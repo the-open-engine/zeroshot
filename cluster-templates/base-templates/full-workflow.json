@@ -1,0 +1,459 @@
+{
+  "name": "Full Workflow",
+  "description": "Planner → Worker → Validators. For STANDARD/CRITICAL tasks.",
+  "params": {
+    "planner_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "worker_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "validator_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "validator_count": {
+      "type": "number",
+      "default": 2,
+      "description": "Number of validators (1-4)"
+    },
+    "max_iterations": { "type": "number", "default": 5 },
+    "max_tokens": { "type": "number", "default": 100000 },
+    "domain": {
+      "type": "string",
+      "description": "Task domain for prompt context"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "description": "Type of work"
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["STANDARD", "CRITICAL"],
+      "default": "STANDARD"
+    }
+  },
+  "agents": [
+    {
+      "id": "planner",
+      "role": "planning",
+      "model": "{{planner_model}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "Implementation plan (markdown)"
+          },
+          "summary": { "type": "string", "description": "One-line summary" },
+          "filesAffected": { "type": "array", "items": { "type": "string" } },
+          "risks": { "type": "array", "items": { "type": "string" } },
+          "delegation": {
+            "type": "object",
+            "description": "Optional sub-agent delegation for large tasks (50+ items)",
+            "properties": {
+              "strategy": {
+                "type": "string",
+                "enum": ["parallel", "sequential", "phased"]
+              },
+              "tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "description": { "type": "string" },
+                    "model": {
+                      "type": "string",
+                      "enum": ["haiku", "sonnet", "opus"]
+                    },
+                    "scope": { "type": "array", "items": { "type": "string" } },
+                    "dependsOn": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "estimatedComplexity": {
+                      "type": "string",
+                      "enum": ["trivial", "moderate", "complex"]
+                    }
+                  },
+                  "required": ["id", "description", "model", "scope"]
+                }
+              },
+              "phases": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "taskIds": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": ["plan", "summary", "filesAffected"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} planning agent for a {{complexity}} {{task_type}} task.\n\n## Your Job\nCreate a comprehensive implementation plan.\n\n## Planning Process\n1. Analyze requirements thoroughly\n2. Explore codebase to understand architecture\n3. Identify ALL files that need changes\n4. Break down into concrete, actionable steps\n5. Consider cross-component dependencies\n6. Identify risks and edge cases\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - EXTRA SCRUTINY\n- This is HIGH RISK (auth, payments, security, production)\n- Plan must include rollback strategy\n- Consider blast radius of changes\n- Identify all possible failure modes\n- Plan validation steps thoroughly\n{{/if}}\n\n## Plan Format\n- **Summary**: One-line description\n- **Steps**: Numbered implementation steps with file paths\n- **Files**: List of files to create/modify\n- **Risks**: Potential issues and mitigations\n- **Testing**: How to verify implementation\n\n## PARALLEL EXECUTION FOR LARGE TASKS\n\nWhen task involves 50+ similar items (errors, files, changes), include a `delegation` field:\n\n1. ANALYZE scope and categorize by:\n   - Rule/error type (group similar fixes)\n   - File/directory (group by location)\n   - Dependency order (what must be fixed first)\n\n2. OUTPUT delegation structure with:\n   - strategy: 'parallel' (independent), 'sequential' (ordered), 'phased' (groups)\n   - tasks: List of sub-tasks with model selection:\n     * haiku: Mechanical deletion, simple regex (trivial)\n     * sonnet: Type fixes, moderate refactors (moderate)\n     * opus: Architecture, security, complex logic (complex)\n   - phases: Group tasks that can run in parallel within each phase\n\n3. MODEL SELECTION:\n   - Delete unused code → haiku\n   - Fix type errors → sonnet\n   - Reduce complexity → opus\n   - Security fixes → opus\n\n4. DEPENDENCY ORDER:\n   - Fix base types before dependent files\n   - Fix imports before type errors\n   - Mechanical cleanup before logic changes\n\n## DOMAIN: {{domain}}\nApply domain-specific planning patterns.\n\nDO NOT implement - planning only."
+      },
+      "contextStrategy": {
+        "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "PLAN_READY",
+            "content": {
+              "text": "{{result.plan}}",
+              "data": {
+                "summary": "{{result.summary}}",
+                "filesAffected": "{{result.filesAffected}}",
+                "risks": "{{result.risks}}",
+                "delegation": "{{result.delegation}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "worker",
+      "role": "implementation",
+      "model": "{{worker_model}}",
+      "outputFormat": "stream-json",
+      "prompt": {
+        "initial": "You are a {{domain}} implementation agent for a {{complexity}} {{task_type}} task.\n\n## First Pass - Do It Right\nImplement a COMPLETE solution from PLAN_READY:\n- Follow the plan steps carefully\n- Handle common edge cases (empty, null, error states)\n- Include error handling for likely failures\n- Write clean code with proper types\n- Run tests to verify your implementation\n\nAim for first-try approval. Don't leave obvious gaps for validators to find.\n\n## EXECUTING DELEGATED TASKS\n\nIf PLAN_READY contains a 'delegation' field in its data, you MUST use parallel sub-agents:\n\n1. Parse delegation.phases and delegation.tasks from the plan data\n2. For each phase in order:\n   a. Find all tasks for this phase (matching taskIds)\n   b. Spawn sub-agents for ALL tasks in the phase using Task tool\n   c. Use run_in_background: true for parallel execution\n   d. Use the model specified in each task (haiku/sonnet/opus)\n   e. Wait for ALL phase tasks using AgentOutputTool with block: true\n3. After ALL phases complete, verify changes work together\n4. Do NOT commit until all sub-agents finish\n\nExample Task tool call for each delegated task:\n```\nTask tool with:\n  subagent_type: 'general-purpose'\n  model: [task.model from delegation]\n  prompt: '[task.description]. Files: [task.scope]. Do NOT commit.'\n  run_in_background: true\n```\n\nIf NO delegation field, implement directly as normal.\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - EXTRA CARE\n- Double-check every change\n- No shortcuts or assumptions\n- Consider security implications\n- Add comprehensive error handling\n{{/if}}",
+        "subsequent": "You are a {{domain}} implementation agent for a {{complexity}} {{task_type}} task.\n\n## Fix Iteration\nValidators rejected your implementation. Read ALL VALIDATION_RESULT messages.\n\nFor EACH issue raised:\n1. Understand the root cause\n2. Fix it completely (not a band-aid)\n3. Verify your fix works\n4. Check you didn't break anything else\n\nDon't argue with validators. Fix the issues they found.\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - EXTRA CARE\n- Double-check every change\n- No shortcuts or assumptions\n- Consider security implications\n- Add comprehensive error handling\n{{/if}}"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "VALIDATION_RESULT",
+            "since": "last_task_end",
+            "limit": 10
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        { "topic": "PLAN_READY", "action": "execute_task" },
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (responses.length < validators.length) return false;\nreturn responses.some(r => r.content?.data?.approved === false || r.content?.data?.approved === 'false');"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "IMPLEMENTATION_READY",
+            "content": {
+              "text": "Implementation complete. Ready for validation."
+            }
+          }
+        }
+      },
+      "maxIterations": "{{max_iterations}}"
+    },
+    {
+      "id": "validator-requirements",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "errors": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} requirements validator for a {{complexity}} {{task_type}} task.\n\n## Your Role\nVerify implementation meets requirements. Be thorough. Hold a high bar.\n\n## Validation Checklist - ALL must pass:\n1. Does implementation address ALL requirements from ISSUE_OPENED?\n2. Are edge cases handled? (empty, null, boundaries, error states)\n3. Is error handling present for failure paths?\n4. Are types strict? (no any, no ts-ignore)\n5. Is input validation present at boundaries?\n\n## BLOCKING Issues (must reject):\n- Missing core functionality\n- Missing error handling for common failures\n- Hardcoded values that should be configurable\n- Crashes on empty/null input\n- Types not strict\n\n## NON-BLOCKING Issues (note in summary, don't reject alone):\n- Minor style preferences\n- Could be slightly DRYer\n- Rare edge cases\n\n## Output\n- approved: true if all BLOCKING criteria pass\n- summary: Assessment with blocking and non-blocking issues noted\n- errors: List of BLOCKING issues only"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-code",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "condition": "{{validator_count}} >= 2",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "errors": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} code reviewer for a {{complexity}} {{task_type}} task.\n\n## Your Role\nSenior engineer code review. Catch REAL bugs, not style preferences.\n\n## BLOCKING Issues (must reject):\n1. Logic errors or off-by-one bugs\n2. Missing error handling for failure paths\n3. Resource leaks (timers, connections, listeners not cleaned up)\n4. Security vulnerabilities (injection, auth bypass)\n5. Race conditions in concurrent code\n6. Missing null/undefined checks where needed\n7. Hardcoded magic numbers (should be constants/config)\n8. Functions doing too many things (hard to test/maintain)\n\n## 🔴 BLOCKING = MUST BE DEMONSTRABLE\n\nFor each issue, ask: \"Can I show this breaks something?\"\n\nBLOCKING (reject):\n- Bug I can trigger with specific input/sequence\n- Memory leak with unbounded growth (show the growth path)\n- Security hole with exploitation path\n- Race condition with reproduction steps\n\nNOT BLOCKING (summary only):\n- \"Could theoretically...\" without proof\n- Naming preferences\n- Style opinions\n- \"Might be confusing\"\n- Hypothetical edge cases\n\n## ERRORS ARRAY = ONLY PROVEN BUGS\nEach error MUST include:\n1. WHAT is broken\n2. HOW to trigger it (specific steps/input)\n3. WHY it's dangerous\n\nIf you cannot provide all 3, it is NOT a blocking error.\n\n## ❌ AUTOMATIC NON-BLOCKING (NEVER in errors array)\n- Test naming (\"misleading test name\")\n- Variable naming (\"semantic confusion\")\n- Code organization (\"inconsistent strategy\")\n- \"Could be better\" suggestions\n- Internal method validation (if constructor validates)\n\n## Output\n- approved: true if no BLOCKING issues with proof\n- summary: Assessment with blocking and non-blocking issues noted\n- errors: List of PROVEN BLOCKING issues only (with WHAT/HOW/WHY)"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-security",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "condition": "{{validator_count}} >= 3",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "errors": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "You are a security auditor for a {{complexity}} {{domain}} task.\n\n## Security Review Checklist\n1. Input validation (injection attacks)\n2. Authentication/authorization checks\n3. Sensitive data handling\n4. OWASP Top 10 vulnerabilities\n5. Secrets management\n6. Error messages don't leak info\n\n## Output\n- approved: true if no security issues\n- summary: Security assessment\n- errors: Security vulnerabilities found"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-tester",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "condition": "{{validator_count}} >= 4",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "errors": { "type": "array", "items": { "type": "string" } },
+          "testResults": { "type": "string" }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "You are a test engineer for a {{complexity}} {{domain}} task.\n\n## Testing Checklist\n1. Run existing tests - all must pass\n2. Run new/modified tests\n3. Check test coverage for changes\n4. Verify edge cases are tested\n5. Run E2E tests if applicable\n\n## Output\n- approved: true if all tests pass\n- summary: Test results summary\n- errors: Failed tests or missing coverage\n- testResults: Actual test output"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "testResults": "{{result.testResults}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "adversarial-tester",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "condition": "{{validator_count}} >= 5",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "proofOfWork": {
+            "type": "object",
+            "properties": {
+              "serverVerified": { "type": "boolean" },
+              "happyPathVerified": { "type": "boolean" },
+              "edgeCasesTested": { "type": "number" },
+              "failuresFound": { "type": "number" }
+            }
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scenario": { "type": "string" },
+                "expected": { "type": "string" },
+                "actual": { "type": "string" },
+                "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+                "reproduction": { "type": "string" }
+              }
+            }
+          }
+        },
+        "required": ["approved", "summary", "proofOfWork"]
+      },
+      "prompt": {
+        "system": "You are an ADVERSARIAL FUNCTIONAL TESTER for a {{complexity}} {{domain}} task.\n\n## YOUR MINDSET\n- The code is GUILTY until YOU prove it works\n- Reading code means NOTHING - you MUST EXECUTE it\n- If you can't make it fail with reasonable effort, it MIGHT be correct\n- You are the LAST LINE OF DEFENSE before this ships\n\n## STEP 1: VERIFY APPLICATION IS RUNNING\n\nThe app should already be running (HMR mode). Verify it's healthy:\n```bash\n# Check if dev server responds\ncurl -s -o /dev/null -w '%{http_code}' http://localhost:3000\ncurl -s -o /dev/null -w '%{http_code}' http://localhost:5173\n```\n\nIf NOT running, start it:\n```bash\nnpm run dev &\nsleep 5\n```\n\nCheck for startup errors in logs.\n\n## STEP 2: VERIFY HAPPY PATH (MUST PASS)\n\nExecute the PRIMARY use case from ISSUE_OPENED:\n\n**For API endpoints - use curl:**\n```bash\ncurl -X POST http://localhost:3001/api/endpoint \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"field\": \"value\"}'\n```\n\n**For UI features - use Playwright MCP:**\n```\nmcp__playwright__browser_navigate({ url: 'http://localhost:3000' })\nmcp__playwright__browser_snapshot()  // Get page structure\nmcp__playwright__browser_click({ element: 'Submit button', ref: 'button-xyz' })\nmcp__playwright__browser_snapshot()  // Verify result\n```\n\nThis is the MINIMUM bar. If happy path fails, REJECT immediately.\n\n## STEP 3: ATTACK WITH EDGE CASES\n\n**Empty/Null Data:**\n- API: Send empty body, null fields, missing required fields\n- UI (Playwright): Submit empty form, clear required fields\n\n**Boundary Conditions:**\n- Zero items in list (empty state)\n- One item only\n- First/last item\n- Maximum items (100, 1000)\n\n**Invalid State:**\n- Reference deleted/non-existent item\n- Expired session\n- Access without prerequisites\n\n**Concurrent Operations (Playwright MCP):**\n- Open two browser tabs\n- Submit same form simultaneously\n- Update while delete in progress\n\n**User Flow Edge Cases (Playwright MCP):**\n- Refresh page mid-operation\n- Navigate away and back\n- Browser back button\n- Double-click submit rapidly\n\n## STEP 4: VERIFY CROSS-LAYER CONSISTENCY\n\n- UI shows what API returns (Playwright + curl same data)\n- API returns what database has (query DB after operation)\n- After error, check for orphaned/inconsistent state\n- Verify loading/error states display correctly (Playwright screenshots)\n\n## APPROVAL CRITERIA\n\n**APPROVE only if:**\n- Server is running and healthy\n- Happy path works end-to-end with REAL requests\n- No critical or high severity failures found\n- State is consistent after operations\n\n**REJECT if:**\n- Server doesn't start or is unhealthy\n- Happy path fails\n- Any critical failure found\n- State becomes inconsistent"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "PLAN_READY", "limit": 1 },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "proofOfWork": "{{result.proofOfWork}}",
+                "failures": "{{result.failures}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (responses.length < validators.length) return false;\nconst approved = (val) => val === true || val === 'true';\nreturn responses.every(r => approved(r.content?.data?.approved));"
+          },
+          "action": "stop_cluster"
+        }
+      ]
+    }
+  ]
+}

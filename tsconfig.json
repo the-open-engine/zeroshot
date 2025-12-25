@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    // Type checking for JavaScript files
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+
+    // Strict type checking
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+
+    // Additional checks
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Module resolution
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    // Target Node.js 18+
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+
+    // Skip type checking of declaration files
+    "skipLibCheck": true,
+
+    // JSDoc validation
+    "maxNodeModuleJsDepth": 1
+  },
+  "include": ["src/**/*", "cli/**/*", "lib/**/*", "cluster-scripts/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

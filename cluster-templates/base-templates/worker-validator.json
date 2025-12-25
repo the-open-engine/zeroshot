@@ -1,0 +1,135 @@
+{
+  "name": "Worker + Validator",
+  "description": "Worker implements, validator checks, rejection loop. For SIMPLE tasks.",
+  "params": {
+    "worker_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "validator_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "max_iterations": { "type": "number", "default": 3 },
+    "max_tokens": { "type": "number", "default": 100000 },
+    "domain": {
+      "type": "string",
+      "description": "Task domain for prompt context"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "description": "Type of work"
+    }
+  },
+  "agents": [
+    {
+      "id": "worker",
+      "role": "implementation",
+      "model": "{{worker_model}}",
+      "outputFormat": "stream-json",
+      "prompt": {
+        "system": "You are a {{domain}} implementation agent for a SIMPLE {{task_type}} task.\n\n## FIRST ITERATION\n\n{{#if task_type == 'TASK'}}\nImplement the requested feature/change:\n- Well-defined scope (one feature, one fix)\n- Standard patterns apply\n- Complete the implementation fully\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nInvestigate and fix the issue:\n- Reproduce the problem\n- Find the root cause (not just symptoms)\n- Apply the fix\n- Verify it works\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nResearch and provide detailed answers:\n- Explore relevant code and documentation\n- Explain how things work\n- Provide accurate, complete information\n{{/if}}\n\n## SUBSEQUENT ITERATIONS (after rejection)\n\nRead VALIDATION_RESULT messages carefully.\nFix EVERY issue listed in 'errors'.\nFix root causes, not symptoms.\nDon't introduce new bugs."
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "VALIDATION_RESULT", "since": "last_task_end", "limit": 3 }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        { "topic": "ISSUE_OPENED", "action": "execute_task" },
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst response = ledger.findLast({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nreturn response?.content?.data?.approved === false || response?.content?.data?.approved === 'false';"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "IMPLEMENTATION_READY",
+            "content": {
+              "text": "Implementation complete. Ready for validation."
+            }
+          }
+        }
+      },
+      "maxIterations": "{{max_iterations}}"
+    },
+    {
+      "id": "validator",
+      "role": "validator",
+      "model": "{{validator_model}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean",
+            "description": "true if implementation is correct"
+          },
+          "summary": {
+            "type": "string",
+            "description": "One-line validation result"
+          },
+          "errors": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Issues found (empty if approved)"
+          }
+        },
+        "required": ["approved", "summary", "errors"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} validator for a SIMPLE {{task_type}} task.\n\n## VALIDATION CRITERIA\n\n**APPROVE** if:\n- Core functionality works as requested\n- Implementation is correct and complete\n- No obvious bugs or critical issues\n\n**REJECT** if:\n- Major functionality is missing or broken\n- Implementation doesn't match requirements\n- Critical bugs present\n\n## DOMAIN-SPECIFIC: {{domain}}\n\nApply domain-specific validation criteria.\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'TASK'}}\nVerify the feature/change works correctly.\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nVerify the bug is actually fixed at root cause.\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nVerify the information is accurate and complete.\n{{/if}}\n\nFor SIMPLE tasks, don't nitpick. Focus on: Does it work and meet requirements?"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "IMPLEMENTATION_READY", "limit": 1 }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst result = ledger.findLast({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nreturn result?.content?.data?.approved === true || result?.content?.data?.approved === 'true';"
+          },
+          "action": "stop_cluster"
+        }
+      ]
+    }
+  ]
+}

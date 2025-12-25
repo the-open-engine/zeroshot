@@ -1,0 +1,558 @@
+/**
+ * Integration tests for complete cluster lifecycle
+ *
+ * Tests the full message flow: ISSUE_OPENED → agents → completion
+ * Uses MockTaskRunner to avoid real Claude API calls while testing
+ * all coordination logic.
+ */
+
+const assert = require('node:assert');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+const Orchestrator = require('../../src/orchestrator');
+const _Ledger = require('../../src/ledger');
+const _MessageBus = require('../../src/message-bus');
+const MockTaskRunner = require('../helpers/mock-task-runner');
+const LedgerAssertions = require('../helpers/ledger-assertions');
+
+describe('Orchestrator Flow Integration', function () {
+  this.timeout(30000);
+
+  let tempDir;
+  let orchestrator;
+  let mockRunner;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-integration-'));
+    mockRunner = new MockTaskRunner();
+  });
+
+  afterEach(async () => {
+    if (orchestrator) {
+      const clusters = orchestrator.listClusters();
+      for (const cluster of clusters) {
+        try {
+          await orchestrator.kill(cluster.id);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  describe('Simple Worker Flow', () => {
+    const simpleConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          prompt: 'Implement the requested feature',
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'TASK_COMPLETE', content: { text: 'Done' } },
+            },
+          },
+        },
+        {
+          id: 'completion-detector',
+          role: 'orchestrator',
+          triggers: [{ topic: 'TASK_COMPLETE', action: 'stop_cluster' }],
+        },
+      ],
+    };
+
+    it('should execute worker and complete cluster', async () => {
+      mockRunner.when('worker').returns(
+        JSON.stringify({
+          summary: 'Feature implemented',
+          files: ['src/feature.js'],
+        })
+      );
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(simpleConfig, {
+        text: 'Implement feature X',
+      });
+      const clusterId = result.id;
+
+      // Wait for completion
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+      // Verify worker was called
+      mockRunner.assertCalled('worker', 1);
+
+      // Verify context included the task
+      const calls = mockRunner.getCalls('worker');
+      assert(calls[0].context.includes('Implement feature X'), 'Context should include task');
+    });
+
+    it('should publish messages in correct order', async () => {
+      mockRunner.when('worker').returns('{"done": true}');
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(simpleConfig, {
+        text: 'Test task',
+      });
+      const clusterId = result.id;
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+      // Get ledger and verify message sequence
+      const cluster = orchestrator.getCluster(clusterId);
+      const ledger = cluster.messageBus.ledger;
+      const assertions = new LedgerAssertions(ledger, clusterId);
+
+      assertions
+        .assertPublished('ISSUE_OPENED')
+        .assertPublished('TASK_COMPLETE')
+        .assertSequence(['ISSUE_OPENED', 'TASK_COMPLETE']);
+    });
+  });
+
+  describe('Worker + Validator Flow', () => {
+    const validatorConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [
+            { topic: 'ISSUE_OPENED', action: 'execute_task' },
+            {
+              topic: 'VALIDATION_RESULT',
+              action: 'execute_task',
+              logic: {
+                engine: 'javascript',
+                script: `
+                  const result = ledger.findLast({ topic: 'VALIDATION_RESULT' });
+                  return result && (result.content?.data?.approved === false || result.content?.data?.approved === 'false');
+                `,
+              },
+            },
+          ],
+          prompt: 'Implement the feature',
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'IMPLEMENTATION_READY' },
+            },
+          },
+        },
+        {
+          id: 'validator',
+          role: 'validator',
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+          prompt: 'Validate the implementation',
+          outputFormat: 'json',
+          jsonSchema: {
+            type: 'object',
+            properties: {
+              approved: { type: 'boolean' },
+              issues: { type: 'array' },
+            },
+            required: ['approved'],
+          },
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: { data: { approved: '{{result.approved}}' } },
+              },
+            },
+          },
+        },
+        {
+          id: 'completion-detector',
+          role: 'orchestrator',
+          triggers: [
+            {
+              topic: 'VALIDATION_RESULT',
+              action: 'stop_cluster',
+              logic: {
+                engine: 'javascript',
+                script: `
+                const result = ledger.findLast({ topic: 'VALIDATION_RESULT' });
+                return result && (result.content?.data?.approved === true || result.content?.data?.approved === 'true');
+              `,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    it('should complete on approval', async () => {
+      mockRunner.when('worker').returns('{"implemented": true}');
+      mockRunner.when('validator').returns(
+        JSON.stringify({
+          approved: true,
+          issues: [],
+        })
+      );
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(validatorConfig, {
+        text: 'Build feature',
+      });
+      const clusterId = result.id;
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 15000);
+
+      mockRunner.assertCalled('worker', 1);
+      mockRunner.assertCalled('validator', 1);
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      assertions.assertSequence(['ISSUE_OPENED', 'IMPLEMENTATION_READY', 'VALIDATION_RESULT']);
+    });
+
+    it('should retry worker on rejection', async () => {
+      let workerCallCount = 0;
+      mockRunner.when('worker').calls(() => {
+        workerCallCount++;
+        return {
+          success: true,
+          output: JSON.stringify({ attempt: workerCallCount }),
+        };
+      });
+
+      let validatorCallCount = 0;
+      mockRunner.when('validator').calls(() => {
+        validatorCallCount++;
+        // First call rejects, second approves
+        const approved = validatorCallCount >= 2;
+        return {
+          success: true,
+          output: JSON.stringify({
+            approved,
+            issues: approved ? [] : ['Bug found'],
+          }),
+        };
+      });
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(validatorConfig, {
+        text: 'Build with retry',
+      });
+      const clusterId = result.id;
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 20000);
+
+      // Worker should be called twice (initial + retry after rejection)
+      assert.strictEqual(workerCallCount, 2, 'Worker should be called twice');
+      // Validator should be called twice
+      assert.strictEqual(validatorCallCount, 2, 'Validator should be called twice');
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      // Should have the rejection and approval in sequence
+      const validationResults = assertions.getMessages('VALIDATION_RESULT');
+      assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
+    });
+  });
+
+  describe('Multiple Validators (Consensus)', () => {
+    const consensusConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'IMPLEMENTATION_READY' },
+            },
+          },
+        },
+        {
+          id: 'validator-a',
+          role: 'validator',
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+          outputFormat: 'json',
+          jsonSchema: {
+            type: 'object',
+            properties: { approved: { type: 'boolean' } },
+          },
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: { data: { approved: '{{result.approved}}' } },
+              },
+            },
+          },
+        },
+        {
+          id: 'validator-b',
+          role: 'validator',
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+          outputFormat: 'json',
+          jsonSchema: {
+            type: 'object',
+            properties: { approved: { type: 'boolean' } },
+          },
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: { data: { approved: '{{result.approved}}' } },
+              },
+            },
+          },
+        },
+        {
+          id: 'completion-detector',
+          role: 'orchestrator',
+          triggers: [
+            {
+              topic: 'VALIDATION_RESULT',
+              action: 'stop_cluster',
+              logic: {
+                engine: 'javascript',
+                script: `
+                const validators = cluster.getAgentsByRole('validator');
+                const lastImpl = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
+                if (!lastImpl) return false;
+
+                const results = ledger.query({
+                  topic: 'VALIDATION_RESULT',
+                  since: lastImpl.timestamp
+                });
+
+                if (results.length < validators.length) return false;
+                return results.every(r => r.content?.data?.approved === true || r.content?.data?.approved === 'true');
+              `,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    it('should wait for all validators before completing', async () => {
+      mockRunner.when('worker').returns('{"done": true}');
+
+      // Both validators approve
+      mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
+      mockRunner.when('validator-b').delays(500, JSON.stringify({ approved: true }));
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(consensusConfig, {
+        text: 'Consensus test',
+      });
+      const clusterId = result.id;
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 15000);
+
+      mockRunner.assertCalled('validator-a', 1);
+      mockRunner.assertCalled('validator-b', 1);
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      // Should have 2 validation results
+      assertions.assertCount('VALIDATION_RESULT', 2);
+    });
+
+    it('should NOT complete when one validator rejects', async () => {
+      mockRunner.when('worker').returns('{"done": true}');
+
+      // validator-a approves, validator-b rejects
+      mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
+      mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(consensusConfig, {
+        text: 'Rejection test',
+      });
+      const clusterId = result.id;
+
+      // Wait for both validators to respond
+      await new Promise((r) => setTimeout(r, 3000));
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      // Should have 2 validation results
+      assertions.assertCount('VALIDATION_RESULT', 2);
+
+      // Cluster should still be running (NOT stopped)
+      assert.strictEqual(
+        cluster.state,
+        'running',
+        'Cluster should still be running when consensus not reached'
+      );
+
+      // Verify that completion detector did not trigger
+      const validationResults = assertions.getMessages('VALIDATION_RESULT');
+      assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
+      assert.strictEqual(
+        validationResults[0].content.data.approved,
+        true,
+        'First validator approved'
+      );
+      assert.strictEqual(
+        validationResults[1].content.data.approved,
+        false,
+        'Second validator rejected'
+      );
+
+      // Clean up
+      await orchestrator.kill(clusterId);
+    });
+
+    it('should NOT complete when validators have mixed results', async () => {
+      mockRunner.when('worker').returns('{"done": true}');
+
+      // Both validators reject
+      mockRunner.when('validator-a').returns(JSON.stringify({ approved: false }));
+      mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(consensusConfig, {
+        text: 'All reject test',
+      });
+      const clusterId = result.id;
+
+      // Wait for both validators to respond
+      await new Promise((r) => setTimeout(r, 3000));
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      // Should have 2 validation results
+      assertions.assertCount('VALIDATION_RESULT', 2);
+
+      // Cluster should still be running
+      assert.strictEqual(
+        cluster.state,
+        'running',
+        'Cluster should still be running when all validators reject'
+      );
+
+      // Verify both rejected
+      const validationResults = assertions.getMessages('VALIDATION_RESULT');
+      assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
+      assert(
+        validationResults.every((r) => r.content.data.approved === false),
+        'All validators should reject'
+      );
+
+      // Clean up
+      await orchestrator.kill(clusterId);
+    });
+  });
+
+  describe('Error Handling', () => {
+    const errorConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          maxIterations: 2,
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onError: {
+              action: 'publish_message',
+              config: { topic: 'AGENT_ERROR' },
+            },
+          },
+        },
+      ],
+    };
+
+    it('should handle agent failure gracefully', async () => {
+      mockRunner.when('worker').fails('Task execution failed');
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(errorConfig, {
+        text: 'Failing task',
+      });
+      const clusterId = result.id;
+
+      // Wait for failure processing
+      await new Promise((r) => setTimeout(r, 5000));
+
+      const cluster = orchestrator.getCluster(clusterId);
+
+      // Cluster should track failure
+      assert(
+        cluster.failureInfo || cluster.state === 'stopped',
+        'Cluster should have failure info or be stopped'
+      );
+    });
+  });
+});
+
+/**
+ * Wait for cluster to reach a specific state
+ */
+async function waitForClusterState(orchestrator, clusterId, targetState, timeoutMs) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const cluster = orchestrator.getCluster(clusterId);
+    if (!cluster) {
+      throw new Error(`Cluster ${clusterId} not found`);
+    }
+
+    if (cluster.state === targetState) {
+      return;
+    }
+
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const cluster = orchestrator.getCluster(clusterId);
+  throw new Error(
+    `Timeout waiting for cluster ${clusterId} to reach state '${targetState}'. Current state: ${cluster?.state}`
+  );
+}

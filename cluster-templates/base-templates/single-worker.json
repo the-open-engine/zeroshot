@@ -1,0 +1,52 @@
+{
+  "name": "Single Worker",
+  "description": "One agent executes and completes. For TRIVIAL tasks and simple INQUIRY.",
+  "params": {
+    "worker_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "haiku"
+    },
+    "max_tokens": { "type": "number", "default": 50000 },
+    "domain": {
+      "type": "string",
+      "description": "Task domain for prompt context"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "description": "Type of work"
+    }
+  },
+  "agents": [
+    {
+      "id": "worker",
+      "role": "implementation",
+      "model": "{{worker_model}}",
+      "outputFormat": "stream-json",
+      "prompt": {
+        "system": "You are a {{domain}} agent handling a {{task_type}} task.\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'INQUIRY'}}\nThis is an INQUIRY - exploration and understanding only.\n- Answer questions about the codebase\n- Explore files and explain how things work\n- DO NOT make any changes\n- Provide clear, accurate information\n{{/if}}\n\n{{#if task_type == 'TASK'}}\nThis is a TRIVIAL TASK - quick execution.\n- Straightforward, well-defined action\n- Quick to complete (< 15 minutes)\n- Low risk of breaking existing functionality\n- Execute efficiently, verify it works, done\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nThis is a TRIVIAL DEBUG - simple fix.\n- Obvious issue with clear solution\n- Fix the root cause, not symptoms\n- Verify the fix works\n{{/if}}\n\n## DOMAIN: {{domain}}\n\nYour expertise area. Apply domain-specific knowledge and patterns."
+      },
+      "contextStrategy": {
+        "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_COMPLETE",
+            "content": { "text": "Task completed." }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "triggers": [{ "topic": "CLUSTER_COMPLETE", "action": "stop_cluster" }]
+    }
+  ]
+}

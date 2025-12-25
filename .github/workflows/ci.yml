@@ -1,0 +1,83 @@
+name: CI
+
+# Codecov setup:
+# 1. Go to https://codecov.io and sign in with GitHub
+# 2. Add the covibes/zeroshot repository
+# 3. Get the upload token from Settings > General
+# 4. Add it as a GitHub secret: Settings > Secrets and variables > Actions > New repository secret
+#    Name: CODECOV_TOKEN
+#    Value: <your-token-from-codecov>
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Fast quality gates - must pass before anything else
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test with coverage
+        run: npm run test:coverage
+        timeout-minutes: 5
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-zeroshot
+          fail_ci_if_error: false
+
+  # Cross-platform/version compatibility
+  install-matrix:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20, 22]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Link CLI
+        run: npm link
+
+      - name: CLI smoke test
+        run: |
+          zeroshot --help
+          zeroshot --version
+          zeroshot list

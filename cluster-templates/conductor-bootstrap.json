@@ -1,0 +1,132 @@
+{
+  "name": "Two-Tier Conductor (Domain × Complexity × TaskType)",
+  "description": "Cost-optimized conductor: Haiku junior for 3D classification (domain + complexity + taskType), Sonnet senior for UNCERTAIN tasks. Routes to appropriate cluster config via helpers.getConfig().",
+  "agents": [
+    {
+      "id": "junior-conductor",
+      "role": "conductor",
+      "model": "haiku",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": ["CODE", "INFRA", "CICD", "OPS", "TESTING", "CONTEXT"],
+            "description": "Task domain category"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": ["TRIVIAL", "SIMPLE", "STANDARD", "CRITICAL", "UNCERTAIN"],
+            "description": "Task complexity level"
+          },
+          "taskType": {
+            "type": "string",
+            "enum": ["INQUIRY", "TASK", "DEBUG"],
+            "description": "Type of work: INQUIRY (questions/exploration), TASK (implement new), DEBUG (fix broken)"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Why this classification (1-2 sentences)"
+          }
+        },
+        "required": ["domain", "complexity", "taskType", "reasoning"]
+      },
+      "prompt": {
+        "system": "You are the JUNIOR CONDUCTOR (Haiku) - fast, cost-efficient task classification.\n\n## Your Job\nClassify tasks on THREE dimensions: DOMAIN, COMPLEXITY, and TASK TYPE.\n\n## DOMAINS (what area of work)\n\n**CODE** - Features, bugs, refactoring application code\n**INFRA** - Terraform, K8s, AWS, cloud resources, deployments\n**CICD** - GitHub Actions, pipelines, workflows\n**OPS** - Logs, monitoring, production systems, incident response\n**TESTING** - E2E, unit tests, test infrastructure\n**CONTEXT** - CLAUDE.md, skills, prompts, commands\n\n## COMPLEXITY (how hard/risky)\n\n**TRIVIAL** - One command, one file, mechanical\n**SIMPLE** - One concern, straightforward\n**STANDARD** - Multi-file, needs planning\n**CRITICAL** - High risk (auth, payments, security, production)\n**UNCERTAIN** - Escalate to senior conductor\n\n## TASK TYPE (what kind of action)\n\n**INQUIRY** - Questions, exploration, understanding\n- \"How does X work?\", \"What files handle Y?\", \"Explain Z\"\n- NO changes made, just gathering information\n\n**TASK** - Implement something new\n- \"Add feature X\", \"Create Y\", \"Implement Z\"\n- Building new functionality\n\n**DEBUG** - Fix something broken\n- \"Why is X failing?\", \"Fix bug in Y\", \"Debug Z\"\n- Investigating and fixing existing issues\n\n## Output Format\n\n```json\n{\n  \"domain\": \"CODE|INFRA|CICD|OPS|TESTING|CONTEXT\",\n  \"complexity\": \"TRIVIAL|SIMPLE|STANDARD|CRITICAL|UNCERTAIN\",\n  \"taskType\": \"INQUIRY|TASK|DEBUG\",\n  \"reasoning\": \"Brief explanation\"\n}\n```\n\n## Examples\n\n\"How does auth work?\" → CODE, SIMPLE, INQUIRY\n\"Add rate limiting\" → CODE, STANDARD, TASK\n\"Fix null pointer bug\" → CODE, SIMPLE, DEBUG\n\"Why is the API slow?\" → OPS, STANDARD, DEBUG\n\"Deploy to AWS\" → INFRA, CRITICAL, TASK\n\"terraform plan\" → INFRA, SIMPLE, TASK\n\"What files handle routing?\" → CODE, TRIVIAL, INQUIRY\n\n## Critical Rules\n\n1. ALWAYS output all three dimensions\n2. INQUIRY = read-only, TASK = create new, DEBUG = fix broken\n3. complexity=UNCERTAIN only when truly ambiguous\n\nTask: {{ISSUE_OPENED.content.text}}"
+      },
+      "contextStrategy": {
+        "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
+        "format": "chronological",
+        "maxTokens": 100000
+      },
+      "triggers": [
+        {
+          "topic": "ISSUE_OPENED",
+          "logic": {
+            "engine": "javascript",
+            "script": "return message.sender === 'system';"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "transform": {
+            "engine": "javascript",
+            "script": "const { domain, complexity, taskType, reasoning } = result;\nconst taskText = triggeringMessage.content?.text || '';\n\nif (complexity === 'UNCERTAIN') {\n  return {\n    topic: 'CONDUCTOR_ESCALATE',\n    content: {\n      text: reasoning,\n      data: { domain, complexity, taskType, reasoning, taskText }\n    }\n  };\n}\n\nconst config = helpers.getConfig(domain, complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `[${domain}:${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      domain,\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText } }\n      ]\n    }\n  }\n};"
+          }
+        }
+      }
+    },
+    {
+      "id": "senior-conductor",
+      "role": "conductor",
+      "model": "sonnet",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": ["CODE", "INFRA", "CICD", "OPS", "TESTING", "CONTEXT"],
+            "description": "Task domain after deep analysis"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": ["TRIVIAL", "SIMPLE", "STANDARD", "CRITICAL"],
+            "description": "Task complexity (no UNCERTAIN - must decide)"
+          },
+          "taskType": {
+            "type": "string",
+            "enum": ["INQUIRY", "TASK", "DEBUG"],
+            "description": "Type of work after analysis"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "Detailed explanation"
+          }
+        },
+        "required": ["domain", "complexity", "taskType", "reasoning"]
+      },
+      "prompt": {
+        "system": "You are the SENIOR CONDUCTOR - expert task analyzer for ambiguous tasks.\n\nThe junior conductor was uncertain. Analyze deeply and make a definitive classification.\n\n## DOMAINS\n\n**CODE** - Features, bugs, refactoring application code\n**INFRA** - Terraform, K8s, AWS, cloud resources, deployments\n**CICD** - GitHub Actions, pipelines, workflows\n**OPS** - Logs, monitoring, production systems, incident response\n**TESTING** - E2E, unit tests, test infrastructure\n**CONTEXT** - CLAUDE.md, skills, prompts, commands\n\n## COMPLEXITY\n\n**TRIVIAL** - One command/file, mechanical, no risk\n**SIMPLE** - One concern, straightforward\n**STANDARD** - Multi-file, needs planning\n**CRITICAL** - High risk (auth/payments/security/production)\n\n## TASK TYPE\n\n**INQUIRY** - Questions, exploration (read-only)\n**TASK** - Implement something new (create)\n**DEBUG** - Fix something broken (investigate + fix)\n\n## Decision Rules\n\n1. YOU MUST DECIDE - no UNCERTAIN output\n2. When in doubt about complexity, go ONE LEVEL HIGHER\n3. INQUIRY vs TASK vs DEBUG based on intent, not keywords\n4. Consider: Is user asking a question? Building new? Fixing broken?\n\nJunior classified as UNCERTAIN. Original task and reasoning follow."
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          {
+            "topic": "CONDUCTOR_ESCALATE",
+            "since": "last_agent_start",
+            "limit": 1
+          },
+          {
+            "topic": "CLUSTER_OPERATIONS_VALIDATION_FAILED",
+            "since": "cluster_start",
+            "limit": 3
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": 100000
+      },
+      "maxRetries": 3,
+      "triggers": [
+        { "topic": "CONDUCTOR_ESCALATE", "action": "execute_task" },
+        {
+          "topic": "CLUSTER_OPERATIONS_VALIDATION_FAILED",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "transform": {
+            "engine": "javascript",
+            "script": "const { domain, complexity, taskType, reasoning } = result;\n\nlet taskText = triggeringMessage.content?.data?.taskText || '';\nif (!taskText) {\n  taskText = triggeringMessage.content?.text || '';\n}\n\nconst config = helpers.getConfig(domain, complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `Senior: [${domain}:${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      domain,\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText } }\n      ]\n    }\n  }\n};"
+          }
+        }
+      }
+    }
+  ]
+}

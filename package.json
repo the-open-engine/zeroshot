@@ -1,0 +1,120 @@
+{
+  "name": "@covibes/zeroshot",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestration engine for Claude - cluster coordinator and CLI",
+  "main": "src/orchestrator.js",
+  "bin": {
+    "zeroshot": "./cli/index.js"
+  },
+  "directories": {
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "mocha 'tests/**/*.test.js'",
+    "test:coverage": "c8 npm test",
+    "test:coverage:report": "c8 --reporter=html npm test && echo 'Coverage report generated at coverage/index.html'",
+    "start": "node cli/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "deadcode": "ts-prune --skip node_modules",
+    "deadcode:files": "unimported",
+    "deadcode:deps": "depcheck",
+    "deadcode:all": "npm run deadcode && npm run deadcode:files && npm run deadcode:deps",
+    "check": "npm run typecheck && npm run lint",
+    "check:all": "npm run check && npm run deadcode:all",
+    "release": "semantic-release",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test"
+  },
+  "c8": {
+    "reporter": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "include": [
+      "src/**/*.js",
+      "lib/**/*.js",
+      "cli/**/*.js"
+    ],
+    "exclude": [
+      "**/*.test.js",
+      "**/tests/**"
+    ],
+    "all": true
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "multi-agent",
+    "orchestration",
+    "claude",
+    "automation"
+  ],
+  "author": "Covibes",
+  "license": "MIT",
+  "homepage": "https://github.com/covibes/zeroshot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/covibes/zeroshot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/covibes/zeroshot/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "src/",
+    "lib/",
+    "cli/",
+    "cluster-templates/",
+    "hooks/",
+    "docker/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ansi-to-html": "^0.7.2",
+    "better-sqlite3": "^12.5.0",
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
+    "chalk": "^4.1.2",
+    "commander": "^14.0.2",
+    "md-to-pdf": "^5.2.5",
+    "node-pty": "^1.0.0",
+    "omelette": "^0.4.17",
+    "pidusage": "^4.0.1",
+    "proper-lockfile": "^4.1.2"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.3",
+    "c8": "^10.1.3",
+    "chai": "^6.2.1",
+    "depcheck": "^1.4.7",
+    "eslint": "^9.39.1",
+    "eslint-plugin-unused-imports": "^4.3.0",
+    "mocha": "^11.7.5",
+    "semantic-release": "^25.0.2",
+    "sinon": "^21.0.0",
+    "ts-prune": "^0.10.3",
+    "typescript": "^5.9.3",
+    "unimported": "^1.31.0"
+  },
+  "overrides": {
+    "xml2js": "^0.5.0"
+  }
+}

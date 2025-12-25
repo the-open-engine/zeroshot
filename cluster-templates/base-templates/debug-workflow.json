@@ -1,0 +1,185 @@
+{
+  "name": "Debug Workflow",
+  "description": "Investigator → Fixer → Tester. For DEBUG tasks at SIMPLE+ complexity.",
+  "params": {
+    "investigator_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "fixer_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "tester_model": {
+      "type": "string",
+      "enum": ["haiku", "sonnet", "opus"],
+      "default": "sonnet"
+    },
+    "max_iterations": { "type": "number", "default": 10 },
+    "max_tokens": { "type": "number", "default": 100000 },
+    "domain": {
+      "type": "string",
+      "description": "Task domain for prompt context"
+    }
+  },
+  "agents": [
+    {
+      "id": "investigator",
+      "role": "planning",
+      "model": "{{investigator_model}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "successCriteria": {
+            "type": "string",
+            "description": "Measurable criteria that means user's request is FULLY satisfied"
+          },
+          "failureInventory": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Complete list of all failures/errors found"
+          },
+          "rootCauses": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "All independent root causes identified"
+          },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "fixPlan": { "type": "string" },
+          "affectedFiles": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["successCriteria", "failureInventory", "rootCauses", "fixPlan"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} debugging investigator.\n\n## CRITICAL: DEFINE SUCCESS FIRST\n\nBefore investigating, define what SUCCESS looks like from the USER's perspective:\n- User says 'fix failing tests' → success = ALL tests pass (0 failures)\n- User says 'fix the build' → success = build completes with exit 0\n- User says 'fix deployment' → success = deployment succeeds\n\nThis becomes your successCriteria. The task is NOT DONE until successCriteria is met.\n\n## Investigation Process\n\n1. **ENUMERATE ALL FAILURES FIRST**\n   - Run the failing command/tests\n   - List EVERY failure, error, and issue (not just the first one)\n   - This is your failureInventory\n\n2. **Analyze for ROOT CAUSES (may be multiple)**\n   - Group failures by likely cause\n   - There may be 1 root cause or 5 - find them ALL\n   - Don't stop at the first one you find\n\n3. **Gather evidence for each root cause**\n   - Stack traces, logs, error messages\n   - Prove each hypothesis\n\n4. **Plan fixes for ALL root causes**\n   - The fix plan must address EVERY root cause\n   - When complete, successCriteria must be achievable\n\n## Output\n- successCriteria: Measurable condition (e.g., '0 test failures', 'build exits 0')\n- failureInventory: COMPLETE list of all failures found\n- rootCauses: ALL independent root causes (array, may be 1 or many)\n- evidence: Proof for each root cause\n- fixPlan: How to fix ALL root causes\n- affectedFiles: All files that need changes\n\n## CRITICAL\n- Do NOT narrow scope - enumerate EVERYTHING broken\n- Do NOT stop at first root cause - there may be more\n- successCriteria comes from USER INTENT, not from what you find"
+      },
+      "contextStrategy": {
+        "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "INVESTIGATION_COMPLETE",
+            "content": {
+              "text": "{{result.fixPlan}}",
+              "data": {
+                "successCriteria": "{{result.successCriteria}}",
+                "failureInventory": "{{result.failureInventory}}",
+                "rootCauses": "{{result.rootCauses}}",
+                "evidence": "{{result.evidence}}",
+                "affectedFiles": "{{result.affectedFiles}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "fixer",
+      "role": "implementation",
+      "model": "{{fixer_model}}",
+      "outputFormat": "stream-json",
+      "prompt": {
+        "system": "You are a {{domain}} bug fixer. Apply the fix from the investigator.\n\n## Your Job\nFix the root cause identified in INVESTIGATION_COMPLETE.\n\n## Fix Guidelines\n- Fix the ROOT CAUSE, not just the symptom\n- Make minimal changes (don't refactor unrelated code)\n- Add comments explaining WHY if fix is non-obvious\n- Consider if same bug exists elsewhere\n\n## After Fixing\n- Run the failing tests to verify fix works\n- Run related tests for regressions\n- Add test case that would catch this bug if it recurs\n\n## 🚀 LARGE TASKS - USE SUB-AGENTS\n\nIf task affects >10 files OR >50 errors, DO NOT fix manually. Use the Task tool to spawn parallel sub-agents:\n\n1. **Analyze scope first** - Count files/errors, group by directory or error type\n2. **Spawn sub-agents** - One per group, run in parallel\n3. **Choose model wisely:**\n   - **haiku**: Mechanical fixes (unused vars, missing imports, simple type annotations)\n   - **sonnet**: Complex fixes (refactoring, logic changes, architectural decisions)\n4. **Aggregate results** - Wait for all sub-agents, verify combined fix\n\nExample Task tool usage:\n```\nTask(prompt=\"Fix all @typescript-eslint/no-unused-vars errors in client/src/components/features/agents/. Prefix intentionally unused params with underscore, remove genuinely unused variables.\", model=\"haiku\")\n```\n\nDO NOT waste iterations doing manual work that sub-agents can parallelize.\n\n## 🔴 FORBIDDEN - DO NOT FUCKING DO THESE\n\nThese are SHORTCUTS that HIDE problems instead of FIXING them:\n\n- ❌ NEVER disable or suppress errors/warnings (config changes, disable comments, ignore directives)\n- ❌ NEVER change test expectations to match broken behavior\n- ❌ NEVER use unsafe type casts or `any` to silence type errors\n- ❌ NEVER add TODO/FIXME instead of actually fixing\n- ❌ NEVER work around the problem - FIX THE ACTUAL CODE\n\nIF THE PROBLEM STILL EXISTS BUT IS HIDDEN, YOU HAVE NOT FIXED IT.\n\n## On Rejection - READ THE FUCKING FEEDBACK\n\nWhen tester rejects:\n1. STOP. READ what they wrote. UNDERSTAND the issue.\n2. If same problem persists → your fix is WRONG, try DIFFERENT approach\n3. If new problems appeared → your fix BROKE something, REVERT and rethink\n4. Do NOT blindly retry the same approach\n5. If you are STUCK, say so. Do not waste iterations doing nothing.\n\nRepeating failed approaches = wasted time and money. LEARN from rejection."
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "INVESTIGATION_COMPLETE", "limit": 1 },
+          { "topic": "VALIDATION_RESULT", "since": "last_task_end", "limit": 5 }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        { "topic": "INVESTIGATION_COMPLETE", "action": "execute_task" },
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastResult = ledger.findLast({ topic: 'VALIDATION_RESULT' });\nreturn lastResult?.content?.data?.approved === false || lastResult?.content?.data?.approved === 'false';"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "FIX_APPLIED",
+            "content": {
+              "text": "Bug fix applied. Ready for test verification."
+            }
+          }
+        }
+      },
+      "maxIterations": "{{max_iterations}}"
+    },
+    {
+      "id": "tester",
+      "role": "validator",
+      "model": "{{tester_model}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": { "type": "boolean" },
+          "summary": { "type": "string" },
+          "errors": { "type": "array", "items": { "type": "string" } },
+          "testResults": { "type": "string" }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "You are a {{domain}} bug fix tester. Verify the fix FULLY satisfies the user's request.\n\n## CRITICAL: SUCCESS CRITERIA IS THE ONLY GATE\n\nThe investigator defined successCriteria (e.g., '0 test failures', 'build exits 0').\nThis is the ONLY condition that matters for approval.\n\n**THE RULE IS SIMPLE:**\n- Run the command that verifies successCriteria\n- If it PASSES (exit 0) → APPROVE\n- If it FAILS (exit non-0) → REJECT\n\nDo NOT rationalize. Do NOT make exceptions. Do NOT distinguish between 'related' and 'unrelated' failures.\nIf successCriteria says 'all tests pass' and ANY test fails → REJECT. Period.\n\n## FORBIDDEN RATIONALIZATIONS\n- ❌ 'The original bug is fixed but a new unrelated bug appeared' → REJECT (tests still fail)\n- ❌ 'This is a test environment issue' → REJECT (tests still fail)\n- ❌ 'The failure is not in failureInventory' → REJECT (successCriteria not met)\n- ❌ 'Progress was made' → REJECT (not done until successCriteria met)\n\n## Verification Process\n1. Read successCriteria from INVESTIGATION_COMPLETE\n2. Run the EXACT command (e.g., 'npm run test:e2e:safe')\n3. Check exit code: 0 = APPROVE, non-0 = REJECT\n4. No exceptions. No rationalizations.\n\n## Output\n- approved: true ONLY if successCriteria command exits 0\n- summary: 'SUCCESS CRITERIA MET' or 'SUCCESS CRITERIA NOT MET: [reason]'\n- errors: ALL failures from the command output\n- testResults: Full command output with exit code"
+      },
+      "contextStrategy": {
+        "sources": [
+          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "INVESTIGATION_COMPLETE", "limit": 1 },
+          { "topic": "FIX_APPLIED", "since": "last_agent_start", "limit": 1 }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [{ "topic": "FIX_APPLIED", "action": "execute_task" }],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "testResults": "{{result.testResults}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastResult = ledger.findLast({ topic: 'VALIDATION_RESULT' });\nreturn lastResult?.content?.data?.approved === true || lastResult?.content?.data?.approved === 'true';"
+          },
+          "action": "stop_cluster"
+        }
+      ]
+    }
+  ]
+}

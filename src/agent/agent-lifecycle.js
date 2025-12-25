@@ -1,0 +1,555 @@
+// @ts-nocheck
+/**
+ * AgentLifecycle - Agent state machine and lifecycle management
+ *
+ * Provides:
+ * - Agent startup and shutdown
+ * - Message handling and routing
+ * - Trigger action execution (execute_task, stop_cluster)
+ * - Task execution with retry logic
+ * - Liveness monitoring with multi-indicator stuck detection
+ *
+ * State machine: idle → evaluating → building_context → executing → idle
+ */
+
+const { buildContext } = require('./agent-context-builder');
+const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
+const { executeHook } = require('./agent-hook-executor');
+const {
+  analyzeProcessHealth,
+  isPlatformSupported,
+  STUCK_THRESHOLD,
+} = require('./agent-stuck-detector');
+
+/**
+ * Start the agent (begin listening for triggers)
+ * @param {AgentWrapper} agent - Agent instance
+ */
+function start(agent) {
+  if (agent.running) {
+    throw new Error(`Agent ${agent.id} is already running`);
+  }
+
+  agent.running = true;
+  agent.state = 'idle';
+
+  // Subscribe to all messages for this cluster
+  agent.unsubscribe = agent.messageBus.subscribe((message) => {
+    if (message.cluster_id === agent.cluster.id) {
+      handleMessage(agent, message).catch((error) => {
+        // FATAL: Message handling failed - crash loud
+        console.error(`\n${'='.repeat(80)}`);
+        console.error(`🔴 FATAL: Agent ${agent.id} message handler crashed`);
+        console.error(`${'='.repeat(80)}`);
+        console.error(`Topic: ${message.topic}`);
+        console.error(`Error: ${error.message}`);
+        console.error(`Stack: ${error.stack}`);
+        console.error(`${'='.repeat(80)}\n`);
+        // Re-throw to crash the process - DO NOT SILENTLY CONTINUE
+        throw error;
+      });
+    }
+  });
+
+  agent._log(`Agent ${agent.id} started (role: ${agent.role})`);
+  agent._publishLifecycle('STARTED', {
+    triggers: agent.config.triggers?.map((t) => t.topic) || [],
+  });
+}
+
+/**
+ * Stop the agent
+ * @param {AgentWrapper} agent - Agent instance
+ */
+function stop(agent) {
+  if (!agent.running) {
+    return;
+  }
+
+  agent.running = false;
+  agent.state = 'stopped';
+
+  if (agent.unsubscribe) {
+    agent.unsubscribe();
+    agent.unsubscribe = null;
+  }
+
+  // Kill current task if any
+  if (agent.currentTask) {
+    agent._killTask();
+  }
+
+  agent._log(`Agent ${agent.id} stopped`);
+}
+
+/**
+ * Handle incoming message
+ * @param {AgentWrapper} agent - Agent instance
+ * @param {Object} message - Incoming message
+ */
+async function handleMessage(agent, message) {
+  // Check if any trigger matches FIRST (before state check)
+  const matchingTrigger = findMatchingTrigger({
+    triggers: agent.config.triggers,
+    message,
+  });
+
+  if (!matchingTrigger) {
+    return; // No trigger for this message type
+  }
+
+  // Now check state - LOG if we're dropping a message we SHOULD handle
+  if (!agent.running) {
+    console.warn(`[${agent.id}] ⚠️ DROPPING message (not running): ${message.topic}`);
+    return;
+  }
+  if (agent.state !== 'idle') {
+    console.warn(
+      `[${agent.id}] ⚠️ DROPPING message (busy, state=${agent.state}): ${message.topic}`
+    );
+    return;
+  }
+
+  // Evaluate trigger logic
+  agent.state = 'evaluating_logic';
+
+  const agentContext = {
+    id: agent.id,
+    role: agent.role,
+    iteration: agent.iteration,
+    cluster_id: agent.cluster.id,
+  };
+
+  const shouldExecute = evaluateTrigger({
+    trigger: matchingTrigger,
+    message,
+    agent: agentContext,
+    logicEngine: agent.logicEngine,
+  });
+
+  if (!shouldExecute) {
+    agent.state = 'idle';
+    return;
+  }
+
+  // Execute trigger action (lifecycle event published inside for execute_task)
+  await executeTriggerAction(agent, matchingTrigger, message);
+}
+
+/**
+ * Execute trigger action
+ * @param {AgentWrapper} agent - Agent instance
+ * @param {Object} trigger - Matched trigger config
+ * @param {Object} message - Triggering message
+ */
+async function executeTriggerAction(agent, trigger, message) {
+  const action = trigger.action || 'execute_task';
+
+  if (action === 'execute_task') {
+    await executeTask(agent, message);
+  } else if (action === 'stop_cluster') {
+    // Publish CLUSTER_COMPLETE message to signal successful completion
+    agent._publish({
+      topic: 'CLUSTER_COMPLETE',
+      receiver: 'system',
+      content: {
+        text: 'All validation passed. Cluster completing successfully.',
+        data: {
+          reason: 'all_validators_approved',
+          timestamp: Date.now(),
+        },
+      },
+    });
+    agent.state = 'completed';
+    agent._log(`Agent ${agent.id}: Cluster completion triggered`);
+  } else {
+    console.warn(`Unknown action: ${action}`);
+    agent.state = 'idle';
+  }
+}
+
+/**
+ * Execute claude-zeroshots with built context
+ * Retries disabled by default. Set agent config `maxRetries` to enable (e.g., 3).
+ * @param {AgentWrapper} agent - Agent instance
+ * @param {Object} triggeringMessage - Message that triggered execution
+ */
+async function executeTask(agent, triggeringMessage) {
+  // Default: no retries (maxRetries=1 means 1 attempt only)
+  // Set agent config `maxRetries: 3` to enable exponential backoff retries
+  const maxRetries = agent.config.maxRetries ?? 1;
+  const baseDelay = 2000; // 2 seconds
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Execute onStart hook
+      await executeHook({
+        hook: agent.config.hooks?.onStart,
+        agent: agent,
+        message: triggeringMessage,
+        result: undefined,
+        messageBus: agent.messageBus,
+        cluster: agent.cluster,
+        orchestrator: agent.orchestrator,
+      });
+
+      // Check max iterations limit BEFORE incrementing (prevents infinite rejection loops)
+      if (agent.iteration >= agent.maxIterations) {
+        agent._log(
+          `[Agent ${agent.id}] Hit max iterations (${agent.maxIterations}), stopping cluster`
+        );
+        agent._publishLifecycle('MAX_ITERATIONS_REACHED', {
+          iteration: agent.iteration,
+          maxIterations: agent.maxIterations,
+        });
+        // Publish failure message - orchestrator watches for this and auto-stops
+        agent._publish({
+          topic: 'CLUSTER_FAILED',
+          receiver: 'system',
+          content: {
+            text: `Agent ${agent.id} hit max iterations limit (${agent.maxIterations}). Stopping cluster.`,
+            data: {
+              reason: 'max_iterations',
+              iteration: agent.iteration,
+              maxIterations: agent.maxIterations,
+            },
+          },
+        });
+        agent.state = 'failed';
+        return;
+      }
+
+      // Increment iteration BEFORE building context so worker knows current iteration
+      agent.iteration++;
+
+      // Build context
+      agent.state = 'building_context';
+      const context = buildContext({
+        id: agent.id,
+        role: agent.role,
+        iteration: agent.iteration,
+        config: agent.config,
+        messageBus: agent.messageBus,
+        cluster: agent.cluster,
+        lastTaskEndTime: agent.lastTaskEndTime,
+        triggeringMessage,
+        selectedPrompt: agent._selectPrompt(),
+      });
+
+      // Log input context (helps debug what each agent sees)
+      if (!agent.quiet) {
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`📥 INPUT CONTEXT - Agent: ${agent.id} (Iteration: ${agent.iteration})`);
+        console.log(`${'='.repeat(80)}`);
+        console.log(context);
+        console.log(`${'='.repeat(80)}\n`);
+      }
+
+      // Spawn claude-zeroshots
+      agent.state = 'executing_task';
+
+      agent._publishLifecycle('TASK_STARTED', {
+        iteration: agent.iteration,
+        model: agent._selectModel(),
+        triggeredBy: triggeringMessage.topic,
+        triggerFrom: triggeringMessage.sender,
+      });
+
+      const result = await agent._spawnClaudeTask(context);
+
+      // Add task ID to result for debugging and hooks
+      result.taskId = agent.currentTaskId;
+      result.agentId = agent.id;
+      result.iteration = agent.iteration;
+
+      // Check if task execution failed
+      if (!result.success) {
+        throw new Error(result.error || 'Task execution failed');
+      }
+
+      // Set state to idle BEFORE publishing lifecycle event
+      // (so lifecycle message includes correct state)
+      agent.state = 'idle';
+
+      // Track completion time for context filtering (used by "since: last_task_end")
+      agent.lastTaskEndTime = Date.now();
+
+      agent._publishLifecycle('TASK_COMPLETED', {
+        iteration: agent.iteration,
+        success: true,
+        taskId: agent.currentTaskId,
+      });
+
+      // Execute onComplete hook
+      await executeHook({
+        hook: agent.config.hooks?.onComplete,
+        agent: agent,
+        message: triggeringMessage,
+        result: result,
+        messageBus: agent.messageBus,
+        cluster: agent.cluster,
+        orchestrator: agent.orchestrator,
+      });
+
+      // ✅ SUCCESS - exit retry loop
+      return;
+    } catch (error) {
+      // Log attempt failure
+      console.error(`\n${'='.repeat(80)}`);
+      console.error(
+        `🔴 TASK EXECUTION FAILED - AGENT: ${agent.id} (Attempt ${attempt}/${maxRetries})`
+      );
+      console.error(`${'='.repeat(80)}`);
+      console.error(`Error: ${error.message}`);
+      if (attempt < maxRetries) {
+        console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
+      }
+      console.error(`${'='.repeat(80)}\n`);
+
+      // Last attempt - give up
+      if (attempt >= maxRetries) {
+        console.error(`\n${'='.repeat(80)}`);
+        console.error(`🔴🔴🔴 MAX RETRIES EXHAUSTED - AGENT: ${agent.id} 🔴🔴🔴`);
+        console.error(`${'='.repeat(80)}`);
+        console.error(`All ${maxRetries} attempts failed`);
+        console.error(`Final error: ${error.message}`);
+        console.error(`Stack: ${error.stack}`);
+        console.error(`${'='.repeat(80)}\n`);
+
+        // ROBUSTNESS: If validator crashes after all retries → auto-approve to unblock cluster
+        // Better to skip broken validation than block entire workflow
+        if (agent.role === 'validator') {
+          console.warn(`\n${'='.repeat(80)}`);
+          console.warn(`⚠️  VALIDATOR AUTO-APPROVAL - Agent ${agent.id}`);
+          console.warn(`${'='.repeat(80)}`);
+          console.warn(`Validator crashed ${maxRetries} times, auto-approving to unblock cluster`);
+          console.warn(`This validation was SKIPPED - review manually if needed`);
+          console.warn(`${'='.repeat(80)}\n`);
+
+          // Publish approval message (using hook config structure)
+          const hook = agent.config.hooks?.onComplete;
+          if (hook && hook.action === 'publish_message') {
+            agent._publish({
+              topic: hook.config.topic,
+              receiver: hook.config.receiver || 'broadcast',
+              content: {
+                text: `Auto-approved after ${maxRetries} failed attempts: ${error.message}`,
+                data: {
+                  approved: 'true',
+                  errors: JSON.stringify([
+                    `VALIDATOR CRASHED: ${error.message}. Auto-approved to unblock cluster.`,
+                  ]),
+                  autoApproved: true,
+                  attempts: maxRetries,
+                },
+              },
+            });
+          }
+
+          agent.state = 'idle';
+          return; // Auto-approved, continue cluster
+        }
+
+        // Non-validator agents: publish error and stop
+        agent.state = 'error';
+
+        // Save failure info to cluster for resume capability
+        agent.cluster.failureInfo = {
+          agentId: agent.id,
+          taskId: agent.currentTaskId,
+          iteration: agent.iteration,
+          error: error.message,
+          attempts: maxRetries,
+          timestamp: Date.now(),
+        };
+
+        // Publish error to message bus for visibility in logs
+        agent._publish({
+          topic: 'AGENT_ERROR',
+          receiver: 'broadcast',
+          content: {
+            text: `Task execution failed after ${maxRetries} attempts: ${error.message}`,
+            data: {
+              error: error.message,
+              stack: error.stack,
+              agent: agent.id,
+              role: agent.role,
+              iteration: agent.iteration,
+              taskId: agent.currentTaskId,
+              attempts: maxRetries,
+              hookFailureContext: error.message.includes('Hook uses result')
+                ? {
+                    taskId: agent.currentTaskId || 'UNKNOWN',
+                    retrieveLogs: agent.currentTaskId
+                      ? `zeroshot task logs ${agent.currentTaskId}`
+                      : 'N/A',
+                  }
+                : undefined,
+            },
+          },
+          metadata: {
+            triggeringTopic: triggeringMessage.topic,
+          },
+        });
+
+        // Execute onError hook
+        await executeHook({
+          hook: agent.config.hooks?.onError,
+          agent: agent,
+          message: triggeringMessage,
+          result: { error },
+          messageBus: agent.messageBus,
+          cluster: agent.cluster,
+          orchestrator: agent.orchestrator,
+        });
+
+        agent.state = 'idle';
+        return; // Give up
+      }
+
+      // Not the last attempt - prepare for retry
+      const delay = baseDelay * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+
+      agent._publishLifecycle('RETRY_SCHEDULED', {
+        attempt,
+        maxRetries,
+        delayMs: delay,
+        error: error.message,
+      });
+
+      agent._log(`[${agent.id}] ⚠️  Retrying in ${delay}ms... (${attempt + 1}/${maxRetries})`);
+
+      // Exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
+      agent._log(`[${agent.id}] 🔄 Starting retry attempt ${attempt + 1}/${maxRetries}`);
+      // Continue to next iteration of for loop
+    }
+  }
+}
+
+/**
+ * Start monitoring agent output liveness using multi-indicator stuck detection
+ *
+ * SAFE DETECTION: Only flags as stuck when MULTIPLE indicators agree:
+ * - Process sleeping (state=S)
+ * - Blocked on epoll/poll wait
+ * - Low CPU usage (<1%)
+ * - Low context switches (<10)
+ * - No network data in flight
+ *
+ * Single-indicator detection (just output freshness) has HIGH false positive risk.
+ * This multi-indicator approach eliminates false positives.
+ *
+ * @param {AgentWrapper} agent - Agent instance
+ */
+function startLivenessCheck(agent) {
+  if (agent.livenessCheckInterval) {
+    clearInterval(agent.livenessCheckInterval);
+  }
+
+  // Check if platform supports /proc filesystem (Linux only)
+  if (!isPlatformSupported()) {
+    agent._log(
+      `[${agent.id}] Liveness check disabled: /proc filesystem not available (non-Linux platform)`
+    );
+    return;
+  }
+
+  // Check every 60 seconds (gives time for multi-indicator analysis)
+  const CHECK_INTERVAL_MS = 60 * 1000;
+  const ANALYSIS_SAMPLE_MS = 5000; // Sample CPU/context switches over 5 seconds
+
+  agent.livenessCheckInterval = setInterval(async () => {
+    // Skip if no task running or no PID tracked
+    if (!agent.currentTask || !agent.processPid) {
+      return;
+    }
+
+    // Skip if output is recent (process is clearly active)
+    if (agent.lastOutputTime) {
+      const timeSinceLastOutput = Date.now() - agent.lastOutputTime;
+      if (timeSinceLastOutput < agent.staleDuration) {
+        return; // Output is recent, definitely not stuck
+      }
+    }
+
+    // Output is stale - run multi-indicator analysis to confirm
+    agent._log(
+      `[${agent.id}] Output stale for ${Math.round((Date.now() - (agent.lastOutputTime || 0)) / 1000)}s, running multi-indicator analysis...`
+    );
+
+    try {
+      const analysis = await analyzeProcessHealth(agent.processPid, ANALYSIS_SAMPLE_MS);
+
+      // Process died during analysis
+      if (analysis.isLikelyStuck === null) {
+        agent._log(`[${agent.id}] Process analysis inconclusive: ${analysis.reason}`);
+        return;
+      }
+
+      // Log analysis details for debugging
+      agent._log(
+        `[${agent.id}] Analysis: score=${analysis.stuckScore}/${STUCK_THRESHOLD}, ` +
+          `state=${analysis.state}, wchan=${analysis.wchan}, ` +
+          `CPU=${analysis.cpuPercent}%, ctxSwitches=${analysis.ctxSwitchesDelta}`
+      );
+
+      if (analysis.isLikelyStuck) {
+        agent._log(`⚠️  Agent ${agent.id}: CONFIRMED STUCK (confidence: ${analysis.confidence})`);
+        agent._log(`    ${analysis.analysis}`);
+
+        // CHANGED: Stale detection is informational only - never kills tasks
+        // Publish stale detection event with full analysis (for logging/monitoring)
+        agent._publishLifecycle('AGENT_STALE_WARNING', {
+          timeSinceLastOutput: Date.now() - (agent.lastOutputTime || 0),
+          staleDuration: agent.staleDuration,
+          lastOutputTime: agent.lastOutputTime,
+          // Multi-indicator analysis results
+          stuckScore: analysis.stuckScore,
+          confidence: analysis.confidence,
+          processState: analysis.state,
+          wchan: analysis.wchan,
+          cpuPercent: analysis.cpuPercent,
+          ctxSwitchesDelta: analysis.ctxSwitchesDelta,
+          indicators: analysis.indicators,
+          analysis: analysis.analysis,
+        });
+
+        // Keep monitoring - do NOT stop the agent
+        // User can manually intervene with 'zeroshot resume' if needed
+        // stopLivenessCheck(agent); // REMOVED - keep monitoring
+      } else {
+        agent._log(
+          `[${agent.id}] Process appears WORKING despite stale output (score: ${analysis.stuckScore})`
+        );
+        agent._log(`    ${analysis.analysis}`);
+        // Don't flag as stuck - process is legitimately working
+      }
+    } catch (err) {
+      agent._log(`[${agent.id}] Error during stuck analysis: ${err.message}`);
+      // Don't flag as stuck on analysis error
+    }
+  }, CHECK_INTERVAL_MS);
+}
+
+/**
+ * Stop liveness monitoring
+ * @param {AgentWrapper} agent - Agent instance
+ */
+function stopLivenessCheck(agent) {
+  if (agent.livenessCheckInterval) {
+    clearInterval(agent.livenessCheckInterval);
+    agent.livenessCheckInterval = null;
+  }
+}
+
+module.exports = {
+  start,
+  stop,
+  handleMessage,
+  executeTriggerAction,
+  executeTask,
+  startLivenessCheck,
+  stopLivenessCheck,
+};
