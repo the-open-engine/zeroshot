@@ -3,7 +3,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 [![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue.svg)]()
-[![Coverage](https://codecov.io/gh/covibes/zeroshot/branch/main/graph/badge.svg)](https://codecov.io/gh/covibes/zeroshot)
 
 **Multi-agent coding CLI built on Claude Code.**
 
