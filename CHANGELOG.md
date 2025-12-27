@@ -1,3 +1,11 @@
+## [1.0.1](https://github.com/covibes/zeroshot/compare/v1.0.0...v1.0.1) (2025-12-27)
+
+
+### Bug Fixes
+
+* **ci:** checkout latest main to prevent stale SHA race condition ([dd302ba](https://github.com/covibes/zeroshot/commit/dd302ba8e0755cea6835cfae3286b3aa51e2f92a))
+* trigger npm publish ([6aa6708](https://github.com/covibes/zeroshot/commit/6aa6708dca0e55299ba5d1be9eb54410731a7da0))
+
 # 1.0.0 (2025-12-27)
 
 
