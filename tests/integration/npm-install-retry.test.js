@@ -141,9 +141,9 @@ describe('npm install retry logic', function () {
       // Should have made 3 attempts (initial + 2 retries)
       assert.strictEqual(callCount, 3, 'Should attempt 3 times total');
 
-      // Verify exponential backoff delays (2s, 4s, 8s)
-      // Total delay should be at least 14 seconds
-      assert(elapsed >= 14000, `Should wait at least 14s for all retries, got ${elapsed}ms`);
+      // Verify exponential backoff delays (2s before attempt 2, 4s before attempt 3)
+      // Total delay should be at least 6 seconds (2s + 4s = 6s, no delay after last attempt)
+      assert(elapsed >= 6000, `Should wait at least 6s for all retries, got ${elapsed}ms`);
     });
 
     it('does not retry if first attempt succeeds', async function () {
