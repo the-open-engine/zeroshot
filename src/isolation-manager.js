@@ -867,10 +867,12 @@ class IsolationManager {
    * @returns {Promise<void>}
    */
   static async buildImage(image = DEFAULT_IMAGE, maxRetries = 3) {
-    const dockerfilePath = path.join(__dirname, '..', 'docker', 'zeroshot-cluster');
+    // Repository root is one level up from src/
+    const repoRoot = path.join(__dirname, '..');
+    const dockerfilePath = path.join(repoRoot, 'docker', 'zeroshot-cluster', 'Dockerfile');
 
-    if (!fs.existsSync(path.join(dockerfilePath, 'Dockerfile'))) {
-      throw new Error(`Dockerfile not found at ${dockerfilePath}/Dockerfile`);
+    if (!fs.existsSync(dockerfilePath)) {
+      throw new Error(`Dockerfile not found at ${dockerfilePath}`);
     }
 
     console.log(`[IsolationManager] Building Docker image '${image}'...`);
@@ -879,9 +881,10 @@ class IsolationManager {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Use execSync with stdio: 'inherit' to stream output in real-time
-        execSync(`docker build -t ${image} .`, {
-          cwd: dockerfilePath,
+        // CRITICAL: Run from repo root so build context includes package.json and src/
+        // Use -f flag to specify Dockerfile location
+        execSync(`docker build -f docker/zeroshot-cluster/Dockerfile -t ${image} .`, {
+          cwd: repoRoot,
           encoding: 'utf8',
           stdio: 'inherit',
         });
