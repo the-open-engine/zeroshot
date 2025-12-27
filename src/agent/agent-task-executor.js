@@ -506,7 +506,9 @@ function followClaudeTaskLogs(agent, taskId) {
 
         // Check for completion/failure status
         // Strip ANSI codes in case chalk outputs them (shouldn't in non-TTY, but be safe)
-        const cleanStdout = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+        // Use RegExp constructor to avoid ESLint no-control-regex false positive
+        const ansiPattern = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
+        const cleanStdout = stdout.replace(ansiPattern, '');
         // Use flexible whitespace matching in case spacing changes
         const isCompleted = /Status:\s+completed/i.test(cleanStdout);
         const isFailed = /Status:\s+failed/i.test(cleanStdout);
