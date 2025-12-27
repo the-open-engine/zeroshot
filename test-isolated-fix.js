@@ -1,5 +1,4 @@
 const Orchestrator = require('./src/orchestrator');
-const path = require('path');
 
 async function test() {
   console.log('[TEST] Starting isolated mode output capture test...\n');
@@ -112,7 +111,7 @@ async function test() {
     let parsedOutput = null;
 
     for (const msg of outputMessages) {
-      const text = msg.content?.text || m.content?.data?.line || '';
+      const text = msg.content?.text || msg.content?.data?.line || '';
       if (!text.trim().startsWith('{')) continue;
 
       try {
