@@ -600,15 +600,15 @@ Cluster configs can be **parameterized**:
   "config": {
     "base": "full-workflow",
     "params": {
-      "domain": "CODE",
       "complexity": "STANDARD",
+      "task_type": "TASK",
       "validator_count": 3
     }
   }
 }
 
 // TemplateResolver loads base-templates/full-workflow.json
-// and substitutes {{domain}}, {{validator_count}} in agent configs
+// and substitutes {{complexity}}, {{validator_count}} in agent configs
 ```
 
 See `src/template-resolver.js` and `cluster-templates/base-templates/`.

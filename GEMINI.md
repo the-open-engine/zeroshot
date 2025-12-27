@@ -6,7 +6,7 @@ Multi-agent coordination via message-passing primitives. User install: `npm i -g
 
 | Concept                           | Primary File/Location              |
 | --------------------------------- | ---------------------------------- |
-| Conductor 3D classification       | @src/conductor-bootstrap.js        |
+| Conductor 2D classification       | @src/conductor-bootstrap.js        |
 | Base templates                    | @cluster-templates/base-templates/ |
 | Message bus                       | @src/message-bus.js                |
 | Ledger (SQLite)                   | @src/ledger.js                     |

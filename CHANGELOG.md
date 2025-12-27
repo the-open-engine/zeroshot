@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Workflow Templates
 
-- Conductor system with 3D classification (Domain × Complexity × TaskType)
+- Conductor system with 2D classification (Complexity × TaskType)
 - Four base templates: single-worker, worker-validator, debug-workflow, full-workflow
 - Parameterized template resolution with TemplateResolver
 - Dynamic agent spawning based on task analysis
