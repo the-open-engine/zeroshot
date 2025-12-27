@@ -1876,7 +1876,8 @@ program
 program
   .command('resume <id> [prompt]')
   .description('Resume a failed task or cluster')
-  .action(async (id, prompt) => {
+  .option('-d, --detach', 'Resume in background (daemon mode)')
+  .action(async (id, prompt, options) => {
     try {
       // Try cluster first, then task (both use same ID format: "adjective-noun-number")
       const OrchestratorModule = require('../src/orchestrator');
@@ -1903,8 +1904,102 @@ program
             console.log(`  Published CLUSTER_RESUMED to trigger workflow`);
           }
         }
+
+        // === DAEMON MODE: Exit and let cluster run in background ===
+        if (options.detach) {
+          console.log('');
+          console.log(chalk.dim(`Follow logs with: zeroshot logs ${id} -f`));
+          return;
+        }
+
+        // === FOREGROUND MODE: Stream logs in real-time (same as 'run' command) ===
         console.log('');
-        console.log(chalk.dim(`Follow logs with: zeroshot logs ${id} -f`));
+        console.log(chalk.dim('Streaming logs... (Ctrl+C to stop cluster)'));
+        console.log('');
+
+        // Get the cluster's message bus for streaming
+        const resumedCluster = orchestrator.getCluster(id);
+        if (!resumedCluster || !resumedCluster.messageBus) {
+          console.error(chalk.red('Failed to get message bus for resumed cluster'));
+          process.exit(1);
+        }
+
+        // Track senders that have output (for periodic flushing)
+        const sendersWithOutput = new Set();
+        // Track messages we've already processed (to avoid duplicates between history and subscription)
+        const processedMessageIds = new Set();
+
+        // Message handler - processes messages, deduplicates by ID
+        const handleMessage = (msg) => {
+          if (msg.cluster_id !== id) return;
+          if (processedMessageIds.has(msg.id)) return;
+          processedMessageIds.add(msg.id);
+
+          if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
+            sendersWithOutput.add(msg.sender);
+          }
+          printMessage(msg, false, false, true);
+        };
+
+        // Subscribe to NEW messages
+        const unsubscribe = resumedCluster.messageBus.subscribe(handleMessage);
+
+        // Periodic flush of text buffers (streaming text may not have newlines)
+        const flushInterval = setInterval(() => {
+          for (const sender of sendersWithOutput) {
+            const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
+            flushLineBuffer(prefix, sender);
+          }
+        }, 250);
+
+        // Wait for cluster to complete
+        await new Promise((resolve) => {
+          const checkInterval = setInterval(() => {
+            try {
+              const status = orchestrator.getStatus(id);
+              if (status.state !== 'running') {
+                clearInterval(checkInterval);
+                clearInterval(flushInterval);
+                // Final flush
+                for (const sender of sendersWithOutput) {
+                  const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
+                  flushLineBuffer(prefix, sender);
+                }
+                unsubscribe();
+                resolve();
+              }
+            } catch {
+              // Cluster may have been removed
+              clearInterval(checkInterval);
+              clearInterval(flushInterval);
+              unsubscribe();
+              resolve();
+            }
+          }, 500);
+
+          // Handle Ctrl+C: Stop cluster since foreground mode has no daemon
+          // CRITICAL: In foreground mode, the cluster runs IN this process.
+          // If we exit without stopping, the cluster becomes a zombie (state=running but no process).
+          process.on('SIGINT', async () => {
+            console.log(chalk.dim('\n\n--- Interrupted ---'));
+            clearInterval(checkInterval);
+            clearInterval(flushInterval);
+            unsubscribe();
+
+            // Stop the cluster properly so state is updated
+            try {
+              console.log(chalk.dim(`Stopping cluster ${id}...`));
+              await orchestrator.stop(id);
+              console.log(chalk.dim(`Cluster ${id} stopped.`));
+            } catch (stopErr) {
+              console.error(chalk.red(`Failed to stop cluster: ${stopErr.message}`));
+            }
+
+            process.exit(0);
+          });
+        });
+
+        console.log(chalk.dim(`\nCluster ${id} completed.`));
       } else {
         // Try resuming as task
         const { resumeTask } = await import('../task-lib/commands/resume.js');

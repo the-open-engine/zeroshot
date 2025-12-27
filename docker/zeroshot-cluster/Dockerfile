@@ -107,6 +107,12 @@ ENV AWS_PAGER=""
 ENV CHROME_BIN=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Copy zeroshot source into container and install globally
+# CRITICAL: This enables isolation mode to use 'zeroshot task run' inside container
+# which provides timeout, error handling, and log streaming infrastructure
+COPY --chown=node:node . /tmp/zeroshot/
+RUN cd /tmp/zeroshot && npm install && npm link
+
 # Install Claude CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 

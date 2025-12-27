@@ -630,37 +630,29 @@ function getClaudeTasksPath() {
  * @param {String} context - Context to pass to Claude
  * @returns {Promise<Object>} Result object { success, output, error }
  */
-function spawnClaudeTaskIsolated(agent, context) {
+async function spawnClaudeTaskIsolated(agent, context) {
   const { manager, clusterId } = agent.isolation;
 
-  agent._log(`📦 Agent ${agent.id}: Running task in isolated container...`);
+  agent._log(`📦 Agent ${agent.id}: Running task in isolated container using zeroshot task run...`);
 
-  // Build command to run inside container
-  // Use claude directly inside container (installed in base image)
-  // CRITICAL: Default to strict schema validation (same as _spawnClaudeTask)
+  // Build zeroshot task run command (same infrastructure as non-isolation mode)
+  // CRITICAL: Default to strict schema validation to prevent cluster crashes from parse failures
   const desiredOutputFormat = agent.config.outputFormat || 'json';
   const strictSchema = agent.config.strictSchema !== false; // DEFAULT TO TRUE
   const runOutputFormat =
     agent.config.jsonSchema && desiredOutputFormat === 'json' && !strictSchema
       ? 'stream-json'
       : desiredOutputFormat;
-  // NOTE: --dangerously-skip-permissions is REQUIRED for non-interactive (--print) mode
-  // Without it, Claude can't write files, run commands, etc. in the isolated container
-  const command = [
-    'claude',
-    '--print',
-    '--dangerously-skip-permissions',
-    '--output-format',
-    runOutputFormat,
-  ];
 
-  // stream-json with --print requires --verbose and partial messages for live output
-  if (runOutputFormat === 'stream-json') {
-    command.push('--verbose');
-    command.push('--include-partial-messages');
+  const command = ['zeroshot', 'task', 'run', '--output-format', runOutputFormat];
+
+  // Add verification mode flag if configured
+  if (agent.config.verificationMode) {
+    command.push('-v');
   }
 
-  // Add JSON schema if specified in agent config (enforces structured output)
+  // Add JSON schema if specified in agent config
+  // If we are running stream-json for live logs (strictSchema=false), do NOT pass schema to CLI
   if (agent.config.jsonSchema) {
     if (runOutputFormat === 'json') {
       // strictSchema=true OR no schema conflict: pass schema to CLI for native enforcement
@@ -673,13 +665,7 @@ function spawnClaudeTaskIsolated(agent, context) {
     }
   }
 
-  // Add model if specified
-  const selectedModel = agent._selectModel();
-  if (selectedModel) {
-    command.push('--model', selectedModel);
-  }
-
-  // Add explicit output instructions when we run stream-json for a jsonSchema agent.
+  // Add explicit output instructions when we run stream-json for a jsonSchema agent
   let finalContext = context;
   if (
     agent.config.jsonSchema &&
@@ -693,14 +679,11 @@ function spawnClaudeTaskIsolated(agent, context) {
     )}\n\`\`\`\n`;
   }
 
-  // Add the context as the prompt
   command.push(finalContext);
 
-  return new Promise((resolve, reject) => {
-    let output = '';
-    let resolved = false;
-
-    // Spawn process inside container
+  // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
+  const taskId = await new Promise((resolve, reject) => {
+    const selectedModel = agent._selectModel();
     const proc = manager.spawnInContainer(clusterId, command, {
       env: {
         ANTHROPIC_MODEL: selectedModel,
@@ -709,104 +692,246 @@ function spawnClaudeTaskIsolated(agent, context) {
       },
     });
 
-    // Stream stdout to message bus
+    // Track PID for resource monitoring
+    agent.processPid = proc.pid;
+    agent._publishLifecycle('PROCESS_SPAWNED', { pid: proc.pid });
+
+    let stdout = '';
+    let stderr = '';
+
     proc.stdout.on('data', (data) => {
-      const chunk = data.toString();
-      output += chunk;
-
-      // Process each line
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (!line.trim() || !line.trim().startsWith('{')) continue;
-
-        // Validate JSON
-        try {
-          JSON.parse(line);
-        } catch {
-          continue; // Not valid JSON
-        }
-
-        // Publish to message bus
-        agent._publish({
-          topic: 'AGENT_OUTPUT',
-          receiver: 'broadcast',
-          content: {
-            text: line,
-            data: {
-              type: 'stdout',
-              line,
-              agent: agent.id,
-              role: agent.role,
-              iteration: agent.iteration,
-              isolated: true,
-            },
-          },
-        });
-      }
+      stdout += data.toString();
     });
 
     proc.stderr.on('data', (data) => {
-      const text = data.toString();
-      console.error(`[${agent.id}] stderr: ${text}`);
+      stderr += data.toString();
     });
 
     proc.on('close', (code, signal) => {
-      if (resolved) return;
-      resolved = true;
-
-      agent.currentTask = null;
-
-      // Handle process killed by signal (e.g., SIGTERM, SIGKILL, SIGSTOP)
+      // Handle process killed by signal
       if (signal) {
-        resolve({
-          success: false,
-          output,
-          error: `Process killed by signal ${signal}`,
-        });
+        reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
         return;
       }
 
-      resolve({
-        success: code === 0,
-        output,
-        error: code !== 0 ? `Process exited with code ${code}` : null,
-      });
-    });
+      if (code === 0) {
+        // Parse task ID from output: "✓ Task spawned: xxx-yyy-nn"
+        const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
+        if (match) {
+          const spawnedTaskId = match[1];
+          agent.currentTaskId = spawnedTaskId; // Track for resume capability
+          agent._publishLifecycle('TASK_ID_ASSIGNED', {
+            pid: agent.processPid,
+            taskId: spawnedTaskId,
+          });
 
-    proc.on('error', (err) => {
-      if (resolved) return;
-      resolved = true;
+          // Start liveness monitoring
+          if (agent.enableLivenessCheck) {
+            agent.lastOutputTime = Date.now(); // Initialize to spawn time
+            agent._startLivenessCheck();
+          }
 
-      agent.currentTask = null;
-      reject(err);
-    });
-
-    // Store cleanup function
-    agent.currentTask = {
-      kill: () => {
-        if (!resolved) {
-          proc.kill('SIGTERM');
+          resolve(spawnedTaskId);
+        } else {
+          reject(new Error(`Could not parse task ID from output: ${stdout}`));
         }
-      },
+      } else {
+        reject(new Error(`zeroshot task run failed with code ${code}: ${stderr}`));
+      }
+    });
+
+    proc.on('error', (error) => {
+      reject(error);
+    });
+  });
+
+  agent._log(`📋 Agent ${agent.id}: Following zeroshot logs for ${taskId} in container...`);
+
+  // STEP 2: Follow the task's log file inside container (NOT the spawn stdout!)
+  return followClaudeTaskLogsIsolated(agent, taskId);
+}
+
+/**
+ * Follow task logs inside Docker container (isolated mode)
+ * Reads task log file inside container and streams JSON lines to message bus
+ * @param {Object} agent - Agent instance with isolation context
+ * @param {String} taskId - Task ID to follow
+ * @returns {Promise<Object>} Result object
+ * @private
+ */
+function followClaudeTaskLogsIsolated(agent, taskId) {
+  const { isolation } = agent;
+  if (!isolation?.manager) {
+    throw new Error('followClaudeTaskLogsIsolated: isolation manager not found');
+  }
+
+  const manager = isolation.manager;
+  const clusterId = isolation.clusterId;
+
+  return new Promise((resolve, reject) => {
+    let taskExited = false;
+    let lastSize = 0;
+    let fullOutput = '';
+    let pollInterval = null;
+
+    // Cleanup function
+    const cleanup = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
     };
 
-    // REMOVED: Task timeout disabled - tasks run until completion or explicit kill
-    // Tasks should run until:
-    // - Completion
-    // - Explicit kill
-    // - External error (rate limit, API failure)
-    //
-    // setTimeout(() => {
-    //   if (resolved) return;
-    //   resolved = true;
-    //
-    //   proc.kill("SIGTERM");
-    //   agent.currentTask = null;
-    //   const timeoutMinutes = Math.round(agent.timeout / 60000);
-    //   reject(
-    //     new Error(`Isolated task timed out after ${timeoutMinutes} minutes`),
-    //   );
-    // }, agent.timeout);
+    // Get log file path from zeroshot CLI inside container
+    manager
+      .execInContainer(clusterId, ['sh', '-c', `zeroshot get-log-path ${taskId}`])
+      .then(({ stdout, stderr, code }) => {
+        if (code !== 0) {
+          cleanup();
+          return reject(
+            new Error(
+              `Failed to get log path for ${taskId} inside container: ${stderr || stdout}`
+            )
+          );
+        }
+
+        const logFilePath = stdout.trim();
+        if (!logFilePath) {
+          cleanup();
+          return reject(new Error(`Empty log path returned for ${taskId}`));
+        }
+
+        agent._log(`[${agent.id}] Following isolated task logs: ${logFilePath}`);
+
+        // Broadcast line helper (same as non-isolated mode)
+        const broadcastLine = (line) => {
+          const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*(.*)$/);
+          const timestamp = timestampMatch
+            ? new Date(timestampMatch[1]).getTime()
+            : Date.now();
+          const content = timestampMatch ? timestampMatch[2] : line;
+
+          agent.messageBus.publish({
+            cluster_id: agent.cluster.id,
+            topic: 'AGENT_OUTPUT',
+            sender: agent.id,
+            content: {
+              data: {
+                line: content,
+                taskId,
+                iteration: agent.iteration,
+              },
+            },
+            timestamp,
+          });
+
+          // Update last output time for liveness tracking
+          agent.lastOutputTime = Date.now();
+        };
+
+        // Poll log file inside container (check every 500ms)
+        pollInterval = setInterval(async () => {
+          try {
+            // Get file size inside container
+            const sizeResult = await manager.execInContainer(clusterId, [
+              'sh',
+              '-c',
+              `stat -c %s "${logFilePath}" 2>/dev/null || echo 0`,
+            ]);
+
+            const currentSize = parseInt(sizeResult.stdout.trim()) || 0;
+
+            // Read new content if file grew
+            if (currentSize > lastSize) {
+              const bytesToRead = currentSize - lastSize;
+              const readResult = await manager.execInContainer(clusterId, [
+                'sh',
+                '-c',
+                `tail -c ${bytesToRead} "${logFilePath}"`,
+              ]);
+
+              if (readResult.code === 0 && readResult.stdout) {
+                fullOutput += readResult.stdout;
+
+                // Split by newlines and broadcast each complete line
+                const lines = readResult.stdout.split('\n');
+                for (let i = 0; i < lines.length - 1; i++) {
+                  if (lines[i].trim()) {
+                    broadcastLine(lines[i]);
+                  }
+                }
+              }
+
+              lastSize = currentSize;
+            }
+
+            // Check if task exited (query zeroshot status inside container)
+            const statusResult = await manager.execInContainer(clusterId, [
+              'sh',
+              '-c',
+              `zeroshot status ${taskId} 2>/dev/null || echo "not_found"`,
+            ]);
+
+            const statusOutput = statusResult.stdout.toLowerCase();
+            if (
+              statusOutput.includes('success') ||
+              statusOutput.includes('error') ||
+              statusOutput.includes('not_found')
+            ) {
+              // Task finished - read final output and resolve
+              const finalReadResult = await manager.execInContainer(clusterId, [
+                'sh',
+                '-c',
+                `cat "${logFilePath}"`,
+              ]);
+
+              if (finalReadResult.code === 0) {
+                fullOutput = finalReadResult.stdout;
+
+                // Broadcast any final lines we haven't seen
+                const finalLines = fullOutput.split('\n');
+                for (const line of finalLines) {
+                  if (line.trim()) {
+                    broadcastLine(line);
+                  }
+                }
+              }
+
+              cleanup();
+              taskExited = true;
+
+              // Parse result from output (same logic as non-isolated mode)
+              const parsedResult = agent._parseResultOutput(fullOutput);
+
+              resolve({
+                output: fullOutput,
+                taskId,
+                result: parsedResult,
+              });
+            }
+          } catch (pollErr) {
+            // Log error but continue polling (file might not exist yet)
+            agent._log(`[${agent.id}] Poll error (will retry): ${pollErr.message}`);
+          }
+        }, 500);
+
+        // Safety timeout (same as non-isolated mode)
+        const timeoutMs = agent.timeout || 300000; // 5 minutes default
+        setTimeout(() => {
+          if (!taskExited) {
+            cleanup();
+            reject(
+              new Error(
+                `Task ${taskId} timeout after ${timeoutMs}ms (isolated mode)`
+              )
+            );
+          }
+        }, timeoutMs);
+      })
+      .catch((err) => {
+        cleanup();
+        reject(err);
+      });
   });
 }
 

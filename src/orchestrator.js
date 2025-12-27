@@ -164,12 +164,19 @@ class Orchestrator {
       isolationManager = new IsolationManager({ image: isolation.image });
       // Restore the container mapping so cleanup works
       isolationManager.containers.set(clusterId, isolation.containerId);
+      // Restore isolated dir mapping for workspace preservation during cleanup
+      if (isolation.workDir) {
+        isolationManager.isolatedDirs.set(clusterId, {
+          path: path.join(os.tmpdir(), 'zeroshot-isolated', clusterId),
+          originalDir: isolation.workDir,
+        });
+      }
       isolation = {
         ...isolation,
         manager: isolationManager,
       };
       this._log(
-        `[Orchestrator] Restored isolation manager for ${clusterId} (container: ${isolation.containerId})`
+        `[Orchestrator] Restored isolation manager for ${clusterId} (container: ${isolation.containerId}, workDir: ${isolation.workDir || 'unknown'})`
       );
     }
 
@@ -289,6 +296,13 @@ class Orchestrator {
           continue;
         }
 
+        // CRITICAL: Killed clusters are DELETED from disk, not persisted
+        // This ensures they can't be accidentally resumed
+        if (cluster.state === 'killed') {
+          delete existingClusters[clusterId];
+          continue;
+        }
+
         existingClusters[clusterId] = {
           id: cluster.id,
           config: cluster.config,
@@ -299,11 +313,13 @@ class Orchestrator {
           // Persist failure info for resume capability
           failureInfo: cluster.failureInfo || null,
           // Persist isolation info (excluding manager instance which can't be serialized)
+          // CRITICAL: workDir is required for resume() to recreate container with same workspace
           isolation: cluster.isolation
             ? {
                 enabled: cluster.isolation.enabled,
                 containerId: cluster.isolation.containerId,
                 image: cluster.isolation.image,
+                workDir: cluster.isolation.workDir, // Required for resume
               }
             : null,
         };
@@ -489,12 +505,14 @@ class Orchestrator {
       // Track PID for zombie detection (this process owns the cluster)
       pid: process.pid,
       // Isolation state (only if enabled)
+      // CRITICAL: Store workDir for resume capability - without this, resume() can't recreate container
       isolation: options.isolation
         ? {
             enabled: true,
             containerId,
             image: options.isolationImage || 'zeroshot-cluster-base',
             manager: isolationManager,
+            workDir: options.cwd || process.cwd(), // Persisted for resume
           }
         : null,
     };
@@ -823,10 +841,11 @@ class Orchestrator {
     }
 
     // Clean up isolation container if enabled
+    // CRITICAL: Preserve workspace for resume capability - only delete on kill()
     if (cluster.isolation?.manager) {
-      this._log(`[Orchestrator] Cleaning up isolation container for ${clusterId}...`);
-      await cluster.isolation.manager.cleanup(clusterId);
-      this._log(`[Orchestrator] Container removed`);
+      this._log(`[Orchestrator] Stopping isolation container for ${clusterId} (preserving workspace for resume)...`);
+      await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
+      this._log(`[Orchestrator] Container stopped, workspace preserved`);
     }
 
     cluster.state = 'stopped';
@@ -854,11 +873,11 @@ class Orchestrator {
       await agent.stop();
     }
 
-    // Force remove isolation container if enabled
+    // Force remove isolation container AND workspace (full cleanup, no resume)
     if (cluster.isolation?.manager) {
-      this._log(`[Orchestrator] Force removing isolation container for ${clusterId}...`);
-      await cluster.isolation.manager.removeContainer(clusterId, true); // force=true
-      this._log(`[Orchestrator] Container removed`);
+      this._log(`[Orchestrator] Force removing isolation container and workspace for ${clusterId}...`);
+      await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: false });
+      this._log(`[Orchestrator] Container and workspace removed`);
     }
 
     // Close message bus and ledger
@@ -976,10 +995,26 @@ class Orchestrator {
       if (!containerExists) {
         this._log(`[Orchestrator] Container ${oldContainerId} not found, recreating...`);
 
-        // Create new container
+        // Create new container using saved workDir (CRITICAL for isolation mode resume)
+        // The isolated workspace at /tmp/zeroshot-isolated/{clusterId} was preserved by stop()
+        const workDir = cluster.isolation.workDir;
+        if (!workDir) {
+          throw new Error(`Cannot resume cluster ${clusterId}: workDir not saved in isolation state`);
+        }
+
+        // Check if isolated workspace still exists (it should, if stop() was used)
+        const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
+        if (!fs.existsSync(isolatedPath)) {
+          throw new Error(
+            `Cannot resume cluster ${clusterId}: isolated workspace deleted. ` +
+              `Was the cluster killed (not stopped)? Use 'zeroshot run' to start fresh.`
+          );
+        }
+
         const newContainerId = await cluster.isolation.manager.createContainer(clusterId, {
-          workDir: process.cwd(),
+          workDir, // Use saved workDir, NOT process.cwd()
           image: cluster.isolation.image,
+          reuseExistingWorkspace: true, // CRITICAL: Don't wipe existing work
         });
 
         this._log(`[Orchestrator] New container created: ${newContainerId}`);

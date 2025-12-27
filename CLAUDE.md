@@ -79,7 +79,8 @@ zeroshot task run "Fix bug X"        # Background single agent
 zeroshot list / ls                   # All tasks/clusters
 zeroshot status <id>                 # Auto-detects type
 zeroshot logs <id> [-f]              # Follow logs
-zeroshot resume <id> [prompt]        # Resume failed (auto-detects task/cluster)
+zeroshot resume <id> [prompt]        # Resume failed (foreground, Ctrl+C stops)
+zeroshot resume <id> -d              # Resume in background (daemon mode)
 zeroshot kill <id>                   # Kill running
 zeroshot clear [-y]                  # Kill all + delete data
 
@@ -103,9 +104,22 @@ zeroshot settings set defaultModel sonnet
 
 **UX:**
 
-- `zeroshot run` = Multi-agent cluster (auto-attaches to first agent, Ctrl+C to detach)
-- `zeroshot run -d` = Multi-agent cluster (background/detached like docker -d)
+- `zeroshot run` = Foreground mode (streams logs, Ctrl+C **STOPS** cluster)
+- `zeroshot run -d` = Daemon mode (background, like docker -d)
+- `zeroshot resume` = Foreground mode (streams logs, Ctrl+C **STOPS** cluster)
+- `zeroshot resume -d` = Daemon mode (background)
+- `zeroshot attach` = Connect to running daemon (Ctrl+C **DETACHES**, daemon continues)
 - `zeroshot task run` = Single-agent background task
+
+**FAQ: Can I run zeroshot in the background?**
+
+| Question | Answer |
+|----------|--------|
+| **How do I run in background?** | Use `-d` flag: `zeroshot run 123 -d` or `zeroshot resume xyz -d` |
+| **What happens if I Ctrl+C?** | **Foreground (no -d)**: Cluster **STOPS** completely. **Attach mode**: You **DETACH**, daemon continues. |
+| **How do I follow logs of a background cluster?** | `zeroshot logs <id> -f` |
+| **How do I stop a background cluster?** | `zeroshot stop <id>` (graceful) or `zeroshot kill <id>` (force) |
+| **Can I resume a stopped cluster?** | Yes: `zeroshot resume <id>` (foreground) or `zeroshot resume <id> -d` (background) |
 
 ## Architecture: Message-Driven Coordination
 

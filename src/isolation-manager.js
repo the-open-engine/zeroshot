@@ -49,12 +49,14 @@ class IsolationManager {
    * @param {object} config - Container config
    * @param {string} config.workDir - Working directory to mount
    * @param {string} [config.image] - Docker image (default: zeroshot-cluster-base)
+   * @param {boolean} [config.reuseExistingWorkspace=false] - If true, reuse existing isolated workspace (for resume)
    * @returns {Promise<string>} Container ID
    */
   createContainer(clusterId, config) {
     const image = config.image || this.image;
     let workDir = config.workDir || process.cwd();
     const containerName = `zeroshot-cluster-${clusterId}`;
+    const reuseExisting = config.reuseExistingWorkspace || false;
 
     // Check if container already exists
     if (this.containers.has(clusterId)) {
@@ -69,15 +71,30 @@ class IsolationManager {
 
     // For isolation mode: copy files to temp dir with fresh git repo (100% isolated)
     // No worktrees - cleaner, no host path dependencies
+    // EXCEPTION: On resume (reuseExisting=true), skip copy and use existing workspace
     if (this._isGitRepo(workDir)) {
-      const isolatedDir = this._createIsolatedCopy(clusterId, workDir);
-      this.isolatedDirs = this.isolatedDirs || new Map();
-      this.isolatedDirs.set(clusterId, {
-        path: isolatedDir,
-        originalDir: workDir,
-      });
-      workDir = isolatedDir;
-      console.log(`[IsolationManager] Created isolated copy at ${workDir}`);
+      const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
+
+      if (reuseExisting && fs.existsSync(isolatedPath)) {
+        // Resume mode: reuse existing isolated workspace (contains agent's work)
+        console.log(`[IsolationManager] Reusing existing isolated workspace at ${isolatedPath}`);
+        this.isolatedDirs = this.isolatedDirs || new Map();
+        this.isolatedDirs.set(clusterId, {
+          path: isolatedPath,
+          originalDir: workDir,
+        });
+        workDir = isolatedPath;
+      } else {
+        // Fresh start: create new isolated copy
+        const isolatedDir = this._createIsolatedCopy(clusterId, workDir);
+        this.isolatedDirs = this.isolatedDirs || new Map();
+        this.isolatedDirs.set(clusterId, {
+          path: isolatedDir,
+          originalDir: workDir,
+        });
+        workDir = isolatedDir;
+        console.log(`[IsolationManager] Created isolated copy at ${workDir}`);
+      }
     }
 
     // Create fresh Claude config dir for this cluster (avoids permission issues from host)
@@ -381,32 +398,42 @@ class IsolationManager {
   }
 
   /**
-   * Stop and remove a container, and clean up isolated dir/config
+   * Stop and remove a container, and optionally clean up isolated dir/config
    * @param {string} clusterId - Cluster ID
+   * @param {object} [options] - Cleanup options
+   * @param {boolean} [options.preserveWorkspace=false] - If true, keep the isolated workspace (for resume capability)
    * @returns {Promise<void>}
    */
-  async cleanup(clusterId) {
+  async cleanup(clusterId, options = {}) {
+    const preserveWorkspace = options.preserveWorkspace || false;
+
     await this.stopContainer(clusterId);
     await this.removeContainer(clusterId);
 
-    // Clean up isolated directory if one was created
+    // Clean up isolated directory if one was created (unless preserveWorkspace is set)
     if (this.isolatedDirs?.has(clusterId)) {
       const isolatedInfo = this.isolatedDirs.get(clusterId);
-      console.log(`[IsolationManager] Cleaning up isolated dir at ${isolatedInfo.path}`);
 
-      // Preserve Terraform state before deleting isolated directory
-      this._preserveTerraformState(clusterId, isolatedInfo.path);
+      if (preserveWorkspace) {
+        console.log(`[IsolationManager] Preserving isolated workspace at ${isolatedInfo.path} for resume`);
+        // Don't delete - but DON'T remove from Map either, resume() needs it
+      } else {
+        console.log(`[IsolationManager] Cleaning up isolated dir at ${isolatedInfo.path}`);
 
-      // Remove the isolated directory
-      try {
-        fs.rmSync(isolatedInfo.path, { recursive: true, force: true });
-      } catch {
-        // Ignore
+        // Preserve Terraform state before deleting isolated directory
+        this._preserveTerraformState(clusterId, isolatedInfo.path);
+
+        // Remove the isolated directory
+        try {
+          fs.rmSync(isolatedInfo.path, { recursive: true, force: true });
+        } catch {
+          // Ignore
+        }
+        this.isolatedDirs.delete(clusterId);
       }
-      this.isolatedDirs.delete(clusterId);
     }
 
-    // Clean up cluster config dir
+    // Clean up cluster config dir (always - it's recreated on resume)
     this._cleanupClusterConfigDir(clusterId);
   }
 
