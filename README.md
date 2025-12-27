@@ -108,6 +108,14 @@ Zeroshot agents use strict JSON schema outputs to ensure reliable parsing and ho
 
 During heavy tasks (large refactors, complex analysis), the CLI may appear frozen for several minutes while the agent works. This is normal - the agent is actively running, just not streaming output.
 
+**Q: Why is it called "zeroshot"?**
+
+In machine learning, "zero-shot" means solving tasks the model has never seen before - using only the task description, no prior examples needed.
+
+Same idea here: give zeroshot a well-defined task, get back a result. No examples. No iterative feedback. No hand-holding.
+
+The multi-agent architecture handles planning, implementation, and validation internally. You provide a clear problem statement. Zeroshot handles the rest.
+
 ---
 
 ## How It Works
