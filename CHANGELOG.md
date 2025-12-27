@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/covibes/zeroshot/compare/v1.0.1...v1.0.2) (2025-12-27)
+
+
+### Bug Fixes
+
+* include task-lib in npm package ([37602fb](https://github.com/covibes/zeroshot/commit/37602fb3f1f6cd735d8db232be5829dc342b815d))
+
 ## [1.0.1](https://github.com/covibes/zeroshot/compare/v1.0.0...v1.0.1) (2025-12-27)
 
 
