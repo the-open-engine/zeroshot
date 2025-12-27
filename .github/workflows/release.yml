@@ -42,6 +42,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify package before release
+        run: |
+          # Create tarball (respects 'files' array in package.json)
+          TARBALL=$(npm pack)
+          echo "Created: $TARBALL"
+
+          # Install from tarball (simulates npm install -g @covibes/zeroshot)
+          npm install -g "./$TARBALL"
+
+          # Smoke tests - must all pass
+          echo "=== Testing installed package ==="
+          zeroshot --version
+          zeroshot --help
+          zeroshot list
+
+          # Cleanup
+          npm uninstall -g @covibes/zeroshot
+          rm "$TARBALL"
+
+          echo "✅ Package verification passed"
+
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
