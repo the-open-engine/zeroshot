@@ -42,13 +42,14 @@ jobs:
         timeout-minutes: 5
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/lcov.info
           flags: unittests
           name: codecov-zeroshot
           fail_ci_if_error: false
+        continue-on-error: true
 
   # Cross-platform/version compatibility
   install-matrix:
