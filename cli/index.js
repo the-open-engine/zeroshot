@@ -36,7 +36,9 @@ const program = new Command();
 // GLOBAL ERROR HANDLERS - Prevent silent process death
 // =============================================================================
 // Track active cluster ID for cleanup on crash
+/** @type {string | null} */
 let activeClusterId = null;
+/** @type {import('../src/orchestrator') | null} */
 let orchestratorInstance = null;
 
 /**
@@ -74,7 +76,8 @@ function handleFatalError(type, error) {
         console.error(chalk.yellow(`Cluster ${activeClusterId} marked as failed.`));
       }
     } catch (cleanupErr) {
-      console.error(chalk.red(`Failed to update cluster state: ${cleanupErr.message}`));
+      const errMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+      console.error(chalk.red(`Failed to update cluster state: ${errMsg}`));
     }
   }
 
@@ -113,7 +116,11 @@ function detectGitRepoRoot() {
 }
 
 // Lazy-loaded orchestrator (quiet by default) - created on first use
+/** @type {import('../src/orchestrator') | null} */
 let _orchestrator = null;
+/**
+ * @returns {import('../src/orchestrator')}
+ */
 function getOrchestrator() {
   if (!_orchestrator) {
     _orchestrator = new Orchestrator({ quiet: true });
@@ -122,12 +129,21 @@ function getOrchestrator() {
 }
 
 /**
+ * @typedef {Object} TaskLogMessage
+ * @property {string} topic
+ * @property {string} sender
+ * @property {Object} content
+ * @property {number} timestamp
+ */
+
+/**
  * Read task logs from zeroshot task log files for agents in a cluster
  * Returns messages in cluster message format (topic, sender, content, timestamp)
  * @param {Object} cluster - Cluster object from orchestrator
- * @returns {Array} Messages from task logs
+ * @returns {TaskLogMessage[]} Messages from task logs
  */
 function readAgentTaskLogs(cluster) {
+  /** @type {TaskLogMessage[]} */
   const messages = [];
   const zeroshotLogsDir = path.join(os.homedir(), '.claude-zeroshot', 'logs');
 
