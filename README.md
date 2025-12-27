@@ -19,7 +19,7 @@ You know the problem. Your AI agent:
 
 Context degrades. Attention drifts. Shortcuts get taken.
 
-Zeroshot fixes this with **multiple isolated agents** - separate agents for planning, implementing, and validating. The agent that writes the code isn't the one checking it.
+Zeroshot fixes this with **multiple isolated agents** that check each other's work. The validator didn't write the code, so it can't lie about tests. Fail? Fix and retry until it works.
 
 ```bash
 zeroshot 123
@@ -96,7 +96,7 @@ Three failure modes compound when one agent does everything in one session:
 - **Success Bias**: LLMs optimize for "Task Complete" - even if that means skipping steps to get there.
 - **Error Snowball**: When fixing mistakes repeatedly, the context fills with broken code. The model starts copying its own bad patterns.
 
-Zeroshot fixes this with **multiple isolated agents** - the agent that writes code isn't the one checking it.
+Zeroshot fixes this with **isolated agents** where validators check work they didn't write - no self-grading, no shortcuts.
 
 **Q: Can I customize the team?**
 
