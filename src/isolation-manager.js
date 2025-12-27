@@ -599,10 +599,13 @@ class IsolationManager {
       fs.rmSync(configDir, { recursive: true, force: true });
     }
 
-    // Create fresh directory and hooks subdirectory
+    // Create fresh directory and required subdirectories
     fs.mkdirSync(configDir, { recursive: true });
     const hooksDir = path.join(configDir, 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
+    // CRITICAL: Claude CLI writes session files to projects/ subdirectory
+    const projectsDir = path.join(configDir, 'projects');
+    fs.mkdirSync(projectsDir, { recursive: true });
 
     // Copy only credentials file (essential for auth)
     const credentialsFile = path.join(sourceDir, '.credentials.json');
