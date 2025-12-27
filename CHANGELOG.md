@@ -18,6 +18,26 @@
 * **validator:** make validator-tester repo-calibrated and intelligent ([#5](https://github.com/covibes/zeroshot/issues/5)) ([3bccad2](https://github.com/covibes/zeroshot/commit/3bccad2ab32130efb897864de2a31d10c1f1842c))
 * **validators:** enforce test quality with antipattern detection ([#2](https://github.com/covibes/zeroshot/issues/2)) ([9b4f912](https://github.com/covibes/zeroshot/commit/9b4f91200f4429acbce300f2c049d1d23191e768))
 
+# 1.0.0 (2025-12-27)
+
+
+### Bug Fixes
+
+* **ci:** update codecov to v5 and add continue-on-error ([53de603](https://github.com/covibes/zeroshot/commit/53de603d008764c31dc158a3f2702128d6cf8bc4))
+* **ci:** use Node.js 22 for semantic-release compatibility ([#9](https://github.com/covibes/zeroshot/issues/9)) ([0387c7d](https://github.com/covibes/zeroshot/commit/0387c7dcf5211b8632cf5c19a5516ad119c69a59))
+* disable checkJs to fix CI typecheck failures ([cabe14c](https://github.com/covibes/zeroshot/commit/cabe14c21e8827b26423aa1b5339cb4056f0f8a5))
+* **lint:** add missing eslint-config-prettier + fix no-control-regex ([d26e1ba](https://github.com/covibes/zeroshot/commit/d26e1ba404a85c96519d2945501dfa4b09505190))
+* mark task-lib as ES module for Node 18 compatibility ([44fea80](https://github.com/covibes/zeroshot/commit/44fea80bd4d28877786eb140d9a9d63ac9f609ee))
+* prevent agents from asking questions in non-interactive mode ([#8](https://github.com/covibes/zeroshot/issues/8)) ([458ed29](https://github.com/covibes/zeroshot/commit/458ed299aefa2790fcc951dd0efcd9d347c485ce))
+* **resume:** find last workflow trigger instead of arbitrary last 5 messages ([497c24f](https://github.com/covibes/zeroshot/commit/497c24f4bd0b8c0be168167965520600b82a3f2a))
+* **test:** correct npm install retry timing assertion ([36222d6](https://github.com/covibes/zeroshot/commit/36222d69920fc1aed012002c3846cf9f7d9e6392))
+
+
+### Features
+
+* **validator:** make validator-tester repo-calibrated and intelligent ([#5](https://github.com/covibes/zeroshot/issues/5)) ([3bccad2](https://github.com/covibes/zeroshot/commit/3bccad2ab32130efb897864de2a31d10c1f1842c))
+* **validators:** enforce test quality with antipattern detection ([#2](https://github.com/covibes/zeroshot/issues/2)) ([9b4f912](https://github.com/covibes/zeroshot/commit/9b4f91200f4429acbce300f2c049d1d23191e768))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
