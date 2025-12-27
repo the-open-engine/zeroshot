@@ -72,7 +72,7 @@ function executeHook(params) {
  * Transform scripts return the message to publish, with access to:
  * - result: parsed agent output
  * - triggeringMessage: the message that triggered the agent
- * - helpers: { getConfig(domain, complexity, taskType) }
+ * - helpers: { getConfig(complexity, taskType) }
  * @param {Object} params - Transform parameters
  * @param {Object} params.transform - Transform configuration
  * @param {Object} params.context - Execution context
@@ -108,7 +108,7 @@ function executeTransform(params) {
   // Helper functions exposed to transform scripts
   const helpers = {
     /**
-     * Get cluster config based on domain, complexity, and task type
+     * Get cluster config based on complexity and task type
      * Returns: { base: 'template-name', params: { ... } }
      */
     getConfig: require('../config-router').getConfig,

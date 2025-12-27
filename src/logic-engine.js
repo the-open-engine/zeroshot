@@ -133,7 +133,7 @@ class LogicEngine {
       },
 
       /**
-       * Get cluster config based on domain, complexity, and task type
+       * Get cluster config based on complexity and task type
        * Returns: { base: 'template-name', params: { ... } }
        */
       getConfig: require('./config-router').getConfig,

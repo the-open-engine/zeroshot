@@ -120,7 +120,7 @@ Zeroshot is a **multi-agent coordination framework** with smart defaults.
 zeroshot 123  # Analyzes task → picks team → done
 ```
 
-The conductor classifies your task (domain × complexity × type) and routes to a pre-built workflow.
+The conductor classifies your task (complexity × type) and routes to a pre-built workflow.
 
 ### Default Workflows (Out of the Box)
 
@@ -132,7 +132,7 @@ The conductor classifies your task (domain × complexity × type) and routes to 
                                          ▼
                 ┌────────────────────────────────────────────┐
                 │                 CONDUCTOR                  │
-                │  Domain × Complexity × TaskType → Workflow │
+                │     Complexity × TaskType → Workflow       │
                 └────────────────────────┬───────────────────┘
                                          │
            ┌─────────────────────────────┼─────────────────────────────┐
@@ -197,18 +197,18 @@ These are **templates**. The conductor picks based on what you're building.
                                                        │
                                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              CONDUCTOR (3D Classification)                                    │
+│                              CONDUCTOR (2D Classification)                                    │
 │  ┌─────────────────────────────────────────────────────────────────────────────────────────┐ │
 │  │  Junior (Haiku)                                     Senior (Sonnet)                     │ │
 │  │  ─────────────                                      ───────────────                     │ │
-│  │  Fast classification on 3 dimensions:        ───▶   Handles UNCERTAIN cases             │ │
-│  │  • Domain: CODE | INFRA | CICD | OPS         (if    with deeper analysis                │ │
-│  │  • Complexity: TRIVIAL | SIMPLE | STANDARD   Junior                                     │ │
-│  │  • TaskType: INQUIRY | TASK | DEBUG          unsure)                                    │ │
+│  │  Fast classification on 2 dimensions:        ───▶   Handles UNCERTAIN cases             │ │
+│  │  • Complexity: TRIVIAL | SIMPLE | STANDARD   (if    with deeper analysis                │ │
+│  │  • TaskType: INQUIRY | TASK | DEBUG          Junior                                     │ │
+│  │                                              unsure)                                    │ │
 │  └─────────────────────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
                                                        │
-                                                       │ Classification: CODE × STANDARD × TASK
+                                                       │ Classification: STANDARD × TASK
                                                        ▼
                               ┌─────────────────────────────────────────┐
                               │            CONFIG ROUTER                │

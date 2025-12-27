@@ -1,20 +1,19 @@
 /**
- * Config Router - Maps 3D classification to parameterized templates
+ * Config Router - Maps 2D classification to parameterized templates
  *
- * Single source of truth for: Domain × Complexity × TaskType → { base, params }
+ * Single source of truth for: Complexity × TaskType → { base, params }
  * Used by both logic-engine.js (trigger evaluation) and agent-wrapper.js (transform scripts)
  */
 
 const { DEFAULT_MAX_ITERATIONS } = require('./agent/agent-config');
 
 /**
- * Get cluster config based on domain, complexity, and task type
- * @param {string} domain - CODE, INFRA, CICD, OPS, TESTING, CONTEXT
+ * Get cluster config based on complexity and task type
  * @param {string} complexity - TRIVIAL, SIMPLE, STANDARD, CRITICAL
  * @param {string} taskType - INQUIRY, TASK, DEBUG
  * @returns {{ base: string, params: object }}
  */
-function getConfig(domain, complexity, taskType) {
+function getConfig(complexity, taskType) {
   const getBase = () => {
     if (taskType === 'DEBUG' && complexity !== 'TRIVIAL') {
       return 'debug-workflow';
@@ -53,7 +52,6 @@ function getConfig(domain, complexity, taskType) {
   const base = getBase();
 
   const params = {
-    domain,
     task_type: taskType,
     complexity,
     max_tokens: getMaxTokens(),

@@ -1,13 +1,13 @@
 /**
- * Tests for TemplateResolver and 3D classification routing
+ * Tests for TemplateResolver and 2D classification routing
  */
 
 const assert = require('assert');
 const path = require('path');
 const TemplateResolver = require('../src/template-resolver');
 
-// Copy of getConfig logic from logic-engine.js for testing
-function getConfig(domain, complexity, taskType) {
+// Copy of getConfig logic from config-router.js for testing
+function getConfig(complexity, taskType) {
   const getBase = () => {
     if (taskType === 'DEBUG' && complexity !== 'TRIVIAL') {
       return 'debug-workflow';
@@ -54,7 +54,6 @@ function getConfig(domain, complexity, taskType) {
   const base = getBase();
 
   const params = {
-    domain,
     task_type: taskType,
     complexity,
     max_tokens: getMaxTokens(),
@@ -80,7 +79,6 @@ function getConfig(domain, complexity, taskType) {
   return { base, params };
 }
 
-const DOMAINS = ['CODE', 'INFRA', 'CICD', 'OPS', 'TESTING', 'CONTEXT'];
 const COMPLEXITIES = ['TRIVIAL', 'SIMPLE', 'STANDARD', 'CRITICAL'];
 const TASK_TYPES = ['INQUIRY', 'TASK', 'DEBUG'];
 
@@ -120,7 +118,6 @@ describe('TemplateResolver', function () {
   describe('resolve', function () {
     it('should resolve single-worker template', function () {
       const resolved = resolver.resolve('single-worker', {
-        domain: 'CODE',
         task_type: 'TASK',
         complexity: 'TRIVIAL',
         max_tokens: 50000,
@@ -137,7 +134,6 @@ describe('TemplateResolver', function () {
 
     it('should resolve full-workflow with conditional validators', function () {
       const resolved = resolver.resolve('full-workflow', {
-        domain: 'CODE',
         task_type: 'TASK',
         complexity: 'CRITICAL',
         max_tokens: 150000,
@@ -168,7 +164,7 @@ describe('TemplateResolver', function () {
   });
 });
 
-describe('3D Classification Routing', function () {
+describe('2D Classification Routing', function () {
   let resolver;
 
   before(function () {
@@ -176,57 +172,55 @@ describe('3D Classification Routing', function () {
     resolver = new TemplateResolver(templatesDir);
   });
 
-  describe('All 72 combinations', function () {
-    for (const domain of DOMAINS) {
-      for (const complexity of COMPLEXITIES) {
-        for (const taskType of TASK_TYPES) {
-          const key = `${domain}:${complexity}:${taskType}`;
+  describe('All 12 combinations', function () {
+    for (const complexity of COMPLEXITIES) {
+      for (const taskType of TASK_TYPES) {
+        const key = `${complexity}:${taskType}`;
 
-          it(`should resolve ${key}`, function () {
-            const { base, params } = getConfig(domain, complexity, taskType);
-            const resolved = resolver.resolve(base, params);
+        it(`should resolve ${key}`, function () {
+          const { base, params } = getConfig(complexity, taskType);
+          const resolved = resolver.resolve(base, params);
 
-            assert.ok(resolved.agents, `${key}: No agents`);
-            assert.ok(resolved.agents.length > 0, `${key}: Empty agents array`);
+          assert.ok(resolved.agents, `${key}: No agents`);
+          assert.ok(resolved.agents.length > 0, `${key}: Empty agents array`);
 
-            // Verify orchestrator exists
-            const hasOrchestrator = resolved.agents.some(
-              (a) => a.role === 'orchestrator' || a.id === 'completion-detector'
-            );
-            assert.ok(hasOrchestrator, `${key}: No orchestrator`);
-          });
-        }
+          // Verify orchestrator exists
+          const hasOrchestrator = resolved.agents.some(
+            (a) => a.role === 'orchestrator' || a.id === 'completion-detector'
+          );
+          assert.ok(hasOrchestrator, `${key}: No orchestrator`);
+        });
       }
     }
   });
 
   describe('Classification correctness', function () {
     it('TRIVIAL should use single-worker with haiku', function () {
-      const { base, params } = getConfig('CODE', 'TRIVIAL', 'TASK');
+      const { base, params } = getConfig('TRIVIAL', 'TASK');
       assert.strictEqual(base, 'single-worker');
       assert.strictEqual(params.worker_model, 'haiku');
     });
 
     it('SIMPLE DEBUG should use debug-workflow', function () {
-      const { base, params } = getConfig('CODE', 'SIMPLE', 'DEBUG');
+      const { base, params } = getConfig('SIMPLE', 'DEBUG');
       assert.strictEqual(base, 'debug-workflow');
       assert.strictEqual(params.investigator_model, 'sonnet');
     });
 
     it('SIMPLE TASK should use worker-validator', function () {
-      const { base } = getConfig('CODE', 'SIMPLE', 'TASK');
+      const { base } = getConfig('SIMPLE', 'TASK');
       assert.strictEqual(base, 'worker-validator');
     });
 
     it('STANDARD should use full-workflow with 2 validators', function () {
-      const { base, params } = getConfig('CODE', 'STANDARD', 'TASK');
+      const { base, params } = getConfig('STANDARD', 'TASK');
       assert.strictEqual(base, 'full-workflow');
       assert.strictEqual(params.validator_count, 2);
       assert.strictEqual(params.planner_model, 'sonnet');
     });
 
     it('CRITICAL should use opus planner and 4 validators', function () {
-      const { base, params } = getConfig('CODE', 'CRITICAL', 'TASK');
+      const { base, params } = getConfig('CRITICAL', 'TASK');
       assert.strictEqual(base, 'full-workflow');
       assert.strictEqual(params.planner_model, 'opus');
       assert.strictEqual(params.validator_count, 4);
@@ -234,22 +228,14 @@ describe('3D Classification Routing', function () {
     });
 
     it('TRIVIAL DEBUG should still use single-worker (not debug-workflow)', function () {
-      const { base } = getConfig('CODE', 'TRIVIAL', 'DEBUG');
+      const { base } = getConfig('TRIVIAL', 'DEBUG');
       assert.strictEqual(base, 'single-worker');
-    });
-
-    it('Domain should be injected into params', function () {
-      const { params: codeParams } = getConfig('CODE', 'SIMPLE', 'TASK');
-      const { params: infraParams } = getConfig('INFRA', 'SIMPLE', 'TASK');
-
-      assert.strictEqual(codeParams.domain, 'CODE');
-      assert.strictEqual(infraParams.domain, 'INFRA');
     });
   });
 
   describe('Feedback loops preserved', function () {
     it('worker-validator should have rejection trigger', function () {
-      const { base, params } = getConfig('CODE', 'SIMPLE', 'TASK');
+      const { base, params } = getConfig('SIMPLE', 'TASK');
       const resolved = resolver.resolve(base, params);
 
       const worker = resolved.agents.find((a) => a.id === 'worker');
@@ -265,7 +251,7 @@ describe('3D Classification Routing', function () {
     });
 
     it('debug-workflow should have rejection trigger on fixer', function () {
-      const { base, params } = getConfig('CODE', 'SIMPLE', 'DEBUG');
+      const { base, params } = getConfig('SIMPLE', 'DEBUG');
       const resolved = resolver.resolve(base, params);
 
       const fixer = resolved.agents.find((a) => a.id === 'fixer');
@@ -277,7 +263,7 @@ describe('3D Classification Routing', function () {
     });
 
     it('full-workflow should have consensus-based rejection trigger', function () {
-      const { base, params } = getConfig('CODE', 'CRITICAL', 'TASK');
+      const { base, params } = getConfig('CRITICAL', 'TASK');
       const resolved = resolver.resolve(base, params);
 
       const worker = resolved.agents.find((a) => a.id === 'worker');

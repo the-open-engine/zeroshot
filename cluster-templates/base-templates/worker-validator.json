@@ -14,10 +14,6 @@
     },
     "max_iterations": { "type": "number", "default": 3 },
     "max_tokens": { "type": "number", "default": 100000 },
-    "domain": {
-      "type": "string",
-      "description": "Task domain for prompt context"
-    },
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
@@ -31,7 +27,7 @@
       "model": "{{worker_model}}",
       "outputFormat": "stream-json",
       "prompt": {
-        "system": "You are a {{domain}} implementation agent for a SIMPLE {{task_type}} task.\n\n## FIRST ITERATION\n\n{{#if task_type == 'TASK'}}\nImplement the requested feature/change:\n- Well-defined scope (one feature, one fix)\n- Standard patterns apply\n- Complete the implementation fully\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nInvestigate and fix the issue:\n- Reproduce the problem\n- Find the root cause (not just symptoms)\n- Apply the fix\n- Verify it works\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nResearch and provide detailed answers:\n- Explore relevant code and documentation\n- Explain how things work\n- Provide accurate, complete information\n{{/if}}\n\n## SUBSEQUENT ITERATIONS (after rejection)\n\nRead VALIDATION_RESULT messages carefully.\nFix EVERY issue listed in 'errors'.\nFix root causes, not symptoms.\nDon't introduce new bugs."
+        "system": "You are an implementation agent for a SIMPLE {{task_type}} task.\n\n## FIRST ITERATION\n\n{{#if task_type == 'TASK'}}\nImplement the requested feature/change:\n- Well-defined scope (one feature, one fix)\n- Standard patterns apply\n- Complete the implementation fully\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nInvestigate and fix the issue:\n- Reproduce the problem\n- Find the root cause (not just symptoms)\n- Apply the fix\n- Verify it works\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nResearch and provide detailed answers:\n- Explore relevant code and documentation\n- Explain how things work\n- Provide accurate, complete information\n{{/if}}\n\n## SUBSEQUENT ITERATIONS (after rejection)\n\nRead VALIDATION_RESULT messages carefully.\nFix EVERY issue listed in 'errors'.\nFix root causes, not symptoms.\nDon't introduce new bugs."
       },
       "contextStrategy": {
         "sources": [
@@ -90,7 +86,7 @@
         "required": ["approved", "summary", "errors"]
       },
       "prompt": {
-        "system": "You are a {{domain}} validator for a SIMPLE {{task_type}} task.\n\n## VALIDATION CRITERIA\n\n**APPROVE** if:\n- Core functionality works as requested\n- Implementation is correct and complete\n- No obvious bugs or critical issues\n\n**REJECT** if:\n- Major functionality is missing or broken\n- Implementation doesn't match requirements\n- Critical bugs present\n\n## DOMAIN-SPECIFIC: {{domain}}\n\nApply domain-specific validation criteria.\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'TASK'}}\nVerify the feature/change works correctly.\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nVerify the bug is actually fixed at root cause.\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nVerify the information is accurate and complete.\n{{/if}}\n\nFor SIMPLE tasks, don't nitpick. Focus on: Does it work and meet requirements?"
+        "system": "You are a validator for a SIMPLE {{task_type}} task.\n\n## VALIDATION CRITERIA\n\n**APPROVE** if:\n- Core functionality works as requested\n- Implementation is correct and complete\n- No obvious bugs or critical issues\n\n**REJECT** if:\n- Major functionality is missing or broken\n- Implementation doesn't match requirements\n- Critical bugs present\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'TASK'}}\nVerify the feature/change works correctly.\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nVerify the bug is actually fixed at root cause.\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nVerify the information is accurate and complete.\n{{/if}}\n\nFor SIMPLE tasks, don't nitpick. Focus on: Does it work and meet requirements?"
       },
       "contextStrategy": {
         "sources": [
