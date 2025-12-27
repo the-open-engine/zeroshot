@@ -36,6 +36,18 @@ const TemplateResolver = require('./template-resolver');
  */
 const VALID_OPERATIONS = ['add_agents', 'remove_agents', 'update_agent', 'publish', 'load_config'];
 
+/**
+ * Workflow-triggering topics that indicate cluster state progression
+ * These are the topics that MATTER for resume - not AGENT_OUTPUT noise
+ */
+const WORKFLOW_TRIGGERS = Object.freeze([
+  'ISSUE_OPENED',
+  'PLAN_READY',
+  'IMPLEMENTATION_READY',
+  'VALIDATION_RESULT',
+  'CONDUCTOR_ESCALATE',
+]);
+
 class Orchestrator {
   constructor(options = {}) {
     this.clusters = new Map(); // cluster_id -> cluster object
@@ -889,6 +901,22 @@ class Orchestrator {
   }
 
   /**
+   * Find the last workflow-triggering message in the ledger
+   * Workflow triggers indicate cluster state progression (not AGENT_OUTPUT noise)
+   * @param {Array} messages - All messages from ledger
+   * @returns {Object|null} - Last workflow trigger message or null
+   * @private
+   */
+  _findLastWorkflowTrigger(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (WORKFLOW_TRIGGERS.includes(messages[i].topic)) {
+        return messages[i];
+      }
+    }
+    return null;
+  }
+
+  /**
    * Resume a stopped cluster from where it left off
    * Handles both failed clusters (with error context) and cleanly stopped clusters
    * @param {String} clusterId - Cluster ID
@@ -1057,42 +1085,77 @@ class Orchestrator {
 
     context += `\n## Resume Instructions\n\n${resumePrompt}\n`;
 
-    // Find agents that should run based on recent messages
+    // Find the LAST workflow trigger - not arbitrary last 5 messages
+    // This is the message that indicates current workflow state
+    const lastTrigger = this._findLastWorkflowTrigger(recentMessages);
     const agentsToResume = [];
-    for (const agent of cluster.agents) {
-      if (!agent.config.triggers) continue;
 
-      // Check if any recent message would trigger this agent
-      for (const message of recentMessages.slice(-5)) {
+    if (lastTrigger) {
+      this._log(
+        `[Orchestrator] Last workflow trigger: ${lastTrigger.topic} (${new Date(lastTrigger.timestamp).toISOString()})`
+      );
+
+      for (const agent of cluster.agents) {
+        if (!agent.config.triggers) continue;
+
         const matchingTrigger = agent.config.triggers.find((trigger) => {
-          if (trigger.topic === '*' || trigger.topic === message.topic) return true;
+          // Exact match
+          if (trigger.topic === lastTrigger.topic) return true;
+          // Wildcard match
+          if (trigger.topic === '*') return true;
+          // Prefix match (e.g., "VALIDATION_*")
           if (trigger.topic.endsWith('*')) {
             const prefix = trigger.topic.slice(0, -1);
-            return message.topic.startsWith(prefix);
+            return lastTrigger.topic.startsWith(prefix);
           }
           return false;
         });
 
         if (matchingTrigger) {
-          agentsToResume.push({ agent, message, trigger: matchingTrigger });
-          break; // Found a trigger for this agent
+          // Evaluate logic script if present
+          if (matchingTrigger.logic?.script) {
+            const shouldTrigger = agent._evaluateTrigger(matchingTrigger, lastTrigger);
+            if (!shouldTrigger) continue;
+          }
+          agentsToResume.push({ agent, message: lastTrigger, trigger: matchingTrigger });
         }
       }
+    } else {
+      this._log(`[Orchestrator] No workflow triggers found in ledger`);
     }
 
     if (agentsToResume.length === 0) {
-      // No agents matched recent messages - publish a CLUSTER_RESUMED message to bootstrap
-      this._log(`[Orchestrator] No agents matched recent messages, publishing CLUSTER_RESUMED`);
-      cluster.messageBus.publish({
-        cluster_id: clusterId,
-        topic: 'CLUSTER_RESUMED',
-        sender: 'system',
-        receiver: 'broadcast',
-        content: {
-          text: context,
-          data: { resumeType: 'clean' },
-        },
-      });
+      if (!lastTrigger) {
+        // No workflow activity - cluster never really started
+        this._log(
+          `[Orchestrator] WARNING: No workflow triggers in ledger. Cluster may not have started properly.`
+        );
+        this._log(`[Orchestrator] Publishing ISSUE_OPENED to bootstrap workflow...`);
+
+        // Re-publish the original issue if we have it
+        const issueMessage = recentMessages.find((m) => m.topic === 'ISSUE_OPENED');
+        if (issueMessage) {
+          cluster.messageBus.publish({
+            cluster_id: clusterId,
+            topic: 'ISSUE_OPENED',
+            sender: 'system',
+            receiver: 'broadcast',
+            content: issueMessage.content,
+            metadata: { _resumed: true, _originalId: issueMessage.id },
+          });
+        } else {
+          throw new Error(
+            `Cannot resume cluster ${clusterId}: No workflow triggers found and no ISSUE_OPENED message. ` +
+              `The cluster may not have started properly. Try: zeroshot run <issue> instead.`
+          );
+        }
+      } else {
+        // Had a trigger but no agents matched - something is wrong with agent configs
+        throw new Error(
+          `Cannot resume cluster ${clusterId}: Found trigger ${lastTrigger.topic} but no agents handle it. ` +
+            `Check agent trigger configurations.`
+        );
+      }
     } else {
       // Resume agents that should run based on ledger state
       this._log(`[Orchestrator] Resuming ${agentsToResume.length} agent(s) based on ledger state`);
