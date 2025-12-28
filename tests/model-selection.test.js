@@ -8,7 +8,7 @@ const mockCluster = { id: 'test-cluster', agents: [] };
 describe('Model Selection', () => {
   describe('Static model (backward compatibility)', () => {
     it('should use static model when no rules provided', () => {
-      const agent = new AgentWrapper({ id: 'test', model: 'opus' }, mockMessageBus, mockCluster, {
+      const agent = new AgentWrapper({ id: 'test', model: 'opus', timeout: 0 }, mockMessageBus, mockCluster, {
         testMode: true,
         mockSpawnFn: () => {},
       });
@@ -17,7 +17,7 @@ describe('Model Selection', () => {
     });
 
     it('should default to sonnet if no model specified', () => {
-      const agent = new AgentWrapper({ id: 'test' }, mockMessageBus, mockCluster, {
+      const agent = new AgentWrapper({ id: 'test', timeout: 0 }, mockMessageBus, mockCluster, {
         testMode: true,
         mockSpawnFn: () => {},
       });
@@ -31,6 +31,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [
             { iterations: '1', model: 'haiku' },
             { iterations: '2', model: 'sonnet' },
@@ -53,6 +54,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [
             { iterations: '1-3', model: 'sonnet' },
             { iterations: 'all', model: 'opus' },
@@ -77,6 +79,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [
             { iterations: '1', model: 'sonnet' },
             { iterations: '2+', model: 'opus' },
@@ -104,6 +107,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [
             { iterations: '1', model: 'haiku' },
             { iterations: 'all', model: 'sonnet' },
@@ -122,6 +126,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [
             { iterations: '1-10', model: 'sonnet' },
             { iterations: '5+', model: 'opus' }, // Overlaps but shouldn't match
@@ -142,6 +147,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [{ iterations: '1-2', model: 'sonnet' }],
         },
         mockMessageBus,
@@ -157,6 +163,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'test',
+          timeout: 0,
           modelRules: [{ iterations: 'invalid', model: 'sonnet' }],
         },
         mockMessageBus,
@@ -174,6 +181,7 @@ describe('Model Selection', () => {
       const agent = new AgentWrapper(
         {
           id: 'worker',
+          timeout: 0,
           modelRules: [
             { iterations: '1', model: 'sonnet' },
             { iterations: '2+', model: 'opus' },

@@ -242,6 +242,7 @@ describe('Fixer Instructions - CRITICAL', () => {
       const fixerConfig = {
         id: 'fixer',
         role: 'implementation',
+        timeout: 0,
         contextStrategy: {
           sources: [
             { topic: 'INVESTIGATION_COMPLETE', limit: 1 },
@@ -311,6 +312,7 @@ describe('Fixer Instructions - CRITICAL', () => {
 
       const fixerConfig = {
         id: 'fixer',
+        timeout: 0,
         contextStrategy: {
           sources: [{ topic: 'VALIDATION_RESULT', since: 'last_task_end', limit: 10 }],
         },

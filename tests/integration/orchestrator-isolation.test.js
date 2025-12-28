@@ -35,6 +35,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
       {
         id: 'worker',
         role: 'implementation',
+        timeout: 0,
         triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
         prompt: 'Implement the requested feature',
         hooks: {
@@ -47,6 +48,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
       {
         id: 'completion-detector',
         role: 'orchestrator',
+        timeout: 0,
         triggers: [{ topic: 'TASK_COMPLETE', action: 'stop_cluster' }],
       },
     ],
@@ -58,6 +60,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
       {
         id: 'worker',
         role: 'implementation',
+        timeout: 0,
         triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
         prompt: 'Implement the feature',
         hooks: {
@@ -70,6 +73,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
       {
         id: 'validator',
         role: 'validator',
+        timeout: 0,
         triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
         prompt: 'Validate the implementation',
         outputFormat: 'json',
@@ -94,6 +98,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
       {
         id: 'completion-detector',
         role: 'orchestrator',
+        timeout: 0,
         triggers: [
           {
             topic: 'VALIDATION_RESULT',
@@ -403,6 +408,7 @@ describe('Orchestrator Isolation Mode Integration', function () {
         {
           id: 'worker',
           role: 'implementation',
+          timeout: 0,
           triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
           prompt: 'Implement the requested feature',
           hooks: {

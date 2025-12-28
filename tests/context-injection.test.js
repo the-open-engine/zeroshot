@@ -77,6 +77,7 @@ describe('Context Injection - CRITICAL', () => {
       id: 'worker',
       role: 'implementation',
       model: 'sonnet',
+      timeout: 0,
       contextStrategy: {
         sources: [{ topic: 'VALIDATION_RESULT', since: 'last_task_end', limit: 10 }],
       },
@@ -193,6 +194,7 @@ describe('Context Injection - CRITICAL', () => {
 
     const workerConfig = {
       id: 'worker',
+      timeout: 0,
       contextStrategy: {
         sources: [{ topic: 'VALIDATION_RESULT', since: 'last_task_end', limit: 10 }],
       },

@@ -48,6 +48,7 @@ describe('last_task_end - Context Filtering', () => {
       id: 'worker',
       role: 'implementation',
       model: 'sonnet',
+      timeout: 0,
       contextStrategy: {
         sources: [
           { topic: 'ISSUE_OPENED', limit: 1 },
@@ -161,6 +162,7 @@ describe('last_task_end - Context Filtering', () => {
   it('should fall back to cluster_start if no tasks completed yet', () => {
     const workerConfig = {
       id: 'worker',
+      timeout: 0,
       contextStrategy: {
         sources: [{ topic: 'VALIDATION_RESULT', since: 'last_task_end', limit: 10 }],
       },
