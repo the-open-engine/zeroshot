@@ -126,9 +126,55 @@ class Orchestrator {
       const clusterIds = Object.keys(data);
       this._log(`[Orchestrator] Found ${clusterIds.length} clusters in file:`, clusterIds);
 
+      // Track clusters to remove (missing .db files or 0 messages)
+      const clustersToRemove = [];
+      // Track clusters with 0 messages (corrupted from SIGINT race condition)
+      const corruptedClusters = [];
+
       for (const [clusterId, clusterData] of Object.entries(data)) {
+        // Skip clusters whose .db file doesn't exist (orphaned registry entries)
+        const dbPath = path.join(this.storageDir, `${clusterId}.db`);
+        if (!fs.existsSync(dbPath)) {
+          console.warn(`[Orchestrator] Cluster ${clusterId} has no database file, removing from registry`);
+          clustersToRemove.push(clusterId);
+          continue;
+        }
+
         this._log(`[Orchestrator] Loading cluster: ${clusterId}`);
-        this._loadSingleCluster(clusterId, clusterData);
+        const cluster = this._loadSingleCluster(clusterId, clusterData);
+
+        // VALIDATION: Detect 0-message clusters (corrupted from SIGINT during initialization)
+        // These clusters were created before the initCompletePromise fix was applied
+        if (cluster && cluster.messageBus) {
+          const messageCount = cluster.messageBus.count({ cluster_id: clusterId });
+          if (messageCount === 0) {
+            console.warn(`[Orchestrator] ⚠️  Cluster ${clusterId} has 0 messages (corrupted)`);
+            console.warn(`[Orchestrator]    This likely occurred from SIGINT during initialization.`);
+            console.warn(`[Orchestrator]    Marking as 'corrupted' - use 'zeroshot kill ${clusterId}' to remove.`);
+            corruptedClusters.push(clusterId);
+            // Mark cluster as corrupted for visibility in status/list commands
+            cluster.state = 'corrupted';
+            cluster.corruptedReason = 'SIGINT during initialization (0 messages in ledger)';
+          }
+        }
+      }
+
+      // Clean up orphaned entries from clusters.json
+      if (clustersToRemove.length > 0) {
+        for (const clusterId of clustersToRemove) {
+          delete data[clusterId];
+        }
+        fs.writeFileSync(clustersFile, JSON.stringify(data, null, 2));
+        this._log(`[Orchestrator] Removed ${clustersToRemove.length} orphaned cluster(s) from registry`);
+      }
+
+      // Log summary of corrupted clusters
+      if (corruptedClusters.length > 0) {
+        console.warn(`\n[Orchestrator] ⚠️  Found ${corruptedClusters.length} corrupted cluster(s):`);
+        for (const clusterId of corruptedClusters) {
+          console.warn(`    - ${clusterId}`);
+        }
+        console.warn(`[Orchestrator] Run 'zeroshot clear' to remove all corrupted clusters.\n`);
       }
 
       this._log(`[Orchestrator] Total clusters loaded: ${this.clusters.size}`);
@@ -494,6 +540,13 @@ class Orchestrator {
     }
 
     // Build cluster object
+    // CRITICAL: initComplete promise ensures ISSUE_OPENED is published before stop() completes
+    // This prevents 0-message clusters from SIGINT during async initialization
+    let resolveInitComplete;
+    const initCompletePromise = new Promise((resolve) => {
+      resolveInitComplete = resolve;
+    });
+
     const cluster = {
       id: clusterId,
       config,
@@ -504,6 +557,9 @@ class Orchestrator {
       createdAt: Date.now(),
       // Track PID for zombie detection (this process owns the cluster)
       pid: process.pid,
+      // Initialization completion tracking (for safe SIGINT handling)
+      initCompletePromise,
+      _resolveInitComplete: resolveInitComplete,
       // Isolation state (only if enabled)
       // CRITICAL: Store workDir for resume capability - without this, resume() can't recreate container
       isolation: options.isolation
@@ -651,6 +707,12 @@ class Orchestrator {
           source: input.issue ? 'github' : 'text',
         },
       });
+
+      // CRITICAL: Mark initialization complete AFTER ISSUE_OPENED is published
+      // This ensures stop() waits for at least 1 message before stopping
+      if (cluster._resolveInitComplete) {
+        cluster._resolveInitComplete();
+      }
 
       this._log(`Cluster ${clusterId} started with ${cluster.agents.length} agents`);
 
@@ -818,6 +880,10 @@ class Orchestrator {
       };
     } catch (error) {
       cluster.state = 'failed';
+      // CRITICAL: Resolve the promise on failure too, so stop() doesn't hang
+      if (cluster._resolveInitComplete) {
+        cluster._resolveInitComplete();
+      }
       console.error(`Cluster ${clusterId} failed to start:`, error);
       throw error;
     }
@@ -831,6 +897,17 @@ class Orchestrator {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
+    }
+
+    // CRITICAL: Wait for initialization to complete before stopping
+    // This ensures ISSUE_OPENED is published, preventing 0-message clusters
+    // Timeout after 30s to prevent infinite hang if init truly fails
+    if (cluster.initCompletePromise && cluster.state === 'initializing') {
+      this._log(`[Orchestrator] Waiting for initialization to complete before stopping...`);
+      await Promise.race([
+        cluster.initCompletePromise,
+        new Promise((resolve) => setTimeout(resolve, 30000)),
+      ]);
     }
 
     cluster.state = 'stopping';
