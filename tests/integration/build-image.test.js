@@ -11,10 +11,18 @@ describe('Docker Image Build with Retry', function () {
 
   const TEST_IMAGE = 'zeroshot-cluster-base-test';
 
+  // Skip Docker tests in CI (no Docker image available)
+  // To run locally: docker build -t zeroshot-cluster-base docker/zeroshot-cluster/
   before(function () {
+    if (process.env.CI) {
+      this.skip();
+      return;
+    }
+
     // Check if Docker is available
     if (!IsolationManager.isDockerAvailable()) {
       this.skip();
+      return;
     }
 
     // Clean up test image if exists

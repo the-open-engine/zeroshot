@@ -21,7 +21,15 @@ describe('npm install retry logic', function () {
   let tempDir;
   let testClusterId;
 
+  // Skip Docker tests in CI (no Docker image available)
+  // To run locally: docker build -t zeroshot-cluster-base docker/zeroshot-cluster/
   before(function () {
+    if (process.env.CI) {
+      this.skip();
+      return;
+    }
+
+    // HARD FAIL if Docker unavailable (local development)
     if (!IsolationManager.isDockerAvailable()) {
       throw new Error(
         'Docker is required to run IsolationManager tests. Install Docker and try again.'
