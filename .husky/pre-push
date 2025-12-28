@@ -1,4 +1,9 @@
-# Block manual version tags - let semantic-release handle them
+# Skip all checks in CI - semantic-release handles tags correctly there
+if [ -n "$CI" ]; then
+  exit 0
+fi
+
+# Block manual version tags - let semantic-release handle them (local only)
 if git tag --points-at HEAD 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+'; then
   echo "ERROR: Manual version tags forbidden. Let semantic-release create them."
   exit 1
