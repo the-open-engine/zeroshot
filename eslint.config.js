@@ -73,6 +73,15 @@ export default [
       'no-unsafe-optional-chaining': 'error',
       'no-prototype-builtins': 'error',
 
+      // Dangerous fallbacks - FORBIDDEN
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "LogicalExpression[operator='||'][right.value=/localhost|127\\.0\\.0|^\\d{4,5}$/]",
+          message: 'FORBIDDEN: Dangerous fallback. Throw error if missing instead.',
+        },
+      ],
+
       // Style (keep existing)
       'no-console': 'off',
       'no-case-declarations': 'off',

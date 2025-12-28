@@ -1,1 +1,10 @@
+# Block multiple implementation files (anti-pattern #4)
+BAD_FILES=$(git diff --cached --name-only | grep -E '(-v[0-9]+|-new|-old|-backup)\.[jt]sx?$' || true)
+if [ -n "$BAD_FILES" ]; then
+  echo "ERROR: Multiple implementation files detected:"
+  echo "$BAD_FILES"
+  echo "Use ONE file per concept. Refactor, don't duplicate."
+  exit 1
+fi
+
 npm run lint && npm run typecheck

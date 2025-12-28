@@ -415,6 +415,19 @@ function validateAgents(config) {
       }
     }
 
+    // Check for git operations in validator prompts (unreliable in agents)
+    if (agent.role === 'validator') {
+      const prompt = typeof agent.prompt === 'string' ? agent.prompt : agent.prompt?.system;
+      const gitPatterns = ['git diff', 'git status', 'git log', 'git show'];
+      for (const pattern of gitPatterns) {
+        if (prompt?.includes(pattern)) {
+          errors.push(
+            `Validator '${agent.id}' uses '${pattern}' - git state is unreliable in agents`
+          );
+        }
+      }
+    }
+
     // JSON output without schema
     if (agent.outputFormat === 'json' && !agent.jsonSchema) {
       warnings.push(

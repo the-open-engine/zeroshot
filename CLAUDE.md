@@ -520,3 +520,24 @@ npm run lint && npm run typecheck
 ```
 
 Now lint/typecheck errors are caught BEFORE push, not after CI runs.
+
+## Mechanical Enforcement
+
+**Documentation alone doesn't prevent bugs. Code enforcement does.** These mechanisms prevent anti-patterns from reaching production:
+
+| Antipattern | Enforcement | File |
+|-------------|-------------|------|
+| Dangerous fallbacks (`\|\| "localhost"`) | ESLint ERROR | eslint.config.js |
+| Manual git version tags | Pre-push hook | .husky/pre-push |
+| Git ops in validator prompts | Config validator | src/config-validator.js |
+| Multiple implementation files (-v2, -new) | Pre-commit hook | .husky/pre-commit |
+| Hardcoded URLs | ESLint WARN | eslint.config.js |
+| Duplicate code | jscpd (manual) | npm run dupcheck |
+
+**Enforcement hierarchy (best to worst):**
+
+1. **ESLint** - Prevents at build time (caught before push)
+2. **Pre-push hook** - Prevents at git push time
+3. **Pre-commit hook** - Prevents at commit time
+4. **Config validator** - Prevents invalid cluster configurations
+5. **Documentation** - Educates but doesn't prevent

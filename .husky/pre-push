@@ -1,1 +1,7 @@
+# Block manual version tags - let semantic-release handle them
+if git tag --points-at HEAD 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+'; then
+  echo "ERROR: Manual version tags forbidden. Let semantic-release create them."
+  exit 1
+fi
+
 npm run lint && npm run typecheck

@@ -1,0 +1,7 @@
+{
+  "threshold": 5,
+  "minLines": 5,
+  "minTokens": 50,
+  "reporters": ["console"],
+  "ignore": ["**/*.test.js", "**/node_modules/**", "tests/**"]
+}
