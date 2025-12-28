@@ -1,3 +1,24 @@
+# [1.5.0](https://github.com/covibes/zeroshot/compare/v1.4.0...v1.5.0) (2025-12-28)
+
+
+### Bug Fixes
+
+* **agent:** stop polling after max failures and fix status matching ([7a0fbfe](https://github.com/covibes/zeroshot/commit/7a0fbfe5439f428bdf8e0bcadbd308542221b6f1))
+* **cli:** prevent terminal garbling with status footer coordination ([2716ce5](https://github.com/covibes/zeroshot/commit/2716ce55eae9a08107788200ab798c3f76815820))
+* **config:** add timeout: 0 default to agent configuration ([6ff66c0](https://github.com/covibes/zeroshot/commit/6ff66c093bf8dfd5048b468fbd250cbfc0d9dbc1))
+* **deps:** regenerate package-lock.json for jscpd dependencies ([c46d84c](https://github.com/covibes/zeroshot/commit/c46d84c3fc1fbb3d00585922613ff36d829d917a))
+* **infra:** improve container cleanup and npm install robustness ([6c04b46](https://github.com/covibes/zeroshot/commit/6c04b46374bd3041a8b5c185ca163009f2fb6635))
+* **orchestrator:** prevent 0-message clusters on SIGINT during init ([33ed8f9](https://github.com/covibes/zeroshot/commit/33ed8f9b90d92da6bf9caf2a7b5e52eadbcecc9f))
+* **template-resolver:** apply param defaults before resolving placeholders ([eafdd62](https://github.com/covibes/zeroshot/commit/eafdd62fce381a7b9a7cb9787cd06e13f421171b))
+* **templates:** add timeout parameter to all base templates ([f853ed3](https://github.com/covibes/zeroshot/commit/f853ed39e0e566afaf31040ce94923a2dcc7bfb9))
+
+
+### Features
+
+* **agents:** add git prohibition + minimal output instructions ([6f6496c](https://github.com/covibes/zeroshot/commit/6f6496c5db29073ebbeb6229ac128a5f62d7591f))
+* mechanical enforcement of 7 antipatterns ([4286091](https://github.com/covibes/zeroshot/commit/428609163f9405a8d4b9e84adaee0edbc6bbb7d1)), closes [#1](https://github.com/covibes/zeroshot/issues/1) [#5](https://github.com/covibes/zeroshot/issues/5) [#2](https://github.com/covibes/zeroshot/issues/2) [#4](https://github.com/covibes/zeroshot/issues/4) [#3](https://github.com/covibes/zeroshot/issues/3) [#7](https://github.com/covibes/zeroshot/issues/7) [covibes/covibes#635](https://github.com/covibes/covibes/issues/635)
+* **templates:** add timeout parameter to worker-validator agents ([ee8b17b](https://github.com/covibes/zeroshot/commit/ee8b17bc76aa29bb692965fddbc5a993749f11f9))
+
 # [1.4.0](https://github.com/covibes/zeroshot/compare/v1.3.0...v1.4.0) (2025-12-28)
 
 
