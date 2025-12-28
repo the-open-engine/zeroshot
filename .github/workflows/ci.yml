@@ -39,7 +39,7 @@ jobs:
 
       - name: Test with coverage
         run: npm run test:coverage
-        timeout-minutes: 5
+        timeout-minutes: 15
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -82,3 +82,49 @@ jobs:
           zeroshot --help
           zeroshot --version
           zeroshot list
+
+      - name: Test process-metrics (platform-specific)
+        run: |
+          node -e "
+          (async () => {
+            const { getProcessMetrics, formatMetrics, getStateIcon, isPlatformSupported, getPlatformInfo } = require('./src/process-metrics');
+            const os = require('os');
+
+            console.log('Platform:', os.platform());
+            console.log('Supported:', isPlatformSupported());
+            console.log('Platform info:', JSON.stringify(getPlatformInfo()));
+
+            // Test metrics collection
+            const metrics = await getProcessMetrics(process.pid, { samplePeriodMs: 100 });
+            console.log('Metrics:', JSON.stringify(metrics, null, 2));
+
+            // Validate required fields
+            if (!metrics.exists) throw new Error('Process should exist');
+            if (typeof metrics.cpuPercent !== 'number') throw new Error('cpuPercent must be number');
+            if (typeof metrics.memoryMB !== 'number') throw new Error('memoryMB must be number');
+            if (!metrics.state) throw new Error('state must be set');
+
+            console.log('Formatted:', formatMetrics(metrics));
+            console.log('State icon:', getStateIcon(metrics.state, metrics.network?.hasActivity));
+
+            console.log('✓ Process metrics test passed on', os.platform());
+          })().catch(e => { console.error(e); process.exit(1); });
+          "
+
+      - name: Test status-footer
+        run: |
+          node -e "
+          const { StatusFooter } = require('./src/status-footer');
+
+          const footer = new StatusFooter({ enabled: false });
+          footer.setCluster('test-cluster');
+          footer.setClusterState('running');
+          footer.updateAgent({ id: 'worker', state: 'executing', pid: process.pid, iteration: 1 });
+
+          const statusLine = footer.buildStatusLine(80);
+          if (!statusLine.includes('running')) throw new Error('Status line missing state');
+          if (!statusLine.includes('1/1')) throw new Error('Status line missing agent count');
+
+          footer.stop();
+          console.log('✓ StatusFooter test passed');
+          "

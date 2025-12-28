@@ -29,6 +29,8 @@ const {
   coerceValue,
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
+const { requirePreflight } = require('../src/preflight');
+const { StatusFooter } = require('../src/status-footer');
 
 const program = new Command();
 
@@ -423,6 +425,16 @@ Input formats:
         input.text = inputArg;
       }
 
+      // === PREFLIGHT CHECKS ===
+      // Validate all dependencies BEFORE starting anything
+      // This gives users clear, actionable error messages upfront
+      const preflightOptions = {
+        requireGh: !!input.issue, // gh CLI required when fetching GitHub issues
+        requireDocker: options.isolation || options.full, // Docker required for isolation mode
+        quiet: process.env.CREW_DAEMON === '1', // Suppress success in daemon mode
+      };
+      requirePreflight(preflightOptions);
+
       // === CLUSTER MODE ===
       // Validate --pr requires --isolation
       if (options.pr && !options.isolation) {
@@ -580,6 +592,60 @@ Input formats:
         // Track messages we've already processed (to avoid duplicates between history and subscription)
         const processedMessageIds = new Set();
 
+        // === STATUS FOOTER: Live agent monitoring ===
+        // Shows CPU, memory, network metrics for all agents at bottom of terminal
+        const statusFooter = new StatusFooter({
+          refreshInterval: 1000,
+          enabled: process.stdout.isTTY,
+        });
+        statusFooter.setCluster(clusterId);
+        statusFooter.setClusterState('running');
+
+        // Subscribe to AGENT_LIFECYCLE to track agent states and PIDs
+        const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic('AGENT_LIFECYCLE', (msg) => {
+          const data = msg.content?.data || {};
+          const event = data.event;
+          const agentId = data.agent || msg.sender;
+
+          // Update agent state based on lifecycle event
+          if (event === 'STARTED') {
+            statusFooter.updateAgent({
+              id: agentId,
+              state: 'idle',
+              pid: null,
+              iteration: data.iteration || 0,
+            });
+          } else if (event === 'TASK_STARTED') {
+            statusFooter.updateAgent({
+              id: agentId,
+              state: 'executing',
+              pid: statusFooter.agents.get(agentId)?.pid || null,
+              iteration: data.iteration || 0,
+            });
+          } else if (event === 'PROCESS_SPAWNED') {
+            // Got the PID - update the agent with it
+            const current = statusFooter.agents.get(agentId) || { state: 'executing', iteration: 0 };
+            statusFooter.updateAgent({
+              id: agentId,
+              state: current.state,
+              pid: data.pid,
+              iteration: current.iteration,
+            });
+          } else if (event === 'TASK_COMPLETED' || event === 'TASK_FAILED') {
+            statusFooter.updateAgent({
+              id: agentId,
+              state: 'idle',
+              pid: null,
+              iteration: data.iteration || 0,
+            });
+          } else if (event === 'STOPPED') {
+            statusFooter.removeAgent(agentId);
+          }
+        });
+
+        // Start the status footer
+        statusFooter.start();
+
         // Message handler - processes messages, deduplicates by ID
         const handleMessage = (msg) => {
           if (msg.cluster_id !== clusterId) return;
@@ -618,6 +684,9 @@ Input formats:
               if (status.state !== 'running') {
                 clearInterval(checkInterval);
                 clearInterval(flushInterval);
+                // Stop status footer
+                statusFooter.stop();
+                lifecycleUnsubscribe();
                 // Final flush
                 for (const sender of sendersWithOutput) {
                   const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
@@ -630,6 +699,8 @@ Input formats:
               // Cluster may have been removed
               clearInterval(checkInterval);
               clearInterval(flushInterval);
+              statusFooter.stop();
+              lifecycleUnsubscribe();
               unsubscribe();
               resolve();
             }
@@ -639,6 +710,10 @@ Input formats:
           // CRITICAL: In foreground mode, the cluster runs IN this process.
           // If we exit without stopping, the cluster becomes a zombie (state=running but no process).
           process.on('SIGINT', async () => {
+            // Stop status footer first to restore terminal
+            statusFooter.stop();
+            lifecycleUnsubscribe();
+
             console.log(chalk.dim('\n\n--- Interrupted ---'));
             clearInterval(checkInterval);
             clearInterval(flushInterval);
@@ -752,6 +827,14 @@ taskCmd
   .option('--silent-json-output', 'Log ONLY final structured output')
   .action(async (prompt, options) => {
     try {
+      // === PREFLIGHT CHECKS ===
+      // Claude CLI must be installed and authenticated for task execution
+      requirePreflight({
+        requireGh: false, // gh not needed for plain tasks
+        requireDocker: false, // Docker not needed for plain tasks
+        quiet: false,
+      });
+
       // Dynamically import task command (ESM module)
       const { runTask } = await import('../task-lib/commands/run.js');
       await runTask(prompt, options);
@@ -1885,6 +1968,16 @@ program
 
       // Check if cluster exists
       const cluster = orchestrator.getCluster(id);
+
+      // === PREFLIGHT CHECKS ===
+      // Claude CLI must be installed and authenticated
+      // Check if cluster uses isolation (needs Docker)
+      const requiresDocker = cluster?.isolation?.enabled || false;
+      requirePreflight({
+        requireGh: false, // Resume doesn't fetch new issues
+        requireDocker: requiresDocker,
+        quiet: false,
+      });
 
       if (cluster) {
         // Resume cluster
