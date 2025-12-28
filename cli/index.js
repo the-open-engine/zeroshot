@@ -341,7 +341,7 @@ if (shouldShowBanner) {
 program
   .name('zeroshot')
   .description('Multi-agent orchestration and task management for Claude')
-  .version('1.0.0')
+  .version(require('../package.json').version)
   .addHelpText(
     'after',
     `
