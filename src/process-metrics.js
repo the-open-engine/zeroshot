@@ -366,7 +366,11 @@ async function getProcessMetricsLinuxAggregated(pid, samplePeriodMs) {
   const clockTicks = 100; // Usually 100 on Linux
   const cpuSeconds = totalCpuTicksDelta / clockTicks;
   const sampleSeconds = samplePeriodMs / 1000;
-  const cpuPercent = (cpuSeconds / sampleSeconds) * 100;
+  const rawCpuPercent = (cpuSeconds / sampleSeconds) * 100;
+
+  // Normalize to per-core average (0-100% range)
+  const cpuCores = require('os').cpus().length;
+  const cpuPercent = Math.min(100, rawCpuPercent / cpuCores);
 
   // Get network state for all processes
   let network = { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0, bytesSent: 0, bytesReceived: 0 };
@@ -444,10 +448,14 @@ function getProcessMetricsDarwinAggregated(pid) {
     if (netState.hasActivity) network.hasActivity = true;
   }
 
+  // Normalize to per-core average (0-100% range)
+  const cpuCores = require('os').cpus().length;
+  const normalizedCpu = Math.min(100, totalCpuPercent / cpuCores);
+
   return {
     pid,
     exists: true,
-    cpuPercent: parseFloat(totalCpuPercent.toFixed(1)),
+    cpuPercent: parseFloat(normalizedCpu.toFixed(1)),
     memoryMB: parseFloat((totalMemoryKB / 1024).toFixed(1)),
     state: rootState,
     threads: totalThreads,

@@ -62,7 +62,12 @@ const formatBytes = (bytes) => {
  */
 const formatCPU = (percent) => {
   if (typeof percent !== 'number' || percent < 0) return '0.0%';
-  if (percent > 100) percent = 100;
+
+  // Assert normalized range (should never exceed 100% after per-core normalization)
+  if (percent > 100) {
+    console.warn(`[formatCPU] CPU percent ${percent}% exceeds 100% - normalization bug?`);
+    percent = 100;
+  }
 
   return `${percent.toFixed(1)}%`;
 };

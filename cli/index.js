@@ -3666,7 +3666,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   }
 
   if (msg.topic === 'ISSUE_OPENED') {
-    formatIssueOpenedNormal(msg, prefix, timestamp);
+    formatIssueOpenedNormal(msg, prefix, timestamp, shownNewTaskForCluster);
     return;
   }
 
