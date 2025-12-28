@@ -50,14 +50,17 @@ class StatusFooter {
    * @param {Object} options
    * @param {number} [options.refreshInterval=1000] - Refresh interval in ms
    * @param {boolean} [options.enabled=true] - Whether footer is enabled
+   * @param {number} [options.maxAgentRows=5] - Max agent rows to display
    */
   constructor(options = {}) {
     this.refreshInterval = options.refreshInterval || 1000;
     this.enabled = options.enabled !== false;
+    this.maxAgentRows = options.maxAgentRows || 5;
     this.intervalId = null;
     this.agents = new Map(); // agentId -> AgentState
     this.metricsCache = new Map(); // agentId -> ProcessMetrics
-    this.footerHeight = 2; // Lines reserved for footer
+    this.footerHeight = 3; // Minimum: header + 1 agent row + summary
+    this.lastFooterHeight = 3;
     this.scrollRegionSet = false;
     this.clusterId = null;
     this.clusterState = 'initializing';
@@ -201,6 +204,24 @@ class StatusFooter {
   }
 
   /**
+   * Format bytes in human-readable form
+   * @param {number} bytes
+   * @returns {string}
+   */
+  formatBytes(bytes) {
+    if (bytes < 1024) {
+      return `${bytes}B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(1)}KB`;
+    }
+    if (bytes < 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+    }
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}GB`;
+  }
+
+  /**
    * Render the footer
    */
   async render() {
@@ -221,130 +242,190 @@ class StatusFooter {
       }
     }
 
-    // Build footer content
-    const line1 = this.buildAgentLine(cols);
-    const line2 = this.buildStatusLine(cols);
+    // Get executing agents for display
+    const executingAgents = Array.from(this.agents.entries())
+      .filter(([, agent]) => agent.state === 'executing')
+      .slice(0, this.maxAgentRows);
+
+    // Calculate dynamic footer height: header + agent rows + separator + summary
+    // Minimum 3 lines (header + "no agents" message + summary)
+    const agentRowCount = Math.max(1, executingAgents.length);
+    const newHeight = 2 + agentRowCount + 1; // header + agents + summary (separator merged with summary)
+
+    // Update scroll region if height changed
+    if (newHeight !== this.footerHeight) {
+      this.footerHeight = newHeight;
+      this.setupScrollRegion();
+    }
+
+    // Build footer lines
+    const headerLine = this.buildHeaderLine(cols);
+    const agentRows = this.buildAgentRows(executingAgents, cols);
+    const summaryLine = this.buildSummaryLine(cols);
 
     // Save cursor, render footer, restore cursor
     process.stdout.write(SAVE_CURSOR);
     process.stdout.write(HIDE_CURSOR);
 
-    // Move to footer position
-    this.moveTo(rows - 1, 1);
-    process.stdout.write(CLEAR_LINE);
-    process.stdout.write(`${COLORS.bgBlack}${line1}${COLORS.reset}`);
+    // Render from top of footer area
+    let currentRow = rows - this.footerHeight + 1;
 
-    this.moveTo(rows, 1);
+    // Header line
+    this.moveTo(currentRow++, 1);
     process.stdout.write(CLEAR_LINE);
-    process.stdout.write(`${COLORS.bgBlack}${line2}${COLORS.reset}`);
+    process.stdout.write(`${COLORS.bgBlack}${headerLine}${COLORS.reset}`);
+
+    // Agent rows
+    for (const agentRow of agentRows) {
+      this.moveTo(currentRow++, 1);
+      process.stdout.write(CLEAR_LINE);
+      process.stdout.write(`${COLORS.bgBlack}${agentRow}${COLORS.reset}`);
+    }
+
+    // Summary line (with bottom border)
+    this.moveTo(currentRow, 1);
+    process.stdout.write(CLEAR_LINE);
+    process.stdout.write(`${COLORS.bgBlack}${summaryLine}${COLORS.reset}`);
 
     process.stdout.write(RESTORE_CURSOR);
     process.stdout.write(SHOW_CURSOR);
   }
 
   /**
-   * Build the agent status line
+   * Build the header line with cluster ID
    * @param {number} width - Terminal width
    * @returns {string}
    */
-  buildAgentLine(width) {
-    const parts = [];
-
-    // Border
-    parts.push(`${COLORS.gray}┌─${COLORS.reset}`);
+  buildHeaderLine(width) {
+    let content = `${COLORS.gray}┌─${COLORS.reset}`;
 
     // Cluster ID
     if (this.clusterId) {
       const shortId = this.clusterId.replace('cluster-', '');
-      parts.push(`${COLORS.cyan}${shortId}${COLORS.reset}`);
-      parts.push(`${COLORS.gray} ─ ${COLORS.reset}`);
+      content += ` ${COLORS.cyan}${COLORS.bold}${shortId}${COLORS.reset} `;
     }
 
-    // Agent statuses
-    const agentParts = [];
-    for (const [agentId, agent] of this.agents) {
-      const icon = this.getAgentIcon(agent.state);
-      const metrics = this.metricsCache.get(agentId);
-
-      let agentStr = `${icon} ${COLORS.white}${agentId}${COLORS.reset}`;
-
-      if (metrics && metrics.exists) {
-        const cpuColor = metrics.cpuPercent > 50 ? COLORS.yellow : COLORS.green;
-        agentStr += ` ${cpuColor}${metrics.cpuPercent}%${COLORS.reset}`;
-        agentStr += ` ${COLORS.gray}${metrics.memoryMB}MB${COLORS.reset}`;
-
-        if (metrics.network.hasActivity) {
-          agentStr += ` ${COLORS.cyan}↕${COLORS.reset}`;
-        }
-      }
-
-      if (agent.iteration > 0) {
-        agentStr += ` ${COLORS.dim}#${agent.iteration}${COLORS.reset}`;
-      }
-
-      agentParts.push(agentStr);
-    }
-
-    if (agentParts.length > 0) {
-      parts.push(agentParts.join(`${COLORS.gray} │ ${COLORS.reset}`));
-    } else {
-      parts.push(`${COLORS.dim}No agents${COLORS.reset}`);
-    }
-
-    // Pad to width and close border
-    const content = parts.join('');
+    // Fill with border
     const contentLen = this.stripAnsi(content).length;
-    const padding = Math.max(0, width - contentLen - 2);
-    return content + ' '.repeat(padding) + `${COLORS.gray}─┐${COLORS.reset}`;
+    const padding = Math.max(0, width - contentLen - 1);
+    return content + `${COLORS.gray}${'─'.repeat(padding)}┐${COLORS.reset}`;
   }
 
   /**
-   * Build the summary status line
+   * Build agent rows (one row per executing agent)
+   * @param {Array} executingAgents - Array of [agentId, agent] pairs
+   * @param {number} width - Terminal width
+   * @returns {Array<string>} Array of formatted rows
+   */
+  buildAgentRows(executingAgents, width) {
+    if (executingAgents.length === 0) {
+      // No agents row
+      const content = `${COLORS.gray}│${COLORS.reset}  ${COLORS.dim}No active agents${COLORS.reset}`;
+      const contentLen = this.stripAnsi(content).length;
+      const padding = Math.max(0, width - contentLen - 1);
+      return [content + ' '.repeat(padding) + `${COLORS.gray}│${COLORS.reset}`];
+    }
+
+    const rows = [];
+    for (const [agentId, agent] of executingAgents) {
+      const icon = this.getAgentIcon(agent.state);
+      const metrics = this.metricsCache.get(agentId);
+
+      // Build columns with fixed widths for alignment
+      const iconCol = icon;
+      const nameCol = agentId.padEnd(14).slice(0, 14); // Max 14 chars for name
+
+      let metricsStr = '';
+      if (metrics && metrics.exists) {
+        const cpuColor = metrics.cpuPercent > 50 ? COLORS.yellow : COLORS.green;
+        const cpuVal = `${metrics.cpuPercent}%`.padStart(4);
+        const ramVal = `${metrics.memoryMB}MB`.padStart(6);
+
+        metricsStr += `${COLORS.dim}CPU:${COLORS.reset}${cpuColor}${cpuVal}${COLORS.reset}`;
+        metricsStr += `  ${COLORS.dim}RAM:${COLORS.reset}${COLORS.gray}${ramVal}${COLORS.reset}`;
+
+        // Network bytes
+        const net = metrics.network;
+        if (net.bytesSent > 0 || net.bytesReceived > 0) {
+          const sent = this.formatBytes(net.bytesSent).padStart(7);
+          const recv = this.formatBytes(net.bytesReceived).padStart(7);
+          metricsStr += `  ${COLORS.dim}NET:${COLORS.reset}${COLORS.cyan}↑${sent} ↓${recv}${COLORS.reset}`;
+        }
+      } else {
+        metricsStr = `${COLORS.dim}(starting...)${COLORS.reset}`;
+      }
+
+      // Iteration number
+      const iterStr = agent.iteration > 0 ? `${COLORS.dim}#${agent.iteration}${COLORS.reset}` : '';
+
+      // Build the row
+      let content = `${COLORS.gray}│${COLORS.reset}  ${iconCol} ${COLORS.white}${nameCol}${COLORS.reset}  ${metricsStr}`;
+      if (iterStr) {
+        content += `  ${iterStr}`;
+      }
+
+      const contentLen = this.stripAnsi(content).length;
+      const padding = Math.max(0, width - contentLen - 1);
+      rows.push(content + ' '.repeat(padding) + `${COLORS.gray}│${COLORS.reset}`);
+    }
+
+    return rows;
+  }
+
+  /**
+   * Build the summary line with aggregated metrics
    * @param {number} width - Terminal width
    * @returns {string}
    */
-  buildStatusLine(width) {
+  buildSummaryLine(width) {
     const parts = [];
 
-    // Border
+    // Border with corner
     parts.push(`${COLORS.gray}└─${COLORS.reset}`);
 
     // Cluster state
     const stateColor = this.clusterState === 'running' ? COLORS.green : COLORS.yellow;
-    parts.push(`${stateColor}${this.clusterState}${COLORS.reset}`);
+    parts.push(` ${stateColor}${this.clusterState}${COLORS.reset}`);
 
     // Duration
     const duration = this.formatDuration(Date.now() - this.startTime);
-    parts.push(`${COLORS.gray} │ ${COLORS.reset}${COLORS.dim}${duration}${COLORS.reset}`);
+    parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.dim}${duration}${COLORS.reset}`);
 
     // Agent counts
     const executing = Array.from(this.agents.values()).filter(a => a.state === 'executing').length;
-    const idle = Array.from(this.agents.values()).filter(a => a.state === 'idle').length;
     const total = this.agents.size;
-
-    parts.push(`${COLORS.gray} │ ${COLORS.reset}`);
-    parts.push(`${COLORS.green}${executing}/${total}${COLORS.reset} active`);
+    parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.green}${executing}/${total}${COLORS.reset} active`);
 
     // Aggregate metrics
     let totalCpu = 0;
     let totalMem = 0;
+    let totalBytesSent = 0;
+    let totalBytesReceived = 0;
     for (const metrics of this.metricsCache.values()) {
       if (metrics.exists) {
         totalCpu += metrics.cpuPercent;
         totalMem += metrics.memoryMB;
+        totalBytesSent += metrics.network.bytesSent || 0;
+        totalBytesReceived += metrics.network.bytesReceived || 0;
       }
     }
 
     if (totalCpu > 0 || totalMem > 0) {
-      parts.push(`${COLORS.gray} │ ${COLORS.reset}`);
-      parts.push(`${COLORS.cyan}Σ${COLORS.reset} ${totalCpu.toFixed(0)}% ${totalMem.toFixed(0)}MB`);
+      parts.push(` ${COLORS.gray}│${COLORS.reset}`);
+      let aggregateStr = ` ${COLORS.cyan}Σ${COLORS.reset} `;
+      aggregateStr += `${COLORS.dim}CPU:${COLORS.reset}${totalCpu.toFixed(0)}%`;
+      aggregateStr += ` ${COLORS.dim}RAM:${COLORS.reset}${totalMem.toFixed(0)}MB`;
+      if (totalBytesSent > 0 || totalBytesReceived > 0) {
+        aggregateStr += ` ${COLORS.dim}NET:${COLORS.reset}${COLORS.cyan}↑${this.formatBytes(totalBytesSent)} ↓${this.formatBytes(totalBytesReceived)}${COLORS.reset}`;
+      }
+      parts.push(aggregateStr);
     }
 
-    // Pad and close
+    // Pad and close with bottom corner
     const content = parts.join('');
     const contentLen = this.stripAnsi(content).length;
-    const padding = Math.max(0, width - contentLen - 2);
-    return content + ' '.repeat(padding) + `${COLORS.gray}─┘${COLORS.reset}`;
+    const padding = Math.max(0, width - contentLen - 1);
+    return content + `${COLORS.gray}${'─'.repeat(padding)}┘${COLORS.reset}`;
   }
 
   /**
@@ -395,15 +476,16 @@ class StatusFooter {
       // Reset scroll region
       this.resetScrollRegion();
 
-      // Clear footer lines
+      // Clear all footer lines (dynamic height)
       const { rows } = this.getTerminalSize();
-      this.moveTo(rows - 1, 1);
-      process.stdout.write(CLEAR_LINE);
-      this.moveTo(rows, 1);
-      process.stdout.write(CLEAR_LINE);
+      const startRow = rows - this.footerHeight + 1;
+      for (let row = startRow; row <= rows; row++) {
+        this.moveTo(row, 1);
+        process.stdout.write(CLEAR_LINE);
+      }
 
       // Move cursor to safe position
-      this.moveTo(rows - 1, 1);
+      this.moveTo(startRow, 1);
       process.stdout.write(SHOW_CURSOR);
     }
   }
@@ -415,11 +497,14 @@ class StatusFooter {
     if (!this.isTTY()) return;
 
     this.resetScrollRegion();
+
+    // Clear all footer lines (dynamic height)
     const { rows } = this.getTerminalSize();
-    this.moveTo(rows - 1, 1);
-    process.stdout.write(CLEAR_LINE);
-    this.moveTo(rows, 1);
-    process.stdout.write(CLEAR_LINE);
+    const startRow = rows - this.footerHeight + 1;
+    for (let row = startRow; row <= rows; row++) {
+      this.moveTo(row, 1);
+      process.stdout.write(CLEAR_LINE);
+    }
   }
 
   /**

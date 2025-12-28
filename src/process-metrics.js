@@ -165,6 +165,7 @@ function getProcessMetricsDarwin(pid) {
 
 /**
  * Get network state for a process (Linux)
+ * Uses ss -tip to get extended TCP info including cumulative bytes sent/received
  * @param {number} pid - Process ID
  * @returns {Object} Network state
  */
@@ -174,11 +175,14 @@ function getNetworkStateLinux(pid) {
     hasActivity: false,
     sendQueueBytes: 0,
     recvQueueBytes: 0,
+    bytesSent: 0,      // Cumulative bytes sent across all sockets
+    bytesReceived: 0,  // Cumulative bytes received across all sockets
   };
 
   try {
-    // Use ss to get socket states for this process
-    const output = execSync(`ss -tunp 2>/dev/null | grep ",pid=${pid}," || true`, {
+    // Use ss -tip to get extended TCP info with bytes_sent/bytes_received
+    // -t = TCP only, -i = show internal TCP info, -p = show process
+    const output = execSync(`ss -tip 2>/dev/null | grep -A1 "pid=${pid}," || true`, {
       encoding: 'utf8',
       timeout: 3000,
     });
@@ -189,8 +193,10 @@ function getNetworkStateLinux(pid) {
 
     const lines = output.trim().split('\n');
 
-    for (const line of lines) {
-      // Parse: State  Recv-Q  Send-Q  Local:Port  Peer:Port  Process
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Parse socket line: State  Recv-Q  Send-Q  Local:Port  Peer:Port  Process
       const match = line.match(/^(\S+)\s+(\d+)\s+(\d+)\s+/);
       if (match) {
         const state = match[1];
@@ -208,6 +214,20 @@ function getNetworkStateLinux(pid) {
           result.hasActivity = true;
         }
       }
+
+      // Parse extended TCP info line (follows socket line)
+      // Contains: bytes_sent:N bytes_received:N (and other metrics)
+      const bytesSentMatch = line.match(/bytes_sent:(\d+)/);
+      const bytesReceivedMatch = line.match(/bytes_received:(\d+)/);
+
+      if (bytesSentMatch) {
+        result.bytesSent += parseInt(bytesSentMatch[1], 10);
+        result.hasActivity = true;
+      }
+      if (bytesReceivedMatch) {
+        result.bytesReceived += parseInt(bytesReceivedMatch[1], 10);
+        result.hasActivity = true;
+      }
     }
   } catch {
     // Ignore errors
@@ -218,6 +238,8 @@ function getNetworkStateLinux(pid) {
 
 /**
  * Get network state for a process (macOS)
+ * Note: macOS doesn't expose per-socket byte counts like Linux's ss -tip
+ * We return 0 for bytesSent/bytesReceived (not available without dtrace/nettop)
  * @param {number} pid - Process ID
  * @returns {Object} Network state
  */
@@ -227,6 +249,8 @@ function getNetworkStateDarwin(pid) {
     hasActivity: false,
     sendQueueBytes: 0,
     recvQueueBytes: 0,
+    bytesSent: 0,      // Not available on macOS without root/dtrace
+    bytesReceived: 0,  // Not available on macOS without root/dtrace
   };
 
   try {
@@ -298,7 +322,7 @@ async function getProcessMetricsLinuxAggregated(pid, samplePeriodMs) {
       memoryMB: 0,
       state: 'X',
       threads: 0,
-      network: { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0 },
+      network: { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0, bytesSent: 0, bytesReceived: 0 },
       childCount: 0,
       timestamp: Date.now(),
     };
@@ -345,12 +369,14 @@ async function getProcessMetricsLinuxAggregated(pid, samplePeriodMs) {
   const cpuPercent = (cpuSeconds / sampleSeconds) * 100;
 
   // Get network state for all processes
-  let network = { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0 };
+  let network = { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0, bytesSent: 0, bytesReceived: 0 };
   for (const p of Object.keys(t1Metrics)) {
     const netState = getNetworkStateLinux(parseInt(p, 10));
     network.established += netState.established;
     network.sendQueueBytes += netState.sendQueueBytes;
     network.recvQueueBytes += netState.recvQueueBytes;
+    network.bytesSent += netState.bytesSent;
+    network.bytesReceived += netState.bytesReceived;
     if (netState.hasActivity) network.hasActivity = true;
   }
 
@@ -409,10 +435,12 @@ async function getProcessMetricsDarwinAggregated(pid) {
   }
 
   // Get network state
-  let network = { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0 };
+  let network = { established: 0, hasActivity: false, sendQueueBytes: 0, recvQueueBytes: 0, bytesSent: 0, bytesReceived: 0 };
   for (const p of allPids) {
     const netState = getNetworkStateDarwin(p);
     network.established += netState.established;
+    network.bytesSent += netState.bytesSent;
+    network.bytesReceived += netState.bytesReceived;
     if (netState.hasActivity) network.hasActivity = true;
   }
 

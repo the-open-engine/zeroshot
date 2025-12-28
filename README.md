@@ -4,6 +4,8 @@
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 [![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue.svg)]()
 
+> **2024** was the year of LLMs. **2025** was the year of agents. **2026** is the year of agent clusters.
+
 **Multi-agent coding CLI built on Claude Code.**
 
 You know the problem. Your AI agent:
