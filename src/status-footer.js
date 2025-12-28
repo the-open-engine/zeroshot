@@ -96,6 +96,11 @@ class StatusFooter {
     this.minRows = 8; // Minimum rows for footer display (graceful degradation)
     this.hidden = false; // True when terminal too small for footer
 
+    // Output queue - serializes all stdout to prevent cursor corruption
+    // When scroll region is active, console.log() can corrupt cursor position
+    // All output must go through print() to coordinate with render cycles
+    this.printQueue = [];
+
     // Debounced resize handler (100ms) - prevents rapid-fire redraws
     this._debouncedResize = debounce(() => this._handleResize(), 100);
   }
@@ -106,6 +111,38 @@ class StatusFooter {
    */
   isTTY() {
     return process.stdout.isTTY === true;
+  }
+
+  /**
+   * Print text to stdout, coordinating with the render cycle.
+   * When a render is in progress, queues output to prevent cursor corruption.
+   * When no render is active, writes immediately.
+   *
+   * MUST be used instead of console.log() when status footer is active.
+   * @param {string} text - Text to print (newline will be added)
+   */
+  print(text) {
+    if (this.isRendering) {
+      // Queue for later - render() will flush after restoring cursor
+      this.printQueue.push(text);
+    } else {
+      // Write immediately - no render in progress
+      process.stdout.write(text + '\n');
+    }
+  }
+
+  /**
+   * Flush queued output to stdout.
+   * Called after render() restores cursor to ensure proper positioning.
+   * @private
+   */
+  _flushPrintQueue() {
+    if (this.printQueue.length === 0) return;
+
+    // Write all queued output
+    const output = this.printQueue.map(text => text + '\n').join('');
+    this.printQueue = [];
+    process.stdout.write(output);
   }
 
   /**
@@ -495,6 +532,19 @@ class StatusFooter {
     } finally {
       this.isRendering = false;
 
+      // CRITICAL: Position cursor at bottom of scroll region before flushing
+      // Without this, output goes below footer if cursor was restored outside scroll region
+      // (RESTORE_CURSOR at line 527 may restore to row outside the scrollable area)
+      if (this.scrollRegionSet) {
+        const { rows } = this.getTerminalSize();
+        const scrollEnd = rows - this.footerHeight;
+        process.stdout.write(this._moveToStr(scrollEnd, 1));
+      }
+
+      // Flush any output that was queued during render
+      // Must happen BEFORE pending resize to preserve output order
+      this._flushPrintQueue();
+
       // Process pending resize if one was queued during render
       if (this.pendingResize) {
         this.pendingResize = false;
@@ -728,12 +778,14 @@ class StatusFooter {
       // Prevents interleaving with agent output during cleanup
       let buffer = '';
 
-      // Reset scroll region
+      // CRITICAL: Clear footer area BEFORE resetting scroll region
+      // While scroll region is active, footer area contains only status bar content
+      // After reset, those lines may contain scrolled output (which we DON'T want to clear)
+      buffer += this._clearFooterAreaStr();
+
+      // Now reset scroll region (full terminal is scrollable again)
       buffer += this._resetScrollRegionStr();
       this.scrollRegionSet = false;
-
-      // Clear all footer lines
-      buffer += this._clearFooterAreaStr();
 
       // Move cursor to safe position and show cursor
       const { rows } = this.getTerminalSize();
@@ -753,9 +805,10 @@ class StatusFooter {
     if (!this.isTTY()) return;
 
     // Single atomic write for hide operation
-    let buffer = this._resetScrollRegionStr();
+    // CRITICAL: Clear footer BEFORE resetting scroll region (same reason as stop())
+    let buffer = this._clearFooterAreaStr();
+    buffer += this._resetScrollRegionStr();
     this.scrollRegionSet = false;
-    buffer += this._clearFooterAreaStr();
     process.stdout.write(buffer);
   }
 

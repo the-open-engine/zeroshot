@@ -60,6 +60,39 @@ let activeClusterId = null;
 /** @type {import('../src/orchestrator') | null} */
 let orchestratorInstance = null;
 
+// Track active status footer for safe output routing
+// When set, all output routes through statusFooter.print() to prevent garbling
+/** @type {import('../src/status-footer').StatusFooter | null} */
+let activeStatusFooter = null;
+
+/**
+ * Safe print - routes through statusFooter when active to prevent garbling
+ * @param {...any} args - Arguments to print (like console.log)
+ */
+function safePrint(...args) {
+  const text = args.map(arg =>
+    typeof arg === 'string' ? arg : String(arg)
+  ).join(' ');
+
+  if (activeStatusFooter) {
+    activeStatusFooter.print(text + '\n');
+  } else {
+    console.log(...args);
+  }
+}
+
+/**
+ * Safe write - routes through statusFooter when active
+ * @param {string} text - Text to write
+ */
+function safeWrite(text) {
+  if (activeStatusFooter) {
+    activeStatusFooter.print(text);
+  } else {
+    process.stdout.write(text);
+  }
+}
+
 /**
  * Handle fatal errors: log, cleanup cluster state, exit
  * @param {string} type - 'uncaughtException' or 'unhandledRejection'
@@ -614,6 +647,8 @@ Input formats:
         statusFooter.setCluster(clusterId);
         statusFooter.setClusterState('running');
         statusFooter.setMessageBus(cluster.messageBus);
+        // Set module-level reference so safePrint/safeWrite route through footer
+        activeStatusFooter = statusFooter;
 
         // Subscribe to AGENT_LIFECYCLE to track agent states and PIDs
         const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic('AGENT_LIFECYCLE', (msg) => {
@@ -698,14 +733,16 @@ Input formats:
               if (status.state !== 'running') {
                 clearInterval(checkInterval);
                 clearInterval(flushInterval);
-                // Stop status footer
-                statusFooter.stop();
                 lifecycleUnsubscribe();
-                // Final flush
+                // Final flush BEFORE stopping status footer
+                // (statusFooter.stop() sends ANSI codes that can clear terminal area)
                 for (const sender of sendersWithOutput) {
                   const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
                   flushLineBuffer(prefix, sender);
                 }
+                // Stop status footer AFTER output is done
+                statusFooter.stop();
+                activeStatusFooter = null;
                 unsubscribe();
                 resolve();
               }
@@ -714,6 +751,7 @@ Input formats:
               clearInterval(checkInterval);
               clearInterval(flushInterval);
               statusFooter.stop();
+              activeStatusFooter = null;
               lifecycleUnsubscribe();
               unsubscribe();
               resolve();
@@ -726,6 +764,7 @@ Input formats:
           process.on('SIGINT', async () => {
             // Stop status footer first to restore terminal
             statusFooter.stop();
+            activeStatusFooter = null;
             lifecycleUnsubscribe();
 
             console.log(chalk.dim('\n\n--- Interrupted ---'));
@@ -750,6 +789,22 @@ Input formats:
       }
 
       // Daemon mode: cluster runs in background, stay alive via orchestrator's setInterval
+      // Add cleanup handlers for daemon mode to ensure container cleanup on process exit
+      // CRITICAL: Without this, containers become orphaned when daemon process dies
+      if (process.env.CREW_DAEMON) {
+        const cleanup = async (signal) => {
+          console.log(`\n[DAEMON] Received ${signal}, cleaning up cluster ${clusterId}...`);
+          try {
+            await orchestrator.stop(clusterId);
+            console.log(`[DAEMON] Cluster ${clusterId} stopped.`);
+          } catch (e) {
+            console.error(`[DAEMON] Cleanup error: ${e.message}`);
+          }
+          process.exit(0);
+        };
+        process.on('SIGTERM', () => cleanup('SIGTERM'));
+        process.on('SIGINT', () => cleanup('SIGINT'));
+      }
     } catch (error) {
       console.error('Error:', error.message);
       process.exit(1);
@@ -3570,32 +3625,40 @@ function accumulateText(prefix, sender, text) {
     buf.textBuffer = buf.textBuffer.slice(newlineIdx + 1);
 
     // Word wrap and print the complete line
+    // CRITICAL: Batch all output into single safeWrite() to prevent interleaving with render()
     const wrappedLines = wordWrap(completeLine, contentWidth);
+    let outputBuffer = '';
+
     for (let i = 0; i < wrappedLines.length; i++) {
       const wrappedLine = wrappedLines[i];
 
       // Print prefix (real or continuation)
       if (buf.needsPrefix) {
-        process.stdout.write(`${prefix} `);
+        outputBuffer += `${prefix} `;
         buf.needsPrefix = false;
       } else if (i > 0) {
-        process.stdout.write(`${continuationPrefix}`);
+        outputBuffer += `${continuationPrefix}`;
       }
 
       if (wrappedLine.trim()) {
-        process.stdout.write(formatInlineMarkdown(wrappedLine));
+        outputBuffer += formatInlineMarkdown(wrappedLine);
       }
 
       // Newline after each wrapped segment
       if (i < wrappedLines.length - 1) {
-        process.stdout.write('\n');
+        outputBuffer += '\n';
       }
     }
 
     // Complete the line
-    process.stdout.write('\n');
+    outputBuffer += '\n';
     buf.needsPrefix = true;
     buf.pendingNewline = false;
+
+    // Single atomic write prevents interleaving
+    if (outputBuffer) {
+      safeWrite(outputBuffer);
+    }
   }
 
   // Mark that we have pending text (no newline yet)
@@ -3620,35 +3683,45 @@ function accumulateThinking(prefix, sender, text) {
     const newlineIdx = remaining.indexOf('\n');
     const rawLine = newlineIdx === -1 ? remaining : remaining.slice(0, newlineIdx);
 
+    // CRITICAL: Batch all output into single safeWrite() to prevent interleaving with render()
     const wrappedLines = wordWrap(rawLine, contentWidth);
+    let outputBuffer = '';
 
     for (let i = 0; i < wrappedLines.length; i++) {
       const wrappedLine = wrappedLines[i];
 
       if (buf.thinkingNeedsPrefix) {
-        process.stdout.write(`${prefix} ${chalk.dim.italic('💭 ')}`);
+        outputBuffer += `${prefix} ${chalk.dim.italic('💭 ')}`;
         buf.thinkingNeedsPrefix = false;
       } else if (i > 0) {
-        process.stdout.write(`${continuationPrefix}`);
+        outputBuffer += `${continuationPrefix}`;
       }
 
       if (wrappedLine.trim()) {
-        process.stdout.write(chalk.dim.italic(wrappedLine));
+        outputBuffer += chalk.dim.italic(wrappedLine);
       }
 
       if (i < wrappedLines.length - 1) {
-        process.stdout.write('\n');
+        outputBuffer += '\n';
       }
     }
 
     if (newlineIdx === -1) {
       buf.thinkingPendingNewline = true;
+      // Single atomic write
+      if (outputBuffer) {
+        safeWrite(outputBuffer);
+      }
       break;
     } else {
-      process.stdout.write('\n');
+      outputBuffer += '\n';
       buf.thinkingNeedsPrefix = true;
       buf.thinkingPendingNewline = false;
       remaining = remaining.slice(newlineIdx + 1);
+      // Single atomic write
+      if (outputBuffer) {
+        safeWrite(outputBuffer);
+      }
     }
   }
 }
@@ -3658,7 +3731,10 @@ function flushLineBuffer(prefix, sender) {
   const buf = lineBuffers.get(sender);
   if (!buf) return;
 
-  // CRITICAL: Flush any remaining text in textBuffer (text without trailing newline)
+  // CRITICAL: Batch all output into single safeWrite() to prevent interleaving with render()
+  let outputBuffer = '';
+
+  // Flush any remaining text in textBuffer (text without trailing newline)
   if (buf.textBuffer && buf.textBuffer.length > 0) {
     // Calculate widths for word wrapping (same as accumulateText)
     const prefixLen = chalk.reset(prefix).replace(/\\x1b\[[0-9;]*m/g, '').length + 1;
@@ -3671,18 +3747,18 @@ function flushLineBuffer(prefix, sender) {
       const wrappedLine = wrappedLines[i];
 
       if (buf.needsPrefix) {
-        process.stdout.write(`${prefix} `);
+        outputBuffer += `${prefix} `;
         buf.needsPrefix = false;
       } else if (i > 0) {
-        process.stdout.write(`${continuationPrefix}`);
+        outputBuffer += `${continuationPrefix}`;
       }
 
       if (wrappedLine.trim()) {
-        process.stdout.write(formatInlineMarkdown(wrappedLine));
+        outputBuffer += formatInlineMarkdown(wrappedLine);
       }
 
       if (i < wrappedLines.length - 1) {
-        process.stdout.write('\n');
+        outputBuffer += '\n';
       }
     }
 
@@ -3692,14 +3768,19 @@ function flushLineBuffer(prefix, sender) {
   }
 
   if (buf.pendingNewline) {
-    process.stdout.write('\n');
+    outputBuffer += '\n';
     buf.needsPrefix = true;
     buf.pendingNewline = false;
   }
   if (buf.thinkingPendingNewline) {
-    process.stdout.write('\n');
+    outputBuffer += '\n';
     buf.thinkingNeedsPrefix = true;
     buf.thinkingPendingNewline = false;
+  }
+
+  // Single atomic write prevents interleaving
+  if (outputBuffer) {
+    safeWrite(outputBuffer);
   }
 }
 
@@ -3783,17 +3864,17 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   }
 
   if (msg.topic === 'PR_CREATED') {
-    formatPrCreated(msg, prefix, timestamp);
+    formatPrCreated(msg, prefix, timestamp, safePrint);
     return;
   }
 
   if (msg.topic === 'CLUSTER_COMPLETE') {
-    formatClusterComplete(msg, prefix, timestamp);
+    formatClusterComplete(msg, prefix, timestamp, safePrint);
     return;
   }
 
   if (msg.topic === 'CLUSTER_FAILED') {
-    formatClusterFailed(msg, prefix, timestamp);
+    formatClusterFailed(msg, prefix, timestamp, safePrint);
     return;
   }
 
@@ -3819,7 +3900,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
           if (event.text) {
             accumulateThinking(prefix, msg.sender, event.text);
           } else if (event.type === 'thinking_start') {
-            console.log(`${prefix} ${chalk.dim.italic('💭 thinking...')}`);
+            safePrint(`${prefix} ${chalk.dim.italic('💭 thinking...')}`);
           }
           break;
 
@@ -3833,7 +3914,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
           flushLineBuffer(prefix, msg.sender);
           const icon = getToolIcon(event.toolName);
           const toolDesc = formatToolCall(event.toolName, event.input);
-          console.log(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
+          safePrint(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
           // Store tool call info for matching with result
           currentToolCall.set(msg.sender, {
             toolName: event.toolName,
@@ -3855,7 +3936,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
             toolCall?.toolName,
             toolCall?.input
           );
-          console.log(`${prefix}   ${status} ${resultDesc}`);
+          safePrint(`${prefix}   ${status} ${resultDesc}`);
           // Clear stored tool call after result
           currentToolCall.delete(msg.sender);
           break;
@@ -3865,7 +3946,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
           flushLineBuffer(prefix, msg.sender);
           // Final result - only show errors (success text already streamed)
           if (!event.success) {
-            console.log(`${prefix} ${chalk.bold.red('✗ Error:')} ${event.error || 'Task failed'}`);
+            safePrint(`${prefix} ${chalk.bold.red('✗ Error:')} ${event.error || 'Task failed'}`);
           }
           break;
 
@@ -3906,7 +3987,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
         // Skip duplicate content
         if (isDuplicate(trimmed)) continue;
 
-        console.log(`${prefix} ${line}`);
+        safePrint(`${prefix} ${line}`);
       }
     }
     return;
@@ -3914,22 +3995,22 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
 
   // AGENT_ERROR: Show errors with visual prominence
   if (msg.topic === 'AGENT_ERROR') {
-    console.log(''); // Blank line before error
-    console.log(chalk.bold.red(`${'─'.repeat(60)}`));
-    console.log(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.red('🔴 AGENT ERROR')}`);
+    safePrint(''); // Blank line before error
+    safePrint(chalk.bold.red(`${'─'.repeat(60)}`));
+    safePrint(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.red('🔴 AGENT ERROR')}`);
     if (msg.content?.text) {
-      console.log(`${prefix} ${chalk.red(msg.content.text)}`);
+      safePrint(`${prefix} ${chalk.red(msg.content.text)}`);
     }
     if (msg.content?.data?.stack) {
       // Show first 5 lines of stack trace
       const stackLines = msg.content.data.stack.split('\n').slice(0, 5);
       for (const line of stackLines) {
         if (line.trim()) {
-          console.log(`${prefix} ${chalk.dim(line)}`);
+          safePrint(`${prefix} ${chalk.dim(line)}`);
         }
       }
     }
-    console.log(chalk.bold.red(`${'─'.repeat(60)}`));
+    safePrint(chalk.bold.red(`${'─'.repeat(60)}`));
     return;
   }
 
@@ -3941,29 +4022,29 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
     }
     shownNewTaskForCluster.add(msg.cluster_id);
 
-    console.log(''); // Blank line before new task
-    console.log(chalk.bold.blue(`${'─'.repeat(60)}`));
-    console.log(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋 NEW TASK')}`);
+    safePrint(''); // Blank line before new task
+    safePrint(chalk.bold.blue(`${'─'.repeat(60)}`));
+    safePrint(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋 NEW TASK')}`);
     if (msg.content?.text) {
       // Show task description (first 3 lines max)
       const lines = msg.content.text.split('\n').slice(0, 3);
       for (const line of lines) {
         if (line.trim() && line.trim() !== '# Manual Input') {
-          console.log(`${prefix} ${chalk.white(line)}`);
+          safePrint(`${prefix} ${chalk.white(line)}`);
         }
       }
     }
-    console.log(chalk.bold.blue(`${'─'.repeat(60)}`));
+    safePrint(chalk.bold.blue(`${'─'.repeat(60)}`));
     return;
   }
 
   // IMPLEMENTATION_READY: milestone marker
   if (msg.topic === 'IMPLEMENTATION_READY') {
-    console.log(
+    safePrint(
       `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`
     );
     if (msg.content?.data?.commit) {
-      console.log(
+      safePrint(
         `${prefix} ${chalk.gray('Commit:')} ${chalk.cyan(msg.content.data.commit.substring(0, 8))}`
       );
     }
@@ -3976,33 +4057,33 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
     const approved = data.approved === true || data.approved === 'true';
     const status = approved ? chalk.bold.green('✓ APPROVED') : chalk.bold.red('✗ REJECTED');
 
-    console.log(`${prefix} ${chalk.gray(timestamp)} ${status}`);
+    safePrint(`${prefix} ${chalk.gray(timestamp)} ${status}`);
 
     // Show summary if present and not a template variable
     if (msg.content?.text && !msg.content.text.includes('{{')) {
-      console.log(`${prefix} ${msg.content.text.substring(0, 100)}`);
+      safePrint(`${prefix} ${msg.content.text.substring(0, 100)}`);
     }
 
     // Show full JSON data structure
-    console.log(
+    safePrint(
       `${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`
     );
 
     // Show errors/issues if any
     if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) {
-      console.log(`${prefix} ${chalk.red('Errors:')}`);
+      safePrint(`${prefix} ${chalk.red('Errors:')}`);
       data.errors.forEach((err) => {
         if (err && typeof err === 'string') {
-          console.log(`${prefix}   - ${err}`);
+          safePrint(`${prefix}   - ${err}`);
         }
       });
     }
 
     if (data.issues && Array.isArray(data.issues) && data.issues.length > 0) {
-      console.log(`${prefix} ${chalk.yellow('Issues:')}`);
+      safePrint(`${prefix} ${chalk.yellow('Issues:')}`);
       data.issues.forEach((issue) => {
         if (issue && typeof issue === 'string') {
-          console.log(`${prefix}   - ${issue}`);
+          safePrint(`${prefix}   - ${issue}`);
         }
       });
     }
@@ -4010,7 +4091,7 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   }
 
   // Fallback: generic message display for unknown topics
-  formatGenericMessage(msg, prefix, timestamp);
+  formatGenericMessage(msg, prefix, timestamp, safePrint);
 }
 
 // Default command handling: if first arg doesn't match a known command, treat it as 'run'
