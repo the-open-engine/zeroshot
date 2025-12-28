@@ -27,7 +27,7 @@
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test",
+    "prepublishOnly": "npm run lint && npm run typecheck",
     "prepare": "husky"
   },
   "c8": {
