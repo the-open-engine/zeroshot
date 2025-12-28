@@ -1,3 +1,16 @@
+# [1.2.0](https://github.com/covibes/zeroshot/compare/v1.1.4...v1.2.0) (2025-12-28)
+
+
+### Bug Fixes
+
+* **status-footer:** robust terminal resize handling ([767a610](https://github.com/covibes/zeroshot/commit/767a610027b3e2bb238b54c31a3a7e93db635319))
+
+
+### Features
+
+* **agent:** publish TOKEN_USAGE events with task completion ([c79482c](https://github.com/covibes/zeroshot/commit/c79482c82582b75a692ba71005c821decdc1d769))
+* **stream-parser:** add token usage tracking to result events ([91ad850](https://github.com/covibes/zeroshot/commit/91ad8507f42fd1a398bdc06f3b91b0a13eec8941))
+
 ## [1.1.4](https://github.com/covibes/zeroshot/compare/v1.1.3...v1.1.4) (2025-12-28)
 
 
