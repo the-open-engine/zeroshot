@@ -1,3 +1,19 @@
+# [1.1.0](https://github.com/covibes/zeroshot/compare/v1.0.2...v1.1.0) (2025-12-28)
+
+
+### Bug Fixes
+
+* **docker:** use repo root as build context for Dockerfile ([c1d6719](https://github.com/covibes/zeroshot/commit/c1d6719eb43787ba62e5f69663eb4e5bd1aeb492))
+* **lint:** remove unused import and fix undefined variable in test ([41c9965](https://github.com/covibes/zeroshot/commit/41c9965eb84d2b8c22eaaf8e1d65a5f41c7b1e44))
+
+
+### Features
+
+* **isolation:** use zeroshot task infrastructure inside containers ([922f30d](https://github.com/covibes/zeroshot/commit/922f30d5ddd8c4d87cac375fd97025f402e7c43e))
+* **monitoring:** add live status footer with CPU/memory metrics ([2df3de0](https://github.com/covibes/zeroshot/commit/2df3de0a1fe9573961b596da9e78a159f3c33086))
+* **validators:** add zero-tolerance rejection rules for incomplete code ([308aef8](https://github.com/covibes/zeroshot/commit/308aef8b5ee2e3ff05e336ee810b842492183b2e))
+* **validators:** strengthen with senior engineering principles ([d83f666](https://github.com/covibes/zeroshot/commit/d83f6668a145e36bd7d807d9821e8631a3a1cc18))
+
 ## [1.0.2](https://github.com/covibes/zeroshot/compare/v1.0.1...v1.0.2) (2025-12-27)
 
 
