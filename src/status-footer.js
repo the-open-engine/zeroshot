@@ -373,6 +373,16 @@ class StatusFooter {
   }
 
   /**
+   * Build a single status line for testing/display
+   * Alias for buildSummaryLine for backward compatibility
+   * @param {number} width - Terminal width
+   * @returns {string}
+   */
+  buildStatusLine(width) {
+    return this.buildSummaryLine(width);
+  }
+
+  /**
    * Build the summary line with aggregated metrics
    * @param {number} width - Terminal width
    * @returns {string}

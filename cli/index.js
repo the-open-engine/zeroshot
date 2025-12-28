@@ -22,6 +22,23 @@ const chalk = require('chalk');
 const Orchestrator = require('../src/orchestrator');
 const { setupCompletion } = require('../lib/completion');
 const { parseChunk } = require('../lib/stream-json-parser');
+const { formatWatchMode } = require('./message-formatters-watch');
+const {
+  formatAgentLifecycle,
+  formatAgentError: formatAgentErrorNormal,
+  formatIssueOpened: formatIssueOpenedNormal,
+  formatImplementationReady: formatImplementationReadyNormal,
+  formatValidationResult: formatValidationResultNormal,
+  formatPrCreated,
+  formatClusterComplete,
+  formatClusterFailed,
+  formatGenericMessage,
+} = require('./message-formatters-normal');
+const {
+  getColorForSender,
+  buildMessagePrefix,
+  buildClusterPrefix,
+} = require('./message-formatter-utils');
 const {
   loadSettings,
   saveSettings,
@@ -319,11 +336,7 @@ if (shouldShowBanner) {
   showBanner();
 }
 
-// Color palette for agents (avoid green/red - reserved for APPROVED/REJECTED)
-const COLORS = [chalk.cyan, chalk.yellow, chalk.magenta, chalk.blue, chalk.white, chalk.gray];
-
-// Map agent IDs to colors
-const agentColors = new Map();
+// NOTE: Agent color handling moved to message-formatter-utils.js
 
 program
   .name('zeroshot')
@@ -3021,18 +3034,6 @@ function formatToolResult(content, isError, toolName, toolInput) {
 
 // Helper function to get deterministic color for an agent/sender based on name hash
 // Uses djb2 hash algorithm for good distribution across color palette
-function getColorForSender(sender) {
-  if (!agentColors.has(sender)) {
-    let hash = 5381;
-    for (let i = 0; i < sender.length; i++) {
-      hash = (hash << 5) + hash + sender.charCodeAt(i);
-    }
-    const colorIndex = Math.abs(hash) % COLORS.length;
-    agentColors.set(sender, COLORS[colorIndex]);
-  }
-  return agentColors.get(sender);
-}
-
 // Track recently seen content to avoid duplicates
 const recentContentHashes = new Set();
 const MAX_RECENT_HASHES = 100;
@@ -3639,166 +3640,62 @@ const FILTERED_PATTERNS = [
 
 // Helper function to print a message (docker-compose style with colors)
 function printMessage(msg, showClusterId = false, watchMode = false, isActive = true) {
+  // Build prefix using utility function
+  const prefix = buildMessagePrefix(msg, showClusterId, isActive);
+
   const timestamp = new Date(msg.timestamp).toLocaleTimeString('en-US', {
     hour12: false,
   });
-  // Use dim colors for inactive clusters
-  const color = isActive ? getColorForSender(msg.sender) : chalk.dim;
 
-  // Build prefix with optional cluster ID and model (sender_model is set by agent-wrapper._publish)
-  let senderLabel = msg.sender;
-  if (showClusterId && msg.cluster_id) {
-    senderLabel = `${msg.cluster_id}/${msg.sender}`;
-  }
-  const modelSuffix = msg.sender_model ? chalk.dim(` [${msg.sender_model}]`) : '';
-  const prefix = color(`${senderLabel.padEnd(showClusterId ? 25 : 15)} |`) + modelSuffix;
-
-  // Watch mode: ONLY show high-level business events in human-readable format
+  // Watch mode: delegate to watch mode formatter
   if (watchMode) {
-    // Skip low-level topics (too noisy for watch mode)
-    if (msg.topic === 'AGENT_OUTPUT' || msg.topic === 'AGENT_LIFECYCLE') {
-      return;
-    }
-
-    // Clear status line, print message, will be redrawn by status interval
-    process.stdout.write('\r' + ' '.repeat(120) + '\r');
-
-    // Simplified prefix for watch mode: just cluster ID (white = alive, grey = dead)
-    const clusterPrefix = isActive
-      ? chalk.white(`${msg.cluster_id.padEnd(20)} |`)
-      : chalk.dim(`${msg.cluster_id.padEnd(20)} |`);
-
-    // AGENT_ERROR: Show errors prominently
-    if (msg.topic === 'AGENT_ERROR') {
-      const errorMsg = `${msg.sender} ${chalk.bold.red('ERROR')}`;
-      console.log(`${clusterPrefix} ${errorMsg}`);
-      if (msg.content?.text) {
-        console.log(`${clusterPrefix}   ${chalk.red(msg.content.text)}`);
-      }
-      return;
-    }
-
-    // Human-readable event descriptions (with consistent agent colors)
-    const agentColor = getColorForSender(msg.sender);
-    const agentName = agentColor(msg.sender);
-    let eventText = '';
-
-    switch (msg.topic) {
-      case 'ISSUE_OPENED':
-        const issueNum = msg.content?.data?.issue_number || '';
-        const title = msg.content?.data?.title || '';
-        const prompt = msg.content?.data?.prompt || msg.content?.text || '';
-
-        // If it's manual input, show the prompt instead of "Manual Input"
-        const taskDesc = title === 'Manual Input' && prompt ? prompt : title;
-        const truncatedDesc =
-          taskDesc && taskDesc.length > 60 ? taskDesc.substring(0, 60) + '...' : taskDesc;
-
-        eventText = `Started ${issueNum ? `#${issueNum}` : 'task'}${truncatedDesc ? chalk.dim(` - ${truncatedDesc}`) : ''}`;
-        break;
-
-      case 'IMPLEMENTATION_READY':
-        eventText = `${agentName} completed implementation`;
-        break;
-
-      case 'VALIDATION_RESULT':
-        const data = msg.content?.data;
-        const approved = data?.approved === 'true' || data?.approved === true;
-        const status = approved ? chalk.green('APPROVED') : chalk.red('REJECTED');
-        eventText = `${agentName} ${status}`;
-        if (data?.summary && !approved) {
-          eventText += chalk.dim(` - ${data.summary}`);
-        }
-        console.log(`${clusterPrefix} ${eventText}`);
-
-        // Show rejection details (character counts only)
-        if (!approved) {
-          let errors = data.errors;
-          let issues = data.issues;
-
-          if (typeof errors === 'string') {
-            try {
-              errors = JSON.parse(errors);
-            } catch {
-              errors = [];
-            }
-          }
-          if (typeof issues === 'string') {
-            try {
-              issues = JSON.parse(issues);
-            } catch {
-              issues = [];
-            }
-          }
-
-          // Calculate total character counts
-          let errorsCharCount = 0;
-          let issuesCharCount = 0;
-
-          if (Array.isArray(errors) && errors.length > 0) {
-            errorsCharCount = JSON.stringify(errors).length;
-            console.log(
-              `${clusterPrefix}   ${chalk.red('•')} ${errors.length} error${errors.length > 1 ? 's' : ''} (${errorsCharCount} chars)`
-            );
-          }
-
-          if (Array.isArray(issues) && issues.length > 0) {
-            issuesCharCount = JSON.stringify(issues).length;
-            console.log(
-              `${clusterPrefix}   ${chalk.yellow('•')} ${issues.length} issue${issues.length > 1 ? 's' : ''} (${issuesCharCount} chars)`
-            );
-          }
-        }
-        return;
-
-      case 'PR_CREATED':
-        const prNum = msg.content?.data?.pr_number || '';
-        eventText = `${agentName} created PR${prNum ? ` #${prNum}` : ''}`;
-        break;
-
-      case 'PR_MERGED':
-        eventText = `${agentName} merged PR`;
-        break;
-
-      default:
-        // Fallback for unknown topics
-        eventText = `${agentName} ${msg.topic.toLowerCase().replace(/_/g, ' ')}`;
-    }
-
-    console.log(`${clusterPrefix} ${eventText}`);
+    const clusterPrefix = buildClusterPrefix(msg, isActive);
+    formatWatchMode(msg, clusterPrefix);
     return;
   }
 
-  // AGENT_LIFECYCLE: Show agent start/trigger/task events
+  // Normal mode: delegate to appropriate formatter based on topic
   if (msg.topic === 'AGENT_LIFECYCLE') {
-    const data = msg.content?.data;
-    const event = data?.event;
-
-    let icon, eventText;
-    switch (event) {
-      case 'STARTED':
-        icon = chalk.green('▶');
-        const triggers = data.triggers?.join(', ') || 'none';
-        eventText = `started (listening for: ${chalk.dim(triggers)})`;
-        break;
-      case 'TASK_STARTED':
-        icon = chalk.yellow('⚡');
-        eventText = `${chalk.cyan(data.triggeredBy)} → task #${data.iteration} (${chalk.dim(data.model)})`;
-        break;
-      case 'TASK_COMPLETED':
-        icon = chalk.green('✓');
-        eventText = `task #${data.iteration} completed`;
-        break;
-      default:
-        icon = chalk.dim('•');
-        eventText = event || 'unknown event';
-    }
-
-    console.log(`${prefix} ${icon} ${eventText}`);
+    formatAgentLifecycle(msg, prefix);
     return;
   }
 
-  // AGENT_OUTPUT: parse streaming JSON and display all content
+  if (msg.topic === 'AGENT_ERROR') {
+    formatAgentErrorNormal(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'ISSUE_OPENED') {
+    formatIssueOpenedNormal(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'IMPLEMENTATION_READY') {
+    formatImplementationReadyNormal(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'VALIDATION_RESULT') {
+    formatValidationResultNormal(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'PR_CREATED') {
+    formatPrCreated(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'CLUSTER_COMPLETE') {
+    formatClusterComplete(msg, prefix, timestamp);
+    return;
+  }
+
+  if (msg.topic === 'CLUSTER_FAILED') {
+    formatClusterFailed(msg, prefix, timestamp);
+    return;
+  }
+
+  // AGENT_OUTPUT: handle separately (complex streaming logic - kept in main file due to dependencies)
   if (msg.topic === 'AGENT_OUTPUT') {
     // Support both old 'chunk' and new 'line' formats
     const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
@@ -4010,55 +3907,8 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
     return;
   }
 
-  // PR_CREATED: show PR created banner
-  if (msg.topic === 'PR_CREATED') {
-    console.log('');
-    console.log(chalk.bold.green(`${'─'.repeat(60)}`));
-    console.log(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('🔗 PR CREATED')}`);
-    if (msg.content?.data?.pr_url) {
-      console.log(`${prefix} ${chalk.cyan(msg.content.data.pr_url)}`);
-    }
-    if (msg.content?.data?.merged) {
-      console.log(`${prefix} ${chalk.bold.cyan('✓ MERGED')}`);
-    }
-    console.log(chalk.bold.green(`${'─'.repeat(60)}`));
-    return;
-  }
-
-  // CLUSTER_COMPLETE: show completion banner
-  if (msg.topic === 'CLUSTER_COMPLETE') {
-    console.log('');
-    console.log(chalk.bold.green(`${'═'.repeat(60)}`));
-    console.log(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('✅ CLUSTER COMPLETED')}`);
-    if (msg.content?.text) {
-      console.log(`${prefix} ${chalk.white(msg.content.text)}`);
-    }
-    if (msg.content?.data?.reason) {
-      console.log(`${prefix} ${chalk.dim('Reason:')} ${msg.content.data.reason}`);
-    }
-    console.log(chalk.bold.green(`${'═'.repeat(60)}`));
-    console.log('');
-    return;
-  }
-
-  // Other topics: generic display
-  const topicColor = msg.topic.startsWith('TASK_')
-    ? chalk.bold.green
-    : msg.topic.startsWith('ERROR')
-      ? chalk.bold.red
-      : chalk.bold;
-
-  console.log(`${prefix} ${chalk.gray(timestamp)} ${topicColor(msg.topic)}`);
-
-  // Show text content (skip template variables)
-  if (msg.content?.text && !msg.content.text.includes('{{')) {
-    const lines = msg.content.text.split('\n');
-    for (const line of lines) {
-      if (line.trim()) {
-        console.log(`${prefix} ${line}`);
-      }
-    }
-  }
+  // Fallback: generic message display for unknown topics
+  formatGenericMessage(msg, prefix, timestamp);
 }
 
 // Default command handling: if first arg doesn't match a known command, treat it as 'run'
