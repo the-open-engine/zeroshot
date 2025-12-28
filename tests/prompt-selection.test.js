@@ -8,7 +8,7 @@ const mockCluster = { id: 'test-cluster', agents: [] };
 describe('Prompt Selection - Static (backward compat)', function () {
   it('should use string prompt directly', function () {
     const agent = new AgentWrapper(
-      { id: 'test', prompt: 'You are a helpful assistant.' },
+      { id: 'test', timeout: 0, prompt: 'You are a helpful assistant.' },
       mockMessageBus,
       mockCluster,
       { testMode: true, mockSpawnFn: () => {} }
@@ -19,7 +19,7 @@ describe('Prompt Selection - Static (backward compat)', function () {
 
   it('should use object prompt with system property', function () {
     const agent = new AgentWrapper(
-      { id: 'test', prompt: { system: 'You are a code reviewer.' } },
+      { id: 'test', timeout: 0, prompt: { system: 'You are a code reviewer.' } },
       mockMessageBus,
       mockCluster,
       { testMode: true, mockSpawnFn: () => {} }
@@ -30,7 +30,7 @@ describe('Prompt Selection - Static (backward compat)', function () {
 
   it('should return null if no prompt configured', function () {
     const agent = new AgentWrapper(
-      { id: 'test' },
+      { id: 'test', timeout: 0 },
       mockMessageBus,
       mockCluster,
       { testMode: true, mockSpawnFn: () => {} }
@@ -45,6 +45,7 @@ describe('Prompt Selection - initial/subsequent shorthand', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           initial: 'Start fresh. Analyze the task.',
           subsequent: 'Address the feedback.',
@@ -63,6 +64,7 @@ describe('Prompt Selection - initial/subsequent shorthand', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           initial: 'Start fresh. Analyze the task.',
           subsequent: 'Address the feedback.',
@@ -87,6 +89,7 @@ describe('Prompt Selection - initial/subsequent shorthand', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: { initial: 'First iteration only.' },
       },
       mockMessageBus,
@@ -102,6 +105,7 @@ describe('Prompt Selection - initial/subsequent shorthand', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: { subsequent: 'Retry iterations.' },
       },
       mockMessageBus,
@@ -122,6 +126,7 @@ describe('Prompt Selection - Full iterations array', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [
             { match: '1', system: 'First iteration prompt.' },
@@ -146,6 +151,7 @@ describe('Prompt Selection - Full iterations array', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [
             { match: '1-3', system: 'Early iterations.' },
@@ -172,6 +178,7 @@ describe('Prompt Selection - Full iterations array', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [
             { match: '1', system: 'First only.' },
@@ -198,6 +205,7 @@ describe('Prompt Selection - Full iterations array', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [
             { match: '1', system: 'First iteration.' },
@@ -218,6 +226,7 @@ describe('Prompt Selection - Full iterations array', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [
             { match: '1-10', system: 'Early prompt.' },
@@ -240,6 +249,7 @@ describe('Prompt Selection - Error handling', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: {
           iterations: [{ match: '1-2', system: 'Limited range.' }],
         },
@@ -257,7 +267,7 @@ describe('Prompt Selection - Error handling', function () {
     assert.throws(
       () =>
         new AgentWrapper(
-          { id: 'test', prompt: { invalid: 'format' } },
+          { id: 'test', timeout: 0, prompt: { invalid: 'format' } },
           mockMessageBus,
           mockCluster,
           { testMode: true, mockSpawnFn: () => {} }
@@ -270,6 +280,7 @@ describe('Prompt Selection - Error handling', function () {
     const agent = new AgentWrapper(
       {
         id: 'test',
+        timeout: 0,
         prompt: { subsequent: 'Only for 2+.' },
       },
       mockMessageBus,
@@ -292,6 +303,7 @@ Focus only on fixing what was rejected.`;
     const agent = new AgentWrapper(
       {
         id: 'worker',
+        timeout: 0,
         prompt: { initial: initialPrompt, subsequent: subsequentPrompt },
       },
       mockMessageBus,
