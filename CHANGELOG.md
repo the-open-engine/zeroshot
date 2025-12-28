@@ -1,3 +1,10 @@
+## [1.1.3](https://github.com/covibes/zeroshot/compare/v1.1.2...v1.1.3) (2025-12-28)
+
+
+### Bug Fixes
+
+* **publish:** remove tests from prepublishOnly to prevent double execution ([3e11e71](https://github.com/covibes/zeroshot/commit/3e11e71cb722f835634d21f80fee79ea3c29b031))
+
 ## [1.1.2](https://github.com/covibes/zeroshot/compare/v1.1.1...v1.1.2) (2025-12-28)
 
 
