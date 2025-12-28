@@ -127,6 +127,48 @@ class MessageBus extends EventEmitter {
   }
 
   /**
+   * Publish multiple messages atomically
+   * All messages are committed in a single transaction with contiguous timestamps.
+   * Use this for task completion to prevent message interleaving between agents.
+   *
+   * @param {Array<Object>} messages - Array of messages to publish
+   * @returns {Array<Object>} Published messages with IDs
+   */
+  batchPublish(messages) {
+    // Validate all messages
+    for (const message of messages) {
+      if (!message.cluster_id) {
+        throw new Error('cluster_id is required for all messages');
+      }
+      if (!message.topic) {
+        throw new Error('topic is required for all messages');
+      }
+      if (!message.sender) {
+        throw new Error('sender is required for all messages');
+      }
+    }
+
+    // Delegate to ledger's atomic batchAppend
+    const published = this.ledger.batchAppend(messages);
+
+    // Emit to topic-specific listeners for each message
+    for (const msg of published) {
+      this.emit(`topic:${msg.topic}`, msg);
+    }
+
+    return published;
+  }
+
+  /**
+   * Get aggregated token usage by role (passthrough to ledger)
+   * @param {String} cluster_id - Cluster ID
+   * @returns {Object} Token usage aggregated by role with _total key
+   */
+  getTokensByRole(cluster_id) {
+    return this.ledger.getTokensByRole(cluster_id);
+  }
+
+  /**
    * Register a WebSocket client for broadcasts
    * @param {WebSocket} ws - WebSocket connection
    */

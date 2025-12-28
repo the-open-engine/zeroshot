@@ -915,23 +915,44 @@ program
       if (clusters.length > 0) {
         console.log(chalk.bold('\n=== Clusters ==='));
         console.log(
-          `${'ID'.padEnd(25)} ${'State'.padEnd(15)} ${'Agents'.padEnd(10)} ${'Msgs'.padEnd(8)} Created`
+          `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(12)} ${'Cost'.padEnd(8)} Created`
         );
         console.log('-'.repeat(100));
 
+        const orchestrator = getOrchestrator();
         for (const cluster of clusters) {
           const created = new Date(cluster.createdAt).toLocaleString();
+
+          // Get token usage
+          let tokenDisplay = '-';
+          let costDisplay = '-';
+          try {
+            const clusterObj = orchestrator.getCluster(cluster.id);
+            if (clusterObj?.messageBus) {
+              const tokensByRole = clusterObj.messageBus.getTokensByRole(cluster.id);
+              if (tokensByRole?._total?.count > 0) {
+                const total = tokensByRole._total;
+                const totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
+                tokenDisplay = totalTokens.toLocaleString();
+                if (total.totalCostUsd > 0) {
+                  costDisplay = '$' + total.totalCostUsd.toFixed(3);
+                }
+              }
+            }
+          } catch {
+            /* Token tracking not available */
+          }
 
           // Highlight zombie clusters in red
           const stateDisplay =
             cluster.state === 'zombie'
-              ? chalk.red(cluster.state.padEnd(15))
-              : cluster.state.padEnd(15);
+              ? chalk.red(cluster.state.padEnd(12))
+              : cluster.state.padEnd(12);
 
           const rowColor = cluster.state === 'zombie' ? chalk.red : (s) => s;
 
           console.log(
-            `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount.toString().padEnd(10)} ${cluster.messageCount.toString().padEnd(8)} ${created}`
+            `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount.toString().padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${created}`
           );
         }
       } else {
@@ -987,6 +1008,24 @@ program
         }
         console.log(`Created: ${new Date(status.createdAt).toLocaleString()}`);
         console.log(`Messages: ${status.messageCount}`);
+
+        // Show token usage if available
+        try {
+          const cluster = getOrchestrator().getCluster(id);
+          if (cluster?.messageBus) {
+            const tokensByRole = cluster.messageBus.getTokensByRole(id);
+            const tokenLines = formatTokenUsage(tokensByRole);
+            if (tokenLines) {
+              console.log('');
+              for (const line of tokenLines) {
+                console.log(line);
+              }
+            }
+          }
+        } catch {
+          /* Token tracking not available */
+        }
+
         console.log(`\nAgents:`);
 
         for (const agent of status.agents) {
@@ -1553,16 +1592,29 @@ Key bindings:
           for (const clusterId of clusters) {
             const agents = await socketDiscovery.listAttachableAgents(clusterId);
             console.log(`  ${clusterId}`);
-            // Get agent models from orchestrator (if available)
+            // Get agent models and token usage from orchestrator (if available)
             let agentModels = {};
+            let tokenUsageLines = null;
             try {
               const orchestrator = OrchestratorModule.getInstance();
               const status = orchestrator.getStatus(clusterId);
               for (const a of status.agents) {
                 agentModels[a.id] = a.model;
               }
+              // Get token usage from message bus
+              const cluster = orchestrator.getCluster(clusterId);
+              if (cluster?.messageBus) {
+                const tokensByRole = cluster.messageBus.getTokensByRole(clusterId);
+                tokenUsageLines = formatTokenUsage(tokensByRole);
+              }
             } catch {
-              /* orchestrator not running - models unavailable */
+              /* orchestrator not running - models/tokens unavailable */
+            }
+            // Display token usage if available
+            if (tokenUsageLines) {
+              for (const line of tokenUsageLines) {
+                console.log(`    ${line}`);
+              }
             }
             for (const agent of agents) {
               const modelLabel = agentModels[agent] ? chalk.dim(` [${agentModels[agent]}]`) : '';
@@ -3085,6 +3137,55 @@ function formatTaskSummary(issueOpened, maxLen = 35) {
   const text = issueOpened.content?.text || 'Task';
   const firstLine = text.split('\n').find((l) => l.trim() && !l.startsWith('#')) || 'Task';
   return firstLine.slice(0, maxLen) + (firstLine.length > maxLen ? '...' : '');
+}
+
+// Format token usage for display
+function formatTokenUsage(tokensByRole) {
+  if (!tokensByRole || !tokensByRole._total || tokensByRole._total.count === 0) {
+    return null;
+  }
+
+  const total = tokensByRole._total;
+  const lines = [];
+
+  // Format numbers with commas
+  const fmt = (n) => n.toLocaleString();
+
+  // Total line
+  const inputTokens = total.inputTokens || 0;
+  const outputTokens = total.outputTokens || 0;
+  const totalTokens = inputTokens + outputTokens;
+  const cost = total.totalCostUsd || 0;
+
+  lines.push(
+    chalk.dim('Tokens: ') +
+      chalk.cyan(fmt(totalTokens)) +
+      chalk.dim(' (') +
+      chalk.green(fmt(inputTokens)) +
+      chalk.dim(' in / ') +
+      chalk.yellow(fmt(outputTokens)) +
+      chalk.dim(' out)')
+  );
+
+  // Cost line (if available)
+  if (cost > 0) {
+    lines.push(chalk.dim('Cost: ') + chalk.green('$' + cost.toFixed(4)));
+  }
+
+  // Per-role breakdown (compact)
+  const roles = Object.keys(tokensByRole).filter((r) => r !== '_total');
+  if (roles.length > 1) {
+    const roleStats = roles
+      .map((role) => {
+        const r = tokensByRole[role];
+        const roleTotal = (r.inputTokens || 0) + (r.outputTokens || 0);
+        return `${role}: ${fmt(roleTotal)}`;
+      })
+      .join(chalk.dim(' | '));
+    lines.push(chalk.dim('By role: ') + roleStats);
+  }
+
+  return lines;
 }
 
 // Set terminal title (works in most terminals)

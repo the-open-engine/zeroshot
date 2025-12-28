@@ -282,6 +282,8 @@ async function executeTask(agent, triggeringMessage) {
       });
 
       // Publish TOKEN_USAGE event for aggregation and tracking
+      // CRITICAL: Include taskId for causal linking - allows consumers to group
+      // messages by task regardless of interleaved timing from async hooks
       if (result.tokenUsage) {
         agent.messageBus.publish({
           cluster_id: agent.cluster.id,
@@ -294,6 +296,7 @@ async function executeTask(agent, triggeringMessage) {
               role: agent.role,
               model: agent._selectModel(),
               iteration: agent.iteration,
+              taskId: agent.currentTaskId, // Causal linking for message ordering
               ...result.tokenUsage,
             },
           },

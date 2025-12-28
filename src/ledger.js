@@ -117,6 +117,84 @@ class Ledger extends EventEmitter {
   }
 
   /**
+   * Append multiple messages atomically using a transaction
+   * All messages get contiguous timestamps and are committed together.
+   * If any insert fails, the entire batch is rolled back.
+   *
+   * Use this for task completion messages to prevent interleaving:
+   * - TOKEN_USAGE, TASK_COMPLETED, and hook messages published atomically
+   * - Other agents' messages cannot appear between them
+   *
+   * @param {Array<Object>} messages - Array of message objects
+   * @returns {Array<Object>} Array of appended messages with generated IDs
+   */
+  batchAppend(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return [];
+    }
+
+    // Create transaction function - all inserts happen atomically
+    const insertMany = this.db.transaction((msgs) => {
+      const results = [];
+      const baseTimestamp = Date.now();
+
+      for (let i = 0; i < msgs.length; i++) {
+        const message = msgs[i];
+        const id = message.id || `msg_${crypto.randomBytes(16).toString('hex')}`;
+        // Use incrementing timestamps to preserve order within batch
+        const timestamp = message.timestamp || (baseTimestamp + i);
+
+        const record = {
+          id,
+          timestamp,
+          topic: message.topic,
+          sender: message.sender,
+          receiver: message.receiver || 'broadcast',
+          content_text: message.content?.text || null,
+          content_data: message.content?.data ? JSON.stringify(message.content.data) : null,
+          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+          cluster_id: message.cluster_id,
+        };
+
+        this.stmts.insert.run(
+          record.id,
+          record.timestamp,
+          record.topic,
+          record.sender,
+          record.receiver,
+          record.content_text,
+          record.content_data,
+          record.metadata,
+          record.cluster_id
+        );
+
+        results.push(this._deserializeMessage(record));
+      }
+
+      return results;
+    });
+
+    try {
+      // Execute transaction (atomic - all or nothing)
+      const appendedMessages = insertMany(messages);
+
+      // Invalidate cache
+      this.cache.clear();
+
+      // Emit events for subscriptions AFTER transaction commits
+      // This ensures listeners see consistent state
+      for (const fullMessage of appendedMessages) {
+        this.emit('message', fullMessage);
+        this.emit(`topic:${fullMessage.topic}`, fullMessage);
+      }
+
+      return appendedMessages;
+    } catch (error) {
+      throw new Error(`Failed to batch append messages: ${error.message}`);
+    }
+  }
+
+  /**
    * Query messages with filters
    * @param {Object} criteria - Query criteria
    * @returns {Array} Matching messages
@@ -267,6 +345,77 @@ class Ledger extends EventEmitter {
   getAll(cluster_id) {
     const rows = this.stmts.getAll.all(cluster_id);
     return rows.map((row) => this._deserializeMessage(row));
+  }
+
+  /**
+   * Get aggregated token usage by agent role
+   * Queries TOKEN_USAGE messages and sums tokens per role
+   * @param {String} cluster_id - Cluster ID
+   * @returns {Object} Token usage aggregated by role
+   *   Example: {
+   *     implementation: { inputTokens: 5000, outputTokens: 2000, totalCostUsd: 0.05, count: 3 },
+   *     validator: { inputTokens: 3000, outputTokens: 1500, totalCostUsd: 0.03, count: 2 },
+   *     _total: { inputTokens: 8000, outputTokens: 3500, totalCostUsd: 0.08, count: 5 }
+   *   }
+   */
+  getTokensByRole(cluster_id) {
+    if (!cluster_id) {
+      throw new Error('cluster_id is required for getTokensByRole');
+    }
+
+    // Query all TOKEN_USAGE messages for this cluster
+    const sql = `SELECT * FROM messages WHERE cluster_id = ? AND topic = 'TOKEN_USAGE' ORDER BY timestamp ASC`;
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(cluster_id);
+
+    const byRole = {};
+    const total = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      totalCostUsd: 0,
+      count: 0,
+    };
+
+    for (const row of rows) {
+      const message = this._deserializeMessage(row);
+      const data = message.content?.data || {};
+      const role = data.role || 'unknown';
+
+      // Initialize role bucket if needed
+      if (!byRole[role]) {
+        byRole[role] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          totalCostUsd: 0,
+          count: 0,
+        };
+      }
+
+      // Aggregate tokens for this role
+      byRole[role].inputTokens += data.inputTokens || 0;
+      byRole[role].outputTokens += data.outputTokens || 0;
+      byRole[role].cacheReadInputTokens += data.cacheReadInputTokens || 0;
+      byRole[role].cacheCreationInputTokens += data.cacheCreationInputTokens || 0;
+      byRole[role].totalCostUsd += data.totalCostUsd || 0;
+      byRole[role].count += 1;
+
+      // Aggregate totals
+      total.inputTokens += data.inputTokens || 0;
+      total.outputTokens += data.outputTokens || 0;
+      total.cacheReadInputTokens += data.cacheReadInputTokens || 0;
+      total.cacheCreationInputTokens += data.cacheCreationInputTokens || 0;
+      total.totalCostUsd += data.totalCostUsd || 0;
+      total.count += 1;
+    }
+
+    // Add total as special _total key
+    byRole._total = total;
+
+    return byRole;
   }
 
   /**
