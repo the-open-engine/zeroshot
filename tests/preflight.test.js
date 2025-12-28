@@ -358,7 +358,14 @@ describe('Preflight Validation', function () {
     });
   });
 
-  describe('CLI Integration', () => {
+  describe('CLI Integration', function () {
+    // Skip in CI - these tests spawn real CLI processes and require Claude CLI to be installed
+    before(function () {
+      if (process.env.CI) {
+        this.skip();
+      }
+    });
+
     it('should show preflight passed message on valid run', function () {
       this.timeout(15000);
 

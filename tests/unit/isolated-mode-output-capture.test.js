@@ -16,10 +16,12 @@ const IsolationManager = require('../../src/isolation-manager');
 const path = require('path');
 const fs = require('fs');
 
-// This test requires Docker to be available
+// This test requires Docker and full isolation mode support
+// Skip in CI - isolation mode tests require more than just Docker being available
 const hasDocker = IsolationManager.isDockerAvailable();
+const isCI = process.env.CI === 'true' || process.env.CI === '1';
 
-(hasDocker ? describe : describe.skip)('Isolated Mode Output Capture', () => {
+(hasDocker && !isCI ? describe : describe.skip)('Isolated Mode Output Capture', () => {
   let orchestrator;
   const storageDir = path.join(__dirname, '.test-storage');
 
