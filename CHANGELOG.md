@@ -1,3 +1,12 @@
+## [1.1.2](https://github.com/covibes/zeroshot/compare/v1.1.1...v1.1.2) (2025-12-28)
+
+
+### Bug Fixes
+
+* **ci:** resolve ESLint violations and status-footer test failures ([0d794f9](https://github.com/covibes/zeroshot/commit/0d794f98aa10d2492d8ab0af516bb1e5abee0566))
+* **isolation:** handle missing/directory .gitconfig in CI environments ([3d754e4](https://github.com/covibes/zeroshot/commit/3d754e4a02d40e2fd902d97d17a6532ba247f780))
+* **workflow:** extract tarball filename correctly from npm pack output ([3cf48a3](https://github.com/covibes/zeroshot/commit/3cf48a3ddf4f1938916c7ed5a2be1796003a988f))
+
 ## [1.1.1](https://github.com/covibes/zeroshot/compare/v1.1.0...v1.1.1) (2025-12-28)
 
 
