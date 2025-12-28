@@ -191,7 +191,7 @@ class IsolationManager {
                 try {
                   installResult = await this.execInContainer(
                     clusterId,
-                    ['sh', '-c', 'npm install --no-audit --no-fund 2>&1'],
+                    ['sh', '-c', 'npm_config_engine_strict=false npm install --no-audit --no-fund'],
                     {}
                   );
 
@@ -201,16 +201,18 @@ class IsolationManager {
                   }
 
                   // Failed - retry if not last attempt
+                  // Use stderr if available, otherwise stdout (npm writes some errors to stdout)
+                  const errorOutput = (installResult.stderr || installResult.stdout || '').slice(0, 500);
                   if (attempt < maxRetries) {
                     const delay = baseDelay * Math.pow(2, attempt - 1);
                     console.warn(
                       `[IsolationManager] ⚠️ npm install failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
                     );
-                    console.warn(`[IsolationManager] Error: ${installResult.stderr.slice(0, 200)}`);
+                    console.warn(`[IsolationManager] Error: ${errorOutput}`);
                     await new Promise((_resolve) => setTimeout(_resolve, delay));
                   } else {
                     console.warn(
-                      `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${installResult.stderr.slice(0, 200)}`
+                      `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${errorOutput}`
                     );
                   }
                 } catch (execErr) {
@@ -342,8 +344,9 @@ class IsolationManager {
    * @param {number} [timeout=10] - Timeout in seconds before SIGKILL
    * @returns {Promise<void>}
    */
-  stopContainer(clusterId, timeout = 10) {
-    const containerId = this.containers.get(clusterId);
+  stopContainer(clusterId, timeout = 10, explicitContainerId = null) {
+    // Use explicit containerId (from restored state) or in-memory Map
+    const containerId = explicitContainerId || this.containers.get(clusterId);
     if (!containerId) {
       return; // Already stopped or never started
     }
@@ -369,8 +372,9 @@ class IsolationManager {
    * @param {boolean} [force=false] - Force remove running container
    * @returns {Promise<void>}
    */
-  removeContainer(clusterId, force = false) {
-    const containerId = this.containers.get(clusterId);
+  removeContainer(clusterId, force = false, explicitContainerId = null) {
+    // Use explicit containerId (from restored state) or in-memory Map
+    const containerId = explicitContainerId || this.containers.get(clusterId);
     if (!containerId) {
       return;
     }

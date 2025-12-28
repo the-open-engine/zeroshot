@@ -6,6 +6,10 @@
 
 FROM node:20-slim
 
+# Upgrade npm to fix Arborist isDescendantOf bug (npm 10.x crash on complex peer deps)
+# See: https://github.com/npm/cli/issues/7682
+RUN npm install -g npm@latest
+
 # Version pinning for infrastructure tools
 ARG AWS_CLI_VERSION=2.15.10
 ARG TERRAFORM_VERSION=1.6.6
@@ -19,6 +23,9 @@ ARG TFSEC_VERSION=1.28.4
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    # Build tools for native modules (node-gyp needs make, gcc, g++)
+    build-essential \
+    python3-dev \
     ca-certificates \
     gnupg \
     unzip \
