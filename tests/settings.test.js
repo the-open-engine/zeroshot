@@ -65,7 +65,7 @@ describe('Settings System', function () {
     assert.strictEqual(DEFAULT_SETTINGS.defaultModel, 'sonnet');
     assert.strictEqual(DEFAULT_SETTINGS.defaultConfig, 'conductor-bootstrap');
     assert.strictEqual(DEFAULT_SETTINGS.defaultIsolation, false);
-    assert.strictEqual(DEFAULT_SETTINGS.strictSchema, false);
+    assert.strictEqual(DEFAULT_SETTINGS.strictSchema, true);
     assert.strictEqual(DEFAULT_SETTINGS.logLevel, 'normal');
   });
 
@@ -84,7 +84,7 @@ describe('Settings System', function () {
     assert.strictEqual(settings.defaultModel, 'sonnet');
     assert.strictEqual(settings.defaultConfig, 'conductor-bootstrap');
     assert.strictEqual(settings.defaultIsolation, false);
-    assert.strictEqual(settings.strictSchema, false);
+    assert.strictEqual(settings.strictSchema, true);
     assert.strictEqual(settings.logLevel, 'normal');
   });
 
