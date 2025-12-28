@@ -288,7 +288,7 @@ function getNetworkStateDarwin(pid) {
  * @param {number} [options.samplePeriodMs=1000] - Sample period for rate calculations (Linux only)
  * @returns {Promise<ProcessMetrics>}
  */
-async function getProcessMetrics(pid, options = {}) {
+function getProcessMetrics(pid, options = {}) {
   const samplePeriodMs = options.samplePeriodMs || 1000;
 
   if (PLATFORM === 'darwin') {
@@ -398,7 +398,7 @@ async function getProcessMetricsLinuxAggregated(pid, samplePeriodMs) {
  * @param {number} pid - Root process ID
  * @returns {Promise<ProcessMetrics>}
  */
-async function getProcessMetricsDarwinAggregated(pid) {
+function getProcessMetricsDarwinAggregated(pid) {
   const allPids = [pid, ...getChildPids(pid)];
   let totalCpuPercent = 0;
   let totalMemoryKB = 0;

@@ -10,7 +10,7 @@
  * allowing normal terminal output to scroll above it.
  */
 
-const { getProcessMetrics, formatMetrics, getStateIcon } = require('./process-metrics');
+const { getProcessMetrics } = require('./process-metrics');
 
 // ANSI escape codes
 const ESC = '\x1b';
