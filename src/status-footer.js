@@ -86,6 +86,7 @@ class StatusFooter {
     this.clusterId = null;
     this.clusterState = 'initializing';
     this.startTime = Date.now();
+    this.messageBus = null; // MessageBus for token usage tracking
 
     // Robust resize handling state
     this.isRendering = false; // Render lock - prevents concurrent renders
@@ -137,23 +138,60 @@ class StatusFooter {
   }
 
   /**
-   * Clear all footer lines (uses last known height for safety)
+   * Generate move cursor ANSI sequence (returns string, doesn't write)
+   * Used for atomic buffered writes to prevent interleaving
+   * @param {number} row - 1-based row
+   * @param {number} col - 1-based column
+   * @returns {string} ANSI escape sequence
    * @private
    */
-  _clearFooterArea() {
+  _moveToStr(row, col) {
+    return `${CSI}${row};${col}H`;
+  }
+
+  /**
+   * Generate clear line ANSI sequence (returns string, doesn't write)
+   * Used for atomic buffered writes to prevent interleaving
+   * @param {number} row - 1-based row number
+   * @returns {string} ANSI escape sequence
+   * @private
+   */
+  _clearLineStr(row) {
+    return `${CSI}${row};1H${CLEAR_LINE}`;
+  }
+
+  /**
+   * Generate ANSI sequences to clear all footer lines (returns string)
+   * Used for atomic buffered writes to prevent interleaving
+   * @returns {string} ANSI escape sequences
+   * @private
+   */
+  _clearFooterAreaStr() {
     const { rows } = this.getTerminalSize();
     // Use max of current and last footer height to ensure full cleanup
     const heightToClear = Math.max(this.footerHeight, this.lastFooterHeight, 3);
     const startRow = Math.max(1, rows - heightToClear + 1);
 
+    let buffer = '';
     for (let row = startRow; row <= rows; row++) {
-      this._clearLine(row);
+      buffer += this._clearLineStr(row);
     }
+    return buffer;
+  }
+
+  /**
+   * Clear all footer lines (uses last known height for safety)
+   * Uses single atomic write to prevent interleaving with other processes
+   * @private
+   */
+  _clearFooterArea() {
+    process.stdout.write(this._clearFooterAreaStr());
   }
 
   /**
    * Set up scroll region to reserve space for footer
    * ROBUST: Clears footer area first, resets to full screen, then sets new region
+   * Uses single atomic write to prevent interleaving with other processes
    */
   setupScrollRegion() {
     if (!this.isTTY()) return;
@@ -178,29 +216,44 @@ class StatusFooter {
 
     const scrollEnd = rows - this.footerHeight;
 
-    // CRITICAL: Save cursor before any manipulation
-    process.stdout.write(SAVE_CURSOR);
-    process.stdout.write(HIDE_CURSOR);
+    // BUILD ENTIRE OUTPUT INTO SINGLE BUFFER for atomic write
+    let buffer = '';
 
-    // Step 1: Reset scroll region to full screen first (prevents artifacts)
-    process.stdout.write(`${CSI}1;${rows}r`);
+    // Step 1: Save cursor before any manipulation
+    buffer += SAVE_CURSOR;
+    buffer += HIDE_CURSOR;
 
-    // Step 2: Clear footer area completely (prevents ghosting)
-    this._clearFooterArea();
+    // Step 2: Reset scroll region to full screen first (prevents artifacts)
+    buffer += `${CSI}1;${rows}r`;
 
-    // Step 3: Set new scroll region (lines 1 to scrollEnd)
-    process.stdout.write(`${CSI}1;${scrollEnd}r`);
+    // Step 3: Clear footer area completely (prevents ghosting)
+    buffer += this._clearFooterAreaStr();
 
-    // Step 4: Move cursor to bottom of scroll region (safe position)
-    process.stdout.write(`${CSI}${scrollEnd};1H`);
+    // Step 4: Set new scroll region (lines 1 to scrollEnd)
+    buffer += `${CSI}1;${scrollEnd}r`;
 
-    // Restore cursor and show it
-    process.stdout.write(RESTORE_CURSOR);
-    process.stdout.write(SHOW_CURSOR);
+    // Step 5: Move cursor to bottom of scroll region (safe position)
+    buffer += this._moveToStr(scrollEnd, 1);
+
+    // Step 6: Restore cursor and show it
+    buffer += RESTORE_CURSOR;
+    buffer += SHOW_CURSOR;
+
+    // SINGLE ATOMIC WRITE - prevents interleaving
+    process.stdout.write(buffer);
 
     this.scrollRegionSet = true;
     this.lastKnownRows = rows;
     this.lastKnownCols = cols;
+  }
+
+  /**
+   * Generate reset scroll region string (returns string, doesn't write)
+   * @private
+   */
+  _resetScrollRegionStr() {
+    const { rows } = this.getTerminalSize();
+    return `${CSI}1;${rows}r`;
   }
 
   /**
@@ -209,8 +262,7 @@ class StatusFooter {
   resetScrollRegion() {
     if (!this.isTTY()) return;
 
-    const { rows } = this.getTerminalSize();
-    process.stdout.write(`${CSI}1;${rows}r`);
+    process.stdout.write(this._resetScrollRegionStr());
     this.scrollRegionSet = false;
   }
 
@@ -249,6 +301,14 @@ class StatusFooter {
    */
   setCluster(clusterId) {
     this.clusterId = clusterId;
+  }
+
+  /**
+   * Set message bus for token usage tracking
+   * @param {object} messageBus - MessageBus instance with getTokensByRole()
+   */
+  setMessageBus(messageBus) {
+    this.messageBus = messageBus;
   }
 
   /**
@@ -401,32 +461,37 @@ class StatusFooter {
       const agentRows = this.buildAgentRows(executingAgents, cols);
       const summaryLine = this.buildSummaryLine(cols);
 
-      // Save cursor, render footer, restore cursor
-      process.stdout.write(SAVE_CURSOR);
-      process.stdout.write(HIDE_CURSOR);
+      // BUILD ENTIRE OUTPUT INTO SINGLE BUFFER for atomic write
+      // This prevents interleaving with other processes writing to stdout
+      let buffer = '';
+      buffer += SAVE_CURSOR;
+      buffer += HIDE_CURSOR;
 
       // Render from top of footer area
       let currentRow = rows - this.footerHeight + 1;
 
       // Header line
-      this.moveTo(currentRow++, 1);
-      process.stdout.write(CLEAR_LINE);
-      process.stdout.write(`${COLORS.bgBlack}${headerLine}${COLORS.reset}`);
+      buffer += this._moveToStr(currentRow++, 1);
+      buffer += CLEAR_LINE;
+      buffer += `${COLORS.bgBlack}${headerLine}${COLORS.reset}`;
 
       // Agent rows
       for (const agentRow of agentRows) {
-        this.moveTo(currentRow++, 1);
-        process.stdout.write(CLEAR_LINE);
-        process.stdout.write(`${COLORS.bgBlack}${agentRow}${COLORS.reset}`);
+        buffer += this._moveToStr(currentRow++, 1);
+        buffer += CLEAR_LINE;
+        buffer += `${COLORS.bgBlack}${agentRow}${COLORS.reset}`;
       }
 
       // Summary line (with bottom border)
-      this.moveTo(currentRow, 1);
-      process.stdout.write(CLEAR_LINE);
-      process.stdout.write(`${COLORS.bgBlack}${summaryLine}${COLORS.reset}`);
+      buffer += this._moveToStr(currentRow, 1);
+      buffer += CLEAR_LINE;
+      buffer += `${COLORS.bgBlack}${summaryLine}${COLORS.reset}`;
 
-      process.stdout.write(RESTORE_CURSOR);
-      process.stdout.write(SHOW_CURSOR);
+      buffer += RESTORE_CURSOR;
+      buffer += SHOW_CURSOR;
+
+      // SINGLE ATOMIC WRITE - prevents interleaving
+      process.stdout.write(buffer);
     } finally {
       this.isRendering = false;
 
@@ -554,6 +619,21 @@ class StatusFooter {
     const total = this.agents.size;
     parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.green}${executing}/${total}${COLORS.reset} active`);
 
+    // Token cost (from message bus)
+    if (this.messageBus && this.clusterId) {
+      try {
+        const tokensByRole = this.messageBus.getTokensByRole(this.clusterId);
+        const totalCost = tokensByRole?._total?.totalCostUsd || 0;
+        if (totalCost > 0) {
+          // Format: $0.05 or $1.23 or $12.34
+          const costStr = totalCost < 0.01 ? '<$0.01' : `$${totalCost.toFixed(2)}`;
+          parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.yellow}${costStr}${COLORS.reset}`);
+        }
+      } catch {
+        // Ignore errors - token tracking is optional
+      }
+    }
+
     // Aggregate metrics
     let totalCpu = 0;
     let totalMem = 0;
@@ -621,7 +701,9 @@ class StatusFooter {
     process.stdout.on('resize', this._debouncedResize);
 
     // Start refresh interval
+    // Guard: Skip if previous render still running (prevents overlapping renders)
     this.intervalId = setInterval(() => {
+      if (this.isRendering) return;
       this.render();
     }, this.refreshInterval);
 
@@ -642,17 +724,25 @@ class StatusFooter {
     process.stdout.removeListener('resize', this._debouncedResize);
 
     if (this.isTTY() && !this.hidden) {
+      // BUILD SINGLE BUFFER for atomic shutdown write
+      // Prevents interleaving with agent output during cleanup
+      let buffer = '';
+
       // Reset scroll region
-      this.resetScrollRegion();
+      buffer += this._resetScrollRegionStr();
+      this.scrollRegionSet = false;
 
       // Clear all footer lines
-      this._clearFooterArea();
+      buffer += this._clearFooterAreaStr();
 
-      // Move cursor to safe position
+      // Move cursor to safe position and show cursor
       const { rows } = this.getTerminalSize();
       const startRow = rows - this.footerHeight + 1;
-      this.moveTo(startRow, 1);
-      process.stdout.write(SHOW_CURSOR);
+      buffer += this._moveToStr(startRow, 1);
+      buffer += SHOW_CURSOR;
+
+      // SINGLE ATOMIC WRITE
+      process.stdout.write(buffer);
     }
   }
 
@@ -662,8 +752,11 @@ class StatusFooter {
   hide() {
     if (!this.isTTY()) return;
 
-    this.resetScrollRegion();
-    this._clearFooterArea();
+    // Single atomic write for hide operation
+    let buffer = this._resetScrollRegionStr();
+    this.scrollRegionSet = false;
+    buffer += this._clearFooterAreaStr();
+    process.stdout.write(buffer);
   }
 
   /**

@@ -613,6 +613,7 @@ Input formats:
         });
         statusFooter.setCluster(clusterId);
         statusFooter.setClusterState('running');
+        statusFooter.setMessageBus(cluster.messageBus);
 
         // Subscribe to AGENT_LIFECYCLE to track agent states and PIDs
         const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic('AGENT_LIFECYCLE', (msg) => {
