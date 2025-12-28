@@ -121,40 +121,41 @@ class IsolationManager {
       // Mount fresh Claude config to node user's home (read-write - Claude CLI writes settings, todos, etc.)
       '-v',
       `${clusterConfigDir}:/home/node/.claude`,
-      // Mount gh credentials (read-write - gh auth setup-git needs to write)
-      '-v',
-      `${this._getGhConfigDir()}:/home/node/.config/gh`,
-      // Mount git config (read-only - for git identity)
-      '-v',
-      `${this._getGitConfigPath()}:/home/node/.gitconfig:ro`,
-      // Mount AWS credentials (read-only)
-      '-v',
-      `${this._getAwsConfigDir()}:/home/node/.aws:ro`,
-      // Mount Kubernetes config (read-only)
-      '-v',
-      `${this._getKubeConfigDir()}:/home/node/.kube:ro`,
-      // Mount SSH keys (read-only)
-      '-v',
-      `${this._getSshDir()}:/home/node/.ssh:ro`,
-      // Mount Terraform plugin cache (read-write for caching)
-      '-v',
-      `${this._getTerraformPluginDir()}:/home/node/.terraform.d`,
-      // Environment variables for infrastructure tasks
+    ];
+
+    // Add optional volume mounts (skip if path doesn't exist or isn't mountable)
+    // Each mount is [hostPath, containerPath, options?]
+    const optionalMounts = [
+      [this._getGhConfigDir(), '/home/node/.config/gh', null], // gh credentials (read-write)
+      [this._getGitConfigPath(), '/home/node/.gitconfig', 'ro'], // git config (read-only)
+      [this._getAwsConfigDir(), '/home/node/.aws', 'ro'], // AWS credentials (read-only)
+      [this._getKubeConfigDir(), '/home/node/.kube', 'ro'], // Kubernetes config (read-only)
+      [this._getSshDir(), '/home/node/.ssh', 'ro'], // SSH keys (read-only)
+      [this._getTerraformPluginDir(), '/home/node/.terraform.d', null], // Terraform cache (read-write)
+    ];
+
+    for (const [hostPath, containerPath, options] of optionalMounts) {
+      if (hostPath && fs.existsSync(hostPath)) {
+        const mountSpec = options ? `${hostPath}:${containerPath}:${options}` : `${hostPath}:${containerPath}`;
+        args.push('-v', mountSpec);
+      }
+    }
+
+    // Environment variables and final args
+    args.push(
       '-e',
       `AWS_REGION=${process.env.AWS_REGION || 'eu-north-1'}`,
       '-e',
       `AWS_PROFILE=${process.env.AWS_PROFILE || 'default'}`,
       '-e',
       'AWS_PAGER=',
-      // Set working directory
       '-w',
       '/workspace',
-      // Keep container running
       image,
       'tail',
       '-f',
-      '/dev/null',
-    ];
+      '/dev/null'
+    );
 
     return new Promise((resolve, reject) => {
       const proc = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -779,10 +780,22 @@ class IsolationManager {
 
   /**
    * Get git config file path (for commit identity)
+   * Returns null if .gitconfig doesn't exist or is a directory (e.g., on GitHub Actions)
    * @private
    */
   _getGitConfigPath() {
-    return path.join(os.homedir(), '.gitconfig');
+    const gitConfigPath = path.join(os.homedir(), '.gitconfig');
+    try {
+      const stat = fs.statSync(gitConfigPath);
+      if (stat.isFile()) {
+        return gitConfigPath;
+      }
+      // .gitconfig exists but is a directory (GitHub Actions runner has this issue)
+      return null;
+    } catch {
+      // .gitconfig doesn't exist
+      return null;
+    }
   }
 
   /**
