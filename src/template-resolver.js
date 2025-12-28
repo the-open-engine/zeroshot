@@ -43,8 +43,11 @@ class TemplateResolver {
     // Validate required params
     this._validateParams(template, params);
 
+    // Apply defaults for missing params (e.g., timeout: 0)
+    const paramsWithDefaults = this._applyDefaults(template, params);
+
     // Deep clone and resolve
-    const resolved = this._resolveObject(JSON.parse(JSON.stringify(template)), params);
+    const resolved = this._resolveObject(JSON.parse(JSON.stringify(template)), paramsWithDefaults);
 
     // Filter out conditional agents that don't meet their condition
     if (resolved.agents) {
@@ -84,6 +87,25 @@ class TemplateResolver {
     if (missing.length > 0) {
       throw new Error(`Missing required params: ${missing.join(', ')}`);
     }
+  }
+
+  /**
+   * Apply template defaults for any missing params
+   * @private
+   * @param {any} template
+   * @param {any} params
+   * @returns {any} params with defaults applied
+   */
+  _applyDefaults(template, params) {
+    if (!template.params) return params;
+
+    const result = { ...params };
+    for (const [name, schema] of Object.entries(template.params)) {
+      if (result[name] === undefined && schema.default !== undefined) {
+        result[name] = schema.default;
+      }
+    }
+    return result;
   }
 
   /**
