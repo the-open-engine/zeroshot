@@ -51,6 +51,72 @@ function sanitizeErrorMessage(error) {
   return error;
 }
 
+/**
+ * Strip timestamp prefix from log lines.
+ * Log lines may have format: [epochMs]{json...} or [epochMs]text
+ *
+ * @param {string} line - Raw log line
+ * @returns {string} Line content without timestamp prefix, empty string for invalid input
+ */
+function stripTimestampPrefix(line) {
+  if (!line || typeof line !== 'string') return '';
+  const trimmed = line.trim().replace(/\r$/, '');
+  if (!trimmed) return '';
+  const match = trimmed.match(/^\[(\d{13})\](.*)$/);
+  return match ? match[2] : trimmed;
+}
+
+/**
+ * Extract error context from task output.
+ * Shared by both isolated and non-isolated modes.
+ *
+ * @param {Object} params - Extraction parameters
+ * @param {string} params.output - Full task output
+ * @param {string} [params.statusOutput] - Status command output (non-isolated only)
+ * @param {string} params.taskId - Task ID for error messages
+ * @param {boolean} [params.isNotFound=false] - True if task was not found
+ * @returns {string|null} Sanitized error context or null if extraction failed
+ */
+function extractErrorContext({ output, statusOutput, taskId, isNotFound = false }) {
+  // Task not found - explicit error
+  if (isNotFound) {
+    return sanitizeErrorMessage(`Task ${taskId} not found (may have crashed or been killed)`);
+  }
+
+  // Try status output first (only available in non-isolated mode)
+  if (statusOutput) {
+    const statusErrorMatch = statusOutput.match(/Error:\s*(.+)/);
+    if (statusErrorMatch) {
+      return sanitizeErrorMessage(statusErrorMatch[1].trim());
+    }
+  }
+
+  // Fall back to extracting from output (last 500 chars)
+  const lastOutput = (output || '').slice(-500).trim();
+  if (!lastOutput) {
+    return sanitizeErrorMessage('Task failed with no output (check if task was interrupted or timed out)');
+  }
+
+  // Common error patterns
+  const errorPatterns = [
+    /Error:\s*(.+)/i,
+    /error:\s*(.+)/i,
+    /failed:\s*(.+)/i,
+    /Exception:\s*(.+)/i,
+    /panic:\s*(.+)/i,
+  ];
+
+  for (const pattern of errorPatterns) {
+    const match = lastOutput.match(pattern);
+    if (match) {
+      return sanitizeErrorMessage(match[1].slice(0, 200));
+    }
+  }
+
+  // No pattern matched - include last portion of output
+  return sanitizeErrorMessage(`Task failed. Last output: ${lastOutput.slice(-200)}`);
+}
+
 // Track if we've already ensured the AskUserQuestion hook is installed
 let askUserQuestionHookInstalled = false;
 
@@ -68,10 +134,11 @@ function extractTokenUsage(output) {
 
   // Find the result line containing usage data
   for (const line of lines) {
-    if (!line.trim()) continue;
+    const content = stripTimestampPrefix(line);
+    if (!content) continue;
 
     try {
-      const event = JSON.parse(line.trim());
+      const event = JSON.parse(content);
       if (event.type === 'result') {
         const usage = event.usage || {};
         return {
@@ -527,14 +594,45 @@ function followClaudeTaskLogs(agent, taskId) {
         // Track exec failures - if status command keeps failing, something is wrong
         if (error) {
           consecutiveExecFailures++;
-          if (consecutiveExecFailures === MAX_CONSECUTIVE_FAILURES) {
+          if (consecutiveExecFailures >= MAX_CONSECUTIVE_FAILURES) {
             console.error(
-              `[Agent ${agent.id}] ⚠️ Status polling failed ${MAX_CONSECUTIVE_FAILURES} times consecutively!`
+              `[Agent ${agent.id}] ⚠️ Status polling failed ${MAX_CONSECUTIVE_FAILURES} times consecutively! STOPPING.`
             );
             console.error(`  Command: ${ctPath} status ${taskId}`);
             console.error(`  Error: ${error.message}`);
             console.error(`  Stderr: ${stderr || 'none'}`);
             console.error(`  This may indicate zeroshot is not in PATH or task storage is corrupted.`);
+
+            // Stop polling and resolve with failure
+            if (!resolved) {
+              resolved = true;
+              clearInterval(pollInterval);
+              clearInterval(statusCheckInterval);
+              agent.currentTask = null;
+
+              // Publish error for orchestrator/resume
+              agent._publish({
+                topic: 'AGENT_ERROR',
+                receiver: 'broadcast',
+                content: {
+                  text: `Task ${taskId} polling failed after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
+                  data: {
+                    taskId,
+                    error: 'polling_timeout',
+                    attempts: consecutiveExecFailures,
+                    role: agent.role,
+                    iteration: agent.iteration,
+                  },
+                },
+              });
+
+              resolve({
+                success: false,
+                output,
+                error: `Status polling failed ${MAX_CONSECUTIVE_FAILURES} times - task may not exist`,
+              });
+            }
+            return;
           }
           return; // Keep polling - might be transient
         }
@@ -566,47 +664,15 @@ function followClaudeTaskLogs(agent, taskId) {
             clearInterval(statusCheckInterval);
             agent.currentTask = null;
 
-            // Extract meaningful error context when task fails
-            let errorContext = null;
-            if (!success) {
-              // Try to extract error from status output first
-              const statusErrorMatch = stdout.match(/Error:\s*(.+)/);
-              if (statusErrorMatch) {
-                errorContext = statusErrorMatch[1].trim();
-              } else {
-                // Fall back to last 500 chars of output (likely contains the failure reason)
-                const lastOutput = output.slice(-500).trim();
-                if (lastOutput) {
-                  // Look for common error patterns in output
-                  const errorPatterns = [
-                    /Error:\s*(.+)/i,
-                    /error:\s*(.+)/i,
-                    /failed:\s*(.+)/i,
-                    /Exception:\s*(.+)/i,
-                    /panic:\s*(.+)/i,
-                  ];
-                  for (const pattern of errorPatterns) {
-                    const match = lastOutput.match(pattern);
-                    if (match) {
-                      errorContext = match[1].slice(0, 200);
-                      break;
-                    }
-                  }
-                  // If no pattern matched, include last portion of output
-                  if (!errorContext) {
-                    errorContext = `Task failed. Last output: ${lastOutput.slice(-200)}`;
-                  }
-                } else {
-                  errorContext =
-                    'Task failed with no output (check if task was interrupted or timed out)';
-                }
-              }
-            }
+            // Extract error context using shared helper
+            const errorContext = !success
+              ? extractErrorContext({ output, statusOutput: stdout, taskId })
+              : null;
 
             resolve({
               success,
               output,
-              error: sanitizeErrorMessage(errorContext),
+              error: errorContext,
               tokenUsage: extractTokenUsage(output),
             });
           }, 500);
@@ -912,12 +978,14 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
               `zeroshot status ${taskId} 2>/dev/null || echo "not_found"`,
             ]);
 
-            const statusOutput = statusResult.stdout.toLowerCase();
-            if (
-              statusOutput.includes('success') ||
-              statusOutput.includes('error') ||
-              statusOutput.includes('not_found')
-            ) {
+            // Use same regex patterns as non-isolated mode (lines 649-650)
+            // CRITICAL: Don't use substring matching - it matches "error" in "is_error":false
+            const statusOutput = statusResult.stdout;
+            const isSuccess = /Status:\s+completed/i.test(statusOutput);
+            const isError = /Status:\s+failed/i.test(statusOutput);
+            const isNotFound = statusOutput.includes('not_found');
+
+            if (isSuccess || isError || isNotFound) {
               // Task finished - read final output and resolve
               const finalReadResult = await manager.execInContainer(clusterId, [
                 'sh',
@@ -940,13 +1008,23 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
               cleanup();
               taskExited = true;
 
-              // Parse result from output (same logic as non-isolated mode)
+              // Determine success status
+              const success = isSuccess && !isError;
+
+              // Extract error context using shared helper
+              const errorContext = !success
+                ? extractErrorContext({ output: fullOutput, taskId, isNotFound })
+                : null;
+
+              // Parse result from output
               const parsedResult = agent._parseResultOutput(fullOutput);
 
               resolve({
+                success,
                 output: fullOutput,
                 taskId,
                 result: parsedResult,
+                error: errorContext,
                 tokenUsage: extractTokenUsage(fullOutput),
               });
             }
@@ -995,11 +1073,14 @@ function parseResultOutput(agent, output) {
   let trimmedOutput = output.trim();
 
   // IMPORTANT: Output is NDJSON (one JSON object per line) from streaming log
+  // Lines may have timestamp prefix: [epochMs]{json...}
   // Find the line with "type":"result" which contains the actual result
   const lines = trimmedOutput.split('\n');
   const resultLine = lines.find((line) => {
     try {
-      const obj = JSON.parse(line.trim());
+      const content = stripTimestampPrefix(line);
+      if (!content.startsWith('{')) return false;
+      const obj = JSON.parse(content);
       return obj.type === 'result';
     } catch {
       return false;
@@ -1007,13 +1088,15 @@ function parseResultOutput(agent, output) {
   });
 
   // Use the result line if found, otherwise use last non-empty line
+  // CRITICAL: Strip timestamp prefix before assigning to trimmedOutput
   if (resultLine) {
-    trimmedOutput = resultLine.trim();
+    trimmedOutput = stripTimestampPrefix(resultLine);
   } else if (lines.length > 1) {
-    // Fallback: use last non-empty line
+    // Fallback: use last non-empty line (also strip timestamp)
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim()) {
-        trimmedOutput = lines[i].trim();
+      const content = stripTimestampPrefix(lines[i]);
+      if (content) {
+        trimmedOutput = content;
         break;
       }
     }
