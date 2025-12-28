@@ -1,3 +1,11 @@
+## [1.1.4](https://github.com/covibes/zeroshot/compare/v1.1.3...v1.1.4) (2025-12-28)
+
+
+### Bug Fixes
+
+* **cli:** read version from package.json instead of hardcoded value ([a6e0e57](https://github.com/covibes/zeroshot/commit/a6e0e570feeaffa64dbc46d494eeef000f32b708))
+* **cli:** resolve streaming mode crash and refactor message formatters ([efb9264](https://github.com/covibes/zeroshot/commit/efb9264ce0d3ede0eb7d502d4625694c2c525230))
+
 ## [1.1.3](https://github.com/covibes/zeroshot/compare/v1.1.2...v1.1.3) (2025-12-28)
 
 
