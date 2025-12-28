@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/covibes/zeroshot/compare/v1.3.0...v1.4.0) (2025-12-28)
+
+
+### Features
+
+* **status-footer:** atomic writes + token cost display ([7baf0c2](https://github.com/covibes/zeroshot/commit/7baf0c228dd5f3489013f75a1782abe6cbe39661))
+
 # [1.3.0](https://github.com/covibes/zeroshot/compare/v1.2.0...v1.3.0) (2025-12-28)
 
 
