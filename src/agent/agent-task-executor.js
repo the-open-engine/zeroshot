@@ -55,6 +55,44 @@ function sanitizeErrorMessage(error) {
 let askUserQuestionHookInstalled = false;
 
 /**
+ * Extract token usage from NDJSON output.
+ * Looks for the 'result' event line which contains usage data.
+ *
+ * @param {string} output - Full NDJSON output from Claude CLI
+ * @returns {Object|null} Token usage data or null if not found
+ */
+function extractTokenUsage(output) {
+  if (!output) return null;
+
+  const lines = output.split('\n');
+
+  // Find the result line containing usage data
+  for (const line of lines) {
+    if (!line.trim()) continue;
+
+    try {
+      const event = JSON.parse(line.trim());
+      if (event.type === 'result') {
+        const usage = event.usage || {};
+        return {
+          inputTokens: usage.input_tokens || 0,
+          outputTokens: usage.output_tokens || 0,
+          cacheReadInputTokens: usage.cache_read_input_tokens || 0,
+          cacheCreationInputTokens: usage.cache_creation_input_tokens || 0,
+          totalCostUsd: event.total_cost_usd || null,
+          durationMs: event.duration_ms || null,
+          modelUsage: event.modelUsage || null,
+        };
+      }
+    } catch {
+      // Not valid JSON, continue
+    }
+  }
+
+  return null;
+}
+
+/**
  * Ensure the AskUserQuestion blocking hook is installed in user's Claude config.
  * This adds defense-in-depth by blocking the tool at the Claude CLI level.
  * Modifies ~/.claude/settings.json and copies hook script to ~/.claude/hooks/
@@ -569,6 +607,7 @@ function followClaudeTaskLogs(agent, taskId) {
               success,
               output,
               error: sanitizeErrorMessage(errorContext),
+              tokenUsage: extractTokenUsage(output),
             });
           }, 500);
         }
@@ -590,6 +629,7 @@ function followClaudeTaskLogs(agent, taskId) {
           success: false,
           output,
           error: reason,
+          tokenUsage: extractTokenUsage(output),
         });
       },
     };
@@ -907,6 +947,7 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
                 output: fullOutput,
                 taskId,
                 result: parsedResult,
+                tokenUsage: extractTokenUsage(fullOutput),
               });
             }
           } catch (pollErr) {

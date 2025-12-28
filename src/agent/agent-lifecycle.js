@@ -278,7 +278,27 @@ async function executeTask(agent, triggeringMessage) {
         iteration: agent.iteration,
         success: true,
         taskId: agent.currentTaskId,
+        tokenUsage: result.tokenUsage || null,
       });
+
+      // Publish TOKEN_USAGE event for aggregation and tracking
+      if (result.tokenUsage) {
+        agent.messageBus.publish({
+          cluster_id: agent.cluster.id,
+          topic: 'TOKEN_USAGE',
+          sender: agent.id,
+          content: {
+            text: `${agent.id} used ${result.tokenUsage.inputTokens} input + ${result.tokenUsage.outputTokens} output tokens`,
+            data: {
+              agentId: agent.id,
+              role: agent.role,
+              model: agent._selectModel(),
+              iteration: agent.iteration,
+              ...result.tokenUsage,
+            },
+          },
+        });
+      }
 
       // Execute onComplete hook
       await executeHook({
