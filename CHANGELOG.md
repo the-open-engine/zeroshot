@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/covibes/zeroshot/compare/v1.1.0...v1.1.1) (2025-12-28)
+
+
+### Bug Fixes
+
+* **lint:** resolve require-await and unused-imports errors ([852c8a0](https://github.com/covibes/zeroshot/commit/852c8a0e9076eb5403105c6f319e66e53c27fd6d))
+
 # [1.1.0](https://github.com/covibes/zeroshot/compare/v1.0.2...v1.1.0) (2025-12-28)
 
 
