@@ -956,18 +956,19 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
           }
         }, 500);
 
-        // Safety timeout (same as non-isolated mode)
-        const timeoutMs = agent.timeout || 300000; // 5 minutes default
-        setTimeout(() => {
-          if (!taskExited) {
-            cleanup();
-            reject(
-              new Error(
-                `Task ${taskId} timeout after ${timeoutMs}ms (isolated mode)`
-              )
-            );
-          }
-        }, timeoutMs);
+        // Safety timeout (0 = no timeout, task runs until completion)
+        if (agent.timeout > 0) {
+          setTimeout(() => {
+            if (!taskExited) {
+              cleanup();
+              reject(
+                new Error(
+                  `Task ${taskId} timeout after ${agent.timeout}ms (isolated mode)`
+                )
+              );
+            }
+          }, agent.timeout);
+        }
       })
       .catch((err) => {
         cleanup();

@@ -11,10 +11,9 @@
 // Default max iterations (high limit - let the user decide when to give up)
 const DEFAULT_MAX_ITERATIONS = 100;
 
-// Task timeout - DISABLED (tasks run until completion or explicit kill)
-// Originally: 2 hours - caused premature termination of long-running tasks
-// Now: Infinity - tasks only stop on completion, explicit kill, or external error
-const DEFAULT_TASK_TIMEOUT_MS = Infinity;
+// NO DEFAULT TIMEOUT - agent configs MUST specify timeout explicitly
+// Use 0 to disable timeout (task runs until completion or explicit kill)
+// Use positive number for timeout in milliseconds
 
 // Stale detection - ENABLED by default using multi-indicator analysis (safe from false positives)
 // Multi-indicator approach checks: process state, CPU usage, context switches, network I/O
@@ -85,13 +84,27 @@ function validateAgentConfig(config, options = {}) {
     throw new Error(`Agent "${config.id}": invalid prompt format`);
   }
 
+  // REQUIRED: timeout field (no fallback)
+  // Use 0 to disable timeout, or positive number for timeout in milliseconds
+  if (config.timeout === undefined || config.timeout === null) {
+    throw new Error(
+      `Agent "${config.id}": timeout field is REQUIRED. ` +
+        `Use 0 to disable timeout, or specify milliseconds (e.g., 300000 for 5 minutes).`
+    );
+  }
+  if (typeof config.timeout !== 'number' || config.timeout < 0) {
+    throw new Error(
+      `Agent "${config.id}": timeout must be a non-negative number (got ${config.timeout}).`
+    );
+  }
+
   // Build normalized config
   const normalizedConfig = {
     ...config,
     modelConfig,
     promptConfig,
     maxIterations: config.maxIterations || DEFAULT_MAX_ITERATIONS,
-    timeout: config.timeout || DEFAULT_TASK_TIMEOUT_MS,
+    timeout: config.timeout, // NO FALLBACK - explicitly required above
     staleDuration: config.staleDuration || DEFAULT_STALE_DURATION_MS,
     enableLivenessCheck: config.enableLivenessCheck ?? DEFAULT_LIVENESS_CHECK_ENABLED, // On by default, opt-out with false
   };
@@ -115,7 +128,6 @@ function validateAgentConfig(config, options = {}) {
 module.exports = {
   validateAgentConfig,
   DEFAULT_MAX_ITERATIONS,
-  DEFAULT_TASK_TIMEOUT_MS,
   DEFAULT_STALE_DURATION_MS,
   DEFAULT_LIVENESS_CHECK_ENABLED,
 };

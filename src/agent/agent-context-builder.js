@@ -54,6 +54,15 @@ function buildContext({
   context += `- If unsure between "fix the code" vs "relax the rules" → ALWAYS fix the code\n`;
   context += `- If unsure between "do more" vs "do less" → ALWAYS do what's required, nothing more\n\n`;
 
+  // MINIMAL OUTPUT - No verbose prose for background agents
+  context += `## 📝 OUTPUT STYLE - MINIMAL\n\n`;
+  context += `You are a background agent. The human CANNOT interact with you.\n`;
+  context += `- NO explanatory prose ("Let me explain...", "I'll now...")\n`;
+  context += `- NO step-by-step narration\n`;
+  context += `- YES: Brief status updates ("Implementing auth", "Fixed 3 errors")\n`;
+  context += `- YES: Error reports with actionable info\n`;
+  context += `- YES: Final summary of changes made\n\n`;
+
   // Add prompt from config (system prompt, instructions, output format)
   // If selectedPrompt is provided (iteration-based), use it directly
   // Otherwise fall back to legacy config.prompt handling

@@ -8,6 +8,11 @@
       "default": "haiku"
     },
     "max_tokens": { "type": "number", "default": 50000 },
+    "timeout": {
+      "type": "number",
+      "default": 0,
+      "description": "Task timeout in milliseconds (0 = no timeout)"
+    },
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
@@ -19,8 +24,9 @@
       "id": "worker",
       "role": "implementation",
       "model": "{{worker_model}}",
+      "timeout": "{{timeout}}",
       "prompt": {
-        "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are an agent handling a {{task_type}} task.\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'INQUIRY'}}\nThis is an INQUIRY - exploration and understanding only.\n- Answer questions about the codebase\n- Explore files and explain how things work\n- DO NOT make any changes\n- Provide clear, accurate information\n{{/if}}\n\n{{#if task_type == 'TASK'}}\nThis is a TRIVIAL TASK - quick execution.\n- Straightforward, well-defined action\n- Quick to complete (< 15 minutes)\n- Low risk of breaking existing functionality\n- Execute efficiently, verify it works, done\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nThis is a TRIVIAL DEBUG - simple fix.\n- Obvious issue with clear solution\n- Fix the root cause, not symptoms\n- Verify the fix works\n{{/if}}"
+        "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\n## 🚫 GIT OPERATIONS - FORBIDDEN\n\nNEVER commit, push, or create PRs. You only modify files.\nThe git-pusher agent handles ALL git operations AFTER validators approve.\n\n- ❌ NEVER run: git add, git commit, git push, gh pr create\n- ❌ NEVER suggest committing changes\n- ✅ Only modify files and publish your completion message when done\n\nYou are an agent handling a {{task_type}} task.\n\n## TASK TYPE: {{task_type}}\n\n{{#if task_type == 'INQUIRY'}}\nThis is an INQUIRY - exploration and understanding only.\n- Answer questions about the codebase\n- Explore files and explain how things work\n- DO NOT make any changes\n- Provide clear, accurate information\n{{/if}}\n\n{{#if task_type == 'TASK'}}\nThis is a TRIVIAL TASK - quick execution.\n- Straightforward, well-defined action\n- Quick to complete (< 15 minutes)\n- Low risk of breaking existing functionality\n- Execute efficiently, verify it works, done\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nThis is a TRIVIAL DEBUG - simple fix.\n- Obvious issue with clear solution\n- Fix the root cause, not symptoms\n- Verify the fix works\n{{/if}}"
       },
       "contextStrategy": {
         "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
@@ -41,6 +47,7 @@
     {
       "id": "completion-detector",
       "role": "orchestrator",
+      "timeout": 0,
       "triggers": [{ "topic": "CLUSTER_COMPLETE", "action": "stop_cluster" }]
     }
   ]
