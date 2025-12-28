@@ -27,7 +27,8 @@
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test",
+    "prepare": "husky"
   },
   "c8": {
     "reporter": [
@@ -109,6 +110,7 @@
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-unused-imports": "^4.3.0",
+    "husky": "^9.1.7",
     "mocha": "^11.7.5",
     "semantic-release": "^25.0.2",
     "sinon": "^21.0.0",

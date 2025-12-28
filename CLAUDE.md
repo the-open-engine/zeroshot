@@ -486,3 +486,37 @@ zeroshot --completion >> ~/.bashrc   # Shell completion
 - Workaround: Long tasks write to file, periodically check
 
 **What IS streamed:** Claude's text (`text_delta`), thinking, tool invocations (NOT tool results)
+
+## 🔴 POSTMORTEM: Release v1.0.3 Friction (2025-12-28)
+
+**What happened:** npm release v1.0.3 was blocked multiple times by:
+1. Manual git tag `v1.0.3` blocking semantic-release (had to delete tag, re-trigger)
+2. ESLint errors not caught until semantic-release CI stage:
+   - `require-await`: async functions without await (`getProcessMetrics`, `getProcessMetricsDarwinAggregated`)
+   - `no-return-await`: `return await` is redundant (first fix attempt)
+   - `unused-imports/no-unused-vars`: `formatMetrics`, `getStateIcon` unused in status-footer.js
+3. Git push rejected after semantic-release committed - required `git pull --rebase`
+
+**Root cause:** CI workflow runs lint but doesn't block pushes to main. Semantic-release runs `npm run lint` before publish (correct behavior), but developer didn't run lint locally before pushing.
+
+**Time wasted:** ~30 minutes debugging multiple workflow failures.
+
+### Prevention Checklist
+
+| Issue | Prevention |
+|-------|------------|
+| Manual tags blocking semantic-release | NEVER create version tags manually. Let semantic-release do it. |
+| Lint errors reaching CI | Run `npm run lint` locally before pushing |
+| `require-await` | If function returns Promise, don't mark it async (just return the Promise) |
+| `no-return-await` | Never `return await x` - just `return x` (await is redundant on return) |
+| Unused imports | ESLint catches these - run lint locally |
+| Git push rejected | After semantic-release commits, `git pull --rebase origin main` before next push |
+
+### Fix Implemented
+
+**Added husky pre-push hook** (`.husky/pre-push`) that runs:
+```bash
+npm run lint && npm run typecheck
+```
+
+Now lint/typecheck errors are caught BEFORE push, not after CI runs.
