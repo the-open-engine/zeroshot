@@ -45,7 +45,8 @@ jobs:
       - name: Verify package before release
         run: |
           # Create tarball (respects 'files' array in package.json)
-          TARBALL=$(npm pack)
+          # Extract last line only (tarball filename) to avoid capturing prepare script output
+          TARBALL=$(npm pack | tail -1)
           echo "Created: $TARBALL"
 
           # Install from tarball (simulates npm install -g @covibes/zeroshot)
