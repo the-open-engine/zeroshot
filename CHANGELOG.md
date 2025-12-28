@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/covibes/zeroshot/compare/v1.2.0...v1.3.0) (2025-12-28)
+
+
+### Features
+
+* **planner:** enforce explicit acceptance criteria via JSON schema ([73009d9](https://github.com/covibes/zeroshot/commit/73009d9ad33e46e546721680be6d2cab9c9e46f0)), closes [#16](https://github.com/covibes/zeroshot/issues/16)
+
 # [1.2.0](https://github.com/covibes/zeroshot/compare/v1.1.4...v1.2.0) (2025-12-28)
 
 
