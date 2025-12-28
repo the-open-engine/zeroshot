@@ -11,9 +11,9 @@
 // Default max iterations (high limit - let the user decide when to give up)
 const DEFAULT_MAX_ITERATIONS = 100;
 
-// NO DEFAULT TIMEOUT - agent configs MUST specify timeout explicitly
-// Use 0 to disable timeout (task runs until completion or explicit kill)
+// Default timeout: 0 = no timeout (task runs until completion or explicit kill)
 // Use positive number for timeout in milliseconds
+const DEFAULT_TIMEOUT = 0;
 
 // Stale detection - ENABLED by default using multi-indicator analysis (safe from false positives)
 // Multi-indicator approach checks: process state, CPU usage, context switches, network I/O
@@ -84,15 +84,16 @@ function validateAgentConfig(config, options = {}) {
     throw new Error(`Agent "${config.id}": invalid prompt format`);
   }
 
-  // REQUIRED: timeout field (no fallback)
-  // Use 0 to disable timeout, or positive number for timeout in milliseconds
-  if (config.timeout === undefined || config.timeout === null) {
-    throw new Error(
-      `Agent "${config.id}": timeout field is REQUIRED. ` +
-        `Use 0 to disable timeout, or specify milliseconds (e.g., 300000 for 5 minutes).`
-    );
+  // Default timeout to 0 (no timeout) if not specified
+  // Use positive number for timeout in milliseconds
+  // ROBUST: Handle undefined, null, AND string values from template resolution
+  if (config.timeout === undefined || config.timeout === null || config.timeout === '') {
+    config.timeout = DEFAULT_TIMEOUT;
+  } else {
+    // Coerce to number (handles string "0" from template resolution)
+    config.timeout = Number(config.timeout);
   }
-  if (typeof config.timeout !== 'number' || config.timeout < 0) {
+  if (!Number.isFinite(config.timeout) || config.timeout < 0) {
     throw new Error(
       `Agent "${config.id}": timeout must be a non-negative number (got ${config.timeout}).`
     );
@@ -104,7 +105,7 @@ function validateAgentConfig(config, options = {}) {
     modelConfig,
     promptConfig,
     maxIterations: config.maxIterations || DEFAULT_MAX_ITERATIONS,
-    timeout: config.timeout, // NO FALLBACK - explicitly required above
+    timeout: config.timeout, // Defaults to 0 (no timeout) if not specified
     staleDuration: config.staleDuration || DEFAULT_STALE_DURATION_MS,
     enableLivenessCheck: config.enableLivenessCheck ?? DEFAULT_LIVENESS_CHECK_ENABLED, // On by default, opt-out with false
   };
