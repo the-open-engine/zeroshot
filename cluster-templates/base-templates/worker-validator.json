@@ -14,6 +14,11 @@
     },
     "max_iterations": { "type": "number", "default": 3 },
     "max_tokens": { "type": "number", "default": 100000 },
+    "timeout": {
+      "type": "number",
+      "default": 0,
+      "description": "Task timeout in milliseconds (0 = no timeout)"
+    },
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
@@ -25,6 +30,7 @@
       "id": "worker",
       "role": "implementation",
       "model": "{{worker_model}}",
+      "timeout": "{{timeout}}",
       "prompt": {
         "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\n## 🚫 GIT OPERATIONS - FORBIDDEN\n\nNEVER commit, push, or create PRs. You only modify files.\nThe git-pusher agent handles ALL git operations AFTER validators approve.\n\n- ❌ NEVER run: git add, git commit, git push, gh pr create\n- ❌ NEVER suggest committing changes\n- ✅ Only modify files and publish your completion message when done\n\nYou are an implementation agent for a SIMPLE {{task_type}} task.\n\n## FIRST ITERATION\n\n{{#if task_type == 'TASK'}}\nImplement the requested feature/change:\n- Well-defined scope (one feature, one fix)\n- Standard patterns apply\n- Complete the implementation fully\n{{/if}}\n\n{{#if task_type == 'DEBUG'}}\nInvestigate and fix the issue:\n- Reproduce the problem\n- Find the root cause (not just symptoms)\n- Apply the fix\n- Verify it works\n{{/if}}\n\n{{#if task_type == 'INQUIRY'}}\nResearch and provide detailed answers:\n- Explore relevant code and documentation\n- Explain how things work\n- Provide accurate, complete information\n{{/if}}\n\n## SUBSEQUENT ITERATIONS (after rejection)\n\nYou are being called back because validators REJECTED your implementation. This is NOT a minor issue.\n\n### FIX LIKE A SENIOR ENGINEER\n\n1. **STOP AND UNDERSTAND FIRST**\n   - Read ALL VALIDATION_RESULT messages completely\n   - Understand WHY each issue exists, not just WHAT it is\n   - Trace the root cause - don't patch symptoms\n\n2. **FIX PROPERLY - NO SHORTCUTS**\n   - Fix the ACTUAL problem, not the error message\n   - If your approach was wrong, redesign it - don't add band-aids\n   - Consider architectural implications of your fix\n   - A senior dev would be embarrassed to submit a half-fix\n\n3. **VERIFY YOUR FIX**\n   - Test your changes actually work\n   - Check you didn't break anything else\n   - If unsure, investigate before committing\n\n### MINDSET\n- Validators are senior engineers reviewing your code\n- They found REAL problems - take them seriously\n- Shortcuts will be caught and rejected again"
       },
@@ -64,6 +70,7 @@
       "id": "validator",
       "role": "validator",
       "model": "{{validator_model}}",
+      "timeout": "{{timeout}}",
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -115,6 +122,7 @@
     {
       "id": "completion-detector",
       "role": "orchestrator",
+      "timeout": 0,
       "triggers": [
         {
           "topic": "VALIDATION_RESULT",
