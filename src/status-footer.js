@@ -8,6 +8,13 @@
  *
  * Uses ANSI escape sequences to maintain a fixed footer while
  * allowing normal terminal output to scroll above it.
+ *
+ * ROBUST RESIZE HANDLING:
+ * - Debounced resize events (100ms) prevent rapid-fire redraws
+ * - Render lock prevents concurrent renders from corrupting state
+ * - Full footer clear before scroll region reset prevents artifacts
+ * - Dimension checkpointing skips unnecessary redraws
+ * - Graceful degradation for terminals < 8 rows
  */
 
 const { getProcessMetrics } = require('./process-metrics');
@@ -38,6 +45,20 @@ const COLORS = {
 };
 
 /**
+ * Debounce function - prevents rapid-fire calls during resize
+ * @param {Function} fn - Function to debounce
+ * @param {number} ms - Debounce delay in milliseconds
+ * @returns {Function} Debounced function
+ */
+function debounce(fn, ms) {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), ms);
+  };
+}
+
+/**
  * @typedef {Object} AgentState
  * @property {string} id - Agent ID
  * @property {string} state - Agent state (idle, executing, etc.)
@@ -65,6 +86,17 @@ class StatusFooter {
     this.clusterId = null;
     this.clusterState = 'initializing';
     this.startTime = Date.now();
+
+    // Robust resize handling state
+    this.isRendering = false; // Render lock - prevents concurrent renders
+    this.pendingResize = false; // Queue resize if render in progress
+    this.lastKnownRows = 0; // Track terminal dimensions for change detection
+    this.lastKnownCols = 0;
+    this.minRows = 8; // Minimum rows for footer display (graceful degradation)
+    this.hidden = false; // True when terminal too small for footer
+
+    // Debounced resize handler (100ms) - prevents rapid-fire redraws
+    this._debouncedResize = debounce(() => this._handleResize(), 100);
   }
 
   /**
@@ -96,21 +128,79 @@ class StatusFooter {
   }
 
   /**
+   * Clear a specific line completely
+   * @param {number} row - 1-based row number
+   * @private
+   */
+  _clearLine(row) {
+    process.stdout.write(`${CSI}${row};1H${CLEAR_LINE}`);
+  }
+
+  /**
+   * Clear all footer lines (uses last known height for safety)
+   * @private
+   */
+  _clearFooterArea() {
+    const { rows } = this.getTerminalSize();
+    // Use max of current and last footer height to ensure full cleanup
+    const heightToClear = Math.max(this.footerHeight, this.lastFooterHeight, 3);
+    const startRow = Math.max(1, rows - heightToClear + 1);
+
+    for (let row = startRow; row <= rows; row++) {
+      this._clearLine(row);
+    }
+  }
+
+  /**
    * Set up scroll region to reserve space for footer
+   * ROBUST: Clears footer area first, resets to full screen, then sets new region
    */
   setupScrollRegion() {
     if (!this.isTTY()) return;
 
-    const { rows } = this.getTerminalSize();
+    const { rows, cols } = this.getTerminalSize();
+
+    // Graceful degradation: hide footer if terminal too small
+    if (rows < this.minRows) {
+      if (!this.hidden) {
+        this.hidden = true;
+        // Reset to full screen scroll
+        process.stdout.write(`${CSI}1;${rows}r`);
+        this.scrollRegionSet = false;
+      }
+      return;
+    }
+
+    // Restore footer if terminal grew large enough
+    if (this.hidden) {
+      this.hidden = false;
+    }
+
     const scrollEnd = rows - this.footerHeight;
 
-    // Set scroll region (lines 1 to scrollEnd)
+    // CRITICAL: Save cursor before any manipulation
+    process.stdout.write(SAVE_CURSOR);
+    process.stdout.write(HIDE_CURSOR);
+
+    // Step 1: Reset scroll region to full screen first (prevents artifacts)
+    process.stdout.write(`${CSI}1;${rows}r`);
+
+    // Step 2: Clear footer area completely (prevents ghosting)
+    this._clearFooterArea();
+
+    // Step 3: Set new scroll region (lines 1 to scrollEnd)
     process.stdout.write(`${CSI}1;${scrollEnd}r`);
 
-    // Move cursor to top of scroll region
-    process.stdout.write(`${CSI}1;1H`);
+    // Step 4: Move cursor to bottom of scroll region (safe position)
+    process.stdout.write(`${CSI}${scrollEnd};1H`);
+
+    // Restore cursor and show it
+    process.stdout.write(RESTORE_CURSOR);
+    process.stdout.write(SHOW_CURSOR);
 
     this.scrollRegionSet = true;
+    this.lastKnownRows = rows;
+    this.lastKnownCols = cols;
   }
 
   /**
@@ -122,6 +212,35 @@ class StatusFooter {
     const { rows } = this.getTerminalSize();
     process.stdout.write(`${CSI}1;${rows}r`);
     this.scrollRegionSet = false;
+  }
+
+  /**
+   * Handle terminal resize event
+   * Called via debounced wrapper to prevent rapid-fire redraws
+   * @private
+   */
+  _handleResize() {
+    if (!this.isTTY()) return;
+
+    const { rows, cols } = this.getTerminalSize();
+
+    // Skip if dimensions haven't actually changed (debounce may still fire)
+    if (rows === this.lastKnownRows && cols === this.lastKnownCols) {
+      return;
+    }
+
+    // If render in progress, queue resize for after
+    if (this.isRendering) {
+      this.pendingResize = true;
+      return;
+    }
+
+    // Update dimensions and reconfigure
+    this.lastKnownRows = rows;
+    this.lastKnownCols = cols;
+
+    this.setupScrollRegion();
+    this.render();
   }
 
   /**
@@ -223,72 +342,101 @@ class StatusFooter {
 
   /**
    * Render the footer
+   * ROBUST: Uses render lock to prevent concurrent renders from corrupting state
    */
   async render() {
     if (!this.enabled || !this.isTTY()) return;
 
-    const { rows, cols } = this.getTerminalSize();
+    // Graceful degradation: don't render if hidden
+    if (this.hidden) return;
 
-    // Collect metrics for all agents with PIDs
-    for (const [agentId, agent] of this.agents) {
-      if (agent.pid) {
-        try {
-          const metrics = await getProcessMetrics(agent.pid, { samplePeriodMs: 500 });
-          this.metricsCache.set(agentId, metrics);
-        } catch {
-          // Process may have exited
-          this.metricsCache.delete(agentId);
+    // Render lock: prevent concurrent renders
+    if (this.isRendering) {
+      return;
+    }
+    this.isRendering = true;
+
+    try {
+      const { rows, cols } = this.getTerminalSize();
+
+      // Double-check terminal size (may have changed since last check)
+      if (rows < this.minRows) {
+        this.hidden = true;
+        this.resetScrollRegion();
+        return;
+      }
+
+      // Collect metrics for all agents with PIDs
+      for (const [agentId, agent] of this.agents) {
+        if (agent.pid) {
+          try {
+            const metrics = await getProcessMetrics(agent.pid, { samplePeriodMs: 500 });
+            this.metricsCache.set(agentId, metrics);
+          } catch {
+            // Process may have exited
+            this.metricsCache.delete(agentId);
+          }
         }
       }
-    }
 
-    // Get executing agents for display
-    const executingAgents = Array.from(this.agents.entries())
-      .filter(([, agent]) => agent.state === 'executing')
-      .slice(0, this.maxAgentRows);
+      // Get executing agents for display
+      const executingAgents = Array.from(this.agents.entries())
+        .filter(([, agent]) => agent.state === 'executing')
+        .slice(0, this.maxAgentRows);
 
-    // Calculate dynamic footer height: header + agent rows + separator + summary
-    // Minimum 3 lines (header + "no agents" message + summary)
-    const agentRowCount = Math.max(1, executingAgents.length);
-    const newHeight = 2 + agentRowCount + 1; // header + agents + summary (separator merged with summary)
+      // Calculate dynamic footer height: header + agent rows + summary
+      // Minimum 3 lines (header + "no agents" message + summary)
+      const agentRowCount = Math.max(1, executingAgents.length);
+      const newHeight = 2 + agentRowCount + 1; // header + agents + summary
 
-    // Update scroll region if height changed
-    if (newHeight !== this.footerHeight) {
-      this.footerHeight = newHeight;
-      this.setupScrollRegion();
-    }
+      // Update scroll region if height changed
+      if (newHeight !== this.footerHeight) {
+        this.lastFooterHeight = this.footerHeight;
+        this.footerHeight = newHeight;
+        this.setupScrollRegion();
+      }
 
-    // Build footer lines
-    const headerLine = this.buildHeaderLine(cols);
-    const agentRows = this.buildAgentRows(executingAgents, cols);
-    const summaryLine = this.buildSummaryLine(cols);
+      // Build footer lines
+      const headerLine = this.buildHeaderLine(cols);
+      const agentRows = this.buildAgentRows(executingAgents, cols);
+      const summaryLine = this.buildSummaryLine(cols);
 
-    // Save cursor, render footer, restore cursor
-    process.stdout.write(SAVE_CURSOR);
-    process.stdout.write(HIDE_CURSOR);
+      // Save cursor, render footer, restore cursor
+      process.stdout.write(SAVE_CURSOR);
+      process.stdout.write(HIDE_CURSOR);
 
-    // Render from top of footer area
-    let currentRow = rows - this.footerHeight + 1;
+      // Render from top of footer area
+      let currentRow = rows - this.footerHeight + 1;
 
-    // Header line
-    this.moveTo(currentRow++, 1);
-    process.stdout.write(CLEAR_LINE);
-    process.stdout.write(`${COLORS.bgBlack}${headerLine}${COLORS.reset}`);
-
-    // Agent rows
-    for (const agentRow of agentRows) {
+      // Header line
       this.moveTo(currentRow++, 1);
       process.stdout.write(CLEAR_LINE);
-      process.stdout.write(`${COLORS.bgBlack}${agentRow}${COLORS.reset}`);
+      process.stdout.write(`${COLORS.bgBlack}${headerLine}${COLORS.reset}`);
+
+      // Agent rows
+      for (const agentRow of agentRows) {
+        this.moveTo(currentRow++, 1);
+        process.stdout.write(CLEAR_LINE);
+        process.stdout.write(`${COLORS.bgBlack}${agentRow}${COLORS.reset}`);
+      }
+
+      // Summary line (with bottom border)
+      this.moveTo(currentRow, 1);
+      process.stdout.write(CLEAR_LINE);
+      process.stdout.write(`${COLORS.bgBlack}${summaryLine}${COLORS.reset}`);
+
+      process.stdout.write(RESTORE_CURSOR);
+      process.stdout.write(SHOW_CURSOR);
+    } finally {
+      this.isRendering = false;
+
+      // Process pending resize if one was queued during render
+      if (this.pendingResize) {
+        this.pendingResize = false;
+        // Use setImmediate to avoid deep recursion
+        setImmediate(() => this._handleResize());
+      }
     }
-
-    // Summary line (with bottom border)
-    this.moveTo(currentRow, 1);
-    process.stdout.write(CLEAR_LINE);
-    process.stdout.write(`${COLORS.bgBlack}${summaryLine}${COLORS.reset}`);
-
-    process.stdout.write(RESTORE_CURSOR);
-    process.stdout.write(SHOW_CURSOR);
   }
 
   /**
@@ -402,7 +550,7 @@ class StatusFooter {
     parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.dim}${duration}${COLORS.reset}`);
 
     // Agent counts
-    const executing = Array.from(this.agents.values()).filter(a => a.state === 'executing').length;
+    const executing = Array.from(this.agents.values()).filter((a) => a.state === 'executing').length;
     const total = this.agents.size;
     parts.push(` ${COLORS.gray}│${COLORS.reset} ${COLORS.green}${executing}/${total}${COLORS.reset} active`);
 
@@ -456,13 +604,21 @@ class StatusFooter {
       return;
     }
 
+    // Initialize dimension tracking
+    const { rows, cols } = this.getTerminalSize();
+    this.lastKnownRows = rows;
+    this.lastKnownCols = cols;
+
+    // Check for graceful degradation at startup
+    if (rows < this.minRows) {
+      this.hidden = true;
+      return; // Don't set up scroll region for tiny terminals
+    }
+
     this.setupScrollRegion();
 
-    // Handle terminal resize
-    process.stdout.on('resize', () => {
-      this.setupScrollRegion();
-      this.render();
-    });
+    // Handle terminal resize with debounced handler
+    process.stdout.on('resize', this._debouncedResize);
 
     // Start refresh interval
     this.intervalId = setInterval(() => {
@@ -482,19 +638,19 @@ class StatusFooter {
       this.intervalId = null;
     }
 
-    if (this.isTTY()) {
+    // Remove resize listener
+    process.stdout.removeListener('resize', this._debouncedResize);
+
+    if (this.isTTY() && !this.hidden) {
       // Reset scroll region
       this.resetScrollRegion();
 
-      // Clear all footer lines (dynamic height)
-      const { rows } = this.getTerminalSize();
-      const startRow = rows - this.footerHeight + 1;
-      for (let row = startRow; row <= rows; row++) {
-        this.moveTo(row, 1);
-        process.stdout.write(CLEAR_LINE);
-      }
+      // Clear all footer lines
+      this._clearFooterArea();
 
       // Move cursor to safe position
+      const { rows } = this.getTerminalSize();
+      const startRow = rows - this.footerHeight + 1;
       this.moveTo(startRow, 1);
       process.stdout.write(SHOW_CURSOR);
     }
@@ -507,14 +663,7 @@ class StatusFooter {
     if (!this.isTTY()) return;
 
     this.resetScrollRegion();
-
-    // Clear all footer lines (dynamic height)
-    const { rows } = this.getTerminalSize();
-    const startRow = rows - this.footerHeight + 1;
-    for (let row = startRow; row <= rows; row++) {
-      this.moveTo(row, 1);
-      process.stdout.write(CLEAR_LINE);
-    }
+    this._clearFooterArea();
   }
 
   /**
@@ -523,6 +672,14 @@ class StatusFooter {
   show() {
     if (!this.isTTY()) return;
 
+    // Reset hidden state and check terminal size
+    const { rows } = this.getTerminalSize();
+    if (rows < this.minRows) {
+      this.hidden = true;
+      return;
+    }
+
+    this.hidden = false;
     this.setupScrollRegion();
     this.render();
   }
