@@ -115,10 +115,16 @@ zeroshot purge [-y]                  # NUCLEAR: kill all + delete all data
 
 # Settings
 zeroshot settings                    # Show all (highlights non-defaults)
-zeroshot settings set defaultModel sonnet
+zeroshot settings set maxModel sonnet
 ```
 
-**Settings:** `defaultModel` (opus/sonnet/haiku), `defaultConfig`, `defaultIsolation`, `logLevel`
+**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultIsolation`, `logLevel`
+
+**maxModel (Cost Ceiling):**
+- Sets the maximum model agents can request (not a default/override)
+- Agent requests opus but maxModel is sonnet → **ERROR** at config time
+- Agent requests sonnet with maxModel opus → OK (within ceiling)
+- Agent unspecified → uses maxModel as default
 
 **UX:**
 
