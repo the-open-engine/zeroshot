@@ -1,6 +1,6 @@
 {
   "name": "@covibes/zeroshot",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Multi-agent orchestration engine for Claude - cluster coordinator and CLI",
   "main": "src/orchestrator.js",
   "bin": {

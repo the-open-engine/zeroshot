@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/covibes/zeroshot/compare/v2.0.0...v2.1.0) (2025-12-29)
+
+
+### Features
+
+* add first-run wizard and update checker ([c93cdfe](https://github.com/covibes/zeroshot/commit/c93cdfec65f05ce5b1ed4583b5ec0a23fcf56f31)), closes [#17](https://github.com/covibes/zeroshot/issues/17)
+
 # [2.0.0](https://github.com/covibes/zeroshot/compare/v1.5.0...v2.0.0) (2025-12-29)
 
 
