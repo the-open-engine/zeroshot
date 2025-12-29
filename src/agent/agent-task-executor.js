@@ -961,6 +961,21 @@ async function spawnClaudeTaskIsolated(agent, context) {
  * @returns {Promise<Object>} Result object
  * @private
  */
+/**
+ * Follow Claude task logs in isolated container using persistent tail -f stream
+ * Issue #23: Persistent log streaming instead of polling (10-20% latency reduction)
+ *
+ * OLD APPROACH (removed):
+ * - Polled every 500ms with 2-3 docker exec calls per poll
+ * - Each docker exec = ~100-200ms overhead
+ * - Total: 300-400ms latency per poll cycle
+ *
+ * NEW APPROACH:
+ * - Single persistent `tail -f` stream via spawnInContainer()
+ * - Lines arrive in real-time as they're written
+ * - Status checks reduced to every 2 seconds (not every poll)
+ * - Result: 10-20% overall latency reduction
+ */
 function followClaudeTaskLogsIsolated(agent, taskId) {
   const { isolation } = agent;
   if (!isolation?.manager) {
@@ -972,16 +987,67 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
 
   return new Promise((resolve, reject) => {
     let taskExited = false;
-    let lastSize = 0;
     let fullOutput = '';
-    let pollInterval = null;
+    let tailProcess = null;
+    let statusCheckInterval = null;
+    let lineBuffer = '';
 
-    // Cleanup function
+    // Cleanup function - kill tail process and clear intervals
     const cleanup = () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
+      if (tailProcess) {
+        try {
+          tailProcess.kill('SIGTERM');
+        } catch {
+          // Ignore - process may already be dead
+        }
+        tailProcess = null;
       }
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = null;
+      }
+    };
+
+    // Broadcast line helper (same as non-isolated mode)
+    const broadcastLine = (line) => {
+      const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*(.*)$/);
+      const timestamp = timestampMatch
+        ? new Date(timestampMatch[1]).getTime()
+        : Date.now();
+      const content = timestampMatch ? timestampMatch[2] : line;
+
+      agent.messageBus.publish({
+        cluster_id: agent.cluster.id,
+        topic: 'AGENT_OUTPUT',
+        sender: agent.id,
+        content: {
+          data: {
+            line: content,
+            taskId,
+            iteration: agent.iteration,
+          },
+        },
+        timestamp,
+      });
+
+      // Update last output time for liveness tracking
+      agent.lastOutputTime = Date.now();
+    };
+
+    // Process new content by splitting into complete lines
+    const processNewContent = (content) => {
+      lineBuffer += content;
+      const lines = lineBuffer.split('\n');
+
+      // Process all complete lines (all except last, which might be incomplete)
+      for (let i = 0; i < lines.length - 1; i++) {
+        if (lines[i].trim()) {
+          broadcastLine(lines[i]);
+        }
+      }
+
+      // Keep last line in buffer (might be incomplete)
+      lineBuffer = lines[lines.length - 1];
     };
 
     // Get log file path from zeroshot CLI inside container
@@ -1003,98 +1069,81 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
           return reject(new Error(`Empty log path returned for ${taskId}`));
         }
 
-        agent._log(`[${agent.id}] Following isolated task logs: ${logFilePath}`);
+        agent._log(`[${agent.id}] Following isolated task logs (streaming): ${logFilePath}`);
 
-        // Broadcast line helper (same as non-isolated mode)
-        const broadcastLine = (line) => {
-          const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*(.*)$/);
-          const timestamp = timestampMatch
-            ? new Date(timestampMatch[1]).getTime()
-            : Date.now();
-          const content = timestampMatch ? timestampMatch[2] : line;
+        // Start persistent tail -f stream
+        // Uses spawnInContainer() which creates a single docker exec process
+        // that streams output in real-time (no polling overhead)
+        tailProcess = manager.spawnInContainer(clusterId, [
+          'sh',
+          '-c',
+          // Wait for file to exist, then tail -f from beginning
+          // The -F flag handles file recreation (rotation)
+          `while [ ! -f "${logFilePath}" ]; do sleep 0.1; done; tail -F -n +1 "${logFilePath}"`,
+        ]);
 
-          agent.messageBus.publish({
-            cluster_id: agent.cluster.id,
-            topic: 'AGENT_OUTPUT',
-            sender: agent.id,
-            content: {
-              data: {
-                line: content,
-                taskId,
-                iteration: agent.iteration,
-              },
-            },
-            timestamp,
-          });
+        // Stream stdout directly - lines arrive as they're written
+        tailProcess.stdout.on('data', (data) => {
+          const chunk = data.toString();
+          fullOutput += chunk;
+          processNewContent(chunk);
+        });
 
-          // Update last output time for liveness tracking
-          agent.lastOutputTime = Date.now();
-        };
+        // Log stderr but don't fail (tail might emit warnings)
+        tailProcess.stderr.on('data', (data) => {
+          const msg = data.toString().trim();
+          if (msg && !msg.includes('file truncated')) {
+            agent._log(`[${agent.id}] tail stderr: ${msg}`);
+          }
+        });
 
-        // Poll log file inside container (check every 500ms)
-        pollInterval = setInterval(async () => {
+        // Handle tail process exit (shouldn't happen unless killed)
+        tailProcess.on('close', (exitCode) => {
+          if (!taskExited) {
+            agent._log(`[${agent.id}] tail process exited with code ${exitCode}`);
+          }
+        });
+
+        tailProcess.on('error', (err) => {
+          agent._log(`[${agent.id}] tail process error: ${err.message}`);
+        });
+
+        // Check task status periodically (every 2 seconds - much less frequent than polling)
+        // This is the only remaining docker exec - but now at 2s intervals instead of 500ms
+        statusCheckInterval = setInterval(async () => {
+          if (taskExited) return;
+
           try {
-            // Get file size inside container
-            const sizeResult = await manager.execInContainer(clusterId, [
-              'sh',
-              '-c',
-              `stat -c %s "${logFilePath}" 2>/dev/null || echo 0`,
-            ]);
-
-            const currentSize = parseInt(sizeResult.stdout.trim()) || 0;
-
-            // Read new content if file grew
-            if (currentSize > lastSize) {
-              const bytesToRead = currentSize - lastSize;
-              const readResult = await manager.execInContainer(clusterId, [
-                'sh',
-                '-c',
-                `tail -c ${bytesToRead} "${logFilePath}"`,
-              ]);
-
-              if (readResult.code === 0 && readResult.stdout) {
-                fullOutput += readResult.stdout;
-
-                // Split by newlines and broadcast each complete line
-                const lines = readResult.stdout.split('\n');
-                for (let i = 0; i < lines.length - 1; i++) {
-                  if (lines[i].trim()) {
-                    broadcastLine(lines[i]);
-                  }
-                }
-              }
-
-              lastSize = currentSize;
-            }
-
-            // Check if task exited (query zeroshot status inside container)
             const statusResult = await manager.execInContainer(clusterId, [
               'sh',
               '-c',
               `zeroshot status ${taskId} 2>/dev/null || echo "not_found"`,
             ]);
 
-            // Use same regex patterns as non-isolated mode (lines 649-650)
-            // CRITICAL: Don't use substring matching - it matches "error" in "is_error":false
             const statusOutput = statusResult.stdout;
             const isSuccess = /Status:\s+completed/i.test(statusOutput);
             const isError = /Status:\s+failed/i.test(statusOutput);
             const isNotFound = statusOutput.includes('not_found');
 
             if (isSuccess || isError || isNotFound) {
-              // Task finished - read final output and resolve
+              taskExited = true;
+
+              // Give tail a moment to flush remaining output
+              await new Promise((r) => setTimeout(r, 200));
+
+              // Read final output to ensure we have everything
               const finalReadResult = await manager.execInContainer(clusterId, [
                 'sh',
                 '-c',
-                `cat "${logFilePath}"`,
+                `cat "${logFilePath}" 2>/dev/null || echo ""`,
               ]);
 
-              if (finalReadResult.code === 0) {
+              if (finalReadResult.code === 0 && finalReadResult.stdout) {
                 fullOutput = finalReadResult.stdout;
 
-                // Broadcast any final lines we haven't seen
-                const finalLines = fullOutput.split('\n');
-                for (const line of finalLines) {
+                // Process any remaining content
+                const remainingLines = fullOutput.split('\n');
+                for (const line of remainingLines) {
                   if (line.trim()) {
                     broadcastLine(line);
                   }
@@ -1102,7 +1151,6 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
               }
 
               cleanup();
-              taskExited = true;
 
               // Determine success status
               const success = isSuccess && !isError;
@@ -1124,11 +1172,11 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
                 tokenUsage: extractTokenUsage(fullOutput),
               });
             }
-          } catch (pollErr) {
-            // Log error but continue polling (file might not exist yet)
-            agent._log(`[${agent.id}] Poll error (will retry): ${pollErr.message}`);
+          } catch (statusErr) {
+            // Log error but continue checking (transient failures are common)
+            agent._log(`[${agent.id}] Status check error (will retry): ${statusErr.message}`);
           }
-        }, 500);
+        }, 2000); // Check every 2 seconds (was 500ms in polling mode)
 
         // Safety timeout (0 = no timeout, task runs until completion)
         if (agent.timeout > 0) {

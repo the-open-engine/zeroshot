@@ -871,7 +871,7 @@ class Orchestrator {
             containerId,
           }).catch((err) => {
             console.error(`Failed to execute CLUSTER_OPERATIONS:`, err.message);
-            // Publish failure for conductor to retry
+            // Publish failure message
             messageBus.publish({
               cluster_id: clusterId,
               topic: 'CLUSTER_OPERATIONS_FAILED',
@@ -883,6 +883,18 @@ class Orchestrator {
                   operations: operations,
                 },
               },
+            });
+
+            // CRITICAL: Stop cluster on operation failure - cluster cannot continue
+            // without required agents (e.g., planner model mismatch)
+            this._log(`\n${'='.repeat(80)}`);
+            this._log(`❌ CLUSTER_OPERATIONS FAILED - STOPPING CLUSTER`);
+            this._log(`${'='.repeat(80)}`);
+            this._log(`Error: ${err.message}`);
+            this._log(`${'='.repeat(80)}\n`);
+
+            this.stop(clusterId).catch((stopErr) => {
+              console.error(`Failed to stop cluster after operation failure:`, stopErr.message);
             });
           });
         }

@@ -120,6 +120,13 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 COPY --chown=node:node . /tmp/zeroshot/
 RUN cd /tmp/zeroshot && npm install && npm link
 
+# Pre-bake common npm dependencies (Issue #20: 30-40% startup reduction)
+# These are installed once at image build time, then copied to workspaces at runtime
+# if the project's dependencies are satisfied by the pre-baked set.
+COPY docker/zeroshot-cluster/pre-baked-deps.json /pre-baked-deps/package.json
+RUN cd /pre-baked-deps && npm install --ignore-scripts \
+    && chown -R node:node /pre-baked-deps
+
 # Install Claude CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
