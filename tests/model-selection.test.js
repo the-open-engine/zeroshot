@@ -1,11 +1,46 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const AgentWrapper = require('../src/agent-wrapper');
 
 // Mock message bus and cluster
 const mockMessageBus = { publish: () => {}, subscribe: () => {} };
 const mockCluster = { id: 'test-cluster', agents: [] };
 
+// Test settings directory (isolated)
+const TEST_STORAGE_DIR = path.join(os.tmpdir(), 'zeroshot-model-selection-test-' + Date.now());
+const TEST_SETTINGS_FILE = path.join(TEST_STORAGE_DIR, 'settings.json');
+
 describe('Model Selection', () => {
+  // Set up test settings with maxModel: 'opus' so tests can use all models
+  before(function () {
+    if (!fs.existsSync(TEST_STORAGE_DIR)) {
+      fs.mkdirSync(TEST_STORAGE_DIR, { recursive: true });
+    }
+    // Create settings with maxModel: 'opus' to allow testing all model levels
+    const testSettings = {
+      maxModel: 'opus',
+      defaultConfig: 'conductor-bootstrap',
+      defaultDocker: false,
+      strictSchema: true,
+      logLevel: 'normal',
+    };
+    fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(testSettings, null, 2), 'utf8');
+    process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
+  });
+
+  after(function () {
+    // Clean up env var
+    delete process.env.ZEROSHOT_SETTINGS_FILE;
+
+    // Clean up test directory
+    try {
+      fs.rmSync(TEST_STORAGE_DIR, { recursive: true, force: true });
+    } catch (e) {
+      console.error('Cleanup failed:', e.message);
+    }
+  });
   describe('Static model (backward compatibility)', () => {
     it('should use static model when no rules provided', () => {
       const agent = new AgentWrapper({ id: 'test', model: 'opus', timeout: 0 }, mockMessageBus, mockCluster, {
@@ -16,13 +51,14 @@ describe('Model Selection', () => {
       assert.strictEqual(agent._selectModel(), 'opus');
     });
 
-    it('should default to sonnet if no model specified', () => {
+    it('should default to maxModel if no model specified', () => {
       const agent = new AgentWrapper({ id: 'test', timeout: 0 }, mockMessageBus, mockCluster, {
         testMode: true,
         mockSpawnFn: () => {},
       });
 
-      assert.strictEqual(agent._selectModel(), 'sonnet');
+      // When no model specified, defaults to maxModel (opus in test settings)
+      assert.strictEqual(agent._selectModel(), 'opus');
     });
   });
 

@@ -109,7 +109,7 @@ describe('First-Run Setup', function () {
   describe('printComplete()', function () {
     it('should not throw when called with settings object', function () {
       const settings = {
-        defaultModel: 'sonnet',
+        maxModel: 'sonnet',
         autoCheckUpdates: true,
       };
       assert.doesNotThrow(() => firstRunModule.printComplete(settings));
@@ -121,7 +121,7 @@ describe('First-Run Setup', function () {
       // Save initial settings with custom values
       const initialSettings = {
         ...settingsModule.DEFAULT_SETTINGS,
-        defaultModel: 'haiku',
+        maxModel: 'haiku',
         logLevel: 'verbose',
         firstRunComplete: false,
       };
@@ -134,7 +134,7 @@ describe('First-Run Setup', function () {
       // Verify other settings were preserved
       const savedSettings = JSON.parse(fs.readFileSync(TEST_SETTINGS_FILE, 'utf8'));
       assert.strictEqual(savedSettings.firstRunComplete, true);
-      assert.strictEqual(savedSettings.defaultModel, 'haiku');
+      assert.strictEqual(savedSettings.maxModel, 'haiku');
       assert.strictEqual(savedSettings.logLevel, 'verbose');
     });
   });

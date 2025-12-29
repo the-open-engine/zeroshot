@@ -81,7 +81,7 @@ describe('Settings System', function () {
 
     const settings = loadSettings();
 
-    assert.strictEqual(settings.defaultModel, 'sonnet');
+    assert.strictEqual(settings.maxModel, 'sonnet');
     assert.strictEqual(settings.defaultConfig, 'conductor-bootstrap');
     assert.strictEqual(settings.defaultDocker, false);
     assert.strictEqual(settings.strictSchema, true);
@@ -106,7 +106,7 @@ describe('Settings System', function () {
     };
 
     const newSettings = {
-      defaultModel: 'haiku',
+      maxModel: 'haiku',
       defaultConfig: 'conductor-junior-bootstrap',
       defaultDocker: true,
       logLevel: 'verbose',
@@ -116,7 +116,7 @@ describe('Settings System', function () {
     assert.ok(fs.existsSync(TEST_SETTINGS_FILE), 'Settings file should exist');
 
     const loaded = loadSettings();
-    assert.strictEqual(loaded.defaultModel, 'haiku');
+    assert.strictEqual(loaded.maxModel, 'haiku');
     assert.strictEqual(loaded.defaultConfig, 'conductor-junior-bootstrap');
     assert.strictEqual(loaded.defaultDocker, true);
     assert.strictEqual(loaded.logLevel, 'verbose');
@@ -126,12 +126,12 @@ describe('Settings System', function () {
     const { validateSetting } = settingsModule;
 
     // Valid models
-    assert.strictEqual(validateSetting('defaultModel', 'opus'), null);
-    assert.strictEqual(validateSetting('defaultModel', 'sonnet'), null);
-    assert.strictEqual(validateSetting('defaultModel', 'haiku'), null);
+    assert.strictEqual(validateSetting('maxModel', 'opus'), null);
+    assert.strictEqual(validateSetting('maxModel', 'sonnet'), null);
+    assert.strictEqual(validateSetting('maxModel', 'haiku'), null);
 
     // Invalid model
-    const error = validateSetting('defaultModel', 'gpt4');
+    const error = validateSetting('maxModel', 'gpt4');
     assert.ok(error !== null);
     assert.ok(error.includes('Invalid model'));
   });
@@ -173,7 +173,7 @@ describe('Settings System', function () {
   it('should coerce string values', function () {
     const { coerceValue } = settingsModule;
 
-    assert.strictEqual(coerceValue('defaultModel', 'haiku'), 'haiku');
+    assert.strictEqual(coerceValue('maxModel', 'haiku'), 'haiku');
     assert.strictEqual(coerceValue('defaultConfig', 'my-config'), 'my-config');
   });
 
@@ -187,7 +187,7 @@ describe('Settings System', function () {
     };
 
     const settings = {
-      defaultModel: 'sonnet',
+      maxModel: 'sonnet',
       defaultConfig: 'test-config',
       defaultDocker: false,
       logLevel: 'normal',
