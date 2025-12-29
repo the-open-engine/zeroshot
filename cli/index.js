@@ -1267,11 +1267,23 @@ program
             clusterStates.set(c.id, c.state);
           }
 
-          // Track agent states from AGENT_LIFECYCLE messages (cross-process compatible)
-          const agentStates = new Map(); // agent -> { state, timestamp }
-
-          // Track if status line is currently displayed (to clear before printing logs)
-          let statusLineShown = false;
+          // === STATUS FOOTER: Live agent monitoring (same as foreground mode) ===
+          // Shows CPU, memory, network metrics for all agents at bottom of terminal
+          let statusFooter = null;
+          if ((options.follow || options.watch) && process.stdout.isTTY) {
+            statusFooter = new StatusFooter({
+              refreshInterval: 1000,
+              enabled: true,
+            });
+            // Set first cluster as the active one (for display purposes)
+            if (allClusters.length > 0) {
+              statusFooter.setCluster(allClusters[0].id);
+              statusFooter.setClusterState(clusterStates.get(allClusters[0].id) || 'running');
+            }
+            // Set module-level reference so safePrint/safeWrite route through footer
+            activeStatusFooter = statusFooter;
+            statusFooter.start();
+          }
 
           // Buffered message handler - collects messages and sorts by timestamp
           const flushMessages = () => {
@@ -1285,19 +1297,46 @@ program
               if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
                 sendersWithOutput.add(msg.sender);
               }
-              // Track agent state from AGENT_LIFECYCLE messages
-              if (msg.topic === 'AGENT_LIFECYCLE' && msg.sender && msg.content?.data?.state) {
-                agentStates.set(msg.sender, {
-                  state: msg.content.data.state,
-                  model: msg.sender_model, // sender_model is always set by agent-wrapper._publish
-                  timestamp: msg.timestamp || Date.now(),
-                });
-              }
 
-              // Clear status line before printing message
-              if (statusLineShown) {
-                process.stdout.write('\r' + ' '.repeat(120) + '\r');
-                statusLineShown = false;
+              // Update StatusFooter from polled AGENT_LIFECYCLE messages (cross-process)
+              if (msg.topic === 'AGENT_LIFECYCLE' && statusFooter) {
+                const data = msg.content?.data || {};
+                const event = data.event;
+                const agentId = data.agent || msg.sender;
+
+                if (event === 'STARTED') {
+                  statusFooter.updateAgent({
+                    id: agentId,
+                    state: 'idle',
+                    pid: null,
+                    iteration: data.iteration || 0,
+                  });
+                } else if (event === 'TASK_STARTED') {
+                  statusFooter.updateAgent({
+                    id: agentId,
+                    state: 'executing',
+                    pid: statusFooter.agents.get(agentId)?.pid || null,
+                    iteration: data.iteration || 0,
+                  });
+                } else if (event === 'PROCESS_SPAWNED') {
+                  // Got the PID - update the agent with it for CPU/memory metrics
+                  const current = statusFooter.agents.get(agentId) || { state: 'executing', iteration: 0 };
+                  statusFooter.updateAgent({
+                    id: agentId,
+                    state: current.state,
+                    pid: data.pid,
+                    iteration: current.iteration,
+                  });
+                } else if (event === 'TASK_COMPLETED' || event === 'TASK_FAILED') {
+                  statusFooter.updateAgent({
+                    id: agentId,
+                    state: 'idle',
+                    pid: null,
+                    iteration: data.iteration || 0,
+                  });
+                } else if (event === 'STOPPED') {
+                  statusFooter.removeAgent(agentId);
+                }
               }
 
               const isActive = clusterStates.get(msg.cluster_id) === 'running';
@@ -1319,51 +1358,6 @@ program
 
           // Flush buffer every 250ms
           const flushInterval = setInterval(flushMessages, 250);
-
-          // Blinking status indicator (follow/watch mode) - uses AGENT_LIFECYCLE state
-          let blinkState = false;
-          let statusInterval = null;
-          if (options.follow || options.watch) {
-            statusInterval = setInterval(() => {
-              blinkState = !blinkState;
-
-              // Get active agents from tracked states
-              const activeList = [];
-              for (const [agentId, info] of agentStates.entries()) {
-                // Agent is active if not idle and not stopped
-                if (info.state !== 'idle' && info.state !== 'stopped') {
-                  activeList.push({
-                    id: agentId,
-                    state: info.state,
-                    model: info.model,
-                  });
-                }
-              }
-
-              // Build status line - only show when agents are actively working
-              if (activeList.length > 0) {
-                const indicator = blinkState ? chalk.yellow('●') : chalk.dim('○');
-                const agents = activeList
-                  .map((a) => {
-                    // Show state only for non-standard states (error, etc.)
-                    const showState = a.state === 'error';
-                    const stateLabel = showState ? chalk.red(` (${a.state})`) : '';
-                    // Always show model
-                    const modelLabel = a.model ? chalk.dim(` [${a.model}]`) : '';
-                    return getColorForSender(a.id)(a.id) + modelLabel + stateLabel;
-                  })
-                  .join(', ');
-                process.stdout.write(`\r${indicator} Active: ${agents}` + ' '.repeat(20));
-                statusLineShown = true;
-              } else {
-                // Clear status line when no agents actively working
-                if (statusLineShown) {
-                  process.stdout.write('\r' + ' '.repeat(60) + '\r');
-                  statusLineShown = false;
-                }
-              }
-            }, 500);
-          }
 
           for (const clusterInfo of allClusters) {
             const cluster = quietOrchestrator.getCluster(clusterInfo.id);
@@ -1397,13 +1391,13 @@ program
 
           keepProcessAlive(() => {
             clearInterval(flushInterval);
-            if (statusInterval) clearInterval(statusInterval);
             flushMessages();
             stopPollers.forEach((stop) => stop());
             stopWatching();
-            // Clear status line on exit
-            if (statusLineShown) {
-              process.stdout.write('\r' + ' '.repeat(120) + '\r');
+            // Stop status footer and restore terminal
+            if (statusFooter) {
+              statusFooter.stop();
+              activeStatusFooter = null;
             }
             // Restore terminal title
             restoreTerminalTitle();
@@ -2830,6 +2824,48 @@ settingsCmd.action(() => {
   console.log(chalk.dim('  zeroshot settings reset'));
   console.log('');
 });
+
+// Update command
+program
+  .command('update')
+  .description('Update zeroshot to the latest version')
+  .option('--check', 'Check for updates without installing')
+  .action(async (options) => {
+    const {
+      getCurrentVersion,
+      fetchLatestVersion,
+      isNewerVersion,
+      runUpdate,
+    } = require('./lib/update-checker');
+
+    const currentVersion = getCurrentVersion();
+    console.log(chalk.dim(`Current version: ${currentVersion}`));
+    console.log(chalk.dim('Checking for updates...'));
+
+    const latestVersion = await fetchLatestVersion();
+
+    if (!latestVersion) {
+      console.error(chalk.red('Failed to check for updates. Check your internet connection.'));
+      process.exit(1);
+    }
+
+    console.log(chalk.dim(`Latest version:  ${latestVersion}`));
+
+    if (!isNewerVersion(currentVersion, latestVersion)) {
+      console.log(chalk.green('\n✓ You are already on the latest version!'));
+      return;
+    }
+
+    console.log(chalk.yellow(`\n📦 Update available: ${currentVersion} → ${latestVersion}`));
+
+    if (options.check) {
+      console.log(chalk.dim('\nRun `zeroshot update` to install the update.'));
+      return;
+    }
+
+    const success = await runUpdate();
+    process.exit(success ? 0 : 1);
+  });
 
 // Config visualization commands
 const configCmd = program.command('config').description('Manage and visualize cluster configs');

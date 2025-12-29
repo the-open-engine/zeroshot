@@ -225,10 +225,11 @@ async function checkForUpdates(options = {}) {
 
 module.exports = {
   checkForUpdates,
-  // Exported for testing
+  // Exported for testing and CLI update command
   getCurrentVersion,
   isNewerVersion,
   fetchLatestVersion,
+  runUpdate,
   shouldCheckForUpdates,
   CHECK_INTERVAL_MS,
 };

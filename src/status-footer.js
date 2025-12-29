@@ -114,6 +114,9 @@ class StatusFooter {
     // All output must go through print() to coordinate with render cycles
     this.printQueue = [];
 
+    // Blink state for executing agents - toggles on each render for visual pulse
+    this.blinkState = false;
+
     // Debounced resize handler (100ms) - prevents rapid-fire redraws
     this._debouncedResize = debounce(() => this._handleResize(), 100);
   }
@@ -466,25 +469,31 @@ class StatusFooter {
 
   /**
    * Get status icon for agent state
+   * Uses blinking dot for active states (executing, evaluating, building_context)
    * @param {string} state
    * @returns {string}
    */
   getAgentIcon(state) {
+    // Blinking indicator for active states - alternates between bright and dim
+    const blinkOn = `${COLORS.green}●${COLORS.reset}`;
+    const blinkOff = `${COLORS.dim}○${COLORS.reset}`;
+    const blinkIndicator = this.blinkState ? blinkOn : blinkOff;
+
     switch (state) {
       case 'idle':
-        return '⏳'; // Waiting for trigger
+        return `${COLORS.gray}○${COLORS.reset}`; // Waiting for trigger
       case 'evaluating':
-        return '🔍'; // Evaluating triggers
+        return blinkIndicator; // Evaluating triggers (blinking)
       case 'building_context':
-        return '📝'; // Building context
+        return blinkIndicator; // Building context (blinking)
       case 'executing':
-        return '🔄'; // Running task
+        return blinkIndicator; // Running task (blinking)
       case 'stopped':
-        return '⏹️'; // Stopped
+        return `${COLORS.gray}■${COLORS.reset}`; // Stopped
       case 'error':
-        return '❌'; // Error
+        return `${COLORS.red}●${COLORS.reset}`; // Error
       default:
-        return '⚪';
+        return `${COLORS.gray}○${COLORS.reset}`;
     }
   }
 
@@ -540,6 +549,9 @@ class StatusFooter {
       return;
     }
     this.isRendering = true;
+
+    // Toggle blink state for visual pulse effect on executing agents
+    this.blinkState = !this.blinkState;
 
     try {
       const { rows, cols } = this.getTerminalSize();
