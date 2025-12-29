@@ -250,7 +250,7 @@ ISOLATION_CONTENT="Isolation mode works at $(date)"
 
 # Spawn in detached mode
 echo "Spawning isolation cluster (detached)..."
-ISO_OUTPUT=$(zeroshot run --isolation "Create file '$ISOLATION_TEST_FILE' with content '$ISOLATION_CONTENT'" -d 2>&1)
+ISO_OUTPUT=$(zeroshot run --docker "Create file '$ISOLATION_TEST_FILE' with content '$ISOLATION_CONTENT'" -d 2>&1)
 echo "$ISO_OUTPUT"
 
 ISO_CLUSTER=$(echo "$ISO_OUTPUT" | grep -oP '[a-z]+-[a-z]+-\d+' | head -1)
@@ -314,8 +314,8 @@ log_test "TEST 3: Auto Mode (Command Validation)"
 # Verify auto command exists and has expected flags
 AUTO_HELP=$(zeroshot auto --help 2>&1)
 
-assert "echo '$AUTO_HELP' | grep -q 'isolation'" \
-       "Auto mode supports --isolation flag"
+assert "echo '$AUTO_HELP' | grep -q 'docker'" \
+       "Auto mode supports --docker flag"
 
 assert "echo '$AUTO_HELP' | grep -q 'auto'" \
        "Auto mode command is available"

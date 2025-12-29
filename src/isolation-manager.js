@@ -34,6 +34,7 @@ class IsolationManager {
     this.containers = new Map(); // clusterId -> containerId
     this.isolatedDirs = new Map(); // clusterId -> { path, originalDir }
     this.clusterConfigDirs = new Map(); // clusterId -> configDirPath
+    this.worktrees = new Map(); // clusterId -> { path, branch, repoRoot }
   }
 
   /**
@@ -1143,13 +1144,51 @@ class IsolationManager {
   }
 
   /**
+   * Create worktree-based isolation for a cluster (lightweight alternative to Docker)
+   * Creates a git worktree at /tmp/zeroshot-worktrees/{clusterId}
+   * @param {string} clusterId - Cluster ID
+   * @param {string} workDir - Original working directory (must be a git repo)
+   * @returns {{ path: string, branch: string, repoRoot: string }}
+   */
+  createWorktreeIsolation(clusterId, workDir) {
+    if (!this._isGitRepo(workDir)) {
+      throw new Error(`Worktree isolation requires a git repository. ${workDir} is not a git repo.`);
+    }
+
+    const worktreeInfo = this.createWorktree(clusterId, workDir);
+    this.worktrees.set(clusterId, worktreeInfo);
+
+    console.log(`[IsolationManager] Created worktree isolation at ${worktreeInfo.path}`);
+    console.log(`[IsolationManager] Branch: ${worktreeInfo.branch}`);
+
+    return worktreeInfo;
+  }
+
+  /**
+   * Clean up worktree isolation for a cluster
+   * @param {string} clusterId - Cluster ID
+   * @param {object} [options] - Cleanup options
+   * @param {boolean} [options.preserveBranch=true] - Keep the branch after removing worktree
+   */
+  cleanupWorktreeIsolation(clusterId, options = {}) {
+    const worktreeInfo = this.worktrees.get(clusterId);
+    if (!worktreeInfo) {
+      return; // No worktree to clean up
+    }
+
+    this.removeWorktree(worktreeInfo, options);
+    this.worktrees.delete(clusterId);
+
+    console.log(`[IsolationManager] Cleaned up worktree isolation for ${clusterId}`);
+  }
+
+  /**
    * Create a git worktree for isolated work
-   * @private
    * @param {string} clusterId - Cluster ID (used as branch name)
    * @param {string} workDir - Original working directory
    * @returns {{ path: string, branch: string, repoRoot: string }}
    */
-  _createWorktree(clusterId, workDir) {
+  createWorktree(clusterId, workDir) {
     const repoRoot = this._getGitRoot(workDir);
     if (!repoRoot) {
       throw new Error(`Cannot find git root for ${workDir}`);
@@ -1205,10 +1244,11 @@ class IsolationManager {
 
   /**
    * Remove a git worktree
-   * @private
    * @param {{ path: string, branch: string, repoRoot: string }} worktreeInfo
+   * @param {object} [options] - Removal options
+   * @param {boolean} [options.deleteBranch=false] - Also delete the branch
    */
-  _removeWorktree(worktreeInfo) {
+  removeWorktree(worktreeInfo, _options = {}) {
     try {
       // Remove the worktree
       execSync(`git worktree remove --force "${worktreeInfo.path}" 2>/dev/null`, {

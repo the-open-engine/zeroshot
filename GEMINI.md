@@ -69,8 +69,10 @@ zeroshot auto 123 -d                 # Same, but detached/background
 zeroshot run 123                     # Issue number (auto-attaches to first agent)
 zeroshot run 123 -d                  # Detached/background mode
 zeroshot run "Implement X"           # Plain text
-zeroshot run 123 --isolation         # Docker isolation
-zeroshot run 123 --isolation --pr    # Isolation + create PR on success
+zeroshot run 123 --docker            # Docker isolation
+zeroshot run 123 --worktree          # Git worktree isolation (lightweight)
+zeroshot run 123 --pr                # Worktree + PR (--worktree auto-enabled)
+zeroshot run 123 --ship              # Worktree + PR + auto-merge
 
 # Single tasks
 zeroshot task run "Fix bug X"        # Background single agent
@@ -100,7 +102,7 @@ zeroshot settings                    # Show all (highlights non-defaults)
 zeroshot settings set maxModel sonnet
 ```
 
-**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultIsolation`, `logLevel`
+**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultDocker`, `logLevel`
 
 **maxModel (Cost Ceiling):**
 - Sets the maximum model agents can request (not a default/override)
@@ -405,9 +407,21 @@ Security pipeline with mandatory approval:
 - SecurityScanner → SECURITY_RESULT
 - SecurityGate → stop_cluster (if no vulnerabilities)
 
-## Isolation Mode (Docker Container)
+## Isolation Modes
 
-**Isolates workspace in fresh git clone, protects working directory. NOT about credentials (always mounted) or security sandboxing.**
+### Worktree Isolation (Default for --pr/--ship)
+
+**Lightweight isolation using git worktree.** Creates a separate working directory with its own branch. Fast (<1s setup), no Docker required.
+
+**Use when:**
+
+- PR workflows (`--pr`, `--ship` auto-enable `--worktree`)
+- Quick isolated work on a branch
+- Don't want Docker overhead
+
+### Docker Isolation (--docker)
+
+**Full isolation in fresh git clone inside Docker container.** Protects working directory completely.
 
 **Use when:**
 
@@ -415,7 +429,7 @@ Security pipeline with mandatory approval:
 - Risky experiments you might discard
 - Long-running tasks (keep working locally)
 - Parallel agents on same codebase
-- PR workflows (`--pr`, `--merge` imply `--isolation`)
+- Need full environment isolation
 
 **Skip when:**
 

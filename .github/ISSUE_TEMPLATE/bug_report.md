@@ -27,7 +27,7 @@ What actually happens.
 - OS:
 - Node.js version:
 - zeroshot version:
-- Docker version (if using --isolation):
+- Docker version (if using --docker):
 
 ## Logs
 

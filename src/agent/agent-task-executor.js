@@ -120,6 +120,9 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false 
 // Track if we've already ensured the AskUserQuestion hook is installed
 let askUserQuestionHookInstalled = false;
 
+// Track if we've already ensured the dangerous git hook is installed
+let dangerousGitHookInstalled = false;
+
 /**
  * Extract token usage from NDJSON output.
  * Looks for the 'result' event line which contains usage data.
@@ -237,6 +240,85 @@ function ensureAskUserQuestionHook() {
 }
 
 /**
+ * Ensure the dangerous git blocking hook is installed in user's Claude config.
+ * This blocks dangerous git commands like stash, checkout --, reset --hard, etc.
+ * Modifies ~/.claude/settings.json and copies hook script to ~/.claude/hooks/
+ *
+ * Only used in worktree mode - Docker isolation mode has its own git-safe.sh wrapper.
+ * Safe to call multiple times - only modifies config once per process.
+ */
+function ensureDangerousGitHook() {
+  if (dangerousGitHookInstalled) {
+    return; // Already installed this session
+  }
+
+  const userClaudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const hooksDir = path.join(userClaudeDir, 'hooks');
+  const settingsPath = path.join(userClaudeDir, 'settings.json');
+  const hookScriptName = 'block-dangerous-git.py';
+  const hookScriptDst = path.join(hooksDir, hookScriptName);
+
+  // Ensure hooks directory exists
+  if (!fs.existsSync(hooksDir)) {
+    fs.mkdirSync(hooksDir, { recursive: true });
+  }
+
+  // Copy hook script if not present or outdated
+  const hookScriptSrc = path.join(__dirname, '..', '..', 'hooks', hookScriptName);
+  if (fs.existsSync(hookScriptSrc)) {
+    // Always copy to ensure latest version
+    fs.copyFileSync(hookScriptSrc, hookScriptDst);
+    fs.chmodSync(hookScriptDst, 0o755);
+  }
+
+  // Read existing settings or create new
+  let settings = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    } catch (e) {
+      console.warn(`[AgentTaskExecutor] Could not parse settings.json, creating new: ${e.message}`);
+      settings = {};
+    }
+  }
+
+  // Ensure hooks structure exists
+  if (!settings.hooks) {
+    settings.hooks = {};
+  }
+  if (!settings.hooks.PreToolUse) {
+    settings.hooks.PreToolUse = [];
+  }
+
+  // Check if dangerous git hook already exists
+  const hasHook = settings.hooks.PreToolUse.some(
+    (entry) =>
+      entry.matcher === 'Bash' &&
+      entry.hooks &&
+      entry.hooks.some((h) => h.command && h.command.includes(hookScriptName))
+  );
+
+  if (!hasHook) {
+    // Add the hook - matches Bash tool to check for dangerous git commands
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command: hookScriptDst,
+        },
+      ],
+    });
+
+    // Write updated settings
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    console.log(`[AgentTaskExecutor] Installed dangerous git blocking hook in ${settingsPath}`);
+  }
+
+  dangerousGitHookInstalled = true;
+}
+
+/**
  * Spawn claude-zeroshots process and stream output via message bus
  * @param {Object} agent - Agent instance
  * @param {String} context - Context to pass to Claude
@@ -322,16 +404,30 @@ async function spawnClaudeTask(agent, context) {
   // DO NOT override CLAUDE_CONFIG_DIR - it breaks authentication on Claude CLI 2.x
   ensureAskUserQuestionHook();
 
+  // WORKTREE MODE: Install git safety hook (blocks dangerous git commands)
+  if (agent.worktree?.enabled) {
+    ensureDangerousGitHook();
+  }
+
+  // Build environment for spawn
+  const spawnEnv = {
+    ...process.env,
+    ANTHROPIC_MODEL: agent._selectModel(),
+    // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
+    ZEROSHOT_BLOCK_ASK_USER: '1',
+  };
+
+  // WORKTREE MODE: Activate git safety hook via environment variable
+  // The hook only activates when ZEROSHOT_WORKTREE=1 is set
+  if (agent.worktree?.enabled) {
+    spawnEnv.ZEROSHOT_WORKTREE = '1';
+  }
+
   const taskId = await new Promise((resolve, reject) => {
     const proc = spawn(ctPath, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        ANTHROPIC_MODEL: agent._selectModel(),
-        // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
-        ZEROSHOT_BLOCK_ASK_USER: '1',
-      },
+      env: spawnEnv,
     });
     // Track PID for resource monitoring
     agent.processPid = proc.pid;

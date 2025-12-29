@@ -487,6 +487,7 @@ class Orchestrator {
    * @param {Object} options - Start options
    * @param {boolean} options.isolation - Run in Docker container
    * @param {string} options.isolationImage - Docker image to use
+   * @param {boolean} options.worktree - Run in git worktree isolation (lightweight, no Docker)
    * @returns {Object} Cluster object
    */
   start(config, input = {}, options = {}) {
@@ -495,6 +496,7 @@ class Orchestrator {
       cwd: options.cwd || process.cwd(), // Target working directory for agents
       isolation: options.isolation || false,
       isolationImage: options.isolationImage,
+      worktree: options.worktree || false,
       autoPr: process.env.CREW_PR === '1',
     });
   }
@@ -512,14 +514,15 @@ class Orchestrator {
     const ledger = new Ledger(dbPath);
     const messageBus = new MessageBus(ledger);
 
-    // Handle isolation mode (Docker container)
+    // Handle isolation mode (Docker container OR git worktree)
     let isolationManager = null;
     let containerId = null;
+    let worktreeInfo = null;
 
     if (options.isolation) {
       // Check Docker availability
       if (!IsolationManager.isDockerAvailable()) {
-        throw new Error('Docker is not available. Install Docker to use --isolation mode.');
+        throw new Error('Docker is not available. Install Docker to use --docker mode.');
       }
 
       // Ensure image exists (auto-build if missing)
@@ -537,6 +540,16 @@ class Orchestrator {
         image,
       });
       this._log(`[Orchestrator] Container created: ${containerId} (workDir: ${workDir})`);
+    } else if (options.worktree) {
+      // Worktree isolation: lightweight git-based isolation (no Docker required)
+      const workDir = options.cwd || process.cwd();
+
+      isolationManager = new IsolationManager({});
+      worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir);
+
+      this._log(`[Orchestrator] Starting cluster in worktree isolation mode`);
+      this._log(`[Orchestrator] Worktree: ${worktreeInfo.path}`);
+      this._log(`[Orchestrator] Branch: ${worktreeInfo.branch}`);
     }
 
     // Build cluster object
@@ -567,6 +580,17 @@ class Orchestrator {
             enabled: true,
             containerId,
             image: options.isolationImage || 'zeroshot-cluster-base',
+            manager: isolationManager,
+            workDir: options.cwd || process.cwd(), // Persisted for resume
+          }
+        : null,
+      // Worktree isolation state (lightweight alternative to Docker)
+      worktree: options.worktree
+        ? {
+            enabled: true,
+            path: worktreeInfo.path,
+            branch: worktreeInfo.branch,
+            repoRoot: worktreeInfo.repoRoot,
             manager: isolationManager,
             workDir: options.cwd || process.cwd(), // Persisted for resume
           }
@@ -636,7 +660,8 @@ class Orchestrator {
       // Initialize agents with optional mock injection
       // Check agent type: regular agent or subcluster
       // CRITICAL: Inject cwd into each agent config for proper working directory
-      const agentCwd = options.cwd || process.cwd();
+      // In worktree mode, agents run in the worktree path (not original cwd)
+      const agentCwd = cluster.worktree ? cluster.worktree.path : options.cwd || process.cwd();
       for (const agentConfig of config.agents) {
         // Inject cwd if not already set (config may override)
         if (!agentConfig.cwd) {
@@ -669,6 +694,16 @@ class Orchestrator {
             enabled: true,
             manager: isolationManager,
             clusterId,
+          };
+        }
+
+        // Pass worktree context if enabled (lightweight isolation without Docker)
+        if (cluster.worktree) {
+          agentOptions.worktree = {
+            enabled: true,
+            path: cluster.worktree.path,
+            branch: cluster.worktree.branch,
+            repoRoot: cluster.worktree.repoRoot,
           };
         }
 
@@ -925,6 +960,14 @@ class Orchestrator {
       this._log(`[Orchestrator] Container stopped, workspace preserved`);
     }
 
+    // Worktree cleanup on stop: preserve for resume capability
+    // Branch stays, worktree stays - can resume work later
+    if (cluster.worktree?.manager) {
+      this._log(`[Orchestrator] Worktree preserved at ${cluster.worktree.path} for resume`);
+      this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
+      // Don't cleanup worktree - it will be reused on resume
+    }
+
     cluster.state = 'stopped';
     cluster.pid = null; // Clear PID - cluster is no longer running
     this._log(`Cluster ${clusterId} stopped`);
@@ -955,6 +998,14 @@ class Orchestrator {
       this._log(`[Orchestrator] Force removing isolation container and workspace for ${clusterId}...`);
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: false });
       this._log(`[Orchestrator] Container and workspace removed`);
+    }
+
+    // Force remove worktree (full cleanup, no resume)
+    // Note: Branch is preserved for potential PR creation / inspection
+    if (cluster.worktree?.manager) {
+      this._log(`[Orchestrator] Force removing worktree for ${clusterId}...`);
+      cluster.worktree.manager.cleanupWorktreeIsolation(clusterId, { preserveBranch: true });
+      this._log(`[Orchestrator] Worktree removed, branch ${cluster.worktree.branch} preserved`);
     }
 
     // Close message bus and ledger
@@ -1111,6 +1162,20 @@ class Orchestrator {
       } else {
         this._log(`[Orchestrator] Container ${oldContainerId} still exists, reusing`);
       }
+    }
+
+    // Verify worktree still exists for worktree isolation mode
+    if (cluster.worktree?.enabled) {
+      const worktreePath = cluster.worktree.path;
+      if (!fs.existsSync(worktreePath)) {
+        throw new Error(
+          `Cannot resume cluster ${clusterId}: worktree at ${worktreePath} no longer exists. ` +
+            `Was the worktree manually removed? Use 'zeroshot run' to start fresh.`
+        );
+      }
+
+      this._log(`[Orchestrator] Worktree at ${worktreePath} exists, reusing`);
+      this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
     }
 
     // Restart all agents

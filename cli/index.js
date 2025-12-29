@@ -386,7 +386,7 @@ Examples:
   ${chalk.cyan('zeroshot run 123')}                    Run cluster and attach to first agent
   ${chalk.cyan('zeroshot run 123 -d')}                 Run cluster in background (detached)
   ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster on plain text task
-  ${chalk.cyan('zeroshot run 123 --isolation')}        Run in Docker container (safe for e2e tests)
+  ${chalk.cyan('zeroshot run 123 --docker')}           Run in Docker container (safe for e2e tests)
   ${chalk.cyan('zeroshot task run "Fix the bug"')}     Run single-agent background task
   ${chalk.cyan('zeroshot list')}                       List all tasks and clusters
   ${chalk.cyan('zeroshot task list')}                  List tasks only
@@ -406,11 +406,12 @@ Examples:
   ${chalk.cyan('zeroshot config show <name>')}         Visualize a cluster config (agents, triggers, flow)
   ${chalk.cyan('zeroshot export <id>')}                Export cluster conversation to file
 
-Automation levels (cascading: --ship → --pr → --isolation):
+Automation levels (cascading: --ship → --pr → --worktree):
   ${chalk.yellow('zeroshot run 123')}            → Local run, no isolation
-  ${chalk.yellow('zeroshot run 123 --isolation')} → Docker isolation, no PR
-  ${chalk.yellow('zeroshot run 123 --pr')}       → Isolation + PR (human reviews)
-  ${chalk.yellow('zeroshot run 123 --ship')}     → Isolation + PR + auto-merge (full automation)
+  ${chalk.yellow('zeroshot run 123 --docker')}   → Docker isolation, no PR
+  ${chalk.yellow('zeroshot run 123 --worktree')} → Git worktree isolation, no PR
+  ${chalk.yellow('zeroshot run 123 --pr')}       → Worktree + PR (human reviews)
+  ${chalk.yellow('zeroshot run 123 --ship')}     → Worktree + PR + auto-merge (full automation)
   ${chalk.yellow('zeroshot task run')}           → Single-agent background task (simpler, faster)
 
 Shell completion:
@@ -423,17 +424,18 @@ program
   .command('run <input>')
   .description('Start a multi-agent cluster (auto-detects GitHub issue or plain text)')
   .option('--config <file>', 'Path to cluster config JSON (default: conductor-bootstrap)')
-  .option('--isolation', 'Run cluster inside Docker container (for e2e testing)')
+  .option('--docker', 'Run cluster inside Docker container (full isolation)')
+  .option('--worktree', 'Use git worktree for isolation (lightweight, no Docker required)')
   .option(
-    '--isolation-image <image>',
-    'Docker image for isolation (default: zeroshot-cluster-base)'
+    '--docker-image <image>',
+    'Docker image for --docker mode (default: zeroshot-cluster-base)'
   )
   .option(
     '--strict-schema',
     'Enforce JSON schema via CLI (no live streaming). Default: live streaming with local validation'
   )
-  .option('--pr', 'Create PR for human review (auto-enables --isolation)')
-  .option('--ship', 'Full automation: isolation + PR + auto-merge')
+  .option('--pr', 'Create PR for human review (uses worktree isolation by default, use --docker for Docker)')
+  .option('--ship', 'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)')
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .addHelpText(
@@ -448,15 +450,18 @@ Input formats:
   )
   .action(async (inputArg, options) => {
     try {
-      // Cascading flag implications: --ship → --pr → --isolation
-      // --ship = full automation (isolation + PR + auto-merge)
+      // Cascading flag implications: --ship → --pr → worktree (unless --docker)
+      // --ship = full automation (worktree isolation + PR + auto-merge)
       if (options.ship) {
         options.pr = true;
-        options.isolation = true;
+        // Use worktree by default, Docker only if explicitly requested
+        if (!options.docker) {
+          options.worktree = true;
+        }
       }
-      // --pr = PR for human review (auto-enables isolation)
-      if (options.pr) {
-        options.isolation = true;
+      // --pr = PR for human review (worktree by default, Docker if requested)
+      if (options.pr && !options.docker && !options.worktree) {
+        options.worktree = true;
       }
 
       // Auto-detect input type
@@ -484,7 +489,8 @@ Input formats:
       // This gives users clear, actionable error messages upfront
       const preflightOptions = {
         requireGh: !!input.issue, // gh CLI required when fetching GitHub issues
-        requireDocker: options.isolation, // Docker required for isolation mode
+        requireDocker: options.docker, // Docker required for --docker mode
+        requireGit: options.worktree, // Git required for worktree isolation
         quiet: process.env.CREW_DAEMON === '1', // Suppress success in daemon mode
       };
       requirePreflight(preflightOptions);
@@ -502,8 +508,8 @@ Input formats:
         const clusterId = generateName('cluster');
 
         // Output cluster ID and help
-        if (options.isolation) {
-          console.log(`Started ${clusterId} (isolated)`);
+        if (options.docker) {
+          console.log(`Started ${clusterId} (docker)`);
         } else {
           console.log(`Started ${clusterId}`);
         }
@@ -532,9 +538,10 @@ Input formats:
             ...process.env,
             CREW_DAEMON: '1',
             CREW_CLUSTER_ID: clusterId,
-            CREW_ISOLATION: options.isolation ? '1' : '',
-            CREW_ISOLATION_IMAGE: options.isolationImage || '',
+            CREW_DOCKER: options.docker ? '1' : '',
+            CREW_DOCKER_IMAGE: options.dockerImage || '',
             CREW_PR: options.pr ? '1' : '',
+            CREW_WORKTREE: options.worktree ? '1' : '',
             CREW_WORKERS: options.workers?.toString() || '',
             CREW_CWD: targetCwd, // Explicit CWD for orchestrator
           },
@@ -585,8 +592,10 @@ Input formats:
 
       // In foreground mode, show startup info
       if (!process.env.CREW_DAEMON) {
-        if (options.isolation) {
-          console.log(`Starting ${clusterId} (isolated)`);
+        if (options.docker) {
+          console.log(`Starting ${clusterId} (docker)`);
+        } else if (options.worktree) {
+          console.log(`Starting ${clusterId} (worktree)`);
         } else {
           console.log(`Starting ${clusterId}`);
         }
@@ -610,8 +619,9 @@ Input formats:
       const startOptions = {
         cwd: targetCwd, // Target working directory for agents
         isolation:
-          options.isolation || process.env.CREW_ISOLATION === '1' || settings.defaultIsolation,
-        isolationImage: options.isolationImage || process.env.CREW_ISOLATION_IMAGE || undefined,
+          options.docker || process.env.CREW_DOCKER === '1' || settings.defaultDocker,
+        isolationImage: options.dockerImage || process.env.CREW_DOCKER_IMAGE || undefined,
+        worktree: options.worktree || process.env.CREW_WORKTREE === '1',
         autoPr: options.pr || process.env.CREW_PR === '1',
         autoMerge: process.env.CREW_MERGE === '1',
         autoPush: process.env.CREW_PUSH === '1',

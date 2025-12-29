@@ -75,6 +75,11 @@ function validateConfig(config, depth = 0) {
   errors.push(...logicResult.errors);
   warnings.push(...logicResult.warnings);
 
+  // === PHASE 5: Template variable validation ===
+  const templateResult = validateTemplateVariables(config, depth);
+  errors.push(...templateResult.errors);
+  warnings.push(...templateResult.warnings);
+
   return {
     valid: errors.length === 0,
     errors,
@@ -560,6 +565,194 @@ function validateLogicScripts(config) {
 }
 
 /**
+ * Phase 5: Validate template variables against jsonSchema
+ * Ensures {{result.*}} references in hooks match defined schema properties
+ */
+function validateTemplateVariables(config, depth = 0) {
+  const errors = [];
+  const warnings = [];
+
+  if (!config.agents || !Array.isArray(config.agents)) {
+    return { errors, warnings };
+  }
+
+  const prefix = depth > 0 ? `Sub-cluster (depth ${depth}): ` : '';
+
+  for (const agent of config.agents) {
+    // Skip subclusters - they have their own validation
+    if (agent.type === 'subcluster') {
+      // Recursively validate subcluster config
+      if (agent.config?.agents) {
+        const subResult = validateTemplateVariables(agent.config, depth + 1);
+        // Prefix sub-cluster errors with agent ID
+        errors.push(...subResult.errors.map((e) => `Sub-cluster '${agent.id}': ${e}`));
+        warnings.push(...subResult.warnings.map((w) => `Sub-cluster '${agent.id}': ${w}`));
+      }
+      continue;
+    }
+
+    const result = validateAgentTemplateVariables(agent, agent.id);
+    errors.push(...result.errors.map((e) => `${prefix}${e}`));
+    warnings.push(...result.warnings.map((w) => `${prefix}${w}`));
+  }
+
+  return { errors, warnings };
+}
+
+/**
+ * Validate template variables for a single agent
+ * @param {Object} agent - Agent configuration
+ * @param {String} agentId - Agent ID for error messages
+ * @returns {{ errors: string[], warnings: string[] }}
+ */
+function validateAgentTemplateVariables(agent, agentId) {
+  const errors = [];
+  const warnings = [];
+
+  // Extract schema properties (null if non-JSON output or text output)
+  const schemaProps = extractSchemaProperties(agent);
+
+  // If schemaProps is null, this agent doesn't use JSON output - skip validation
+  if (schemaProps === null) {
+    return { errors, warnings };
+  }
+
+  // Extract template variables from hooks
+  const templateVars = extractTemplateVariables(agent);
+
+  // Check for undefined references (ERROR)
+  for (const varName of templateVars) {
+    if (!schemaProps.has(varName)) {
+      const availableProps = Array.from(schemaProps).join(', ');
+      errors.push(
+        `Agent '${agentId}': Template uses '{{result.${varName}}}' but '${varName}' is not defined in jsonSchema. ` +
+          `Available properties: [${availableProps}]`
+      );
+    }
+  }
+
+  // Check for unused schema properties (WARNING)
+  for (const prop of schemaProps) {
+    if (!templateVars.has(prop)) {
+      warnings.push(
+        `Agent '${agentId}': Schema property '${prop}' is defined but never referenced in hooks. ` +
+          `Consider removing it to save tokens.`
+      );
+    }
+  }
+
+  return { errors, warnings };
+}
+
+/**
+ * Extract all template variables ({{result.*}}) from agent hooks
+ * Searches hooks.onComplete.config (recursive) and hooks.onComplete.transform.script
+ * Also searches triggers[].onComplete patterns
+ * @param {Object} agent - Agent configuration
+ * @returns {Set<string>} Set of variable names referenced
+ */
+function extractTemplateVariables(agent) {
+  const variables = new Set();
+
+  // Regex patterns - reset lastIndex before each use to avoid state pollution
+  const mustachePattern = /\{\{result\.([^}]+)\}\}/g;
+  const directPattern = /\bresult\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+
+  /**
+   * Recursively traverse an object/array and extract template variables from strings
+   */
+  function traverseAndExtract(obj) {
+    if (obj === null || obj === undefined) {
+      return;
+    }
+
+    if (typeof obj === 'string') {
+      // Extract mustache-style {{result.field}}
+      mustachePattern.lastIndex = 0;
+      let match;
+      while ((match = mustachePattern.exec(obj)) !== null) {
+        variables.add(match[1]);
+      }
+      return;
+    }
+
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        traverseAndExtract(item);
+      }
+      return;
+    }
+
+    if (typeof obj === 'object') {
+      for (const value of Object.values(obj)) {
+        traverseAndExtract(value);
+      }
+    }
+  }
+
+  /**
+   * Extract variables from transform script (direct result.field access)
+   */
+  function extractFromScript(script) {
+    if (typeof script !== 'string') {
+      return;
+    }
+
+    directPattern.lastIndex = 0;
+    let match;
+    while ((match = directPattern.exec(script)) !== null) {
+      variables.add(match[1]);
+    }
+  }
+
+  // Extract from hooks.onComplete.config
+  if (agent.hooks?.onComplete?.config) {
+    traverseAndExtract(agent.hooks.onComplete.config);
+  }
+
+  // Extract from hooks.onComplete.transform.script
+  if (agent.hooks?.onComplete?.transform?.script) {
+    extractFromScript(agent.hooks.onComplete.transform.script);
+  }
+
+  // Extract from triggers[].onComplete (some agents define hooks per-trigger)
+  if (agent.triggers && Array.isArray(agent.triggers)) {
+    for (const trigger of agent.triggers) {
+      if (trigger.onComplete?.config) {
+        traverseAndExtract(trigger.onComplete.config);
+      }
+      if (trigger.onComplete?.transform?.script) {
+        extractFromScript(trigger.onComplete.transform.script);
+      }
+    }
+  }
+
+  return variables;
+}
+
+/**
+ * Extract schema properties from agent's jsonSchema
+ * @param {Object} agent - Agent configuration
+ * @returns {Set<string>|null} Set of property names, or null if agent doesn't use JSON output
+ */
+function extractSchemaProperties(agent) {
+  // Non-JSON agents don't need validation
+  // Both 'json' and 'stream-json' use jsonSchema and need validation
+  if (!['json', 'stream-json'].includes(agent.outputFormat)) {
+    return null;
+  }
+
+  // If explicit schema is provided, use its properties
+  if (agent.jsonSchema?.properties) {
+    return new Set(Object.keys(agent.jsonSchema.properties));
+  }
+
+  // Default schema when outputFormat is 'json' but no explicit schema
+  // See: agent-config.js:62-69
+  return new Set(['summary', 'result']);
+}
+
+/**
  * Check if iteration pattern is valid
  */
 function isValidIterationPattern(pattern) {
@@ -608,4 +801,9 @@ module.exports = {
   validateLogicScripts,
   isValidIterationPattern,
   formatValidationResult,
+  // Phase 5: Template variable validation
+  validateTemplateVariables,
+  extractTemplateVariables,
+  extractSchemaProperties,
+  validateAgentTemplateVariables,
 };
