@@ -87,9 +87,12 @@ def check_command(command: str) -> tuple[bool, str, str] | None:
     """Check if command matches any dangerous pattern.
 
     Returns (matched, reason, alternative) if dangerous, None if safe.
+
+    NOTE: We do NOT use re.IGNORECASE because git flags are case-sensitive.
+    For example: 'git branch -d' (lowercase) is safe, 'git branch -D' (uppercase) is dangerous.
     """
     for pattern, reason, alternative in DANGEROUS_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
+        if re.search(pattern, command):
             return (True, reason, alternative)
     return None
 
