@@ -14,6 +14,7 @@
 
 const { expect } = require('chai');
 const Orchestrator = require('../src/orchestrator');
+const MockTaskRunner = require('./helpers/mock-task-runner');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -23,6 +24,7 @@ describe('Conductor Duplicate Spawning Prevention', function () {
   this.timeout(30000);
 
   let orchestrator;
+  let mockRunner;
   let testDir;
   let clusterId;
 
@@ -50,10 +52,35 @@ describe('Conductor Duplicate Spawning Prevention', function () {
     // Override settings path for ct CLI spawned by agents
     process.env.ZEROSHOT_SETTINGS_FILE = settingsPath;
 
+    // Create mock task runner with behavior for junior-conductor
+    // This prevents real Claude CLI execution - the mock returns instantly
+    mockRunner = new MockTaskRunner();
+
+    // Junior conductor returns a SIMPLE/TASK classification
+    // This triggers CLUSTER_OPERATIONS to load agents and republish ISSUE_OPENED
+    mockRunner.when('junior-conductor').returns(
+      JSON.stringify({
+        complexity: 'SIMPLE',
+        taskType: 'TASK',
+        reasoning: 'Simple task classification for test',
+      })
+    );
+
+    // Senior conductor only triggers on CONDUCTOR_ESCALATE (not in this test)
+    // but we define a behavior just in case
+    mockRunner.when('senior-conductor').returns(
+      JSON.stringify({
+        complexity: 'SIMPLE',
+        taskType: 'TASK',
+        reasoning: 'Fallback classification',
+      })
+    );
+
     orchestrator = new Orchestrator({
       quiet: true,
       storageDir: testDir,
       skipLoad: true,
+      taskRunner: mockRunner, // Inject mock to prevent real Claude CLI execution
     });
   });
 
@@ -89,8 +116,9 @@ describe('Conductor Duplicate Spawning Prevention', function () {
     const cluster = orchestrator.getCluster(clusterId);
 
     // Wait for classification and agent spawning to complete
-    // Give extra time for both conductors to potentially trigger (if bug exists)
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    // With mocks, this is fast - but we still need to wait for async message processing
+    // Give enough time for CLUSTER_OPERATIONS to be processed and agents to potentially re-trigger
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // ASSERTIONS
 
@@ -103,14 +131,12 @@ describe('Conductor Duplicate Spawning Prevention', function () {
     console.log(`\n📊 Test Results:`);
     console.log(`  CLUSTER_OPERATIONS count: ${clusterOps.length}`);
 
-    // 2. Count junior-conductor classifications (agent executions)
-    const juniorOutputs = cluster.messageBus.query({
-      cluster_id: clusterId,
-      topic: 'AGENT_OUTPUT',
-      sender: 'junior-conductor',
-    });
+    // 2. Count junior-conductor task executions via MockTaskRunner
+    // NOTE: With MockTaskRunner, AGENT_OUTPUT messages are not published
+    // because the streaming path is bypassed. Use mock's call tracking instead.
+    const juniorCalls = mockRunner.getCalls('junior-conductor');
 
-    console.log(`  Conductor classifications: ${juniorOutputs.length}`);
+    console.log(`  Conductor task executions: ${juniorCalls.length}`);
 
     // 3. Check all ISSUE_OPENED messages for _republished metadata
     const issueMessages = cluster.messageBus.query({
@@ -155,32 +181,33 @@ describe('Conductor Duplicate Spawning Prevention', function () {
     if (clusterOps.length > 1) {
       console.log(`\n❌ FAILURE: Duplicate spawning detected`);
       console.log(`  CLUSTER_OPERATIONS count: ${clusterOps.length} (expected: 1)`);
-      console.log(`  Conductor classifications: ${juniorOutputs.length} (expected: 1)`);
-    } else if (juniorOutputs.length > 1) {
+      console.log(`  Conductor task executions: ${juniorCalls.length} (expected: 1)`);
+    } else if (juniorCalls.length > 1) {
       console.log(`\n❌ FAILURE: Conductor re-triggered`);
-      console.log(`  Conductor classifications: ${juniorOutputs.length} (expected: 1)`);
+      console.log(`  Conductor task executions: ${juniorCalls.length} (expected: 1)`);
     } else {
       console.log(`\n✅ SUCCESS: No duplicate spawning detected`);
       console.log(`  CLUSTER_OPERATIONS count: ${clusterOps.length}`);
-      console.log(`  Conductor classifications: ${juniorOutputs.length}`);
+      console.log(`  Conductor task executions: ${juniorCalls.length}`);
     }
 
     // Assertions
-    expect(clusterOps.length, 'CLUSTER_OPERATIONS should be published exactly once').to.equal(1);
-    expect(juniorOutputs.length, 'Junior conductor should classify exactly once').to.equal(1);
+    expect(clusterOps.length, 'CLUSTER_OPERATIONS: should be published exactly once').to.equal(1);
+    // Use MockTaskRunner's call tracking - AGENT_OUTPUT is not published with mocks
+    mockRunner.assertCalled('junior-conductor', 1);
 
     // Verify republished message has metadata flag
     const republishedMsg = issueMessages.find((m) => m.metadata?._republished === true);
-    expect(republishedMsg, 'Republished ISSUE_OPENED should have _republished metadata').to.exist;
+    expect(republishedMsg, 'Republished ISSUE_OPENED: should have _republished metadata').to.exist;
 
     // Verify publish operation in CLUSTER_OPERATIONS has metadata
     const publishOp = clusterOps[0]?.content?.data?.operations?.find(
       (op) => op.action === 'publish'
     );
-    expect(publishOp, 'CLUSTER_OPERATIONS should contain publish operation').to.exist;
+    expect(publishOp, 'CLUSTER_OPERATIONS: should contain publish operation').to.exist;
     expect(
       publishOp.metadata,
-      'Publish operation should have metadata with _republished flag'
+      'Publish operation: should have metadata with _republished flag'
     ).to.deep.equal({ _republished: true });
   });
 });

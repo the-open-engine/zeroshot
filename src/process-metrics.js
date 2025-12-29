@@ -19,6 +19,18 @@ const fs = require('fs');
 const PLATFORM = process.platform;
 
 /**
+ * Escape a string for safe use in shell commands
+ * Prevents shell injection when passing dynamic values to execSync with shell: true
+ * @param {string} str - String to escape
+ * @returns {string} Shell-escaped string
+ */
+function escapeShell(str) {
+  // Replace single quotes with escaped version and wrap in single quotes
+  // This is the safest approach for shell escaping
+  return `'${str.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * @typedef {Object} ProcessMetrics
  * @property {number} pid - Process ID
  * @property {boolean} exists - Whether process exists
@@ -46,7 +58,7 @@ function getChildPids(pid) {
   try {
     if (PLATFORM === 'darwin') {
       // macOS: Use pgrep with -P flag
-      const output = execSync(`pgrep -P ${pid} 2>/dev/null`, {
+      const output = execSync(`pgrep -P ${escapeShell(String(pid))} 2>/dev/null`, {
         encoding: 'utf8',
         timeout: 2000,
       });
@@ -136,7 +148,7 @@ function getProcessMetricsLinux(pid) {
 function getProcessMetricsDarwin(pid) {
   try {
     // ps -p PID -o %cpu=,rss=,state=
-    const output = execSync(`ps -p ${pid} -o %cpu=,rss=,state= 2>/dev/null`, {
+    const output = execSync(`ps -p ${escapeShell(String(pid))} -o %cpu=,rss=,state= 2>/dev/null`, {
       encoding: 'utf8',
       timeout: 2000,
     });
@@ -182,7 +194,7 @@ function getNetworkStateLinux(pid) {
   try {
     // Use ss -tip to get extended TCP info with bytes_sent/bytes_received
     // -t = TCP only, -i = show internal TCP info, -p = show process
-    const output = execSync(`ss -tip 2>/dev/null | grep -A1 "pid=${pid}," || true`, {
+    const output = execSync(`ss -tip 2>/dev/null | grep -A1 "pid=${escapeShell(String(pid))}," || true`, {
       encoding: 'utf8',
       timeout: 3000,
     });
@@ -255,7 +267,7 @@ function getNetworkStateDarwin(pid) {
 
   try {
     // lsof -i -n -P for network connections
-    const output = execSync(`lsof -i -n -P -a -p ${pid} 2>/dev/null || true`, {
+    const output = execSync(`lsof -i -n -P -a -p ${escapeShell(String(pid))} 2>/dev/null || true`, {
       encoding: 'utf8',
       timeout: 3000,
     });

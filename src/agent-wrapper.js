@@ -80,7 +80,22 @@ class AgentWrapper {
 
     // MOCK SUPPORT - Inject mock spawn function for testing
     // When set, _spawnClaudeTask uses this instead of real ct CLI
-    this.mockSpawnFn = options.mockSpawnFn || null;
+    // Priority: options.mockSpawnFn (legacy) > options.taskRunner (new DI pattern)
+    if (options.mockSpawnFn) {
+      this.mockSpawnFn = options.mockSpawnFn;
+    } else if (options.taskRunner) {
+      // TaskRunner DI - create mockSpawnFn wrapper
+      const taskRunner = options.taskRunner;
+      this.mockSpawnFn = (args, { context }) => {
+        return taskRunner.run(context, {
+          agentId: this.id,
+          model: this._selectModel(),
+        });
+      };
+    } else {
+      this.mockSpawnFn = null;
+    }
+
     this.testMode = options.testMode || false;
     this.quiet = options.quiet || false;
 

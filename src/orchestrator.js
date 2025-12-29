@@ -681,11 +681,10 @@ class Orchestrator {
         // TaskRunner DI - new pattern for mocking task execution
         // Creates a mockSpawnFn wrapper that delegates to the taskRunner
         if (this.taskRunner) {
-          agentOptions.mockSpawnFn = (args, { context }) => {
-            return this.taskRunner.run(context, {
-              agentId: agentConfig.id,
-            });
-          };
+          // CRITICAL: agent is a closure variable capturing the AgentWrapper instance
+          // We cannot access agent._selectModel() here because agent doesn't exist yet
+          // Solution: Pass a factory function that will be called when agent is available
+          agentOptions.taskRunner = this.taskRunner;
         }
 
         // Pass isolation context if enabled
@@ -1638,9 +1637,14 @@ Continue from where you left off. Review your previous output to understand what
 
       // Build agent options
       const agentOptions = {
-        testMode: false,
+        testMode: !!this.taskRunner, // Enable testMode if taskRunner provided
         quiet: this.quiet,
       };
+
+      // TaskRunner DI - propagate to dynamically spawned agents
+      if (this.taskRunner) {
+        agentOptions.taskRunner = this.taskRunner;
+      }
 
       // Pass isolation context if cluster is running in isolation mode
       if (cluster.isolation?.enabled && context.isolationManager) {

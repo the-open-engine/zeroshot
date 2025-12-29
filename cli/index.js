@@ -4317,7 +4317,8 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
 // Main async entry point
 async function main() {
   // First-run setup wizard (blocks on first use only)
-  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet');
+  // CRITICAL: Auto-enable quiet mode in test environment to prevent stdin hangs
+  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet') || process.env.NODE_ENV === 'test';
   await checkFirstRun({ quiet: isQuiet });
 
   // Check for updates (non-blocking if offline)

@@ -148,9 +148,12 @@ function validateAgentConfig(config, options = {}) {
     (trigger) => !trigger.action || trigger.action === 'execute_task'
   );
 
-  if (options.testMode && !options.mockSpawnFn && executesTask) {
+  // Accept either mockSpawnFn OR taskRunner as valid mock sources
+  const hasMock = options.mockSpawnFn || options.taskRunner;
+
+  if (options.testMode && !hasMock && executesTask) {
     throw new Error(
-      `AgentWrapper: testMode=true but no mockSpawnFn provided for agent '${config.id}'. ` +
+      `AgentWrapper: testMode=true but no mockSpawnFn/taskRunner provided for agent '${config.id}'. ` +
         `This would cause real Claude API calls. ABORTING.`
     );
   }

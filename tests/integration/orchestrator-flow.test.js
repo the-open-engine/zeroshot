@@ -592,16 +592,16 @@ describe('Orchestrator Flow Integration', function () {
 
       assert(
         messages.length > 0,
-        `Cluster should have at least 1 message (ISSUE_OPENED), but has ${messages.length}. ` +
+        `Cluster: should have at least 1 message (ISSUE_OPENED), but has ${messages.length}. ` +
           `This indicates the SIGINT race condition is not fixed.`
       );
 
       // Verify ISSUE_OPENED specifically
       const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
-      assert(issueOpened, 'ISSUE_OPENED message should exist in ledger');
+      assert(issueOpened, 'ISSUE_OPENED: message should exist in ledger');
       assert(
         issueOpened.content.text.includes('Test SIGINT race condition'),
-        'ISSUE_OPENED should contain the task text'
+        'ISSUE_OPENED: should contain the task text'
       );
     });
 
@@ -634,6 +634,243 @@ describe('Orchestrator Flow Integration', function () {
       assert(
         stopDuration < 5000,
         `stop() took ${stopDuration}ms, should complete quickly (not hang on initCompletePromise)`
+      );
+    });
+  });
+
+  describe('Invalid Command Handling', () => {
+    /**
+     * Test that the system handles invalid/ambiguous commands gracefully
+     * without spawning duplicate agents or entering infinite loops
+     */
+    it('should handle invalid command without errors', async () => {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            timeout: 0,
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            prompt: 'Handle the command',
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: {
+                  topic: 'TASK_COMPLETE',
+                  content: { text: 'Handled invalid command' },
+                },
+              },
+            },
+          },
+          {
+            id: 'completion-detector',
+            role: 'orchestrator',
+            timeout: 0,
+            triggers: [{ topic: 'TASK_COMPLETE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+
+      mockRunner.when('worker').returns(
+        JSON.stringify({
+          error: 'Invalid command',
+          handled: true,
+        })
+      );
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(config, {
+        text: 'invalid-command',
+      });
+      const clusterId = result.id;
+
+      // Wait for completion
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+      // Verify worker was called exactly once (no duplicates)
+      mockRunner.assertCalled('worker', 1);
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+      // Should have clean message flow
+      assertions
+        .assertPublished('ISSUE_OPENED')
+        .assertPublished('TASK_COMPLETE')
+        .assertSequence(['ISSUE_OPENED', 'TASK_COMPLETE']);
+
+      // Verify no error messages published
+      assertions.assertCount('AGENT_ERROR', 0);
+      assertions.assertCount('CLUSTER_FAILED', 0);
+    });
+  });
+
+  describe('CLUSTER_OPERATIONS Failure Handling', () => {
+    /**
+     * Test for the bug where CLUSTER_OPERATIONS failure didn't stop the cluster.
+     *
+     * Root cause (fixed): When CLUSTER_OPERATIONS failed (e.g., agent model > maxModel),
+     * the .catch() handler published CLUSTER_OPERATIONS_FAILED but never called stop().
+     * The cluster remained running with no working agents.
+     *
+     * Fix: Added this.stop(clusterId) in the catch handler after publishing the failure message.
+     */
+    it('should stop cluster when CLUSTER_OPERATIONS fails due to model validation', async function () {
+      // Simple config with just a conductor that will publish CLUSTER_OPERATIONS
+      const config = {
+        agents: [
+          {
+            id: 'bootstrap-agent',
+            role: 'bootstrap',
+            timeout: 0,
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            prompt: 'Acknowledge the task',
+          },
+        ],
+      };
+
+      mockRunner.when('bootstrap-agent').returns('{"acknowledged": true}');
+
+      // Override maxModel setting to 'sonnet' for this test
+      const originalEnv = process.env.ZEROSHOT_MAX_MODEL;
+      process.env.ZEROSHOT_MAX_MODEL = 'sonnet';
+
+      try {
+        orchestrator = new Orchestrator({
+          quiet: true,
+          storageDir: tempDir,
+          taskRunner: mockRunner,
+        });
+
+        const result = await orchestrator.start(config, {
+          text: 'Test CLUSTER_OPERATIONS failure',
+        });
+        const clusterId = result.id;
+
+        // Give bootstrap agent time to start
+        await new Promise((r) => setTimeout(r, 500));
+
+        // Publish CLUSTER_OPERATIONS with an agent requesting 'opus' model
+        // This should fail because maxModel is 'sonnet'
+        const cluster = orchestrator.getCluster(clusterId);
+        cluster.messageBus.publish({
+          cluster_id: clusterId,
+          topic: 'CLUSTER_OPERATIONS',
+          sender: 'test',
+          content: {
+            data: {
+              operations: [
+                {
+                  action: 'add_agents',
+                  agents: [
+                    {
+                      id: 'planner',
+                      role: 'planner',
+                      model: 'opus', // This exceeds maxModel='sonnet'
+                      timeout: 0,
+                      triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+                      prompt: 'Plan the task',
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        });
+
+        // Wait for cluster to stop (the fix ensures this happens after operation failure)
+        await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+        // Verify CLUSTER_OPERATIONS_FAILED was published
+        const failedMessages = cluster.messageBus.query({
+          cluster_id: clusterId,
+          topic: 'CLUSTER_OPERATIONS_FAILED',
+        });
+        assert(failedMessages.length > 0, 'CLUSTER_OPERATIONS_FAILED: should be published');
+        assert(
+          failedMessages[0].content.text.includes('Operation chain failed'),
+          'Failure message: should indicate operation failure'
+        );
+
+        // Verify the cluster state is stopped (not running)
+        const finalStatus = orchestrator.getStatus(clusterId);
+        assert.strictEqual(
+          finalStatus.state,
+          'stopped',
+          `Cluster: should be stopped after CLUSTER_OPERATIONS failure, but is ${finalStatus.state}`
+        );
+      } finally {
+        // Restore original env
+        if (originalEnv !== undefined) {
+          process.env.ZEROSHOT_MAX_MODEL = originalEnv;
+        } else {
+          delete process.env.ZEROSHOT_MAX_MODEL;
+        }
+      }
+    });
+
+    it('should stop cluster when CLUSTER_OPERATIONS validation fails', async function () {
+      // Test for CLUSTER_OPERATIONS_VALIDATION_FAILED case
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            timeout: 0,
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            prompt: 'Do work',
+          },
+        ],
+      };
+
+      mockRunner.when('worker').returns('{"done": true}');
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(config, {
+        text: 'Test CLUSTER_OPERATIONS validation failure',
+      });
+      const clusterId = result.id;
+
+      // Give worker time to start
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Publish CLUSTER_OPERATIONS with invalid operation
+      const cluster = orchestrator.getCluster(clusterId);
+      cluster.messageBus.publish({
+        cluster_id: clusterId,
+        topic: 'CLUSTER_OPERATIONS',
+        sender: 'test',
+        content: {
+          data: {
+            operations: [
+              {
+                action: 'invalid_action', // Invalid action type
+                agents: [],
+              },
+            ],
+          },
+        },
+      });
+
+      // Wait for cluster to stop
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+      // Verify the cluster stopped due to the operation failure
+      const finalStatus = orchestrator.getStatus(clusterId);
+      assert.strictEqual(
+        finalStatus.state,
+        'stopped',
+        `Cluster: should be stopped after invalid CLUSTER_OPERATIONS, but is ${finalStatus.state}`
       );
     });
   });
