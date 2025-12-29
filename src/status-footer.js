@@ -681,8 +681,8 @@ class StatusFooter {
       let metricsStr = '';
       if (metrics && data.exists) {
         const cpuColor = metrics.cpuPercent > 50 ? COLORS.yellow : COLORS.green;
-        const cpuVal = `${Math.round(metrics.cpuPercent)}%`.padStart(4);
-        const ramVal = `${Math.round(metrics.memoryMB)}MB`.padStart(6);
+        const cpuVal = `${metrics.cpuPercent.toFixed(1)}%`.padStart(6);
+        const ramVal = `${metrics.memoryMB.toFixed(1)}MB`.padStart(8);
 
         metricsStr += `${COLORS.dim}CPU:${COLORS.reset}${cpuColor}${cpuVal}${COLORS.reset}`;
         metricsStr += `  ${COLORS.dim}RAM:${COLORS.reset}${COLORS.gray}${ramVal}${COLORS.reset}`;
@@ -781,8 +781,8 @@ class StatusFooter {
     if (totalCpu > 0 || totalMem > 0) {
       parts.push(` ${COLORS.gray}│${COLORS.reset}`);
       let aggregateStr = ` ${COLORS.cyan}Σ${COLORS.reset} `;
-      aggregateStr += `${COLORS.dim}CPU:${COLORS.reset}${totalCpu.toFixed(0)}%`;
-      aggregateStr += ` ${COLORS.dim}RAM:${COLORS.reset}${totalMem.toFixed(0)}MB`;
+      aggregateStr += `${COLORS.dim}CPU:${COLORS.reset}${totalCpu.toFixed(1)}%`;
+      aggregateStr += ` ${COLORS.dim}RAM:${COLORS.reset}${totalMem.toFixed(1)}MB`;
       if (totalBytesSent > 0 || totalBytesReceived > 0) {
         aggregateStr += ` ${COLORS.dim}NET:${COLORS.reset}${COLORS.cyan}↑${this.formatBytes(totalBytesSent)} ↓${this.formatBytes(totalBytesReceived)}${COLORS.reset}`;
       }
