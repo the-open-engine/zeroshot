@@ -882,7 +882,11 @@ class StatusFooter {
     // Remove resize listener
     process.stdout.removeListener('resize', this._debouncedResize);
 
-    if (this.isTTY() && !this.hidden) {
+    // ALWAYS perform cleanup if TTY, regardless of hidden state
+    // BUG FIX: Previously skipped cleanup when hidden=true, but footer content
+    // may still be rendered from before terminal was resized small.
+    // The cleanup operations are harmless if footer was never rendered.
+    if (this.isTTY()) {
       // BUILD SINGLE BUFFER for atomic shutdown write
       // Prevents interleaving with agent output during cleanup
       let buffer = '';
