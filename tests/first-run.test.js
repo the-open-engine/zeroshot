@@ -16,12 +16,9 @@ const assert = require('assert');
 const TEST_STORAGE_DIR = path.join(os.tmpdir(), 'zeroshot-first-run-test-' + Date.now());
 const TEST_SETTINGS_FILE = path.join(TEST_STORAGE_DIR, 'settings.json');
 
-// Set env var BEFORE requiring modules (so settings.js uses test path)
+// Set env var to use test settings file
+// The settings module reads this dynamically via getSettingsFile()
 process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
-
-// Clear require cache to ensure fresh module load with test env var
-delete require.cache[require.resolve('../lib/settings')];
-delete require.cache[require.resolve('../cli/lib/first-run')];
 
 const settingsModule = require('../lib/settings');
 const firstRunModule = require('../cli/lib/first-run');
