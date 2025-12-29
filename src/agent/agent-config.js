@@ -6,7 +6,10 @@
  * - Default values for optional fields
  * - Model configuration setup
  * - Safety checks for test mode
+ * - maxModel ceiling enforcement at config time
  */
+
+const { loadSettings, validateModelAgainstMax } = require('../../lib/settings');
 
 // Default max iterations (high limit - let the user decide when to give up)
 const DEFAULT_MAX_ITERATIONS = 100;
@@ -55,11 +58,40 @@ function validateAgentConfig(config, options = {}) {
   }
 
   // Model configuration: support both static model and dynamic rules
+  // If no model specified, model is null - _selectModel() will use maxModel as default
   let modelConfig;
   if (config.modelRules) {
     modelConfig = { type: 'rules', rules: config.modelRules };
   } else {
-    modelConfig = { type: 'static', model: config.model || 'sonnet' };
+    modelConfig = { type: 'static', model: config.model || null };
+  }
+
+  // COST CEILING ENFORCEMENT: Validate model(s) against maxModel at config time
+  // Catches violations EARLY (config load) instead of at runtime (iteration N)
+  const settings = loadSettings();
+  const maxModel = settings.maxModel || 'sonnet';
+
+  if (modelConfig.type === 'static' && modelConfig.model) {
+    // Static model: validate once
+    try {
+      validateModelAgainstMax(modelConfig.model, maxModel);
+    } catch (error) {
+      throw new Error(`Agent "${config.id}": ${error.message}`);
+    }
+  } else if (modelConfig.type === 'rules') {
+    // Dynamic rules: validate ALL rules upfront (don't wait until iteration N)
+    for (const rule of modelConfig.rules) {
+      if (rule.model) {
+        try {
+          validateModelAgainstMax(rule.model, maxModel);
+        } catch {
+          throw new Error(
+            `Agent "${config.id}": modelRule "${rule.iterations}" requests "${rule.model}" ` +
+              `but maxModel is "${maxModel}". Either lower the rule's model or raise maxModel.`
+          );
+        }
+      }
+    }
   }
 
   // Prompt configuration: support static prompt OR iteration-based rules

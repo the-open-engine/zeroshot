@@ -12,6 +12,7 @@
 
 const LogicEngine = require('./logic-engine');
 const { validateAgentConfig } = require('./agent/agent-config');
+const { loadSettings, validateModelAgainstMax } = require('../lib/settings');
 const { buildContext } = require('./agent/agent-context-builder');
 const { findMatchingTrigger, evaluateTrigger } = require('./agent/agent-trigger-evaluator');
 const { executeHook } = require('./agent/agent-hook-executor');
@@ -134,27 +135,44 @@ class AgentWrapper {
 
   /**
    * Select model based on current iteration and agent config
+   * Enforces maxModel ceiling from settings
    * @returns {string} Model name ('sonnet', 'opus', 'haiku')
    * @private
    */
   _selectModel() {
-    // Backward compatibility: static model
-    if (this.modelConfig.type === 'static') {
-      return this.modelConfig.model;
-    }
+    const settings = loadSettings();
+    const maxModel = settings.maxModel || 'sonnet';
 
-    // Dynamic rules: evaluate based on iteration
-    for (const rule of this.modelConfig.rules) {
-      if (this._matchesIterationRange(rule.iterations)) {
-        return rule.model;
+    let requestedModel = null;
+
+    // Get requested model from config
+    if (this.modelConfig.type === 'static') {
+      requestedModel = this.modelConfig.model;
+    } else if (this.modelConfig.type === 'rules') {
+      // Dynamic rules: evaluate based on iteration
+      for (const rule of this.modelConfig.rules) {
+        if (this._matchesIterationRange(rule.iterations)) {
+          requestedModel = rule.model;
+          break;
+        }
+      }
+
+      // No match for rules: fail fast (config error)
+      if (!requestedModel) {
+        throw new Error(
+          `Agent ${this.id}: No model rule matched iteration ${this.iteration}. ` +
+            `Add a catch-all rule like { "iterations": "all", "model": "sonnet" }`
+        );
       }
     }
 
-    // No match: fail fast
-    throw new Error(
-      `Agent ${this.id}: No model rule matched iteration ${this.iteration}. ` +
-        `Add a catch-all rule like { "iterations": "all", "model": "sonnet" }`
-    );
+    // If no model specified (neither static nor rules), use maxModel as default
+    if (!requestedModel) {
+      return maxModel;
+    }
+
+    // Enforce ceiling - will throw if requestedModel > maxModel
+    return validateModelAgainstMax(requestedModel, maxModel);
   }
 
   /**
