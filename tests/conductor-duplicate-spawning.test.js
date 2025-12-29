@@ -76,6 +76,19 @@ describe('Conductor Duplicate Spawning Prevention', function () {
       })
     );
 
+    // Worker agent is dynamically spawned via CLUSTER_OPERATIONS from worker-validator template
+    mockRunner.when('worker').returns('Implementation complete. All tests pass.');
+
+    // Validator agent is dynamically spawned via CLUSTER_OPERATIONS from worker-validator template
+    // It has outputFormat: "json" with jsonSchema requiring approved, summary, errors
+    mockRunner.when('validator').returns(
+      JSON.stringify({
+        approved: true,
+        summary: 'Implementation verified successfully',
+        errors: [],
+      })
+    );
+
     orchestrator = new Orchestrator({
       quiet: true,
       storageDir: testDir,
