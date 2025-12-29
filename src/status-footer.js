@@ -69,17 +69,30 @@ function debounce(fn, ms) {
 class StatusFooter {
   /**
    * @param {Object} options
-   * @param {number} [options.refreshInterval=1000] - Refresh interval in ms
+   * @param {number} [options.samplingInterval=500] - Background metrics sampling interval in ms
+   * @param {number} [options.refreshInterval=100] - Display refresh interval in ms (10 fps)
+   * @param {number} [options.interpolationSpeed=0.15] - Lerp factor (0-1) per refresh tick
    * @param {boolean} [options.enabled=true] - Whether footer is enabled
    * @param {number} [options.maxAgentRows=5] - Max agent rows to display
    */
   constructor(options = {}) {
-    this.refreshInterval = options.refreshInterval || 1000;
+    // INTERPOLATION ARCHITECTURE:
+    // - Sample actual metrics every 500ms (background, non-blocking)
+    // - Display updates every 100ms (10 fps - appears continuous)
+    // - Values smoothly drift toward actual measurements via lerp
+    // - Result: Real-time seeming monitoring even with less frequent polling
+    this.samplingInterval = options.samplingInterval || 500; // Actual metrics poll (ms)
+    this.refreshInterval = options.refreshInterval || 100; // Display update rate (ms) - was 1000
+    this.interpolationSpeed = options.interpolationSpeed || 0.15; // Lerp factor per tick
     this.enabled = options.enabled !== false;
     this.maxAgentRows = options.maxAgentRows || 5;
     this.intervalId = null;
+    this.samplingIntervalId = null; // Background metrics sampler
     this.agents = new Map(); // agentId -> AgentState
-    this.metricsCache = new Map(); // agentId -> ProcessMetrics
+    // Interpolated metrics: { current: {...}, target: {...}, lastSampleTime, exists }
+    // - current: Displayed value (interpolated toward target)
+    // - target: Actual measured value from last sample
+    this.interpolatedMetrics = new Map(); // agentId -> InterpolatedMetrics
     this.footerHeight = 3; // Minimum: header + 1 agent row + summary
     this.lastFooterHeight = 3;
     this.scrollRegionSet = false;
@@ -373,7 +386,82 @@ class StatusFooter {
    */
   removeAgent(agentId) {
     this.agents.delete(agentId);
-    this.metricsCache.delete(agentId);
+    this.interpolatedMetrics.delete(agentId);
+  }
+
+  /**
+   * Background metrics sampling - polls actual CPU/RAM every samplingInterval ms
+   * Updates target values that display will interpolate toward
+   * @private
+   */
+  async _sampleMetrics() {
+    for (const [agentId, agent] of this.agents) {
+      if (!agent.pid) continue;
+
+      try {
+        // Get actual metrics with 200ms sample window (for CPU calculation)
+        const raw = await getProcessMetrics(agent.pid, { samplePeriodMs: 200 });
+        const existing = this.interpolatedMetrics.get(agentId);
+
+        this.interpolatedMetrics.set(agentId, {
+          // Keep interpolating from current position (smooth transition)
+          current: existing?.current || {
+            cpuPercent: raw.cpuPercent,
+            memoryMB: raw.memoryMB,
+          },
+          // New target to approach
+          target: {
+            cpuPercent: raw.cpuPercent,
+            memoryMB: raw.memoryMB,
+          },
+          // Network is cumulative - just use latest value (no interpolation)
+          network: raw.network,
+          lastSampleTime: Date.now(),
+          exists: raw.exists,
+        });
+      } catch {
+        // Process may have exited
+        this.interpolatedMetrics.delete(agentId);
+      }
+    }
+  }
+
+  /**
+   * Interpolate current values toward target values
+   * Called each render tick (100ms) for smooth visual updates
+   * @private
+   */
+  _interpolateMetrics() {
+    for (const [, data] of this.interpolatedMetrics) {
+      if (!data.target || !data.current) continue;
+
+      // Lerp CPU and RAM toward target (they fluctuate)
+      data.current.cpuPercent = this._lerp(
+        data.current.cpuPercent,
+        data.target.cpuPercent
+      );
+      data.current.memoryMB = this._lerp(
+        data.current.memoryMB,
+        data.target.memoryMB
+      );
+      // Network is cumulative counter - no interpolation, just use latest
+    }
+  }
+
+  /**
+   * Linear interpolation helper
+   * Moves current 15% of the way toward target each tick
+   * At 100ms ticks: reaches ~87% of target after 1 second
+   * @param {number} current - Current displayed value
+   * @param {number} target - Target measured value
+   * @returns {number} New interpolated value
+   * @private
+   */
+  _lerp(current, target) {
+    if (current === null || current === undefined) return target;
+    if (target === null || target === undefined) return current;
+    const diff = target - current;
+    return current + diff * this.interpolationSpeed;
   }
 
   /**
@@ -441,7 +529,7 @@ class StatusFooter {
    * Render the footer
    * ROBUST: Uses render lock to prevent concurrent renders from corrupting state
    */
-  async render() {
+  render() {
     if (!this.enabled || !this.isTTY()) return;
 
     // Graceful degradation: don't render if hidden
@@ -463,18 +551,9 @@ class StatusFooter {
         return;
       }
 
-      // Collect metrics for all agents with PIDs
-      for (const [agentId, agent] of this.agents) {
-        if (agent.pid) {
-          try {
-            const metrics = await getProcessMetrics(agent.pid, { samplePeriodMs: 500 });
-            this.metricsCache.set(agentId, metrics);
-          } catch {
-            // Process may have exited
-            this.metricsCache.delete(agentId);
-          }
-        }
-      }
+      // Interpolate metrics toward targets (called every 100ms for smooth visuals)
+      // Background sampler updates targets every 500ms
+      this._interpolateMetrics();
 
       // Get executing agents for display
       const executingAgents = Array.from(this.agents.entries())
@@ -592,24 +671,25 @@ class StatusFooter {
     const rows = [];
     for (const [agentId, agent] of executingAgents) {
       const icon = this.getAgentIcon(agent.state);
-      const metrics = this.metricsCache.get(agentId);
+      const data = this.interpolatedMetrics.get(agentId);
+      const metrics = data?.current;
 
       // Build columns with fixed widths for alignment
       const iconCol = icon;
       const nameCol = agentId.padEnd(14).slice(0, 14); // Max 14 chars for name
 
       let metricsStr = '';
-      if (metrics && metrics.exists) {
+      if (metrics && data.exists) {
         const cpuColor = metrics.cpuPercent > 50 ? COLORS.yellow : COLORS.green;
-        const cpuVal = `${metrics.cpuPercent}%`.padStart(4);
-        const ramVal = `${metrics.memoryMB}MB`.padStart(6);
+        const cpuVal = `${Math.round(metrics.cpuPercent)}%`.padStart(4);
+        const ramVal = `${Math.round(metrics.memoryMB)}MB`.padStart(6);
 
         metricsStr += `${COLORS.dim}CPU:${COLORS.reset}${cpuColor}${cpuVal}${COLORS.reset}`;
         metricsStr += `  ${COLORS.dim}RAM:${COLORS.reset}${COLORS.gray}${ramVal}${COLORS.reset}`;
 
-        // Network bytes
-        const net = metrics.network;
-        if (net.bytesSent > 0 || net.bytesReceived > 0) {
+        // Network bytes (cumulative - no interpolation)
+        const net = data.network;
+        if (net && (net.bytesSent > 0 || net.bytesReceived > 0)) {
           const sent = this.formatBytes(net.bytesSent).padStart(7);
           const recv = this.formatBytes(net.bytesReceived).padStart(7);
           metricsStr += `  ${COLORS.dim}NET:${COLORS.reset}${COLORS.cyan}↑${sent} ↓${recv}${COLORS.reset}`;
@@ -684,17 +764,17 @@ class StatusFooter {
       }
     }
 
-    // Aggregate metrics
+    // Aggregate metrics (using interpolated values for smooth display)
     let totalCpu = 0;
     let totalMem = 0;
     let totalBytesSent = 0;
     let totalBytesReceived = 0;
-    for (const metrics of this.metricsCache.values()) {
-      if (metrics.exists) {
-        totalCpu += metrics.cpuPercent;
-        totalMem += metrics.memoryMB;
-        totalBytesSent += metrics.network.bytesSent || 0;
-        totalBytesReceived += metrics.network.bytesReceived || 0;
+    for (const data of this.interpolatedMetrics.values()) {
+      if (data.exists && data.current) {
+        totalCpu += data.current.cpuPercent;
+        totalMem += data.current.memoryMB;
+        totalBytesSent += data.network?.bytesSent || 0;
+        totalBytesReceived += data.network?.bytesReceived || 0;
       }
     }
 
@@ -750,8 +830,19 @@ class StatusFooter {
     // Handle terminal resize with debounced handler
     process.stdout.on('resize', this._debouncedResize);
 
-    // Start refresh interval
-    // Guard: Skip if previous render still running (prevents overlapping renders)
+    // Start background metrics sampling (every 500ms)
+    // Non-blocking - updates target values that display will interpolate toward
+    this.samplingIntervalId = setInterval(() => {
+      this._sampleMetrics().catch(() => {
+        // Ignore sampling errors - display will show stale data
+      });
+    }, this.samplingInterval);
+
+    // Initial metrics sample (async, don't block startup)
+    this._sampleMetrics().catch(() => {});
+
+    // Start display refresh interval (every 100ms - 10 fps)
+    // Interpolates current values toward targets for smooth visual updates
     this.intervalId = setInterval(() => {
       if (this.isRendering) return;
       this.render();
@@ -768,6 +859,12 @@ class StatusFooter {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+
+    // Stop background metrics sampling
+    if (this.samplingIntervalId) {
+      clearInterval(this.samplingIntervalId);
+      this.samplingIntervalId = null;
     }
 
     // Remove resize listener

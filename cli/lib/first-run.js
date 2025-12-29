@@ -3,7 +3,7 @@
  *
  * Interactive setup on first use:
  * - Welcome banner
- * - Default model selection (sonnet/opus/haiku)
+ * - Max model ceiling selection (sonnet/opus/haiku)
  * - Auto-update preference
  * - Marks setup as complete
  */
@@ -45,10 +45,10 @@ function createReadline() {
  */
 function promptModel(rl) {
   return new Promise((resolve) => {
-    console.log('Which Claude model should agents use by default?\n');
-    console.log('  1) sonnet  - Fast & capable (recommended)');
-    console.log('  2) opus    - Most capable, slower');
-    console.log('  3) haiku   - Fastest, for simple tasks\n');
+    console.log('What is the maximum model agents can use? (cost ceiling)\n');
+    console.log('  1) sonnet  - Agents can use sonnet or haiku (recommended)');
+    console.log('  2) opus    - Agents can use opus, sonnet, or haiku');
+    console.log('  3) haiku   - Agents can only use haiku (lowest cost)\n');
 
     rl.question('Enter 1, 2, or 3 [1]: ', (answer) => {
       const choice = answer.trim() || '1';
@@ -95,8 +95,8 @@ function printComplete(settings) {
 ╚═══════════════════════════════════════════════════════════════╝
 
 Your settings:
-  • Default model: ${settings.defaultModel}
-  • Auto-updates:  ${settings.autoCheckUpdates ? 'enabled' : 'disabled'}
+  • Max model:    ${settings.maxModel} (agents can use this model or lower)
+  • Auto-updates: ${settings.autoCheckUpdates ? 'enabled' : 'disabled'}
 
 Change anytime with: zeroshot settings set <key> <value>
 
@@ -144,9 +144,9 @@ async function checkFirstRun(options = {}) {
   const rl = createReadline();
 
   try {
-    // Model selection
+    // Model ceiling selection
     const model = await promptModel(rl);
-    settings.defaultModel = model;
+    settings.maxModel = model;
 
     // Auto-update preference
     const autoUpdate = await promptAutoUpdate(rl);

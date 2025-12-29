@@ -400,8 +400,8 @@ Examples:
   ${chalk.cyan('zeroshot kill <id>')}                  Kill a running task or cluster
   ${chalk.cyan('zeroshot purge')}                      Kill all processes and delete all data (with confirmation)
   ${chalk.cyan('zeroshot purge -y')}                   Purge everything without confirmation
-  ${chalk.cyan('zeroshot settings')}                   Show/manage zeroshot settings (default model, config, etc.)
-  ${chalk.cyan('zeroshot settings set <key> <val>')}   Set a setting (e.g., defaultModel haiku)
+  ${chalk.cyan('zeroshot settings')}                   Show/manage zeroshot settings (maxModel, config, etc.)
+  ${chalk.cyan('zeroshot settings set <key> <val>')}   Set a setting (e.g., maxModel haiku)
   ${chalk.cyan('zeroshot config list')}                List available cluster configs
   ${chalk.cyan('zeroshot config show <name>')}         Visualize a cluster config (agents, triggers, flow)
   ${chalk.cyan('zeroshot export <id>')}                Export cluster conversation to file
@@ -423,7 +423,6 @@ program
   .command('run <input>')
   .description('Start a multi-agent cluster (auto-detects GitHub issue or plain text)')
   .option('--config <file>', 'Path to cluster config JSON (default: conductor-bootstrap)')
-  .option('-m, --model <model>', 'Model for all agents: opus, sonnet, haiku (default: from config)')
   .option('--isolation', 'Run cluster inside Docker container (for e2e testing)')
   .option(
     '--isolation-image <image>',
@@ -533,7 +532,6 @@ Input formats:
             ...process.env,
             CREW_DAEMON: '1',
             CREW_CLUSTER_ID: clusterId,
-            CREW_MODEL: options.model || '',
             CREW_ISOLATION: options.isolation ? '1' : '',
             CREW_ISOLATION_IMAGE: options.isolationImage || '',
             CREW_PR: options.pr ? '1' : '',
@@ -594,17 +592,6 @@ Input formats:
         }
         console.log(chalk.dim(`Config: ${configName}`));
         console.log(chalk.dim('Ctrl+C to stop following (cluster keeps running)\n'));
-      }
-
-      // Override model (CLI > settings > config)
-      const modelOverride = process.env.CREW_MODEL || options.model || settings.defaultModel;
-      if (modelOverride) {
-        for (const agent of config.agents) {
-          // Only override if agent doesn't already specify a model
-          if (!agent.model || modelOverride) {
-            agent.model = modelOverride;
-          }
-        }
       }
 
       // Apply strictSchema setting to all agents (CLI > env > settings)
@@ -822,10 +809,6 @@ taskCmd
   .command('run <prompt>')
   .description('Run a single-agent background task')
   .option('-C, --cwd <path>', 'Working directory for task')
-  .option(
-    '-m, --model <model>',
-    'Model to use: opus, sonnet, haiku (default: sonnet or ANTHROPIC_MODEL env)'
-  )
   .option('-r, --resume <sessionId>', 'Resume a specific Claude session')
   .option('-c, --continue', 'Continue the most recent session')
   .option(

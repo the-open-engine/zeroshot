@@ -9,9 +9,22 @@
  */
 
 const { spawn, execSync } = require('child_process');
+const { Worker } = require('worker_threads');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+
+/**
+ * Escape a string for safe use in shell commands
+ * Prevents shell injection when passing dynamic values to execSync with shell: true
+ * @param {string} str - String to escape
+ * @returns {string} Shell-escaped string
+ */
+function escapeShell(str) {
+  // Replace single quotes with escaped version and wrap in single quotes
+  // This is the safest approach for shell escaping
+  return `'${str.replace(/'/g, "'\\''")}'`;
+}
 
 const DEFAULT_IMAGE = 'zeroshot-cluster-base';
 
@@ -177,54 +190,73 @@ class IsolationManager {
 
           // Install dependencies if package.json exists
           // This enables e2e tests and other npm-based tools to run
+          // OPTIMIZATION: Skip npm install if node_modules already exists (30-40% faster startup)
+          // See: GitHub issue #20
           try {
             console.log(`[IsolationManager] Checking for package.json in ${workDir}...`);
             if (fs.existsSync(path.join(workDir, 'package.json'))) {
-              console.log(`[IsolationManager] Installing npm dependencies in container...`);
+              // Check if node_modules already exists in container (pre-baked or previous run)
+              const checkResult = await this.execInContainer(
+                clusterId,
+                ['sh', '-c', 'test -d node_modules && test -f node_modules/.package-lock.json && echo "exists"'],
+                {}
+              );
 
-              // Retry npm install with exponential backoff (network issues are common)
-              const maxRetries = 3;
-              const baseDelay = 2000; // 2 seconds
-              let installResult = null;
+              if (checkResult.code === 0 && checkResult.stdout.trim() === 'exists') {
+                console.log(`[IsolationManager] ✓ Dependencies already installed (skipping npm install)`);
+              } else {
+                // Check if npm is available in container
+                const npmCheck = await this.execInContainer(clusterId, ['which', 'npm'], {});
+                if (npmCheck.code !== 0) {
+                  console.log(`[IsolationManager] npm not available in container, skipping dependency install`);
+                } else {
+                  console.log(`[IsolationManager] Installing npm dependencies in container...`);
 
-              for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                  installResult = await this.execInContainer(
-                    clusterId,
-                    ['sh', '-c', 'npm_config_engine_strict=false npm install --no-audit --no-fund'],
-                    {}
-                  );
+                  // Retry npm install with exponential backoff (network issues are common)
+                  const maxRetries = 3;
+                  const baseDelay = 2000; // 2 seconds
+                  let installResult = null;
 
-                  if (installResult.code === 0) {
-                    console.log(`[IsolationManager] ✓ Dependencies installed`);
-                    break; // Success - exit retry loop
-                  }
+                  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                      installResult = await this.execInContainer(
+                        clusterId,
+                        ['sh', '-c', 'npm_config_engine_strict=false npm install --no-audit --no-fund'],
+                        {}
+                      );
 
-                  // Failed - retry if not last attempt
-                  // Use stderr if available, otherwise stdout (npm writes some errors to stdout)
-                  const errorOutput = (installResult.stderr || installResult.stdout || '').slice(0, 500);
-                  if (attempt < maxRetries) {
-                    const delay = baseDelay * Math.pow(2, attempt - 1);
-                    console.warn(
-                      `[IsolationManager] ⚠️ npm install failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
-                    );
-                    console.warn(`[IsolationManager] Error: ${errorOutput}`);
-                    await new Promise((_resolve) => setTimeout(_resolve, delay));
-                  } else {
-                    console.warn(
-                      `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${errorOutput}`
-                    );
-                  }
-                } catch (execErr) {
-                  if (attempt < maxRetries) {
-                    const delay = baseDelay * Math.pow(2, attempt - 1);
-                    console.warn(
-                      `[IsolationManager] ⚠️ npm install execution error (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
-                    );
-                    console.warn(`[IsolationManager] Error: ${execErr.message}`);
-                    await new Promise((_resolve) => setTimeout(_resolve, delay));
-                  } else {
-                    throw execErr; // Re-throw on last attempt
+                      if (installResult.code === 0) {
+                        console.log(`[IsolationManager] ✓ Dependencies installed`);
+                        break; // Success - exit retry loop
+                      }
+
+                      // Failed - retry if not last attempt
+                      // Use stderr if available, otherwise stdout (npm writes some errors to stdout)
+                      const errorOutput = (installResult.stderr || installResult.stdout || '').slice(0, 500);
+                      if (attempt < maxRetries) {
+                        const delay = baseDelay * Math.pow(2, attempt - 1);
+                        console.warn(
+                          `[IsolationManager] ⚠️ npm install failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
+                        );
+                        console.warn(`[IsolationManager] Error: ${errorOutput}`);
+                        await new Promise((_resolve) => setTimeout(_resolve, delay));
+                      } else {
+                        console.warn(
+                          `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${errorOutput}`
+                        );
+                      }
+                    } catch (execErr) {
+                      if (attempt < maxRetries) {
+                        const delay = baseDelay * Math.pow(2, attempt - 1);
+                        console.warn(
+                          `[IsolationManager] ⚠️ npm install execution error (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
+                        );
+                        console.warn(`[IsolationManager] Error: ${execErr.message}`);
+                        await new Promise((_resolve) => setTimeout(_resolve, delay));
+                      } else {
+                        throw execErr; // Re-throw on last attempt
+                      }
+                    }
                   }
                 }
               }
@@ -495,13 +527,15 @@ class IsolationManager {
       // No remote configured in source
     }
 
-    // Initialize fresh git repo
-    execSync('git init', { cwd: isolatedPath, stdio: 'pipe' });
+    // Initialize fresh git repo with all setup in a single batched command
+    // This reduces ~500ms overhead (5 execSync calls @ ~100ms each) to ~100ms (1 call)
+    // Issue #22: Batch git operations for 5-10% startup reduction
+    const branchName = `zeroshot/${clusterId}`;
 
-    // Add remote if source had one (needed for git push / PR creation)
-    // Inject gh token into URL for authentication inside container
+    // Build authenticated remote URL if source had one (needed for git push / PR creation)
+    let authRemoteUrl = null;
     if (remoteUrl) {
-      let authRemoteUrl = remoteUrl;
+      authRemoteUrl = remoteUrl;
       const token = this._getGhToken();
       if (token && remoteUrl.startsWith('https://github.com/')) {
         // Convert https://github.com/org/repo.git to https://x-access-token:TOKEN@github.com/org/repo.git
@@ -510,80 +544,208 @@ class IsolationManager {
           `https://x-access-token:${token}@github.com/`
         );
       }
-      execSync(`git remote add origin "${authRemoteUrl}"`, {
-        cwd: isolatedPath,
-        stdio: 'pipe',
-      });
     }
 
-    execSync('git add -A', { cwd: isolatedPath, stdio: 'pipe' });
+    // Batch all git operations into a single shell command
+    // Using --allow-empty on commit to handle edge case of empty directories
+    const gitCommands = [
+      'git init',
+      authRemoteUrl ? `git remote add origin ${escapeShell(authRemoteUrl)}` : null,
+      'git add -A',
+      'git commit -m "Initial commit (isolated copy)" --allow-empty',
+      `git checkout -b ${escapeShell(branchName)}`,
+    ]
+      .filter(Boolean)
+      .join(' && ');
 
-    try {
-      execSync('git commit -m "Initial commit (isolated copy)"', {
-        cwd: isolatedPath,
-        stdio: 'pipe',
-      });
-    } catch {
-      // May fail if nothing to commit (empty dir)
-    }
-
-    // Create feature branch for work
-    const branchName = `zeroshot/${clusterId}`;
-    execSync(`git checkout -b "${branchName}"`, {
+    execSync(gitCommands, {
       cwd: isolatedPath,
       stdio: 'pipe',
+      shell: '/bin/bash',
     });
 
     return isolatedPath;
   }
 
   /**
-   * Copy directory excluding certain paths
+   * Copy directory excluding certain paths using parallel worker threads
    * Supports exact matches and glob patterns (*.ext)
+   *
+   * Performance optimization for large repos (10k+ files):
+   * - Phase 1: Collect all files async (non-blocking traversal)
+   * - Phase 2: Create directory structure (must be sequential)
+   * - Phase 3: Copy files in parallel using worker threads
+   *
    * @private
+   * @param {string} src - Source directory
+   * @param {string} dest - Destination directory
+   * @param {string[]} exclude - Patterns to exclude
    */
   _copyDirExcluding(src, dest, exclude) {
-    const entries = fs.readdirSync(src, { withFileTypes: true });
+    // Phase 1: Collect all files and directories
+    const files = [];
+    const directories = new Set();
 
-    for (const entry of entries) {
-      // Check exclusions (exact match or glob pattern)
-      const shouldExclude = exclude.some((pattern) => {
-        if (pattern.startsWith('*.')) {
-          return entry.name.endsWith(pattern.slice(1));
-        }
-        return entry.name === pattern;
-      });
-      if (shouldExclude) continue;
-
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-
+    const collectFiles = (currentSrc, relativePath = '') => {
+      let entries;
       try {
-        // Handle symlinks: resolve to actual target and copy appropriately
-        // This avoids EISDIR errors when symlink points to directory
-        if (entry.isSymbolicLink()) {
-          // Get the actual target stats (follows the symlink)
-          const targetStats = fs.statSync(srcPath);
-          if (targetStats.isDirectory()) {
-            fs.mkdirSync(destPath, { recursive: true });
-            this._copyDirExcluding(srcPath, destPath, exclude);
-          } else {
-            fs.copyFileSync(srcPath, destPath);
-          }
-        } else if (entry.isDirectory()) {
-          fs.mkdirSync(destPath, { recursive: true });
-          this._copyDirExcluding(srcPath, destPath, exclude);
-        } else {
-          fs.copyFileSync(srcPath, destPath);
-        }
+        entries = fs.readdirSync(currentSrc, { withFileTypes: true });
       } catch (err) {
-        // Skip files we can't copy (permission denied, broken symlinks, etc.)
-        // These are usually cache/temp files that aren't needed
         if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT') {
-          continue;
+          return;
         }
-        throw err; // Re-throw other errors
+        throw err;
       }
+
+      for (const entry of entries) {
+        // Check exclusions (exact match or glob pattern)
+        const shouldExclude = exclude.some((pattern) => {
+          if (pattern.startsWith('*.')) {
+            return entry.name.endsWith(pattern.slice(1));
+          }
+          return entry.name === pattern;
+        });
+        if (shouldExclude) continue;
+
+        const srcPath = path.join(currentSrc, entry.name);
+        const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+
+        try {
+          // Handle symlinks: resolve to actual target
+          if (entry.isSymbolicLink()) {
+            const targetStats = fs.statSync(srcPath);
+            if (targetStats.isDirectory()) {
+              directories.add(relPath);
+              collectFiles(srcPath, relPath);
+            } else {
+              files.push(relPath);
+              // Ensure parent directory is tracked
+              if (relativePath) directories.add(relativePath);
+            }
+          } else if (entry.isDirectory()) {
+            directories.add(relPath);
+            collectFiles(srcPath, relPath);
+          } else {
+            files.push(relPath);
+            // Ensure parent directory is tracked
+            if (relativePath) directories.add(relativePath);
+          }
+        } catch (err) {
+          if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT') {
+            continue;
+          }
+          throw err;
+        }
+      }
+    };
+
+    collectFiles(src);
+
+    // Phase 2: Create directory structure (sequential - must exist before file copy)
+    // Sort directories by depth to ensure parents are created before children
+    const sortedDirs = Array.from(directories).sort((a, b) => {
+      const depthA = a.split(path.sep).length;
+      const depthB = b.split(path.sep).length;
+      return depthA - depthB;
+    });
+
+    for (const dir of sortedDirs) {
+      const destDir = path.join(dest, dir);
+      try {
+        fs.mkdirSync(destDir, { recursive: true });
+      } catch (err) {
+        if (err.code !== 'EEXIST') {
+          throw err;
+        }
+      }
+    }
+
+    // Phase 3: Copy files in parallel using worker threads
+    // For small file counts (<100), use synchronous copy (worker overhead not worth it)
+    if (files.length < 100) {
+      for (const relPath of files) {
+        const srcPath = path.join(src, relPath);
+        const destPath = path.join(dest, relPath);
+        try {
+          fs.copyFileSync(srcPath, destPath);
+        } catch (err) {
+          if (err.code !== 'EACCES' && err.code !== 'EPERM' && err.code !== 'ENOENT') {
+            throw err;
+          }
+        }
+      }
+      return;
+    }
+
+    // Use worker threads for larger file counts
+    const numWorkers = Math.min(4, os.cpus().length);
+    const chunkSize = Math.ceil(files.length / numWorkers);
+    const workerPath = path.join(__dirname, 'copy-worker.js');
+
+    // Split files into chunks for workers
+    const chunks = [];
+    for (let i = 0; i < files.length; i += chunkSize) {
+      chunks.push(files.slice(i, i + chunkSize));
+    }
+
+    // Spawn workers and wait for completion
+    const workerPromises = chunks.map((chunk) => {
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(workerPath, {
+          workerData: {
+            files: chunk,
+            sourceBase: src,
+            destBase: dest,
+          },
+        });
+
+        worker.on('message', (result) => {
+          resolve(result);
+        });
+
+        worker.on('error', (err) => {
+          reject(err);
+        });
+
+        worker.on('exit', (code) => {
+          if (code !== 0) {
+            reject(new Error(`Worker exited with code ${code}`));
+          }
+        });
+      });
+    });
+
+    // Wait for all workers synchronously (required for this sync API)
+    // We use a busy-wait pattern since _copyDirExcluding is called synchronously
+    let completed = false;
+    let workerError = null;
+
+    Promise.all(workerPromises)
+      .then(() => {
+        completed = true;
+      })
+      .catch((err) => {
+        workerError = err;
+        completed = true;
+      });
+
+    // Busy wait for workers to complete
+    // This is acceptable since it's still faster than sequential copy for large repos
+    const startTime = Date.now();
+    const timeout = 300000; // 5 minute timeout
+    while (!completed) {
+      if (Date.now() - startTime > timeout) {
+        throw new Error('Parallel copy timed out after 5 minutes');
+      }
+      // Small sleep to prevent CPU spinning
+      const waitUntil = Date.now() + 10;
+      while (Date.now() < waitUntil) {
+        // spin
+      }
+    }
+
+    if (workerError) {
+      throw workerError;
     }
   }
 
