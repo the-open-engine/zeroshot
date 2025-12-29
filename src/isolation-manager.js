@@ -66,7 +66,7 @@ class IsolationManager {
    * @param {boolean} [config.reuseExistingWorkspace=false] - If true, reuse existing isolated workspace (for resume)
    * @returns {Promise<string>} Container ID
    */
-  createContainer(clusterId, config) {
+  async createContainer(clusterId, config) {
     const image = config.image || this.image;
     let workDir = config.workDir || process.cwd();
     const containerName = `zeroshot-cluster-${clusterId}`;
@@ -100,7 +100,7 @@ class IsolationManager {
         workDir = isolatedPath;
       } else {
         // Fresh start: create new isolated copy
-        const isolatedDir = this._createIsolatedCopy(clusterId, workDir);
+        const isolatedDir = await this._createIsolatedCopy(clusterId, workDir);
         this.isolatedDirs = this.isolatedDirs || new Map();
         this.isolatedDirs.set(clusterId, {
           path: isolatedDir,
@@ -525,9 +525,9 @@ class IsolationManager {
    * @private
    * @param {string} clusterId - Cluster ID
    * @param {string} sourceDir - Source directory to copy
-   * @returns {string} Path to isolated directory
+   * @returns {Promise<string>} Path to isolated directory
    */
-  _createIsolatedCopy(clusterId, sourceDir) {
+  async _createIsolatedCopy(clusterId, sourceDir) {
     const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
 
     // Clean up existing dir
@@ -539,7 +539,7 @@ class IsolationManager {
     fs.mkdirSync(isolatedPath, { recursive: true });
 
     // Copy files (excluding .git and common build artifacts)
-    this._copyDirExcluding(sourceDir, isolatedPath, [
+    await this._copyDirExcluding(sourceDir, isolatedPath, [
       '.git',
       'node_modules',
       '.next',
@@ -626,8 +626,9 @@ class IsolationManager {
    * @param {string} src - Source directory
    * @param {string} dest - Destination directory
    * @param {string[]} exclude - Patterns to exclude
+   * @returns {Promise<void>}
    */
-  _copyDirExcluding(src, dest, exclude) {
+  async _copyDirExcluding(src, dest, exclude) {
     // Phase 1: Collect all files and directories
     const files = [];
     const directories = new Set();
@@ -761,38 +762,10 @@ class IsolationManager {
       });
     });
 
-    // Wait for all workers synchronously (required for this sync API)
-    // We use a busy-wait pattern since _copyDirExcluding is called synchronously
-    let completed = false;
-    let workerError = null;
-
-    Promise.all(workerPromises)
-      .then(() => {
-        completed = true;
-      })
-      .catch((err) => {
-        workerError = err;
-        completed = true;
-      });
-
-    // Busy wait for workers to complete
-    // This is acceptable since it's still faster than sequential copy for large repos
-    const startTime = Date.now();
-    const timeout = 300000; // 5 minute timeout
-    while (!completed) {
-      if (Date.now() - startTime > timeout) {
-        throw new Error('Parallel copy timed out after 5 minutes');
-      }
-      // Small sleep to prevent CPU spinning
-      const waitUntil = Date.now() + 10;
-      while (Date.now() < waitUntil) {
-        // spin
-      }
-    }
-
-    if (workerError) {
-      throw workerError;
-    }
+    // Wait for all workers to complete (proper async/await - no busy-wait!)
+    // FIX: Previous version used busy-wait which blocked the event loop,
+    // preventing worker thread messages from being processed (timeout bug)
+    await Promise.all(workerPromises);
   }
 
   /**
