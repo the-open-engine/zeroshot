@@ -50,8 +50,8 @@ function promptModel(rl) {
     console.log('  2) opus    - Agents can use opus, sonnet, or haiku');
     console.log('  3) haiku   - Agents can only use haiku (lowest cost)\n');
 
-    rl.question('Enter 1, 2, or 3 [1]: ', (answer) => {
-      const choice = answer.trim() || '1';
+    rl.question('Enter 1, 2, or 3 [2]: ', (answer) => {
+      const choice = answer.trim() || '2';
       switch (choice) {
         case '2':
           resolve('opus');
