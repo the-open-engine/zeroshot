@@ -1,3 +1,78 @@
+# [3.0.0](https://github.com/covibes/zeroshot/compare/v2.1.0...v3.0.0) (2025-12-29)
+
+
+### Bug Fixes
+
+* **isolation:** replace busy-wait with async/await for parallel copy ([c8afbf0](https://github.com/covibes/zeroshot/commit/c8afbf00927ce939af633406c47a928507c339c4)), closes [#21](https://github.com/covibes/zeroshot/issues/21)
+* **security:** escape shell arguments in Docker commands ([43476ad](https://github.com/covibes/zeroshot/commit/43476adfb3c67634d478b4dd53d52a6afb42b297))
+* shell injection prevention and test reliability improvements ([45254f7](https://github.com/covibes/zeroshot/commit/45254f7f75b027ba43f6e16fa3668960d4b77f97))
+* **status-footer:** use decimal display for interpolated metrics ([#26](https://github.com/covibes/zeroshot/issues/26)) ([73ce673](https://github.com/covibes/zeroshot/commit/73ce67376078f97faefe6724e32ff34619f33374))
+
+
+### Features
+
+* **cli:** change default model ceiling to opus ([#28](https://github.com/covibes/zeroshot/issues/28)) ([1810be3](https://github.com/covibes/zeroshot/commit/1810be3a6a2cbfbb4d3aefa711c32f9ff9718f5a))
+* **cli:** change default model ceiling to opus + fix worktree flag cascade ([#29](https://github.com/covibes/zeroshot/issues/29)) ([eaa30b0](https://github.com/covibes/zeroshot/commit/eaa30b06baf381c4fb7306d08fcd2d4e980de002))
+* **cli:** consolidate StatusFooter for logs -f mode + add blinking agent indicator ([fe2722d](https://github.com/covibes/zeroshot/commit/fe2722d157e04048b56368e2c0ffcd7052604f36))
+* real-time metrics via interpolation + maxModel cost ceiling ([#24](https://github.com/covibes/zeroshot/issues/24)) ([f1db466](https://github.com/covibes/zeroshot/commit/f1db46691eca592de67e399aca18f6db3e94d628)), closes [#21](https://github.com/covibes/zeroshot/issues/21)
+* **settings:** replace defaultModel with maxModel cost ceiling ([#25](https://github.com/covibes/zeroshot/issues/25)) ([9877dad](https://github.com/covibes/zeroshot/commit/9877dadad890f78b3af1404b0341da392f6f4bb7)), closes [#23](https://github.com/covibes/zeroshot/issues/23)
+* **validation:** add Phase 5 template variable validation ([#27](https://github.com/covibes/zeroshot/issues/27)) ([5e5e7c6](https://github.com/covibes/zeroshot/commit/5e5e7c6ab2a11ba23a3600d101a9c9c7de02569e))
+
+
+### Performance Improvements
+
+* **isolation:** optimize startup with 4 key improvements ([f28f89c](https://github.com/covibes/zeroshot/commit/f28f89c36ac98c341484124bbaffee745818dffa)), closes [#20](https://github.com/covibes/zeroshot/issues/20) [#21](https://github.com/covibes/zeroshot/issues/21) [#22](https://github.com/covibes/zeroshot/issues/22) [#23](https://github.com/covibes/zeroshot/issues/23) [#20](https://github.com/covibes/zeroshot/issues/20) [#21](https://github.com/covibes/zeroshot/issues/21) [#22](https://github.com/covibes/zeroshot/issues/22) [#23](https://github.com/covibes/zeroshot/issues/23)
+
+
+### BREAKING CHANGES
+
+* None
+* **settings:** defaultModel setting renamed to maxModel
+* defaultModel setting renamed to maxModel
+
+* feat(status-footer): implement real-time metrics via interpolation
+
+Replace blocking 1s metrics polling with background sampling + interpolation:
+- Sample actual metrics every 500ms (non-blocking background)
+- Display updates every 100ms (10 fps - appears continuous)
+- Values smoothly drift toward targets via lerp (15% per tick)
+- CPU and RAM interpolate; Network is cumulative (no interpolation)
+
+Result: Real-time seeming monitoring while reducing actual polling.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+* feat(debug-workflow): harden investigator/fixer/tester for senior-dev quality
+
+Implements 7 hardening changes to ensure debug-workflow produces
+trustworthy output without manual code review:
+
+**Investigator:**
+- Structured rootCauses schema requiring proof each is fundamental
+- Mandatory similarPatternLocations field from codebase-wide scan
+- Prompt requires documenting WHY each cause is root (not symptom)
+
+**Fixer:**
+- Mandatory root cause mapping (each cause → specific fix)
+- Mandatory test addition with escape hatch for valid justifications
+- Must fix ALL similar pattern locations, not just original failure
+
+**Tester:**
+- Structured verification schema with commandResult, rootCauseVerification,
+  similarLocationVerification, testVerification, regressionCheck
+- Comprehensive checklist: A (command), B (root causes), C (similar locs),
+  D (test quality), E (regression via smart tiering)
+- Explicit forbidden rationalizations and approval criteria
+
+Result: Workflow now blocks incomplete work, band-aid fixes, missing tests,
+and ignored similar bugs. Output can be trusted.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
 # [2.1.0](https://github.com/covibes/zeroshot/compare/v2.0.0...v2.1.0) (2025-12-29)
 
 
