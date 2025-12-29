@@ -1,3 +1,23 @@
+# [2.0.0](https://github.com/covibes/zeroshot/compare/v1.5.0...v2.0.0) (2025-12-29)
+
+
+### Code Refactoring
+
+* **cli:** simplify flag hierarchy with cascading --ship → --pr → --isolation ([#18](https://github.com/covibes/zeroshot/issues/18)) ([5718ead](https://github.com/covibes/zeroshot/commit/5718ead37f1771a5dfa68dd9b4f55f73e1f6b9d7)), closes [#17](https://github.com/covibes/zeroshot/issues/17)
+
+
+### BREAKING CHANGES
+
+* **cli:** `auto` command removed, use `run --ship` instead
+
+- Remove `auto` command (use `run --ship` for full automation)
+- Add `--ship` flag: isolation + PR + auto-merge
+- `--pr` now auto-enables `--isolation`
+- Rename `clear` → `purge` for clarity
+- Update help text with cascading flag examples
+- Add `agents` command stubs
+- Add `--json` output support to list/status
+
 # [1.5.0](https://github.com/covibes/zeroshot/compare/v1.4.0...v1.5.0) (2025-12-28)
 
 
