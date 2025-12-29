@@ -64,7 +64,7 @@ describe('Settings System', function () {
 
     assert.strictEqual(DEFAULT_SETTINGS.defaultModel, 'sonnet');
     assert.strictEqual(DEFAULT_SETTINGS.defaultConfig, 'conductor-bootstrap');
-    assert.strictEqual(DEFAULT_SETTINGS.defaultIsolation, false);
+    assert.strictEqual(DEFAULT_SETTINGS.defaultDocker, false);
     assert.strictEqual(DEFAULT_SETTINGS.strictSchema, true);
     assert.strictEqual(DEFAULT_SETTINGS.logLevel, 'normal');
   });
@@ -83,7 +83,7 @@ describe('Settings System', function () {
 
     assert.strictEqual(settings.defaultModel, 'sonnet');
     assert.strictEqual(settings.defaultConfig, 'conductor-bootstrap');
-    assert.strictEqual(settings.defaultIsolation, false);
+    assert.strictEqual(settings.defaultDocker, false);
     assert.strictEqual(settings.strictSchema, true);
     assert.strictEqual(settings.logLevel, 'normal');
   });
@@ -108,7 +108,7 @@ describe('Settings System', function () {
     const newSettings = {
       defaultModel: 'haiku',
       defaultConfig: 'conductor-junior-bootstrap',
-      defaultIsolation: true,
+      defaultDocker: true,
       logLevel: 'verbose',
     };
 
@@ -118,7 +118,7 @@ describe('Settings System', function () {
     const loaded = loadSettings();
     assert.strictEqual(loaded.defaultModel, 'haiku');
     assert.strictEqual(loaded.defaultConfig, 'conductor-junior-bootstrap');
-    assert.strictEqual(loaded.defaultIsolation, true);
+    assert.strictEqual(loaded.defaultDocker, true);
     assert.strictEqual(loaded.logLevel, 'verbose');
   });
 
@@ -153,14 +153,14 @@ describe('Settings System', function () {
   it('should coerce boolean values', function () {
     const { coerceValue } = settingsModule;
 
-    // defaultIsolation
-    assert.strictEqual(coerceValue('defaultIsolation', 'true'), true);
-    assert.strictEqual(coerceValue('defaultIsolation', '1'), true);
-    assert.strictEqual(coerceValue('defaultIsolation', 'yes'), true);
-    assert.strictEqual(coerceValue('defaultIsolation', true), true);
-    assert.strictEqual(coerceValue('defaultIsolation', 'false'), false);
-    assert.strictEqual(coerceValue('defaultIsolation', 'no'), false);
-    assert.strictEqual(coerceValue('defaultIsolation', false), false);
+    // defaultDocker
+    assert.strictEqual(coerceValue('defaultDocker', 'true'), true);
+    assert.strictEqual(coerceValue('defaultDocker', '1'), true);
+    assert.strictEqual(coerceValue('defaultDocker', 'yes'), true);
+    assert.strictEqual(coerceValue('defaultDocker', true), true);
+    assert.strictEqual(coerceValue('defaultDocker', 'false'), false);
+    assert.strictEqual(coerceValue('defaultDocker', 'no'), false);
+    assert.strictEqual(coerceValue('defaultDocker', false), false);
 
     // strictSchema
     assert.strictEqual(coerceValue('strictSchema', 'true'), true);
@@ -189,7 +189,7 @@ describe('Settings System', function () {
     const settings = {
       defaultModel: 'sonnet',
       defaultConfig: 'test-config',
-      defaultIsolation: false,
+      defaultDocker: false,
       logLevel: 'normal',
     };
 

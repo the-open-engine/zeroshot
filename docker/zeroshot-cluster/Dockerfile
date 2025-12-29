@@ -2,7 +2,7 @@
 # Provides: Node.js, Python, Git, Chromium, Claude CLI, Playwright deps, Infrastructure tools
 #
 # Build: docker build -t vibe-cluster-base vibe/cluster/docker/vibe-cluster/
-# Usage: vibe run <task> --isolation
+# Usage: zeroshot run <task> --docker
 
 FROM node:20-slim
 

@@ -86,6 +86,9 @@ class AgentWrapper {
 
     // ISOLATION SUPPORT - Run tasks inside Docker container
     this.isolation = options.isolation || null;
+
+    // WORKTREE SUPPORT - Run tasks in git worktree (lightweight isolation without Docker)
+    this.worktree = options.worktree || null;
   }
 
   /**

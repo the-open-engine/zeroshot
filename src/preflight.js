@@ -4,7 +4,7 @@
  * Validates:
  * - Claude CLI installed and authenticated
  * - gh CLI installed and authenticated (if using issue numbers)
- * - Docker available (if using --isolation)
+ * - Docker available (if using --docker)
  *
  * Provides CLEAR, ACTIONABLE error messages with recovery instructions.
  */
@@ -232,7 +232,8 @@ function checkDocker() {
  * Run all preflight checks
  * @param {Object} options - Preflight options
  * @param {boolean} options.requireGh - Whether gh CLI is required (true if using issue number)
- * @param {boolean} options.requireDocker - Whether Docker is required (true if using --isolation)
+ * @param {boolean} options.requireDocker - Whether Docker is required (true if using --docker)
+ * @param {boolean} options.requireGit - Whether git repo is required (true if using --worktree)
  * @param {boolean} options.quiet - Suppress success messages
  * @returns {ValidationResult}
  */
@@ -330,6 +331,30 @@ function runPreflight(options = {}) {
     }
   }
 
+  // 5. Check git repo (if required for worktree isolation)
+  if (options.requireGit) {
+    let isGitRepo = false;
+    try {
+      execSync('git rev-parse --git-dir', { stdio: 'pipe' });
+      isGitRepo = true;
+    } catch {
+      // Not a git repo
+    }
+    if (!isGitRepo) {
+      errors.push(
+        formatError(
+          'Not in a git repository',
+          'Worktree isolation requires a git repository',
+          [
+            'Run from within a git repository',
+            'Or use --docker instead of --worktree for non-git directories',
+            'Initialize a repo with: git init',
+          ]
+        )
+      );
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,
@@ -342,6 +367,7 @@ function runPreflight(options = {}) {
  * @param {Object} options - Preflight options
  * @param {boolean} options.requireGh - Whether gh CLI is required
  * @param {boolean} options.requireDocker - Whether Docker is required
+ * @param {boolean} options.requireGit - Whether git repo is required
  * @param {boolean} options.quiet - Suppress success messages
  */
 function requirePreflight(options = {}) {

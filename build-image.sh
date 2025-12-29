@@ -62,8 +62,8 @@ for attempt in $(seq 1 $MAX_RETRIES); do
     echo "Image: $IMAGE_NAME"
     echo ""
     echo "Usage:"
-    echo "  zeroshot run <task> --isolation"
-    echo "  zeroshot run <issue-number> --isolation"
+    echo "  zeroshot run <task> --docker"
+    echo "  zeroshot run <issue-number> --docker"
     echo ""
     exit 0
   fi

@@ -70,10 +70,11 @@ gh auth login
 zeroshot run 123               # Run on GitHub issue
 zeroshot run "Add dark mode"   # Run from description
 
-# Automation levels (cascading: --ship → --pr → --isolation)
-zeroshot run 123 --isolation   # Docker isolation, no PR
-zeroshot run 123 --pr          # Isolation + PR (human reviews)
-zeroshot run 123 --ship        # Isolation + PR + auto-merge (full automation)
+# Automation levels (cascading: --ship → --pr → --worktree)
+zeroshot run 123 --docker      # Docker isolation (full container)
+zeroshot run 123 --worktree    # Git worktree isolation (lightweight)
+zeroshot run 123 --pr          # Worktree + PR (human reviews)
+zeroshot run 123 --ship        # Worktree + PR + auto-merge (full automation)
 
 # Background mode
 zeroshot run 123 -d            # Detached/daemon
@@ -331,13 +332,23 @@ zeroshot resume cluster-bold-panther
 
 ---
 
-## Docker Isolation
+## Isolation Modes
+
+### Git Worktree (Default for --pr/--ship)
 
 ```bash
-zeroshot 123 --isolation
+zeroshot 123 --worktree
 ```
 
-Runs in a fresh container. Your workspace stays untouched. Good for risky experiments.
+Lightweight isolation using git worktree. Creates a separate working directory with its own branch. Fast (<1s setup), no Docker required. Auto-enabled with `--pr` and `--ship`.
+
+### Docker Container
+
+```bash
+zeroshot 123 --docker
+```
+
+Full isolation in a fresh container. Your workspace stays untouched. Good for risky experiments or parallel agents.
 
 ---
 
@@ -356,7 +367,7 @@ Runs in a fresh container. Your workspace stays untouched. Good for risky experi
 | `claude: command not found`   | `npm i -g @anthropic-ai/claude-code && claude auth login`            |
 | `gh: command not found`       | [Install GitHub CLI](https://cli.github.com/)                        |
 | CLI frozen for minutes        | Normal - agents use JSON schema output, can't stream partial results |
-| `--isolation` fails           | Docker must be running: `docker ps` to verify                        |
+| `--docker` fails              | Docker must be running: `docker ps` to verify                        |
 | Cluster stuck                 | `zeroshot resume <id>` to continue with guidance                     |
 | Agent keeps failing           | Check `zeroshot logs <id>` for actual error                          |
 | `zeroshot: command not found` | `npm install -g @covibes/zeroshot`                                   |

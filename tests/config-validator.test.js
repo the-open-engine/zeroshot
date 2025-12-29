@@ -16,6 +16,11 @@ const {
   validateAgents,
   validateLogicScripts,
   isValidIterationPattern,
+  // Phase 5: Template variable validation
+  validateTemplateVariables,
+  extractTemplateVariables,
+  extractSchemaProperties,
+  validateAgentTemplateVariables,
 } = require('../src/config-validator');
 
 describe('Config Validator', function () {
@@ -696,6 +701,1028 @@ describe('Config Validator', function () {
       const result = validateConfig(brokenConfig);
       assert.strictEqual(result.valid, false);
       assert.ok(result.errors.length >= 3); // At least: missing id, missing role, empty triggers
+    });
+  });
+
+  // === PHASE 5: TEMPLATE VARIABLE VALIDATION TESTS ===
+  // Tests cross-validation between jsonSchema definitions and {{result.*}} template usage
+
+  describe('extractTemplateVariables', function () {
+    // Test 1: Mustache in string
+    it('should extract single mustache variable from string', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              content: { text: '{{result.summary}}' },
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('summary'));
+      assert.strictEqual(vars.size, 1);
+    });
+
+    // Test 2: Multiple mustache same string
+    it('should extract multiple mustache variables from same string', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              content: { text: '{{result.a}} and {{result.b}}' },
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('a'));
+      assert.ok(vars.has('b'));
+      assert.strictEqual(vars.size, 2);
+    });
+
+    // Test 3: Mustache in nested object
+    it('should extract mustache from deeply nested object', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              x: { y: { z: '{{result.deep}}' } },
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('deep'));
+    });
+
+    // Test 4: Mustache in array
+    it('should extract mustache from array elements', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              items: ['{{result.item1}}', '{{result.item2}}'],
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('item1'));
+      assert.ok(vars.has('item2'));
+    });
+
+    // Test 5: Mustache in deeply nested array
+    it('should extract mustache from nested array of objects', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              arr: [{ obj: '{{result.x}}' }],
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('x'));
+    });
+
+    // Test 6: Transform script direct access
+    it('should extract direct result access from transform script', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            transform: {
+              script: 'return result.approved ? "yes" : "no";',
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('approved'));
+    });
+
+    // Test 7: Transform script multiple access
+    it('should extract multiple result accesses from transform script', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            transform: {
+              script: 'return result.a + result.b;',
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('a'));
+      assert.ok(vars.has('b'));
+    });
+
+    // Test 8: Both mustache AND script
+    it('should extract from both mustache config and transform script', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.fromConfig}}' },
+            transform: { script: 'return result.fromScript;' },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('fromConfig'));
+      assert.ok(vars.has('fromScript'));
+    });
+
+    // Test 9: Triggers array pattern
+    it('should extract from triggers[].onComplete', function () {
+      const agent = {
+        triggers: [
+          {
+            topic: 'X',
+            onComplete: {
+              config: { text: '{{result.triggerVar}}' },
+            },
+          },
+        ],
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('triggerVar'));
+    });
+
+    // Test 10: No hooks at all
+    it('should return empty set when agent has no hooks', function () {
+      const agent = { id: 'test', role: 'impl' };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 11: Hooks but no onComplete
+    it('should return empty set when hooks has no onComplete', function () {
+      const agent = { hooks: {} };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 12: Empty config object
+    it('should return empty set for empty config object', function () {
+      const agent = { hooks: { onComplete: { config: {} } } };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 13: Duplicate variable refs (deduplication)
+    it('should deduplicate multiple references to same variable', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: {
+              text: '{{result.x}} {{result.x}} {{result.x}}',
+            },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('x'));
+      assert.strictEqual(vars.size, 1);
+    });
+
+    // Test 14: Malformed mustache (edge case) - missing field name
+    it('should not match malformed mustache {{result.}}', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.}}' },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 15: Malformed mustache - no dot
+    it('should not match {{result}} without field', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result}}' },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 16: Multiple triggers with different template vars
+    // REGRESSION: Ensure ALL triggers are scanned, not just the first
+    it('should extract from ALL triggers onComplete hooks', function () {
+      const agent = {
+        triggers: [
+          {
+            topic: 'TOPIC_A',
+            onComplete: {
+              config: { text: '{{result.fromTriggerA}}' },
+            },
+          },
+          {
+            topic: 'TOPIC_B',
+            onComplete: {
+              config: { text: '{{result.fromTriggerB}}' },
+            },
+          },
+          {
+            topic: 'TOPIC_C',
+            onComplete: {
+              config: { nested: { deep: '{{result.fromTriggerC}}' } },
+            },
+          },
+        ],
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('fromTriggerA'), 'should find var from first trigger');
+      assert.ok(vars.has('fromTriggerB'), 'should find var from second trigger');
+      assert.ok(vars.has('fromTriggerC'), 'should find var from third trigger');
+      assert.strictEqual(vars.size, 3);
+    });
+
+    // Test 17: triggers[].onComplete.transform.script extraction
+    // REGRESSION: Transform scripts inside triggers were not being extracted
+    it('should extract from triggers[].onComplete.transform.script', function () {
+      const agent = {
+        triggers: [
+          {
+            topic: 'VALIDATION',
+            onComplete: {
+              transform: {
+                script: 'return result.approved && result.score > 0.8;',
+              },
+              config: { text: '{{result.summary}}' },
+            },
+          },
+        ],
+      };
+      const vars = extractTemplateVariables(agent);
+      assert.ok(vars.has('approved'), 'should find approved from transform script');
+      assert.ok(vars.has('score'), 'should find score from transform script');
+      assert.ok(vars.has('summary'), 'should find summary from config');
+      assert.strictEqual(vars.size, 3);
+    });
+
+    // Test 18: Empty onComplete object
+    it('should return empty set for empty onComplete object', function () {
+      const agent = { hooks: { onComplete: {} } };
+      const vars = extractTemplateVariables(agent);
+      assert.strictEqual(vars.size, 0);
+    });
+
+    // Test 19: Regex lastIndex pollution
+    // REGRESSION: Global regex /g with lastIndex can skip matches on consecutive calls
+    it('should not be affected by regex lastIndex state pollution', function () {
+      // Create two agents and call extraction multiple times
+      const agent1 = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.first}} {{result.second}}' },
+          },
+        },
+      };
+      const agent2 = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.third}} {{result.fourth}}' },
+          },
+        },
+      };
+
+      // Call multiple times in sequence - regex state should not pollute
+      const vars1a = extractTemplateVariables(agent1);
+      const vars2 = extractTemplateVariables(agent2);
+      const vars1b = extractTemplateVariables(agent1);
+
+      // First call for agent1
+      assert.ok(vars1a.has('first'));
+      assert.ok(vars1a.has('second'));
+      assert.strictEqual(vars1a.size, 2);
+
+      // Call for agent2
+      assert.ok(vars2.has('third'));
+      assert.ok(vars2.has('fourth'));
+      assert.strictEqual(vars2.size, 2);
+
+      // Second call for agent1 (same result - no pollution)
+      assert.ok(vars1b.has('first'));
+      assert.ok(vars1b.has('second'));
+      assert.strictEqual(vars1b.size, 2);
+    });
+
+    // Test 20: Nested result path like {{result.nested.field}}
+    it('should extract full path for nested result access', function () {
+      const agent = {
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.nested.field}}' },
+          },
+        },
+      };
+      const vars = extractTemplateVariables(agent);
+      // Should extract "nested.field" as the full path
+      assert.ok(vars.has('nested.field') || vars.has('nested'), 'should extract nested path');
+    });
+  });
+
+  describe('extractSchemaProperties', function () {
+    // Test 1: Non-JSON agent (outputFormat: 'text')
+    it('should return null for outputFormat: text', function () {
+      const agent = { outputFormat: 'text' };
+      const props = extractSchemaProperties(agent);
+      assert.strictEqual(props, null);
+    });
+
+    // Test 2: No outputFormat specified
+    it('should return null when outputFormat is undefined', function () {
+      const agent = {};
+      const props = extractSchemaProperties(agent);
+      assert.strictEqual(props, null);
+    });
+
+    // Test 3: JSON without explicit schema - default
+    it('should return default schema for json without explicit schema', function () {
+      const agent = { outputFormat: 'json' };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props.has('summary'));
+      assert.ok(props.has('result'));
+      assert.strictEqual(props.size, 2);
+    });
+
+    // Test 4: JSON with explicit schema
+    it('should return schema properties from explicit jsonSchema', function () {
+      const agent = {
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            approved: { type: 'boolean' },
+            issues: { type: 'array' },
+            summary: { type: 'string' },
+          },
+        },
+      };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props.has('approved'));
+      assert.ok(props.has('issues'));
+      assert.ok(props.has('summary'));
+      assert.strictEqual(props.size, 3);
+    });
+
+    // Test 5: Empty properties object
+    it('should return empty set for empty properties', function () {
+      const agent = {
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: {},
+        },
+      };
+      const props = extractSchemaProperties(agent);
+      assert.strictEqual(props.size, 0);
+    });
+
+    // Test 6: Schema with nested properties - only top-level
+    it('should extract only top-level properties from nested schema', function () {
+      const agent = {
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            nested: {
+              type: 'object',
+              properties: { innerField: { type: 'string' } },
+            },
+          },
+        },
+      };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props.has('nested'));
+      assert.ok(!props.has('innerField')); // Only top-level
+      assert.strictEqual(props.size, 1);
+    });
+
+    // Test 7: Schema with required array
+    it('should extract from properties, not required array', function () {
+      const agent = {
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: { a: { type: 'string' }, b: { type: 'string' } },
+          required: ['a'],
+        },
+      };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props.has('a'));
+      assert.ok(props.has('b'));
+      assert.strictEqual(props.size, 2);
+    });
+
+    // Test 8: Null jsonSchema with JSON outputFormat
+    it('should return default schema when jsonSchema is null', function () {
+      const agent = { outputFormat: 'json', jsonSchema: null };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props.has('summary'));
+      assert.ok(props.has('result'));
+    });
+
+    // Test 9: stream-json outputFormat - should validate like 'json'
+    // REGRESSION: Bug where stream-json was skipped because only 'json' was checked
+    it('should return schema properties for stream-json outputFormat', function () {
+      const agent = {
+        outputFormat: 'stream-json',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            summary: { type: 'string' },
+            approved: { type: 'boolean' },
+          },
+        },
+      };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props !== null, 'stream-json should not return null');
+      assert.ok(props.has('summary'));
+      assert.ok(props.has('approved'));
+      assert.strictEqual(props.size, 2);
+    });
+
+    // Test 10: stream-json without explicit schema - should use defaults
+    it('should return default schema for stream-json without explicit schema', function () {
+      const agent = { outputFormat: 'stream-json' };
+      const props = extractSchemaProperties(agent);
+      assert.ok(props !== null, 'stream-json should not return null');
+      assert.ok(props.has('summary'));
+      assert.ok(props.has('result'));
+      assert.strictEqual(props.size, 2);
+    });
+  });
+
+  describe('validateAgentTemplateVariables', function () {
+    // Helper to create a valid JSON agent with schema and hooks
+    function createJsonAgent(schemaProps, templateVars) {
+      const agent = {
+        id: 'test-agent',
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: {},
+        },
+        hooks: {
+          onComplete: {
+            config: { text: '' },
+          },
+        },
+      };
+      // Add schema properties
+      for (const prop of schemaProps) {
+        agent.jsonSchema.properties[prop] = { type: 'string' };
+      }
+      // Add template variables
+      agent.hooks.onComplete.config.text = templateVars.map((v) => `{{result.${v}}}`).join(' ');
+      return agent;
+    }
+
+    // Test 1: Ref exists in schema - no error
+    it('should not error when template ref exists in schema', function () {
+      const agent = createJsonAgent(['summary'], ['summary']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+    });
+
+    // Test 2: Ref NOT in schema - ERROR
+    it('should error when template references undefined field', function () {
+      const agent = createJsonAgent(['summary'], ['nonexistent']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('nonexistent'));
+      assert.ok(result.errors[0].includes('not defined in jsonSchema'));
+    });
+
+    // Test 3: Multiple undefined refs - multiple ERRORs
+    it('should error for each undefined field', function () {
+      const agent = createJsonAgent(['summary'], ['bad1', 'bad2', 'bad3']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 3);
+    });
+
+    // Test 4: Schema prop unused - WARNING
+    it('should warn when schema property is never referenced', function () {
+      const agent = createJsonAgent(['summary', 'unused'], ['summary']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 1);
+      assert.ok(result.warnings[0].includes('unused'));
+      assert.ok(result.warnings[0].includes('never referenced'));
+    });
+
+    // Test 5: Multiple unused props - multiple WARNINGs
+    it('should warn for each unused property', function () {
+      const agent = createJsonAgent(['a', 'b', 'c', 'd'], ['a']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.warnings.length, 3); // b, c, d unused
+    });
+
+    // Test 6: All refs valid, all props used - clean
+    it('should return clean result when all vars match schema', function () {
+      const agent = createJsonAgent(['a', 'b'], ['a', 'b']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 0);
+    });
+
+    // Test 7: Some valid, some invalid - mixed
+    it('should return both errors and warnings for mixed issues', function () {
+      const agent = createJsonAgent(['valid', 'unused'], ['valid', 'invalid']);
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 1); // invalid
+      assert.strictEqual(result.warnings.length, 1); // unused
+    });
+
+    // Test 8: Non-JSON agent - skip validation
+    it('should skip validation for non-json outputFormat', function () {
+      const agent = { id: 'test', outputFormat: 'text' };
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 0);
+    });
+
+    // Test 9: Default schema used
+    it('should validate against default schema when no explicit schema', function () {
+      const agent = {
+        id: 'test',
+        outputFormat: 'json',
+        hooks: {
+          onComplete: {
+            config: { text: '{{result.summary}} {{result.result}}' },
+          },
+        },
+      };
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+    });
+
+    // Test 10: Error message format - contains agent ID and field name
+    it('should include agent ID and field name in error message', function () {
+      const agent = createJsonAgent(['a'], ['badfield']);
+      const result = validateAgentTemplateVariables(agent, 'my-agent');
+      assert.ok(result.errors[0].includes("Agent 'my-agent'"));
+      assert.ok(result.errors[0].includes('badfield'));
+    });
+
+    // Test 11: Warning message format
+    it('should include agent ID and field name in warning message', function () {
+      const agent = createJsonAgent(['unusedField'], []);
+      const result = validateAgentTemplateVariables(agent, 'my-agent');
+      assert.ok(result.warnings[0].includes("Agent 'my-agent'"));
+      assert.ok(result.warnings[0].includes('unusedField'));
+    });
+
+    // Test 12: Empty hooks + default schema - warnings for unused defaults
+    it('should warn about unused default schema fields', function () {
+      const agent = {
+        id: 'test',
+        outputFormat: 'json',
+        hooks: { onComplete: { config: {} } },
+      };
+      const result = validateAgentTemplateVariables(agent, 'test');
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 2); // summary and result unused
+    });
+  });
+
+  describe('validateTemplateVariables (Phase 5 entry)', function () {
+    // Helper to create minimal valid agent
+    function createAgent(id, schemaProps, templateVars) {
+      const agent = {
+        id,
+        role: 'impl',
+        triggers: [{ topic: 'X' }],
+        outputFormat: 'json',
+        jsonSchema: { type: 'object', properties: {} },
+        hooks: { onComplete: { config: { text: '' } } },
+      };
+      for (const prop of schemaProps) {
+        agent.jsonSchema.properties[prop] = { type: 'string' };
+      }
+      agent.hooks.onComplete.config.text = templateVars.map((v) => `{{result.${v}}}`).join(' ');
+      return agent;
+    }
+
+    // Test 1: Single agent, all valid
+    it('should return clean result for valid single agent', function () {
+      const config = {
+        agents: [createAgent('worker', ['a'], ['a'])],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 0);
+    });
+
+    // Test 2: Single agent, undefined ref
+    it('should error for single agent with undefined ref', function () {
+      const config = {
+        agents: [createAgent('worker', ['a'], ['bad'])],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('bad'));
+    });
+
+    // Test 3: Multiple agents, one invalid
+    it('should only error for invalid agent', function () {
+      const config = {
+        agents: [createAgent('valid-worker', ['a'], ['a']), createAgent('invalid-worker', ['b'], ['nonexistent'])],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('invalid-worker'));
+    });
+
+    // Test 4: Multiple agents, multiple invalid
+    it('should error for each invalid agent', function () {
+      const config = {
+        agents: [createAgent('bad1', ['a'], ['x']), createAgent('bad2', ['b'], ['y'])],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 2);
+    });
+
+    // Test 5: Sub-cluster depth 1
+    it('should prefix errors with sub-cluster name', function () {
+      const config = {
+        agents: [
+          {
+            id: 'sub1',
+            type: 'subcluster',
+            config: {
+              agents: [createAgent('inner-worker', ['a'], ['bad'])],
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes("Sub-cluster 'sub1'"));
+    });
+
+    // Test 6: Sub-cluster depth 2
+    it('should double-prefix for nested sub-clusters', function () {
+      const config = {
+        agents: [
+          {
+            id: 'outer',
+            type: 'subcluster',
+            config: {
+              agents: [
+                {
+                  id: 'inner',
+                  type: 'subcluster',
+                  config: {
+                    agents: [createAgent('deepest', ['a'], ['bad'])],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes("Sub-cluster 'outer'"));
+      assert.ok(result.errors[0].includes("Sub-cluster 'inner'"));
+    });
+
+    // Test 7: Empty agents array
+    it('should return clean result for empty agents array', function () {
+      const config = { agents: [] };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 0);
+      assert.strictEqual(result.warnings.length, 0);
+    });
+
+    // Test 8: Null config.agents
+    it('should return clean result for null agents', function () {
+      const config = { agents: null };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 0);
+    });
+
+    // Test 9: Undefined config.agents
+    it('should return clean result for undefined agents', function () {
+      const config = {};
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 0);
+    });
+
+    // Test 10: Mixed root valid, sub-cluster invalid
+    it('should only error for sub-cluster agent', function () {
+      const config = {
+        agents: [
+          createAgent('root-worker', ['a'], ['a']),
+          {
+            id: 'sub',
+            type: 'subcluster',
+            config: {
+              agents: [createAgent('sub-worker', ['b'], ['bad'])],
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes("Sub-cluster 'sub'"));
+      assert.ok(result.errors[0].includes('sub-worker'));
+    });
+  });
+
+  describe('Integration with validateConfig()', function () {
+    // Test 1: Phase 5 runs (errors block validation)
+    it('should block validation when template var errors exist', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            outputFormat: 'json',
+            jsonSchema: { type: 'object', properties: { summary: { type: 'string' } } },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: { text: '{{result.nonexistent}}' } },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.errors.some((e) => e.includes('nonexistent')));
+    });
+
+    // Test 2: Phase 5 warnings don't block
+    it('should not block validation for warnings only', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: {
+                summary: { type: 'string' },
+                unusedProp: { type: 'string' },
+              },
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: { text: '{{result.summary}}' } },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      assert.strictEqual(result.valid, true);
+      assert.ok(result.warnings.some((w) => w.includes('unusedProp')));
+    });
+
+    // Test 3: Real config: full-workflow.json
+    it('should validate full-workflow.json without template errors', function () {
+      const fs = require('fs');
+      const path = require('path');
+      const configPath = path.join(
+        __dirname,
+        '..',
+        'cluster-templates',
+        'base-templates',
+        'full-workflow.json'
+      );
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+      const result = validateConfig(config);
+      // Filter to only template-related errors
+      const templateErrors = result.errors.filter(
+        (e) => e.includes('{{result.') || e.includes('not defined in jsonSchema')
+      );
+      assert.strictEqual(
+        templateErrors.length,
+        0,
+        `Template errors: ${templateErrors.join(', ')}`
+      );
+    });
+
+    // Test 4: Real config: conductor-bootstrap.json (if exists)
+    it('should validate conductor-bootstrap.json without template errors', function () {
+      const fs = require('fs');
+      const path = require('path');
+      const configPath = path.join(
+        __dirname,
+        '..',
+        'cluster-templates',
+        'conductor-bootstrap.json'
+      );
+
+      // Skip if file doesn't exist
+      if (!fs.existsSync(configPath)) {
+        this.skip();
+        return;
+      }
+
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const result = validateConfig(config);
+      const templateErrors = result.errors.filter(
+        (e) => e.includes('{{result.') || e.includes('not defined in jsonSchema')
+      );
+      assert.strictEqual(
+        templateErrors.length,
+        0,
+        `Template errors: ${templateErrors.join(', ')}`
+      );
+    });
+
+    // Test 5: Non-JSON agents pass without template validation
+    it('should skip template validation for non-JSON agents', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            // No outputFormat or text format - template validation skipped
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: { text: '{{result.anything}}' } },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      // Should have no template-related errors (non-JSON agents are skipped)
+      const templateErrors = result.errors.filter((e) => e.includes('not defined in jsonSchema'));
+      assert.strictEqual(templateErrors.length, 0);
+    });
+  });
+
+  describe('Real-World Regression Tests', function () {
+    // Test 1: Typo in template var
+    it('should catch typo: {{result.sumary}} instead of summary', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'X' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: { summary: { type: 'string' } },
+            },
+            hooks: {
+              onComplete: {
+                config: { text: '{{result.sumary}}' }, // Typo!
+              },
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('sumary'));
+    });
+
+    // Test 2: Case sensitivity
+    it('should catch case mismatch: {{result.Summary}} vs summary', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'X' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: { summary: { type: 'string' } },
+            },
+            hooks: {
+              onComplete: {
+                config: { text: '{{result.Summary}}' }, // Wrong case!
+              },
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('Summary'));
+    });
+
+    // Test 3: Added schema field, forgot hook
+    it('should warn when schema field added but not used in hooks', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'X' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: {
+                summary: { type: 'string' },
+                newField: { type: 'string' }, // Added but not used
+              },
+            },
+            hooks: {
+              onComplete: {
+                config: { text: '{{result.summary}}' },
+              },
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.warnings.length, 1);
+      assert.ok(result.warnings[0].includes('newField'));
+    });
+
+    // Test 4: Removed schema field, forgot hook
+    it('should error when hook references removed schema field', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'X' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: { summary: { type: 'string' } },
+              // 'oldField' was removed from schema
+            },
+            hooks: {
+              onComplete: {
+                config: { text: '{{result.summary}} {{result.oldField}}' }, // oldField no longer exists
+              },
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      assert.strictEqual(result.errors.length, 1);
+      assert.ok(result.errors[0].includes('oldField'));
+    });
+
+    // Test 5: Nested field access (edge case)
+    it('should extract nested field access as single key', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'X' }],
+            outputFormat: 'json',
+            jsonSchema: {
+              type: 'object',
+              properties: {
+                'nested.field': { type: 'string' },
+              },
+            },
+            hooks: {
+              onComplete: {
+                config: { text: '{{result.nested.field}}' },
+              },
+            },
+          },
+        ],
+      };
+      const result = validateTemplateVariables(config);
+      // nested.field is treated as single key name
+      assert.strictEqual(result.errors.length, 0);
     });
   });
 });

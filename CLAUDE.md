@@ -61,24 +61,26 @@ Multi-agent coordination via message-passing primitives. User install: `npm i -g
 ### Flag Cascade (Most Important!)
 
 ```
---ship → implies → --pr → implies → --isolation
+--ship → implies → --pr → implies → --worktree
 ```
 
 | Command | Behavior |
 |---------|----------|
 | `zeroshot run 123` | Local run, no isolation |
-| `zeroshot run 123 --isolation` | Docker isolation, no PR |
-| `zeroshot run 123 --pr` | Isolation + PR (human reviews) |
-| `zeroshot run 123 --ship` | Isolation + PR + auto-merge |
+| `zeroshot run 123 --docker` | Docker isolation, no PR |
+| `zeroshot run 123 --worktree` | Git worktree isolation (lightweight) |
+| `zeroshot run 123 --pr` | Worktree + PR (human reviews) |
+| `zeroshot run 123 --ship` | Worktree + PR + auto-merge |
 
 **Commands:**
 
 ```bash
 # Automation levels (cascading flags)
 zeroshot run 123                     # Local run
-zeroshot run 123 --isolation         # Docker isolation
-zeroshot run 123 --pr                # Isolation + PR (--isolation auto-enabled)
-zeroshot run 123 --ship              # Isolation + PR + auto-merge (full automation)
+zeroshot run 123 --docker            # Docker isolation
+zeroshot run 123 --worktree          # Git worktree isolation (lightweight)
+zeroshot run 123 --pr                # Worktree + PR (--worktree auto-enabled)
+zeroshot run 123 --ship              # Worktree + PR + auto-merge (full automation)
 
 # Input types
 zeroshot run 123                     # Issue number
@@ -118,7 +120,7 @@ zeroshot settings                    # Show all (highlights non-defaults)
 zeroshot settings set maxModel sonnet
 ```
 
-**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultIsolation`, `logLevel`
+**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultDocker`, `logLevel`
 
 **maxModel (Cost Ceiling):**
 - Sets the maximum model agents can request (not a default/override)
@@ -423,9 +425,21 @@ Security pipeline with mandatory approval:
 - SecurityScanner → SECURITY_RESULT
 - SecurityGate → stop_cluster (if no vulnerabilities)
 
-## Isolation Mode (Docker Container)
+## Isolation Modes
 
-**Isolates workspace in fresh git clone, protects working directory. NOT about credentials (always mounted) or security sandboxing.**
+### Worktree Isolation (Default for --pr/--ship)
+
+**Lightweight isolation using git worktree.** Creates a separate working directory with its own branch. Fast (<1s setup), no Docker required.
+
+**Use when:**
+
+- PR workflows (`--pr`, `--ship` auto-enable `--worktree`)
+- Quick isolated work on a branch
+- Don't want Docker overhead
+
+### Docker Isolation (--docker)
+
+**Full isolation in fresh git clone inside Docker container.** Protects working directory completely.
 
 **Use when:**
 
@@ -433,7 +447,7 @@ Security pipeline with mandatory approval:
 - Risky experiments you might discard
 - Long-running tasks (keep working locally)
 - Parallel agents on same codebase
-- PR workflows (`--pr`, `--merge` imply `--isolation`)
+- Need full environment isolation
 
 **Skip when:**
 
