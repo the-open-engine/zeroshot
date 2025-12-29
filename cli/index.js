@@ -464,6 +464,11 @@ Input formats:
         options.worktree = true;
       }
 
+      // Mutual exclusivity: --docker explicitly disables worktree
+      if (options.docker) {
+        options.worktree = false;
+      }
+
       // Auto-detect input type
       let input = {};
 
