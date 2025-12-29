@@ -1658,7 +1658,7 @@ Continue from where you left off. Review your previous output to understand what
    * @private
    */
   _opPublish(cluster, op, sender) {
-    const { topic, content } = op;
+    const { topic, content, metadata } = op;
     if (!topic) {
       throw new Error('publish operation missing topic');
     }
@@ -1669,6 +1669,7 @@ Continue from where you left off. Review your previous output to understand what
       sender: op.sender || sender,
       receiver: op.receiver || 'broadcast',
       content: content || {},
+      metadata: metadata || null,
     });
 
     this._log(`    ✓ Published to topic: ${topic}`);

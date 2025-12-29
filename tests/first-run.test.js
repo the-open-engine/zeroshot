@@ -20,6 +20,7 @@ const TEST_SETTINGS_FILE = path.join(TEST_STORAGE_DIR, 'settings.json');
 // The settings module reads this dynamically via getSettingsFile()
 process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
 
+
 const settingsModule = require('../lib/settings');
 const firstRunModule = require('../cli/lib/first-run');
 

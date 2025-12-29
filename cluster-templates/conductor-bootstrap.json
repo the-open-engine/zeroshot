@@ -40,7 +40,7 @@
           "topic": "ISSUE_OPENED",
           "logic": {
             "engine": "javascript",
-            "script": "return message.sender === 'system';"
+            "script": "return message.sender === 'system' && !message.metadata?._republished;"
           },
           "action": "execute_task"
         }
@@ -50,7 +50,7 @@
           "action": "publish_message",
           "transform": {
             "engine": "javascript",
-            "script": "const { complexity, taskType, reasoning } = result;\nconst taskText = triggeringMessage.content?.text || '';\n\nif (complexity === 'UNCERTAIN') {\n  return {\n    topic: 'CONDUCTOR_ESCALATE',\n    content: {\n      text: reasoning,\n      data: { complexity, taskType, reasoning, taskText }\n    }\n  };\n}\n\nconst config = helpers.getConfig(complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `[${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText } }\n      ]\n    }\n  }\n};"
+            "script": "const { complexity, taskType, reasoning } = result;\nconst taskText = triggeringMessage.content?.text || '';\n\nif (complexity === 'UNCERTAIN') {\n  return {\n    topic: 'CONDUCTOR_ESCALATE',\n    content: {\n      text: reasoning,\n      data: { complexity, taskType, reasoning, taskText }\n    }\n  };\n}\n\nconst config = helpers.getConfig(complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `[${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText }, metadata: { _republished: true } }\n      ]\n    }\n  }\n};"
           }
         }
       }
@@ -113,7 +113,7 @@
           "action": "publish_message",
           "transform": {
             "engine": "javascript",
-            "script": "const { complexity, taskType, reasoning } = result;\n\nlet taskText = triggeringMessage.content?.data?.taskText || '';\nif (!taskText) {\n  taskText = triggeringMessage.content?.text || '';\n}\n\nconst config = helpers.getConfig(complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `Senior: [${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText } }\n      ]\n    }\n  }\n};"
+            "script": "const { complexity, taskType, reasoning } = result;\n\nlet taskText = triggeringMessage.content?.data?.taskText || '';\nif (!taskText) {\n  taskText = triggeringMessage.content?.text || '';\n}\n\nconst config = helpers.getConfig(complexity, taskType);\n\nreturn {\n  topic: 'CLUSTER_OPERATIONS',\n  content: {\n    text: `Senior: [${complexity}:${taskType}] ${reasoning}`,\n    data: {\n      complexity,\n      taskType,\n      operations: [\n        { action: 'load_config', config },\n        { action: 'publish', topic: 'ISSUE_OPENED', content: { text: taskText }, metadata: { _republished: true } }\n      ]\n    }\n  }\n};"
           }
         }
       }
