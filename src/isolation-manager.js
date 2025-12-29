@@ -1007,7 +1007,7 @@ class IsolationManager {
    */
   _isContainerRunning(containerId) {
     try {
-      const result = execSync(`docker inspect -f '{{.State.Running}}' ${containerId} 2>/dev/null`, {
+      const result = execSync(`docker inspect -f '{{.State.Running}}' ${escapeShell(containerId)} 2>/dev/null`, {
         encoding: 'utf8',
       });
       return result.trim() === 'true';
@@ -1022,7 +1022,7 @@ class IsolationManager {
    */
   _removeContainerByName(name) {
     try {
-      execSync(`docker rm -f ${name} 2>/dev/null`, { encoding: 'utf8' });
+      execSync(`docker rm -f ${escapeShell(name)} 2>/dev/null`, { encoding: 'utf8' });
     } catch {
       // Ignore - container doesn't exist
     }
@@ -1048,7 +1048,7 @@ class IsolationManager {
    */
   static imageExists(image = DEFAULT_IMAGE) {
     try {
-      execSync(`docker image inspect ${image} 2>/dev/null`, {
+      execSync(`docker image inspect ${escapeShell(image)} 2>/dev/null`, {
         encoding: 'utf8',
         stdio: 'pipe',
       });
@@ -1081,7 +1081,7 @@ class IsolationManager {
       try {
         // CRITICAL: Run from repo root so build context includes package.json and src/
         // Use -f flag to specify Dockerfile location
-        execSync(`docker build -f docker/zeroshot-cluster/Dockerfile -t ${image} .`, {
+        execSync(`docker build -f docker/zeroshot-cluster/Dockerfile -t ${escapeShell(image)} .`, {
           cwd: repoRoot,
           encoding: 'utf8',
           stdio: 'inherit',
