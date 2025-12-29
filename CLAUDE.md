@@ -58,31 +58,46 @@ Multi-agent coordination via message-passing primitives. User install: `npm i -g
 **Packages:** `zeroshot` (CommonJS cluster + ESM task via dynamic import)
 **Commands work for both clusters and single-agent tasks automatically.**
 
+### Flag Cascade (Most Important!)
+
+```
+--ship → implies → --pr → implies → --isolation
+```
+
+| Command | Behavior |
+|---------|----------|
+| `zeroshot run 123` | Local run, no isolation |
+| `zeroshot run 123 --isolation` | Docker isolation, no PR |
+| `zeroshot run 123 --pr` | Isolation + PR (human reviews) |
+| `zeroshot run 123 --ship` | Isolation + PR + auto-merge |
+
 **Commands:**
 
 ```bash
-# Full automation
-zeroshot auto 123                    # Isolated + auto-merge PR (recommended)
-zeroshot auto 123 -d                 # Same, but detached/background
-
-# Clusters (multi-agent)
-zeroshot run 123                     # Issue number (auto-attaches to first agent)
-zeroshot run 123 -d                  # Detached/background mode
-zeroshot run "Implement X"           # Plain text
+# Automation levels (cascading flags)
+zeroshot run 123                     # Local run
 zeroshot run 123 --isolation         # Docker isolation
-zeroshot run 123 --isolation --pr    # Isolation + create PR on success
+zeroshot run 123 --pr                # Isolation + PR (--isolation auto-enabled)
+zeroshot run 123 --ship              # Isolation + PR + auto-merge (full automation)
+
+# Input types
+zeroshot run 123                     # Issue number
+zeroshot run "Implement X"           # Plain text
+
+# Background mode
+zeroshot run 123 -d                  # Detached/background
+zeroshot run 123 --ship -d           # Full automation, background
 
 # Single tasks
 zeroshot task run "Fix bug X"        # Background single agent
 
-# Both
-zeroshot list / ls                   # All tasks/clusters
-zeroshot status <id>                 # Auto-detects type
+# Management (--json available for scripting)
+zeroshot list                        # All tasks/clusters (--json)
+zeroshot status <id>                 # Cluster details (--json)
 zeroshot logs <id> [-f]              # Follow logs
-zeroshot resume <id> [prompt]        # Resume failed (foreground, Ctrl+C stops)
-zeroshot resume <id> -d              # Resume in background (daemon mode)
+zeroshot resume <id> [prompt]        # Resume failed (foreground)
+zeroshot resume <id> -d              # Resume in background
 zeroshot kill <id>                   # Kill running
-zeroshot clear [-y]                  # Kill all + delete data
 
 # Cluster-only
 zeroshot stop <id>                   # Graceful shutdown
@@ -90,10 +105,13 @@ zeroshot export <id>                 # Export conversation
 zeroshot config list/show <name>     # Manage configs
 zeroshot watch                       # TUI dashboard (htop-style)
 
-# Agent Library
-zeroshot agents list / ls            # View available agent definitions
-zeroshot agents list --verbose       # Show full agent details
-zeroshot agents list --json          # Output as JSON
+# Agent library
+zeroshot agents list                 # View available agents (--json, --verbose)
+zeroshot agents show <name>          # Agent details (--json)
+
+# Maintenance
+zeroshot clean                       # Remove old records
+zeroshot purge [-y]                  # NUCLEAR: kill all + delete all data
 
 # Settings
 zeroshot settings                    # Show all (highlights non-defaults)

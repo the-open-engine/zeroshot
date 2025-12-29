@@ -47,6 +47,8 @@ const {
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
 const { requirePreflight } = require('../src/preflight');
+const { checkFirstRun } = require('./lib/first-run');
+const { checkForUpdates } = require('./lib/update-checker');
 const { StatusFooter } = require('../src/status-footer');
 
 const program = new Command();
@@ -375,11 +377,12 @@ program
   .name('zeroshot')
   .description('Multi-agent orchestration and task management for Claude')
   .version(require('../package.json').version)
+  .option('-q, --quiet', 'Suppress prompts (first-run wizard, update checks)')
   .addHelpText(
     'after',
     `
 Examples:
-  ${chalk.cyan('zeroshot auto 123')}                   Full automation: isolated + auto-merge PR
+  ${chalk.cyan('zeroshot run 123 --ship')}             Full automation: isolated + auto-merge PR
   ${chalk.cyan('zeroshot run 123')}                    Run cluster and attach to first agent
   ${chalk.cyan('zeroshot run 123 -d')}                 Run cluster in background (detached)
   ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster on plain text task
@@ -395,19 +398,20 @@ Examples:
   ${chalk.cyan('zeroshot status <id>')}                Detailed status of task or cluster
   ${chalk.cyan('zeroshot finish <id>')}                Convert cluster to completion task (creates and merges PR)
   ${chalk.cyan('zeroshot kill <id>')}                  Kill a running task or cluster
-  ${chalk.cyan('zeroshot clear')}                      Kill all processes and delete all data (with confirmation)
-  ${chalk.cyan('zeroshot clear -y')}                   Clear everything without confirmation
+  ${chalk.cyan('zeroshot purge')}                      Kill all processes and delete all data (with confirmation)
+  ${chalk.cyan('zeroshot purge -y')}                   Purge everything without confirmation
   ${chalk.cyan('zeroshot settings')}                   Show/manage zeroshot settings (default model, config, etc.)
   ${chalk.cyan('zeroshot settings set <key> <val>')}   Set a setting (e.g., defaultModel haiku)
   ${chalk.cyan('zeroshot config list')}                List available cluster configs
   ${chalk.cyan('zeroshot config show <name>')}         Visualize a cluster config (agents, triggers, flow)
   ${chalk.cyan('zeroshot export <id>')}                Export cluster conversation to file
 
-Cluster vs Task:
-  ${chalk.yellow('zeroshot auto')}      → Full automation (isolated + auto-merge PR)
-  ${chalk.yellow('zeroshot run')}       → Multi-agent cluster (auto-attaches, Ctrl+B d to detach)
-  ${chalk.yellow('zeroshot run -d')}    → Multi-agent cluster (background/detached)
-  ${chalk.yellow('zeroshot task run')}  → Single-agent background task (simpler, faster)
+Automation levels (cascading: --ship → --pr → --isolation):
+  ${chalk.yellow('zeroshot run 123')}            → Local run, no isolation
+  ${chalk.yellow('zeroshot run 123 --isolation')} → Docker isolation, no PR
+  ${chalk.yellow('zeroshot run 123 --pr')}       → Isolation + PR (human reviews)
+  ${chalk.yellow('zeroshot run 123 --ship')}     → Isolation + PR + auto-merge (full automation)
+  ${chalk.yellow('zeroshot task run')}           → Single-agent background task (simpler, faster)
 
 Shell completion:
   ${chalk.dim('zeroshot --completion >> ~/.bashrc && source ~/.bashrc')}
@@ -429,8 +433,8 @@ program
     '--strict-schema',
     'Enforce JSON schema via CLI (no live streaming). Default: live streaming with local validation'
   )
-  .option('--pr', 'Create PR and merge on successful completion (requires --isolation)')
-  .option('--full', 'Shorthand for --isolation --pr (full automation)')
+  .option('--pr', 'Create PR for human review (auto-enables --isolation)')
+  .option('--ship', 'Full automation: isolation + PR + auto-merge')
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .addHelpText(
@@ -445,10 +449,15 @@ Input formats:
   )
   .action(async (inputArg, options) => {
     try {
-      // Expand --full to --isolation + --pr
-      if (options.full) {
-        options.isolation = true;
+      // Cascading flag implications: --ship → --pr → --isolation
+      // --ship = full automation (isolation + PR + auto-merge)
+      if (options.ship) {
         options.pr = true;
+        options.isolation = true;
+      }
+      // --pr = PR for human review (auto-enables isolation)
+      if (options.pr) {
+        options.isolation = true;
       }
 
       // Auto-detect input type
@@ -476,18 +485,12 @@ Input formats:
       // This gives users clear, actionable error messages upfront
       const preflightOptions = {
         requireGh: !!input.issue, // gh CLI required when fetching GitHub issues
-        requireDocker: options.isolation || options.full, // Docker required for isolation mode
+        requireDocker: options.isolation, // Docker required for isolation mode
         quiet: process.env.CREW_DAEMON === '1', // Suppress success in daemon mode
       };
       requirePreflight(preflightOptions);
 
       // === CLUSTER MODE ===
-      // Validate --pr requires --isolation
-      if (options.pr && !options.isolation) {
-        console.error(chalk.red('Error: --pr requires --isolation flag for safety'));
-        console.error(chalk.dim('  Usage: zeroshot run 123 --isolation --pr'));
-        process.exit(1);
-      }
 
       const { generateName } = require('../src/name-generator');
 
@@ -811,68 +814,6 @@ Input formats:
     }
   });
 
-// Auto command - full automation (isolation + PR)
-program
-  .command('auto <input>')
-  .description('Full automation: isolated + auto-merge PR (shorthand for run --isolation --pr)')
-  .option('--config <file>', 'Path to cluster config JSON (default: conductor-bootstrap)')
-  .option('-m, --model <model>', 'Model for all agents: opus, sonnet, haiku (default: from config)')
-  .option(
-    '--isolation-image <image>',
-    'Docker image for isolation (default: zeroshot-cluster-base)'
-  )
-  .option(
-    '--strict-schema',
-    'Enforce JSON schema via CLI (no live streaming). Default: live streaming with local validation'
-  )
-  .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
-  .option('-d, --detach', 'Run in background (default: attach to first agent)')
-  .addHelpText(
-    'after',
-    `
-Input formats:
-  123                              GitHub issue number (uses current repo)
-  org/repo#123                     GitHub issue with explicit repo
-  https://github.com/.../issues/1  Full GitHub issue URL
-  "Implement feature X"            Plain text task description
-
-Examples:
-  ${chalk.cyan('zeroshot auto 123')}              Auto-resolve issue (isolated + PR)
-  ${chalk.cyan('zeroshot auto 123 -d')}           Same, but detached/background
-`
-  )
-  .action((inputArg, options) => {
-    // Auto command is shorthand for: zeroshot run <input> --isolation --pr [options]
-    // Re-invoke CLI with the correct flags to avoid Commander.js internal API issues
-    const { spawn } = require('child_process');
-
-    const args = ['run', inputArg, '--isolation', '--pr'];
-
-    // Forward other options
-    if (options.config) args.push('--config', options.config);
-    if (options.model) args.push('--model', options.model);
-    if (options.isolationImage) args.push('--isolation-image', options.isolationImage);
-    if (options.strictSchema) args.push('--strict-schema');
-    if (options.workers) args.push('--workers', String(options.workers));
-    if (options.detach) args.push('--detach');
-
-    // Spawn zeroshot run with inherited stdio
-    const proc = spawn(process.execPath, [process.argv[1], ...args], {
-      stdio: 'inherit',
-      cwd: process.cwd(),
-      env: process.env,
-    });
-
-    proc.on('close', (code) => {
-      process.exit(code || 0);
-    });
-
-    proc.on('error', (err) => {
-      console.error(chalk.red(`Error: ${err.message}`));
-      process.exit(1);
-    });
-  });
-
 // === TASK COMMANDS ===
 // Task run - single-agent background task
 const taskCmd = program.command('task').description('Single-agent task management');
@@ -956,48 +897,78 @@ program
   .description('List all tasks and clusters')
   .option('-s, --status <status>', 'Filter tasks by status (running, completed, failed)')
   .option('-n, --limit <n>', 'Limit number of results', parseInt)
+  .option('--json', 'Output as JSON')
   .action(async (options) => {
     try {
       // Get clusters
       const clusters = getOrchestrator().listClusters();
+      const orchestrator = getOrchestrator();
+
+      // Enrich clusters with token data
+      const enrichedClusters = clusters.map((cluster) => {
+        let totalTokens = 0;
+        let totalCostUsd = 0;
+        try {
+          const clusterObj = orchestrator.getCluster(cluster.id);
+          if (clusterObj?.messageBus) {
+            const tokensByRole = clusterObj.messageBus.getTokensByRole(cluster.id);
+            if (tokensByRole?._total?.count > 0) {
+              const total = tokensByRole._total;
+              totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
+              totalCostUsd = total.totalCostUsd || 0;
+            }
+          }
+        } catch {
+          /* Token tracking not available */
+        }
+        return {
+          ...cluster,
+          totalTokens,
+          totalCostUsd,
+        };
+      });
 
       // Get tasks (dynamic import)
-      const { listTasks } = await import('../task-lib/commands/list.js');
+      const { listTasks, getTasksData } = await import('../task-lib/commands/list.js');
 
-      // Capture task output (listTasks prints directly, we need to capture)
-      // For now, let's list them separately
+      // JSON output mode
+      if (options.json) {
+        // Get tasks data if available
+        let tasks = [];
+        try {
+          if (typeof getTasksData === 'function') {
+            tasks = await getTasksData(options);
+          }
+        } catch {
+          /* Tasks not available */
+        }
 
+        console.log(
+          JSON.stringify(
+            {
+              clusters: enrichedClusters,
+              tasks,
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      // Human-readable output (default)
       // Print clusters
-      if (clusters.length > 0) {
+      if (enrichedClusters.length > 0) {
         console.log(chalk.bold('\n=== Clusters ==='));
         console.log(
           `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(12)} ${'Cost'.padEnd(8)} Created`
         );
         console.log('-'.repeat(100));
 
-        const orchestrator = getOrchestrator();
-        for (const cluster of clusters) {
+        for (const cluster of enrichedClusters) {
           const created = new Date(cluster.createdAt).toLocaleString();
-
-          // Get token usage
-          let tokenDisplay = '-';
-          let costDisplay = '-';
-          try {
-            const clusterObj = orchestrator.getCluster(cluster.id);
-            if (clusterObj?.messageBus) {
-              const tokensByRole = clusterObj.messageBus.getTokensByRole(cluster.id);
-              if (tokensByRole?._total?.count > 0) {
-                const total = tokensByRole._total;
-                const totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
-                tokenDisplay = totalTokens.toLocaleString();
-                if (total.totalCostUsd > 0) {
-                  costDisplay = '$' + total.totalCostUsd.toFixed(3);
-                }
-              }
-            }
-          } catch {
-            /* Token tracking not available */
-          }
+          const tokenDisplay = cluster.totalTokens > 0 ? cluster.totalTokens.toLocaleString() : '-';
+          const costDisplay = cluster.totalCostUsd > 0 ? '$' + cluster.totalCostUsd.toFixed(3) : '-';
 
           // Highlight zombie clusters in red
           const stateDisplay =
@@ -1029,14 +1000,19 @@ program
 program
   .command('status <id>')
   .description('Get detailed status of a task or cluster')
-  .action(async (id) => {
+  .option('--json', 'Output as JSON')
+  .action(async (id, options) => {
     try {
       const { detectIdType } = require('../lib/id-detector');
       const type = detectIdType(id);
 
       if (!type) {
-        console.error(`ID not found: ${id}`);
-        console.error('Not found in tasks or clusters');
+        if (options.json) {
+          console.log(JSON.stringify({ error: 'ID not found', id }, null, 2));
+        } else {
+          console.error(`ID not found: ${id}`);
+          console.error('Not found in tasks or clusters');
+        }
         process.exit(1);
       }
 
@@ -1044,6 +1020,35 @@ program
         // Show cluster status
         const status = getOrchestrator().getStatus(id);
 
+        // Get token usage
+        let tokensByRole = null;
+        try {
+          const cluster = getOrchestrator().getCluster(id);
+          if (cluster?.messageBus) {
+            tokensByRole = cluster.messageBus.getTokensByRole(id);
+          }
+        } catch {
+          /* Token tracking not available */
+        }
+
+        // JSON output mode
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                type: 'cluster',
+                ...status,
+                createdAtISO: new Date(status.createdAt).toISOString(),
+                tokensByRole,
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+
+        // Human-readable output
         console.log(`\nCluster: ${status.id}`);
         if (status.isZombie) {
           console.log(
@@ -1066,20 +1071,14 @@ program
         console.log(`Messages: ${status.messageCount}`);
 
         // Show token usage if available
-        try {
-          const cluster = getOrchestrator().getCluster(id);
-          if (cluster?.messageBus) {
-            const tokensByRole = cluster.messageBus.getTokensByRole(id);
-            const tokenLines = formatTokenUsage(tokensByRole);
-            if (tokenLines) {
-              console.log('');
-              for (const line of tokenLines) {
-                console.log(line);
-              }
+        if (tokensByRole) {
+          const tokenLines = formatTokenUsage(tokensByRole);
+          if (tokenLines) {
+            console.log('');
+            for (const line of tokenLines) {
+              console.log(line);
             }
           }
-        } catch {
-          /* Token tracking not available */
         }
 
         console.log(`\nAgents:`);
@@ -1104,11 +1103,30 @@ program
         console.log('');
       } else {
         // Show task status
-        const { showStatus } = await import('../task-lib/commands/status.js');
+        const { showStatus, getStatusData } = await import('../task-lib/commands/status.js');
+
+        if (options.json) {
+          // Try to get JSON data if available
+          let taskData = null;
+          try {
+            if (typeof getStatusData === 'function') {
+              taskData = await getStatusData(id);
+            }
+          } catch {
+            /* Not available */
+          }
+          console.log(JSON.stringify({ type: 'task', id, ...taskData }, null, 2));
+          return;
+        }
+
         await showStatus(id);
       }
     } catch (error) {
-      console.error('Error getting status:', error.message);
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }, null, 2));
+      } else {
+        console.error('Error getting status:', error.message);
+      }
       process.exit(1);
     }
   });
@@ -2460,10 +2478,10 @@ program
     }
   });
 
-// Clear all runs (clusters + tasks)
+// Purge all runs (clusters + tasks) - NUCLEAR option
 program
-  .command('clear')
-  .description('Kill all running processes and delete all data')
+  .command('purge')
+  .description('NUCLEAR: Kill all running processes and delete all data')
   .option('-y, --yes', 'Skip confirmation')
   .action(async (options) => {
     try {
@@ -2604,7 +2622,7 @@ program
         await cleanTasks({ all: true });
       }
 
-      console.log(chalk.bold.green('\nAll runs killed and cleared.'));
+      console.log(chalk.bold.green('\nAll runs purged.'));
     } catch (error) {
       console.error('Error clearing runs:', error.message);
       process.exit(1);
@@ -3004,6 +3022,210 @@ configCmd
       process.exit(1);
     }
   });
+
+// Agent library commands
+const agentsCmd = program.command('agents').description('View available agent definitions');
+
+agentsCmd
+  .command('list')
+  .alias('ls')
+  .description('List available agent definitions')
+  .option('--verbose', 'Show full agent details')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    try {
+      const agentsDir = path.join(PACKAGE_ROOT, 'src', 'agents');
+
+      // Check if agents directory exists
+      if (!fs.existsSync(agentsDir)) {
+        if (options.json) {
+          console.log(JSON.stringify({ agents: [], error: null }, null, 2));
+        } else {
+          console.log(chalk.dim('No agents directory found.'));
+        }
+        return;
+      }
+
+      const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
+
+      if (files.length === 0) {
+        if (options.json) {
+          console.log(JSON.stringify({ agents: [], error: null }, null, 2));
+        } else {
+          console.log(chalk.dim('No agent definitions found in src/agents/'));
+        }
+        return;
+      }
+
+      // Parse all agent files
+      const agents = [];
+      for (const file of files) {
+        try {
+          const agentPath = path.join(agentsDir, file);
+          const agent = JSON.parse(fs.readFileSync(agentPath, 'utf8'));
+          agents.push({
+            file: file.replace('.json', ''),
+            id: agent.id || file.replace('.json', ''),
+            role: agent.role || 'unspecified',
+            model: agent.model || 'default',
+            triggers: agent.triggers?.length || 0,
+            prompt: agent.prompt || null,
+            output: agent.output || null,
+          });
+        } catch (err) {
+          // Skip invalid JSON files
+          console.error(chalk.yellow(`Warning: Could not parse ${file}: ${err.message}`));
+        }
+      }
+
+      // JSON output
+      if (options.json) {
+        console.log(JSON.stringify({ agents, error: null }, null, 2));
+        return;
+      }
+
+      // Human-readable output
+      console.log(chalk.bold('\nAvailable agent definitions:\n'));
+
+      for (const agent of agents) {
+        console.log(
+          `  ${chalk.cyan(agent.id.padEnd(25))} ${chalk.dim('role:')} ${agent.role.padEnd(20)} ${chalk.dim('model:')} ${agent.model}`
+        );
+
+        if (options.verbose) {
+          console.log(chalk.dim(`    Triggers: ${agent.triggers}`));
+          if (agent.output) {
+            console.log(chalk.dim(`    Output topic: ${agent.output.topic || 'none'}`));
+          }
+          if (agent.prompt) {
+            const promptPreview = agent.prompt.substring(0, 100).replace(/\n/g, ' ');
+            console.log(chalk.dim(`    Prompt: ${promptPreview}...`));
+          }
+          console.log('');
+        }
+      }
+
+      if (!options.verbose) {
+        console.log('');
+        console.log(chalk.dim('  Use --verbose for full details'));
+      }
+      console.log('');
+    } catch (error) {
+      if (options.json) {
+        console.log(JSON.stringify({ agents: [], error: error.message }, null, 2));
+      } else {
+        console.error(chalk.red(`Error listing agents: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+agentsCmd
+  .command('show <name>')
+  .description('Show detailed agent definition')
+  .option('--json', 'Output as JSON')
+  .action((name, options) => {
+    try {
+      const agentsDir = path.join(PACKAGE_ROOT, 'src', 'agents');
+
+      // Support both with and without .json extension
+      const agentName = name.endsWith('.json') ? name : `${name}.json`;
+      const agentPath = path.join(agentsDir, agentName);
+
+      if (!fs.existsSync(agentPath)) {
+        // Try with -agent.json suffix
+        const altPath = path.join(agentsDir, `${name}-agent.json`);
+        if (fs.existsSync(altPath)) {
+          const agent = JSON.parse(fs.readFileSync(altPath, 'utf8'));
+          outputAgent(agent, options);
+          return;
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify({ error: `Agent not found: ${name}` }, null, 2));
+        } else {
+          console.error(chalk.red(`Agent not found: ${name}`));
+          console.log(chalk.dim('\nAvailable agents:'));
+          const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
+          files.forEach((f) => console.log(chalk.dim(`  - ${f.replace('.json', '')}`)));
+        }
+        process.exit(1);
+      }
+
+      const agent = JSON.parse(fs.readFileSync(agentPath, 'utf8'));
+      outputAgent(agent, options);
+    } catch (error) {
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }, null, 2));
+      } else {
+        console.error(chalk.red(`Error: ${error.message}`));
+      }
+      process.exit(1);
+    }
+  });
+
+function outputAgent(agent, options) {
+  if (options.json) {
+    console.log(JSON.stringify(agent, null, 2));
+    return;
+  }
+
+  // Human-readable output
+  console.log('');
+  console.log(chalk.bold.cyan('═'.repeat(80)));
+  console.log(chalk.bold.cyan(`  Agent: ${agent.id}`));
+  console.log(chalk.bold.cyan('═'.repeat(80)));
+  console.log('');
+
+  // Basic info
+  console.log(chalk.bold('Configuration:'));
+  console.log(`  ${chalk.dim('ID:')}    ${agent.id}`);
+  console.log(`  ${chalk.dim('Role:')}  ${agent.role || 'unspecified'}`);
+  console.log(`  ${chalk.dim('Model:')} ${agent.model || 'default'}`);
+  console.log('');
+
+  // Triggers
+  if (agent.triggers && agent.triggers.length > 0) {
+    console.log(chalk.bold('Triggers:'));
+    for (const trigger of agent.triggers) {
+      console.log(`  ${chalk.yellow('•')} Topic: ${chalk.cyan(trigger.topic)}`);
+      if (trigger.action) {
+        console.log(`    Action: ${trigger.action}`);
+      }
+      if (trigger.logic?.script) {
+        const scriptPreview = trigger.logic.script.substring(0, 80).replace(/\n/g, ' ');
+        console.log(chalk.dim(`    Logic: ${scriptPreview}...`));
+      }
+    }
+    console.log('');
+  }
+
+  // Output
+  if (agent.output) {
+    console.log(chalk.bold('Output:'));
+    console.log(`  ${chalk.dim('Topic:')} ${agent.output.topic || 'none'}`);
+    if (agent.output.publishAfter) {
+      console.log(`  ${chalk.dim('Publish after:')} ${agent.output.publishAfter}`);
+    }
+    console.log('');
+  }
+
+  // Prompt
+  if (agent.prompt) {
+    console.log(chalk.bold('Prompt:'));
+    console.log(chalk.dim('─'.repeat(76)));
+    // Show first 500 chars of prompt
+    const promptLines = agent.prompt.substring(0, 500).split('\n');
+    for (const line of promptLines) {
+      console.log(`  ${line}`);
+    }
+    if (agent.prompt.length > 500) {
+      console.log(chalk.dim(`  ... (${agent.prompt.length - 500} more characters)`));
+    }
+    console.log(chalk.dim('─'.repeat(76)));
+    console.log('');
+  }
+}
 
 // Helper function to keep the process alive for follow mode
 function keepProcessAlive(cleanupFn) {
@@ -4094,23 +4316,39 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   formatGenericMessage(msg, prefix, timestamp, safePrint);
 }
 
-// Default command handling: if first arg doesn't match a known command, treat it as 'run'
-// This allows `zeroshot "task"` to work the same as `zeroshot run "task"`
-const args = process.argv.slice(2);
-if (args.length > 0) {
-  const firstArg = args[0];
+// Main async entry point
+async function main() {
+  // First-run setup wizard (blocks on first use only)
+  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet');
+  await checkFirstRun({ quiet: isQuiet });
 
-  // Skip if it's a flag/option (starts with -)
-  // Skip if it's --help or --version (these are handled by commander)
-  if (!firstArg.startsWith('-')) {
-    // Get all registered command names
-    const commandNames = program.commands.map((cmd) => cmd.name());
+  // Check for updates (non-blocking if offline)
+  await checkForUpdates({ quiet: isQuiet });
 
-    // If first arg is not a known command, prepend 'run'
-    if (!commandNames.includes(firstArg)) {
-      process.argv.splice(2, 0, 'run');
+  // Default command handling: if first arg doesn't match a known command, treat it as 'run'
+  // This allows `zeroshot "task"` to work the same as `zeroshot run "task"`
+  const args = process.argv.slice(2);
+  if (args.length > 0) {
+    const firstArg = args[0];
+
+    // Skip if it's a flag/option (starts with -)
+    // Skip if it's --help or --version (these are handled by commander)
+    if (!firstArg.startsWith('-')) {
+      // Get all registered command names
+      const commandNames = program.commands.map((cmd) => cmd.name());
+
+      // If first arg is not a known command, prepend 'run'
+      if (!commandNames.includes(firstArg)) {
+        process.argv.splice(2, 0, 'run');
+      }
     }
   }
+
+  program.parse();
 }
 
-program.parse();
+// Run main
+main().catch((err) => {
+  console.error('Fatal error:', err.message);
+  process.exit(1);
+});

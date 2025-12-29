@@ -67,19 +67,33 @@ gh auth login
 ## Commands
 
 ```bash
-zeroshot 123                   # Run on GitHub issue
-zeroshot "Add dark mode"       # Run from description
+zeroshot run 123               # Run on GitHub issue
+zeroshot run "Add dark mode"   # Run from description
 
-# Full automation (isolated container + PR + merge)
-zeroshot auto 123
-zeroshot auto 123 -d           # Background
+# Automation levels (cascading: --ship → --pr → --isolation)
+zeroshot run 123 --isolation   # Docker isolation, no PR
+zeroshot run 123 --pr          # Isolation + PR (human reviews)
+zeroshot run 123 --ship        # Isolation + PR + auto-merge (full automation)
+
+# Background mode
+zeroshot run 123 -d            # Detached/daemon
+zeroshot run 123 --ship -d     # Full automation, background
 
 # Control
-zeroshot list                  # See all running
+zeroshot list                  # See all running (--json for scripting)
+zeroshot status <id>           # Cluster status (--json for scripting)
 zeroshot logs <id> -f          # Follow output
 zeroshot resume <id>           # Continue after crash
 zeroshot kill <id>             # Stop
 zeroshot watch                 # TUI dashboard
+
+# Agent library
+zeroshot agents list           # View available agents
+zeroshot agents show <name>    # Agent details
+
+# Maintenance
+zeroshot clean                 # Remove old records
+zeroshot purge                 # NUCLEAR: kill all + delete all
 ```
 
 ---
