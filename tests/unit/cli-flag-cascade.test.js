@@ -28,8 +28,8 @@ function processOptions(options) {
 
   // Normalize for backward compatibility:
   // worktree and docker are mutually exclusive
-  if (result.docker && result.worktree) {
-    // --docker takes precedence when explicitly set
+  // When --docker is explicitly set, always set worktree = false
+  if (result.docker) {
     result.worktree = false;
   }
 
