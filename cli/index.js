@@ -47,6 +47,8 @@ const {
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
 const { requirePreflight } = require('../src/preflight');
+const { checkFirstRun } = require('./lib/first-run');
+const { checkForUpdates } = require('./lib/update-checker');
 const { StatusFooter } = require('../src/status-footer');
 
 const program = new Command();
@@ -4094,23 +4096,39 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   formatGenericMessage(msg, prefix, timestamp, safePrint);
 }
 
-// Default command handling: if first arg doesn't match a known command, treat it as 'run'
-// This allows `zeroshot "task"` to work the same as `zeroshot run "task"`
-const args = process.argv.slice(2);
-if (args.length > 0) {
-  const firstArg = args[0];
+// Main async entry point
+async function main() {
+  // First-run setup wizard (blocks on first use only)
+  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet');
+  await checkFirstRun({ quiet: isQuiet });
 
-  // Skip if it's a flag/option (starts with -)
-  // Skip if it's --help or --version (these are handled by commander)
-  if (!firstArg.startsWith('-')) {
-    // Get all registered command names
-    const commandNames = program.commands.map((cmd) => cmd.name());
+  // Check for updates (non-blocking if offline)
+  await checkForUpdates({ quiet: isQuiet });
 
-    // If first arg is not a known command, prepend 'run'
-    if (!commandNames.includes(firstArg)) {
-      process.argv.splice(2, 0, 'run');
+  // Default command handling: if first arg doesn't match a known command, treat it as 'run'
+  // This allows `zeroshot "task"` to work the same as `zeroshot run "task"`
+  const args = process.argv.slice(2);
+  if (args.length > 0) {
+    const firstArg = args[0];
+
+    // Skip if it's a flag/option (starts with -)
+    // Skip if it's --help or --version (these are handled by commander)
+    if (!firstArg.startsWith('-')) {
+      // Get all registered command names
+      const commandNames = program.commands.map((cmd) => cmd.name());
+
+      // If first arg is not a known command, prepend 'run'
+      if (!commandNames.includes(firstArg)) {
+        process.argv.splice(2, 0, 'run');
+      }
     }
   }
+
+  program.parse();
 }
 
-program.parse();
+// Run main
+main().catch((err) => {
+  console.error('Fatal error:', err.message);
+  process.exit(1);
+});
