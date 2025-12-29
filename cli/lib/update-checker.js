@@ -116,11 +116,41 @@ function promptForUpdate(currentVersion, latestVersion) {
 }
 
 /**
+ * Check if we have write permission to npm global directory
+ * @returns {boolean} True if we can write to npm global prefix
+ */
+function canWriteToNpmGlobal() {
+  const { execSync } = require('child_process');
+  const fs = require('fs');
+
+  try {
+    // Get npm global prefix (e.g., /usr/lib or /home/user/.nvm/versions/node/...)
+    const prefix = execSync('npm config get prefix', { encoding: 'utf8' }).trim();
+    const globalModulesDir = require('path').join(prefix, 'lib', 'node_modules');
+
+    // Check if directory exists and is writable
+    fs.accessSync(globalModulesDir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Run npm install to update the package
  * @returns {Promise<boolean>} True if update succeeded
  */
 function runUpdate() {
   return new Promise((resolve) => {
+    // Check permissions BEFORE attempting update
+    if (!canWriteToNpmGlobal()) {
+      console.log('\n⚠️  Cannot auto-update: no write permission to npm global directory.');
+      console.log('   Run manually with sudo:');
+      console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
+      resolve(false);
+      return;
+    }
+
     console.log('\n📥 Installing update...');
 
     const proc = spawn('npm', ['install', '-g', '@covibes/zeroshot@latest'], {
@@ -135,14 +165,14 @@ function runUpdate() {
         resolve(true);
       } else {
         console.log('❌ Update failed. Try manually:');
-        console.log('   npm install -g @covibes/zeroshot@latest\n');
+        console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
         resolve(false);
       }
     });
 
     proc.on('error', () => {
       console.log('❌ Update failed. Try manually:');
-      console.log('   npm install -g @covibes/zeroshot@latest\n');
+      console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
       resolve(false);
     });
   });
@@ -209,14 +239,29 @@ async function checkForUpdates(options = {}) {
   settings.lastSeenVersion = latestVersion;
   saveSettings(settings);
 
+  // Check write permissions upfront
+  const hasWriteAccess = canWriteToNpmGlobal();
+
   // Quiet mode - just inform, no prompt
   if (options.quiet) {
     console.log(`📦 Update available: ${currentVersion} → ${latestVersion}`);
-    console.log('   Run: npm install -g @covibes/zeroshot@latest\n');
+    if (hasWriteAccess) {
+      console.log('   Run: npm install -g @covibes/zeroshot@latest\n');
+    } else {
+      console.log('   Run: sudo npm install -g @covibes/zeroshot@latest\n');
+    }
     return;
   }
 
-  // Interactive mode - prompt for update
+  // No write permission - inform user but don't offer interactive prompt
+  // (they'd say yes then get an error, which is frustrating UX)
+  if (!hasWriteAccess) {
+    console.log(`\n📦 Update available: ${currentVersion} → ${latestVersion}`);
+    console.log('   Run: sudo npm install -g @covibes/zeroshot@latest\n');
+    return;
+  }
+
+  // Interactive mode - prompt for update (only if we have write access)
   const wantsUpdate = await promptForUpdate(currentVersion, latestVersion);
   if (wantsUpdate) {
     await runUpdate();
@@ -231,5 +276,6 @@ module.exports = {
   fetchLatestVersion,
   runUpdate,
   shouldCheckForUpdates,
+  canWriteToNpmGlobal,
   CHECK_INTERVAL_MS,
 };
