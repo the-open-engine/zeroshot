@@ -339,38 +339,45 @@ async function executeTask(agent, triggeringMessage) {
         console.error(`Stack: ${error.stack}`);
         console.error(`${'='.repeat(80)}\n`);
 
-        // ROBUSTNESS: If validator crashes after all retries → auto-approve to unblock cluster
-        // Better to skip broken validation than block entire workflow
+        // CRITICAL FIX: Validator crash = REJECTION (not auto-approval)
+        // Auto-approval on crash allowed broken code to be merged - unacceptable!
+        // If validator crashed 3x, something is fundamentally wrong - REJECT and investigate
         if (agent.role === 'validator') {
-          console.warn(`\n${'='.repeat(80)}`);
-          console.warn(`⚠️  VALIDATOR AUTO-APPROVAL - Agent ${agent.id}`);
-          console.warn(`${'='.repeat(80)}`);
-          console.warn(`Validator crashed ${maxRetries} times, auto-approving to unblock cluster`);
-          console.warn(`This validation was SKIPPED - review manually if needed`);
-          console.warn(`${'='.repeat(80)}\n`);
+          console.error(`\n${'='.repeat(80)}`);
+          console.error(`❌ VALIDATOR CRASHED - REJECTING (NOT AUTO-APPROVING)`);
+          console.error(`${'='.repeat(80)}`);
+          console.error(`Validator ${agent.id} crashed ${maxRetries} times`);
+          console.error(`Error: ${error.message}`);
+          console.error(`REJECTING validation - broken code will NOT be merged`);
+          console.error(`Investigation required before retry`);
+          console.error(`${'='.repeat(80)}\n`);
 
-          // Publish approval message (using hook config structure)
+          // Publish REJECTION message (NOT approval!)
           const hook = agent.config.hooks?.onComplete;
           if (hook && hook.action === 'publish_message') {
             agent._publish({
               topic: hook.config.topic,
               receiver: hook.config.receiver || 'broadcast',
               content: {
-                text: `Auto-approved after ${maxRetries} failed attempts: ${error.message}`,
+                text: `REJECTED: Validator crashed ${maxRetries} times - ${error.message}`,
                 data: {
-                  approved: 'true',
+                  approved: false, // REJECT!
+                  crashedAfterRetries: true,
                   errors: JSON.stringify([
-                    `VALIDATOR CRASHED: ${error.message}. Auto-approved to unblock cluster.`,
+                    `VALIDATOR CRASHED ${maxRetries}x: ${error.message}`,
+                    `Validation could not be performed - REJECTING to prevent broken code merge`,
+                    `Investigation required before retry`,
                   ]),
-                  autoApproved: true,
                   attempts: maxRetries,
+                  requiresInvestigation: true,
                 },
               },
             });
           }
 
-          agent.state = 'idle';
-          return; // Auto-approved, continue cluster
+          agent.state = 'error';
+          // Don't return - fall through to publish AGENT_ERROR and save failure info
+          // This allows the cluster to stop and be resumed after investigation
         }
 
         // Non-validator agents: publish error and stop
