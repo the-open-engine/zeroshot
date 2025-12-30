@@ -25,6 +25,8 @@ const MAX_CONTEXT_CHARS = 500000;
  * @param {number} [params.lastTaskEndTime] - Timestamp of last task completion
  * @param {any} params.triggeringMessage - Message that triggered this execution
  * @param {string} [params.selectedPrompt] - Pre-selected prompt from _selectPrompt() (iteration-based)
+ * @param {object} [params.worktree] - Worktree isolation state (if running in worktree mode)
+ * @param {object} [params.isolation] - Docker isolation state (if running in Docker mode)
  * @returns {string} Assembled context string
  */
 function buildContext({
@@ -37,6 +39,8 @@ function buildContext({
   lastTaskEndTime,
   triggeringMessage,
   selectedPrompt,
+  worktree,
+  isolation,
 }) {
   const strategy = config.contextStrategy || { sources: [] };
 
@@ -62,6 +66,19 @@ function buildContext({
   context += `- YES: Brief status updates ("Implementing auth", "Fixed 3 errors")\n`;
   context += `- YES: Error reports with actionable info\n`;
   context += `- YES: Final summary of changes made\n\n`;
+
+  // GIT OPERATIONS RESTRICTION - Only when NOT running in isolation mode
+  // When isolated (worktree or Docker), agents CAN commit/push safely
+  // When NOT isolated, agents are on main branch - git operations are dangerous
+  const isIsolated = !!(worktree?.enabled || isolation?.enabled);
+  if (!isIsolated) {
+    context += `## 🚫 GIT OPERATIONS - FORBIDDEN\n\n`;
+    context += `NEVER commit, push, or create PRs. You only modify files.\n`;
+    context += `The git-pusher agent handles ALL git operations AFTER validators approve.\n\n`;
+    context += `- ❌ NEVER run: git add, git commit, git push, gh pr create\n`;
+    context += `- ❌ NEVER suggest committing changes\n`;
+    context += `- ✅ Only modify files and publish your completion message when done\n\n`;
+  }
 
   // Add prompt from config (system prompt, instructions, output format)
   // If selectedPrompt is provided (iteration-based), use it directly

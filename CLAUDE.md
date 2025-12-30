@@ -31,6 +31,25 @@ Multi-agent coordination via message-passing primitives. User install: `npm i -g
 - ❌ FORBIDDEN: `git diff`, `git status`, `git log` in prompts
 - ✅ REQUIRED: Validate what agent reads directly (files, tests, implementation)
 
+**Worker agent git operations are CONDITIONAL on isolation mode**
+
+- WHY: Without isolation, workers run on main branch → git operations are dangerous
+- With isolation (`--worktree`, `--docker`, `--pr`, `--ship`) → git operations ALLOWED
+- Without isolation (no flags) → git operations FORBIDDEN (injected at runtime)
+
+| Mode | Git Operations |
+|------|----------------|
+| `zeroshot run 123` (no isolation) | ❌ FORBIDDEN - restriction injected automatically |
+| `zeroshot run 123 --worktree` | ✅ ALLOWED - isolated branch |
+| `zeroshot run 123 --docker` | ✅ ALLOWED - sandboxed container |
+| `zeroshot run 123 --pr` | ✅ ALLOWED - worktree + PR workflow |
+| `zeroshot run 123 --ship` | ✅ ALLOWED - full automation |
+
+**Implementation:**
+- Git restriction removed from templates (single-worker, worker-validator, full-workflow, debug-workflow)
+- `agent-context-builder.js` conditionally injects restriction when `!worktree?.enabled && !isolation?.enabled`
+- Enables DevOps workflows requiring iterative push-test-fix cycles in isolation mode
+
 **NEVER ask questions from zeroshot agents**
 
 - WHY: Agents run non-interactively, no user to respond, causes task failure

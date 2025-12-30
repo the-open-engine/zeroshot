@@ -346,6 +346,9 @@ class AgentWrapper {
       lastTaskEndTime: this.lastTaskEndTime,
       triggeringMessage,
       selectedPrompt: this._selectPrompt(),
+      // Pass isolation state for conditional git restriction
+      worktree: this.worktree,
+      isolation: this.isolation,
     });
   }
 
