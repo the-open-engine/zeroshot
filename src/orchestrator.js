@@ -63,6 +63,9 @@ class Orchestrator {
       fs.mkdirSync(this.storageDir, { recursive: true });
     }
 
+    // Track if orchestrator is closed (prevents _saveClusters race conditions during cleanup)
+    this.closed = false;
+
     // Load existing clusters from disk (skip if explicitly disabled)
     if (options.skipLoad !== true) {
       this._loadClusters();
@@ -289,6 +292,11 @@ class Orchestrator {
    * @private
    */
   _saveClusters() {
+    // Skip saving if orchestrator is closed (prevents race conditions during cleanup)
+    if (this.closed) {
+      return;
+    }
+
     const clustersFile = this._ensureClustersFile();
     const lockfilePath = path.join(this.storageDir, 'clusters.json.lock');
     let release;
@@ -1056,6 +1064,14 @@ class Orchestrator {
     }
 
     return results;
+  }
+
+  /**
+   * Close the orchestrator (prevents further _saveClusters operations)
+   * Call before deleting storageDir to prevent ENOENT race conditions during cleanup
+   */
+  close() {
+    this.closed = true;
   }
 
   /**
