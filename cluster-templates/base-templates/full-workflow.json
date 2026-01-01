@@ -206,6 +206,7 @@
       "role": "validator",
       "model": "{{validator_model}}",
       "timeout": "{{timeout}}",
+      "maxRetries": 3,
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -280,6 +281,7 @@
       "role": "validator",
       "model": "{{validator_model}}",
       "timeout": "{{timeout}}",
+      "maxRetries": 3,
       "condition": "{{validator_count}} >= 2",
       "outputFormat": "json",
       "jsonSchema": {
@@ -329,6 +331,7 @@
       "role": "validator",
       "model": "{{validator_model}}",
       "timeout": "{{timeout}}",
+      "maxRetries": 3,
       "condition": "{{validator_count}} >= 3",
       "outputFormat": "json",
       "jsonSchema": {
@@ -378,6 +381,7 @@
       "role": "validator",
       "model": "{{validator_model}}",
       "timeout": "{{timeout}}",
+      "maxRetries": 3,
       "condition": "{{validator_count}} >= 4",
       "outputFormat": "json",
       "jsonSchema": {

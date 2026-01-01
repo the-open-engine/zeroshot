@@ -248,6 +248,18 @@ async function executeTask(agent, triggeringMessage) {
       // Spawn claude-zeroshots
       agent.state = 'executing_task';
 
+      // LOCK CONTENTION FIX: Add random jitter for validators to prevent thundering herd
+      // When multiple validators wake on the same trigger (e.g., IMPLEMENTATION_READY),
+      // they all try to spawn Claude CLI at the same time. Claude CLI uses a lock file
+      // per workspace, so only one can run. Adding jitter staggers their starts.
+      if (agent.role === 'validator') {
+        const jitterMs = Math.floor(Math.random() * 15000); // 0-15 seconds
+        if (!agent.quiet) {
+          agent._log(`[Agent ${agent.id}] Adding ${Math.round(jitterMs / 1000)}s jitter to prevent lock contention`);
+        }
+        await new Promise(resolve => setTimeout(resolve, jitterMs));
+      }
+
       agent._publishLifecycle('TASK_STARTED', {
         iteration: agent.iteration,
         model: agent._selectModel(),
@@ -317,6 +329,10 @@ async function executeTask(agent, triggeringMessage) {
       // ✅ SUCCESS - exit retry loop
       return;
     } catch (error) {
+      // LOCK CONTENTION: Add extra jittered delay for lock file errors
+      // This happens when multiple validators try to run Claude CLI in the same workspace
+      const isLockError = error.message && error.message.includes('Lock file');
+
       // Log attempt failure
       console.error(`\n${'='.repeat(80)}`);
       console.error(
@@ -324,7 +340,13 @@ async function executeTask(agent, triggeringMessage) {
       );
       console.error(`${'='.repeat(80)}`);
       console.error(`Error: ${error.message}`);
-      if (attempt < maxRetries) {
+
+      if (isLockError) {
+        // Lock contention - add significant jittered delay
+        const lockDelay = 10000 + Math.floor(Math.random() * 20000); // 10-30 seconds
+        console.error(`⚠️ Lock contention detected - waiting ${Math.round(lockDelay / 1000)}s before retry`);
+        await new Promise(resolve => setTimeout(resolve, lockDelay));
+      } else if (attempt < maxRetries) {
         console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
       }
       console.error(`${'='.repeat(80)}\n`);
