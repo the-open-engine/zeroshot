@@ -11,6 +11,8 @@
  * - Creates Unix socket at ~/.zeroshot/sockets/task-<id>.sock
  * - Supports multiple attached clients
  * - Still writes to log file for backward compatibility
+ *
+ * CRITICAL: Global error handlers installed FIRST to catch silent crashes
  */
 
 import { appendFileSync, existsSync, mkdirSync } from 'fs';
@@ -18,15 +20,77 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { updateTask } from './store.js';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔴 CRITICAL: Global error handlers - MUST be installed BEFORE any async ops
+// Without these, uncaught errors cause SILENT process death (no logs, no status)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Parse args early so we can log errors to the correct file
+const [, , taskIdArg, cwdArg, logFileArg, argsJsonArg, configJsonArg] = process.argv;
+
+/**
+ * Emergency logger - works even if main log function isn't ready
+ */
+function emergencyLog(msg) {
+  if (logFileArg) {
+    try {
+      appendFileSync(logFileArg, msg);
+    } catch {
+      // Last resort - stderr
+      process.stderr.write(msg);
+    }
+  } else {
+    process.stderr.write(msg);
+  }
+}
+
+/**
+ * Mark task as failed and exit
+ */
+function crashWithError(error, source) {
+  const timestamp = Date.now();
+  const errorMsg = error instanceof Error ? error.stack || error.message : String(error);
+
+  emergencyLog(`\n[${timestamp}][CRASH] ${source}: ${errorMsg}\n`);
+  emergencyLog(`[${timestamp}][CRASH] Process terminating due to unhandled error\n`);
+
+  // Try to update task status - may fail if error is in store.js itself
+  if (taskIdArg) {
+    try {
+      updateTask(taskIdArg, {
+        status: 'failed',
+        error: `${source}: ${errorMsg}`,
+        socketPath: null,
+      });
+    } catch (updateError) {
+      emergencyLog(`[${timestamp}][CRASH] Failed to update task status: ${updateError.message}\n`);
+    }
+  }
+
+  // Exit with error code
+  process.exit(1);
+}
+
+// Install handlers IMMEDIATELY
+process.on('uncaughtException', (error) => {
+  crashWithError(error, 'uncaughtException');
+});
+
+process.on('unhandledRejection', (reason) => {
+  crashWithError(reason, 'unhandledRejection');
+});
+
 // Import attach infrastructure from src package (CommonJS)
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { AttachServer } = require('../src/attach');
 
-// Parse command line args (same format as legacy watcher)
-const [, , taskId, cwd, logFile, argsJson, configJson] = process.argv;
-const args = JSON.parse(argsJson);
-const config = configJson ? JSON.parse(configJson) : {};
+// Use the args parsed earlier (during error handler setup)
+const taskId = taskIdArg;
+const cwd = cwdArg;
+const logFile = logFileArg;
+const args = JSON.parse(argsJsonArg);
+const config = configJsonArg ? JSON.parse(configJsonArg) : {};
 
 // Socket path for attach
 const SOCKET_DIR = join(homedir(), '.zeroshot', 'sockets');
