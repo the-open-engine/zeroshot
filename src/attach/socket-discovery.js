@@ -14,6 +14,23 @@ const net = require('net');
 
 const CREW_DIR = path.join(os.homedir(), '.zeroshot');
 const SOCKET_DIR = path.join(CREW_DIR, 'sockets');
+const CLUSTERS_FILE = path.join(CREW_DIR, 'clusters.json');
+
+/**
+ * Check if an ID is a known cluster by looking up clusters.json
+ * Cluster IDs don't have prefix (e.g., 'steady-pulse-42'), unlike task IDs ('task-xxx')
+ * @param {string} id - ID to check
+ * @returns {boolean} True if ID is a cluster
+ */
+function isKnownCluster(id) {
+  try {
+    if (!fs.existsSync(CLUSTERS_FILE)) return false;
+    const clusters = JSON.parse(fs.readFileSync(CLUSTERS_FILE, 'utf8'));
+    return id in clusters;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Ensure socket directory exists
@@ -58,7 +75,9 @@ function getSocketPath(id, agentId = null) {
   if (id.startsWith('task-')) {
     return getTaskSocketPath(id);
   }
-  if (id.startsWith('cluster-')) {
+  // Check for explicit 'cluster-' prefix OR known cluster in registry
+  // Cluster IDs are generated without prefix (e.g., 'steady-pulse-42')
+  if (id.startsWith('cluster-') || isKnownCluster(id)) {
     if (agentId) {
       return getAgentSocketPath(id, agentId);
     }
@@ -184,6 +203,7 @@ async function listAttachableAgents(clusterId) {
 
 /**
  * List all attachable clusters
+ * Checks both socket directories AND clusters.json for known clusters
  * @returns {Promise<string[]>} - Array of cluster IDs with at least one live agent socket
  */
 async function listAttachableClusters() {
@@ -191,11 +211,15 @@ async function listAttachableClusters() {
   const entries = fs.readdirSync(SOCKET_DIR, { withFileTypes: true });
   const clusters = [];
 
+  // Check socket directories (both 'cluster-' prefix and plain cluster IDs)
   for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith('cluster-')) {
-      const agents = await listAttachableAgents(entry.name);
-      if (agents.length > 0) {
-        clusters.push(entry.name);
+    if (entry.isDirectory()) {
+      // Accept directories with 'cluster-' prefix OR that are known clusters
+      if (entry.name.startsWith('cluster-') || isKnownCluster(entry.name)) {
+        const agents = await listAttachableAgents(entry.name);
+        if (agents.length > 0) {
+          clusters.push(entry.name);
+        }
       }
     }
   }
@@ -239,4 +263,5 @@ module.exports = {
   listAttachableAgents,
   listAttachableClusters,
   cleanupClusterSockets,
+  isKnownCluster,
 };

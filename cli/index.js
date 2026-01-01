@@ -1698,11 +1698,17 @@ Key bindings:
 
       if (id.startsWith('task-')) {
         socketPath = socketDiscovery.getTaskSocketPath(id);
-      } else if (id.startsWith('cluster-')) {
+      } else if (id.startsWith('cluster-') || socketDiscovery.isKnownCluster(id)) {
         // Clusters use the task system - each agent spawns a task with its own socket
         // Get cluster status to find which task each agent is running
-        const store = require('../lib/store');
-        const cluster = store.getCluster(id);
+        const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
+        let cluster;
+        try {
+          const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+          cluster = clusters[id];
+        } catch {
+          cluster = null;
+        }
 
         if (!cluster) {
           console.error(chalk.red(`Cluster ${id} not found`));
@@ -1715,9 +1721,9 @@ Key bindings:
           process.exit(1);
         }
 
-        // Get orchestrator instance to query agent states
-        const OrchestratorModule = require('../src/orchestrator');
-        const orchestrator = OrchestratorModule.getInstance();
+        // Create orchestrator instance to query agent states
+        // This loads the cluster from disk including its ledger and agents
+        const orchestrator = new Orchestrator({ quiet: true });
 
         try {
           const status = orchestrator.getStatus(id);
