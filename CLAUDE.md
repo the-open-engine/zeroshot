@@ -1,600 +1,177 @@
 # Zeroshot: Multi-Agent Coordination Engine
 
-Multi-agent coordination via message-passing primitives. User install: `npm i -g @covibes/zeroshot`. Dev install: `npm link` in zeroshot root directory.
+Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @covibes/zeroshot` or `npm link` (dev).
+
+## 🔴 CRITICAL RULES
+
+| Rule | Why | Forbidden | Required |
+|------|-----|-----------|----------|
+| **Never spawn without permission** | Consumes API credits | "I'll run zeroshot on 123" | User says "run zeroshot" |
+| **Never use git in validators** | Git state unreliable | `git diff`, `git status` in prompts | Validate files directly |
+| **Never ask questions** | Agents run non-interactively | `AskUserQuestion`, waiting for confirmation | Make autonomous decisions |
+| **Never edit AI instruction files** | Config files for other assistants | Editing `AGENTS.md`, `GEMINI.md` | Read-only unless explicitly asked |
+
+**Worker git operations:** Allowed with isolation (`--worktree`, `--docker`, `--pr`, `--ship`). Forbidden without isolation (auto-injected restriction).
+
+**Read-only safe:** `zeroshot list`, `zeroshot status`, `zeroshot logs`
+
+**Destructive (needs permission):** `zeroshot kill`, `zeroshot clear`, `zeroshot purge`
 
 ## Where to Look
 
-| Concept                           | Primary File/Location              |
-| --------------------------------- | ---------------------------------- |
-| Conductor 2D classification       | @src/conductor-bootstrap.js        |
-| Base templates                    | @cluster-templates/base-templates/ |
-| Message bus                       | @src/message-bus.js                |
-| Ledger (SQLite)                   | @src/ledger.js                     |
-| Logic engine (trigger evaluation) | @src/logic-engine.js               |
-| Orchestrator                      | @src/orchestrator.js               |
-| Agent wrapper                     | @src/agent-wrapper.js              |
-| TUI dashboard                     | @src/tui/                          |
+| Concept | File |
+|---------|------|
+| Conductor classification | `src/conductor-bootstrap.js` |
+| Base templates | `cluster-templates/base-templates/` |
+| Message bus | `src/message-bus.js` |
+| Ledger (SQLite) | `src/ledger.js` |
+| Trigger evaluation | `src/logic-engine.js` |
+| Agent wrapper | `src/agent-wrapper.js` |
+| TUI dashboard | `src/tui/` |
 
-## 🔴 CRITICAL USAGE RULES
-
-**NEVER spawn agents without explicit user permission**
-
-- WHY: Consumes API credits, modifies code autonomously
-- ❌ FORBIDDEN: "I'll run zeroshot on issue 123" (no user request)
-- ✅ OK: User says "run zeroshot", "spawn cluster", "start task"
-- ❌ FORBIDDEN: `zeroshot kill`, `zeroshot clear` (destroys work/data)
-- ✅ OK: `zeroshot list`, `zeroshot status`, `zeroshot logs` (read-only)
-
-**NEVER use git operations in validator agents**
-
-- WHY: Git state unreliable (dirty, uncommitted, non-existent)
-- ❌ FORBIDDEN: `git diff`, `git status`, `git log` in prompts
-- ✅ REQUIRED: Validate what agent reads directly (files, tests, implementation)
-
-**Worker agent git operations are CONDITIONAL on isolation mode**
-
-- WHY: Without isolation, workers run on main branch → git operations are dangerous
-- With isolation (`--worktree`, `--docker`, `--pr`, `--ship`) → git operations ALLOWED
-- Without isolation (no flags) → git operations FORBIDDEN (injected at runtime)
-
-| Mode | Git Operations |
-|------|----------------|
-| `zeroshot run 123` (no isolation) | ❌ FORBIDDEN - restriction injected automatically |
-| `zeroshot run 123 --worktree` | ✅ ALLOWED - isolated branch |
-| `zeroshot run 123 --docker` | ✅ ALLOWED - sandboxed container |
-| `zeroshot run 123 --pr` | ✅ ALLOWED - worktree + PR workflow |
-| `zeroshot run 123 --ship` | ✅ ALLOWED - full automation |
-
-**Implementation:**
-- Git restriction removed from templates (single-worker, worker-validator, full-workflow, debug-workflow)
-- `agent-context-builder.js` conditionally injects restriction when `!worktree?.enabled && !isolation?.enabled`
-- Enables DevOps workflows requiring iterative push-test-fix cycles in isolation mode
-
-**NEVER ask questions from zeroshot agents**
-
-- WHY: Agents run non-interactively, no user to respond, causes task failure
-- ❌ FORBIDDEN: `AskUserQuestion`, "Would you like me to...", "Should I..."
-- ❌ FORBIDDEN: Waiting for approval/confirmation
-- ✅ REQUIRED: Make autonomous decisions
-- ✅ REQUIRED: When choosing between "fix code" vs "relax rules" → ALWAYS fix the code
-
-**Enforcement (defense in depth):**
-
-1. **PreToolUse hook** - `hooks/block-ask-user-question.py` returns `permissionDecision: deny`
-2. **Prompt injection** - `agent-wrapper.js:670-680` adds explicit NEVER ASK instructions
-3. **Isolation mode** - `isolation-manager.js:631-659` creates Claude config with hook
-4. **Non-isolation mode** - `agent-wrapper.js:40-88` creates zeroshot-specific Claude config via `CLAUDE_CONFIG_DIR`
-
-**NEVER edit other AI instruction files**
-
-- WHY: These are configuration files for other AI assistants, not for Claude
-- ❌ FORBIDDEN: Editing `AGENTS.md`, `GEMINI.md`, or similar AI-specific files
-- ✅ OK: Reading them for context if relevant to the task
-- ✅ OK: Editing only if user explicitly requests changes to those specific files
-
-## zeroshot CLI (Unified)
-
-**Packages:** `zeroshot` (CommonJS cluster + ESM task via dynamic import)
-**Commands work for both clusters and single-agent tasks automatically.**
-
-### Flag Cascade (Most Important!)
-
-```
---ship → implies → --pr → implies → --worktree
-```
-
-| Command | Behavior |
-|---------|----------|
-| `zeroshot run 123` | Local run, no isolation |
-| `zeroshot run 123 --docker` | Docker isolation, no PR |
-| `zeroshot run 123 --worktree` | Git worktree isolation (lightweight) |
-| `zeroshot run 123 --pr` | Worktree + PR (human reviews) |
-| `zeroshot run 123 --ship` | Worktree + PR + auto-merge |
-
-**Commands:**
+## CLI Quick Reference
 
 ```bash
-# Automation levels (cascading flags)
-zeroshot run 123                     # Local run
-zeroshot run 123 --docker            # Docker isolation
-zeroshot run 123 --worktree          # Git worktree isolation (lightweight)
-zeroshot run 123 --pr                # Worktree + PR (--worktree auto-enabled)
-zeroshot run 123 --ship              # Worktree + PR + auto-merge (full automation)
+# Flag cascade: --ship → --pr → --worktree
+zeroshot run 123                  # Local, no isolation
+zeroshot run 123 --worktree       # Git worktree isolation
+zeroshot run 123 --pr             # Worktree + create PR
+zeroshot run 123 --ship           # Worktree + PR + auto-merge
+zeroshot run 123 --docker         # Docker container isolation
+zeroshot run 123 -d               # Background (daemon) mode
 
-# Input types
-zeroshot run 123                     # Issue number
-zeroshot run "Implement X"           # Plain text
+# Management
+zeroshot list                     # All clusters (--json)
+zeroshot status <id>              # Cluster details
+zeroshot logs <id> [-f]           # Stream logs
+zeroshot resume <id> [prompt]     # Resume failed cluster
+zeroshot stop <id>                # Graceful stop
+zeroshot kill <id>                # Force kill
 
-# Background mode
-zeroshot run 123 -d                  # Detached/background
-zeroshot run 123 --ship -d           # Full automation, background
-
-# Single tasks
-zeroshot task run "Fix bug X"        # Background single agent
-
-# Management (--json available for scripting)
-zeroshot list                        # All tasks/clusters (--json)
-zeroshot status <id>                 # Cluster details (--json)
-zeroshot logs <id> [-f]              # Follow logs
-zeroshot resume <id> [prompt]        # Resume failed (foreground)
-zeroshot resume <id> -d              # Resume in background
-zeroshot kill <id>                   # Kill running
-
-# Cluster-only
-zeroshot stop <id>                   # Graceful shutdown
-zeroshot export <id>                 # Export conversation
-zeroshot config list/show <name>     # Manage configs
-zeroshot watch                       # TUI dashboard (htop-style)
-
-# Agent library
-zeroshot agents list                 # View available agents (--json, --verbose)
-zeroshot agents show <name>          # Agent details (--json)
-
-# Maintenance
-zeroshot clean                       # Remove old records
-zeroshot purge [-y]                  # NUCLEAR: kill all + delete all data
-
-# Settings
-zeroshot settings                    # Show all (highlights non-defaults)
-zeroshot settings set maxModel sonnet
+# Utilities
+zeroshot watch                    # TUI dashboard
+zeroshot export <id>              # Export conversation
+zeroshot agents list              # Available agents
+zeroshot settings                 # View/modify settings
 ```
 
-**Settings:** `maxModel` (opus/sonnet/haiku - cost ceiling), `defaultConfig`, `defaultDocker`, `logLevel`
+**UX modes:**
+- Foreground (`zeroshot run`): Streams logs, Ctrl+C **stops** cluster
+- Daemon (`-d`): Background, Ctrl+C detaches
+- Attach (`zeroshot attach`): Connect to daemon, Ctrl+C **detaches** only
 
-**maxModel (Cost Ceiling):**
-- Sets the maximum model agents can request (not a default/override)
-- Agent requests opus but maxModel is sonnet → **ERROR** at config time
-- Agent requests sonnet with maxModel opus → OK (within ceiling)
-- Agent unspecified → uses maxModel as default
+**Settings:** `maxModel` (opus/sonnet/haiku cost ceiling), `defaultConfig`, `logLevel`
 
-**UX:**
+## Architecture
 
-- `zeroshot run` = Foreground mode (streams logs, Ctrl+C **STOPS** cluster)
-- `zeroshot run -d` = Daemon mode (background, like docker -d)
-- `zeroshot resume` = Foreground mode (streams logs, Ctrl+C **STOPS** cluster)
-- `zeroshot resume -d` = Daemon mode (background)
-- `zeroshot attach` = Connect to running daemon (Ctrl+C **DETACHES**, daemon continues)
-- `zeroshot task run` = Single-agent background task
-
-**FAQ: Can I run zeroshot in the background?**
-
-| Question | Answer |
-|----------|--------|
-| **How do I run in background?** | Use `-d` flag: `zeroshot run 123 -d` or `zeroshot resume xyz -d` |
-| **What happens if I Ctrl+C?** | **Foreground (no -d)**: Cluster **STOPS** completely. **Attach mode**: You **DETACH**, daemon continues. |
-| **How do I follow logs of a background cluster?** | `zeroshot logs <id> -f` |
-| **How do I stop a background cluster?** | `zeroshot stop <id>` (graceful) or `zeroshot kill <id>` (force) |
-| **Can I resume a stopped cluster?** | Yes: `zeroshot resume <id>` (foreground) or `zeroshot resume <id> -d` (background) |
-
-## Architecture: Message-Driven Coordination
-
-**Pub/sub message bus + immutable SQLite ledger.** Agents subscribe to topics, execute on trigger match, publish results via hooks. Creates decoupled event-driven workflows.
-
-### Primitives
-
-| Primitive        | Purpose                                     | Example                                                                              |
-| ---------------- | ------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **Topic**        | Named message channel                       | `ISSUE_OPENED`, `IMPLEMENTATION_READY`, `VALIDATION_RESULT`                          |
-| **Trigger**      | Condition to wake agent                     | `{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }`                      |
-| **Logic Script** | JavaScript predicate for complex conditions | `ledger.query({ topic: 'VALIDATION_RESULT' }).every(r => r.content?.data?.approved)` |
-| **Hook**         | Post-task action                            | Publish message, execute command                                                     |
-| **Role**         | Semantic grouping                           | `implementation`, `validator`, `orchestrator`                                        |
-
-### System Components
-
-| Component            | File                      | Purpose                                               |
-| -------------------- | ------------------------- | ----------------------------------------------------- |
-| **Orchestrator**     | @src/orchestrator.js      | Cluster lifecycle, agent spawning, GitHub integration |
-| **AgentWrapper**     | @src/agent-wrapper.js     | Claude CLI wrapper, trigger eval, context building    |
-| **MessageBus**       | @src/message-bus.js       | Pub/sub, WebSocket broadcast, topic routing           |
-| **Ledger**           | @src/ledger.js            | SQLite append-only log, query API, crash recovery     |
-| **LogicEngine**      | @src/logic-engine.js      | JavaScript sandbox for triggers, ledger/cluster APIs  |
-| **IsolationManager** | @src/isolation-manager.js | Docker lifecycle for isolated execution               |
-| **TUI Dashboard**    | @src/tui/                 | Interactive monitoring, real-time stats               |
-
-### Message Flow
+**Pub/sub message bus + SQLite ledger.** Agents subscribe to topics, execute on trigger match, publish results.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CLUSTER RUNTIME                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  Agent A                    MessageBus                    Agent B    │
-│  ┌──────┐                   ┌───────┐                    ┌──────┐   │
-│  │ PTY  │ ──publish()──────>│ SQLite│<──subscribeTopic()─│ PTY  │   │
-│  │Claude│                   │Ledger │                    │Claude│   │
-│  └──────┘                   └───────┘                    └──────┘   │
-│     │                           │                           ▲       │
-│     │                           ▼                           │       │
-│     │                    ┌──────────┐                       │       │
-│     └────────────────────│LogicEngine│───────────────────────┘       │
-│                          │ Evaluate  │                               │
-│                          │ Triggers  │                               │
-│                          └──────────┘                               │
-└─────────────────────────────────────────────────────────────────────┘
+Agent A → publish() → SQLite Ledger → LogicEngine → trigger match → Agent B executes
 ```
 
-1. Agent A completes task → `hooks.onComplete` publishes to topic (e.g., `IMPLEMENTATION_READY`)
-2. MessageBus appends to SQLite Ledger → emits `topic:IMPLEMENTATION_READY` event
-3. LogicEngine evaluates all agents' triggers against this message
-4. Agent B's trigger matches → AgentWrapper builds context from ledger → spawns Claude CLI
+### Core Primitives
 
-### Agent Configuration Schema
+| Primitive | Purpose |
+|-----------|---------|
+| Topic | Named message channel (`ISSUE_OPENED`, `VALIDATION_RESULT`) |
+| Trigger | Condition to wake agent (`{ topic, action, logic }`) |
+| Logic Script | JS predicate for complex conditions |
+| Hook | Post-task action (publish message, execute command) |
+
+### Agent Configuration (Minimal)
 
 ```json
 {
-  "id": "unique-agent-id",
-  "role": "semantic-role",
-  "model": "sonnet|opus|haiku",
-
-  "triggers": [
-    {
-      "topic": "TOPIC_NAME",
-      "action": "execute_task|stop_cluster",
-      "logic": {
-        "engine": "javascript",
-        "script": "return true; // JS predicate with ledger/cluster APIs"
-      }
-    }
-  ],
-
-  "contextStrategy": {
-    "sources": [
-      { "topic": "ISSUE_OPENED", "limit": 1 },
-      { "topic": "VALIDATION_RESULT", "since": "last_task_end", "limit": 10 }
-    ],
-    "maxTokens": 100000
-  },
-
-  "prompt": "Agent instructions (string or object with system/outputFormat)",
-
-  "outputFormat": "stream-json|json",
-  "jsonSchema": { "type": "object", "properties": {...} },
-
+  "id": "worker",
+  "role": "implementation",
+  "model": "sonnet",
+  "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+  "prompt": "Implement the requested feature...",
   "hooks": {
     "onComplete": {
       "action": "publish_message",
-      "config": {
-        "topic": "OUTPUT_TOPIC",
-        "content": {
-          "text": "{{result.summary}}",
-          "data": { "approved": "{{result.approved}}" }
-        }
-      }
+      "config": { "topic": "IMPLEMENTATION_READY" }
     }
-  },
-
-  "maxIterations": 30,
-  "maxRetries": 1
+  }
 }
 ```
 
 ### Logic Script API
 
-Trigger scripts run in a sandboxed JavaScript VM with these APIs:
-
 ```javascript
-// Ledger API (auto-scoped to cluster)
-ledger.query({ topic: 'X', sender: 'Y', since: timestamp, limit: N }); // Query messages
-ledger.findLast({ topic: 'X' }); // Get most recent message
-ledger.count({ topic: 'X' }); // Count messages
+// Ledger (auto-scoped to cluster)
+ledger.query({ topic, sender, since, limit })
+ledger.findLast({ topic })
+ledger.count({ topic })
 
-// Cluster API
-cluster.getAgents(); // All agents in cluster
-cluster.getAgentsByRole('validator'); // Agents with specific role
-cluster.getAgent('worker'); // Single agent by ID
+// Cluster
+cluster.getAgents()
+cluster.getAgentsByRole('validator')
 
-// Helper Functions
-helpers.allResponded(agents, topic, since); // Check if all agents responded
-helpers.hasConsensus(topic, since); // All responses have approved=true
-helpers.timeSinceLastMessage(topic); // Milliseconds since last message
-
-// Context
-(agent.id, agent.role, agent.iteration); // Current agent info
-(message.topic, message.sender, message.content); // Triggering message
+// Helpers
+helpers.allResponded(agents, topic, since)
+helpers.hasConsensus(topic, since)
 ```
 
-### Consensus Logic Example
+## Conductor: 2D Classification
 
-```javascript
-// Wait for ALL validators to approve
-const validators = cluster.getAgentsByRole('validator');
-const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
-const responses = ledger.query({
-  topic: 'VALIDATION_RESULT',
-  since: lastPush.timestamp,
-});
-return responses.length >= validators.length && responses.every((r) => r.content?.data?.approved);
-```
+Classifies tasks on **Complexity × TaskType**, routes to parameterized templates.
 
-### Template Variables in Hooks
+| Complexity | Description | Validators |
+|------------|-------------|------------|
+| TRIVIAL | 1 file, mechanical | 0 |
+| SIMPLE | 1 concern | 1 |
+| STANDARD | Multi-file | 3 |
+| CRITICAL | Auth/payments/security | 5 |
 
-Hooks support template substitution:
+| TaskType | Action |
+|----------|--------|
+| INQUIRY | Read-only exploration |
+| TASK | Implement new feature |
+| DEBUG | Fix broken code |
 
-| Variable              | Value                            |
-| --------------------- | -------------------------------- |
-| `{{cluster.id}}`      | Cluster ID                       |
-| `{{result.summary}}`  | Parsed summary from agent output |
-| `{{result.approved}}` | Parsed approved boolean          |
-| `{{result.errors}}`   | Parsed errors array              |
-| `{{error.message}}`   | Error message (onError hook)     |
-
-### Creating Custom Workflows
-
-**Define message flow → create agents for each step → add orchestrator.**
-
-Example: ISSUE_OPENED → Worker → IMPLEMENTATION_READY → [Validators] → VALIDATION_RESULT
-
-- Worker: triggered by ISSUE_OPENED, publishes IMPLEMENTATION_READY
-- Validators: triggered by IMPLEMENTATION_READY, publish VALIDATION_RESULT
-- Orchestrator: triggered by VALIDATION_RESULT (with consensus logic), stops cluster
-
-## Conductor System: 2D Classification → Parameterized Templates
-
-**Conductor classifies tasks on 2 dimensions, routes to base templates with parameters.**
-
-### Classification Dimensions
-
-**Complexity (how hard):**
-
-- TRIVIAL: 1 command/file, mechanical
-- SIMPLE: 1 concern, straightforward
-- STANDARD: multi-file, needs planning
-- CRITICAL: high risk (auth, payments, security)
-
-**TaskType (what action):**
-
-- INQUIRY: read-only exploration ("How does X work?")
-- TASK: implement new ("Add feature X")
-- DEBUG: fix broken ("Why is X failing?")
-
-### Base Templates (Parameterized)
-
-**4 base templates replace 12 static configs:**
-
-| Template           | Used When                      | Agents                        |
-| ------------------ | ------------------------------ | ----------------------------- |
-| `single-worker`    | TRIVIAL                        | 1 worker                      |
-| `worker-validator` | SIMPLE INQUIRY/TASK            | worker ↔ validator loop       |
-| `debug-workflow`   | SIMPLE+ DEBUG                  | investigator → fixer → tester |
-| `full-workflow`    | STANDARD/CRITICAL INQUIRY/TASK | planner → worker → validators |
-
-**Parameters injected by classification:**
-
-- `complexity` → validator_count (0/1/2/4), max_iterations (1/3/5/7)
-- `task_type` → behavior (read-only/implement/fix)
-- `*_model` → haiku (TRIVIAL), sonnet (SIMPLE/STANDARD), opus (CRITICAL planner)
-
-**Templates:** @cluster-templates/base-templates/
-
-**Flow:**
-
-```
-COMPLEXITY × TASKTYPE
-  ↓
-helpers.getConfig() → { base, params }
-  ↓
-TemplateResolver.resolve(base, params) → agents
-  ↓
-Orchestrator spawns
-```
-
-### Model Selection by Complexity
-
-| Complexity | Planner | Worker | Validators |
-| ---------- | ------- | ------ | ---------- |
-| TRIVIAL    | -       | haiku  | 0          |
-| SIMPLE     | -       | sonnet | 1 (sonnet) |
-| STANDARD   | sonnet  | sonnet | 3 (sonnet) |
-| CRITICAL   | opus    | sonnet | 5 (sonnet) |
-
-### Adversarial Tester (STANDARD/CRITICAL only)
-
-The **adversarial-tester** is a validator with one job: **prove the implementation works by USING IT YOURSELF.**
-
-**Core principle:** DO NOT trust existing tests. Tests can be outdated, incomplete, or passing while implementation is broken. **TESTS PASSING ≠ IMPLEMENTATION WORKS.**
-
-The ONLY way to know if it works: **USE IT YOURSELF** (ad-hoc testing).
-
-**The algorithm (language-agnostic):**
-
-1. **UNDERSTAND** - Read the issue/task. What SPECIFICALLY was supposed to be built?
-2. **FIGURE OUT HOW TO USE IT** - Look at the code. How do you invoke this feature?
-3. **ACTUALLY USE IT** - Run the command, call the function, hit the endpoint. Did it work?
-4. **TRY TO BREAK IT** - Empty input, invalid input, wrong order, call it twice
-5. **VERIFY REQUIREMENTS** - For EACH requirement in the issue, show evidence (command + output)
-
-**Existing tests are SECONDARY:**
-
-- Tests passing does NOT mean approved
-- Tests failing does NOT necessarily mean rejected (tests might be outdated)
-- YOUR AD-HOC TESTING is the primary verification
-
-**Approval criteria:**
-
-- ✅ You PERSONALLY verified the feature works
-- ✅ You have evidence (actual commands + outputs)
-- ✅ No critical bugs found during ad-hoc testing
-
-**Rejection criteria:**
-
-- ❌ You couldn't figure out how to use it
-- ❌ It doesn't do what the issue asked for
-- ❌ It crashes or errors on reasonable usage
-- ❌ You found critical bugs
-
-### Workflow Patterns
-
-| Pattern            | Flow                                                                    |
-| ------------------ | ----------------------------------------------------------------------- |
-| **Pipeline**       | ISSUE → Planner → Worker → Reviewer → APPROVED                          |
-| **Fan-Out/Fan-In** | IMPLEMENTATION → [Validators parallel] → Consensus → COMPLETE           |
-| **Rejection Loop** | Worker → Validators → (rejected) → Worker → ... → (approved) → COMPLETE |
-| **Hierarchical**   | Supervisor → [Workers parallel] → Aggregator → COMPLETE                 |
-| **Expert Panel**   | ISSUE → [Specialists parallel] → Aggregator → FINAL_REVIEW              |
-| **Staged Gate**    | Worker → Stage1 → Stage2 → ... → COMPLETE (rejected = retry)            |
-
-### Custom Pattern Example
-
-**Define topic flow → map to agent configs.**
-
-Security pipeline with mandatory approval:
-
-- Implementer → CODE_READY
-- SecurityScanner → SECURITY_RESULT
-- SecurityGate → stop_cluster (if no vulnerabilities)
+**Base templates:** `single-worker`, `worker-validator`, `debug-workflow`, `full-workflow`
 
 ## Isolation Modes
 
-### Worktree Isolation (Default for --pr/--ship)
+| Mode | Flag | Use When |
+|------|------|----------|
+| Worktree | `--worktree` | Quick isolated work, PR workflows |
+| Docker | `--docker` | Full isolation, risky experiments, parallel agents |
 
-**Lightweight isolation using git worktree.** Creates a separate working directory with its own branch. Fast (<1s setup), no Docker required.
+**Worktree:** Lightweight git branch isolation (<1s setup).
 
-**Use when:**
+**Docker:** Fresh git clone in container, credentials mounted, auto-cleanup.
 
-- PR workflows (`--pr`, `--ship` auto-enable `--worktree`)
-- Quick isolated work on a branch
-- Don't want Docker overhead
+## Adversarial Tester (STANDARD+ only)
 
-### Docker Isolation (--docker)
+**Core principle:** Tests passing ≠ implementation works. The ONLY verification is: **USE IT YOURSELF.**
 
-**Full isolation in fresh git clone inside Docker container.** Protects working directory completely.
-
-**Use when:**
-
-- Big refactors touching many files
-- Risky experiments you might discard
-- Long-running tasks (keep working locally)
-- Parallel agents on same codebase
-- Need full environment isolation
-
-**Skip when:**
-
-- Quick fixes (want immediate results)
-- Debugging current state
-- Interactive back-and-forth
-- Read-only investigation
-
-**Features:** Fresh git clone, Claude/AWS/kube credentials mounted, infra tools + Chromium pre-installed, auto-cleanup
+1. Read issue → understand requirements
+2. Look at code → figure out how to invoke
+3. Run it → did it work?
+4. Try to break it → edge cases
+5. Verify each requirement → evidence (command + output)
 
 ## Persistence
 
-| File                          | Content                               |
-| ----------------------------- | ------------------------------------- |
-| `~/.zeroshot/clusters.json`   | Cluster metadata, state, failure info |
-| `~/.zeroshot/<cluster-id>.db` | SQLite message ledger                 |
+| File | Content |
+|------|---------|
+| `~/.zeroshot/clusters.json` | Cluster metadata |
+| `~/.zeroshot/<id>.db` | SQLite message ledger |
 
-**Clusters survive crashes.** Resume: `zeroshot resume <cluster-id>`
+Clusters survive crashes. Resume: `zeroshot resume <id>`
 
-### Cluster Lifecycle
+## Known Limitations
 
-```
-STOPPED → start() → INITIALIZING → (agents spawn) → RUNNING
-RUNNING → stop() → STOPPING → (SIGTERM) → STOPPED
-RUNNING → kill() → (SIGKILL) → KILLED
-RUNNING → (idle 2min) → auto-stop
-RUNNING → CLUSTER_COMPLETE message → auto-stop
-RUNNING → CLUSTER_FAILED message → auto-stop
-```
-
-## Single-Agent Tasks
-
-**For simple tasks without coordination:**
-
-```bash
-zeroshot task run "Implement X"          # Background task
-zeroshot task run --output-format json   # Structured JSON
-```
-
-**Exit codes:** 0 = success, non-zero = failure
-**Storage:** `~/.claude-zeroshots/`
-
-## Development
-
-```bash
-cd zeroshot && npm link     # Install globally (once)
-# Edit code → changes apply immediately (symlink)
-npm test                    # Mocha tests
-
-zeroshot --completion >> ~/.bashrc   # Shell completion
-```
-
-**Patterns:**
-
-- Human-readable IDs: `task-swift-falcon`, `cluster-bold-panther`
-- Storage: JSON + SQLite (atomic read-modify-write)
-- Processes: PTY child processes, graceful SIGINT/SIGTERM
-
-## Common Issues
-
-| Issue             | Fix                                                |
-| ----------------- | -------------------------------------------------- |
-| Command not found | `npm i -g @covibes/zeroshot` or `npm link` for dev |
-| Stale process     | `task kill <id>` or `zeroshot kill <id>`           |
-| Orphaned logs     | `task clean -a`                                    |
-
-## Known Limitation: Bash Subprocess Output
-
-**Bash tool subprocess output NOT streamed in real-time**
-
-- WHY: Claude CLI's Bash tool returns `tool_result` AFTER subprocess completes
-- Symptom: 60s script → no output for 60s → all output at once
-- NOT a zeroshot bug: Claude CLI architecture limitation
-- Workaround: Long tasks write to file, periodically check
-
-**What IS streamed:** Claude's text (`text_delta`), thinking, tool invocations (NOT tool results)
-
-## 🔴 POSTMORTEM: Release v1.0.3 Friction (2025-12-28)
-
-**What happened:** npm release v1.0.3 was blocked multiple times by:
-1. Manual git tag `v1.0.3` blocking semantic-release (had to delete tag, re-trigger)
-2. ESLint errors not caught until semantic-release CI stage:
-   - `require-await`: async functions without await (`getProcessMetrics`, `getProcessMetricsDarwinAggregated`)
-   - `no-return-await`: `return await` is redundant (first fix attempt)
-   - `unused-imports/no-unused-vars`: `formatMetrics`, `getStateIcon` unused in status-footer.js
-3. Git push rejected after semantic-release committed - required `git pull --rebase`
-
-**Root cause:** CI workflow runs lint but doesn't block pushes to main. Semantic-release runs `npm run lint` before publish (correct behavior), but developer didn't run lint locally before pushing.
-
-**Time wasted:** ~30 minutes debugging multiple workflow failures.
-
-### Prevention Checklist
-
-| Issue | Prevention |
-|-------|------------|
-| Manual tags blocking semantic-release | NEVER create version tags manually. Let semantic-release do it. |
-| Lint errors reaching CI | Run `npm run lint` locally before pushing |
-| `require-await` | If function returns Promise, don't mark it async (just return the Promise) |
-| `no-return-await` | Never `return await x` - just `return x` (await is redundant on return) |
-| Unused imports | ESLint catches these - run lint locally |
-| Git push rejected | After semantic-release commits, `git pull --rebase origin main` before next push |
-
-### Fix Implemented
-
-**Added husky pre-push hook** (`.husky/pre-push`) that runs:
-```bash
-npm run lint && npm run typecheck
-```
-
-Now lint/typecheck errors are caught BEFORE push, not after CI runs.
+**Bash subprocess output not streamed:** Claude CLI returns `tool_result` after subprocess completes. Long scripts show no output until done.
 
 ## Mechanical Enforcement
 
-**Documentation alone doesn't prevent bugs. Code enforcement does.** These mechanisms prevent anti-patterns from reaching production:
-
-| Antipattern | Enforcement | File |
-|-------------|-------------|------|
-| Dangerous fallbacks (`\|\| "localhost"`) | ESLint ERROR | eslint.config.js |
-| Manual git version tags | Pre-push hook | .husky/pre-push |
-| Git ops in validator prompts | Config validator | src/config-validator.js |
-| Multiple implementation files (-v2, -new) | Pre-commit hook | .husky/pre-commit |
-| Hardcoded URLs | ESLint WARN | eslint.config.js |
-| Duplicate code | jscpd (manual) | npm run dupcheck |
-
-**Enforcement hierarchy (best to worst):**
-
-1. **ESLint** - Prevents at build time (caught before push)
-2. **Pre-push hook** - Prevents at git push time
-3. **Pre-commit hook** - Prevents at commit time
-4. **Config validator** - Prevents invalid cluster configurations
-5. **Documentation** - Educates but doesn't prevent
+| Antipattern | Enforcement |
+|-------------|-------------|
+| Dangerous fallbacks | ESLint ERROR |
+| Manual git tags | Pre-push hook |
+| Git in validator prompts | Config validator |
+| Multiple impl files (-v2) | Pre-commit hook |
