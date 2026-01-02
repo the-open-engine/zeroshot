@@ -1,3 +1,5 @@
+UPDATE THIS FILE when making architectural changes, adding patterns, or changing conventions.
+
 # Zeroshot: Multi-Agent Coordination Engine
 
 Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @covibes/zeroshot` or `npm link` (dev).
@@ -9,7 +11,7 @@ Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @co
 | **Never spawn without permission** | Consumes API credits | "I'll run zeroshot on 123" | User says "run zeroshot" |
 | **Never use git in validators** | Git state unreliable | `git diff`, `git status` in prompts | Validate files directly |
 | **Never ask questions** | Agents run non-interactively | `AskUserQuestion`, waiting for confirmation | Make autonomous decisions |
-| **Never edit AI instruction files** | Config files for other assistants | Editing `AGENTS.md`, `GEMINI.md` | Read-only unless explicitly asked |
+| **Never edit CLAUDE.md** | Context file for Claude Code | Editing this file | Read-only unless explicitly asked to update docs |
 
 **Worker git operations:** Allowed with isolation (`--worktree`, `--docker`, `--pr`, `--ship`). Forbidden without isolation (auto-injected restriction).
 
