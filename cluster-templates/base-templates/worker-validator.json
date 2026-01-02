@@ -122,6 +122,7 @@
     {
       "id": "completion-detector",
       "role": "orchestrator",
+      "model": "haiku",
       "timeout": 0,
       "triggers": [
         {
