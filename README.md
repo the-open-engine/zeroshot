@@ -345,6 +345,13 @@ and create a similar cluster. Save to cluster-templates/security-review.json
 
 Claude Code will read existing templates, create valid JSON config, and iterate until it works.
 
+**Built-in validation catches failures before running:**
+- Never start (no bootstrap trigger)
+- Never complete (no path to completion)
+- Loop infinitely (circular dependencies)
+- Deadlock (impossible consensus)
+- Type mismatches (boolean → string in JSON)
+
 See [CLAUDE.md](./CLAUDE.md) for cluster config schema and examples.
 
 You don't configure defaults. But you **can** when needed.
