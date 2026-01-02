@@ -315,7 +315,78 @@ Zeroshot is **message-driven** - define any agent topology:
 - Ledger (SQLite, crash recovery)
 - Dynamic spawning (CLUSTER_OPERATIONS)
 
-See [CLAUDE.md](./CLAUDE.md) for custom cluster configs.
+#### Creating Custom Clusters with Claude Code
+
+**The easiest way to create a custom cluster: just ask Claude Code.**
+
+```bash
+# In your zeroshot repo
+claude
+```
+
+Then give Claude Code a prompt like:
+
+**Example 1: Security Review Workflow**
+```
+Create a zeroshot cluster config for security-critical features:
+
+1. Implementation agent (sonnet) implements the feature
+2. FOUR parallel validators:
+   - Security validator: OWASP checks, SQL injection, XSS, CSRF
+   - Performance validator: No N+1 queries, proper indexing
+   - Privacy validator: GDPR compliance, data minimization
+   - Code reviewer: General code quality
+
+3. ALL validators must approve before merge
+4. If ANY validator rejects, implementation agent fixes and resubmits
+5. Use opus for security validator (highest stakes)
+
+Save to cluster-templates/security-review.json
+```
+
+**Example 2: Documentation-First Workflow**
+```
+Create a zeroshot cluster for API development:
+
+1. API Designer (opus): Creates OpenAPI spec first
+2. Review spec with user (wait for approval)
+3. Backend Implementer (sonnet): Implements the API
+4. Test Writer (sonnet): Writes contract tests against spec
+5. Docs Writer (sonnet): Generates docs from OpenAPI
+6. Integration Tester (sonnet): Tests all together
+
+Agents run sequentially (no parallel). Each publishes completion topic
+that triggers next agent. Save to cluster-templates/api-workflow.json
+```
+
+**Example 3: Multi-Language Review**
+```
+Create a cluster for polyglot codebases:
+
+- TypeScript Specialist (trigger: *.ts, *.tsx files changed)
+- Rust Specialist (trigger: *.rs files changed)
+- Python Specialist (trigger: *.py files changed)
+- Database Specialist (trigger: schema.prisma or *.sql changed)
+
+Each specialist ONLY activates if their language was touched.
+Use logic scripts to check file extensions in git diff.
+
+Save to cluster-templates/polyglot-review.json
+```
+
+Claude Code will:
+1. Read existing cluster templates to understand the schema
+2. Create a valid JSON config with proper triggers/topics/prompts
+3. Test the config with `zeroshot run --config your-cluster.json "test task"`
+4. Iterate until it works
+
+**Pro tip:** Reference existing templates when prompting:
+```
+Look at cluster-templates/base-templates/full-workflow.json
+and create a similar cluster but with [your requirements]
+```
+
+See [CLAUDE.md](./CLAUDE.md) for cluster config schema and examples.
 
 You don't configure defaults. But you **can** when needed.
 
