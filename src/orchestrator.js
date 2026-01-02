@@ -256,6 +256,18 @@ class Orchestrator {
           agent = new AgentWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
         }
 
+        // Restore agent runtime state if available (for accurate status display)
+        if (clusterData.agentStates) {
+          const savedState = clusterData.agentStates.find((s) => s.id === agentConfig.id);
+          if (savedState) {
+            agent.state = savedState.state || 'idle';
+            agent.iteration = savedState.iteration || 0;
+            agent.currentTask = savedState.currentTask || false;
+            agent.currentTaskId = savedState.currentTaskId || null;
+            agent.processPid = savedState.processPid || null;
+          }
+        }
+
         agents.push(agent);
       }
     }
@@ -375,6 +387,17 @@ class Orchestrator {
                 image: cluster.isolation.image,
                 workDir: cluster.isolation.workDir, // Required for resume
               }
+            : null,
+          // Persist agent runtime states for accurate status display from other processes
+          agentStates: cluster.agents
+            ? cluster.agents.map((a) => ({
+                id: a.id,
+                state: a.state,
+                iteration: a.iteration,
+                currentTask: a.currentTask ? true : false,
+                currentTaskId: a.currentTaskId,
+                processPid: a.processPid,
+              }))
             : null,
         };
       }
@@ -821,6 +844,15 @@ class Orchestrator {
               console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
             });
           }
+        }
+      });
+
+      // Persist agent state changes for accurate status display from other processes
+      messageBus.on('topic:AGENT_LIFECYCLE', (message) => {
+        const event = message.content?.data?.event;
+        // Save on key state transitions that affect status display
+        if (['TASK_STARTED', 'TASK_COMPLETED', 'PROCESS_SPAWNED', 'TASK_ID_ASSIGNED', 'STARTED'].includes(event)) {
+          this._saveClusters();
         }
       });
 
