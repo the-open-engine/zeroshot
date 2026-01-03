@@ -1,5 +1,6 @@
 # zeroshot CLI
 
+[![npm version](https://img.shields.io/npm/v/@covibes/zeroshot.svg)](https://www.npmjs.com/package/@covibes/zeroshot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 [![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue.svg)]()
@@ -99,7 +100,8 @@ zeroshot purge                 # NUCLEAR: kill all + delete all
 
 ---
 
-## FAQ
+<details>
+<summary><strong>FAQ</strong></summary>
 
 **Q: Why Claude-only?**
 
@@ -119,12 +121,6 @@ Zeroshot fixes this with **isolated agents** where validators check work they di
 
 Yes, see CLAUDE.md. But most people never need to.
 
-**Q: Why does the CLI appear frozen?**
-
-Zeroshot agents use strict JSON schema outputs to ensure reliable parsing and hook execution. This is incompatible with live streaming - agents can't stream partial JSON.
-
-During heavy tasks (large refactors, complex analysis), the CLI may appear frozen for several minutes while the agent works. This is normal - the agent is actively running, just not streaming output.
-
 **Q: Why is it called "zeroshot"?**
 
 In machine learning, "zero-shot" means solving tasks the model has never seen before - using only the task description, no prior examples needed.
@@ -132,6 +128,8 @@ In machine learning, "zero-shot" means solving tasks the model has never seen be
 Same idea here: give zeroshot a well-defined task, get back a result. No examples. No iterative feedback. No hand-holding.
 
 The multi-agent architecture handles planning, implementation, and validation internally. You provide a clear problem statement. Zeroshot handles the rest.
+
+</details>
 
 ---
 
@@ -145,9 +143,7 @@ Zeroshot is a **multi-agent coordination framework** with smart defaults.
 zeroshot 123  # Analyzes task → picks team → done
 ```
 
-The conductor classifies your task (complexity × type) and routes to a pre-built workflow.
-
-### Default Workflows (Out of the Box)
+The conductor classifies your task (complexity × type) and picks the right workflow:
 
 ```
                                 ┌─────────────────┐
@@ -197,8 +193,6 @@ The conductor classifies your task (complexity × type) and routes to a pre-buil
      └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-These are **templates**. The conductor picks based on what you're building.
-
 | Task                   | Complexity | Agents | Validators                                        |
 | ---------------------- | ---------- | ------ | ------------------------------------------------- |
 | Fix typo in README     | TRIVIAL    | 1      | None                                              |
@@ -206,100 +200,21 @@ These are **templates**. The conductor picks based on what you're building.
 | Refactor auth system   | STANDARD   | 5      | requirements, code, adversarial                   |
 | Implement payment flow | CRITICAL   | 7      | requirements, code, security, tester, adversarial |
 
-## End-to-End Flow
-
-**This is how zeroshot processes a task from start to finish:**
-
-```
-                              ╔═════════════════════════════════════════════════════╗
-                              ║            ZEROSHOT ORCHESTRATION ENGINE            ║
-                              ╚═════════════════════════════════════════════════════╝
-
-                                              ┌─────────────────┐
-                                              │   "Add auth     │
-                                              │   to the API"   │
-                                              └────────┬────────┘
-                                                       │
-                                                       ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              CONDUCTOR (2D Classification)                                    │
-│  ┌─────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Junior (Haiku)                                     Senior (Sonnet)                     │ │
-│  │  ─────────────                                      ───────────────                     │ │
-│  │  Fast classification on 2 dimensions:        ───▶   Handles UNCERTAIN cases             │ │
-│  │  • Complexity: TRIVIAL | SIMPLE | STANDARD   (if    with deeper analysis                │ │
-│  │  • TaskType: INQUIRY | TASK | DEBUG          Junior                                     │ │
-│  │                                              unsure)                                    │ │
-│  └─────────────────────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                       │
-                                                       │ Classification: STANDARD × TASK
-                                                       ▼
-                              ┌─────────────────────────────────────────┐
-                              │            CONFIG ROUTER                │
-                              │  ─────────────────────────────────────  │
-                              │  TRIVIAL        → single-worker         │
-                              │  SIMPLE         → worker-validator      │
-                              │  DEBUG (non-trivial) → debug-workflow   │
-                              │  STANDARD/CRITICAL  → full-workflow  ◀──│
-                              └─────────────────────────────────────────┘
-                                                       │
-                                                       │ Spawns full-workflow agents
-                                                       ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    FULL WORKFLOW                                             │
-│  ┌─────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                                                                                         │ │
-│  │   ┌──────────────┐                                                                      │ │
-│  │   │   PLANNER    │  Creates implementation plan                                         │ │
-│  │   │ (opus/sonnet)│  • Analyzes requirements                                             │ │
-│  │   └──────┬───────┘  • Identifies files to change                                        │ │
-│  │          │          • Breaks into actionable steps                                      │ │
-│  │          │ PLAN_READY                                                                   │ │
-│  │          ▼                                                                              │ │
-│  │   ┌──────────────┐                                                                      │ │
-│  │   │    WORKER    │◀─────────────────────────────────────────────┐                       │ │
-│  │   │   (sonnet)   │  Implements the plan                         │                       │ │
-│  │   └──────┬───────┘  • Writes/modifies code                      │                       │ │
-│  │          │          • Handles rejections                        │                       │ │
-│  │          │ IMPLEMENTATION_READY                                 │                       │ │
-│  │          ▼                                                      │                       │ │
-│  │   ┌─────────────────────────────────────────────────────┐       │                       │ │
-│  │   │              VALIDATORS (parallel)                  │       │                       │ │
-│  │   │                                                     │       │                       │ │
-│  │   │  ┌────────────┐ ┌────────────┐ ┌─────────────────┐  │       │ REJECTED              │ │
-│  │   │  │Requirements│ │Code Review │ │  Adversarial    │  │       │                       │ │
-│  │   │  │  Validator │ │  (reviewer)│ │    Tester       │  │───────┘                       │ │
-│  │   │  │ (validator)│ │            │ │ EXECUTES tests  │  │                               │ │
-│  │   │  └────────────┘ └────────────┘ └─────────────────┘  │                               │ │
-│  │   │                                                     │                               │ │
-│  │   └──────────────────────┬──────────────────────────────┘                               │ │
-│  │                          │                                                              │ │
-│  │                          │ ALL APPROVED                                                 │ │
-│  │                          ▼                                                              │ │
-│  │                   ┌──────────────┐                                                      │ │
-│  │                   │   COMPLETE   │                                                      │ │
-│  │                   │  ──────────  │                                                      │ │
-│  │                   │  PR Created  │  (with --pr flag)                                    │ │
-│  │                   │  Auto-merged │  (with --merge flag)                                 │ │
-│  │                   └──────────────┘                                                      │ │
-│  │                                                                                         │ │
-│  └─────────────────────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
 ### Model Selection by Complexity
 
-| Complexity | Planner | Worker | Validators |
-| ---------- | ------- | ------ | ---------- |
-| TRIVIAL    | -       | haiku  | 0          |
-| SIMPLE     | -       | sonnet | 1 (sonnet) |
-| STANDARD   | sonnet  | sonnet | 3 (sonnet) |
-| CRITICAL   | opus    | sonnet | 5 (sonnet) |
+| Complexity | Planner | Worker | Validators | Est. Cost |
+| ---------- | ------- | ------ | ---------- | --------- |
+| TRIVIAL    | -       | haiku  | 0          | ~$0.01    |
+| SIMPLE     | -       | sonnet | 1 (sonnet) | ~$0.10    |
+| STANDARD   | sonnet  | sonnet | 3 (sonnet) | ~$0.50    |
+| CRITICAL   | opus    | sonnet | 5 (sonnet) | ~$2.00    |
+
+Set cost ceiling: `zeroshot settings set maxModel sonnet` (prevents opus)
 
 ---
 
-### Custom Workflows (Framework Mode)
+<details>
+<summary><strong>Custom Workflows (Framework Mode)</strong></summary>
 
 Zeroshot is **message-driven** - define any agent topology:
 
@@ -354,7 +269,7 @@ Claude Code will read existing templates, create valid JSON config, and iterate 
 
 See [CLAUDE.md](./CLAUDE.md) for cluster config schema and examples.
 
-You don't configure defaults. But you **can** when needed.
+</details>
 
 ---
 
@@ -387,6 +302,16 @@ zeroshot 123 --docker
 
 Full isolation in a fresh container. Your workspace stays untouched. Good for risky experiments or parallel agents.
 
+### When to Use Which
+
+| Scenario | Recommended |
+| -------- | ----------- |
+| Quick trusted task | No isolation (default) |
+| PR workflow, code review | `--worktree` or `--pr` |
+| Risky experiment, might break things | `--docker` |
+| Running multiple tasks in parallel | `--docker` |
+| Full automation, no review needed | `--ship` |
+
 ---
 
 ## More
@@ -397,17 +322,19 @@ Full isolation in a fresh container. Your workspace stays untouched. Good for ri
 
 ---
 
-## Troubleshooting
+<details>
+<summary><strong>Troubleshooting</strong></summary>
 
 | Issue                         | Fix                                                                  |
 | ----------------------------- | -------------------------------------------------------------------- |
 | `claude: command not found`   | `npm i -g @anthropic-ai/claude-code && claude auth login`            |
 | `gh: command not found`       | [Install GitHub CLI](https://cli.github.com/)                        |
-| CLI frozen for minutes        | Normal - agents use JSON schema output, can't stream partial results |
 | `--docker` fails              | Docker must be running: `docker ps` to verify                        |
 | Cluster stuck                 | `zeroshot resume <id>` to continue with guidance                     |
 | Agent keeps failing           | Check `zeroshot logs <id>` for actual error                          |
 | `zeroshot: command not found` | `npm install -g @covibes/zeroshot`                                   |
+
+</details>
 
 ---
 
