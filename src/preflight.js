@@ -93,8 +93,12 @@ function checkClaudeAuth() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const credentialsPath = path.join(configDir, '.credentials.json');
 
-  // First, try file-based credentials (Linux, or explicit file auth)
+  // Track what we've checked for appropriate error messages
+  let credentialsFileChecked = false;
+
+  // Try 1: File-based credentials (Linux, or explicit file auth)
   if (fs.existsSync(credentialsPath)) {
+    credentialsFileChecked = true;
     try {
       const content = fs.readFileSync(credentialsPath, 'utf8');
       const creds = JSON.parse(content);
@@ -125,8 +129,20 @@ function checkClaudeAuth() {
           configDir,
         };
       }
+
+      // File exists but no valid credentials in it
+      return {
+        authenticated: false,
+        error: 'No valid authentication in credentials file',
+        configDir,
+      };
     } catch {
-      // File exists but can't be parsed - fall through to CLI check
+      // File exists but can't be parsed
+      return {
+        authenticated: false,
+        error: 'Credentials file is invalid',
+        configDir,
+      };
     }
   }
 
@@ -180,51 +196,10 @@ function checkClaudeAuth() {
     };
   }
 
-  // Try 4: Actually test Claude CLI (definitive check, slower)
-  // This catches cases where credentials exist but CLI can't access them
-  // (e.g., Keychain service name mismatch, permission issues)
-  try {
-    // Run claude with minimal interaction to test auth
-    // --print mode with empty input tests auth without starting interactive session
-    execSync('echo "" | claude --print 2>&1', {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      timeout: 15000, // 15 second timeout
-    });
-    // If we get here, auth worked
-    return {
-      authenticated: true,
-      error: null,
-      configDir,
-    };
-  } catch (err) {
-    const output = (err.stderr || err.stdout || err.message || '').toLowerCase();
-
-    // Check for auth-specific errors
-    if (output.includes('not logged in') || output.includes('unauthorized') ||
-        output.includes('authentication') || output.includes('401') ||
-        output.includes('invalid') || output.includes('expired')) {
-      return {
-        authenticated: false,
-        error: 'Claude CLI authentication failed (run: claude login)',
-        configDir,
-      };
-    }
-
-    // Non-zero exit for other reasons (e.g., empty input) = auth is fine
-    // Claude CLI exits non-zero with empty input, but that means it ran
-    if (err.status !== undefined && err.status !== 0) {
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
-    }
-  }
-
+  // No credentials found anywhere
   return {
     authenticated: false,
-    error: 'No credentials found and CLI auth check failed',
+    error: credentialsFileChecked ? 'No valid authentication in credentials file' : 'No credentials file found',
     configDir,
   };
 }
