@@ -676,7 +676,8 @@ describe('Orchestrator - Error Handling', function () {
 
   it('should handle invalid agent ID in operations', async function () {
     const config = loadFixture('single-worker.json');
-    mockRunner.when('worker').returns({ done: true });
+    // Use delay so cluster stays running long enough to test invalid operation handling
+    mockRunner.when('worker').delays(500, { done: true });
 
     const result = await orchestrator.start(config, { text: 'Task' });
     const clusterId = result.id;
