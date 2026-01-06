@@ -180,9 +180,51 @@ function checkClaudeAuth() {
     };
   }
 
+  // Try 4: Actually test Claude CLI (definitive check, slower)
+  // This catches cases where credentials exist but CLI can't access them
+  // (e.g., Keychain service name mismatch, permission issues)
+  try {
+    // Run claude with minimal interaction to test auth
+    // --print mode with empty input tests auth without starting interactive session
+    execSync('echo "" | claude --print 2>&1', {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 15000, // 15 second timeout
+    });
+    // If we get here, auth worked
+    return {
+      authenticated: true,
+      error: null,
+      configDir,
+    };
+  } catch (err) {
+    const output = (err.stderr || err.stdout || err.message || '').toLowerCase();
+
+    // Check for auth-specific errors
+    if (output.includes('not logged in') || output.includes('unauthorized') ||
+        output.includes('authentication') || output.includes('401') ||
+        output.includes('invalid') || output.includes('expired')) {
+      return {
+        authenticated: false,
+        error: 'Claude CLI authentication failed (run: claude login)',
+        configDir,
+      };
+    }
+
+    // Non-zero exit for other reasons (e.g., empty input) = auth is fine
+    // Claude CLI exits non-zero with empty input, but that means it ran
+    if (err.status !== undefined && err.status !== 0) {
+      return {
+        authenticated: true,
+        error: null,
+        configDir,
+      };
+    }
+  }
+
   return {
     authenticated: false,
-    error: 'No credentials found (file, Keychain, or ANTHROPIC_API_KEY)',
+    error: 'No credentials found and CLI auth check failed',
     configDir,
   };
 }
