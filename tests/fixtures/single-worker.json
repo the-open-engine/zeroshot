@@ -1,6 +1,6 @@
 {
   "name": "Single Worker Test Fixture",
-  "description": "Resolved config for tests",
+  "description": "Simple worker config for tests - no auto-stop",
   "agents": [
     {
       "id": "worker",
@@ -9,22 +9,7 @@
       "prompt": {
         "system": "You are a test agent."
       },
-      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
-      "hooks": {
-        "onComplete": {
-          "action": "publish_message",
-          "config": {
-            "topic": "CLUSTER_COMPLETE",
-            "content": { "text": "Task completed." }
-          }
-        }
-      }
-    },
-    {
-      "id": "completion-detector",
-      "role": "orchestrator",
-      "model": "haiku",
-      "triggers": [{ "topic": "CLUSTER_COMPLETE", "action": "stop_cluster" }]
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }]
     }
   ]
 }
