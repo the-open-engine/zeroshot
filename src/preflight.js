@@ -86,65 +86,122 @@ function getClaudeVersion() {
 
 /**
  * Check Claude CLI authentication status
+ * Supports both file-based credentials (Linux) and Keychain (macOS)
  * @returns {{ authenticated: boolean, error: string | null, configDir: string }}
  */
 function checkClaudeAuth() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const credentialsPath = path.join(configDir, '.credentials.json');
 
-  // Check if credentials file exists
-  if (!fs.existsSync(credentialsPath)) {
-    return {
-      authenticated: false,
-      error: 'No credentials file found',
-      configDir,
-    };
-  }
+  // Track what we've checked for appropriate error messages
+  let credentialsFileChecked = false;
 
-  // Check if credentials file has content
-  try {
-    const content = fs.readFileSync(credentialsPath, 'utf8');
-    const creds = JSON.parse(content);
+  // Try 1: File-based credentials (Linux, or explicit file auth)
+  if (fs.existsSync(credentialsPath)) {
+    credentialsFileChecked = true;
+    try {
+      const content = fs.readFileSync(credentialsPath, 'utf8');
+      const creds = JSON.parse(content);
 
-    // Check for OAuth token (primary auth method)
-    if (creds.claudeAiOauth?.accessToken) {
-      // Check if token is expired
-      const expiresAt = creds.claudeAiOauth.expiresAt;
-      if (expiresAt && new Date(expiresAt) < new Date()) {
+      // Check for OAuth token (primary auth method)
+      if (creds.claudeAiOauth?.accessToken) {
+        // Check if token is expired
+        const expiresAt = creds.claudeAiOauth.expiresAt;
+        if (expiresAt && new Date(expiresAt) < new Date()) {
+          return {
+            authenticated: false,
+            error: 'OAuth token expired',
+            configDir,
+          };
+        }
         return {
-          authenticated: false,
-          error: 'OAuth token expired',
+          authenticated: true,
+          error: null,
           configDir,
         };
       }
+
+      // Check for API key auth
+      if (creds.apiKey) {
+        return {
+          authenticated: true,
+          error: null,
+          configDir,
+        };
+      }
+
+      // File exists but no valid credentials in it
       return {
-        authenticated: true,
-        error: null,
+        authenticated: false,
+        error: 'No valid authentication in credentials file',
+        configDir,
+      };
+    } catch {
+      // File exists but can't be parsed
+      return {
+        authenticated: false,
+        error: 'Credentials file is invalid',
         configDir,
       };
     }
+  }
 
-    // Check for API key auth
-    if (creds.apiKey) {
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
+  // Try 2: macOS Keychain (Claude CLI stores OAuth here on macOS)
+  if (os.platform() === 'darwin') {
+    try {
+      // Claude CLI stores credentials under "Claude Code-credentials"
+      // See: https://github.com/anthropics/claude-code/issues/10039
+      const keychainCreds = execSync(
+        'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+        { encoding: 'utf8', stdio: 'pipe' }
+      ).trim();
+
+      if (keychainCreds) {
+        const parsed = JSON.parse(keychainCreds);
+        if (parsed.claudeAiOauth?.accessToken) {
+          // Check if token is expired
+          const expiresAt = parsed.claudeAiOauth.expiresAt;
+          if (expiresAt && new Date(expiresAt) < new Date()) {
+            return {
+              authenticated: false,
+              error: 'OAuth token expired (run: claude login)',
+              configDir,
+            };
+          }
+          return {
+            authenticated: true,
+            error: null,
+            configDir,
+          };
+        }
+        if (parsed.apiKey) {
+          return {
+            authenticated: true,
+            error: null,
+            configDir,
+          };
+        }
+      }
+    } catch {
+      // Keychain access failed - continue to next check
     }
+  }
 
+  // Try 3: ANTHROPIC_API_KEY environment variable
+  if (process.env.ANTHROPIC_API_KEY) {
     return {
-      authenticated: false,
-      error: 'No valid authentication found in credentials',
-      configDir,
-    };
-  } catch (err) {
-    return {
-      authenticated: false,
-      error: `Failed to parse credentials: ${err.message}`,
+      authenticated: true,
+      error: null,
       configDir,
     };
   }
+
+  // No credentials found anywhere
+  return {
+    authenticated: false,
+    error: credentialsFileChecked ? 'No valid authentication in credentials file' : 'No credentials file found',
+    configDir,
+  };
 }
 
 /**

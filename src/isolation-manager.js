@@ -865,10 +865,65 @@ class IsolationManager {
     const projectsDir = path.join(configDir, 'projects');
     fs.mkdirSync(projectsDir, { recursive: true });
 
-    // Copy only credentials file (essential for auth)
+    // Copy credentials for container auth
+    // Priority: 1) .credentials.json file, 2) macOS Keychain, 3) ANTHROPIC_API_KEY env var
     const credentialsFile = path.join(sourceDir, '.credentials.json');
+    const destCredentialsFile = path.join(configDir, '.credentials.json');
+    let hasCredentials = false;
+
+    // Try 1: File-based credentials (Linux default)
     if (fs.existsSync(credentialsFile)) {
-      fs.copyFileSync(credentialsFile, path.join(configDir, '.credentials.json'));
+      try {
+        const content = fs.readFileSync(credentialsFile, 'utf8');
+        const creds = JSON.parse(content);
+        // Only copy if file has actual credentials (not empty/placeholder)
+        if (creds.claudeAiOauth?.accessToken || creds.apiKey) {
+          fs.copyFileSync(credentialsFile, destCredentialsFile);
+          hasCredentials = true;
+        }
+      } catch {
+        // File exists but can't be parsed - try next method
+      }
+    }
+
+    // Try 2: macOS Keychain (where Claude CLI stores OAuth on macOS)
+    if (!hasCredentials && os.platform() === 'darwin') {
+      try {
+        // Claude CLI stores OAuth in Keychain under "Claude Code-credentials"
+        // See: https://github.com/anthropics/claude-code/issues/10039
+        const keychainCreds = execSync(
+          'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+          { encoding: 'utf8', stdio: 'pipe' }
+        ).trim();
+
+        if (keychainCreds) {
+          // Keychain stores the full JSON object as the password
+          const parsed = JSON.parse(keychainCreds);
+          if (parsed.claudeAiOauth?.accessToken || parsed.apiKey) {
+            fs.writeFileSync(destCredentialsFile, JSON.stringify(parsed, null, 2));
+            console.log('[IsolationManager] Extracted credentials from macOS Keychain');
+            hasCredentials = true;
+          }
+        }
+      } catch {
+        // Keychain access failed - try next method
+      }
+    }
+
+    // Try 3: ANTHROPIC_API_KEY environment variable
+    if (!hasCredentials && process.env.ANTHROPIC_API_KEY) {
+      const apiKeyCreds = { apiKey: process.env.ANTHROPIC_API_KEY };
+      fs.writeFileSync(destCredentialsFile, JSON.stringify(apiKeyCreds, null, 2));
+      console.log('[IsolationManager] Using ANTHROPIC_API_KEY for container authentication');
+      hasCredentials = true;
+    }
+
+    if (!hasCredentials) {
+      console.warn(
+        '[IsolationManager] ⚠️ No credentials available for container.\n' +
+        '  Tried: .credentials.json, macOS Keychain, ANTHROPIC_API_KEY env var\n' +
+        '  Run: claude login (or set ANTHROPIC_API_KEY)'
+      );
     }
 
     // Copy hook script to block AskUserQuestion (CRITICAL for autonomous execution)
