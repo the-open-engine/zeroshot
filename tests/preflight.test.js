@@ -198,6 +198,42 @@ describe('Preflight Validation', function () {
       expect(result.authenticated).to.be.true;
       expect(result.error).to.be.null;
     });
+
+    it('should detect authentication via macOS Keychain when credentials file missing', function () {
+      // Skip if not macOS
+      if (os.platform() !== 'darwin') {
+        this.skip();
+      }
+
+      // Skip if Claude credentials not in Keychain
+      try {
+        execSync('security find-generic-password -s "Claude Code-credentials"', {
+          stdio: 'pipe',
+          timeout: 2000,
+        });
+      } catch {
+        this.skip();
+      }
+
+      // Skip if credentials file exists (can't test Keychain fallback)
+      const defaultCredPath = path.join(os.homedir(), '.claude', '.credentials.json');
+      if (fs.existsSync(defaultCredPath)) {
+        this.skip();
+      }
+
+      // Must NOT set CLAUDE_CONFIG_DIR for Keychain fallback to activate
+      const originalDir = process.env.CLAUDE_CONFIG_DIR;
+      delete process.env.CLAUDE_CONFIG_DIR;
+
+      const result = checkClaudeAuth();
+
+      if (originalDir) {
+        process.env.CLAUDE_CONFIG_DIR = originalDir;
+      }
+
+      expect(result.authenticated).to.be.true;
+      expect(result.method).to.equal('keychain');
+    });
   });
 
   describe('checkGhAuth()', () => {

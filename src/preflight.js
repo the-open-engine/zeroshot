@@ -85,8 +85,30 @@ function getClaudeVersion() {
 }
 
 /**
+ * Check macOS Keychain for Claude Code credentials
+ * @returns {{ authenticated: boolean, error: string | null }}
+ */
+function checkMacOsKeychain() {
+  if (os.platform() !== 'darwin') {
+    return { authenticated: false, error: 'Not macOS' };
+  }
+
+  try {
+    // Check if Claude Code credentials exist in Keychain
+    execSync('security find-generic-password -s "Claude Code-credentials"', {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 2000,
+    });
+    return { authenticated: true, error: null };
+  } catch {
+    return { authenticated: false, error: 'No credentials in Keychain' };
+  }
+}
+
+/**
  * Check Claude CLI authentication status
- * @returns {{ authenticated: boolean, error: string | null, configDir: string }}
+ * @returns {{ authenticated: boolean, error: string | null, configDir: string, method?: string }}
  */
 function checkClaudeAuth() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -94,6 +116,20 @@ function checkClaudeAuth() {
 
   // Check if credentials file exists
   if (!fs.existsSync(credentialsPath)) {
+    // No credentials file - check macOS Keychain as fallback
+    // Only use Keychain when using default config dir (not custom CLAUDE_CONFIG_DIR)
+    const isDefaultConfigDir = !process.env.CLAUDE_CONFIG_DIR;
+    if (isDefaultConfigDir) {
+      const keychainResult = checkMacOsKeychain();
+      if (keychainResult.authenticated) {
+        return {
+          authenticated: true,
+          error: null,
+          configDir,
+          method: 'keychain',
+        };
+      }
+    }
     return {
       authenticated: false,
       error: 'No credentials file found',
