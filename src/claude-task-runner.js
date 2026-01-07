@@ -8,6 +8,7 @@
 const { spawn, exec, execSync } = require('child_process');
 const fs = require('fs');
 const TaskRunner = require('./task-runner');
+const { getClaudeCommand } = require('../lib/settings');
 
 class ClaudeTaskRunner extends TaskRunner {
   /**
@@ -383,8 +384,12 @@ class ClaudeTaskRunner extends TaskRunner {
         ? 'stream-json'
         : desiredOutputFormat;
 
+    // Get configured Claude command (supports custom commands like 'ccr code')
+    const { command: claudeCmd, args: claudeExtraArgs } = getClaudeCommand();
+
     const command = [
-      'claude',
+      claudeCmd,
+      ...claudeExtraArgs,
       '--print',
       '--dangerously-skip-permissions',
       '--output-format',

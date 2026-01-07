@@ -13,6 +13,10 @@ import { appendFileSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { updateTask } from './store.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { getClaudeCommand } = require('../lib/settings.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -34,9 +38,13 @@ if (model && !claudeArgs.includes('--model')) {
   claudeArgs.unshift('--model', model);
 }
 
+// Get configured Claude command (supports custom commands like 'ccr code')
+const { command: claudeCommand, args: claudeExtraArgs } = getClaudeCommand();
+const finalArgs = [...claudeExtraArgs, ...claudeArgs];
+
 // Spawn claude using regular child_process (not PTY)
 // --print mode is non-interactive, PTY adds overhead and causes EIO on OOM
-const child = spawn('claude', claudeArgs, {
+const child = spawn(claudeCommand, finalArgs, {
   cwd,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],

@@ -57,11 +57,19 @@ function commandExists(cmd) {
 
 /**
  * Get Claude CLI version
+ * @param {string} claudeCommand - Optional custom Claude command (e.g., 'ccr code')
  * @returns {{ installed: boolean, version: string | null, error: string | null }}
  */
-function getClaudeVersion() {
+function getClaudeVersion(claudeCommand = 'claude') {
+  // Parse command parts
+  const parts = claudeCommand.trim().split(/\s+/);
+  const command = parts[0];
+  const extraArgs = parts.slice(1);
+
   try {
-    const output = execSync('claude --version', { encoding: 'utf8', stdio: 'pipe' });
+    const versionArgs = [...extraArgs, '--version'];
+    const versionCmd = [command, ...versionArgs].join(' ');
+    const output = execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe' });
     const match = output.match(/(\d+\.\d+\.\d+)/);
     return {
       installed: true,
@@ -73,7 +81,7 @@ function getClaudeVersion() {
       return {
         installed: false,
         version: null,
-        error: 'Claude CLI not installed',
+        error: `Command '${command}' not installed`,
       };
     }
     return {
@@ -271,24 +279,37 @@ function checkDocker() {
  * @param {boolean} options.requireDocker - Whether Docker is required (true if using --docker)
  * @param {boolean} options.requireGit - Whether git repo is required (true if using --worktree)
  * @param {boolean} options.quiet - Suppress success messages
+ * @param {string} options.claudeCommand - Custom Claude command (from settings)
  * @returns {ValidationResult}
  */
 function runPreflight(options = {}) {
   const errors = [];
   const warnings = [];
 
+  // Get configured Claude command (supports custom commands like 'ccr code')
+  const { getClaudeCommand } = require('../lib/settings.js');
+  const { command, args } = getClaudeCommand();
+  const claudeCommand = options.claudeCommand || [command, ...args].join(' ');
+
   // 1. Check Claude CLI installation
-  const claude = getClaudeVersion();
+  const claude = getClaudeVersion(claudeCommand);
   if (!claude.installed) {
     errors.push(
       formatError(
-        'Claude CLI not installed',
+        'Claude command not available',
         claude.error,
-        [
-          'Install Claude CLI: npm install -g @anthropic-ai/claude-code',
-          'Or: brew install claude (macOS)',
-          'Then run: claude --version',
-        ]
+        claudeCommand === 'claude'
+          ? [
+              'Install Claude CLI: npm install -g @anthropic-ai/claude-code',
+              'Or: brew install claude (macOS)',
+              'Then run: claude --version',
+            ]
+          : [
+              `Command '${claudeCommand}' not found`,
+              'Check settings: zeroshot settings',
+              'Update claudeCommand: zeroshot settings set claudeCommand "your-command"',
+              'Or install the missing command',
+            ]
       )
     );
   } else {

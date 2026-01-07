@@ -84,6 +84,7 @@ process.on('unhandledRejection', (reason) => {
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { AttachServer } = require('../src/attach');
+const { getClaudeCommand } = require('../lib/settings.js');
 
 // Use the args parsed earlier (during error handler setup)
 const taskId = taskIdArg;
@@ -115,6 +116,10 @@ if (model && !claudeArgs.includes('--model')) {
   claudeArgs.unshift('--model', model);
 }
 
+// Get configured Claude command (supports custom commands like 'ccr code')
+const { command: claudeCommand, args: claudeExtraArgs } = getClaudeCommand();
+const finalArgs = [...claudeExtraArgs, ...claudeArgs];
+
 // For JSON schema output with silent mode, track final result
 const silentJsonMode =
   config.outputFormat === 'json' && config.jsonSchema && config.silentJsonOutput;
@@ -127,8 +132,8 @@ let outputBuffer = '';
 const server = new AttachServer({
   id: taskId,
   socketPath,
-  command: 'claude',
-  args: claudeArgs,
+  command: claudeCommand,
+  args: finalArgs,
   cwd,
   env,
   cols: 120,
