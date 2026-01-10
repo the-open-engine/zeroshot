@@ -116,11 +116,26 @@ function checkMacOsKeychain() {
 
 /**
  * Check Claude CLI authentication status
+ * @param {string} claudeCommand - The resolved claude command to verify
  * @returns {{ authenticated: boolean, error: string | null, configDir: string, method?: string }}
  */
-function checkClaudeAuth() {
+function checkClaudeAuth(claudeCommand = 'claude') {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const credentialsPath = path.join(configDir, '.credentials.json');
+
+  // First try: check if the actual command works (catches bunx and other variants)
+  try {
+    execSync(`${claudeCommand} --version`, { encoding: 'utf8', stdio: 'pipe' });
+    // Command works, assume authenticated
+    return {
+      authenticated: true,
+      error: null,
+      configDir,
+      method: 'command-check',
+    };
+  } catch {
+    // Command failed, continue to file-based checks
+  }
 
   // Check if credentials file exists
   if (!fs.existsSync(credentialsPath)) {
@@ -287,6 +302,7 @@ function runPreflight(options = {}) {
   const warnings = [];
 
   // Get configured Claude command (supports custom commands like 'ccr code')
+  // getClaudeCommand() automatically tries bunx fallback if default claude not found
   const { getClaudeCommand } = require('../lib/settings.js');
   const { command, args } = getClaudeCommand();
   const claudeCommand = options.claudeCommand || [command, ...args].join(' ');
@@ -302,6 +318,7 @@ function runPreflight(options = {}) {
           ? [
               'Install Claude CLI: npm install -g @anthropic-ai/claude-code',
               'Or: brew install claude (macOS)',
+              'Or: bunx @anthropic-ai/claude-code (via bunx)',
               'Then run: claude --version',
             ]
           : [
@@ -314,7 +331,7 @@ function runPreflight(options = {}) {
     );
   } else {
     // 2. Check Claude CLI authentication
-    const auth = checkClaudeAuth();
+    const auth = checkClaudeAuth(claudeCommand);
     if (!auth.authenticated) {
       errors.push(
         formatError(
