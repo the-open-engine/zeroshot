@@ -447,3 +447,7 @@ For security issues, see [SECURITY.md](SECURITY.md).
 MIT - [Covibes](https://github.com/covibes)
 
 Built on [Claude Code](https://claude.com/product/claude-code) by Anthropic.
+
+---
+
+<sub>**Claude Code users:** Run `/analyze-cluster-postmortem` to analyze failures and optimize prompts.</sub>
