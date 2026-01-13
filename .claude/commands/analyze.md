@@ -1,457 +1,305 @@
 ---
-description: Deep analysis of zeroshot cluster issues - provider/isolation root causes FIRST, then agent prompts
+description: Analyze cluster failures to OPTIMIZE PROMPTS - make agents work for EVERY use case
 argument-hint: <cluster-id or "recent" or "dump">
 ---
 
-Analyze zeroshot cluster with **root cause analysis**. Check provider failures and isolation issues BEFORE blaming agent prompts.
+**PURPOSE: Find prompt weaknesses and FIX THEM so agents work out of the box for EVERY use case.**
 
-**Three Root Cause Categories:**
+This is NOT about debugging infrastructure. This is about making prompts BULLETPROOF.
 
-- **A: PROVIDER BROKE** - API rate limit, timeout, spawn hang (like opencode 429)
-- **B: ISOLATION MISLED** - Worktree/docker/PR mode gave wrong context
-- **C: AGENT ISSUE** - Provider and isolation worked, agent made a mistake
+## The Goal
+
+Every cluster failure is a **prompt improvement opportunity**. Analyze what went wrong → Fix the prompt → Never see this failure pattern again.
 
 ## Input
 
 `$ARGUMENTS` can be:
 
-- **Cluster ID**: Analyze specific cluster (e.g., `zs_abc123`)
+- **Cluster ID**: Analyze specific cluster
 - **"recent"**: Find most recent clusters
 - **"dump"**: User will paste logs directly
-- **Empty**: Prompt for cluster ID or show recent clusters
 
-## Step 1: Retrieve Cluster Data
-
-### Option A: From Ledger (cluster-id or "recent")
+## Step 1: Get the Data
 
 ```bash
 # List recent clusters
 zeroshot list --json | jq '.[-5:]'
 
-# Get cluster status
+# Get cluster status and logs
 zeroshot status $CLUSTER_ID --json
+zeroshot logs $CLUSTER_ID 2>&1
 
-# Get cluster logs
-zeroshot logs $CLUSTER_ID 2>&1 | tail -200
-
-# Query ledger directly (if available)
+# Query ledger for agent messages
 sqlite3 ~/.zeroshot/clusters/$CLUSTER_ID/ledger.db "
-  SELECT timestamp, topic, sender, content_text, content_data
+  SELECT timestamp, topic, sender, content_text
   FROM messages
-  ORDER BY timestamp ASC
-  LIMIT 100;
+  ORDER BY timestamp ASC;
 "
 ```
 
-### Option B: From Log Dump
+## Step 2: Identify What Agent Did Wrong
 
-If user pastes logs, extract:
+**READ THE LOGS. What SPECIFICALLY went wrong?**
 
-1. **Cluster ID** from header
-2. **Agent lifecycle events** (started, completed, failed)
-3. **Message bus traffic** (topic publications)
-4. **Provider errors** (rate limits, timeouts)
-5. **Isolation mode** (worktree, docker, pr, ship)
+| Failure Pattern         | Evidence                             | Prompt Gap                               |
+| ----------------------- | ------------------------------------ | ---------------------------------------- |
+| **Wrong files edited**  | Agent edited unrelated files         | Prompt doesn't scope file targets        |
+| **Missed requirements** | Output missing key functionality     | Prompt doesn't emphasize requirements    |
+| **Broke existing code** | Tests failed after changes           | Prompt doesn't enforce verification      |
+| **Infinite loop**       | Worker/validator cycle >5 iterations | Validation criteria too strict or vague  |
+| **Wrong approach**      | Used deprecated API, bad pattern     | Prompt missing technical constraints     |
+| **Incomplete work**     | Partial implementation               | Prompt doesn't define "done" clearly     |
+| **Hallucinated APIs**   | Called non-existent functions        | Prompt doesn't ground in actual codebase |
+| **Ignored context**     | Didn't read provided files           | Context injection not working            |
+| **Over-engineering**    | Added unnecessary complexity         | Prompt doesn't enforce simplicity        |
+| **Under-testing**       | No tests written                     | Prompt doesn't require tests             |
 
-## Step 2: Provider State Check (BEFORE BLAMING AGENT!)
+## Step 3: Trace the Prompt Chain
 
-**CRITICAL**: Check provider health FIRST. Agent failures are often API issues.
+**Which prompt caused this behavior?**
 
-### Known Provider Failure Patterns
+```
+ISSUE_OPENED (user input)
+    ↓
+conductor-bootstrap.json → junior-conductor/senior-conductor prompts
+    ↓
+CLUSTER_OPERATIONS (classification)
+    ↓
+{config}.json → agent prompts (worker, validator, etc.)
+    ↓
+Agent behavior (good or bad)
+```
 
-| Pattern               | Evidence                                    | Root Cause                       |
-| --------------------- | ------------------------------------------- | -------------------------------- |
-| **Rate limit (429)**  | `429 Too Many Requests`, `rate_limit_error` | API throttling                   |
-| **Spawn hang**        | Agent started but no output for >60s        | Provider CLI hung (opencode bug) |
-| **Timeout**           | `ETIMEDOUT`, `socket hang up`               | Network/API timeout              |
-| **Auth failure**      | `401 Unauthorized`, `invalid_api_key`       | Credential issue                 |
-| **Model unavailable** | `model_not_available`, `overloaded`         | API capacity                     |
-| **Context overflow**  | `context_length_exceeded`                   | Prompt too large                 |
+**Find the weak link:**
 
-### Check Provider Logs
+1. **Conductor misclassified?** → Fix `cluster-templates/conductor-bootstrap.json`
+2. **Wrong config loaded?** → Fix classification logic or config selection
+3. **Worker did wrong thing?** → Fix worker prompt in config template
+4. **Validator too strict/loose?** → Fix validation criteria
+5. **Context missing?** → Fix context injection in agent config
+
+## Step 4: Analyze Prompt Effectiveness
+
+### For Each Agent That Failed:
+
+**1. What was the prompt?**
 
 ```bash
-# Check for rate limits
-grep -i "429\|rate.limit\|too.many.requests" cluster.log
+# Find the config that was loaded
+sqlite3 ledger.db "
+  SELECT content_data FROM messages
+  WHERE topic = 'CLUSTER_OPERATIONS' LIMIT 1;
+" | jq -r '.operations[] | select(.action == "load_config") | .config'
 
-# Check for timeouts
-grep -i "timeout\|ETIMEDOUT\|hang\|spawn" cluster.log
-
-# Check for auth issues
-grep -i "401\|unauthorized\|api.key\|credential" cluster.log
-
-# Check spawn timing (>60s = hang)
-grep "spawning\|started" cluster.log | head -10
+# Read the actual prompt from that config
+cat cluster-templates/base-templates/{config}.json | jq '.agents[] | select(.id == "worker") | .prompt'
 ```
 
-### If ANY provider issue found → Agent is NOT at fault!
+**2. What did the agent actually do?**
 
-**DO NOT CONTINUE TO PROMPT ANALYSIS** if provider was broken.
+- Read the agent's output from logs
+- Compare intended behavior vs actual behavior
 
----
+**3. Where did the prompt fail to guide?**
 
-## Step 3: Isolation State Check
+| Prompt Issue                 | Symptom                              | Fix                                 |
+| ---------------------------- | ------------------------------------ | ----------------------------------- |
+| **Too vague**                | Agent made random choices            | Add specific constraints            |
+| **Too restrictive**          | Agent couldn't solve problem         | Loosen constraints, add flexibility |
+| **Missing edge case**        | Agent broke on specific input        | Add explicit handling               |
+| **Wrong emphasis**           | Agent focused on wrong thing         | Reorder priorities, use CAPS        |
+| **No verification step**     | Agent declared done without checking | Add explicit verification           |
+| **No examples**              | Agent misunderstood format           | Add concrete examples               |
+| **Conflicting instructions** | Agent did inconsistent things        | Remove contradictions               |
 
-### Isolation Mode Issues
+## Step 5: Check Validation Criteria
 
-| Mode           | Issue                     | Evidence                             |
-| -------------- | ------------------------- | ------------------------------------ |
-| **--worktree** | Worktree creation failed  | `fatal: could not create worktree`   |
-| **--worktree** | Wrong branch checked out  | `HEAD detached`, unexpected branch   |
-| **--docker**   | Container failed to start | `docker: Error response from daemon` |
-| **--docker**   | Volume mount failed       | `cannot mount`, permission denied    |
-| **--pr**       | PR creation failed        | `gh pr create` error                 |
-| **--pr**       | Branch push failed        | `rejected`, `non-fast-forward`       |
-| **--ship**     | Merge failed              | `merge conflict`, CI failed          |
+**Validation failures are PROMPT BUGS, not agent bugs.**
 
-### Check Isolation Logs
+If validator rejects good work:
+
+- Validation criteria too strict
+- Validation prompt doesn't understand the task
+
+If validator approves bad work:
+
+- Validation criteria too loose
+- Validation prompt missing checks
 
 ```bash
-# Check worktree issues
-grep -i "worktree\|branch\|checkout" cluster.log
-
-# Check docker issues
-grep -i "docker\|container\|volume\|mount" cluster.log
-
-# Check PR/git issues
-grep -i "pr\|push\|merge\|conflict" cluster.log
-```
-
----
-
-## Step 4: Message Flow Analysis
-
-### Expected Flow (Happy Path)
-
-```
-ISSUE_OPENED (task input)
-    ↓
-CLUSTER_OPERATIONS (conductor classification)
-    ↓
-[config loaded, agents spawned]
-    ↓
-IMPLEMENTATION_READY (worker completed)
-    ↓
-VALIDATION_RESULT (validator approved/rejected)
-    ↓
-[if rejected: IMPLEMENTATION_READY again]
-    ↓
-CLUSTER_OPERATIONS_SUCCESS (cluster done)
-```
-
-### Find Flow Breaks
-
-```bash
-# Trace message topics
+# Find validation results
 sqlite3 ledger.db "
-  SELECT timestamp, topic, sender
+  SELECT sender, content_text, content_data
   FROM messages
-  WHERE topic IN (
-    'ISSUE_OPENED',
-    'CLUSTER_OPERATIONS',
-    'IMPLEMENTATION_READY',
-    'VALIDATION_RESULT',
-    'CLUSTER_OPERATIONS_SUCCESS',
-    'CLUSTER_FAILED',
-    'AGENT_ERROR'
-  )
-  ORDER BY timestamp;
-"
-
-# Find errors
-sqlite3 ledger.db "
-  SELECT timestamp, sender, content_text, content_data
-  FROM messages
-  WHERE topic IN ('AGENT_ERROR', 'CLUSTER_FAILED', 'CLUSTER_OPERATIONS_FAILED')
-  ORDER BY timestamp;
-"
-
-# Find validation rejections
-sqlite3 ledger.db "
-  SELECT timestamp, sender, content_data
-  FROM messages
-  WHERE topic = 'VALIDATION_RESULT'
-  AND content_data LIKE '%\"approved\":false%'
-  ORDER BY timestamp;
+  WHERE topic = 'VALIDATION_RESULT';
 "
 ```
 
----
+**Questions to answer:**
 
-## Step 5: Conductor Classification Analysis
+1. Did validator check the RIGHT things?
+2. Did validator understand the requirements?
+3. Was rejection reason valid or false positive?
+4. Was approval justified or false negative?
 
-### Check Classification Quality
+## Step 6: Generate Prompt Improvements
 
-```bash
-# Get conductor's classification
-sqlite3 ledger.db "
-  SELECT content_text, content_data
-  FROM messages
-  WHERE topic = 'CLUSTER_OPERATIONS'
-  ORDER BY timestamp ASC
-  LIMIT 1;
-"
-```
-
-**Classification Issues:**
-
-| Issue                    | Evidence                               | Impact                      |
-| ------------------------ | -------------------------------------- | --------------------------- |
-| **Under-classified**     | TRIVIAL but needed multiple validators | Slow, missing quality gates |
-| **Over-classified**      | CRITICAL but was simple change         | Wasted resources            |
-| **Wrong taskType**       | Feature classified as refactor         | Wrong agent roles spawned   |
-| **UNCERTAIN escalation** | Conductor couldn't decide              | Senior re-evaluation needed |
-
----
-
-## Step 6: Token Usage Analysis
-
-```bash
-# Get token usage per agent
-sqlite3 ledger.db "
-  SELECT sender, SUM(json_extract(content_data, '$.input_tokens')) as input,
-         SUM(json_extract(content_data, '$.output_tokens')) as output
-  FROM messages
-  WHERE topic = 'TOKEN_USAGE'
-  GROUP BY sender;
-"
-
-# Get total cost
-zeroshot status $CLUSTER_ID --json | jq '.tokenUsage'
-```
-
----
-
-## Step 7: Generate Analysis Report
+### Report Format
 
 ```markdown
-# Zeroshot Cluster Analysis: [Cluster ID]
+# Prompt Analysis: [Cluster ID]
 
 ## Summary
 
-- **Cluster**: [id]
-- **Task**: [original issue/task]
-- **Isolation Mode**: [none/worktree/docker/pr/ship]
-- **Status**: [completed/failed/running]
-- **Duration**: [start → end]
-- **Total Tokens**: [input + output]
+- **Task**: [what user asked for]
+- **Outcome**: [success/failure/partial]
+- **Root Cause**: [which prompt failed and why]
 
 ---
 
-## 🔴 ROOT CAUSE DETERMINATION
+## 🔴 FAILURE ANALYSIS
 
-### Category A: PROVIDER BROKE
+### What Went Wrong
 
-**API or CLI failed - NOT agent's fault.**
+> [Specific quote from logs showing the failure]
 
-Evidence:
+### Why It Went Wrong
 
-> [Quote showing provider failure]
+[Analysis of which prompt instruction was missing/wrong/vague]
 
-**FIX REQUIRED**: [Provider-level fix]
-
----
-
-### Category B: ISOLATION MISLED
-
-**Isolation mode gave wrong context.**
-
-Evidence:
-
-> [Quote showing isolation issue]
-
-**FIX REQUIRED**: [Isolation config fix]
-
----
-
-### Category C: AGENT ISSUE
-
-**Provider and isolation worked. Agent made mistake.**
-
-Evidence:
-
-> [Quote showing agent error]
-
-**FIX REQUIRED**: [Prompt/config change]
-
----
-
-**CHOSEN CATEGORY**: [ A | B | C ]
-
----
-
-## 📊 Message Flow Analysis
-
-| Timestamp | Topic                | Sender    | Status      |
-| --------- | -------------------- | --------- | ----------- |
-| ...       | ISSUE_OPENED         | user      | ✅          |
-| ...       | CLUSTER_OPERATIONS   | conductor | ✅          |
-| ...       | IMPLEMENTATION_READY | worker    | ✅          |
-| ...       | VALIDATION_RESULT    | validator | ❌ rejected |
-| ...       | ...                  | ...       | ...         |
-
-### Flow Breaks Found
-
-1. [Where flow broke and why]
-
----
-
-## 🔍 Conductor Classification
-
-- **Complexity**: [TRIVIAL/ROUTINE/COMPLEX/CRITICAL]
-- **Task Type**: [feature/bugfix/refactor/docs]
-- **Config Loaded**: [config name]
-
-### Classification Quality
-
-- [ ] Appropriate complexity level
-- [ ] Correct task type
-- [ ] Right number of validators
-
----
-
-## 💰 Token Usage
-
-| Agent       | Role           | Input | Output | Cost   |
-| ----------- | -------------- | ----- | ------ | ------ |
-| conductor   | classification | X     | Y      | $Z     |
-| worker-1    | implementation | X     | Y      | $Z     |
-| validator-1 | validation     | X     | Y      | $Z     |
-| **Total**   |                | **X** | **Y**  | **$Z** |
-
----
-
-## 🔧 Recommended Fixes
-
-### Provider Fixes
-
-1. [If category A]
-
-### Isolation Fixes
-
-1. [If category B]
-
-### Agent/Prompt Fixes
-
-1. [If category C]
-
-### Template Fixes
-
-1. [Cluster template improvements]
-
----
-
-## 🎯 Priority Actions
-
-1. **CRITICAL**: [Most important fix]
-2. **HIGH**: [Second priority]
-3. **MEDIUM**: [Can wait]
+### The Prompt Gap
 ```
 
-## Analysis Checklist
+Current prompt says: "..."
+But agent needed: "..."
 
-### Step 1: Data Retrieval
-
-- [ ] Retrieved cluster status
-- [ ] Retrieved cluster logs
-- [ ] Queried ledger messages
-
-### Step 2: Provider Check (DO THIS FIRST!)
-
-- [ ] Checked for rate limits (429)
-- [ ] Checked for spawn hangs (>60s no output)
-- [ ] Checked for timeouts
-- [ ] Checked for auth failures
-
-### Step 3: Isolation Check
-
-- [ ] Verified worktree created successfully (if --worktree)
-- [ ] Verified container started (if --docker)
-- [ ] Verified PR created (if --pr)
-- [ ] Verified merge succeeded (if --ship)
-
-### Step 4: Message Flow
-
-- [ ] Traced ISSUE_OPENED → CLUSTER_OPERATIONS → IMPLEMENTATION_READY → VALIDATION_RESULT
-- [ ] Found flow breaks
-- [ ] Identified failed validations
-
-### Step 5: Classification
-
-- [ ] Verified conductor classification was appropriate
-- [ ] Checked if taskType matched actual work
-
-### Step 6: Token Usage
-
-- [ ] Calculated per-agent token usage
-- [ ] Identified cost anomalies
-
----
-
-## ROOT CAUSE DECISION TREE
-
-```
-START
-  │
-  ▼
-[1] Did provider work? (No 429, no hang, no timeout?)
-  │
-  ├─ NO → **CATEGORY A: PROVIDER BROKE**
-  │        Fix: Provider config, retry logic, rate limit handling
-  │
-  └─ YES
-       │
-       ▼
-[2] Did isolation work? (Worktree/docker/PR succeeded?)
-  │
-  ├─ NO → **CATEGORY B: ISOLATION MISLED**
-  │        Fix: Isolation mode, git config, docker setup
-  │
-  └─ YES
-       │
-       ▼
-[3] Did agents succeed?
-  │
-  ├─ YES → No problem (or user expectation issue)
-  │
-  └─ NO → **CATEGORY C: AGENT ISSUE**
-          Fix: Prompts, triggers, validation criteria
 ```
 
 ---
 
-## Common Failure Patterns
+## 📊 AGENT BEHAVIOR AUDIT
 
-### Provider Failures
-
-| Pattern               | Fix                                      |
-| --------------------- | ---------------------------------------- |
-| Rate limit (429)      | Add retry with backoff, check API quotas |
-| Spawn hang (opencode) | Already fixed in spawn timeout PR        |
-| Context overflow      | Reduce prompt size, use summarization    |
-| Model unavailable     | Fall back to different model             |
-
-### Isolation Failures
-
-| Pattern                         | Fix                      |
-| ------------------------------- | ------------------------ |
-| Worktree on uncommitted changes | WIP commit first         |
-| Docker volume permissions       | Check UID mapping        |
-| PR branch exists                | Use unique branch names  |
-| Merge conflicts                 | Better rebasing strategy |
-
-### Agent Failures
-
-| Pattern                   | Fix                              |
-| ------------------------- | -------------------------------- |
-| Validation always rejects | Loosen validation criteria       |
-| Worker loops forever      | Add max iteration limit          |
-| Wrong files edited        | Improve file targeting in prompt |
-| Tests not run             | Add explicit verification step   |
+| Agent | Expected Behavior | Actual Behavior | Gap |
+|-------|-------------------|-----------------|-----|
+| conductor | Classify as ROUTINE/bugfix | Classified as TRIVIAL/feature | Wrong complexity |
+| worker | Edit src/api.ts only | Edited 5 unrelated files | No file scoping |
+| validator | Check API works | Only checked syntax | Missing functional test |
 
 ---
 
-## Related Commands
+## 🔧 PROMPT FIXES
 
-- `/postmortem` - General debugging postmortem
-- `/status` - Quick cluster status check
+### Fix 1: [Config/Agent Name]
+
+**File**: `cluster-templates/base-templates/{config}.json`
+
+**Problem**: [What's wrong with current prompt]
+
+**Current**:
+```
+
+[current prompt text]
+
+```
+
+**Fixed**:
+```
+
+[improved prompt text]
+
+```
+
+**Why This Fixes It**: [Explanation]
+
+---
+
+### Fix 2: [Config/Agent Name]
+...
+
+---
+
+## 🎯 GENERALIZED IMPROVEMENTS
+
+These fixes should apply to ALL configs, not just this one:
+
+1. **[Pattern]**: [Improvement that prevents this class of failures]
+2. ...
+
+---
+
+## ✅ VERIFICATION
+
+After applying fixes, this cluster type should:
+- [ ] [Specific behavior that should now work]
+- [ ] [Another behavior]
+```
+
+## Step 7: Apply Fixes
+
+1. **Edit the config file** with improved prompts
+2. **Run the same task again** to verify fix works
+3. **Check if fix breaks other use cases** - run a few different task types
+4. **Commit the improvement**
+
+## Common Prompt Gaps
+
+### File Scoping
+
+```diff
+- "Implement the feature"
++ "Implement the feature by editing ONLY files in src/. Do NOT modify tests/, docs/, or config files unless explicitly required."
+```
+
+### Verification Requirements
+
+```diff
+- "Complete the task"
++ "Complete the task. Before declaring done: 1) Run tests, 2) Verify the feature works manually, 3) Check for TypeScript errors"
+```
+
+### Output Format
+
+```diff
+- "Return the result"
++ "Return the result as JSON: { \"status\": \"success\"|\"failure\", \"files_changed\": [...], \"summary\": \"...\" }"
+```
+
+### Context Usage
+
+```diff
+- "Fix the bug"
++ "Fix the bug. The relevant code is in the CONTEXT section above. Read it carefully before making changes."
+```
+
+### Iteration Limits
+
+```diff
+- "Keep trying until it works"
++ "Make at most 3 attempts. If still failing after 3 attempts, report what's blocking you instead of continuing."
+```
+
+### Edge Case Handling
+
+```diff
+- "Handle errors appropriately"
++ "Handle errors: 1) Network errors → retry 3x with backoff, 2) Auth errors → fail immediately with clear message, 3) Validation errors → return details of what failed"
+```
+
+## Anti-Patterns to Fix
+
+| Anti-Pattern         | Why It Fails             | Fix                              |
+| -------------------- | ------------------------ | -------------------------------- |
+| "Be careful"         | Too vague                | Specify WHAT to be careful about |
+| "Use best practices" | Agent doesn't know which | List the specific practices      |
+| "Don't break things" | Negative instruction     | "Verify X, Y, Z still work"      |
+| "Be thorough"        | Unmeasurable             | "Check these 5 specific things"  |
+| "Handle edge cases"  | Which ones?              | List the edge cases explicitly   |
+
+## Checklist
+
+- [ ] Identified SPECIFIC failure (not vague "it didn't work")
+- [ ] Traced failure to SPECIFIC prompt/config
+- [ ] Understood WHY prompt failed to guide agent
+- [ ] Wrote CONCRETE fix (not "make it better")
+- [ ] Fix is GENERALIZABLE (helps all similar tasks)
+- [ ] Verified fix doesn't break other use cases
