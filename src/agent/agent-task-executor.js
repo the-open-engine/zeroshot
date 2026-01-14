@@ -52,64 +52,6 @@ function buildClaudeEnv(modelSpec, options = {}) {
 }
 
 /**
- * Create handlers for task spawn process events
- * Consolidates the duplicated process event handling between isolated and non-isolated modes
- * @param {Object} agent - Agent instance
- * @param {Function} resolve - Promise resolve function
- * @param {Function} reject - Promise reject function
- * @returns {{ onClose: Function, onError: Function }} Event handlers
- */
-function createTaskSpawnHandlers(agent, resolve, reject) {
-  let stdout = '';
-  let stderr = '';
-
-  return {
-    onStdout: (data) => {
-      stdout += data.toString();
-    },
-    onStderr: (data) => {
-      stderr += data.toString();
-    },
-    onClose: (code, signal) => {
-      // Handle process killed by signal (e.g., SIGTERM, SIGKILL, SIGSTOP)
-      if (signal) {
-        reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
-        return;
-      }
-
-      if (code === 0) {
-        // Parse task ID from output: "✓ Task spawned: xxx-yyy-nn"
-        // Format: <adjective>-<noun>-<digits> (may or may not have task- prefix)
-        const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
-        if (match) {
-          const spawnedTaskId = match[1];
-          agent.currentTaskId = spawnedTaskId; // Track for resume capability
-          agent._publishLifecycle('TASK_ID_ASSIGNED', {
-            pid: agent.processPid,
-            taskId: spawnedTaskId,
-          });
-
-          // Start liveness monitoring
-          if (agent.enableLivenessCheck) {
-            agent.lastOutputTime = Date.now(); // Initialize to spawn time
-            agent._startLivenessCheck();
-          }
-
-          resolve(spawnedTaskId);
-        } else {
-          reject(new Error(`Could not parse task ID from output: ${stdout}`));
-        }
-      } else {
-        reject(new Error(`zeroshot task run failed with code ${code}: ${stderr}`));
-      }
-    },
-    onError: (error) => {
-      reject(error);
-    },
-  };
-}
-
-/**
  * Validate and sanitize error messages.
  * Detects TypeScript type annotations that may have leaked into error storage.
  *
