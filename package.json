@@ -17,7 +17,7 @@
     "test:all": "npm run test && npm run test:slow",
     "test:coverage": "c8 npm run test:unit",
     "test:coverage:report": "c8 --reporter=html npm run test:unit && echo 'Coverage report generated at coverage/index.html'",
-    "postinstall": "node scripts/fix-node-pty-permissions.js && node scripts/fix-memorystream.js",
+    "postinstall": "node scripts/fix-node-pty-permissions.js",
     "start": "node cli/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
