@@ -143,6 +143,62 @@ class AnthropicProvider extends BaseProvider {
     warned.add(key);
     console.warn(`⚠️ ${message}`);
   }
+
+  /**
+   * Get default settings including Claude-specific auth fields
+   * @override
+   */
+  getDefaultSettings() {
+    return {
+      ...super.getDefaultSettings(),
+      // Authentication (optional persistent storage)
+      anthropicApiKey: null, // sk-ant-* key
+      bedrockApiKey: null, // AWS_BEARER_TOKEN_BEDROCK value
+      bedrockRegion: null, // AWS_REGION for Bedrock
+    };
+  }
+
+  /**
+   * Validate Claude-specific settings including auth fields
+   * @override
+   */
+  validateSettings(settings) {
+    // First validate base provider settings (levels, etc.)
+    const baseError = super.validateSettings(settings);
+    if (baseError) return baseError;
+
+    // Claude-specific auth field validation
+    const {
+      isValidAnthropicKey,
+      ANTHROPIC_KEY_PREFIX,
+    } = require('../../../lib/settings/claude-auth');
+
+    // Validate string-or-null fields
+    for (const field of ['anthropicApiKey', 'bedrockApiKey', 'bedrockRegion']) {
+      if (
+        settings[field] !== undefined &&
+        settings[field] !== null &&
+        typeof settings[field] !== 'string'
+      ) {
+        return `providerSettings.claude.${field} must be a string or null`;
+      }
+    }
+
+    // Additional prefix validation for Anthropic API key
+    if (settings.anthropicApiKey && !isValidAnthropicKey(settings.anthropicApiKey)) {
+      return `providerSettings.claude.anthropicApiKey must start with ${ANTHROPIC_KEY_PREFIX}`;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get Claude-specific setting field names
+   * @override
+   */
+  getSettingsFields() {
+    return [...super.getSettingsFields(), 'anthropicApiKey', 'bedrockApiKey', 'bedrockRegion'];
+  }
 }
 
 module.exports = AnthropicProvider;

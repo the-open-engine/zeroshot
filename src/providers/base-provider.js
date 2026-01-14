@@ -188,6 +188,64 @@ class BaseProvider {
   getDefaultLevel() {
     throw new Error('Not implemented');
   }
+
+  /**
+   * Get default settings for this provider
+   * Override in provider implementations to provide provider-specific defaults
+   * @returns {Object} Default settings object
+   */
+  getDefaultSettings() {
+    return {
+      maxLevel: this.getDefaultMaxLevel?.() || 'level3',
+      minLevel: this.getDefaultMinLevel?.() || 'level1',
+      defaultLevel: this.getDefaultLevel() || 'level2',
+      levelOverrides: {},
+    };
+  }
+
+  /**
+   * Validate provider-specific settings
+   * Override in provider implementations to add custom validation
+   * @param {Object} settings - Settings object to validate
+   * @returns {string|null} Error message if invalid, null if valid
+   */
+  validateSettings(settings) {
+    if (typeof settings !== 'object' || settings === null) {
+      return `providerSettings.${this.name} must be an object`;
+    }
+
+    // Validate level fields
+    const levelMapping = this.getLevelMapping();
+    const validLevels = Object.keys(levelMapping);
+
+    if (settings.maxLevel && !validLevels.includes(settings.maxLevel)) {
+      return `Invalid maxLevel for ${this.name}: ${settings.maxLevel}`;
+    }
+    if (settings.minLevel && !validLevels.includes(settings.minLevel)) {
+      return `Invalid minLevel for ${this.name}: ${settings.minLevel}`;
+    }
+    if (settings.defaultLevel && !validLevels.includes(settings.defaultLevel)) {
+      return `Invalid defaultLevel for ${this.name}: ${settings.defaultLevel}`;
+    }
+
+    if (
+      settings.levelOverrides &&
+      (typeof settings.levelOverrides !== 'object' || Array.isArray(settings.levelOverrides))
+    ) {
+      return `levelOverrides for ${this.name} must be an object`;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get the list of setting field names specific to this provider
+   * Override in provider implementations to declare custom fields
+   * @returns {string[]} Array of field names
+   */
+  getSettingsFields() {
+    return ['maxLevel', 'minLevel', 'defaultLevel', 'levelOverrides'];
+  }
 }
 
 module.exports = BaseProvider;
