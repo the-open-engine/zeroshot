@@ -2747,6 +2747,202 @@ describe('Semantic Validation - Medium Gap 15', function () {
       );
     });
   });
+
+  // === HOOK LOGIC VALIDATION TESTS ===
+
+  describe('Hook Logic Validation', function () {
+    it('should accept valid hook logic block', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: {
+                  topic: 'IMPL_READY',
+                  content: { text: 'done' },
+                },
+                logic: {
+                  engine: 'javascript',
+                  script: "if (!result.canValidate) return { topic: 'PROGRESS' };",
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [
+              { topic: 'IMPL_READY', action: 'stop_cluster' },
+              { topic: 'PROGRESS', action: 'stop_cluster' },
+            ],
+          },
+        ],
+      });
+      const logicErrors = result.errors.filter((e) => e.includes('logic'));
+      assert.strictEqual(
+        logicErrors.length,
+        0,
+        'Should accept valid logic block: ' + JSON.stringify(logicErrors)
+      );
+    });
+
+    it('should reject hook logic with non-javascript engine', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+                logic: {
+                  engine: 'python',
+                  script: 'return True',
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      });
+      assert.ok(
+        result.errors.some((e) => e.includes("engine must be 'javascript'")),
+        'Should reject non-javascript engine. Errors: ' + JSON.stringify(result.errors)
+      );
+    });
+
+    it('should reject hook logic without script property', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+                logic: {
+                  engine: 'javascript',
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      });
+      assert.ok(
+        result.errors.some((e) => e.includes("must have a 'script' property")),
+        'Should reject logic without script. Errors: ' + JSON.stringify(result.errors)
+      );
+    });
+
+    it('should reject hook logic with syntax error in script', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+                logic: {
+                  engine: 'javascript',
+                  script: 'if (x { return true; }',
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      });
+      assert.ok(
+        result.errors.some((e) => e.includes('syntax error')),
+        'Should reject script with syntax error. Errors: ' + JSON.stringify(result.errors)
+      );
+    });
+
+    it('should reject hook logic without config or transform', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                logic: {
+                  engine: 'javascript',
+                  script: "return { topic: 'NEW_TOPIC' };",
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [{ topic: 'NEW_TOPIC', action: 'stop_cluster' }],
+          },
+        ],
+      });
+      assert.ok(
+        result.errors.some((e) => e.includes("must also have 'config' or 'transform'")),
+        'Should reject logic without config. Errors: ' + JSON.stringify(result.errors)
+      );
+    });
+
+    it('should accept hook logic with non-string script (treated as missing)', function () {
+      const result = validateConfig({
+        agents: [
+          {
+            id: 'worker',
+            role: 'impl',
+            triggers: [{ topic: 'START' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+                logic: {
+                  engine: 'javascript',
+                  script: 123,
+                },
+              },
+            },
+          },
+          {
+            id: 'orch',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      });
+      assert.ok(
+        result.errors.some((e) => e.includes('script must be a string')),
+        'Should reject non-string script. Errors: ' + JSON.stringify(result.errors)
+      );
+    });
+  });
 });
 
 describe('Regression: No existing validation failures', function () {
