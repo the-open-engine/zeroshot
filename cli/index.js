@@ -3027,32 +3027,140 @@ settingsCmd
     formatSettingsList(settings, false);
   });
 
+/**
+ * Get nested value by dot-notation path
+ * @param {object} obj - Object to traverse
+ * @param {string} dotPath - Dot-notation path (e.g., 'providerSettings.claude.anthropicApiKey')
+ * @returns {{ value: any, found: boolean }}
+ */
+function getNestedValue(obj, dotPath) {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return { value: undefined, found: false };
+    }
+    if (!(part in current)) {
+      return { value: undefined, found: false };
+    }
+    current = current[part];
+  }
+  return { value: current, found: true };
+}
+
+/**
+ * Set nested value by dot-notation path, creating intermediate objects as needed
+ * @param {object} obj - Object to modify
+ * @param {string} dotPath - Dot-notation path
+ * @param {any} value - Value to set
+ */
+function setNestedValue(obj, dotPath, value) {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!(part in current) || typeof current[part] !== 'object' || current[part] === null) {
+      current[part] = {};
+    }
+    current = current[part];
+  }
+  current[parts[parts.length - 1]] = value;
+}
+
+/**
+ * Parse a setting value string into appropriate type
+ * Handles null, boolean, JSON, and falls back to string
+ * @param {string} value - Raw value string
+ * @returns {any} Parsed value
+ */
+function parseSettingValue(value) {
+  if (value === 'null') return null;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value; // Keep as string if not valid JSON
+  }
+}
+
 settingsCmd
   .command('get <key>')
-  .description('Get a setting value')
+  .description(
+    'Get a setting value (supports dot-notation: providerSettings.claude.anthropicApiKey)'
+  )
   .action((key) => {
     const settings = loadSettings();
+
+    // Support dot-notation for nested values
+    if (key.includes('.')) {
+      const { value, found } = getNestedValue(settings, key);
+      if (!found) {
+        console.error(chalk.red(`Setting not found: ${key}`));
+        process.exit(1);
+      }
+      console.log(typeof value === 'object' ? JSON.stringify(value, null, 2) : value);
+      return;
+    }
+
     if (!(key in settings)) {
       console.error(chalk.red(`Unknown setting: ${key}`));
       console.log(chalk.dim('\nAvailable settings:'));
       Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
       process.exit(1);
     }
-    console.log(settings[key]);
+    console.log(
+      typeof settings[key] === 'object' ? JSON.stringify(settings[key], null, 2) : settings[key]
+    );
   });
 
 settingsCmd
   .command('set <key> <value>')
-  .description('Set a setting value')
+  .description(
+    'Set a setting value (supports dot-notation: providerSettings.claude.anthropicApiKey)'
+  )
   .action((key, value) => {
+    const settings = loadSettings();
+
+    // Support dot-notation for nested values
+    if (key.includes('.')) {
+      const parts = key.split('.');
+      const rootKey = parts[0];
+
+      // Validate root key exists in defaults
+      if (!(rootKey in DEFAULT_SETTINGS)) {
+        console.error(chalk.red(`Unknown setting: ${rootKey}`));
+        console.log(chalk.dim('\nAvailable settings:'));
+        Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
+        process.exit(1);
+      }
+
+      const parsedValue = parseSettingValue(value);
+
+      // Set nested value
+      setNestedValue(settings, key, parsedValue);
+
+      // Validate the root key after modification
+      const validationError = validateSetting(rootKey, settings[rootKey]);
+      if (validationError) {
+        console.error(chalk.red(validationError));
+        process.exit(1);
+      }
+
+      saveSettings(settings);
+      const displayValue =
+        typeof parsedValue === 'string' ? parsedValue : JSON.stringify(parsedValue);
+      console.log(chalk.green(`✓ Set ${key} = ${displayValue}`));
+      return;
+    }
+
+    // Original flat key handling
     if (!(key in DEFAULT_SETTINGS)) {
       console.error(chalk.red(`Unknown setting: ${key}`));
       console.log(chalk.dim('\nAvailable settings:'));
       Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
       process.exit(1);
     }
-
-    const settings = loadSettings();
 
     // Type coercion
     let parsedValue;
@@ -3072,7 +3180,7 @@ settingsCmd
 
     settings[key] = parsedValue;
     saveSettings(settings);
-    console.log(chalk.green(`✓ Set ${key} = ${parsedValue}`));
+    console.log(chalk.green(`✓ Set ${key} = ${JSON.stringify(parsedValue)}`));
   });
 
 settingsCmd

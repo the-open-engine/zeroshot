@@ -339,12 +339,17 @@ async function executeTask(agent, triggeringMessage) {
       // CRITICAL: Include taskId for causal linking - allows consumers to group
       // messages by task regardless of interleaved timing from async hooks
       if (result.tokenUsage) {
+        // Get actual model used from API response (more accurate than config)
+        const actualModel = result.tokenUsage.modelUsage
+          ? Object.keys(result.tokenUsage.modelUsage)[0]
+          : agent._selectModel();
+
         agent.messageBus.publish({
           cluster_id: agent.cluster.id,
           topic: 'TOKEN_USAGE',
           sender: agent.id,
           content: {
-            text: `${agent.id} used ${result.tokenUsage.inputTokens} input + ${result.tokenUsage.outputTokens} output tokens`,
+            text: `${agent.id} used ${result.tokenUsage.inputTokens} input + ${result.tokenUsage.outputTokens} output tokens (${actualModel})`,
             data: {
               agentId: agent.id,
               role: agent.role,

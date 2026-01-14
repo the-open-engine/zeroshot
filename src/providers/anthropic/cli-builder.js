@@ -1,5 +1,12 @@
 function buildCommand(context, options = {}, commandConfig = {}) {
-  const { modelSpec, outputFormat, jsonSchema, autoApprove, cliFeatures = {} } = options;
+  const {
+    modelSpec,
+    outputFormat,
+    jsonSchema,
+    autoApprove,
+    cliFeatures = {},
+    authEnv = {},
+  } = options;
 
   const command = commandConfig.command || 'claude';
   const extraArgs = commandConfig.args || [];
@@ -36,7 +43,7 @@ function buildCommand(context, options = {}, commandConfig = {}) {
   return {
     binary: command,
     args,
-    env: {},
+    env: authEnv,
   };
 }
 

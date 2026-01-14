@@ -1,6 +1,7 @@
 const BaseProvider = require('../base-provider');
-const { getClaudeCommand } = require('../../../lib/settings');
+const { getClaudeCommand, loadSettings } = require('../../../lib/settings');
 const { commandExists, getCommandPath, getHelpOutput } = require('../../../lib/provider-detection');
+const { resolveClaudeAuth } = require('../../../lib/settings/claude-auth');
 const { buildCommand } = require('./cli-builder');
 const { parseEvent } = require('./output-parser');
 const {
@@ -68,6 +69,16 @@ class AnthropicProvider extends BaseProvider {
     return ['~/.claude'];
   }
 
+  /**
+   * Resolve authentication environment variables for Claude CLI.
+   * Handles Bedrock, API key, and OAuth authentication.
+   * @returns {Object} Environment variables for authentication
+   */
+  resolveAuthEnv() {
+    const settings = loadSettings();
+    return resolveClaudeAuth(settings);
+  }
+
   buildCommand(context, options) {
     const { command, args } = getClaudeCommand();
     const cliFeatures = options.cliFeatures || {};
@@ -97,7 +108,10 @@ class AnthropicProvider extends BaseProvider {
       );
     }
 
-    return buildCommand(context, { ...options, cliFeatures }, { command, args });
+    const authEnv = this.resolveAuthEnv();
+    const resolvedOptions = { ...options, cliFeatures, authEnv };
+
+    return buildCommand(context, resolvedOptions, { command, args });
   }
 
   parseEvent(line) {

@@ -173,6 +173,18 @@ class BaseProvider {
     return modelId;
   }
 
+  /**
+   * Resolve a model name to its CLI-compatible identifier.
+   * Override in provider implementations that need model ID transformation
+   * (e.g., Anthropic Bedrock mapping).
+   * @param {string} model - Model name (e.g., 'opus', 'sonnet')
+   * @param {Object} _authEnv - Authentication environment variables
+   * @returns {string} CLI-compatible model identifier
+   */
+  resolveCliModel(model, _authEnv = {}) {
+    return model;
+  }
+
   getDefaultLevel() {
     throw new Error('Not implemented');
   }

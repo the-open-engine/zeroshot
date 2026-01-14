@@ -16,6 +16,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { loadSettings } = require('../lib/settings');
+const { CLAUDE_AUTH_ENV_VARS, resolveClaudeAuth } = require('../lib/settings/claude-auth');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
 const { getProvider } = require('./providers');
@@ -223,16 +224,37 @@ class IsolationManager {
         mountedHosts.push(hostPath);
       }
 
-      // Pass env vars based on enabled presets
+      // Collect all env vars to pass (deduped - later values override earlier)
+      const envToPass = {};
+
+      // 1. Env vars from mount presets (e.g., aws, gcloud, etc.)
       const envSpecs = expandEnvPatterns(resolveEnvs(mountConfig, settings.dockerEnvPassthrough));
       for (const spec of envSpecs) {
         if (spec.forced) {
-          // Forced value - always pass with specified value
-          args.push('-e', `${spec.name}=${spec.value}`);
+          envToPass[spec.name] = spec.value;
         } else if (process.env[spec.name]) {
-          // Dynamic value - only pass if set in environment
-          args.push('-e', `${spec.name}=${process.env[spec.name]}`);
+          envToPass[spec.name] = process.env[spec.name];
         }
+      }
+
+      // 2. Claude auth from process.env (ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, etc.)
+      for (const envVar of CLAUDE_AUTH_ENV_VARS) {
+        if (process.env[envVar]) {
+          envToPass[envVar] = process.env[envVar];
+        }
+      }
+
+      // 3. Claude auth from settings (only adds vars not already in env)
+      const authEnv = resolveClaudeAuth(settings);
+      for (const [key, value] of Object.entries(authEnv)) {
+        if (!(key in envToPass)) {
+          envToPass[key] = value;
+        }
+      }
+
+      // Emit deduped env vars
+      for (const [key, value] of Object.entries(envToPass)) {
+        args.push('-e', `${key}=${value}`);
       }
     }
 

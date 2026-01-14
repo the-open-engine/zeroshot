@@ -13,6 +13,13 @@ const { execSync } = require('./lib/safe-exec'); // Enforces timeouts
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const {
+  isValidAnthropicKey,
+  ANTHROPIC_KEY_PREFIX,
+  resolveClaudeAuth,
+} = require('../lib/settings/claude-auth.js');
+const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
+const { normalizeProviderName } = require('../lib/provider-names');
 
 /**
  * Validation result
@@ -122,29 +129,55 @@ function checkMacOsKeychain() {
  */
 function checkClaudeAuth() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+
+  // Helper to create consistent result objects
+  const authResult = (authenticated, error = null, method = null) => ({
+    authenticated,
+    error,
+    configDir,
+    ...(method && { method }),
+  });
+
+  // Check for Bedrock bearer token (highest priority)
+  if (process.env.AWS_BEARER_TOKEN_BEDROCK) {
+    if (!process.env.AWS_REGION) {
+      return authResult(false, 'AWS_BEARER_TOKEN_BEDROCK set but AWS_REGION is missing');
+    }
+    return authResult(true, null, 'bedrock_api_key');
+  }
+
+  // Check for ANTHROPIC_API_KEY environment variable
+  const apiKeyEnv = process.env.ANTHROPIC_API_KEY;
+  if (apiKeyEnv) {
+    if (!isValidAnthropicKey(apiKeyEnv)) {
+      return authResult(false, `ANTHROPIC_API_KEY must start with ${ANTHROPIC_KEY_PREFIX}`);
+    }
+    return authResult(true, null, 'env_api_key');
+  }
+
+  // Check for settings-based auth (anthropicApiKey or bedrockApiKey in settings)
+  const settings = loadSettings();
+  const settingsAuth = resolveClaudeAuth(settings);
+  if (settingsAuth.ANTHROPIC_API_KEY) {
+    return authResult(true, null, 'settings_api_key');
+  }
+  if (settingsAuth.AWS_BEARER_TOKEN_BEDROCK) {
+    if (!settingsAuth.AWS_REGION && !process.env.AWS_REGION) {
+      return authResult(false, 'Bedrock configured in settings but AWS_REGION is missing');
+    }
+    return authResult(true, null, 'settings_bedrock');
+  }
+
   const credentialsPath = path.join(configDir, '.credentials.json');
 
   // Check if credentials file exists
   if (!fs.existsSync(credentialsPath)) {
     // No credentials file - check macOS Keychain as fallback
     // Only use Keychain when using default config dir (not custom CLAUDE_CONFIG_DIR)
-    const isDefaultConfigDir = !process.env.CLAUDE_CONFIG_DIR;
-    if (isDefaultConfigDir) {
-      const keychainResult = checkMacOsKeychain();
-      if (keychainResult.authenticated) {
-        return {
-          authenticated: true,
-          error: null,
-          configDir,
-          method: 'keychain',
-        };
-      }
+    if (!process.env.CLAUDE_CONFIG_DIR && checkMacOsKeychain().authenticated) {
+      return authResult(true, null, 'keychain');
     }
-    return {
-      authenticated: false,
-      error: 'No credentials file found',
-      configDir,
-    };
+    return authResult(false, 'No credentials file found');
   }
 
   // Check if credentials file has content
@@ -154,42 +187,21 @@ function checkClaudeAuth() {
 
     // Check for OAuth token (primary auth method)
     if (creds.claudeAiOauth?.accessToken) {
-      // Check if token is expired
       const expiresAt = creds.claudeAiOauth.expiresAt;
       if (expiresAt && new Date(expiresAt) < new Date()) {
-        return {
-          authenticated: false,
-          error: 'OAuth token expired',
-          configDir,
-        };
+        return authResult(false, 'OAuth token expired');
       }
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
+      return authResult(true);
     }
 
     // Check for API key auth
     if (creds.apiKey) {
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
+      return authResult(true);
     }
 
-    return {
-      authenticated: false,
-      error: 'No valid authentication found in credentials',
-      configDir,
-    };
+    return authResult(false, 'No valid authentication found in credentials');
   } catch (err) {
-    return {
-      authenticated: false,
-      error: `Failed to parse credentials: ${err.message}`,
-      configDir,
-    };
+    return authResult(false, `Failed to parse credentials: ${err.message}`);
   }
 }
 
@@ -289,8 +301,6 @@ function runPreflight(options = {}) {
   const errors = [];
   const warnings = [];
 
-  const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
-  const { normalizeProviderName } = require('../lib/provider-names');
   const settings = loadSettings();
   const providerName = normalizeProviderName(
     options.provider || settings.defaultProvider || 'claude'

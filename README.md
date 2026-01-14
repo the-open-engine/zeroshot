@@ -41,9 +41,11 @@ Built for tasks where correctness matters more than speed.
 
 ```bash
 zeroshot run 123                    # GitHub issue number
+zeroshot run feature.md             # Markdown file
+zeroshot run "Add dark mode"        # Inline text
 ```
 
-Or describe the task inline:
+Or describe a complex task inline:
 
 ```bash
 zeroshot run "Add optimistic locking with automatic retry: when updating a user,
@@ -149,8 +151,9 @@ Rule of thumb: if you cannot describe what "done" means, validators cannot verif
 
 ```bash
 # Run
-zeroshot run 123
-zeroshot run "Add dark mode"
+zeroshot run 123                      # GitHub issue
+zeroshot run feature.md               # Markdown file
+zeroshot run "Add dark mode"          # Inline text
 
 # Isolation
 zeroshot run 123 --worktree       # git worktree

@@ -17,9 +17,97 @@ const os = require('os');
 const { exec, execSync } = require('../lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
 const { getProvider, parseChunkWithProvider } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
+const { loadSettings } = require('../../lib/settings.js');
+const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
 
 // Schema utilities for normalizing LLM output
 const { normalizeEnumValues } = require('./schema-utils');
+
+/**
+ * Build Claude-specific environment variables for task spawning
+ * Consolidates auth resolution and model mapping logic used by both isolated and non-isolated modes
+ * @param {Object} modelSpec - Model specification from agent
+ * @param {Object} [options] - Options
+ * @param {boolean} [options.includeAuth=true] - Include auth env vars (false for isolated mode where IsolationManager handles auth)
+ * @returns {Object} Environment variables to merge into spawn env
+ */
+function buildClaudeEnv(modelSpec, options = {}) {
+  const { includeAuth = true } = options;
+  const env = {};
+
+  if (includeAuth) {
+    const settings = loadSettings();
+    const authEnv = resolveClaudeAuth(settings);
+    Object.assign(env, authEnv);
+  }
+
+  if (modelSpec?.model) {
+    env.ANTHROPIC_MODEL = modelSpec.model;
+  }
+
+  // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
+  env.ZEROSHOT_BLOCK_ASK_USER = '1';
+
+  return env;
+}
+
+/**
+ * Create handlers for task spawn process events
+ * Consolidates the duplicated process event handling between isolated and non-isolated modes
+ * @param {Object} agent - Agent instance
+ * @param {Function} resolve - Promise resolve function
+ * @param {Function} reject - Promise reject function
+ * @returns {{ onClose: Function, onError: Function }} Event handlers
+ */
+function createTaskSpawnHandlers(agent, resolve, reject) {
+  let stdout = '';
+  let stderr = '';
+
+  return {
+    onStdout: (data) => {
+      stdout += data.toString();
+    },
+    onStderr: (data) => {
+      stderr += data.toString();
+    },
+    onClose: (code, signal) => {
+      // Handle process killed by signal (e.g., SIGTERM, SIGKILL, SIGSTOP)
+      if (signal) {
+        reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
+        return;
+      }
+
+      if (code === 0) {
+        // Parse task ID from output: "✓ Task spawned: xxx-yyy-nn"
+        // Format: <adjective>-<noun>-<digits> (may or may not have task- prefix)
+        const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
+        if (match) {
+          const spawnedTaskId = match[1];
+          agent.currentTaskId = spawnedTaskId; // Track for resume capability
+          agent._publishLifecycle('TASK_ID_ASSIGNED', {
+            pid: agent.processPid,
+            taskId: spawnedTaskId,
+          });
+
+          // Start liveness monitoring
+          if (agent.enableLivenessCheck) {
+            agent.lastOutputTime = Date.now(); // Initialize to spawn time
+            agent._startLivenessCheck();
+          }
+
+          resolve(spawnedTaskId);
+        } else {
+          reject(new Error(`Could not parse task ID from output: ${stdout}`));
+        }
+      } else {
+        reject(new Error(`zeroshot task run failed with code ${code}: ${stderr}`));
+      }
+    },
+    onError: (error) => {
+      reject(error);
+    },
+  };
+}
 
 /**
  * Validate and sanitize error messages.
@@ -456,16 +544,10 @@ async function spawnClaudeTask(agent, context) {
   }
 
   // Build environment for spawn
-  const spawnEnv = {
-    ...process.env,
-  };
+  const spawnEnv = { ...process.env };
 
   if (providerName === 'claude') {
-    if (modelSpec?.model) {
-      spawnEnv.ANTHROPIC_MODEL = modelSpec.model;
-    }
-    // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
-    spawnEnv.ZEROSHOT_BLOCK_ASK_USER = '1';
+    Object.assign(spawnEnv, buildClaudeEnv(modelSpec));
 
     // WORKTREE MODE: Activate git safety hook via environment variable
     if (agent.worktree?.enabled) {
@@ -482,6 +564,7 @@ async function spawnClaudeTask(agent, context) {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: spawnEnv,
     });
+
     // Track PID for resource monitoring
     agent.processPid = proc.pid;
     agent._publishLifecycle('PROCESS_SPAWNED', { pid: proc.pid });
@@ -1021,17 +1104,13 @@ async function spawnClaudeTaskIsolated(agent, context) {
   // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
   const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+  // Note: Auth env vars are injected by IsolationManager, we only need model mapping here
+  const isolatedEnv =
+    providerName === 'claude' ? buildClaudeEnv(modelSpec, { includeAuth: false }) : {};
 
   const taskId = await new Promise((resolve, reject) => {
     const proc = manager.spawnInContainer(clusterId, command, {
-      env:
-        providerName === 'claude'
-          ? {
-              ANTHROPIC_MODEL: modelSpec?.model,
-              // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
-              ZEROSHOT_BLOCK_ASK_USER: '1',
-            }
-          : {},
+      env: isolatedEnv,
     });
 
     // Track PID for resource monitoring
