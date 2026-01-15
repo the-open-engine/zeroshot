@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push hook: Block direct pushes to main + manual version tags
+# Pre-push hook: Block direct pushes to main/dev + enforce PR workflow
 
 set -e
 
@@ -9,7 +9,7 @@ if [ -n "$CI" ]; then
 fi
 
 # ============================================================================
-# PART 1: Block direct pushes to main branch
+# PART 1: Block direct pushes to main and dev branches
 # ============================================================================
 
 # Read push details from stdin
@@ -28,16 +28,35 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo ""
     echo "❌ ERROR: You cannot push directly to 'main' branch"
     echo ""
-    echo "Required workflow:"
-    echo "  1. Switch to 'dev': git switch dev"
-    echo "  2. Push to 'dev': git push origin dev"
-    echo "  3. Open PR: dev → main"
-    echo "  4. Merge after CI passes"
+    echo "Releases flow:  dev → PR → main → semantic-release"
     echo ""
-    echo "This enforces:"
-    echo "  • All changes reviewed via PR"
-    echo "  • CI validation before production"
-    echo "  • semantic-release manages versions"
+    echo "To release:"
+    echo "  gh pr create --base main --head dev --title \"Release\""
+    echo ""
+    exit 1
+  fi
+
+  # Block pushes to dev
+  if [ "$remote_branch" = "dev" ]; then
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                   ║"
+    echo "║  ❌ BLOCKED: Direct push to 'dev' branch                          ║"
+    echo "║                                                                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "❌ ERROR: You cannot push directly to 'dev' branch"
+    echo ""
+    echo "Required workflow:"
+    echo "  1. Create feature branch: git switch -c feat/my-feature"
+    echo "  2. Push feature branch:   git push -u origin feat/my-feature"
+    echo "  3. Create PR:             gh pr create --base dev"
+    echo "  4. Enable auto-merge:     gh pr merge --auto --squash"
+    echo ""
+    echo "Merge queue will:"
+    echo "  • Rebase your PR on latest dev"
+    echo "  • Re-run CI on rebased code"
+    echo "  • Merge only if CI passes"
     echo ""
     exit 1
   fi

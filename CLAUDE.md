@@ -340,7 +340,48 @@ const maxValidators = cluster.config.complexity === 'CRITICAL' ? 5 : 3;
 
 ## 🔴 BEHAVIORAL RULES
 
-### Git Workflow (Multi-Agent Context)
+### Git Workflow (Contributing to Zeroshot)
+
+**Merge queue enforces CI on rebased code before merge.**
+
+```
+feature-branch (local)
+↓
+pre-push hook → lint + typecheck (~5s)
+↓
+push to origin/feature-branch
+↓
+gh pr create --base dev
+↓
+CI runs tests on PR branch
+↓
+gh pr merge --auto --squash → enters merge queue
+↓
+Queue rebases PR on latest dev + runs CI again
+↓
+Merge to dev (only if CI passes on rebased code)
+```
+
+**Pre-push hook blocks:** Direct pushes to `main` or `dev`. Must use PR workflow.
+
+**Commands:**
+
+```bash
+# Feature work
+git switch -c feat/my-feature
+# ... make changes ...
+git push -u origin feat/my-feature
+gh pr create --base dev
+gh pr merge --auto --squash
+
+# Release (dev → main)
+gh pr create --base main --head dev --title "Release"
+# → CI passes → merge → semantic-release publishes
+```
+
+**Setup merge queue (admin):** `./scripts/setup-merge-queue.sh`
+
+### Git Safety (Multi-Agent Context)
 
 **CRITICAL: Use WIP commits instead of stashing:**
 
@@ -454,14 +495,16 @@ npm run typecheck         # TypeScript (if applicable)
 
 ## Mechanical Enforcement
 
-| Antipattern               | Enforcement               |
-| ------------------------- | ------------------------- |
-| Dangerous fallbacks       | ESLint ERROR              |
-| Manual git tags           | Pre-push hook             |
-| Git in validator prompts  | Config validator          |
-| Multiple impl files (-v2) | Pre-commit hook           |
-| Spawn without permission  | Runtime check (CLI)       |
-| Git stash usage           | Pre-commit hook (planned) |
+| Antipattern               | Enforcement                              |
+| ------------------------- | ---------------------------------------- |
+| Dangerous fallbacks       | ESLint ERROR                             |
+| Manual git tags           | Pre-push hook                            |
+| Direct push to main/dev   | Pre-push hook (blocks with instructions) |
+| Git in validator prompts  | Config validator                         |
+| Multiple impl files (-v2) | Pre-commit hook                          |
+| Spawn without permission  | Runtime check (CLI)                      |
+| Git stash usage           | Pre-commit hook (planned)                |
+| Merge without CI rebase   | GitHub merge queue                       |
 
 ## 🔴 NODE.JS PATTERNS (Zeroshot-Specific)
 
