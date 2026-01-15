@@ -422,5 +422,33 @@ Done.`;
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result.complexity, 'TRIVIAL');
     });
+
+    it('REGRESSION #52: Claude assistant message with text blocks (Haiku)', function () {
+      // Issue #52: Haiku returns JSON in type:assistant message with type:text content blocks
+      // The output parser was ignoring these blocks, only handling tool_use and thinking
+      const output = `{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":\\"SIMPLE\\",\\"taskType\\":\\"INQUIRY\\",\\"reasoning\\":\\"Quick question\\"}"}]}}
+{"type":"result","success":true}`;
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'SIMPLE');
+      assert.strictEqual(result.taskType, 'INQUIRY');
+      assert.ok(result.reasoning);
+    });
+
+    it('REGRESSION #52: Claude assistant message with multiple text blocks', function () {
+      // Haiku may split output across multiple text blocks
+      const output = `{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":"},{"type":"text","text":"\\"STANDARD\\",\\"taskType\\":\\"DEBUG\\",\\"reasoning\\":\\"Fix bug\\"}"}]}}`;
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'STANDARD');
+      assert.strictEqual(result.taskType, 'DEBUG');
+    });
+
+    it('REGRESSION #52: Claude assistant message text blocks alongside tool_use', function () {
+      // Real-world scenario: text blocks mixed with tool_use
+      const output = `{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":\\"TRIVIAL\\",\\"taskType\\":\\"TASK\\",\\"reasoning\\":\\"Simple change\\"}"},{"type":"tool_use","id":"tool1","name":"Read","input":{}}]}}`;
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'TRIVIAL');
+      assert.strictEqual(result.taskType, 'TASK');
+    });
   });
 });

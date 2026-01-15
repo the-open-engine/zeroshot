@@ -204,4 +204,138 @@ describe('Settings System', function () {
     // Should be pretty-printed (indented)
     assert.ok(raw.includes('\n  '), 'Settings should be pretty-printed');
   });
+
+  // ============================================================================
+  // AGENT CONFIG INTEGRATION
+  // ============================================================================
+  describe('strictSchema propagation to agent-config (Issue #52)', function () {
+    it('should propagate strictSchema=false from settings to agent config', function () {
+      // Setup: Save settings with strictSchema=false
+      const saveSettings = (settings) => {
+        const dir = path.dirname(TEST_SETTINGS_FILE);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+      };
+
+      saveSettings({ strictSchema: false });
+
+      // Override ZEROSHOT_SETTINGS_FILE for this test
+      const originalEnv = process.env.ZEROSHOT_SETTINGS_FILE;
+      process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
+
+      try {
+        // Re-require to pick up the env var change
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+
+        const { validateAgentConfig } = require('../src/agent/agent-config');
+
+        // Agent config without strictSchema set - should inherit from settings
+        const agentConfig = {
+          id: 'test-agent',
+          role: 'conductor',
+          triggers: [],
+        };
+
+        const normalized = validateAgentConfig(agentConfig);
+
+        // strictSchema should be false (inherited from settings)
+        assert.strictEqual(normalized.strictSchema, false);
+      } finally {
+        // Restore env
+        if (originalEnv) {
+          process.env.ZEROSHOT_SETTINGS_FILE = originalEnv;
+        } else {
+          delete process.env.ZEROSHOT_SETTINGS_FILE;
+        }
+        // Clean up require cache
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+      }
+    });
+
+    it('should NOT override explicit strictSchema in agent config', function () {
+      // Setup: Save settings with strictSchema=false
+      const saveSettings = (settings) => {
+        const dir = path.dirname(TEST_SETTINGS_FILE);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+      };
+
+      saveSettings({ strictSchema: false });
+
+      // Override ZEROSHOT_SETTINGS_FILE for this test
+      const originalEnv = process.env.ZEROSHOT_SETTINGS_FILE;
+      process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
+
+      try {
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+
+        const { validateAgentConfig } = require('../src/agent/agent-config');
+
+        // Agent config WITH explicit strictSchema=true - should NOT be overridden
+        const agentConfig = {
+          id: 'test-agent',
+          role: 'conductor',
+          triggers: [],
+          strictSchema: true, // Explicit - should be preserved
+        };
+
+        const normalized = validateAgentConfig(agentConfig);
+
+        // strictSchema should remain true (explicit in config)
+        assert.strictEqual(normalized.strictSchema, true);
+      } finally {
+        if (originalEnv) {
+          process.env.ZEROSHOT_SETTINGS_FILE = originalEnv;
+        } else {
+          delete process.env.ZEROSHOT_SETTINGS_FILE;
+        }
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+      }
+    });
+
+    it('should default strictSchema to true when not in settings', function () {
+      // No settings file - defaults should apply
+      const originalEnv = process.env.ZEROSHOT_SETTINGS_FILE;
+      process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
+
+      // Ensure no settings file exists
+      if (fs.existsSync(TEST_SETTINGS_FILE)) {
+        fs.unlinkSync(TEST_SETTINGS_FILE);
+      }
+
+      try {
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+
+        const { validateAgentConfig } = require('../src/agent/agent-config');
+
+        const agentConfig = {
+          id: 'test-agent',
+          role: 'conductor',
+          triggers: [],
+        };
+
+        const normalized = validateAgentConfig(agentConfig);
+
+        // strictSchema should default to true
+        assert.strictEqual(normalized.strictSchema, true);
+      } finally {
+        if (originalEnv) {
+          process.env.ZEROSHOT_SETTINGS_FILE = originalEnv;
+        } else {
+          delete process.env.ZEROSHOT_SETTINGS_FILE;
+        }
+        delete require.cache[require.resolve('../lib/settings')];
+        delete require.cache[require.resolve('../src/agent/agent-config')];
+      }
+    });
+  });
 });

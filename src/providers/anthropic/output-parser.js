@@ -91,6 +91,15 @@ function parseAssistantMessage(message) {
   const results = [];
 
   for (const block of message.content) {
+    // Handle text content blocks (CRITICAL for Haiku/weaker models that return JSON in text)
+    // Issue #52: Haiku returns JSON in type:text blocks, not in result wrapper
+    if (block.type === 'text' && block.text) {
+      results.push({
+        type: 'text',
+        text: block.text,
+      });
+    }
+
     if (block.type === 'tool_use') {
       results.push({
         type: 'tool_call',

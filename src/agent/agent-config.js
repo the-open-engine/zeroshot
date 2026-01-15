@@ -78,6 +78,14 @@ function validateAgentConfig(config, options = {}) {
   const maxModel = settings.maxModel || 'sonnet';
   const minModel = settings.minModel || null;
 
+  // STRICT SCHEMA PROPAGATION: Issue #52 fix
+  // If agent config doesn't explicitly set strictSchema, inherit from global settings
+  // This allows `zeroshot settings set strictSchema false` to actually affect agents
+  // Default behavior: strictSchema=true (reliable JSON output, no streaming)
+  if (config.strictSchema === undefined) {
+    config.strictSchema = settings.strictSchema !== false; // Default true if not set
+  }
+
   if (modelConfig.type === 'static') {
     if (modelConfig.model && VALID_MODELS.includes(modelConfig.model)) {
       // Static model: validate once (legacy Claude models only)
