@@ -418,16 +418,6 @@ function reportSelfTriggeringAgents(config, agentInputTopics, agentOutputTopics,
         `Agent '${agent.id}' triggers on '${selfTrigger}' and produces '${selfTrigger}'. ` +
           'Instant infinite loop.'
       );
-      const hookHasLogic = agent.hooks?.onComplete?.logic?.script;
-
-    const triggerHasLogic = agent.triggers?.some((t) => t.topic === selfTrigger && t.logic?.script);
-    const hookHasLogic = agent.hooks?.onComplete?.logic?.script;
-
-    if (!triggerHasLogic && !hookHasLogic) {
-      errors.push(
-        `Agent '${agent.id}' triggers on '${selfTrigger}' and produces '${selfTrigger}'. ` +
-          'Instant infinite loop.'
-      );
     }
   }
 }

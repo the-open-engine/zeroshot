@@ -658,8 +658,6 @@ describe('CANNOT_VALIDATE_YET Context Builder - Not Skipped on Retry', function 
   });
 
   describe('Context Builder Skip Injection', function () {
-    const { buildContext } = require('../src/agent/agent-context-builder');
-
     // Helper to create base context params
     const baseParams = (overrides = {}) => ({
       id: 'validator',
@@ -672,42 +670,43 @@ describe('CANNOT_VALIDATE_YET Context Builder - Not Skipped on Retry', function 
       ...overrides,
     });
 
-    // Helper to create mock message bus with CANNOT_VALIDATE criteria
-    const mockBusWithCriteria = (criteriaResults) => ({
-      query: ({ topic }) => {
-        if (topic === 'VALIDATION_RESULT') {
-          return [
-            {
-              content: {
-                data: {
-                  criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+    it('should not duplicate CANNOT_VALIDATE criteria in retry iterations', function () {
+      const messageBus = {
+        query: ({ topic }) => {
+          if (topic === 'VALIDATION_RESULT') {
+            return [
+              {
+                content: {
+                  data: {
+                    criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+                  },
                 },
               },
-            },
-            {
-              content: {
-                data: {
-                  criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+              {
+                content: {
+                  data: {
+                    criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+                  },
                 },
               },
-            },
-            {
-              content: {
-                data: {
-                  criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+              {
+                content: {
+                  data: {
+                    criteriaResults: [{ id: 'AC1', status: 'CANNOT_VALIDATE', reason: 'R1' }],
+                  },
                 },
               },
-            },
-          ];
-        }
-        return [];
-      },
-    };
+            ];
+          }
+          return [];
+        },
+      };
 
-    const context = buildContext(baseContextParams({ messageBus }));
+      const context = buildContext(baseParams({ messageBus }));
 
-    const matches = context.match(/\*\*AC1\*\*/g) || [];
-    assert.strictEqual(matches.length, 1, `AC1 appeared ${matches.length} times, expected 1`);
+      const matches = context.match(/\*\*AC1\*\*/g) || [];
+      assert.strictEqual(matches.length, 1, `AC1 appeared ${matches.length} times, expected 1`);
+    });
   });
 });
 
