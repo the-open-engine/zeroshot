@@ -7,13 +7,24 @@
 const assert = require('assert');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
-describe('MockTaskRunner Streaming', () => {
-  let runner;
+let runner;
 
+describe('MockTaskRunner Streaming', () => {
   beforeEach(() => {
     runner = new MockTaskRunner();
   });
 
+  defineBasicStreamingTests();
+  defineEventDelayTests();
+  defineOnOutputCallbackTests();
+  defineMixedBehaviorTests();
+  defineAssertStreamedEventsTests();
+  defineGetStreamEventsTests();
+  defineRealWorldUseCaseTests();
+  defineResetTests();
+});
+
+function defineBasicStreamingTests() {
   describe('Basic streaming', () => {
     it('should emit stream events in correct order', async () => {
       runner
@@ -52,7 +63,9 @@ describe('MockTaskRunner Streaming', () => {
       assert.strictEqual(result.output, '{"status": "complete"}');
     });
   });
+}
 
+function defineEventDelayTests() {
   describe('Event delays', () => {
     it('should emit events with configurable delays', async () => {
       const delayMs = 100;
@@ -101,7 +114,9 @@ describe('MockTaskRunner Streaming', () => {
       assert(elapsed < 50, `Expected less than 50ms, but took ${elapsed}ms`);
     });
   });
+}
 
+function defineOnOutputCallbackTests() {
   describe('onOutput callback', () => {
     it('should call onOutput callback for each event', async () => {
       const capturedEvents = [];
@@ -132,7 +147,9 @@ describe('MockTaskRunner Streaming', () => {
       assert.strictEqual(JSON.parse(capturedEvents[2].content).type, 'tool_result');
     });
   });
+}
 
+function defineMixedBehaviorTests() {
   describe('Mixed behaviors', () => {
     it('should support both streaming and non-streaming agents', async () => {
       // Streaming agent
@@ -182,7 +199,9 @@ describe('MockTaskRunner Streaming', () => {
       assert.strictEqual(events2[0].text, 'First call');
     });
   });
+}
 
+function defineAssertStreamedEventsTests() {
   describe('assertStreamedEvents', () => {
     it('should assert events match expected', async () => {
       runner
@@ -284,7 +303,9 @@ describe('MockTaskRunner Streaming', () => {
       runner.assertStreamedEvents('agent-1', [{ type: 'text_delta', text: 'First' }], 1);
     });
   });
+}
 
+function defineGetStreamEventsTests() {
   describe('getStreamEvents', () => {
     it('should return empty array for non-existent call', () => {
       const events = runner.getStreamEvents('non-existent-agent', 0);
@@ -316,7 +337,9 @@ describe('MockTaskRunner Streaming', () => {
       assert.strictEqual(events[0].type, 'text_delta');
     });
   });
+}
 
+function defineRealWorldUseCaseTests() {
   describe('Real-world use cases', () => {
     it('should simulate Claude task execution with multiple event types', async () => {
       runner
@@ -386,7 +409,9 @@ describe('MockTaskRunner Streaming', () => {
       ]);
     });
   });
+}
 
+function defineResetTests() {
   describe('reset()', () => {
     it('should clear stream events on reset', async () => {
       runner
@@ -403,4 +428,4 @@ describe('MockTaskRunner Streaming', () => {
       assert.strictEqual(runner.getStreamEvents('agent-1', 0).length, 0);
     });
   });
-});
+}

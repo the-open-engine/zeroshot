@@ -5,13 +5,22 @@
 const assert = require('assert');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
-describe('MockTaskRunner - Output Format Validation', function () {
-  let mockRunner;
+let mockRunner;
 
+describe('MockTaskRunner - Output Format Validation', function () {
   beforeEach(() => {
     mockRunner = new MockTaskRunner();
   });
 
+  defineWithOutputFormatTests();
+  defineWithJsonSchemaTests();
+  defineSchemaValidationTests();
+  defineRealWorldValidationTests();
+  defineValidationWithOtherBehaviorTests();
+  defineComplexNestedSchemaTests();
+});
+
+function defineWithOutputFormatTests() {
   describe('withOutputFormat', function () {
     it('should accept valid output formats', function () {
       // Should not throw
@@ -40,7 +49,9 @@ describe('MockTaskRunner - Output Format Validation', function () {
       assert.strictEqual(behavior.type, 'success');
     });
   });
+}
 
+function defineWithJsonSchemaTests() {
   describe('withJsonSchema', function () {
     it('should accept valid JSON schema', function () {
       const schema = {
@@ -86,215 +97,232 @@ describe('MockTaskRunner - Output Format Validation', function () {
       assert.deepStrictEqual(behavior.jsonSchema, schema);
     });
   });
+}
 
+function defineSchemaValidationTests() {
   describe('Schema validation on run', function () {
-    it('should pass validation when output matches schema', async function () {
-      const schema = {
-        type: 'object',
-        properties: {
-          approved: { type: 'boolean' },
-          message: { type: 'string' },
-        },
-        required: ['approved'],
-      };
+    defineSchemaValidationSuccessTests();
+    defineSchemaValidationFailureTests();
+    defineSchemaValidationSkipTests();
+    defineSchemaValidationStreamJsonTests();
+  });
+}
 
-      mockRunner
-        .when('validator')
-        .withOutputFormat('json')
-        .withJsonSchema(schema)
-        .returns({ approved: true, message: 'Looks good' });
+function defineSchemaValidationSuccessTests() {
+  it('should pass validation when output matches schema', async function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        approved: { type: 'boolean' },
+        message: { type: 'string' },
+      },
+      required: ['approved'],
+    };
 
-      const result = await mockRunner.run('test context', {
-        agentId: 'validator',
-        modelLevel: 'level2',
-      });
+    mockRunner
+      .when('validator')
+      .withOutputFormat('json')
+      .withJsonSchema(schema)
+      .returns({ approved: true, message: 'Looks good' });
 
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.error, null);
+    const result = await mockRunner.run('test context', {
+      agentId: 'validator',
+      modelLevel: 'level2',
     });
 
-    it('should fail validation when output does not match schema', async function () {
-      const schema = {
-        type: 'object',
-        properties: {
-          approved: { type: 'boolean' },
-        },
-        required: ['approved'],
-      };
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.error, null);
+  });
+}
 
-      // Wrong type - string instead of boolean
-      mockRunner
-        .when('validator')
-        .withOutputFormat('json')
-        .withJsonSchema(schema)
-        .returns({ approved: 'yes' });
+function defineSchemaValidationFailureTests() {
+  it('should fail validation when output does not match schema', async function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        approved: { type: 'boolean' },
+      },
+      required: ['approved'],
+    };
 
-      const result = await mockRunner.run('test context', {
-        agentId: 'validator',
-        modelLevel: 'level2',
-      });
+    // Wrong type - string instead of boolean
+    mockRunner
+      .when('validator')
+      .withOutputFormat('json')
+      .withJsonSchema(schema)
+      .returns({ approved: 'yes' });
 
-      assert.strictEqual(result.success, false);
-      assert(result.error.includes('Output validation failed'));
-      assert(result.error.includes('approved'));
-      assert(result.error.includes('must be boolean'));
+    const result = await mockRunner.run('test context', {
+      agentId: 'validator',
+      modelLevel: 'level2',
     });
 
-    it('should fail validation when required field is missing', async function () {
-      const schema = {
-        type: 'object',
-        properties: {
-          approved: { type: 'boolean' },
-          reason: { type: 'string' },
-        },
-        required: ['approved', 'reason'],
-      };
-
-      // Missing 'reason' field
-      mockRunner
-        .when('validator')
-        .withOutputFormat('json')
-        .withJsonSchema(schema)
-        .returns({ approved: true });
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'validator',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, false);
-      assert(result.error.includes('Output validation failed'));
-      assert(result.error.includes('must have required property'));
-    });
-
-    it('should provide clear error messages for multiple validation errors', async function () {
-      const schema = {
-        type: 'object',
-        properties: {
-          count: { type: 'number' },
-          status: { type: 'string' },
-          active: { type: 'boolean' },
-        },
-        required: ['count', 'status', 'active'],
-      };
-
-      // Multiple wrong types
-      mockRunner
-        .when('validator')
-        .withOutputFormat('json')
-        .withJsonSchema(schema)
-        .returns({ count: 'five', status: 123, active: 'true' });
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'validator',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, false);
-      assert(result.error.includes('count'));
-      assert(result.error.includes('status'));
-      assert(result.error.includes('active'));
-    });
-
-    it('should fail validation when output is not valid JSON', async function () {
-      const schema = {
-        type: 'object',
-        properties: { approved: { type: 'boolean' } },
-      };
-
-      mockRunner
-        .when('validator')
-        .withOutputFormat('json')
-        .withJsonSchema(schema)
-        .returns('Not valid JSON {');
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'validator',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, false);
-      assert(result.error.includes('Output is not valid JSON'));
-    });
-
-    it('should skip validation when no schema is configured', async function () {
-      mockRunner.when('agent').withOutputFormat('json').returns({ anything: 'goes' });
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'agent',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.error, null);
-    });
-
-    it('should skip validation when output format is text', async function () {
-      const schema = {
-        type: 'object',
-        properties: { approved: { type: 'boolean' } },
-      };
-
-      // Format is 'text', so schema should be ignored
-      mockRunner
-        .when('agent')
-        .withOutputFormat('text')
-        .withJsonSchema(schema)
-        .returns('This is just text, not JSON');
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'agent',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.error, null);
-    });
-
-    it('should skip validation when no output format is set', async function () {
-      const schema = {
-        type: 'object',
-        properties: { approved: { type: 'boolean' } },
-      };
-
-      // No output format specified
-      mockRunner.when('agent').withJsonSchema(schema).returns('Plain text');
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'agent',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.error, null);
-    });
-
-    it('should validate with stream-json format', async function () {
-      const schema = {
-        type: 'object',
-        properties: {
-          approved: { type: 'boolean' },
-        },
-        required: ['approved'],
-      };
-
-      // Valid output with stream-json format
-      mockRunner
-        .when('agent')
-        .withOutputFormat('stream-json')
-        .withJsonSchema(schema)
-        .returns({ approved: true });
-
-      const result = await mockRunner.run('test context', {
-        agentId: 'agent',
-        modelLevel: 'level2',
-      });
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.error, null);
-    });
+    assert.strictEqual(result.success, false);
+    assert(result.error.includes('Output validation failed'));
+    assert(result.error.includes('approved'));
+    assert(result.error.includes('must be boolean'));
   });
 
+  it('should fail validation when required field is missing', async function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        approved: { type: 'boolean' },
+        reason: { type: 'string' },
+      },
+      required: ['approved', 'reason'],
+    };
+
+    // Missing 'reason' field
+    mockRunner
+      .when('validator')
+      .withOutputFormat('json')
+      .withJsonSchema(schema)
+      .returns({ approved: true });
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'validator',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, false);
+    assert(result.error.includes('Output validation failed'));
+    assert(result.error.includes('must have required property'));
+  });
+
+  it('should provide clear error messages for multiple validation errors', async function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        count: { type: 'number' },
+        status: { type: 'string' },
+        active: { type: 'boolean' },
+      },
+      required: ['count', 'status', 'active'],
+    };
+
+    // Multiple wrong types
+    mockRunner
+      .when('validator')
+      .withOutputFormat('json')
+      .withJsonSchema(schema)
+      .returns({ count: 'five', status: 123, active: 'true' });
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'validator',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, false);
+    assert(result.error.includes('count'));
+    assert(result.error.includes('status'));
+    assert(result.error.includes('active'));
+  });
+
+  it('should fail validation when output is not valid JSON', async function () {
+    const schema = {
+      type: 'object',
+      properties: { approved: { type: 'boolean' } },
+    };
+
+    mockRunner
+      .when('validator')
+      .withOutputFormat('json')
+      .withJsonSchema(schema)
+      .returns('Not valid JSON {');
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'validator',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, false);
+    assert(result.error.includes('Output is not valid JSON'));
+  });
+}
+
+function defineSchemaValidationSkipTests() {
+  it('should skip validation when no schema is configured', async function () {
+    mockRunner.when('agent').withOutputFormat('json').returns({ anything: 'goes' });
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'agent',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.error, null);
+  });
+
+  it('should skip validation when output format is text', async function () {
+    const schema = {
+      type: 'object',
+      properties: { approved: { type: 'boolean' } },
+    };
+
+    // Format is 'text', so schema should be ignored
+    mockRunner
+      .when('agent')
+      .withOutputFormat('text')
+      .withJsonSchema(schema)
+      .returns('This is just text, not JSON');
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'agent',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.error, null);
+  });
+
+  it('should skip validation when no output format is set', async function () {
+    const schema = {
+      type: 'object',
+      properties: { approved: { type: 'boolean' } },
+    };
+
+    // No output format specified
+    mockRunner.when('agent').withJsonSchema(schema).returns('Plain text');
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'agent',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.error, null);
+  });
+}
+
+function defineSchemaValidationStreamJsonTests() {
+  it('should validate with stream-json format', async function () {
+    const schema = {
+      type: 'object',
+      properties: {
+        approved: { type: 'boolean' },
+      },
+      required: ['approved'],
+    };
+
+    // Valid output with stream-json format
+    mockRunner
+      .when('agent')
+      .withOutputFormat('stream-json')
+      .withJsonSchema(schema)
+      .returns({ approved: true });
+
+    const result = await mockRunner.run('test context', {
+      agentId: 'agent',
+      modelLevel: 'level2',
+    });
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.error, null);
+  });
+}
+
+function defineRealWorldValidationTests() {
   describe('Real-world validation scenarios', function () {
     it('should validate validator agent output with approval schema', async function () {
       const approvalSchema = {
@@ -437,7 +465,9 @@ describe('MockTaskRunner - Output Format Validation', function () {
       assert(result.error.includes('must be object'));
     });
   });
+}
 
+function defineValidationWithOtherBehaviorTests() {
   describe('Validation with other behavior types', function () {
     it('should validate delayed responses', async function () {
       const schema = {
@@ -553,7 +583,9 @@ describe('MockTaskRunner - Output Format Validation', function () {
       assert(result.error.includes('must be number'));
     });
   });
+}
 
+function defineComplexNestedSchemaTests() {
   describe('Complex nested schemas', function () {
     it('should validate deeply nested object structures', async function () {
       const schema = {
@@ -643,4 +675,4 @@ describe('MockTaskRunner - Output Format Validation', function () {
       assert(result.error.includes('must be number'));
     });
   });
-});
+}

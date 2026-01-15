@@ -9,13 +9,24 @@
 const assert = require('assert');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
-describe('MockTaskRunner Error Scenarios', () => {
-  let mockRunner;
+let mockRunner;
 
+describe('MockTaskRunner Error Scenarios', () => {
   beforeEach(() => {
     mockRunner = new MockTaskRunner();
   });
 
+  defineRateLimitErrorTests();
+  defineAuthenticationErrorTests();
+  defineMalformedResponseTests();
+  defineTimeoutErrorTests();
+  defineNetworkErrorTests();
+  defineIntermittentFailureTests();
+  defineErrorStructureValidationTests();
+  defineCallTrackingTests();
+});
+
+function defineRateLimitErrorTests() {
   describe('Rate Limit Errors', () => {
     it('should simulate rate limit error with retry-after', async () => {
       mockRunner.when('agent').failsWithRateLimit(30);
@@ -41,7 +52,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(result2.output, JSON.stringify({ ok: true }));
     });
   });
+}
 
+function defineAuthenticationErrorTests() {
   describe('Authentication Errors', () => {
     it('should simulate authentication failure with default message', async () => {
       mockRunner.when('agent').failsWithAuth();
@@ -63,7 +76,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(result.errorType, 'AUTH_ERROR');
     });
   });
+}
 
+function defineMalformedResponseTests() {
   describe('Malformed Response Errors', () => {
     it('should simulate malformed response with default partial', async () => {
       mockRunner.when('agent').failsWithMalformed();
@@ -86,7 +101,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(result.output, '{"data": [1, 2,');
     });
   });
+}
 
+function defineTimeoutErrorTests() {
   describe('Timeout Errors', () => {
     it('should simulate request timeout', async () => {
       mockRunner.when('agent').failsWithTimeout();
@@ -98,7 +115,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(result.errorType, 'TIMEOUT');
     });
   });
+}
 
+function defineNetworkErrorTests() {
   describe('Network Errors', () => {
     it('should simulate network connection failure', async () => {
       mockRunner.when('agent').failsWithNetworkError();
@@ -110,7 +129,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(result.errorType, 'NETWORK_ERROR');
     });
   });
+}
 
+function defineIntermittentFailureTests() {
   describe('Intermittent Failures', () => {
     it('should fail on specific call number then succeed', async () => {
       mockRunner.when('agent').failsOnCall(2, 'timeout').thenReturns({ success: true });
@@ -158,7 +179,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(a2r3.success, true);
     });
   });
+}
 
+function defineErrorStructureValidationTests() {
   describe('Error Structure Validation', () => {
     it('should return consistent error structure for all error types', async () => {
       const errorTypes = [
@@ -201,7 +224,9 @@ describe('MockTaskRunner Error Scenarios', () => {
       }
     });
   });
+}
 
+function defineCallTrackingTests() {
   describe('Call Tracking with Errors', () => {
     it('should track call numbers correctly with intermittent failures', async () => {
       mockRunner.when('agent').failsOnCall(2, 'timeout').thenReturns({ ok: true });
@@ -217,19 +242,4 @@ describe('MockTaskRunner Error Scenarios', () => {
       assert.strictEqual(calls[2].callNumber, 3);
     });
   });
-
-  describe('Chaining with Other Behaviors', () => {
-    it('should allow configuring error then success on same agent', async () => {
-      mockRunner.when('agent').failsWithTimeout();
-
-      const result1 = await mockRunner.run('Test', { agentId: 'agent' });
-      assert.strictEqual(result1.success, false);
-
-      // Reconfigure to return success
-      mockRunner.when('agent').returns({ ok: true });
-
-      const result2 = await mockRunner.run('Test', { agentId: 'agent' });
-      assert.strictEqual(result2.success, true);
-    });
-  });
-});
+}

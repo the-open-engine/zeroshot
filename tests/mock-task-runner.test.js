@@ -7,13 +7,24 @@
 const assert = require('node:assert');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
-describe('MockTaskRunner Assertion API', () => {
-  let mockRunner;
+let mockRunner;
 
+describe('MockTaskRunner Assertion API', () => {
   beforeEach(() => {
     mockRunner = new MockTaskRunner();
   });
 
+  defineAssertCalledWithModelTests();
+  defineAssertCalledWithOutputFormatTests();
+  defineAssertCalledWithJsonSchemaTests();
+  defineAssertContextIncludesTests();
+  defineAssertContextExcludesTests();
+  defineAssertCalledWithOptionsTests();
+  defineComplexCallPatternTests();
+  defineErrorMessageQualityTests();
+});
+
+function defineAssertCalledWithModelTests() {
   describe('assertCalledWithModel', () => {
     it('should pass when agent called with correct model', async () => {
       mockRunner.when('worker').returns('{}');
@@ -57,7 +68,9 @@ describe('MockTaskRunner Assertion API', () => {
       mockRunner.assertCalledWithModel('worker', 'sonnet');
     });
   });
+}
 
+function defineAssertCalledWithOutputFormatTests() {
   describe('assertCalledWithOutputFormat', () => {
     it('should pass when agent called with correct output format', async () => {
       mockRunner.when('validator').returns('{"approved": true}');
@@ -98,7 +111,9 @@ describe('MockTaskRunner Assertion API', () => {
       );
     });
   });
+}
 
+function defineAssertCalledWithJsonSchemaTests() {
   describe('assertCalledWithJsonSchema', () => {
     const testSchema = {
       type: 'object',
@@ -153,7 +168,9 @@ describe('MockTaskRunner Assertion API', () => {
       );
     });
   });
+}
 
+function defineAssertContextIncludesTests() {
   describe('assertContextIncludes', () => {
     it('should pass when context includes expected substring', async () => {
       mockRunner.when('worker').returns('{}');
@@ -195,7 +212,9 @@ describe('MockTaskRunner Assertion API', () => {
       mockRunner.assertContextIncludes('worker', 'PLAN_READY');
     });
   });
+}
 
+function defineAssertContextExcludesTests() {
   describe('assertContextExcludes', () => {
     it('should pass when context does not include unwanted substring', async () => {
       mockRunner.when('worker').returns('{}');
@@ -240,7 +259,9 @@ describe('MockTaskRunner Assertion API', () => {
       );
     });
   });
+}
 
+function defineAssertCalledWithOptionsTests() {
   describe('assertCalledWithOptions', () => {
     it('should pass when all specified options match', async () => {
       mockRunner.when('validator').returns('{}');
@@ -337,7 +358,9 @@ describe('MockTaskRunner Assertion API', () => {
       );
     });
   });
+}
 
+function defineComplexCallPatternTests() {
   describe('Complex call patterns', () => {
     it('should verify model escalation workflow', async () => {
       mockRunner.when('worker').returns('{}');
@@ -408,7 +431,9 @@ describe('MockTaskRunner Assertion API', () => {
       assert(calls[2].context.includes('approved'));
     });
   });
+}
 
+function defineErrorMessageQualityTests() {
   describe('Error message quality', () => {
     it('should provide helpful error when agent not called', () => {
       assert.throws(
@@ -432,4 +457,4 @@ describe('MockTaskRunner Assertion API', () => {
       }
     });
   });
-});
+}
