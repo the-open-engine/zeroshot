@@ -22,10 +22,10 @@ const fs = require('fs');
 // Test storage directory (cleaned up after each test)
 const TEST_STORAGE = path.join(os.tmpdir(), 'zeroshot-nested-tests');
 
+let orchestrator;
+
 describe('Nested Cluster', function () {
   this.timeout(15000);
-
-  let orchestrator;
 
   beforeEach(() => {
     // Clean test directory
@@ -61,6 +61,13 @@ describe('Nested Cluster', function () {
     }
   });
 
+  defineConfigValidationTests();
+  defineMaxNestingDepthTests();
+  defineSubClusterWrapperTests();
+  defineMessageBusBridgeTests();
+});
+
+function defineConfigValidationTests() {
   describe('Config Validation', function () {
     it('should validate valid subcluster config', function () {
       const config = {
@@ -204,7 +211,9 @@ describe('Nested Cluster', function () {
       assert(result.errors.some((e) => e.toLowerCase().includes('trigger')));
     });
   });
+}
 
+function defineMaxNestingDepthTests() {
   describe('Max Nesting Depth', function () {
     it('should enforce max nesting depth of 5', function () {
       // Create deeply nested config (7 levels deep - should fail at 5)
@@ -249,7 +258,9 @@ describe('Nested Cluster', function () {
       );
     });
   });
+}
 
+function defineSubClusterWrapperTests() {
   describe('SubClusterWrapper', function () {
     it('should create SubClusterWrapper instance', function () {
       const dbPath = path.join(TEST_STORAGE, 'test.db');
@@ -285,7 +296,9 @@ describe('Nested Cluster', function () {
       assert.strictEqual(wrapper.state, 'idle');
     });
   });
+}
 
+function defineMessageBusBridgeTests() {
   describe('MessageBusBridge', function () {
     it('should create MessageBusBridge instance', function () {
       const dbPath1 = path.join(TEST_STORAGE, 'parent.db');
@@ -307,4 +320,4 @@ describe('Nested Cluster', function () {
       assert.strictEqual(bridge.isActive(), false);
     });
   });
-});
+}
