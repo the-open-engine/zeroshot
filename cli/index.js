@@ -2475,6 +2475,23 @@ taskCmd
     }
   });
 
+taskCmd
+  .command('episodes')
+  .alias('ep')
+  .description('List episodes chronologically')
+  .option('-s, --status <status>', 'Filter by status (running, completed, failed)')
+  .option('-n, --limit <n>', 'Limit number of results', parseInt)
+  .option('-v, --verbose', 'Show detailed information (default: table view)')
+  .action(async (options) => {
+    try {
+      const { listEpisodes } = await import('../task-lib/commands/episodes.js');
+      await listEpisodes(options);
+    } catch (error) {
+      console.error('Error listing episodes:', error.message);
+      process.exit(1);
+    }
+  });
+
 // List command - unified (shows both tasks and clusters)
 program
   .command('list')
