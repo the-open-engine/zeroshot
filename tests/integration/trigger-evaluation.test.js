@@ -14,14 +14,14 @@ const LogicEngine = require('../../src/logic-engine');
 const MessageBus = require('../../src/message-bus');
 const Ledger = require('../../src/ledger');
 
+let tempDir;
+let ledger;
+let messageBus;
+let logicEngine;
+let cluster;
+
 describe('Trigger Evaluation Integration', function () {
   this.timeout(10000);
-
-  let tempDir;
-  let ledger;
-  let messageBus;
-  let logicEngine;
-  let cluster;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-trigger-test-'));
@@ -55,6 +55,15 @@ describe('Trigger Evaluation Integration', function () {
     }
   });
 
+  defineBasicLedgerQueryTests();
+  defineClusterApiTests();
+  defineHelperFunctionTests();
+  defineErrorHandlingTests();
+  defineScriptValidationTests();
+  defineComplexConsensusTests();
+});
+
+function defineBasicLedgerQueryTests() {
   describe('Basic Ledger Queries', () => {
     it('should evaluate ledger.findLast()', () => {
       messageBus.publish({
@@ -151,7 +160,9 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(result, true);
     });
   });
+}
 
+function defineClusterApiTests() {
   describe('Cluster API', () => {
     it('should evaluate cluster.getAgentsByRole()', () => {
       const script = `
@@ -189,7 +200,9 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(result, true);
     });
   });
+}
 
+function defineHelperFunctionTests() {
   describe('Helper Functions', () => {
     it('helpers.allResponded() should check all validators responded', () => {
       // Publish implementation ready first
@@ -329,7 +342,9 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(result, false);
     });
   });
+}
 
+function defineErrorHandlingTests() {
   describe('Error Handling', () => {
     it('should return false on script error (fail-safe)', () => {
       const script = `
@@ -383,7 +398,9 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(result, true);
     });
   });
+}
 
+function defineScriptValidationTests() {
   describe('Script Validation', () => {
     it('should validate script syntax', () => {
       const validScript = 'return true;';
@@ -396,7 +413,9 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(invalidResult.valid, false);
     });
   });
+}
 
+function defineComplexConsensusTests() {
   describe('Complex Consensus Logic', () => {
     it('should evaluate complete validator consensus pattern', () => {
       // Worker publishes implementation
@@ -456,4 +475,4 @@ describe('Trigger Evaluation Integration', function () {
       assert.strictEqual(result, true);
     });
   });
-});
+}
