@@ -63,7 +63,6 @@ jobs:
           name: codecov-zeroshot
           fail_ci_if_error: false
         continue-on-error: true
-
   # Cross-platform/version compatibility (main only)
   # NOTE: macOS runners cost 10x Linux minutes - keep this scoped to main.
   install-matrix:
