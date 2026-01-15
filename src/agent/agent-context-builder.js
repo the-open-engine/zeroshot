@@ -159,14 +159,31 @@ function buildJsonSchemaSection(config) {
   return context;
 }
 
-function resolveSourceSince(source, cluster, lastTaskEndTime) {
-  if (source.since === 'cluster_start') {
+function resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime) {
+  const sinceValue = source.since;
+
+  if (sinceValue === 'cluster_start') {
     return cluster.createdAt;
   }
-  if (source.since === 'last_task_end') {
+  if (sinceValue === 'last_task_end') {
     return lastTaskEndTime || cluster.createdAt;
   }
-  return source.since;
+  if (sinceValue === 'last_agent_start') {
+    return lastAgentStartTime || cluster.createdAt;
+  }
+
+  if (typeof sinceValue === 'string') {
+    const parsed = Date.parse(sinceValue);
+    if (Number.isNaN(parsed)) {
+      throw new Error(
+        `Agent context source for topic ${source.topic} has invalid since value "${sinceValue}". ` +
+          'Use cluster_start, last_task_end, last_agent_start, or an ISO timestamp.'
+      );
+    }
+    return parsed;
+  }
+
+  return sinceValue;
 }
 
 function formatSourceMessagesSection(source, messages) {
@@ -184,10 +201,16 @@ function formatSourceMessagesSection(source, messages) {
   return context;
 }
 
-function buildSourcesSection({ strategy, messageBus, cluster, lastTaskEndTime }) {
+function buildSourcesSection({
+  strategy,
+  messageBus,
+  cluster,
+  lastTaskEndTime,
+  lastAgentStartTime,
+}) {
   let context = '';
   for (const source of strategy.sources) {
-    const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime);
+    const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
     const messages = messageBus.query({
       cluster_id: cluster.id,
       topic: source.topic,
@@ -372,6 +395,7 @@ function applyLegacyMaxTokens(context, strategy) {
  * @param {any} params.messageBus - Message bus for querying ledger
  * @param {any} params.cluster - Cluster object
  * @param {number} [params.lastTaskEndTime] - Timestamp of last task completion
+ * @param {number} [params.lastAgentStartTime] - Timestamp when this agent last started work
  * @param {any} params.triggeringMessage - Message that triggered this execution
  * @param {string} [params.selectedPrompt] - Pre-selected prompt from _selectPrompt() (iteration-based)
  * @param {object} [params.worktree] - Worktree isolation state (if running in worktree mode)
@@ -386,6 +410,7 @@ function buildContext({
   messageBus,
   cluster,
   lastTaskEndTime,
+  lastAgentStartTime,
   triggeringMessage,
   selectedPrompt,
   worktree,
@@ -398,7 +423,13 @@ function buildContext({
   context += buildInstructionsSection({ config, selectedPrompt, id });
   context += buildLegacyOutputSchemaSection(config);
   context += buildJsonSchemaSection(config);
-  context += buildSourcesSection({ strategy, messageBus, cluster, lastTaskEndTime });
+  context += buildSourcesSection({
+    strategy,
+    messageBus,
+    cluster,
+    lastTaskEndTime,
+    lastAgentStartTime,
+  });
   context += buildValidatorSkipSection({ role, messageBus, cluster });
   context += buildTriggeringMessageSection(triggeringMessage);
 

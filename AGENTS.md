@@ -132,6 +132,10 @@ helpers.allResponded(agents, topic, since);
 helpers.hasConsensus(topic, since);
 ```
 
+Context strategies now support `since: 'last_agent_start'` to scope history to the most recent
+iteration start for the executing agent. Acceptable values: `cluster_start`, `last_task_end`,
+`last_agent_start`, or an ISO timestamp string.
+
 ## Conductor: 2D Classification
 
 Classifies tasks on Complexity x TaskType, routes to parameterized templates.
@@ -358,6 +362,8 @@ Trust pre-commit hooks for trivial changes.
 npm run lint
 npm run test
 ```
+
+Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as non-negotiable law before typing again. Failing to read and address each validator complaint before claiming completion will be rejected automatically.
 
 ## CI Failure Diagnosis
 
