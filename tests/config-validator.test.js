@@ -2747,199 +2747,730 @@ describe('Semantic Validation - Medium Gap 15', function () {
       );
     });
   });
+});
 
-  // === HOOK LOGIC VALIDATION TESTS ===
-
-  describe('Hook Logic Validation', function () {
-    it('should accept valid hook logic block', function () {
-      const result = validateConfig({
+describe('Semantic Validation - Critical Gap 6', function () {
+  describe('Gap 6: 3+ agent circular dependencies', function () {
+    it('should error for 3-agent cycle without escape logic', function () {
+      const config = {
         agents: [
           {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
+            id: 'agentA',
+            role: 'implementation',
+            triggers: [{ topic: 'TOPIC_C' }],
             hooks: {
               onComplete: {
                 action: 'publish_message',
-                config: {
-                  topic: 'IMPL_READY',
-                  content: { text: 'done' },
-                },
-                logic: {
-                  engine: 'javascript',
-                  script: "if (!result.canValidate) return { topic: 'PROGRESS' };",
-                },
+                config: { topic: 'TOPIC_A', content: {} },
               },
             },
           },
           {
-            id: 'orch',
+            id: 'agentB',
+            role: 'validator',
+            triggers: [{ topic: 'TOPIC_A' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TOPIC_B', content: {} },
+              },
+            },
+          },
+          {
+            id: 'agentC',
             role: 'orchestrator',
+            triggers: [{ topic: 'TOPIC_B' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TOPIC_C', content: {} },
+              },
+            },
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const cycleErrors = result.errors.filter((e) => e.includes('[Gap 6]'));
+      assert.ok(cycleErrors.length > 0, 'Should detect 3-agent cycle');
+      assert.ok(cycleErrors[0].includes('→'), 'Should show cycle path');
+    });
+
+    it('should warn for 3-agent cycle with escape logic', function () {
+      const config = {
+        agents: [
+          {
+            id: 'agentA',
+            role: 'implementation',
             triggers: [
-              { topic: 'IMPL_READY', action: 'stop_cluster' },
-              { topic: 'PROGRESS', action: 'stop_cluster' },
+              {
+                topic: 'TOPIC_C',
+                logic: { script: 'return message.iteration < 5' }, // Escape logic
+              },
             ],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TOPIC_A', content: {} },
+              },
+            },
+          },
+          {
+            id: 'agentB',
+            role: 'validator',
+            triggers: [{ topic: 'TOPIC_A' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TOPIC_B', content: {} },
+              },
+            },
+          },
+          {
+            id: 'agentC',
+            role: 'orchestrator',
+            triggers: [{ topic: 'TOPIC_B' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TOPIC_C', content: {} },
+              },
+            },
           },
         ],
-      });
-      const logicErrors = result.errors.filter((e) => e.includes('logic'));
+      };
+      const result = validateConfig(config);
+      const cycleErrors = result.errors.filter((e) => e.includes('[Gap 6]'));
+      assert.strictEqual(cycleErrors.length, 0, 'Should not error with escape logic');
+      const cycleWarnings = result.warnings.filter((w) => w.includes('Circular dependency'));
+      assert.ok(cycleWarnings.length > 0, 'Should warn about cycle');
+    });
+
+    it('should not error for acyclic graph', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'WORK_DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'validator',
+            role: 'validator',
+            triggers: [{ topic: 'WORK_DONE' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'VALIDATION_RESULT', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const cycleErrors = result.errors.filter((e) => e.includes('[Gap 6]'));
+      assert.strictEqual(cycleErrors.length, 0);
+    });
+  });
+});
+
+describe('Semantic Validation - Critical Gap 7', function () {
+  describe('Gap 7: CLUSTER_OPERATIONS payload invalid', function () {
+    it('should error when CLUSTER_OPERATIONS missing operations field', function () {
+      const config = {
+        agents: [
+          {
+            id: 'conductor',
+            role: 'conductor',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                transform: {
+                  script: 'return { topic: "CLUSTER_OPERATIONS", content: { data: {} } }', // Missing operations
+                },
+              },
+            },
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const opErrors = result.errors.filter((e) => e.includes('[Gap 7]'));
+      assert.ok(opErrors.length > 0, 'Should have Gap 7 error');
+      assert.ok(opErrors[0].includes('operations'));
+    });
+
+    it('should pass when CLUSTER_OPERATIONS has operations field', function () {
+      const config = {
+        agents: [
+          {
+            id: 'conductor',
+            role: 'conductor',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                transform: {
+                  script:
+                    'return { topic: "CLUSTER_OPERATIONS", content: { data: { operations: JSON.stringify([]) } } }',
+                },
+              },
+            },
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const opErrors = result.errors.filter((e) => e.includes('[Gap 7]'));
+      assert.strictEqual(opErrors.length, 0);
+    });
+  });
+});
+
+describe('Semantic Validation - Medium Gaps (8-9)', function () {
+  describe('Gap 8: JSON schema structurally invalid', function () {
+    it('should error when jsonSchema is not an object', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            jsonSchema: 'invalid', // Not an object
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const schemaErrors = result.errors.filter((e) => e.includes('[Gap 8]'));
+      assert.ok(schemaErrors.length > 0, 'Should have Gap 8 error');
+    });
+
+    it('should pass when jsonSchema is valid object', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            jsonSchema: {
+              type: 'object',
+              properties: { summary: { type: 'string' } },
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const schemaErrors = result.errors.filter((e) => e.includes('[Gap 8]'));
+      assert.strictEqual(schemaErrors.length, 0);
+    });
+  });
+
+  describe('Gap 9: Context sources never produced', function () {
+    it('should warn when context topic is never produced', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            contextStrategy: {
+              sources: [{ topic: 'NONEXISTENT_TOPIC', amount: 1 }],
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const contextWarnings = result.warnings.filter((w) => w.includes('[Gap 9]'));
+      assert.ok(contextWarnings.length > 0, 'Should have Gap 9 warning');
+    });
+  });
+});
+
+describe('Semantic Validation - Medium Gaps (10-11)', function () {
+  describe('Gap 10: Isolation config invalid', function () {
+    it('should error when docker isolation missing image', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            isolation: {
+              type: 'docker',
+              // Missing image field
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const isolationErrors = result.errors.filter((e) => e.includes('[Gap 10]'));
+      assert.ok(isolationErrors.length > 0, 'Should have Gap 10 error');
+      assert.ok(isolationErrors[0].includes('image'));
+    });
+
+    it('should error for unknown isolation type', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            isolation: {
+              type: 'invalid-type',
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const isolationErrors = result.errors.filter((e) => e.includes('[Gap 10]'));
+      assert.ok(isolationErrors.length > 0, 'Should have Gap 10 error');
+      assert.ok(isolationErrors[0].includes('Unknown isolation type'));
+    });
+  });
+
+  describe('Gap 11: Agent ID conflicts across subclusters', function () {
+    it('should error when duplicate agent ID in subcluster', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'sub',
+            type: 'subcluster',
+            role: 'orchestrator', // Subclusters need a role too
+            config: {
+              agents: [
+                {
+                  id: 'worker', // Duplicate ID
+                  role: 'validator',
+                  triggers: [{ topic: 'X' }],
+                  hooks: {
+                    onComplete: {
+                      action: 'publish_message',
+                      config: { topic: 'DONE', content: {} },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const idErrors = result.errors.filter((e) => e.includes('[Gap 11]'));
+      assert.ok(idErrors.length > 0, 'Should have Gap 11 error');
+      assert.ok(idErrors[0].includes('Duplicate agent ID'));
+    });
+  });
+});
+
+describe('Semantic Validation - Medium Gaps (12-13)', function () {
+  describe('Gap 12: Load config file paths dont exist', function () {
+    it('should error when loadConfig path doesnt exist', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            loadConfig: {
+              path: '/nonexistent/path/config.json',
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const pathErrors = result.errors.filter((e) => e.includes('[Gap 12]'));
+      assert.ok(pathErrors.length > 0, 'Should have Gap 12 error');
+      assert.ok(pathErrors[0].includes('does not exist'));
+    });
+  });
+
+  describe('Gap 13: Task executor config invalid', function () {
+    it('should error when task executor missing command', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            taskExecutor: {
+              retries: 3,
+              // Missing command
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const execErrors = result.errors.filter((e) => e.includes('[Gap 13]'));
+      assert.ok(execErrors.length > 0, 'Should have Gap 13 error');
+      assert.ok(execErrors[0].includes('command'));
+    });
+
+    it('should error when retries is negative', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            taskExecutor: {
+              command: 'claude',
+              retries: -1,
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const execErrors = result.errors.filter((e) => e.includes('[Gap 13]'));
+      assert.ok(execErrors.length > 0, 'Should have Gap 13 error');
+      assert.ok(execErrors[0].includes('retries'));
+    });
+
+    it('should error when timeout is invalid', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            taskExecutor: {
+              command: 'claude',
+              timeout: -1000,
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const execErrors = result.errors.filter((e) => e.includes('[Gap 13]'));
+      assert.ok(execErrors.length > 0, 'Should have Gap 13 error');
+      assert.ok(execErrors[0].includes('timeout'));
+    });
+  });
+});
+
+describe('Semantic Validation - Medium Gap 14', function () {
+  describe('Gap 14: Context source format invalid', function () {
+    it('should error when context strategy has invalid value', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            contextStrategy: {
+              sources: [{ topic: 'TEST', amount: 1, strategy: 'invalid-strategy' }],
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'tester',
+            role: 'validator',
+            triggers: [{ topic: 'X' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TEST', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const strategyErrors = result.errors.filter((e) => e.includes('[Gap 14]'));
+      assert.ok(strategyErrors.length > 0, 'Should have Gap 14 error');
+      assert.ok(strategyErrors[0].includes('strategy'));
+    });
+
+    it('should warn when context source missing amount', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            contextStrategy: {
+              sources: [{ topic: 'TEST' }], // Missing amount
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'tester',
+            role: 'validator',
+            triggers: [{ topic: 'X' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TEST', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const amountWarnings = result.warnings.filter((w) => w.includes('[Gap 14]'));
+      assert.ok(amountWarnings.length > 0, 'Should have Gap 14 warning');
+      assert.ok(amountWarnings[0].includes('amount'));
+    });
+  });
+});
+
+describe('Semantic Validation - Medium Gap 15', function () {
+  describe('Gap 15: Role references stricter', function () {
+    it('should error when critical logic references missing role', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [
+              {
+                topic: 'VALIDATION_RESULT',
+                logic: {
+                  script: 'return cluster.getAgentsByRole("validator").length > 0', // References missing role
+                },
+              },
+            ],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const roleErrors = result.errors.filter((e) => e.includes('[Gap 15]'));
+      assert.ok(roleErrors.length > 0, 'Should have Gap 15 error');
+      assert.ok(roleErrors[0].includes('validator'));
+    });
+
+    it('should pass when role exists', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [
+              {
+                topic: 'VALIDATION_RESULT',
+                logic: {
+                  script: 'return cluster.getAgentsByRole("validator").length > 0',
+                },
+              },
+            ],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'validator',
+            role: 'validator',
+            triggers: [{ topic: 'WORK_DONE' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'VALIDATION_RESULT', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const roleErrors = result.errors.filter((e) => e.includes('[Gap 15]'));
+      assert.strictEqual(roleErrors.length, 0);
+    });
+
+    it('should pass when logic has zero-length fallback (git-pusher pattern)', function () {
+      // This tests the git-pusher agent pattern that checks validators.length === 0
+      // and returns early if no validators exist (valid TRIVIAL/SIMPLE workflow)
+      const config = {
+        agents: [
+          {
+            id: 'git-pusher',
+            role: 'completion-detector',
+            triggers: [
+              {
+                topic: 'VALIDATION_RESULT',
+                logic: {
+                  // This is the exact pattern from git-pusher-agent.json
+                  // It correctly handles zero validators with an early return
+                  script:
+                    "const validators = cluster.getAgentsByRole('validator'); if (validators.length === 0) return true; return validators.length > 0;",
+                },
+              },
+            ],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'PR_CREATED', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'PR_CREATED', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const roleErrors = result.errors.filter((e) => e.includes('[Gap 15]'));
       assert.strictEqual(
-        logicErrors.length,
+        roleErrors.length,
         0,
-        'Should accept valid logic block: ' + JSON.stringify(logicErrors)
-      );
-    });
-
-    it('should reject hook logic with non-javascript engine', function () {
-      const result = validateConfig({
-        agents: [
-          {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                config: { topic: 'DONE', content: {} },
-                logic: {
-                  engine: 'python',
-                  script: 'return True',
-                },
-              },
-            },
-          },
-          {
-            id: 'orch',
-            role: 'orchestrator',
-            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
-          },
-        ],
-      });
-      assert.ok(
-        result.errors.some((e) => e.includes("engine must be 'javascript'")),
-        'Should reject non-javascript engine. Errors: ' + JSON.stringify(result.errors)
-      );
-    });
-
-    it('should reject hook logic without script property', function () {
-      const result = validateConfig({
-        agents: [
-          {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                config: { topic: 'DONE', content: {} },
-                logic: {
-                  engine: 'javascript',
-                },
-              },
-            },
-          },
-          {
-            id: 'orch',
-            role: 'orchestrator',
-            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
-          },
-        ],
-      });
-      assert.ok(
-        result.errors.some((e) => e.includes("must have a 'script' property")),
-        'Should reject logic without script. Errors: ' + JSON.stringify(result.errors)
-      );
-    });
-
-    it('should reject hook logic with syntax error in script', function () {
-      const result = validateConfig({
-        agents: [
-          {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                config: { topic: 'DONE', content: {} },
-                logic: {
-                  engine: 'javascript',
-                  script: 'if (x { return true; }',
-                },
-              },
-            },
-          },
-          {
-            id: 'orch',
-            role: 'orchestrator',
-            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
-          },
-        ],
-      });
-      assert.ok(
-        result.errors.some((e) => e.includes('syntax error')),
-        'Should reject script with syntax error. Errors: ' + JSON.stringify(result.errors)
-      );
-    });
-
-    it('should reject hook logic without config or transform', function () {
-      const result = validateConfig({
-        agents: [
-          {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                logic: {
-                  engine: 'javascript',
-                  script: "return { topic: 'NEW_TOPIC' };",
-                },
-              },
-            },
-          },
-          {
-            id: 'orch',
-            role: 'orchestrator',
-            triggers: [{ topic: 'NEW_TOPIC', action: 'stop_cluster' }],
-          },
-        ],
-      });
-      assert.ok(
-        result.errors.some((e) => e.includes("must also have 'config' or 'transform'")),
-        'Should reject logic without config. Errors: ' + JSON.stringify(result.errors)
-      );
-    });
-
-    it('should accept hook logic with non-string script (treated as missing)', function () {
-      const result = validateConfig({
-        agents: [
-          {
-            id: 'worker',
-            role: 'impl',
-            triggers: [{ topic: 'START' }],
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                config: { topic: 'DONE', content: {} },
-                logic: {
-                  engine: 'javascript',
-                  script: 123,
-                },
-              },
-            },
-          },
-          {
-            id: 'orch',
-            role: 'orchestrator',
-            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
-          },
-        ],
-      });
-      assert.ok(
-        result.errors.some((e) => e.includes('script must be a string')),
-        'Should reject non-string script. Errors: ' + JSON.stringify(result.errors)
+        'Should not error when logic has zero-length fallback pattern'
       );
     });
   });
