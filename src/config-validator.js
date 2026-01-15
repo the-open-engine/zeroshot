@@ -420,13 +420,14 @@ function reportSelfTriggeringAgents(config, agentInputTopics, agentOutputTopics,
       );
       const hookHasLogic = agent.hooks?.onComplete?.logic?.script;
 
-      if (!triggerHasLogic && !hookHasLogic) {
-        errors.push(
-          `Agent '${agent.id}' triggers on '${selfTrigger}' and produces '${selfTrigger}'. ` +
-            'Instant infinite loop.'
-        );
-      }
-      // If either has logic, it's a controlled self-trigger pattern (e.g., progress updates)
+    const triggerHasLogic = agent.triggers?.some((t) => t.topic === selfTrigger && t.logic?.script);
+    const hookHasLogic = agent.hooks?.onComplete?.logic?.script;
+
+    if (!triggerHasLogic && !hookHasLogic) {
+      errors.push(
+        `Agent '${agent.id}' triggers on '${selfTrigger}' and produces '${selfTrigger}'. ` +
+          'Instant infinite loop.'
+      );
     }
   }
 }
