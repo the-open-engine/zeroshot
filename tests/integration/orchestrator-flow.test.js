@@ -282,6 +282,75 @@ describe('Orchestrator Flow Integration', function () {
     });
   });
 
+  describe('PR Mode Flow', () => {
+    const prConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          timeout: 0,
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'IMPLEMENTATION_READY' },
+            },
+          },
+        },
+        {
+          id: 'validator',
+          role: 'validator',
+          timeout: 0,
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+          outputFormat: 'json',
+          jsonSchema: {
+            type: 'object',
+            properties: {
+              approved: { type: 'boolean' },
+            },
+            required: ['approved'],
+          },
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: { data: { approved: '{{result.approved}}' } },
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    it('should stop after git-pusher completes in autoPr mode', async () => {
+      mockRunner.when('worker').returns({ summary: 'No changes', result: 'noop' });
+      mockRunner.when('validator').returns({ approved: true });
+      mockRunner.when('git-pusher').returns({ summary: 'PR done', result: 'Merged' });
+
+      orchestrator = new Orchestrator({
+        quiet: true,
+        storageDir: tempDir,
+        taskRunner: mockRunner,
+      });
+
+      const result = await orchestrator.start(
+        prConfig,
+        { text: 'PR mode completion test' },
+        { autoPr: true }
+      );
+      const clusterId = result.id;
+
+      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+      mockRunner.assertCalled('git-pusher', 1);
+
+      const cluster = orchestrator.getCluster(clusterId);
+      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+      assertions.assertPublished('CLUSTER_COMPLETE');
+    });
+  });
+
   describe('Multiple Validators (Consensus)', () => {
     const consensusConfig = {
       agents: [
