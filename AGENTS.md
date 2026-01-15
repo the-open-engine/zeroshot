@@ -379,6 +379,11 @@ Multiple CI jobs fail → Diagnose each independently.
 2. Read ACTUAL error: `gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs`
 3. Fix ONE error → Push → Rerun → Repeat
 
+## Release Pipeline Convention
+
+- Required branch checks should only include `check` (merge queue).
+- Cross-platform `install-matrix` runs only in the Release workflow just before publish.
+
 Do NOT assume single root cause.
 
 ## CLAUDE.md Writing Rules
