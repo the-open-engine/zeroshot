@@ -14,7 +14,7 @@ on:
   pull_request:
     branches: [main, dev]
   merge_group:
-    branches: [dev]
+    branches: [main, dev]
   workflow_dispatch:
 
 jobs:
@@ -64,12 +64,14 @@ jobs:
           fail_ci_if_error: false
         continue-on-error: true
 
-  # Cross-platform/version compatibility
-  # NOTE: macOS runners cost 10x Linux minutes - minimal matrix
-  # Run on: main branch, PRs, and merge queue (skip direct dev pushes)
+  # Cross-platform/version compatibility (main only)
+  # NOTE: macOS runners cost 10x Linux minutes - keep this scoped to main.
   install-matrix:
     needs: check
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: |
+      github.ref == 'refs/heads/main' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+      (github.event_name == 'merge_group' && github.event.merge_group.base_ref == 'refs/heads/main')
     strategy:
       fail-fast: false
       matrix:

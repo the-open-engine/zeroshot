@@ -251,6 +251,18 @@ later via conductor classification missed it.
 Fix: added cwd injection to `_opAddAgents()` and resume path in `orchestrator.js`.
 Test: `tests/worktree-cwd-injection.test.js`.
 
+### PR Mode Completion Hang (2026-01-15)
+
+Bug: PR-mode clusters stayed running after PR creation/merge because no
+`CLUSTER_COMPLETE` was ever published.
+
+Root cause: `git-pusher` relied on `output.publishAfter` without an onComplete
+hook, so the orchestrator never received the completion signal.
+
+Fix: added `onComplete` publish of `CLUSTER_COMPLETE` in
+`src/agents/git-pusher-agent.json`.
+Test: `tests/integration/orchestrator-flow.test.js`.
+
 ## Enforcement Philosophy
 
 **ENFORCE > DOCUMENT. If enforceable, don't document.**
@@ -372,6 +384,12 @@ Multiple CI jobs fail → Diagnose each independently.
 1. Get exact status: `gh api repos/covibes/zeroshot/actions/runs/{RUN_ID}/jobs`
 2. Read ACTUAL error: `gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs`
 3. Fix ONE error → Push → Rerun → Repeat
+
+## Release Pipeline Convention
+
+- Dev required checks: `check` only (merge queue).
+- Main required checks: `check` + `install-matrix` (merge queue).
+- Cross-platform `install-matrix` runs in CI for main only.
 
 Do NOT assume single root cause.
 

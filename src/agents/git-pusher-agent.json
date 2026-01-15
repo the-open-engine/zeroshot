@@ -13,6 +13,20 @@
     }
   ],
   "prompt": "\ud83d\udea8 CRITICAL: ALL VALIDATORS APPROVED. YOU MUST CREATE A PR AND GET IT MERGED. DO NOT STOP UNTIL THE PR IS MERGED. \ud83d\udea8\n\n## MANDATORY STEPS - EXECUTE EACH ONE IN ORDER - DO NOT SKIP ANY STEP\n\n### STEP 1: Stage ALL changes (MANDATORY)\n```bash\ngit add -A\n```\nRun this command. Do not skip it.\n\n### STEP 2: Check what's staged\n```bash\ngit status\n```\nRun this. If nothing to commit, output JSON with pr_url: null and stop.\n\n### STEP 3: Commit the changes (MANDATORY if there are changes)\n```bash\ngit commit -m \"feat: implement #{{issue_number}} - {{issue_title}}\"\n```\nRun this command. Do not skip it.\n\n### STEP 4: Push to origin (MANDATORY)\n```bash\ngit push -u origin HEAD\n```\nRun this. If it fails, check the error and fix it.\n\n\u26a0\ufe0f AFTER PUSH YOU ARE NOT DONE! CONTINUE TO STEP 5! \u26a0\ufe0f\n\n### STEP 5: CREATE THE PR (MANDATORY - YOU MUST RUN THIS COMMAND)\n```bash\ngh pr create --title \"feat: {{issue_title}}\" --body \"Closes #{{issue_number}}\"\n```\n\ud83d\udea8 YOU MUST RUN `gh pr create`! Outputting a link is NOT creating a PR! \ud83d\udea8\nThe push output shows a \"Create a pull request\" link - IGNORE IT.\nYou MUST run the `gh pr create` command above. Save the actual PR URL from the output.\n\n\u26a0\ufe0f AFTER PR CREATION YOU ARE NOT DONE! CONTINUE TO STEP 6! \u26a0\ufe0f\n\n### STEP 6: MERGE THE PR (MANDATORY - THIS IS NOT OPTIONAL)\n```bash\ngh pr merge --merge --auto\n```\nThis sets auto-merge. If it fails (e.g., no auto-merge enabled), try:\n```bash\ngh pr merge --merge\n```\n\n\ud83d\udea8 IF MERGE FAILS DUE TO CONFLICTS - YOU MUST RESOLVE THEM:\na) Pull latest main and rebase:\n   ```bash\n   git fetch origin main\n   git rebase origin/main\n   ```\nb) If conflicts appear - RESOLVE THEM IMMEDIATELY:\n   - Read the conflicting files\n   - Make intelligent decisions about what code to keep\n   - Edit the files to resolve conflicts\n   - `git add <resolved-files>`\n   - `git rebase --continue`\nc) Force push the resolved branch:\n   ```bash\n   git push --force-with-lease\n   ```\nd) Retry merge:\n   ```bash\n   gh pr merge --merge\n   ```\n\nREPEAT UNTIL MERGED. DO NOT GIVE UP. DO NOT SKIP. THE PR MUST BE MERGED.\nIf merge is blocked by CI, wait and retry. If blocked by reviews, set auto-merge.\n\n## CRITICAL RULES\n- Execute EVERY step in order (1, 2, 3, 4, 5, 6)\n- Do NOT skip git add -A\n- Do NOT skip git commit\n- Do NOT skip gh pr create - THE TASK IS NOT DONE UNTIL PR EXISTS\n- Do NOT skip gh pr merge - THE TASK IS NOT DONE UNTIL PR IS MERGED\n- If push fails, debug and fix it\n- If PR creation fails, debug and fix it\n- If merge fails, debug and fix it\n- DO NOT OUTPUT JSON UNTIL PR IS ACTUALLY MERGED\n- A link from git push is NOT a PR - you must run gh pr create\n\n## Final Output\nONLY after the PR is MERGED, output:\n```json\n{\"pr_url\": \"https://github.com/owner/repo/pull/123\", \"pr_number\": 123, \"merged\": true}\n```\n\nIf truly no changes exist, output:\n```json\n{\"pr_url\": null, \"pr_number\": null, \"merged\": false}\n```",
+  "hooks": {
+    "onComplete": {
+      "action": "publish_message",
+      "config": {
+        "topic": "CLUSTER_COMPLETE",
+        "content": {
+          "text": "PR workflow complete.",
+          "data": {
+            "reason": "pr_flow_complete"
+          }
+        }
+      }
+    }
+  },
   "output": {
     "topic": "PR_CREATED",
     "publishAfter": "CLUSTER_COMPLETE"
