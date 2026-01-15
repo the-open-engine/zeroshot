@@ -17,12 +17,21 @@ const _MessageBus = require('../../src/message-bus');
 const MockTaskRunner = require('../helpers/mock-task-runner');
 const LedgerAssertions = require('../helpers/ledger-assertions');
 
+let tempDir;
+let orchestrator;
+let mockRunner;
+
+function createOrchestrator() {
+  orchestrator = new Orchestrator({
+    quiet: true,
+    storageDir: tempDir,
+    taskRunner: mockRunner,
+  });
+  return orchestrator;
+}
+
 describe('Orchestrator Flow Integration', function () {
   this.timeout(30000);
-
-  let tempDir;
-  let orchestrator;
-  let mockRunner;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-integration-'));
@@ -45,6 +54,17 @@ describe('Orchestrator Flow Integration', function () {
     }
   });
 
+  defineSimpleWorkerFlowTests();
+  defineWorkerValidatorFlowTests();
+  definePrModeFlowTests();
+  defineConsensusValidatorTests();
+  defineErrorHandlingTests();
+  defineSigintRaceConditionTests();
+  defineInvalidCommandHandlingTests();
+  defineClusterOperationsFailureTests();
+});
+
+function defineSimpleWorkerFlowTests() {
   describe('Simple Worker Flow', () => {
     const simpleConfig = {
       agents: [
@@ -78,11 +98,7 @@ describe('Orchestrator Flow Integration', function () {
         })
       );
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(simpleConfig, {
         text: 'Implement feature X',
@@ -103,11 +119,7 @@ describe('Orchestrator Flow Integration', function () {
     it('should publish messages in correct order', async () => {
       mockRunner.when('worker').returns('{"done": true}');
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(simpleConfig, {
         text: 'Test task',
@@ -126,7 +138,9 @@ describe('Orchestrator Flow Integration', function () {
         .assertSequence(['ISSUE_OPENED', 'TASK_COMPLETE']);
     });
   });
+}
 
+function defineWorkerValidatorFlowTests() {
   describe('Worker + Validator Flow', () => {
     const validatorConfig = {
       agents: [
@@ -211,11 +225,7 @@ describe('Orchestrator Flow Integration', function () {
         })
       );
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(validatorConfig, {
         text: 'Build feature',
@@ -256,11 +266,7 @@ describe('Orchestrator Flow Integration', function () {
         };
       });
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(validatorConfig, {
         text: 'Build with retry',
@@ -281,7 +287,9 @@ describe('Orchestrator Flow Integration', function () {
       assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
     });
   });
+}
 
+function definePrModeFlowTests() {
   describe('PR Mode Flow', () => {
     const prConfig = {
       agents: [
@@ -328,11 +336,7 @@ describe('Orchestrator Flow Integration', function () {
       mockRunner.when('validator').returns({ approved: true });
       mockRunner.when('git-pusher').returns({ summary: 'PR done', result: 'Merged' });
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(
         prConfig,
@@ -350,73 +354,73 @@ describe('Orchestrator Flow Integration', function () {
       assertions.assertPublished('CLUSTER_COMPLETE');
     });
   });
+}
 
-  describe('Multiple Validators (Consensus)', () => {
-    const consensusConfig = {
-      agents: [
-        {
-          id: 'worker',
-          role: 'implementation',
-          timeout: 0,
-          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: { topic: 'IMPLEMENTATION_READY' },
-            },
+const consensusConfig = {
+  agents: [
+    {
+      id: 'worker',
+      role: 'implementation',
+      timeout: 0,
+      triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+      hooks: {
+        onComplete: {
+          action: 'publish_message',
+          config: { topic: 'IMPLEMENTATION_READY' },
+        },
+      },
+    },
+    {
+      id: 'validator-a',
+      role: 'validator',
+      timeout: 0,
+      triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+      outputFormat: 'json',
+      jsonSchema: {
+        type: 'object',
+        properties: { approved: { type: 'boolean' } },
+      },
+      hooks: {
+        onComplete: {
+          action: 'publish_message',
+          config: {
+            topic: 'VALIDATION_RESULT',
+            content: { data: { approved: '{{result.approved}}' } },
           },
         },
-        {
-          id: 'validator-a',
-          role: 'validator',
-          timeout: 0,
-          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
-          outputFormat: 'json',
-          jsonSchema: {
-            type: 'object',
-            properties: { approved: { type: 'boolean' } },
-          },
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: {
-                topic: 'VALIDATION_RESULT',
-                content: { data: { approved: '{{result.approved}}' } },
-              },
-            },
-          },
-        },
-        {
-          id: 'validator-b',
-          role: 'validator',
-          timeout: 0,
-          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
-          outputFormat: 'json',
-          jsonSchema: {
-            type: 'object',
-            properties: { approved: { type: 'boolean' } },
-          },
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: {
-                topic: 'VALIDATION_RESULT',
-                content: { data: { approved: '{{result.approved}}' } },
-              },
-            },
+      },
+    },
+    {
+      id: 'validator-b',
+      role: 'validator',
+      timeout: 0,
+      triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+      outputFormat: 'json',
+      jsonSchema: {
+        type: 'object',
+        properties: { approved: { type: 'boolean' } },
+      },
+      hooks: {
+        onComplete: {
+          action: 'publish_message',
+          config: {
+            topic: 'VALIDATION_RESULT',
+            content: { data: { approved: '{{result.approved}}' } },
           },
         },
+      },
+    },
+    {
+      id: 'completion-detector',
+      role: 'orchestrator',
+      timeout: 0,
+      triggers: [
         {
-          id: 'completion-detector',
-          role: 'orchestrator',
-          timeout: 0,
-          triggers: [
-            {
-              topic: 'VALIDATION_RESULT',
-              action: 'stop_cluster',
-              logic: {
-                engine: 'javascript',
-                script: `
+          topic: 'VALIDATION_RESULT',
+          action: 'stop_cluster',
+          logic: {
+            engine: 'javascript',
+            script: `
                 const validators = cluster.getAgentsByRole('validator');
                 const lastImpl = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
                 if (!lastImpl) return false;
@@ -429,141 +433,141 @@ describe('Orchestrator Flow Integration', function () {
                 if (results.length < validators.length) return false;
                 return results.every(r => r.content?.data?.approved === true || r.content?.data?.approved === 'true');
               `,
-              },
-            },
-          ],
+          },
         },
       ],
-    };
+    },
+  ],
+};
 
+function defineConsensusValidatorTests() {
+  describe('Multiple Validators (Consensus)', () => {
     it('should wait for all validators before completing', async () => {
-      mockRunner.when('worker').returns('{"done": true}');
-
-      // Both validators approve
-      mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
-      mockRunner.when('validator-b').delays(500, JSON.stringify({ approved: true }));
-
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
-
-      const result = await orchestrator.start(consensusConfig, {
-        text: 'Consensus test',
-      });
-      const clusterId = result.id;
-      await waitForClusterState(orchestrator, clusterId, 'stopped', 15000);
-
-      mockRunner.assertCalled('validator-a', 1);
-      mockRunner.assertCalled('validator-b', 1);
-
-      const cluster = orchestrator.getCluster(clusterId);
-      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
-
-      // Should have 2 validation results
-      assertions.assertCount('VALIDATION_RESULT', 2);
+      await runConsensusApprovalTest();
     });
 
     it('should NOT complete when one validator rejects', async () => {
-      mockRunner.when('worker').returns('{"done": true}');
-
-      // validator-a approves, validator-b rejects
-      mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
-      mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
-
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
-
-      const result = await orchestrator.start(consensusConfig, {
-        text: 'Rejection test',
-      });
-      const clusterId = result.id;
-
-      // Wait for both validators to respond
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const cluster = orchestrator.getCluster(clusterId);
-      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
-
-      // Should have 2 validation results
-      assertions.assertCount('VALIDATION_RESULT', 2);
-
-      // Cluster should still be running (NOT stopped)
-      assert.strictEqual(
-        cluster.state,
-        'running',
-        'Cluster should still be running when consensus not reached'
-      );
-
-      // Verify that completion detector did not trigger
-      const validationResults = assertions.getMessages('VALIDATION_RESULT');
-      assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
-      assert.strictEqual(
-        validationResults[0].content.data.approved,
-        true,
-        'First validator approved'
-      );
-      assert.strictEqual(
-        validationResults[1].content.data.approved,
-        false,
-        'Second validator rejected'
-      );
-
-      // Clean up
-      await orchestrator.kill(clusterId);
+      await runConsensusSingleRejectTest();
     });
 
     it('should NOT complete when validators have mixed results', async () => {
-      mockRunner.when('worker').returns('{"done": true}');
-
-      // Both validators reject
-      mockRunner.when('validator-a').returns(JSON.stringify({ approved: false }));
-      mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
-
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
-
-      const result = await orchestrator.start(consensusConfig, {
-        text: 'All reject test',
-      });
-      const clusterId = result.id;
-
-      // Wait for both validators to respond
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const cluster = orchestrator.getCluster(clusterId);
-      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
-
-      // Should have 2 validation results
-      assertions.assertCount('VALIDATION_RESULT', 2);
-
-      // Cluster should still be running
-      assert.strictEqual(
-        cluster.state,
-        'running',
-        'Cluster should still be running when all validators reject'
-      );
-
-      // Verify both rejected
-      const validationResults = assertions.getMessages('VALIDATION_RESULT');
-      assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
-      assert(
-        validationResults.every((r) => r.content.data.approved === false),
-        'All validators should reject'
-      );
-
-      // Clean up
-      await orchestrator.kill(clusterId);
+      await runConsensusAllRejectTest();
     });
   });
+}
 
+async function runConsensusApprovalTest() {
+  mockRunner.when('worker').returns('{"done": true}');
+
+  // Both validators approve
+  mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
+  mockRunner.when('validator-b').delays(500, JSON.stringify({ approved: true }));
+
+  createOrchestrator();
+
+  const result = await orchestrator.start(consensusConfig, {
+    text: 'Consensus test',
+  });
+  const clusterId = result.id;
+  await waitForClusterState(orchestrator, clusterId, 'stopped', 15000);
+
+  mockRunner.assertCalled('validator-a', 1);
+  mockRunner.assertCalled('validator-b', 1);
+
+  const cluster = orchestrator.getCluster(clusterId);
+  const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+  // Should have 2 validation results
+  assertions.assertCount('VALIDATION_RESULT', 2);
+}
+
+async function runConsensusSingleRejectTest() {
+  mockRunner.when('worker').returns('{"done": true}');
+
+  // validator-a approves, validator-b rejects
+  mockRunner.when('validator-a').returns(JSON.stringify({ approved: true }));
+  mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
+
+  createOrchestrator();
+
+  const result = await orchestrator.start(consensusConfig, {
+    text: 'Rejection test',
+  });
+  const clusterId = result.id;
+
+  // Wait for both validators to respond
+  await new Promise((r) => setTimeout(r, 3000));
+
+  const cluster = orchestrator.getCluster(clusterId);
+  const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+  // Should have 2 validation results
+  assertions.assertCount('VALIDATION_RESULT', 2);
+
+  // Cluster should still be running (NOT stopped)
+  assert.strictEqual(
+    cluster.state,
+    'running',
+    'Cluster should still be running when consensus not reached'
+  );
+
+  // Verify that completion detector did not trigger
+  const validationResults = assertions.getMessages('VALIDATION_RESULT');
+  assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
+  assert.strictEqual(validationResults[0].content.data.approved, true, 'First validator approved');
+  assert.strictEqual(
+    validationResults[1].content.data.approved,
+    false,
+    'Second validator rejected'
+  );
+
+  // Clean up
+  await orchestrator.kill(clusterId);
+}
+
+async function runConsensusAllRejectTest() {
+  mockRunner.when('worker').returns('{"done": true}');
+
+  // Both validators reject
+  mockRunner.when('validator-a').returns(JSON.stringify({ approved: false }));
+  mockRunner.when('validator-b').returns(JSON.stringify({ approved: false }));
+
+  createOrchestrator();
+
+  const result = await orchestrator.start(consensusConfig, {
+    text: 'All reject test',
+  });
+  const clusterId = result.id;
+
+  // Wait for both validators to respond
+  await new Promise((r) => setTimeout(r, 3000));
+
+  const cluster = orchestrator.getCluster(clusterId);
+  const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+
+  // Should have 2 validation results
+  assertions.assertCount('VALIDATION_RESULT', 2);
+
+  // Cluster should still be running
+  assert.strictEqual(
+    cluster.state,
+    'running',
+    'Cluster should still be running when all validators reject'
+  );
+
+  // Verify both rejected
+  const validationResults = assertions.getMessages('VALIDATION_RESULT');
+  assert.strictEqual(validationResults.length, 2, 'Should have 2 validation results');
+  assert(
+    validationResults.every((r) => r.content.data.approved === false),
+    'All validators should reject'
+  );
+
+  // Clean up
+  await orchestrator.kill(clusterId);
+}
+
+function defineErrorHandlingTests() {
   describe('Error Handling', () => {
     const errorConfig = {
       agents: [
@@ -586,11 +590,7 @@ describe('Orchestrator Flow Integration', function () {
     it('should handle agent failure gracefully', async () => {
       mockRunner.when('worker').fails('Task execution failed');
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(errorConfig, {
         text: 'Failing task',
@@ -609,7 +609,9 @@ describe('Orchestrator Flow Integration', function () {
       );
     });
   });
+}
 
+function defineSigintRaceConditionTests() {
   describe('SIGINT Race Condition (Issue: 0-message clusters)', () => {
     /**
      * Test for race condition: SIGINT during initialization should NOT leave 0-message clusters.
@@ -637,11 +639,7 @@ describe('Orchestrator Flow Integration', function () {
 
       mockRunner.when('worker').returns('{"done": true}');
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       // Start the cluster
       const result = await orchestrator.start(config, {
@@ -678,11 +676,7 @@ describe('Orchestrator Flow Integration', function () {
       // This tests the catch block: if initialization throws, the promise
       // should still resolve so stop() doesn't hang forever
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       // Config with no agents - will still initialize but have nothing to run
       const config = { agents: [] };
@@ -706,7 +700,9 @@ describe('Orchestrator Flow Integration', function () {
       );
     });
   });
+}
 
+function defineInvalidCommandHandlingTests() {
   describe('Invalid Command Handling', () => {
     /**
      * Test that the system handles invalid/ambiguous commands gracefully
@@ -747,11 +743,7 @@ describe('Orchestrator Flow Integration', function () {
         })
       );
 
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
+      createOrchestrator();
 
       const result = await orchestrator.start(config, {
         text: 'invalid-command',
@@ -778,7 +770,9 @@ describe('Orchestrator Flow Integration', function () {
       assertions.assertCount('CLUSTER_FAILED', 0);
     });
   });
+}
 
+function defineClusterOperationsFailureTests() {
   describe('CLUSTER_OPERATIONS Failure Handling', () => {
     /**
      * Test for the bug where CLUSTER_OPERATIONS failure didn't stop the cluster.
@@ -790,169 +784,169 @@ describe('Orchestrator Flow Integration', function () {
      * Fix: Added this.stop(clusterId) in the catch handler after publishing the failure message.
      */
     it('should stop cluster when CLUSTER_OPERATIONS fails due to model validation', async function () {
-      // Simple config with just a conductor that will publish CLUSTER_OPERATIONS
-      const config = {
-        agents: [
-          {
-            id: 'bootstrap-agent',
-            role: 'bootstrap',
-            timeout: 0,
-            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-            prompt: 'Acknowledge the task',
-          },
-        ],
-      };
-
-      mockRunner.when('bootstrap-agent').returns('{"acknowledged": true}');
-
-      // Override maxModel setting to 'sonnet' for this test
-      const originalEnv = process.env.ZEROSHOT_MAX_MODEL;
-      process.env.ZEROSHOT_MAX_MODEL = 'sonnet';
-
-      try {
-        orchestrator = new Orchestrator({
-          quiet: true,
-          storageDir: tempDir,
-          taskRunner: mockRunner,
-        });
-
-        const result = await orchestrator.start(config, {
-          text: 'Test CLUSTER_OPERATIONS failure',
-        });
-        const clusterId = result.id;
-
-        // Give bootstrap agent time to start
-        await new Promise((r) => setTimeout(r, 500));
-
-        // Publish CLUSTER_OPERATIONS with an agent requesting 'opus' model
-        // This should fail because maxModel is 'sonnet'
-        const cluster = orchestrator.getCluster(clusterId);
-        cluster.messageBus.publish({
-          cluster_id: clusterId,
-          topic: 'CLUSTER_OPERATIONS',
-          sender: 'test',
-          content: {
-            data: {
-              operations: [
-                {
-                  action: 'add_agents',
-                  agents: [
-                    {
-                      id: 'planner',
-                      role: 'planner',
-                      modelLevel: 'level3', // This exceeds maxModel='sonnet'
-                      timeout: 0,
-                      triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-                      prompt: 'Plan the task',
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-        });
-
-        // Wait for cluster to stop (the fix ensures this happens after operation failure)
-        await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
-
-        // Verify CLUSTER_OPERATIONS_FAILED was published
-        const failedMessages = cluster.messageBus.query({
-          cluster_id: clusterId,
-          topic: 'CLUSTER_OPERATIONS_FAILED',
-        });
-        assert(failedMessages.length > 0, 'CLUSTER_OPERATIONS_FAILED: should be published');
-        assert(
-          failedMessages[0].content.text.includes('Operation chain failed'),
-          'Failure message: should indicate operation failure'
-        );
-
-        // Verify the cluster state is stopped (not running)
-        const finalStatus = orchestrator.getStatus(clusterId);
-        assert.strictEqual(
-          finalStatus.state,
-          'stopped',
-          `Cluster: should be stopped after CLUSTER_OPERATIONS failure, but is ${finalStatus.state}`
-        );
-      } finally {
-        // Restore original env
-        if (originalEnv !== undefined) {
-          process.env.ZEROSHOT_MAX_MODEL = originalEnv;
-        } else {
-          delete process.env.ZEROSHOT_MAX_MODEL;
-        }
-      }
+      await runClusterOperationsModelFailureTest();
     });
 
     it('should stop cluster when CLUSTER_OPERATIONS validation fails', async function () {
-      // Test for CLUSTER_OPERATIONS_VALIDATION_FAILED case
-      const config = {
-        agents: [
-          {
-            id: 'worker',
-            role: 'implementation',
-            timeout: 0,
-            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-            prompt: 'Do work',
-          },
-        ],
-      };
-
-      mockRunner.when('worker').returns('{"done": true}');
-
-      orchestrator = new Orchestrator({
-        quiet: true,
-        storageDir: tempDir,
-        taskRunner: mockRunner,
-      });
-
-      const result = await orchestrator.start(config, {
-        text: 'Test CLUSTER_OPERATIONS validation failure',
-      });
-      const clusterId = result.id;
-
-      // Give worker time to start
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Publish CLUSTER_OPERATIONS with invalid operation
-      const cluster = orchestrator.getCluster(clusterId);
-      cluster.messageBus.publish({
-        cluster_id: clusterId,
-        topic: 'CLUSTER_OPERATIONS',
-        sender: 'test',
-        content: {
-          data: {
-            operations: [
-              {
-                action: 'invalid_action', // Invalid action type
-                agents: [],
-              },
-            ],
-          },
-        },
-      });
-
-      // Wait for cluster to stop
-      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
-
-      // Verify the cluster stopped due to the operation failure
-      const finalStatus = orchestrator.getStatus(clusterId);
-      assert.strictEqual(
-        finalStatus.state,
-        'stopped',
-        `Cluster: should be stopped after invalid CLUSTER_OPERATIONS, but is ${finalStatus.state}`
-      );
+      await runClusterOperationsValidationFailureTest();
     });
   });
-});
+}
+
+async function runClusterOperationsModelFailureTest() {
+  // Simple config with just a conductor that will publish CLUSTER_OPERATIONS
+  const config = {
+    agents: [
+      {
+        id: 'bootstrap-agent',
+        role: 'bootstrap',
+        timeout: 0,
+        triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+        prompt: 'Acknowledge the task',
+      },
+    ],
+  };
+
+  mockRunner.when('bootstrap-agent').returns('{"acknowledged": true}');
+
+  // Override maxModel setting to 'sonnet' for this test
+  const originalEnv = process.env.ZEROSHOT_MAX_MODEL;
+  process.env.ZEROSHOT_MAX_MODEL = 'sonnet';
+
+  try {
+    createOrchestrator();
+
+    const result = await orchestrator.start(config, {
+      text: 'Test CLUSTER_OPERATIONS failure',
+    });
+    const clusterId = result.id;
+
+    // Give bootstrap agent time to start
+    await new Promise((r) => setTimeout(r, 500));
+
+    // Publish CLUSTER_OPERATIONS with an agent requesting 'opus' model
+    // This should fail because maxModel is 'sonnet'
+    const cluster = orchestrator.getCluster(clusterId);
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'CLUSTER_OPERATIONS',
+      sender: 'test',
+      content: {
+        data: {
+          operations: [
+            {
+              action: 'add_agents',
+              agents: [
+                {
+                  id: 'planner',
+                  role: 'planner',
+                  modelLevel: 'level3', // This exceeds maxModel='sonnet'
+                  timeout: 0,
+                  triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+                  prompt: 'Plan the task',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    // Wait for cluster to stop (the fix ensures this happens after operation failure)
+    await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+    // Verify CLUSTER_OPERATIONS_FAILED was published
+    const failedMessages = cluster.messageBus.query({
+      cluster_id: clusterId,
+      topic: 'CLUSTER_OPERATIONS_FAILED',
+    });
+    assert(failedMessages.length > 0, 'CLUSTER_OPERATIONS_FAILED: should be published');
+    assert(
+      failedMessages[0].content.text.includes('Operation chain failed'),
+      'Failure message: should indicate operation failure'
+    );
+
+    // Verify the cluster state is stopped (not running)
+    const finalStatus = orchestrator.getStatus(clusterId);
+    assert.strictEqual(
+      finalStatus.state,
+      'stopped',
+      `Cluster: should be stopped after CLUSTER_OPERATIONS failure, but is ${finalStatus.state}`
+    );
+  } finally {
+    // Restore original env
+    if (originalEnv !== undefined) {
+      process.env.ZEROSHOT_MAX_MODEL = originalEnv;
+    } else {
+      delete process.env.ZEROSHOT_MAX_MODEL;
+    }
+  }
+}
+
+async function runClusterOperationsValidationFailureTest() {
+  // Test for CLUSTER_OPERATIONS_VALIDATION_FAILED case
+  const config = {
+    agents: [
+      {
+        id: 'worker',
+        role: 'implementation',
+        timeout: 0,
+        triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+        prompt: 'Do work',
+      },
+    ],
+  };
+
+  mockRunner.when('worker').returns('{"done": true}');
+
+  createOrchestrator();
+
+  const result = await orchestrator.start(config, {
+    text: 'Test CLUSTER_OPERATIONS validation failure',
+  });
+  const clusterId = result.id;
+
+  // Give worker time to start
+  await new Promise((r) => setTimeout(r, 500));
+
+  // Publish CLUSTER_OPERATIONS with invalid operation
+  const cluster = orchestrator.getCluster(clusterId);
+  cluster.messageBus.publish({
+    cluster_id: clusterId,
+    topic: 'CLUSTER_OPERATIONS',
+    sender: 'test',
+    content: {
+      data: {
+        operations: [
+          {
+            action: 'invalid_action', // Invalid action type
+            agents: [],
+          },
+        ],
+      },
+    },
+  });
+
+  // Wait for cluster to stop
+  await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
+
+  // Verify the cluster stopped due to the operation failure
+  const finalStatus = orchestrator.getStatus(clusterId);
+  assert.strictEqual(
+    finalStatus.state,
+    'stopped',
+    `Cluster: should be stopped after invalid CLUSTER_OPERATIONS, but is ${finalStatus.state}`
+  );
+}
 
 /**
  * Wait for cluster to reach a specific state
  */
-async function waitForClusterState(orchestrator, clusterId, targetState, timeoutMs) {
+async function waitForClusterState(orchestratorInstance, clusterId, targetState, timeoutMs) {
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
-    const cluster = orchestrator.getCluster(clusterId);
+    const cluster = orchestratorInstance.getCluster(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
     }
@@ -964,7 +958,7 @@ async function waitForClusterState(orchestrator, clusterId, targetState, timeout
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  const cluster = orchestrator.getCluster(clusterId);
+  const cluster = orchestratorInstance.getCluster(clusterId);
   throw new Error(
     `Timeout waiting for cluster ${clusterId} to reach state '${targetState}'. Current state: ${cluster?.state}`
   );
