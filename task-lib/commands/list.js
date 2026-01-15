@@ -11,8 +11,8 @@ export function listTasks(options = {}) {
     return;
   }
 
-  // Sort by creation date, newest first
-  taskList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Sort by creation date, oldest first (chronological)
+  taskList.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   // Filter by status if specified
   let filtered = taskList;
