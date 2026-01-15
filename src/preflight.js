@@ -20,6 +20,7 @@ const {
 } = require('../lib/settings/claude-auth.js');
 const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { detectGitContext } = require('../lib/git-remote-utils');
 
 /**
  * Validation result
@@ -480,17 +481,105 @@ function runPreflight(options = {}) {
   errors.push(...providerResult.errors);
   warnings.push(...providerResult.warnings);
 
-  // 4. Check gh CLI (if required)
+  // 4. Check issue provider CLI (if required)
+  if (options.issueProvider) {
+    const { getProvider } = require('./issue-providers');
+    const ProviderClass = getProvider(options.issueProvider);
+
+    if (ProviderClass) {
+      const tool = ProviderClass.getRequiredTool();
+
+      // Check if tool is installed
+      if (!commandExists(tool.name)) {
+        errors.push(
+          formatError(
+            `${ProviderClass.displayName} CLI (${tool.name}) not installed`,
+            `Required for fetching ${ProviderClass.displayName} issues`,
+            [tool.installHint, `Then verify: ${tool.checkCmd}`]
+          )
+        );
+      } else {
+        // Check provider authentication (abstracted per provider)
+        // Use targetHost from URL input if provided, otherwise detect from git context
+        // This ensures we check auth for the actual target, not the current repo
+        const targetHost =
+          options.targetHost || detectGitContext(options.cwd || process.cwd())?.host;
+        const authResult = ProviderClass.checkAuth(targetHost);
+        if (!authResult.authenticated) {
+          errors.push(
+            formatError(
+              `${ProviderClass.displayName} CLI (${tool.name}) not authenticated`,
+              authResult.error,
+              authResult.recovery
+            )
+          );
+        }
+      }
+    }
+  }
+
+  // 5. Check PR/MR CLI tools (if --pr or --ship mode is active)
+  if (options.autoPr) {
+    const { getPlatformForPR, getPRToolForPlatform, getProvider } = require('./issue-providers');
+
+    let platform;
+    let prGitContext;
+    try {
+      // Detect git platform (independent of issue provider)
+      platform = getPlatformForPR(options.cwd || process.cwd());
+      // Get git context for hostname (needed for multi-instance auth checks)
+      prGitContext = detectGitContext(options.cwd || process.cwd());
+    } catch (error) {
+      // If platform detection fails, show clear error
+      errors.push(
+        formatError('--pr mode requires a git repository', error.message, [
+          'Ensure you are in a git repository with a remote URL from GitHub, GitLab, or Azure DevOps',
+        ])
+      );
+      // Skip CLI tool check if platform unknown
+    }
+
+    if (platform) {
+      // Get PR tool info from the provider (unified source of truth)
+      const tool = getPRToolForPlatform(platform);
+      const ProviderClass = getProvider(platform);
+
+      if (tool && !commandExists(tool.name)) {
+        errors.push(
+          formatError(
+            `${tool.displayName} CLI (${tool.name}) not installed`,
+            `Required for --pr mode with ${tool.displayName} repositories`,
+            [tool.installHint, `Then verify: ${tool.checkCmd}`]
+          )
+        );
+      } else if (tool && ProviderClass) {
+        // Check provider authentication (abstracted per provider)
+        // Pass hostname for multi-instance providers (e.g., GitLab with self-hosted)
+        const authResult = ProviderClass.checkAuth(prGitContext?.host);
+        if (!authResult.authenticated) {
+          errors.push(
+            formatError(
+              `${tool.displayName} CLI (${tool.name}) not authenticated`,
+              authResult.error,
+              authResult.recovery
+            )
+          );
+        }
+      }
+    }
+  }
+
+  // Legacy gh check for backward compatibility
   if (options.requireGh) {
     errors.push(...validateGhRequirement());
   }
 
-  // 5. Check Docker (if required)
+  // 6. Check Docker (if required)
   if (options.requireDocker) {
     errors.push(...validateDockerRequirement());
   }
 
-  // 6. Check git repo (if required for worktree isolation)
+  // 7. Check git repo (if required for worktree isolation)
   if (options.requireGit) {
     errors.push(...validateGitRequirement());
   }

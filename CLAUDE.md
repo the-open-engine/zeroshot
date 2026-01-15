@@ -48,6 +48,9 @@ IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
 | TUI dashboard            | `src/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
+| Issue providers          | `src/issue-providers/`              |
+| Git remote detection     | `lib/git-remote-utils.js`           |
+| Input helpers            | `src/input-helpers.js`              |
 | Settings                 | `lib/settings.js`                   |
 
 ## CLI Quick Reference
@@ -83,6 +86,15 @@ zeroshot settings                 # View/modify settings
 - Attach (`zeroshot attach`): Connect to daemon, Ctrl+C **detaches** only
 
 **Settings:** `maxModel` (opus/sonnet/haiku cost ceiling), `defaultConfig`, `logLevel`
+
+**Git Auto-Detection:** Bare numbers (e.g., `123`) automatically detect provider from git remote URL. No configuration needed when working in a git repository.
+
+Priority order for bare numbers:
+
+1. Force flags (`--github`, `--gitlab`, `--devops`) - Explicit CLI override
+2. Git remote detection - Automatic from `git remote get-url origin`
+3. Settings (`defaultIssueSource`) - Global user preference
+4. Legacy fallback - GitHub (only when no git context and no settings)
 
 ## Architecture
 

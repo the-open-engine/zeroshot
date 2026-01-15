@@ -18,6 +18,7 @@ const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { URL } = require('url');
 const chalk = require('chalk');
 const Orchestrator = require('../src/orchestrator');
 const { setupCompletion } = require('../lib/completion');
@@ -205,13 +206,30 @@ function normalizeRunOptions(options) {
 
 function detectRunInput(inputArg) {
   const input = {};
-  if (inputArg.match(/^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/)) {
+
+  // Check if it looks like an issue URL or key
+  const isGitHubUrl = /^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/.test(inputArg);
+  const isGitLabUrl = /gitlab\.(com|[\w.-]+)\/[\w-]+\/[\w-]+\/-\/issues\/\d+/.test(inputArg);
+  const isJiraUrl = /(atlassian\.net|jira\.[\w.-]+)\/browse\/[A-Z][A-Z0-9]+-\d+/.test(inputArg);
+  const isAzureUrl =
+    /dev\.azure\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg) ||
+    /visualstudio\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg);
+  const isJiraKey = /^[A-Z][A-Z0-9]+-\d+$/.test(inputArg);
+  const isIssueNumber = /^\d+$/.test(inputArg);
+  const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
+  const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
+
+  if (
+    isGitHubUrl ||
+    isGitLabUrl ||
+    isJiraUrl ||
+    isAzureUrl ||
+    isJiraKey ||
+    isIssueNumber ||
+    isRepoIssue
+  ) {
     input.issue = inputArg;
-  } else if (/^\d+$/.test(inputArg)) {
-    input.issue = inputArg;
-  } else if (inputArg.match(/^[\w-]+\/[\w-]+#\d+$/)) {
-    input.issue = inputArg;
-  } else if (/\.(md|markdown)$/i.test(inputArg)) {
+  } else if (isMarkdownFile) {
     input.file = inputArg;
   } else {
     input.text = inputArg;
@@ -225,13 +243,38 @@ function resolveProviderOverride(options, settings) {
   );
 }
 
-function runClusterPreflight({ input, options, providerOverride }) {
+function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
+  // Detect which issue provider tool is needed
+  let issueProvider = null;
+  let targetHost = null;
+
+  if (input.issue) {
+    const { detectProvider: detectIssueProvider } = require('../src/issue-providers');
+    const ProviderClass = detectIssueProvider(input.issue, settings, forceProvider);
+    if (ProviderClass) {
+      issueProvider = ProviderClass.id;
+    }
+
+    // Extract hostname from URL input for auth checks
+    // This ensures we check auth for the target host, not the current git repo
+    if (/^https?:\/\//.test(input.issue)) {
+      try {
+        const url = new URL(input.issue);
+        targetHost = url.hostname;
+      } catch {
+        // Invalid URL - let provider handle the error
+      }
+    }
+  }
+
   requirePreflight({
-    requireGh: !!input.issue,
+    requireGh: issueProvider === 'github', // gh CLI required for GitHub
     requireDocker: options.docker,
     requireGit: options.worktree,
     quiet: process.env.ZEROSHOT_DAEMON === '1',
     provider: providerOverride,
+    issueProvider, // Pass detected issue provider for tool checking
+    targetHost, // Pass target host for multi-instance auth checks (e.g., GitLab self-hosted)
   });
 }
 
@@ -412,7 +455,14 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
   console.log(chalk.dim(`Model override: ${modelOverride} (all agents)`));
 }
 
-function buildStartOptions({ clusterId, options, settings, providerOverride, modelOverride }) {
+function buildStartOptions({
+  clusterId,
+  options,
+  settings,
+  providerOverride,
+  modelOverride,
+  forceProvider,
+}) {
   const targetCwd = process.env.ZEROSHOT_CWD || detectGitRepoRoot();
   return {
     clusterId,
@@ -428,6 +478,8 @@ function buildStartOptions({ clusterId, options, settings, providerOverride, mod
     noMounts: options.noMounts || false,
     mounts: options.mount ? parseMountSpecs(options.mount) : undefined,
     containerHome: options.containerHome || undefined,
+    forceProvider: forceProvider || undefined,
+    settings, // Pass settings for provider detection
   };
 }
 
@@ -2322,6 +2374,10 @@ program
     'Override all agents to use a provider (claude, codex, gemini, opencode)'
   )
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
+  .option('-G, --github', 'Force GitHub as issue source')
+  .option('-L, --gitlab', 'Force GitLab as issue source')
+  .option('-J, --jira', 'Force Jira as issue source')
+  .option('-D, --devops', 'Force Azure DevOps as issue source')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
   .option('--no-mounts', 'Disable all Docker credential mounts')
@@ -2333,19 +2389,48 @@ program
     'after',
     `
 Input formats:
-  123                              GitHub issue number (uses current repo)
-  org/repo#123                     GitHub issue with explicit repo
-  https://github.com/.../issues/1  Full GitHub issue URL
-  "Implement feature X"            Plain text task description
+  GitHub:
+    123                              Issue number (uses current repo)
+    org/repo#123                     Issue with explicit repo
+    https://github.com/.../issues/1  Full issue URL
+
+  GitLab:
+    https://gitlab.com/org/repo/-/issues/123   GitLab cloud
+    https://gitlab.company.com/.../issues/123  Self-hosted
+
+  Jira:
+    PROJ-123                         Issue key
+    https://company.atlassian.net/browse/PROJ-123
+
+  Azure DevOps:
+    https://dev.azure.com/org/proj/_workitems/edit/123
+
+  File/Text:
+    feature.md                       Markdown file
+    "Implement feature X"            Plain text task
+
+Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 `
   )
   .action(async (inputArg, options) => {
     try {
+      // Normalize options (--ship → --pr → --worktree flags)
       normalizeRunOptions(options);
+
+      // Determine force provider from CLI flags
+      let forceProvider = null;
+      if (options.github) forceProvider = 'github';
+      else if (options.gitlab) forceProvider = 'gitlab';
+      else if (options.jira) forceProvider = 'jira';
+      else if (options.devops) forceProvider = 'azure-devops';
+
+      // Auto-detect input type
       const input = detectRunInput(inputArg);
       const settings = loadSettings();
       const providerOverride = resolveProviderOverride(options, settings);
-      runClusterPreflight({ input, options, providerOverride });
+
+      // Preflight checks
+      runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
 
       const { generateName } = require('../src/name-generator');
 
@@ -2378,6 +2463,7 @@ Input formats:
         settings,
         providerOverride,
         modelOverride,
+        forceProvider,
       });
 
       // Start cluster

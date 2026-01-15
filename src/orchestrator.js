@@ -37,7 +37,8 @@ const AgentWrapper = require('./agent-wrapper');
 const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
 const Ledger = require('./ledger');
-const GitHub = require('./github');
+const InputHelpers = require('./input-helpers');
+const { detectProvider } = require('./issue-providers');
 const IsolationManager = require('./isolation-manager');
 const { generateName } = require('./name-generator');
 const configValidator = require('./config-validator');
@@ -628,6 +629,8 @@ class Orchestrator {
       autoPr: options.autoPr || process.env.ZEROSHOT_PR === '1',
       modelOverride: options.modelOverride, // Model override for all agents
       clusterId: options.clusterId, // Explicit ID from CLI/daemon parent
+      settings: options.settings, // User settings for issue provider detection
+      forceProvider: options.forceProvider, // Force specific issue provider
     });
   }
 
@@ -682,6 +685,10 @@ class Orchestrator {
       autoPr: options.autoPr || false,
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
+      // Issue provider tracking (where issue was fetched from)
+      issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops)
+      // Git platform tracking (where PR/MR will be created - independent of issue provider)
+      gitPlatform: null, // Set when --pr mode is active
       // Isolation state (only if enabled)
       // CRITICAL: Store workDir for resume capability - without this, resume() can't recreate container
       isolation: options.isolation
@@ -709,8 +716,48 @@ class Orchestrator {
     this.clusters.set(clusterId, cluster);
 
     try {
-      // Fetch input (GitHub issue, file, or text)
-      const inputData = await this._resolveInputData(input);
+      // Fetch input (issue from provider, file, or text)
+      let inputData;
+      if (input.issue) {
+        // Detect provider and fetch issue
+        const ProviderClass = detectProvider(
+          input.issue,
+          options.settings || {},
+          options.forceProvider
+        );
+        if (!ProviderClass) {
+          throw new Error(`No issue provider matched input: ${input.issue}`);
+        }
+
+        const provider = new ProviderClass();
+        inputData = await provider.fetchIssue(input.issue, options.settings || {});
+
+        // Store issue provider for logging/debugging and cross-provider workflows
+        cluster.issueProvider = ProviderClass.id;
+
+        // Log clickable issue link
+        if (inputData.url) {
+          this._log(`[Orchestrator] Issue (${ProviderClass.displayName}): ${inputData.url}`);
+        }
+      } else if (input.file) {
+        inputData = InputHelpers.createFileInput(input.file);
+        this._log(`[Orchestrator] File: ${input.file}`);
+      } else if (input.text) {
+        inputData = InputHelpers.createTextInput(input.text);
+      } else {
+        throw new Error('Either issue, file, or text input is required');
+      }
+
+      // Detect git platform for --pr mode (independent of issue provider)
+      if (options.autoPr) {
+        const { detectGitContext } = require('../lib/git-remote-utils');
+        const gitContext = detectGitContext(options.cwd);
+        cluster.gitPlatform = gitContext?.provider || null;
+
+        if (cluster.gitPlatform) {
+          this._log(`[Orchestrator] Git platform detected: ${cluster.gitPlatform.toUpperCase()}`);
+        }
+      }
 
       // Inject git-pusher agent if --pr is set (replaces completion-detector)
       this._applyAutoPrConfig(config, inputData, options);
@@ -1157,28 +1204,6 @@ class Orchestrator {
     return { isolationManager, containerId, worktreeInfo };
   }
 
-  async _resolveInputData(input) {
-    if (input.issue) {
-      const inputData = await GitHub.fetchIssue(input.issue);
-      if (inputData.url) {
-        this._log(`[Orchestrator] Issue: ${inputData.url}`);
-      }
-      return inputData;
-    }
-
-    if (input.file) {
-      const inputData = GitHub.createFileInput(input.file);
-      this._log(`[Orchestrator] File: ${input.file}`);
-      return inputData;
-    }
-
-    if (input.text) {
-      return GitHub.createTextInput(input.text);
-    }
-
-    throw new Error('Either issue, file, or text input is required');
-  }
-
   _applyAutoPrConfig(config, inputData, options) {
     if (!options.autoPr) {
       return;
@@ -1186,20 +1211,76 @@ class Orchestrator {
 
     config.agents = config.agents.filter((a) => a.id !== 'completion-detector');
 
-    const gitPusherPath = path.join(__dirname, 'agents', 'git-pusher-agent.json');
-    const gitPusherConfig = JSON.parse(fs.readFileSync(gitPusherPath, 'utf8'));
+    // Detect git platform (independent of issue provider)
+    const { getPlatformForPR } = require('./issue-providers');
+    const { detectGitContext } = require('../lib/git-remote-utils');
 
-    gitPusherConfig.prompt = gitPusherConfig.prompt.replace(
-      /\{\{issue_number\}\}/g,
-      inputData.number || 'unknown'
-    );
-    gitPusherConfig.prompt = gitPusherConfig.prompt.replace(
-      /\{\{issue_title\}\}/g,
-      inputData.title || 'Implementation'
-    );
+    let platform;
+    try {
+      // ALWAYS use git context, regardless of issue provider
+      // This allows Jira issues in GitHub repos, etc.
+      platform = getPlatformForPR(options.cwd);
+    } catch (error) {
+      throw new Error(`--pr mode failed: ${error.message}`);
+    }
+
+    // Check for repo mismatch (issue URL repo vs current git remote)
+    // This catches cases like: running `zeroshot run https://gitlab.com/foo/bar/-/issues/1`
+    // from a different repo directory
+    let skipCloseIssue = false;
+    const gitContext = detectGitContext(options.cwd);
+    if (inputData.url && gitContext) {
+      const issueHost = this._extractHostFromUrl(inputData.url);
+      const gitHost = gitContext.host;
+
+      // Compare hosts - if different platforms, warn and don't close issue
+      if (issueHost && gitHost && issueHost !== gitHost) {
+        this._log(
+          `[Orchestrator] ⚠️  WARNING: Issue is from ${issueHost} but PR will be created on ${gitHost}`
+        );
+        this._log(
+          `[Orchestrator] ⚠️  The PR will NOT auto-close the issue (different repositories)`
+        );
+        this._log(`[Orchestrator] ⚠️  To fix: run zeroshot from the target repository directory`);
+        skipCloseIssue = true;
+      }
+    }
+
+    // Generate platform-specific git-pusher agent from template
+    const { generateGitPusherAgent, isPlatformSupported } = require('./agents/git-pusher-template');
+
+    if (!isPlatformSupported(platform)) {
+      throw new Error(
+        `Platform '${platform}' does not support --pr mode. Supported: github, gitlab, azure-devops`
+      );
+    }
+
+    const gitPusherConfig = generateGitPusherAgent(platform);
+
+    // Template replacement for issue context
+    const issueRef = skipCloseIssue ? '' : `Closes #${inputData.number || 'unknown'}`;
+    gitPusherConfig.prompt = gitPusherConfig.prompt
+      .replace(/\{\{issue_number\}\}/g, inputData.number || 'unknown')
+      .replace(/\{\{issue_title\}\}/g, inputData.title || 'Implementation')
+      .replace(/Closes #\{\{issue_number\}\}/g, issueRef);
 
     config.agents.push(gitPusherConfig);
-    this._log(`[Orchestrator] Injected git-pusher agent (creates PR and auto-merges)`);
+    this._log(
+      `[Orchestrator] Injected ${platform}-git-pusher agent (issue: ${inputData.number || 'N/A'}, PR platform: ${platform.toUpperCase()})`
+    );
+  }
+
+  /**
+   * Extract hostname from a URL
+   * @private
+   */
+  _extractHostFromUrl(url) {
+    try {
+      const match = url.match(/https?:\/\/([^/]+)/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
   }
 
   _applyWorkerInstruction(config) {
@@ -2252,22 +2333,45 @@ Continue from where you left off. Review your previous output to understand what
     const isPrMode = cluster.autoPr || process.env.ZEROSHOT_PR === '1';
 
     if (isPrMode) {
-      // Load git-pusher for PR mode
-      const gitPusherPath = path.join(__dirname, 'agents', 'git-pusher-agent.json');
-      const gitPusherConfig = JSON.parse(fs.readFileSync(gitPusherPath, 'utf8'));
+      // Detect platform from stored cluster metadata OR git context
+      let platform = cluster.gitPlatform; // Use stored git platform (not issueProvider!)
+
+      // Fallback to git context detection if cluster metadata missing
+      if (!platform) {
+        const { getPlatformForPR } = require('./issue-providers');
+        try {
+          platform = getPlatformForPR(cluster.cwd || process.cwd());
+        } catch (error) {
+          throw new Error(`Cannot determine platform for PR creation on resume: ${error.message}`);
+        }
+      }
+
+      // Generate platform-specific git-pusher agent from template
+      const {
+        generateGitPusherAgent,
+        isPlatformSupported,
+      } = require('./agents/git-pusher-template');
+
+      if (!isPlatformSupported(platform)) {
+        throw new Error(
+          `Platform '${platform}' does not support --pr mode. Supported: github, gitlab, azure-devops`
+        );
+      }
+
+      const gitPusherConfig = generateGitPusherAgent(platform);
 
       // Get issue context from ledger
       const issueMsg = cluster.messageBus.ledger.findLast({ topic: 'ISSUE_OPENED' });
       const issueNumber = issueMsg?.content?.data?.number || 'unknown';
       const issueTitle = issueMsg?.content?.data?.title || 'Implementation';
 
-      // Inject placeholders
+      // Inject issue context into prompt
       gitPusherConfig.prompt = gitPusherConfig.prompt
         .replace(/\{\{issue_number\}\}/g, issueNumber)
         .replace(/\{\{issue_title\}\}/g, issueTitle);
 
       await this._opAddAgents(cluster, { agents: [gitPusherConfig] }, context);
-      this._log(`    [--pr mode] Injected git-pusher agent`);
+      this._log(`    [--pr mode] Injected ${platform}-git-pusher agent`);
     } else {
       // Default completion-detector
       const completionDetector = {

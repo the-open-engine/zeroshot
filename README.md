@@ -85,7 +85,7 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 npm install -g @covibes/zeroshot
 ```
 
-**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode). [GitHub CLI](https://cli.github.com/) is required when running by issue number.
+**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode).
 
 ```bash
 # Install one or more providers
@@ -188,6 +188,32 @@ zeroshot agents show <name>
 zeroshot clean
 zeroshot purge
 ```
+
+## Multi-Platform Issue Support
+
+Zeroshot works with **GitHub, GitLab, Jira, and Azure DevOps**. Just paste the issue URL or key.
+When working in a git repository, zeroshot automatically detects the issue provider from your git remote URL. No configuration needed!
+
+```bash
+# GitHub
+zeroshot run 123
+zeroshot run https://github.com/org/repo/issues/123
+
+# GitLab (cloud and self-hosted)
+zeroshot run https://gitlab.com/org/repo/-/issues/456
+zeroshot run https://gitlab.mycompany.com/org/repo/-/issues/789
+
+# Jira
+zeroshot run PROJ-789
+zeroshot run https://company.atlassian.net/browse/PROJ-789
+
+# Azure DevOps
+zeroshot run https://dev.azure.com/org/project/_workitems/edit/999
+```
+
+**Requires**: CLI tools ([`gh`](https://cli.github.com/), [`glab`](https://gitlab.com/gitlab-org/cli), [`jira`](https://github.com/go-jira/jira), or [`az`](https://docs.microsoft.com/cli/azure/)) for the platform you use. See [issue-providers README](src/issue-providers/README.md) for setup and self-hosted instances.
+
+**Important for `--pr` mode**: Run zeroshot from the target repository directory. PRs are created on the git remote of your current directory. If you run from a different repo, zeroshot will warn you and skip the "Closes #X" reference (the PR is still created, but won't auto-close the issue).
 
 ## Architecture
 
