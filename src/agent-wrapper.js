@@ -71,6 +71,8 @@ class AgentWrapper {
     this.unsubscribe = null;
     /** @type {number | null} */
     this.lastTaskEndTime = null; // Track when last task completed (for context filtering)
+    /** @type {number | null} */
+    this.lastAgentStartTime = null; // Track when agent last began executing (for context filtering)
 
     // LIVENESS DETECTION - Track output freshness to detect stuck agents
     /** @type {number | null} */
@@ -404,7 +406,8 @@ class AgentWrapper {
    * @private
    */
   _buildContext(triggeringMessage) {
-    return buildContext({
+    const previousAgentStart = this.lastAgentStartTime;
+    const context = buildContext({
       id: this.id,
       role: this.role,
       iteration: this.iteration,
@@ -412,12 +415,18 @@ class AgentWrapper {
       messageBus: this.messageBus,
       cluster: this.cluster,
       lastTaskEndTime: this.lastTaskEndTime,
+      lastAgentStartTime: previousAgentStart,
       triggeringMessage,
       selectedPrompt: this._selectPrompt(),
       // Pass isolation state for conditional git restriction
       worktree: this.worktree,
       isolation: this.isolation,
     });
+
+    // Record when this iteration started so future "since: last_agent_start" filters work
+    this.lastAgentStartTime = Date.now();
+
+    return context;
   }
 
   /**
