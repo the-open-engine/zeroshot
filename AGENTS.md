@@ -381,8 +381,9 @@ Multiple CI jobs fail → Diagnose each independently.
 
 ## Release Pipeline Convention
 
-- Required branch checks should only include `check` (merge queue).
-- Cross-platform `install-matrix` runs only in the Release workflow just before publish.
+- Dev required checks: `check` only (merge queue).
+- Main required checks: `check` + `install-matrix` (merge queue).
+- Cross-platform `install-matrix` runs in CI for main only.
 
 Do NOT assume single root cause.
 
