@@ -353,6 +353,64 @@ function validateCliProvider(command, title, detail, recovery) {
   return { errors, warnings: [] };
 }
 
+function getOpencodeConfigPath() {
+  const configRoot = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(configRoot, 'opencode', 'opencode.json');
+}
+
+function summarizePermission(permission) {
+  if (permission === undefined) return 'missing';
+  if (typeof permission === 'string') return permission;
+  try {
+    return JSON.stringify(permission);
+  } catch {
+    return String(permission);
+  }
+}
+
+function validateOpencodePermissions() {
+  const errors = [];
+  const configPath = getOpencodeConfigPath();
+
+  if (!fs.existsSync(configPath)) {
+    errors.push(
+      formatError('Opencode permissions not configured', `Missing ${configPath}`, [
+        `Create ${configPath}`,
+        'Set: "permission": "allow"',
+        'Re-run the command',
+      ])
+    );
+    return { errors, warnings: [] };
+  }
+
+  let config;
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    config = JSON.parse(raw);
+  } catch (err) {
+    errors.push(
+      formatError('Opencode config invalid', `Failed to parse ${configPath}: ${err.message}`, [
+        `Fix JSON in ${configPath}`,
+        'Ensure it includes: "permission": "allow"',
+      ])
+    );
+    return { errors, warnings: [] };
+  }
+
+  if (config.permission !== 'allow') {
+    const permissionSummary = summarizePermission(config.permission);
+    errors.push(
+      formatError(
+        'Opencode permissions must be "allow"',
+        `Opencode+ requires non-interactive permissions; found ${permissionSummary}`,
+        [`Edit ${configPath}`, 'Set: "permission": "allow"', 'Re-run the command']
+      )
+    );
+  }
+
+  return { errors, warnings: [] };
+}
+
 function validateProvider(providerName, options) {
   const validatorByProvider = {
     claude: () => validateClaudeProvider(options),
@@ -367,12 +425,20 @@ function validateProvider(providerName, options) {
         'Then run: gemini --version',
       ]),
     opencode: () =>
-      validateCliProvider(
-        'opencode',
-        'Opencode CLI not available',
-        'Command "opencode" not installed',
-        ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
-      ),
+      (() => {
+        const result = validateCliProvider(
+          'opencode',
+          'Opencode CLI not available',
+          'Command "opencode" not installed',
+          ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
+        );
+        if (result.errors.length === 0) {
+          const permissionResult = validateOpencodePermissions();
+          result.errors.push(...permissionResult.errors);
+          result.warnings.push(...permissionResult.warnings);
+        }
+        return result;
+      })(),
   };
 
   const validator = validatorByProvider[providerName];

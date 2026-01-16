@@ -365,6 +365,90 @@ function defineRunPreflightTests() {
       expect(result.errors.join('')).to.include('Gemini CLI not available');
     });
 
+    it('should fail when Opencode permissions are not configured', function () {
+      if (process.platform === 'win32') {
+        this.skip();
+      }
+
+      const tmpBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
+      const opencodePath = path.join(tmpBinDir, 'opencode');
+      fs.writeFileSync(opencodePath, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(opencodePath, 0o755);
+
+      const tmpConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-config-'));
+      const originalPath = process.env.PATH;
+      const originalXdg = process.env.XDG_CONFIG_HOME;
+
+      try {
+        process.env.PATH = `${tmpBinDir}${path.delimiter}${originalPath || ''}`;
+        process.env.XDG_CONFIG_HOME = tmpConfigRoot;
+
+        const result = runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'opencode',
+        });
+
+        expect(result.valid).to.be.false;
+        expect(result.errors.join('')).to.include('Opencode permissions');
+      } finally {
+        process.env.PATH = originalPath;
+        if (originalXdg === undefined) {
+          delete process.env.XDG_CONFIG_HOME;
+        } else {
+          process.env.XDG_CONFIG_HOME = originalXdg;
+        }
+        fs.rmSync(tmpBinDir, { recursive: true });
+        fs.rmSync(tmpConfigRoot, { recursive: true });
+      }
+    });
+
+    it('should pass when Opencode permissions are allow', function () {
+      if (process.platform === 'win32') {
+        this.skip();
+      }
+
+      const tmpBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
+      const opencodePath = path.join(tmpBinDir, 'opencode');
+      fs.writeFileSync(opencodePath, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(opencodePath, 0o755);
+
+      const tmpConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-config-'));
+      const configDir = path.join(tmpConfigRoot, 'opencode');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'opencode.json'),
+        JSON.stringify({ permission: 'allow' })
+      );
+
+      const originalPath = process.env.PATH;
+      const originalXdg = process.env.XDG_CONFIG_HOME;
+
+      try {
+        process.env.PATH = `${tmpBinDir}${path.delimiter}${originalPath || ''}`;
+        process.env.XDG_CONFIG_HOME = tmpConfigRoot;
+
+        const result = runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'opencode',
+        });
+
+        expect(result.valid).to.be.true;
+      } finally {
+        process.env.PATH = originalPath;
+        if (originalXdg === undefined) {
+          delete process.env.XDG_CONFIG_HOME;
+        } else {
+          process.env.XDG_CONFIG_HOME = originalXdg;
+        }
+        fs.rmSync(tmpBinDir, { recursive: true });
+        fs.rmSync(tmpConfigRoot, { recursive: true });
+      }
+    });
+
     it('should not require Claude auth when CLI is installed', function () {
       try {
         execSync(`${whichCmd} claude`, { stdio: 'pipe' });
