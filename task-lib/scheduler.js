@@ -17,7 +17,7 @@ const CHECK_INTERVAL = 60000; // 60 seconds
  * Supports: 30s, 5m, 2h, 1d, 1w
  */
 export function parseInterval(str) {
-  const match = str.match(/^(\d+)(s|m|h|d|w)$/i);
+  const match = str.match(/^(\d+)([smhdw])$/i);
   if (!match) return null;
 
   const value = parseInt(match[1], 10);

@@ -132,6 +132,18 @@ class Orchestrator {
   }
 
   /**
+   * Get input source type for metadata
+   * @param {Object} input - Input object
+   * @returns {string} Source type: 'github', 'file', or 'text'
+   * @private
+   */
+  _getInputSource(input) {
+    if (input.issue) return 'github';
+    if (input.file) return 'file';
+    return 'text';
+  }
+
+  /**
    * Load clusters from persistent storage
    * Uses file locking for consistent reads
    * @private
@@ -824,7 +836,7 @@ class Orchestrator {
           },
         },
         metadata: {
-          source: input.issue ? 'github' : input.file ? 'file' : 'text',
+          source: this._getInputSource(input),
         },
       });
 

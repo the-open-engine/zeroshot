@@ -505,7 +505,7 @@ function createLifecycleHandler(statusFooter) {
       statusFooter.updateAgent({
         id: agentId,
         state: AGENT_STATE.IDLE,
-        pid: null,
+        processPid: null,
         iteration: data.iteration || 0,
       });
       return;
@@ -515,7 +515,7 @@ function createLifecycleHandler(statusFooter) {
       statusFooter.updateAgent({
         id: agentId,
         state: AGENT_STATE.EXECUTING_TASK,
-        pid: statusFooter.agents.get(agentId)?.pid || null,
+        processPid: statusFooter.agents.get(agentId)?.processPid || null,
         iteration: data.iteration || 0,
       });
       return;
@@ -526,7 +526,7 @@ function createLifecycleHandler(statusFooter) {
       statusFooter.updateAgent({
         id: agentId,
         state: AGENT_STATE.EXECUTING_TASK,
-        pid: data.pid,
+        processPid: data.pid,
         iteration: current.iteration,
       });
       return;
@@ -536,7 +536,7 @@ function createLifecycleHandler(statusFooter) {
       statusFooter.updateAgent({
         id: agentId,
         state: AGENT_STATE.IDLE,
-        pid: null,
+        processPid: null,
         iteration: data.iteration || 0,
       });
       return;
@@ -1173,6 +1173,19 @@ function followAllClusters(quietOrchestrator, allClusters, options, multiCluster
   const messageBuffer = [];
   const clusterStates = buildClusterStatesMap(allClusters);
   const statusFooter = createLogsStatusFooter(allClusters, clusterStates, options);
+
+  // Replay historical lifecycle messages to initialize agent states
+  // Without this, agents that completed before logs -f started show "(starting...)"
+  if (statusFooter) {
+    const lifecycleHandler = createLifecycleHandler(statusFooter);
+    for (const clusterInfo of allClusters) {
+      const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+      if (cluster) {
+        replayLifecycleMessages(cluster, clusterInfo.id, lifecycleHandler);
+      }
+    }
+  }
+
   const flushMessages = buildMessageBufferFlusher({
     messageBuffer,
     options,
@@ -4249,9 +4262,10 @@ function formatAskUserQuestionCall(questions) {
 
   const question = questions[0];
   const preview = question.question.substring(0, 50);
+  const suffix = question.question.length > 50 ? '...' : '';
   return questions.length > 1
     ? `${questions.length} questions: "${preview}..."`
-    : `"${preview}${question.question.length > 50 ? '...' : ''}"`;
+    : `"${preview}${suffix}"`;
 }
 
 function formatToolCallFallback(input) {
@@ -4303,16 +4317,21 @@ function formatToolResult(content, isError, toolName, toolInput) {
   if (toolName === 'TodoWrite' && toolInput?.todos && Array.isArray(toolInput.todos)) {
     const todos = toolInput.todos;
     if (todos.length === 0) return chalk.dim('no todos');
+
+    // Helper to get status icon
+    const getStatusIcon = (todoStatus) => {
+      if (todoStatus === 'completed') return '✓';
+      if (todoStatus === 'in_progress') return '⧗';
+      return '○';
+    };
+
     if (todos.length === 1) {
-      const status =
-        todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
-      return chalk.dim(
-        `${status} ${todos[0].content.substring(0, 50)}${todos[0].content.length > 50 ? '...' : ''}`
-      );
+      const status = getStatusIcon(todos[0].status);
+      const suffix = todos[0].content.length > 50 ? '...' : '';
+      return chalk.dim(`${status} ${todos[0].content.substring(0, 50)}${suffix}`);
     }
     // Multiple todos - show first one as preview
-    const status =
-      todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
+    const status = getStatusIcon(todos[0].status);
     return chalk.dim(
       `${status} ${todos[0].content.substring(0, 40)}... (+${todos.length - 1} more)`
     );

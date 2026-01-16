@@ -70,12 +70,17 @@ function sanitizeErrorMessage(error) {
     /^unknown$/i,
     /^void$/i,
     /^never$/i,
-    /^[A-Z][a-zA-Z]*\s*\|\s*(null|undefined)$/, // e.g., "Error | null"
-    /^[a-z]+(\s*\|\s*[a-z]+)+$/i, // e.g., "string | number | boolean"
+    /^[A-Z][a-zA-Z]*\s*\|\s*(?:null|undefined)$/, // e.g., "Error | null"
   ];
 
+  const trimmedError = error.trim();
+
+  // Check if it's a union type like "string | number | boolean" (ReDoS-safe approach)
+  const unionParts = trimmedError.split(/\s*\|\s*/);
+  const isUnionType = unionParts.length > 1 && unionParts.every((p) => /^[a-z]+$/i.test(p));
+
   for (const pattern of typeAnnotationPatterns) {
-    if (pattern.test(error.trim())) {
+    if (pattern.test(trimmedError) || isUnionType) {
       console.warn(
         `[agent-task-executor] WARNING: Error message looks like a TypeScript type annotation: "${error}". ` +
           `This indicates corrupted data. Replacing with generic error.`

@@ -376,7 +376,6 @@ class TaskTUI {
         }
 
         // Strip ANSI codes for clean display
-        // eslint-disable-next-line no-control-regex
         content = content.replace(/\x1b\[[0-9;]*m/g, '');
       } catch (error) {
         content = `Error reading log: ${error.message}`;

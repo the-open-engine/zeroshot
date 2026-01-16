@@ -79,9 +79,10 @@ function formatQuestionSummary(input) {
   }
 
   const preview = questions[0].question.substring(0, 50);
+  const suffix = questions[0].question.length > 50 ? '...' : '';
   return questions.length > 1
     ? `${questions.length} questions: "${preview}..."`
-    : `"${preview}${questions[0].question.length > 50 ? '...' : ''}"`;
+    : `"${preview}${suffix}"`;
 }
 
 function formatUnknownToolCall(input) {
@@ -109,16 +110,21 @@ function formatToolResult(content, isError, toolName, toolInput) {
   if (toolName === 'TodoWrite' && toolInput?.todos && Array.isArray(toolInput.todos)) {
     const todos = toolInput.todos;
     if (todos.length === 0) return chalk.dim('no todos');
+
+    // Helper to get status icon
+    const getStatusIcon = (todoStatus) => {
+      if (todoStatus === 'completed') return '✓';
+      if (todoStatus === 'in_progress') return '⧗';
+      return '○';
+    };
+
     if (todos.length === 1) {
-      const status =
-        todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
-      return chalk.dim(
-        `${status} ${todos[0].content.substring(0, 50)}${todos[0].content.length > 50 ? '...' : ''}`
-      );
+      const status = getStatusIcon(todos[0].status);
+      const suffix = todos[0].content.length > 50 ? '...' : '';
+      return chalk.dim(`${status} ${todos[0].content.substring(0, 50)}${suffix}`);
     }
     // Multiple todos - show first one as preview
-    const status =
-      todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
+    const status = getStatusIcon(todos[0].status);
     return chalk.dim(
       `${status} ${todos[0].content.substring(0, 40)}... (+${todos.length - 1} more)`
     );

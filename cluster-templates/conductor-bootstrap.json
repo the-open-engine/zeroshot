@@ -19,7 +19,7 @@
           "taskType": {
             "type": "string",
             "enum": ["INQUIRY", "TASK", "DEBUG"],
-            "description": "Type of work: INQUIRY (questions/exploration), TASK (implement new), DEBUG (fix broken)"
+            "description": "Type of work: INQUIRY (read-only), TASK (implement / known fix), DEBUG (investigate unknown root cause)"
           },
           "reasoning": {
             "type": "string",
@@ -73,7 +73,7 @@
           "taskType": {
             "type": "string",
             "enum": ["INQUIRY", "TASK", "DEBUG"],
-            "description": "Type of work after analysis"
+            "description": "Type of work after analysis (INQUIRY/TASK/DEBUG)"
           },
           "reasoning": {
             "type": "string",
