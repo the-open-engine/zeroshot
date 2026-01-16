@@ -132,6 +132,10 @@ helpers.allResponded(agents, topic, since);
 helpers.hasConsensus(topic, since);
 ```
 
+Context strategies now support `since: 'last_agent_start'` to scope history to the most recent
+iteration start for the executing agent. Acceptable values: `cluster_start`, `last_task_end`,
+`last_agent_start`, or an ISO timestamp string.
+
 ## Conductor: 2D Classification
 
 Classifies tasks on Complexity x TaskType, routes to parameterized templates.
@@ -247,6 +251,18 @@ later via conductor classification missed it.
 Fix: added cwd injection to `_opAddAgents()` and resume path in `orchestrator.js`.
 Test: `tests/worktree-cwd-injection.test.js`.
 
+### PR Mode Completion Hang (2026-01-15)
+
+Bug: PR-mode clusters stayed running after PR creation/merge because no
+`CLUSTER_COMPLETE` was ever published.
+
+Root cause: `git-pusher` relied on `output.publishAfter` without an onComplete
+hook, so the orchestrator never received the completion signal.
+
+Fix: added `onComplete` publish of `CLUSTER_COMPLETE` in
+`src/agents/git-pusher-agent.json`.
+Test: `tests/integration/orchestrator-flow.test.js`.
+
 ## Enforcement Philosophy
 
 **ENFORCE > DOCUMENT. If enforceable, don't document.**
@@ -359,6 +375,8 @@ npm run lint
 npm run test
 ```
 
+Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as non-negotiable law before typing again. Failing to read and address each validator complaint before claiming completion will be rejected automatically.
+
 ## CI Failure Diagnosis
 
 Multiple CI jobs fail → Diagnose each independently.
@@ -366,6 +384,12 @@ Multiple CI jobs fail → Diagnose each independently.
 1. Get exact status: `gh api repos/covibes/zeroshot/actions/runs/{RUN_ID}/jobs`
 2. Read ACTUAL error: `gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs`
 3. Fix ONE error → Push → Rerun → Repeat
+
+## Release Pipeline Convention
+
+- Dev required checks: `check` only (merge queue).
+- Main required checks: `check` + `install-matrix` (merge queue).
+- Cross-platform `install-matrix` runs in CI for main only.
 
 Do NOT assume single root cause.
 

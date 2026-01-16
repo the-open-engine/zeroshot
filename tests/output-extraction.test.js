@@ -17,6 +17,16 @@ const {
 } = require('../src/agent/output-extraction');
 
 describe('Output Extraction Module', function () {
+  defineStripTimestampTests();
+  defineResultWrapperExtractionTests();
+  defineTextEventExtractionTests();
+  defineMarkdownExtractionTests();
+  defineDirectJsonExtractionTests();
+  defineFullPipelineTests();
+  defineRegressionTests();
+});
+
+function defineStripTimestampTests() {
   // ============================================================================
   // UTILITY FUNCTIONS
   // ============================================================================
@@ -47,7 +57,9 @@ describe('Output Extraction Module', function () {
       assert.strictEqual(result, 'content');
     });
   });
+}
 
+function defineResultWrapperExtractionTests() {
   // ============================================================================
   // STRATEGY 1: RESULT WRAPPER EXTRACTION
   // ============================================================================
@@ -114,26 +126,30 @@ describe('Output Extraction Module', function () {
       assert.strictEqual(extractFromResultWrapper('not json'), null);
     });
   });
+}
 
+function defineTextEventExtractionTests() {
   // ============================================================================
   // STRATEGY 2: TEXT EVENTS EXTRACTION
   // ============================================================================
   describe('extractFromTextEvents', function () {
     it('should extract from Claude text events', function () {
       // Claude stream_event format
-      const output = `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"foo\\":\\"bar\\"}"}}}`;
+      const output =
+        '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"foo\\":\\"bar\\"}"}}}';
       const result = extractFromTextEvents(output, 'claude');
       assert.deepStrictEqual(result, { foo: 'bar' });
     });
 
     it('should extract from Codex item.created events', function () {
-      const output = `{"type":"item.created","item":{"type":"message","role":"assistant","content":[{"type":"text","text":"{\\"foo\\":\\"bar\\"}"}]}}`;
+      const output =
+        '{"type":"item.created","item":{"type":"message","role":"assistant","content":[{"type":"text","text":"{\\"foo\\":\\"bar\\"}"}]}}';
       const result = extractFromTextEvents(output, 'codex');
       assert.deepStrictEqual(result, { foo: 'bar' });
     });
 
     it('should extract from Gemini message events', function () {
-      const output = `{"type":"message","role":"assistant","content":"{\\"foo\\":\\"bar\\"}"}`;
+      const output = '{"type":"message","role":"assistant","content":"{\\"foo\\":\\"bar\\"}"}';
       const result = extractFromTextEvents(output, 'gemini');
       assert.deepStrictEqual(result, { foo: 'bar' });
     });
@@ -153,12 +169,15 @@ describe('Output Extraction Module', function () {
     });
 
     it('should handle text containing markdown', function () {
-      const output = `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"\`\`\`json\\n{\\"foo\\":\\"bar\\"}\\n\`\`\`"}}}`;
+      const output =
+        '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"```json\\n{\\"foo\\":\\"bar\\"}\\n```"}}}';
       const result = extractFromTextEvents(output, 'claude');
       assert.deepStrictEqual(result, { foo: 'bar' });
     });
   });
+}
 
+function defineMarkdownExtractionTests() {
   // ============================================================================
   // STRATEGY 3: MARKDOWN EXTRACTION
   // ============================================================================
@@ -204,7 +223,9 @@ describe('Output Extraction Module', function () {
       assert.strictEqual(extractFromMarkdown(null), null);
     });
   });
+}
 
+function defineDirectJsonExtractionTests() {
   // ============================================================================
   // STRATEGY 4: DIRECT JSON EXTRACTION
   // ============================================================================
@@ -254,121 +275,141 @@ describe('Output Extraction Module', function () {
       assert.strictEqual(extractDirectJson(null), null);
     });
   });
+}
 
+function defineFullPipelineTests() {
   // ============================================================================
   // FULL PIPELINE INTEGRATION
   // ============================================================================
   describe('extractJsonFromOutput (full pipeline)', function () {
-    describe('Claude Provider', function () {
-      it('should extract from result wrapper', function () {
-        const output = '{"type":"result","result":{"complexity":"SIMPLE","taskType":"INQUIRY"}}';
-        const result = extractJsonFromOutput(output, 'claude');
-        assert.strictEqual(result.complexity, 'SIMPLE');
-        assert.strictEqual(result.taskType, 'INQUIRY');
-      });
+    defineClaudePipelineTests();
+    defineCodexPipelineTests();
+    defineGeminiPipelineTests();
+    defineEdgeCasePipelineTests();
+    defineStrategyPriorityTests();
+  });
+}
 
-      it('should extract from NDJSON with result line', function () {
-        const output = `[1768207505878]{"type":"system","subtype":"init"}
-[1768207506000]{"type":"assistant","message":{"content":[]}}
-[1768207508291]{"type":"result","result":{"complexity":"STANDARD","taskType":"TASK"}}`;
-        const result = extractJsonFromOutput(output, 'claude');
-        assert.strictEqual(result.complexity, 'STANDARD');
-      });
-
-      it('should extract from text events when no result wrapper', function () {
-        const output =
-          '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"complexity\\":\\"TRIVIAL\\"}"}}}';
-        const result = extractJsonFromOutput(output, 'claude');
-        assert.strictEqual(result.complexity, 'TRIVIAL');
-      });
+function defineClaudePipelineTests() {
+  describe('Claude Provider', function () {
+    it('should extract from result wrapper', function () {
+      const output = '{"type":"result","result":{"complexity":"SIMPLE","taskType":"INQUIRY"}}';
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'SIMPLE');
+      assert.strictEqual(result.taskType, 'INQUIRY');
     });
 
-    describe('Codex Provider', function () {
-      it('should extract from text events (not turn.completed)', function () {
-        const output = `{"type":"item.created","item":{"type":"message","role":"assistant","content":[{"type":"text","text":"{\\"complexity\\":\\"SIMPLE\\",\\"taskType\\":\\"INQUIRY\\"}"}]}}
+    it('should extract from NDJSON with result line', function () {
+      const output = `[1768207505878]{"type":"system","subtype":"init"}
+[1768207506000]{"type":"assistant","message":{"content":[]}}
+[1768207508291]{"type":"result","result":{"complexity":"STANDARD","taskType":"TASK"}}`;
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'STANDARD');
+    });
+
+    it('should extract from text events when no result wrapper', function () {
+      const output =
+        '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"complexity\\":\\"TRIVIAL\\"}"}}}';
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.complexity, 'TRIVIAL');
+    });
+  });
+}
+
+function defineCodexPipelineTests() {
+  describe('Codex Provider', function () {
+    it('should extract from text events (not turn.completed)', function () {
+      const output = `{"type":"item.created","item":{"type":"message","role":"assistant","content":[{"type":"text","text":"{\\"complexity\\":\\"SIMPLE\\",\\"taskType\\":\\"INQUIRY\\"}"}]}}
 {"type":"turn.completed","usage":{"input_tokens":100}}`;
-        const result = extractJsonFromOutput(output, 'codex');
-        assert.strictEqual(result.complexity, 'SIMPLE');
-        assert.strictEqual(result.taskType, 'INQUIRY');
-      });
+      const result = extractJsonFromOutput(output, 'codex');
+      assert.strictEqual(result.complexity, 'SIMPLE');
+      assert.strictEqual(result.taskType, 'INQUIRY');
+    });
 
-      it('should extract raw JSON output', function () {
-        const output = '{"complexity":"STANDARD","taskType":"TASK"}';
-        const result = extractJsonFromOutput(output, 'codex');
-        assert.strictEqual(result.complexity, 'STANDARD');
-      });
+    it('should extract raw JSON output', function () {
+      const output = '{"complexity":"STANDARD","taskType":"TASK"}';
+      const result = extractJsonFromOutput(output, 'codex');
+      assert.strictEqual(result.complexity, 'STANDARD');
+    });
 
-      it('should extract multi-line JSON', function () {
-        const output = `{
+    it('should extract multi-line JSON', function () {
+      const output = `{
   "complexity": "CRITICAL",
   "taskType": "DEBUG"
 }`;
-        const result = extractJsonFromOutput(output, 'codex');
-        assert.strictEqual(result.complexity, 'CRITICAL');
-        assert.strictEqual(result.taskType, 'DEBUG');
-      });
-    });
-
-    describe('Gemini Provider', function () {
-      it('should extract from message events', function () {
-        const output = `{"type":"message","role":"assistant","content":"{\\"complexity\\":\\"SIMPLE\\"}"}
-{"type":"result","success":true}`;
-        const result = extractJsonFromOutput(output, 'gemini');
-        assert.strictEqual(result.complexity, 'SIMPLE');
-      });
-
-      it('should extract raw JSON output', function () {
-        const output = '{"complexity":"STANDARD","taskType":"TASK"}';
-        const result = extractJsonFromOutput(output, 'gemini');
-        assert.strictEqual(result.complexity, 'STANDARD');
-      });
-    });
-
-    describe('Edge Cases', function () {
-      it('should return null for empty output', function () {
-        assert.strictEqual(extractJsonFromOutput('', 'claude'), null);
-        assert.strictEqual(extractJsonFromOutput(null, 'claude'), null);
-      });
-
-      it('should return null for Task not found', function () {
-        assert.strictEqual(extractJsonFromOutput('Task not found', 'claude'), null);
-      });
-
-      it('should return null for Process terminated', function () {
-        assert.strictEqual(extractJsonFromOutput('Process terminated by signal', 'claude'), null);
-      });
-
-      it('should return null for plain text', function () {
-        assert.strictEqual(extractJsonFromOutput('Just some text', 'claude'), null);
-      });
-
-      it('should handle markdown in any provider', function () {
-        const output = 'Here is the result:\n\n```json\n{"foo":"bar"}\n```\n\nDone.';
-        assert.deepStrictEqual(extractJsonFromOutput(output, 'claude'), { foo: 'bar' });
-        assert.deepStrictEqual(extractJsonFromOutput(output, 'codex'), { foo: 'bar' });
-        assert.deepStrictEqual(extractJsonFromOutput(output, 'gemini'), { foo: 'bar' });
-      });
-    });
-
-    describe('Strategy Priority', function () {
-      it('should prefer result wrapper over text events', function () {
-        // Both result wrapper and text events present - wrapper should win
-        const output = `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"source\\":\\"text\\"}"}}}
-{"type":"result","result":{"source":"wrapper"}}`;
-        const result = extractJsonFromOutput(output, 'claude');
-        assert.strictEqual(result.source, 'wrapper');
-      });
-
-      it('should prefer text events over markdown', function () {
-        // Text events should be extracted before trying markdown
-        const output =
-          '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"source\\":\\"text\\"}"}}}';
-        const result = extractJsonFromOutput(output, 'claude');
-        assert.strictEqual(result.source, 'text');
-      });
+      const result = extractJsonFromOutput(output, 'codex');
+      assert.strictEqual(result.complexity, 'CRITICAL');
+      assert.strictEqual(result.taskType, 'DEBUG');
     });
   });
+}
 
+function defineGeminiPipelineTests() {
+  describe('Gemini Provider', function () {
+    it('should extract from message events', function () {
+      const output = `{"type":"message","role":"assistant","content":"{\\"complexity\\":\\"SIMPLE\\"}"}
+{"type":"result","success":true}`;
+      const result = extractJsonFromOutput(output, 'gemini');
+      assert.strictEqual(result.complexity, 'SIMPLE');
+    });
+
+    it('should extract raw JSON output', function () {
+      const output = '{"complexity":"STANDARD","taskType":"TASK"}';
+      const result = extractJsonFromOutput(output, 'gemini');
+      assert.strictEqual(result.complexity, 'STANDARD');
+    });
+  });
+}
+
+function defineEdgeCasePipelineTests() {
+  describe('Edge Cases', function () {
+    it('should return null for empty output', function () {
+      assert.strictEqual(extractJsonFromOutput('', 'claude'), null);
+      assert.strictEqual(extractJsonFromOutput(null, 'claude'), null);
+    });
+
+    it('should return null for Task not found', function () {
+      assert.strictEqual(extractJsonFromOutput('Task not found', 'claude'), null);
+    });
+
+    it('should return null for Process terminated', function () {
+      assert.strictEqual(extractJsonFromOutput('Process terminated by signal', 'claude'), null);
+    });
+
+    it('should return null for plain text', function () {
+      assert.strictEqual(extractJsonFromOutput('Just some text', 'claude'), null);
+    });
+
+    it('should handle markdown in any provider', function () {
+      const output = 'Here is the result:\n\n```json\n{"foo":"bar"}\n```\n\nDone.';
+      assert.deepStrictEqual(extractJsonFromOutput(output, 'claude'), { foo: 'bar' });
+      assert.deepStrictEqual(extractJsonFromOutput(output, 'codex'), { foo: 'bar' });
+      assert.deepStrictEqual(extractJsonFromOutput(output, 'gemini'), { foo: 'bar' });
+    });
+  });
+}
+
+function defineStrategyPriorityTests() {
+  describe('Strategy Priority', function () {
+    it('should prefer result wrapper over text events', function () {
+      // Both result wrapper and text events present - wrapper should win
+      const output = `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"source\\":\\"text\\"}"}}}
+{"type":"result","result":{"source":"wrapper"}}`;
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.source, 'wrapper');
+    });
+
+    it('should prefer text events over markdown', function () {
+      // Text events should be extracted before trying markdown
+      const output =
+        '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\\"source\\":\\"text\\"}"}}}';
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result.source, 'text');
+    });
+  });
+}
+
+function defineRegressionTests() {
   // ============================================================================
   // REGRESSION TESTS
   // ============================================================================
@@ -437,7 +478,8 @@ Done.`;
 
     it('REGRESSION #52: Claude assistant message with multiple text blocks', function () {
       // Haiku may split output across multiple text blocks
-      const output = `{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":"},{"type":"text","text":"\\"STANDARD\\",\\"taskType\\":\\"DEBUG\\",\\"reasoning\\":\\"Fix bug\\"}"}]}}`;
+      const output =
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":"},{"type":"text","text":"\\"STANDARD\\",\\"taskType\\":\\"DEBUG\\",\\"reasoning\\":\\"Fix bug\\"}"}]}}';
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result.complexity, 'STANDARD');
       assert.strictEqual(result.taskType, 'DEBUG');
@@ -445,10 +487,11 @@ Done.`;
 
     it('REGRESSION #52: Claude assistant message text blocks alongside tool_use', function () {
       // Real-world scenario: text blocks mixed with tool_use
-      const output = `{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":\\"TRIVIAL\\",\\"taskType\\":\\"TASK\\",\\"reasoning\\":\\"Simple change\\"}"},{"type":"tool_use","id":"tool1","name":"Read","input":{}}]}}`;
+      const output =
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"complexity\\":\\"TRIVIAL\\",\\"taskType\\":\\"TASK\\",\\"reasoning\\":\\"Simple change\\"}"},{"type":"tool_use","id":"tool1","name":"Read","input":{}}]}}';
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result.complexity, 'TRIVIAL');
       assert.strictEqual(result.taskType, 'TASK');
     });
   });
-});
+}

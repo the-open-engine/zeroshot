@@ -12,7 +12,6 @@
  * State machine: idle → evaluating → building_context → executing → idle
  */
 
-const { buildContext } = require('./agent-context-builder');
 const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
 const { executeHook } = require('./agent-hook-executor');
 const {
@@ -194,23 +193,17 @@ async function executeTriggerAction(agent, trigger, message) {
   }
 }
 
-async function runOnStartHook({ agent, triggeringMessage }) {
-  await executeHook({
-    hook: agent.config.hooks?.onStart,
-    agent: agent,
-    message: triggeringMessage,
-    result: undefined,
-    messageBus: agent.messageBus,
-    cluster: agent.cluster,
-    orchestrator: agent.orchestrator,
-  });
-}
+/**
+ * Execute claude-zeroshots with built context
+ * Retries disabled by default. Set agent config `maxRetries` to enable (e.g., 3).
+ * @param {AgentWrapper} agent - Agent instance
+ * @param {Object} triggeringMessage - Message that triggered execution
+ */
+function handleMaxIterations(agent) {
+  if (agent.iteration < agent.maxIterations) {
+    return false;
+  }
 
-function hasReachedMaxIterations(agent) {
-  return agent.iteration >= agent.maxIterations;
-}
-
-function handleMaxIterationsReached(agent) {
   agent._log(`[Agent ${agent.id}] Hit max iterations (${agent.maxIterations}), stopping cluster`);
   agent._publishLifecycle('MAX_ITERATIONS_REACHED', {
     iteration: agent.iteration,
@@ -230,21 +223,7 @@ function handleMaxIterationsReached(agent) {
     },
   });
   agent.state = 'failed';
-}
-
-function buildTaskContext({ agent, triggeringMessage }) {
-  agent.state = 'building_context';
-  return buildContext({
-    id: agent.id,
-    role: agent.role,
-    iteration: agent.iteration,
-    config: agent.config,
-    messageBus: agent.messageBus,
-    cluster: agent.cluster,
-    lastTaskEndTime: agent.lastTaskEndTime,
-    triggeringMessage,
-    selectedPrompt: agent._selectPrompt(),
-  });
+  return true;
 }
 
 function logInputContext(agent, context) {
@@ -252,11 +231,13 @@ function logInputContext(agent, context) {
     return;
   }
 
-  console.log(`\n${'='.repeat(80)}`);
+  console.log(`
+${'='.repeat(80)}`);
   console.log(`📥 INPUT CONTEXT - Agent: ${agent.id} (Iteration: ${agent.iteration})`);
   console.log(`${'='.repeat(80)}`);
   console.log(context);
-  console.log(`${'='.repeat(80)}\n`);
+  console.log(`${'='.repeat(80)}
+`);
 }
 
 async function applyValidatorJitter(agent) {
@@ -297,32 +278,7 @@ function attachResultMetadata(agent, result) {
   result.iteration = agent.iteration;
 }
 
-function assertTaskSuccess(result) {
-  if (!result.success) {
-    throw new Error(result.error || 'Task execution failed');
-  }
-}
-
-async function executeProviderTask({ agent, triggeringMessage, context }) {
-  // Spawn provider task
-  agent.state = 'executing_task';
-  await applyValidatorJitter(agent);
-  publishTaskStarted(agent, triggeringMessage);
-
-  const result = await agent._spawnClaudeTask(context);
-  attachResultMetadata(agent, result);
-  assertTaskSuccess(result);
-  return result;
-}
-
 function publishTaskCompleted(agent, result) {
-  // Set state to idle BEFORE publishing lifecycle event
-  // (so lifecycle message includes correct state)
-  agent.state = 'idle';
-
-  // Track completion time for context filtering (used by "since: last_task_end")
-  agent.lastTaskEndTime = Date.now();
-
   agent._publishLifecycle('TASK_COMPLETED', {
     iteration: agent.iteration,
     success: true,
@@ -332,21 +288,19 @@ function publishTaskCompleted(agent, result) {
 }
 
 function publishTokenUsage(agent, result) {
+  // Publish TOKEN_USAGE event for aggregation and tracking
+  // CRITICAL: Include taskId for causal linking - allows consumers to group
+  // messages by task regardless of interleaved timing from async hooks
   if (!result.tokenUsage) {
     return;
   }
-
-  // Get actual model used from API response (more accurate than config)
-  const actualModel = result.tokenUsage.modelUsage
-    ? Object.keys(result.tokenUsage.modelUsage)[0]
-    : agent._selectModel();
 
   agent.messageBus.publish({
     cluster_id: agent.cluster.id,
     topic: 'TOKEN_USAGE',
     sender: agent.id,
     content: {
-      text: `${agent.id} used ${result.tokenUsage.inputTokens} input + ${result.tokenUsage.outputTokens} output tokens (${actualModel})`,
+      text: `${agent.id} used ${result.tokenUsage.inputTokens} input + ${result.tokenUsage.outputTokens} output tokens`,
       data: {
         agentId: agent.id,
         role: agent.role,
@@ -359,11 +313,14 @@ function publishTokenUsage(agent, result) {
   });
 }
 
-async function runOnCompleteHookWithRetry({ agent, triggeringMessage, result }) {
+async function executeOnCompleteHookWithRetry(agent, triggeringMessage, result) {
+  // Execute onComplete hook WITH RETRY
+  // Hook failure shouldn't retry the entire task - just the hook
   const hookMaxRetries = 3;
   const hookBaseDelay = 1000;
+  let hookSuccess = false;
 
-  for (let hookAttempt = 1; hookAttempt <= hookMaxRetries; hookAttempt++) {
+  for (let hookAttempt = 1; hookAttempt <= hookMaxRetries && !hookSuccess; hookAttempt++) {
     try {
       await executeHook({
         hook: agent.config.hooks?.onComplete,
@@ -374,9 +331,10 @@ async function runOnCompleteHookWithRetry({ agent, triggeringMessage, result }) 
         cluster: agent.cluster,
         orchestrator: agent.orchestrator,
       });
-      return;
+      hookSuccess = true;
     } catch (hookError) {
-      console.error(`\n${'='.repeat(80)}`);
+      console.error(`
+${'='.repeat(80)}`);
       console.error(
         `🔴 HOOK EXECUTION FAILED - AGENT: ${agent.id} (Attempt ${hookAttempt}/${hookMaxRetries})`
       );
@@ -386,39 +344,86 @@ async function runOnCompleteHookWithRetry({ agent, triggeringMessage, result }) 
       if (hookAttempt < hookMaxRetries) {
         const delay = hookBaseDelay * Math.pow(2, hookAttempt - 1);
         console.error(`Will retry hook in ${delay}ms...`);
-        console.error(`${'='.repeat(80)}\n`);
+        console.error(`${'='.repeat(80)}
+`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
+      } else {
+        console.error(`${'='.repeat(80)}
+`);
+        // All hook retries exhausted - throw to trigger task-level handling
+        throw new Error(
+          `Hook execution failed after ${hookMaxRetries} attempts. ` +
+            `Task completed successfully but hook could not publish result. ` +
+            `Original error: ${hookError.message}`
+        );
       }
-
-      console.error(`${'='.repeat(80)}\n`);
-      throw new Error(
-        `Hook execution failed after ${hookMaxRetries} attempts. ` +
-          `Task completed successfully but hook could not publish result. ` +
-          `Original error: ${hookError.message}`
-      );
     }
   }
 }
 
-async function handleTaskSuccess({ agent, triggeringMessage, result }) {
+async function runTaskAttempt(agent, triggeringMessage) {
+  // Execute onStart hook
+  await executeHook({
+    hook: agent.config.hooks?.onStart,
+    agent: agent,
+    message: triggeringMessage,
+    result: undefined,
+    messageBus: agent.messageBus,
+    cluster: agent.cluster,
+    orchestrator: agent.orchestrator,
+  });
+
+  // Check max iterations limit BEFORE incrementing (prevents infinite rejection loops)
+  if (handleMaxIterations(agent)) {
+    return;
+  }
+
+  // Increment iteration BEFORE building context so worker knows current iteration
+  agent.iteration++;
+
+  // Build context
+  agent.state = 'building_context';
+  const context = agent._buildContext(triggeringMessage);
+
+  // Log input context (helps debug what each agent sees)
+  logInputContext(agent, context);
+
+  // Spawn provider task
+  agent.state = 'executing_task';
+  await applyValidatorJitter(agent);
+  publishTaskStarted(agent, triggeringMessage);
+
+  const result = await agent._spawnClaudeTask(context);
+  attachResultMetadata(agent, result);
+
+  // Check if task execution failed
+  if (!result.success) {
+    throw new Error(result.error || 'Task execution failed');
+  }
+
+  // Set state to idle BEFORE publishing lifecycle event
+  // (so lifecycle message includes correct state)
+  agent.state = 'idle';
+
+  // Track completion time for context filtering (used by "since: last_task_end")
+  agent.lastTaskEndTime = Date.now();
+
   publishTaskCompleted(agent, result);
   publishTokenUsage(agent, result);
-  await runOnCompleteHookWithRetry({ agent, triggeringMessage, result });
+  await executeOnCompleteHookWithRetry(agent, triggeringMessage, result);
 }
 
-function isLockFileError(error) {
-  return Boolean(error?.message && error.message.includes('Lock file'));
-}
-
-function logTaskAttemptFailure({ agent, attempt, maxRetries, error }) {
-  console.error(`\n${'='.repeat(80)}`);
+function logTaskAttemptFailure(agent, attempt, maxRetries, error) {
+  // Log attempt failure
+  console.error(`
+${'='.repeat(80)}`);
   console.error(`🔴 TASK EXECUTION FAILED - AGENT: ${agent.id} (Attempt ${attempt}/${maxRetries})`);
   console.error(`${'='.repeat(80)}`);
   console.error(`Error: ${error.message}`);
 }
 
-async function applyLockContentionDelay() {
+async function handleLockContention() {
+  // Lock contention - add significant jittered delay
   const lockDelay = 10000 + Math.floor(Math.random() * 20000); // 10-30 seconds
   console.error(
     `⚠️ Lock contention detected - waiting ${Math.round(lockDelay / 1000)}s before retry`
@@ -426,59 +431,63 @@ async function applyLockContentionDelay() {
   await new Promise((resolve) => setTimeout(resolve, lockDelay));
 }
 
-function logRetryDelay(baseDelay, attempt) {
-  console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
-}
-
-function logTaskFailureFooter() {
-  console.error(`${'='.repeat(80)}\n`);
-}
-
-function logMaxRetriesExhausted({ agent, maxRetries, error }) {
-  console.error(`\n${'='.repeat(80)}`);
+async function handleFinalFailure(agent, triggeringMessage, error, maxRetries) {
+  console.error(`
+${'='.repeat(80)}`);
   console.error(`🔴🔴🔴 MAX RETRIES EXHAUSTED - AGENT: ${agent.id} 🔴🔴🔴`);
   console.error(`${'='.repeat(80)}`);
   console.error(`All ${maxRetries} attempts failed`);
   console.error(`Final error: ${error.message}`);
   console.error(`Stack: ${error.stack}`);
-  console.error(`${'='.repeat(80)}\n`);
-}
+  console.error(`${'='.repeat(80)}
+`);
 
-function publishValidatorCrashRejection({ agent, error, maxRetries }) {
-  console.error(`\n${'='.repeat(80)}`);
-  console.error(`❌ VALIDATOR CRASHED - REJECTING (NOT AUTO-APPROVING)`);
-  console.error(`${'='.repeat(80)}`);
-  console.error(`Validator ${agent.id} crashed ${maxRetries} times`);
-  console.error(`Error: ${error.message}`);
-  console.error(`REJECTING validation - broken code will NOT be merged`);
-  console.error(`Investigation required before retry`);
-  console.error(`${'='.repeat(80)}\n`);
+  // CRITICAL FIX: Validator crash = REJECTION (not auto-approval)
+  // Auto-approval on crash allowed broken code to be merged - unacceptable!
+  // If validator crashed 3x, something is fundamentally wrong - REJECT and investigate
+  if (agent.role === 'validator') {
+    console.error(`
+${'='.repeat(80)}`);
+    console.error(`❌ VALIDATOR CRASHED - REJECTING (NOT AUTO-APPROVING)`);
+    console.error(`${'='.repeat(80)}`);
+    console.error(`Validator ${agent.id} crashed ${maxRetries} times`);
+    console.error(`Error: ${error.message}`);
+    console.error(`REJECTING validation - broken code will NOT be merged`);
+    console.error(`Investigation required before retry`);
+    console.error(`${'='.repeat(80)}
+`);
 
-  // Publish REJECTION message (NOT approval!)
-  const hook = agent.config.hooks?.onComplete;
-  if (hook && hook.action === 'publish_message') {
-    agent._publish({
-      topic: hook.config.topic,
-      receiver: hook.config.receiver || 'broadcast',
-      content: {
-        text: `REJECTED: Validator crashed ${maxRetries} times - ${error.message}`,
-        data: {
-          approved: false, // REJECT!
-          crashedAfterRetries: true,
-          errors: JSON.stringify([
-            `VALIDATOR CRASHED ${maxRetries}x: ${error.message}`,
-            `Validation could not be performed - REJECTING to prevent broken code merge`,
-            `Investigation required before retry`,
-          ]),
-          attempts: maxRetries,
-          requiresInvestigation: true,
+    // Publish REJECTION message (NOT approval!)
+    const hook = agent.config.hooks?.onComplete;
+    if (hook && hook.action === 'publish_message') {
+      agent._publish({
+        topic: hook.config.topic,
+        receiver: hook.config.receiver || 'broadcast',
+        content: {
+          text: `REJECTED: Validator crashed ${maxRetries} times - ${error.message}`,
+          data: {
+            approved: false, // REJECT!
+            crashedAfterRetries: true,
+            errors: JSON.stringify([
+              `VALIDATOR CRASHED ${maxRetries}x: ${error.message}`,
+              `Validation could not be performed - REJECTING to prevent broken code merge`,
+              `Investigation required before retry`,
+            ]),
+            attempts: maxRetries,
+            requiresInvestigation: true,
+          },
         },
-      },
-    });
-  }
-}
+      });
+    }
 
-function setClusterFailureInfo({ agent, error, maxRetries }) {
+    agent.state = 'error';
+    // Don't return - fall through to publish AGENT_ERROR and save failure info
+    // This allows the cluster to stop and be resumed after investigation
+  }
+
+  // Non-validator agents: publish error and stop
+  agent.state = 'error';
+
   // Save failure info to cluster for resume capability
   agent.cluster.failureInfo = {
     agentId: agent.id,
@@ -488,9 +497,7 @@ function setClusterFailureInfo({ agent, error, maxRetries }) {
     attempts: maxRetries,
     timestamp: Date.now(),
   };
-}
 
-function publishAgentError({ agent, triggeringMessage, error, maxRetries }) {
   // Publish error to message bus for visibility in logs
   agent._publish({
     topic: 'AGENT_ERROR',
@@ -519,9 +526,8 @@ function publishAgentError({ agent, triggeringMessage, error, maxRetries }) {
       triggeringTopic: triggeringMessage.topic,
     },
   });
-}
 
-async function runOnErrorHook({ agent, triggeringMessage, error }) {
+  // Execute onError hook
   await executeHook({
     hook: agent.config.hooks?.onError,
     agent: agent,
@@ -531,26 +537,11 @@ async function runOnErrorHook({ agent, triggeringMessage, error }) {
     cluster: agent.cluster,
     orchestrator: agent.orchestrator,
   });
-}
 
-async function handleExhaustedRetries({ agent, triggeringMessage, error, maxRetries }) {
-  logMaxRetriesExhausted({ agent, maxRetries, error });
-
-  // CRITICAL FIX: Validator crash = REJECTION (not auto-approval)
-  // Auto-approval on crash allowed broken code to be merged - unacceptable!
-  // If validator crashed 3x, something is fundamentally wrong - REJECT and investigate
-  if (agent.role === 'validator') {
-    publishValidatorCrashRejection({ agent, error, maxRetries });
-  }
-
-  agent.state = 'error';
-  setClusterFailureInfo({ agent, error, maxRetries });
-  publishAgentError({ agent, triggeringMessage, error, maxRetries });
-  await runOnErrorHook({ agent, triggeringMessage, error });
   agent.state = 'idle';
 }
 
-async function scheduleRetry({ agent, attempt, maxRetries, baseDelay, error }) {
+async function scheduleRetry(agent, error, attempt, maxRetries, baseDelay) {
   const delay = baseDelay * Math.pow(2, attempt - 1); // 2s, 4s, 8s
 
   agent._publishLifecycle('RETRY_SCHEDULED', {
@@ -568,32 +559,35 @@ async function scheduleRetry({ agent, attempt, maxRetries, baseDelay, error }) {
   agent._log(`[${agent.id}] 🔄 Starting retry attempt ${attempt + 1}/${maxRetries}`);
 }
 
-async function handleTaskFailure({
+async function handleTaskAttemptFailure({
   agent,
   triggeringMessage,
+  error,
   attempt,
   maxRetries,
   baseDelay,
-  error,
 }) {
-  const lockError = isLockFileError(error);
-  logTaskAttemptFailure({ agent, attempt, maxRetries, error });
+  // LOCK CONTENTION: Add extra jittered delay for lock file errors
+  // This happens when multiple validators try to run Claude CLI in the same workspace
+  const isLockError = error.message && error.message.includes('Lock file');
 
-  if (lockError) {
-    // Lock contention - add significant jittered delay
-    await applyLockContentionDelay();
+  logTaskAttemptFailure(agent, attempt, maxRetries, error);
+
+  if (isLockError) {
+    await handleLockContention();
   } else if (attempt < maxRetries) {
-    logRetryDelay(baseDelay, attempt);
+    console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
   }
-  logTaskFailureFooter();
+  console.error(`${'='.repeat(80)}
+`);
 
   if (attempt >= maxRetries) {
-    await handleExhaustedRetries({ agent, triggeringMessage, error, maxRetries });
-    return false;
+    await handleFinalFailure(agent, triggeringMessage, error, maxRetries);
+    return true;
   }
 
-  await scheduleRetry({ agent, attempt, maxRetries, baseDelay, error });
-  return true;
+  await scheduleRetry(agent, error, attempt, maxRetries, baseDelay);
+  return false;
 }
 
 /**
@@ -620,54 +614,23 @@ async function executeTask(agent, triggeringMessage) {
     }
 
     try {
-      await runOnStartHook({ agent, triggeringMessage });
-
-      // Check max iterations limit BEFORE incrementing (prevents infinite rejection loops)
-      if (hasReachedMaxIterations(agent)) {
-        handleMaxIterationsReached(agent);
-        return;
-      }
-
-      // Increment iteration BEFORE building context so worker knows current iteration
-      agent.iteration++;
-
-      const context = buildTaskContext({ agent, triggeringMessage });
-      logInputContext(agent, context);
-
-      const result = await executeProviderTask({ agent, triggeringMessage, context });
-      await handleTaskSuccess({ agent, triggeringMessage, result });
+      await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
-      const shouldRetry = await handleTaskFailure({
+      const shouldStop = await handleTaskAttemptFailure({
         agent,
         triggeringMessage,
+        error,
         attempt,
         maxRetries,
         baseDelay,
-        error,
       });
-      if (!shouldRetry) {
+      if (shouldStop) {
         return;
       }
     }
   }
 }
-
-/**
- * Start monitoring agent output liveness using multi-indicator stuck detection
- *
- * SAFE DETECTION: Only flags as stuck when MULTIPLE indicators agree:
- * - Process sleeping (state=S)
- * - Blocked on epoll/poll wait
- * - Low CPU usage (<1%)
- * - Low context switches (<10)
- * - No network data in flight
- *
- * Single-indicator detection (just output freshness) has HIGH false positive risk.
- * This multi-indicator approach eliminates false positives.
- *
- * @param {AgentWrapper} agent - Agent instance
- */
 function startLivenessCheck(agent) {
   if (agent.livenessCheckInterval) {
     clearInterval(agent.livenessCheckInterval);

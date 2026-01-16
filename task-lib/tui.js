@@ -302,8 +302,8 @@ class TaskTUI {
     const tasks = loadTasks();
     this.tasks = Object.values(tasks);
 
-    // Sort by creation date, newest first
-    this.tasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Sort by creation date, oldest first (chronological)
+    this.tasks.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
     // Verify running status
     for (const task of this.tasks) {

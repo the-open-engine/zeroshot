@@ -10,9 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-describe('Type Safety Validation', () => {
-  let tmpDir;
+let tmpDir;
 
+describe('Type Safety Validation', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-'));
   });
@@ -21,6 +21,13 @@ describe('Type Safety Validation', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  defineBooleanComparisonTests();
+  defineTemplateSubstitutionTests();
+  defineRealTemplateValidationTests();
+  defineEdgeCaseTests();
+});
+
+function defineBooleanComparisonTests() {
   describe('Boolean comparison detection', () => {
     it('should detect unsafe boolean comparison without string fallback', () => {
       const config = {
@@ -125,7 +132,9 @@ describe('Type Safety Validation', () => {
       expect(issues).to.have.length(0);
     });
   });
+}
 
+function defineTemplateSubstitutionTests() {
   describe('Template substitution detection', () => {
     it('should warn about boolean template substitution in hooks', () => {
       const config = {
@@ -171,7 +180,9 @@ describe('Type Safety Validation', () => {
       expect(hasTemplateWarning || hasTriggerError).to.be.true;
     });
   });
+}
 
+function defineRealTemplateValidationTests() {
   describe('Real template validation', () => {
     it('should validate full-workflow.json has no issues', () => {
       const templatePath = path.join(
@@ -226,7 +237,9 @@ describe('Type Safety Validation', () => {
       }
     });
   });
+}
 
+function defineEdgeCaseTests() {
   describe('Edge cases', () => {
     it('should handle malformed JSON gracefully', () => {
       const filePath = path.join(tmpDir, 'malformed.json');
@@ -261,4 +274,4 @@ describe('Type Safety Validation', () => {
       expect(issues).to.have.length(0);
     });
   });
-});
+}
