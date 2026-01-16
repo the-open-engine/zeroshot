@@ -78,6 +78,11 @@ function buildCommand(context, options = {}) {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   }
 
+  // Always skip git repo check - zeroshot runs non-interactively and may run in any directory
+  if (cliFeatures.supportsSkipGitRepoCheck !== false) {
+    args.push('--skip-git-repo-check');
+  }
+
   // Augment context with schema if CLI doesn't support native --output-schema
   let finalContext = context;
   if (jsonSchema && cliFeatures.supportsOutputSchema) {

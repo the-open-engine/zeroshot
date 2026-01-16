@@ -418,11 +418,11 @@ class StatusFooter {
    */
   async _sampleMetrics() {
     for (const [agentId, agent] of this.agents) {
-      if (!agent.pid) continue;
+      if (!agent.processPid) continue;
 
       try {
         // Get actual metrics with 200ms sample window (for CPU calculation)
-        const raw = await getProcessMetrics(agent.pid, { samplePeriodMs: 200 });
+        const raw = await getProcessMetrics(agent.processPid, { samplePeriodMs: 200 });
         const existing = this.interpolatedMetrics.get(agentId);
 
         this.interpolatedMetrics.set(agentId, {

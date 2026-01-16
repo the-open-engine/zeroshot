@@ -989,7 +989,11 @@ class Orchestrator {
         );
 
         watchdogTimer = setTimeout(() => {
-          const clusterOps = messageBus.query({ topic: 'CLUSTER_OPERATIONS', limit: 1 });
+          const clusterOps = messageBus.query({
+            cluster_id: clusterId,
+            topic: 'CLUSTER_OPERATIONS',
+            limit: 1,
+          });
           if (clusterOps.length === 0) {
             console.error(`\n${'='.repeat(80)}`);
             console.error(`🔴 CONDUCTOR WATCHDOG TRIGGERED - CLUSTER_OPERATIONS NEVER RECEIVED`);
