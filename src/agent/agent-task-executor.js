@@ -458,13 +458,28 @@ async function spawnClaudeTask(agent, context) {
   // Wait for task to be registered in zeroshot storage (race condition fix)
   await waitForTaskReady(agent, taskId);
 
-  // CRITICAL: Update agent.processPid with the REAL Claude process PID
-  // The initial proc.pid was the wrapper script which exits immediately.
-  // The watcher updates SQLite store with the actual Claude process PID.
-  const taskInfo = getTask(taskId);
-  if (taskInfo?.pid) {
-    agent.processPid = taskInfo.pid;
-    agent._log(`📋 Agent ${agent.id}: Real process PID: ${taskInfo.pid}`);
+  // CRITICAL: Poll for REAL process PID from task store
+  // The watcher spawns the actual CLI and writes PID to SQLite asynchronously.
+  // We must poll because the watcher runs in a forked process.
+  const MAX_PID_POLLS = 30; // 3 seconds max
+  const PID_POLL_DELAY = 100;
+  let realPid = null;
+
+  for (let i = 0; i < MAX_PID_POLLS; i++) {
+    const taskInfo = getTask(taskId);
+    if (taskInfo?.pid) {
+      realPid = taskInfo.pid;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, PID_POLL_DELAY));
+  }
+
+  if (realPid) {
+    agent.processPid = realPid;
+    agent._publishLifecycle('PROCESS_SPAWNED', { pid: realPid });
+    agent._log(`📋 Agent ${agent.id}: Process PID: ${realPid}`);
+  } else {
+    agent._log(`⚠️ Agent ${agent.id}: PID not available (task may use non-standard watcher)`);
   }
 
   // Now follow the logs and stream output
@@ -586,9 +601,9 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
       env: spawnEnv,
     });
 
-    // Track PID for resource monitoring
-    agent.processPid = proc.pid;
-    agent._publishLifecycle('PROCESS_SPAWNED', { pid: proc.pid });
+    // NOTE: Don't emit PROCESS_SPAWNED here - proc.pid is a wrapper that exits immediately.
+    // Real PID comes from task store after watcher spawns the actual CLI process.
+    // PROCESS_SPAWNED is emitted in spawnClaudeTask after waitForTaskReady + PID polling.
 
     let stdout = '';
     let stderr = '';
