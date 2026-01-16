@@ -350,6 +350,24 @@ const maxValidators = cluster.config.complexity === 'CRITICAL' ? 5 : 3;
 
 **WHY THIS MATTERS:** Conductor dynamically adjusts based on task complexity.
 
+### 7. Bypassing dev → main Workflow (ENFORCED via CI)
+
+**CI blocks PRs to main from any branch except `dev`.** See `.github/workflows/ci.yml` → `enforce-main-pr-source` job.
+
+```bash
+# ❌ CI WILL BLOCK - PRs to main from feature branches
+gh pr create --base main --head fix/my-feature  # FAILS in CI
+
+# ✅ CORRECT - Always go through dev first
+gh pr create --base dev --head fix/my-feature   # PR to dev
+# After merge to dev:
+gh pr create --base main --head dev --title "Release"  # dev → main (allowed)
+```
+
+**POSTMORTEM (2026-01-16):** Agent found merge conflicts between dev and main. Instead of resolving conflicts properly (merge main into dev), created a feature branch directly from main and merged fixes to main. This bypassed dev, created divergence, and left dev without the fixes.
+
+**FIX:** Added CI enforcement (`enforce-main-pr-source` job). Now mechanically impossible to merge non-dev branches to main.
+
 ## 🔴 BEHAVIORAL RULES
 
 ### Git Workflow (Contributing to Zeroshot)
