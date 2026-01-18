@@ -37,11 +37,9 @@ class Renderer {
    * @param {Array} clusters - Array of cluster objects
    */
   renderClustersTable(clusters) {
-    if (!clusters || !Array.isArray(clusters)) {
-      clusters = [];
-    }
+    const clusterList = !clusters || !Array.isArray(clusters) ? [] : clusters;
 
-    const data = clusters.map((c) => {
+    const data = clusterList.map((c) => {
       if (!c) return ['', '', '', ''];
 
       const icon = stateIcon(c.state || 'unknown');
@@ -68,23 +66,19 @@ class Renderer {
    * @param {Map} resourceStats - Map of PID -> {cpu, memory}
    */
   renderSystemStats(clusters, resourceStats) {
-    if (!clusters || !Array.isArray(clusters)) {
-      clusters = [];
-    }
-    if (!resourceStats || !(resourceStats instanceof Map)) {
-      resourceStats = new Map();
-    }
+    const clusterList = !clusters || !Array.isArray(clusters) ? [] : clusters;
+    const statsMap = !resourceStats || !(resourceStats instanceof Map) ? new Map() : resourceStats;
 
     // Calculate aggregate stats
-    const activeClusters = clusters.filter((c) => c && c.state === 'running').length;
-    const totalAgents = clusters.reduce((sum, c) => sum + (c?.agentCount || 0), 0);
+    const activeClusters = clusterList.filter((c) => c && c.state === 'running').length;
+    const totalAgents = clusterList.reduce((sum, c) => sum + (c?.agentCount || 0), 0);
 
     // Calculate average CPU and memory from resource stats
     let totalCpu = 0;
     let totalMemory = 0;
     let statCount = 0;
 
-    resourceStats.forEach((stat) => {
+    statsMap.forEach((stat) => {
       if (stat && typeof stat.cpu === 'number' && typeof stat.memory === 'number') {
         totalCpu += stat.cpu;
         totalMemory += stat.memory;
@@ -125,18 +119,14 @@ class Renderer {
       return;
     }
 
-    if (!agents || !Array.isArray(agents)) {
-      agents = [];
-    }
-    if (!resourceStats || !(resourceStats instanceof Map)) {
-      resourceStats = new Map();
-    }
+    const agentList = !agents || !Array.isArray(agents) ? [] : agents;
+    const statsMap = !resourceStats || !(resourceStats instanceof Map) ? new Map() : resourceStats;
 
-    const data = agents.map((a) => {
+    const data = agentList.map((a) => {
       if (!a) return ['', '', '', '', '', ''];
 
       const pid = a.pid;
-      const stats = resourceStats.get(pid) || { cpu: 0, memory: 0 };
+      const stats = statsMap.get(pid) || { cpu: 0, memory: 0 };
 
       const agentId = truncate(a.id || '', 12);
       const role = truncate(a.role || '', 12);

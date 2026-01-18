@@ -27,12 +27,10 @@ const DEFAULT_TIMEOUT_MS = 30000;
  * // Callback style (for legacy code migration)
  * exec('ls -la', { timeout: 5000 }, (error, stdout) => { ... });
  */
-function exec(command, options = {}, callback = null) {
+function exec(command, optionsOrCallback = {}, callbackArg = null) {
   // Handle overloaded signature: exec(cmd, callback)
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  }
+  const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : callbackArg;
+  const options = typeof optionsOrCallback === 'function' ? {} : optionsOrCallback;
 
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
 

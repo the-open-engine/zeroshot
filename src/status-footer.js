@@ -81,7 +81,8 @@ function debounce(fn, ms) {
  * @typedef {Object} AgentState
  * @property {string} id - Agent ID
  * @property {string} state - Agent state (idle, executing, etc.)
- * @property {number|null} pid - Process ID if running
+ * @property {number|null} processPid - Process ID if running (preferred)
+ * @property {number|null} pid - Legacy alias for processPid
  * @property {number} iteration - Current iteration
  */
 
@@ -396,8 +397,11 @@ class StatusFooter {
    * @param {AgentState} agentState
    */
   updateAgent(agentState) {
+    const processPid = agentState.processPid ?? agentState.pid ?? null;
     this.agents.set(agentState.id, {
       ...agentState,
+      processPid,
+      pid: processPid,
       lastUpdate: Date.now(),
     });
   }
@@ -418,11 +422,12 @@ class StatusFooter {
    */
   async _sampleMetrics() {
     for (const [agentId, agent] of this.agents) {
-      if (!agent.processPid) continue;
+      const processPid = agent.processPid ?? agent.pid;
+      if (!processPid) continue;
 
       try {
         // Get actual metrics with 200ms sample window (for CPU calculation)
-        const raw = await getProcessMetrics(agent.processPid, { samplePeriodMs: 200 });
+        const raw = await getProcessMetrics(processPid, { samplePeriodMs: 200 });
         const existing = this.interpolatedMetrics.get(agentId);
 
         this.interpolatedMetrics.set(agentId, {

@@ -64,12 +64,13 @@ const formatCPU = (percent) => {
   if (typeof percent !== 'number' || percent < 0) return '0.0%';
 
   // Assert normalized range (should never exceed 100% after per-core normalization)
-  if (percent > 100) {
+  let normalizedPercent = percent;
+  if (normalizedPercent > 100) {
     console.warn(`[formatCPU] CPU percent ${percent}% exceeds 100% - normalization bug?`);
-    percent = 100;
+    normalizedPercent = 100;
   }
 
-  return `${percent.toFixed(1)}%`;
+  return `${normalizedPercent.toFixed(1)}%`;
 };
 
 /**

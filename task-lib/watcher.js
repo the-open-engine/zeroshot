@@ -207,7 +207,7 @@ child.on('close', async (code, signal) => {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode === 0 ? null : signal ? `Killed by ${signal}` : null,
+      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
     });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);

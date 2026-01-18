@@ -118,6 +118,8 @@
     "depcheck": "^1.4.7",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-security": "^3.0.1",
+    "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unused-imports": "^4.3.0",
     "husky": "^9.1.7",
     "jscpd": "^3.5.10",
@@ -131,7 +133,10 @@
     "unimported": "^1.31.0"
   },
   "overrides": {
-    "xml2js": "^0.5.0"
+    "xml2js": "^0.5.0",
+    "diff": ">=8.0.3",
+    "tar": ">=7.5.3",
+    "undici": ">=7.18.2"
   },
   "lint-staged": {
     "*.{js,mjs,cjs}": [

@@ -24,4 +24,26 @@ describe('Output Extraction - Prefixed Log Lines', () => {
 
     assert.deepStrictEqual(parsed, { approved: true, summary: 'ok', errors: [] });
   });
+
+  it('extracts JSON from Opencode when lines have agent prefixes', () => {
+    const output = [
+      'investigator | {"type":"text","part":{"type":"text","text":"{\\"foo\\":\\"bar\\"}"}}',
+      'investigator | {"type":"step_finish","part":{"type":"step-finish","tokens":{"input":1,"output":1}}}',
+    ].join('\n');
+
+    const parsed = extractJsonFromOutput(output, 'opencode');
+
+    assert.deepStrictEqual(parsed, { foo: 'bar' });
+  });
+
+  it('extracts JSON from Opencode when lines have timestamp + agent prefixes', () => {
+    const output = [
+      '[1700000000000]investigator | {"type":"text","part":{"type":"text","text":"Working..."}}',
+      '[1700000000001]investigator | {"type":"text","part":{"type":"text","text":"{\\"foo\\":\\"bar\\"}"}}',
+    ].join('\n');
+
+    const parsed = extractJsonFromOutput(output, 'opencode');
+
+    assert.deepStrictEqual(parsed, { foo: 'bar' });
+  });
 });

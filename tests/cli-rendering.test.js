@@ -272,7 +272,6 @@ describe('CLI Rendering (Pre-Refactor Baseline - Tools)', () => {
       const result = formatToolCall('UnknownTool', input);
 
       assert(typeof result === 'string');
-      assert(result.length >= 0); // May be empty or show JSON
     });
   });
 
