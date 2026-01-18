@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { PromptInjector } = require('../lib/prompt-injector');
 
 class TemplateResolver {
   /**
@@ -22,15 +23,19 @@ class TemplateResolver {
   constructor(templatesDir) {
     this.templatesDir = templatesDir;
     this.baseTemplatesDir = path.join(templatesDir, 'base-templates');
+    this.extensionsDir = path.join(templatesDir, 'capability-extensions');
+    this.promptInjector = new PromptInjector(this.extensionsDir);
   }
 
   /**
    * Resolve a template with parameters
    * @param {string} baseName - Name of base template (without .json)
    * @param {Object} params - Parameter values to substitute
+   * @param {Object} options - Optional settings
+   * @param {string} [options.provider] - Provider name for capability injection (claude, openai, codex, gemini)
    * @returns {Object} Resolved cluster config
    */
-  resolve(baseName, params) {
+  resolve(baseName, params, options = {}) {
     // Load base template
     const templatePath = path.join(this.baseTemplatesDir, `${baseName}.json`);
     if (!fs.existsSync(templatePath)) {
@@ -49,6 +54,11 @@ class TemplateResolver {
     // Deep clone and resolve
     const resolved = this._resolveObject(JSON.parse(JSON.stringify(template)), paramsWithDefaults);
 
+    // Inject capability-specific prompt extensions if provider specified
+    if (options.provider && resolved.agents) {
+      this._injectCapabilityExtensions(resolved.agents, options.provider);
+    }
+
     // Filter out conditional agents that don't meet their condition
     if (resolved.agents) {
       resolved.agents = resolved.agents.filter((/** @type {any} */ agent) => {
@@ -59,7 +69,7 @@ class TemplateResolver {
       });
     }
 
-    // Verify no unresolved placeholders remain
+    // Verify no unresolved placeholders remain (except CAPABILITY_EXTENSIONS which is handled above)
     this._verifyResolved(resolved);
 
     // Remove params schema from output (it's metadata, not config)
@@ -68,6 +78,29 @@ class TemplateResolver {
     return resolved;
   }
 
+  /**
+   * Inject capability-specific prompt extensions into agent prompts
+   * @private
+   * @param {Array} agents - Array of agent configurations
+   * @param {string} provider - Provider name
+   */
+  _injectCapabilityExtensions(agents, provider) {
+    for (const agent of agents) {
+      if (!agent.prompt) continue;
+
+      // Handle different prompt formats: string, { initial, subsequent }, { system, ... }
+      if (typeof agent.prompt === 'string') {
+        agent.prompt = this.promptInjector.injectAtMarker(agent.prompt, provider);
+      } else if (typeof agent.prompt === 'object') {
+        // Inject into all prompt fields
+        for (const [key, value] of Object.entries(agent.prompt)) {
+          if (typeof value === 'string') {
+            agent.prompt[key] = this.promptInjector.injectAtMarker(value, provider);
+          }
+        }
+      }
+    }
+  }
   /**
    * Validate that required params are provided
    * @private
@@ -318,7 +351,9 @@ class TemplateResolver {
     if (typeof obj === 'string') {
       const matches = obj.match(/\{\{(\w+)\}\}/g);
       if (matches) {
-        unresolved.push(...matches.map((m) => `${pathPrefix}: ${m}`));
+        // Filter out CAPABILITY_EXTENSIONS marker (handled by prompt injector)
+        const filtered = matches.filter((m) => m !== '{{CAPABILITY_EXTENSIONS}}');
+        unresolved.push(...filtered.map((m) => `${pathPrefix}: ${m}`));
       }
     } else if (Array.isArray(obj)) {
       obj.forEach((item, i) => {

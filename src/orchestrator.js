@@ -2076,6 +2076,9 @@ Continue from where you left off. Review your previous output to understand what
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     let loadedConfig;
 
+    // Get provider info from cluster for capability injection
+    const providerForInjection = cluster.config?.defaultProvider || cluster.config?.forceProvider;
+
     // Check if config is parameterized ({ base, params }) or static (string)
     if (typeof config === 'object' && config.base) {
       // Parameterized template - resolve with TemplateResolver
@@ -2084,7 +2087,8 @@ Continue from where you left off. Review your previous output to understand what
       this._log(`    Params: ${JSON.stringify(params)}`);
 
       const resolver = new TemplateResolver(templatesDir);
-      loadedConfig = resolver.resolve(base, params);
+      const resolveOptions = providerForInjection ? { provider: providerForInjection } : {};
+      loadedConfig = resolver.resolve(base, params, resolveOptions);
 
       this._log(`    ✓ Resolved template: ${base} → ${loadedConfig.agents?.length || 0} agent(s)`);
     } else if (typeof config === 'string') {
