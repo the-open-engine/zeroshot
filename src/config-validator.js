@@ -117,6 +117,100 @@ function validateConfig(config, depth = 0) {
   };
 }
 
+function validateAgentIdentity(agent, prefix, seenIds, errors) {
+  if (!agent.id) {
+    errors.push(`${prefix}.id is required`);
+  } else if (typeof agent.id !== 'string') {
+    errors.push(`${prefix}.id must be a string`);
+  } else if (seenIds.has(agent.id)) {
+    errors.push(`Duplicate agent id: "${agent.id}"`);
+  } else {
+    seenIds.add(agent.id);
+  }
+
+  if (!agent.role) {
+    errors.push(`${prefix}.role is required`);
+  }
+}
+
+function validateSubclusterAgent(agent, depth, errors, warnings) {
+  const subClusterSchema = require('./schemas/sub-cluster');
+  const subResult = subClusterSchema.validateSubCluster(agent, depth);
+  errors.push(...subResult.errors);
+  warnings.push(...subResult.warnings);
+}
+
+function validateTrigger(trigger, triggerPrefix, errors) {
+  if (!trigger.topic) {
+    errors.push(`${triggerPrefix}.topic is required`);
+  }
+
+  if (trigger.action && !['execute_task', 'stop_cluster'].includes(trigger.action)) {
+    errors.push(
+      `${triggerPrefix}.action must be 'execute_task' or 'stop_cluster', got '${trigger.action}'`
+    );
+  }
+
+  if (trigger.logic) {
+    if (!trigger.logic.script) {
+      errors.push(`${triggerPrefix}.logic.script is required when logic is specified`);
+    }
+    if (trigger.logic.engine && trigger.logic.engine !== 'javascript') {
+      errors.push(
+        `${triggerPrefix}.logic.engine must be 'javascript', got '${trigger.logic.engine}'`
+      );
+    }
+  }
+}
+
+function validateAgentTriggers(agent, prefix, errors) {
+  if (!agent.triggers || !Array.isArray(agent.triggers)) {
+    errors.push(`${prefix}.triggers array is required`);
+    return;
+  }
+
+  if (agent.triggers.length === 0) {
+    errors.push(`${prefix}.triggers cannot be empty (agent would never activate)`);
+  }
+
+  for (let j = 0; j < agent.triggers.length; j++) {
+    const trigger = agent.triggers[j];
+    const triggerPrefix = `${prefix}.triggers[${j}]`;
+    validateTrigger(trigger, triggerPrefix, errors);
+  }
+}
+
+function validateModelRule(rule, rulePrefix, errors) {
+  if (!rule.iterations) {
+    errors.push(`${rulePrefix}.iterations is required`);
+  } else if (!isValidIterationPattern(rule.iterations)) {
+    errors.push(
+      `${rulePrefix}.iterations '${rule.iterations}' is invalid. Valid: "1", "1-3", "5+", "all"`
+    );
+  }
+
+  if (!rule.model && !rule.modelLevel) {
+    errors.push(`${rulePrefix}.model or modelLevel is required`);
+  }
+}
+
+function validateAgentModelRules(agent, prefix, errors) {
+  if (!agent.modelRules) {
+    return;
+  }
+
+  if (!Array.isArray(agent.modelRules)) {
+    errors.push(`${prefix}.modelRules must be an array`);
+    return;
+  }
+
+  for (let j = 0; j < agent.modelRules.length; j++) {
+    const rule = agent.modelRules[j];
+    const rulePrefix = `${prefix}.modelRules[${j}]`;
+    validateModelRule(rule, rulePrefix, errors);
+  }
+}
+
 /**
  * Phase 1: Validate basic structure (fields, types, duplicates)
  */
@@ -143,91 +237,21 @@ function validateBasicStructure(config, depth = 0) {
     // Check if this is a subcluster
     const isSubCluster = agent.type === 'subcluster';
 
-    // Required fields
-    if (!agent.id) {
-      errors.push(`${prefix}.id is required`);
-    } else if (typeof agent.id !== 'string') {
-      errors.push(`${prefix}.id must be a string`);
-    } else if (seenIds.has(agent.id)) {
-      errors.push(`Duplicate agent id: "${agent.id}"`);
-    } else {
-      seenIds.add(agent.id);
-    }
-
-    if (!agent.role) {
-      errors.push(`${prefix}.role is required`);
-    }
+    validateAgentIdentity(agent, prefix, seenIds, errors);
 
     // Validate subclusters
     if (isSubCluster) {
-      const subClusterSchema = require('./schemas/sub-cluster');
-      const subResult = subClusterSchema.validateSubCluster(agent, depth);
-      errors.push(...subResult.errors);
-      warnings.push(...subResult.warnings);
+      validateSubclusterAgent(agent, depth, errors, warnings);
       continue; // Skip regular agent validation
     }
 
     // Regular agent validation
-    if (!agent.triggers || !Array.isArray(agent.triggers)) {
-      errors.push(`${prefix}.triggers array is required`);
-    } else if (agent.triggers.length === 0) {
-      errors.push(`${prefix}.triggers cannot be empty (agent would never activate)`);
-    }
-
-    // Validate triggers structure
-    if (agent.triggers) {
-      for (let j = 0; j < agent.triggers.length; j++) {
-        const trigger = agent.triggers[j];
-        const triggerPrefix = `${prefix}.triggers[${j}]`;
-
-        if (!trigger.topic) {
-          errors.push(`${triggerPrefix}.topic is required`);
-        }
-
-        if (trigger.action && !['execute_task', 'stop_cluster'].includes(trigger.action)) {
-          errors.push(
-            `${triggerPrefix}.action must be 'execute_task' or 'stop_cluster', got '${trigger.action}'`
-          );
-        }
-
-        if (trigger.logic) {
-          if (!trigger.logic.script) {
-            errors.push(`${triggerPrefix}.logic.script is required when logic is specified`);
-          }
-          if (trigger.logic.engine && trigger.logic.engine !== 'javascript') {
-            errors.push(
-              `${triggerPrefix}.logic.engine must be 'javascript', got '${trigger.logic.engine}'`
-            );
-          }
-        }
-      }
-    }
+    validateAgentTriggers(agent, prefix, errors);
 
     // Validate model rules if present
-    if (agent.modelRules) {
-      if (!Array.isArray(agent.modelRules)) {
-        errors.push(`${prefix}.modelRules must be an array`);
-      } else {
-        for (let j = 0; j < agent.modelRules.length; j++) {
-          const rule = agent.modelRules[j];
-          const rulePrefix = `${prefix}.modelRules[${j}]`;
+    validateAgentModelRules(agent, prefix, errors);
 
-          if (!rule.iterations) {
-            errors.push(`${rulePrefix}.iterations is required`);
-          } else if (!isValidIterationPattern(rule.iterations)) {
-            errors.push(
-              `${rulePrefix}.iterations '${rule.iterations}' is invalid. Valid: "1", "1-3", "5+", "all"`
-            );
-          }
-
-          if (!rule.model && !rule.modelLevel) {
-            errors.push(`${rulePrefix}.model or modelLevel is required`);
-          }
-        }
-
-        // Note: Detailed coverage gap checking (iteration ranges) is done in Phase 7
-      }
-    }
+    // Note: Detailed coverage gap checking (iteration ranges) is done in Phase 7
   }
 
   return { errors, warnings };
@@ -236,45 +260,77 @@ function validateBasicStructure(config, depth = 0) {
 /**
  * Phase 2: Analyze message flow for structural problems
  */
-function analyzeMessageFlow(config) {
-  const errors = [];
-  const warnings = [];
+function ensureTopicList(map, topic) {
+  if (!map.has(topic)) {
+    map.set(topic, []);
+  }
+  return map.get(topic);
+}
 
-  // Build topic graph
-  const topicProducers = new Map(); // topic -> [agentIds that produce it]
-  const topicConsumers = new Map(); // topic -> [agentIds that consume it]
-  const agentOutputTopics = new Map(); // agentId -> [topics it produces]
-  const agentInputTopics = new Map(); // agentId -> [topics it consumes]
+function recordAgentTriggers(agent, topicConsumers, agentInputTopics) {
+  for (const trigger of agent.triggers || []) {
+    const topic = trigger.topic;
+    ensureTopicList(topicConsumers, topic).push(agent.id);
+    agentInputTopics.get(agent.id).push(topic);
+  }
+}
 
-  // System always produces ISSUE_OPENED
+function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
+  const outputTopic = agent.hooks?.onComplete?.config?.topic;
+  if (outputTopic) {
+    ensureTopicList(topicProducers, outputTopic).push(agent.id);
+    agentOutputTopics.get(agent.id).push(outputTopic);
+  }
+
+  const hookLogicScript = agent.hooks?.onComplete?.logic?.script;
+  if (!hookLogicScript || typeof hookLogicScript !== 'string') {
+    return;
+  }
+
+  const topicMatches = hookLogicScript.match(/topic:\s*['"]([A-Z_]+)['"]/g) || [];
+  for (const match of topicMatches) {
+    const dynamicTopic = match.match(/['"]([A-Z_]+)['"]/)?.[1];
+    if (!dynamicTopic || dynamicTopic === outputTopic) {
+      continue;
+    }
+
+    const producers = ensureTopicList(topicProducers, dynamicTopic);
+    if (!producers.includes(agent.id)) {
+      producers.push(`${agent.id}*`);
+    }
+
+    const outputs = agentOutputTopics.get(agent.id);
+    if (!outputs.includes(dynamicTopic)) {
+      outputs.push(dynamicTopic);
+    }
+  }
+}
+
+function buildMessageFlowGraph(config) {
+  const topicProducers = new Map();
+  const topicConsumers = new Map();
+  const agentOutputTopics = new Map();
+  const agentInputTopics = new Map();
+
   topicProducers.set('ISSUE_OPENED', ['system']);
 
   for (const agent of config.agents) {
     agentInputTopics.set(agent.id, []);
     agentOutputTopics.set(agent.id, []);
 
-    // Track what topics this agent consumes (triggers)
-    for (const trigger of agent.triggers || []) {
-      const topic = trigger.topic;
-      if (!topicConsumers.has(topic)) {
-        topicConsumers.set(topic, []);
-      }
-      topicConsumers.get(topic).push(agent.id);
-      agentInputTopics.get(agent.id).push(topic);
-    }
-
-    // Track what topics this agent produces (hooks)
-    const outputTopic = agent.hooks?.onComplete?.config?.topic;
-    if (outputTopic) {
-      if (!topicProducers.has(outputTopic)) {
-        topicProducers.set(outputTopic, []);
-      }
-      topicProducers.get(outputTopic).push(agent.id);
-      agentOutputTopics.get(agent.id).push(outputTopic);
-    }
+    recordAgentTriggers(agent, topicConsumers, agentInputTopics);
+    recordAgentOutputs(agent, topicProducers, agentOutputTopics);
   }
 
-  // === CHECK 1: No bootstrap trigger ===
+  return {
+    topicProducers,
+    topicConsumers,
+    agentOutputTopics,
+    agentInputTopics,
+  };
+}
+
+function reportMissingBootstrap(topicConsumers, errors) {
   const issueOpenedConsumers = topicConsumers.get('ISSUE_OPENED') || [];
   if (issueOpenedConsumers.length === 0) {
     errors.push(
@@ -282,8 +338,9 @@ function analyzeMessageFlow(config) {
         'Add a trigger: { "topic": "ISSUE_OPENED", "action": "execute_task" }'
     );
   }
+}
 
-  // === CHECK 2: No completion handler ===
+function reportCompletionHandlers(config, errors, warnings) {
   const completionHandlers = config.agents.filter(
     (a) =>
       a.triggers?.some((t) => t.action === 'stop_cluster') ||
@@ -308,10 +365,14 @@ function analyzeMessageFlow(config) {
         'This causes race conditions. Keep only one.'
     );
   }
+}
 
-  // === CHECK 3: Orphan topics (produced but never consumed) ===
+function reportOrphanTopics(topicProducers, topicConsumers, warnings) {
   for (const [topic, producers] of topicProducers) {
-    if (topic === 'CLUSTER_COMPLETE') continue; // System handles this
+    if (topic === 'CLUSTER_COMPLETE') {
+      continue;
+    }
+
     const consumers = topicConsumers.get(topic) || [];
     if (consumers.length === 0) {
       warnings.push(
@@ -319,11 +380,17 @@ function analyzeMessageFlow(config) {
       );
     }
   }
+}
 
-  // === CHECK 4: Waiting for topics that are never produced ===
+function reportUnproducedTopics(topicConsumers, topicProducers, errors) {
   for (const [topic, consumers] of topicConsumers) {
-    if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') continue; // System produces
-    if (topic.endsWith('*')) continue; // Wildcard pattern
+    if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') {
+      continue;
+    }
+    if (topic.endsWith('*')) {
+      continue;
+    }
+
     const producers = topicProducers.get(topic) || [];
     if (producers.length === 0) {
       errors.push(
@@ -332,35 +399,45 @@ function analyzeMessageFlow(config) {
       );
     }
   }
+}
 
-  // === CHECK 5: Self-triggering agents (instant infinite loop) ===
+function reportSelfTriggeringAgents(config, agentInputTopics, agentOutputTopics, errors) {
   for (const agent of config.agents) {
     const inputs = agentInputTopics.get(agent.id) || [];
     const outputs = agentOutputTopics.get(agent.id) || [];
     const selfTrigger = inputs.find((t) => outputs.includes(t));
-    if (selfTrigger) {
+    if (!selfTrigger) {
+      continue;
+    }
+
+    const triggerHasLogic = agent.triggers?.some((t) => t.topic === selfTrigger && t.logic?.script);
+    const hookHasLogic = agent.hooks?.onComplete?.logic?.script;
+
+    if (!triggerHasLogic && !hookHasLogic) {
       errors.push(
         `Agent '${agent.id}' triggers on '${selfTrigger}' and produces '${selfTrigger}'. ` +
           'Instant infinite loop.'
       );
     }
   }
+}
 
-  // === CHECK 6: Two-agent circular dependency ===
+function reportTwoAgentCycles(config, agentInputTopics, agentOutputTopics, warnings) {
   for (const agentA of config.agents) {
     const outputsA = agentOutputTopics.get(agentA.id) || [];
     for (const agentB of config.agents) {
-      if (agentA.id === agentB.id) continue;
+      if (agentA.id === agentB.id) {
+        continue;
+      }
+
       const inputsB = agentInputTopics.get(agentB.id) || [];
       const outputsB = agentOutputTopics.get(agentB.id) || [];
       const inputsA = agentInputTopics.get(agentA.id) || [];
 
-      // A produces what B consumes, AND B produces what A consumes
       const aToB = outputsA.some((t) => inputsB.includes(t));
       const bToA = outputsB.some((t) => inputsA.includes(t));
 
       if (aToB && bToA) {
-        // This might be intentional (rejection loop), check if there's an escape
         const hasEscapeLogic =
           agentA.triggers?.some((t) => t.logic) || agentB.triggers?.some((t) => t.logic);
         if (!hasEscapeLogic) {
@@ -372,35 +449,45 @@ function analyzeMessageFlow(config) {
       }
     }
   }
+}
 
-  // === CHECK 7: Validator without worker re-trigger ===
+function reportMissingValidationTriggers(config, errors) {
   const validators = config.agents.filter((a) => a.role === 'validator');
   const workers = config.agents.filter((a) => a.role === 'implementation');
 
-  if (validators.length > 0 && workers.length > 0) {
-    for (const worker of workers) {
-      const triggersOnValidation = worker.triggers?.some(
-        (t) => t.topic === 'VALIDATION_RESULT' || t.topic.includes('VALIDATION')
-      );
-      if (!triggersOnValidation) {
-        errors.push(
-          `Worker '${worker.id}' has validators but doesn't trigger on VALIDATION_RESULT. ` +
-            'Rejections will be ignored. Add trigger: { "topic": "VALIDATION_RESULT", "logic": {...} }'
-        );
-      }
-    }
+  if (validators.length === 0 || workers.length === 0) {
+    return;
   }
 
-  // === CHECK 8: Context strategy missing trigger topics ===
+  for (const worker of workers) {
+    const triggersOnValidation = worker.triggers?.some(
+      (t) => t.topic === 'VALIDATION_RESULT' || t.topic.includes('VALIDATION')
+    );
+    if (!triggersOnValidation) {
+      errors.push(
+        `Worker '${worker.id}' has validators but doesn't trigger on VALIDATION_RESULT. ` +
+          'Rejections will be ignored. Add trigger: { "topic": "VALIDATION_RESULT", "logic": {...} }'
+      );
+    }
+  }
+}
+
+function reportMissingContextTopics(config, warnings) {
   for (const agent of config.agents) {
-    if (!agent.contextStrategy?.sources) continue;
+    if (!agent.contextStrategy?.sources) {
+      continue;
+    }
 
     const triggerTopics = (agent.triggers || []).map((t) => t.topic);
     const contextTopics = agent.contextStrategy.sources.map((s) => s.topic);
 
     for (const triggerTopic of triggerTopics) {
-      if (triggerTopic === 'ISSUE_OPENED' || triggerTopic === 'CLUSTER_RESUMED') continue;
-      if (triggerTopic.endsWith('*')) continue;
+      if (triggerTopic === 'ISSUE_OPENED' || triggerTopic === 'CLUSTER_RESUMED') {
+        continue;
+      }
+      if (triggerTopic.endsWith('*')) {
+        continue;
+      }
 
       if (!contextTopics.includes(triggerTopic)) {
         warnings.push(
@@ -410,6 +497,23 @@ function analyzeMessageFlow(config) {
       }
     }
   }
+}
+
+function analyzeMessageFlow(config) {
+  const errors = [];
+  const warnings = [];
+
+  const { topicProducers, topicConsumers, agentOutputTopics, agentInputTopics } =
+    buildMessageFlowGraph(config);
+
+  reportMissingBootstrap(topicConsumers, errors);
+  reportCompletionHandlers(config, errors, warnings);
+  reportOrphanTopics(topicProducers, topicConsumers, warnings);
+  reportUnproducedTopics(topicConsumers, topicProducers, errors);
+  reportSelfTriggeringAgents(config, agentInputTopics, agentOutputTopics, errors);
+  reportTwoAgentCycles(config, agentInputTopics, agentOutputTopics, warnings);
+  reportMissingValidationTriggers(config, errors);
+  reportMissingContextTopics(config, warnings);
 
   return { errors, warnings };
 }
@@ -417,6 +521,114 @@ function analyzeMessageFlow(config) {
 /**
  * Phase 3: Validate agent-specific configurations
  */
+function recordAgentRole(roles, agent) {
+  if (!roles.has(agent.role)) {
+    roles.set(agent.role, []);
+  }
+  roles.get(agent.role).push(agent.id);
+}
+
+function agentExecutesTask(agent) {
+  return agent.triggers?.some((t) => t.action === 'execute_task' || (!t.action && !t.logic));
+}
+
+function validateOrchestratorTriggers(agent, warnings) {
+  if (agent.role !== 'orchestrator') {
+    return;
+  }
+
+  if (agentExecutesTask(agent)) {
+    warnings.push(
+      `Orchestrator '${agent.id}' has execute_task triggers. ` +
+        'Orchestrators typically use action: "stop_cluster". This may waste API calls.'
+    );
+  }
+}
+
+function validateValidatorGitUsage(agent, errors) {
+  if (agent.role !== 'validator') {
+    return;
+  }
+
+  const prompt = typeof agent.prompt === 'string' ? agent.prompt : agent.prompt?.system;
+  const gitPatterns = ['git diff', 'git status', 'git log', 'git show'];
+  for (const pattern of gitPatterns) {
+    if (prompt?.includes(pattern)) {
+      errors.push(`Validator '${agent.id}' uses '${pattern}' - git state is unreliable in agents`);
+    }
+  }
+}
+
+function validateJsonOutputSchema(agent, warnings) {
+  if (agent.outputFormat === 'json' && !agent.jsonSchema) {
+    warnings.push(
+      `Agent '${agent.id}' has outputFormat: 'json' but no jsonSchema. ` +
+        'Output parsing may be unreliable.'
+    );
+  }
+}
+
+function validateMaxIterations(agent, warnings) {
+  if (agent.maxIterations && agent.maxIterations > 50) {
+    warnings.push(
+      `Agent '${agent.id}' has maxIterations: ${agent.maxIterations}. ` +
+        'This may consume significant API credits if stuck in a loop.'
+    );
+  }
+}
+
+function validateImplementationIterations(agent, warnings) {
+  if (agent.role === 'implementation' && !agent.maxIterations) {
+    warnings.push(
+      `Implementation agent '${agent.id}' has no maxIterations. ` +
+        'Defaults to 30, but consider setting explicitly.'
+    );
+  }
+}
+
+function validateModelSpec(agent, errors) {
+  if (agent.model) {
+    errors.push(
+      `Agent '${agent.id}' uses 'model: "${agent.model}"'. ` +
+        `Use 'modelLevel: "level1|level2|level3"' instead for provider-agnostic model selection.`
+    );
+  }
+}
+
+function findRoleReferences(script) {
+  const matches = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
+  if (!matches) {
+    return [];
+  }
+
+  return matches.map((match) => match.match(/['"](\w+)['"]/)[1]);
+}
+
+function warnMissingRoleReferences(agents, roles, warnings) {
+  for (const agent of agents) {
+    for (const trigger of agent.triggers || []) {
+      if (!trigger.logic?.script) {
+        continue;
+      }
+
+      const script = trigger.logic.script;
+      const rolesReferenced = findRoleReferences(script);
+      if (rolesReferenced.length === 0) {
+        continue;
+      }
+
+      for (const role of rolesReferenced) {
+        if (!roles.has(role)) {
+          warnings.push(
+            `Agent '${agent.id}' logic references role '${role}' but no agent has that role. ` +
+              `Trigger may be a no-op. Available roles: [${Array.from(roles.keys()).join(', ')}]`
+          );
+        }
+      }
+    }
+  }
+}
+
 function validateAgents(config) {
   const errors = [];
   const warnings = [];
@@ -424,95 +636,20 @@ function validateAgents(config) {
   const roles = new Map(); // role -> [agentIds]
 
   for (const agent of config.agents) {
-    // Track roles
-    if (!roles.has(agent.role)) {
-      roles.set(agent.role, []);
-    }
-    roles.get(agent.role).push(agent.id);
-
-    // Orchestrator should not execute tasks
-    if (agent.role === 'orchestrator') {
-      const executesTask = agent.triggers?.some(
-        (t) => t.action === 'execute_task' || (!t.action && !t.logic)
-      );
-      if (executesTask) {
-        warnings.push(
-          `Orchestrator '${agent.id}' has execute_task triggers. ` +
-            'Orchestrators typically use action: "stop_cluster". This may waste API calls.'
-        );
-      }
-    }
-
-    // Check for git operations in validator prompts (unreliable in agents)
-    if (agent.role === 'validator') {
-      const prompt = typeof agent.prompt === 'string' ? agent.prompt : agent.prompt?.system;
-      const gitPatterns = ['git diff', 'git status', 'git log', 'git show'];
-      for (const pattern of gitPatterns) {
-        if (prompt?.includes(pattern)) {
-          errors.push(
-            `Validator '${agent.id}' uses '${pattern}' - git state is unreliable in agents`
-          );
-        }
-      }
-    }
-
-    // JSON output without schema
-    if (agent.outputFormat === 'json' && !agent.jsonSchema) {
-      warnings.push(
-        `Agent '${agent.id}' has outputFormat: 'json' but no jsonSchema. ` +
-          'Output parsing may be unreliable.'
-      );
-    }
-
-    // Very high maxIterations
-    if (agent.maxIterations && agent.maxIterations > 50) {
-      warnings.push(
-        `Agent '${agent.id}' has maxIterations: ${agent.maxIterations}. ` +
-          'This may consume significant API credits if stuck in a loop.'
-      );
-    }
-
-    // No maxIterations on implementation agent (unbounded retries)
-    if (agent.role === 'implementation' && !agent.maxIterations) {
-      warnings.push(
-        `Implementation agent '${agent.id}' has no maxIterations. ` +
-          'Defaults to 30, but consider setting explicitly.'
-      );
-    }
-
-    // FORBIDDEN: Direct model specification in configs
-    // Use modelLevel (level1/level2/level3) for provider-agnostic model selection
-    if (agent.model) {
-      errors.push(
-        `Agent '${agent.id}' uses 'model: "${agent.model}"'. ` +
-          `Use 'modelLevel: "level1|level2|level3"' instead for provider-agnostic model selection.`
-      );
-    }
+    recordAgentRole(roles, agent);
+    validateOrchestratorTriggers(agent, warnings);
+    validateValidatorGitUsage(agent, errors);
+    validateJsonOutputSchema(agent, warnings);
+    validateMaxIterations(agent, warnings);
+    validateImplementationIterations(agent, warnings);
+    validateModelSpec(agent, errors);
   }
 
   // Check for role references in logic scripts
   // IMPORTANT: Changed from error to warning because some triggers are designed to be
   // no-ops when the referenced role doesn't exist (e.g., worker's VALIDATION_RESULT
   // trigger returns false when validators.length === 0)
-  for (const agent of config.agents) {
-    for (const trigger of agent.triggers || []) {
-      if (trigger.logic?.script) {
-        const script = trigger.logic.script;
-        const roleMatch = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
-        if (roleMatch) {
-          for (const match of roleMatch) {
-            const role = match.match(/['"](\w+)['"]/)[1];
-            if (!roles.has(role)) {
-              warnings.push(
-                `Agent '${agent.id}' logic references role '${role}' but no agent has that role. ` +
-                  `Trigger may be a no-op. Available roles: [${Array.from(roles.keys()).join(', ')}]`
-              );
-            }
-          }
-        }
-      }
-    }
-  }
+  warnMissingRoleReferences(config.agents, roles, warnings);
 
   return { errors, warnings };
 }
@@ -840,6 +977,93 @@ function formatValidationResult(result) {
  * @param {Object} config - Cluster configuration
  * @returns {{ errors: string[], warnings: string[] }}
  */
+function validateHookAction(hook, prefix, errors) {
+  if (!hook.action) {
+    errors.push(
+      `[Gap 1] ${prefix}: Missing 'action' field. ` +
+        `Fix: Add "action": "publish_message" or "action": "execute_system_command"`
+    );
+  }
+}
+
+function validateTransformScript(hook, prefix, errors) {
+  if (!hook.transform?.script) {
+    return;
+  }
+
+  const script = hook.transform.script;
+  const hasReturnTopic = /return\s*\{[^}]*topic\s*:/i.test(script);
+  const hasReturnContent = /return\s*\{[^}]*content\s*:/i.test(script);
+
+  if (!hasReturnTopic) {
+    errors.push(
+      `[Gap 2] ${prefix}: Transform script must return object with 'topic' property. ` +
+        `Fix: return { topic: "TOPIC_NAME", content: {...} }`
+    );
+  }
+
+  if (!hasReturnContent) {
+    errors.push(
+      `[Gap 2] ${prefix}: Transform script must return object with 'content' property. ` +
+        `Fix: return { topic: "...", content: { data: result } }`
+    );
+  }
+}
+
+function validateConductorOperations(agent, hook, prefix, errors) {
+  const targetsClusterOperations =
+    hook.config?.topic === 'CLUSTER_OPERATIONS' ||
+    hook.transform?.script?.includes('CLUSTER_OPERATIONS');
+
+  if (agent.role !== 'conductor' || !targetsClusterOperations) {
+    return;
+  }
+
+  if (!hook.transform?.script) {
+    return;
+  }
+
+  const script = hook.transform.script;
+  const hasOperations = /operations\s*:/i.test(script);
+  if (!hasOperations) {
+    errors.push(
+      `[Gap 7] ${prefix}: CLUSTER_OPERATIONS message must include 'operations' field. ` +
+        `Fix: return { topic: "CLUSTER_OPERATIONS", content: { data: { operations: JSON.stringify([...]) } } }`
+    );
+  }
+}
+
+function validateHookLogic(hook, prefix, errors) {
+  if (!hook.logic) {
+    return;
+  }
+
+  if (hook.logic.engine && hook.logic.engine !== 'javascript') {
+    errors.push(`${prefix}: Hook logic engine must be 'javascript', got: '${hook.logic.engine}'`);
+  }
+
+  if (!hook.logic.script) {
+    errors.push(`${prefix}: Hook logic must have a 'script' property`);
+  } else if (typeof hook.logic.script !== 'string') {
+    errors.push(`${prefix}: Hook logic script must be a string`);
+  } else {
+    try {
+      const vm = require('vm');
+      const wrappedScript = `(function() { 'use strict'; ${hook.logic.script} })()`;
+      new vm.Script(wrappedScript);
+    } catch (syntaxError) {
+      errors.push(`${prefix}: Hook logic script has syntax error: ${syntaxError.message}`);
+    }
+  }
+
+  if (!hook.config && !hook.transform) {
+    errors.push(
+      `${prefix}: Hook with logic block must also have 'config' or 'transform'. ` +
+        `Logic provides overrides, not the full message.`
+    );
+  }
+}
+
 function validateHookSemantics(config) {
   const errors = [];
   const warnings = [];
@@ -865,58 +1089,19 @@ function validateHookSemantics(config) {
 
       // === GAP 1: Hook action field missing ===
       // Causes runtime crash at agent-hook-executor.js:66
-      if (!hook.action) {
-        errors.push(
-          `[Gap 1] ${prefix}: Missing 'action' field. ` +
-            `Fix: Add "action": "publish_message" or "action": "execute_system_command"`
-        );
-      }
+      validateHookAction(hook, prefix, errors);
 
       // === GAP 2: Transform script output shape validation ===
       // Causes runtime crash at agent-hook-executor.js:148
-      if (hook.transform?.script) {
-        const script = hook.transform.script;
-
-        // Check if script returns an object with topic and content
-        // Simple heuristic: look for return statement with object
-        const hasReturnTopic = /return\s*\{[^}]*topic\s*:/i.test(script);
-        const hasReturnContent = /return\s*\{[^}]*content\s*:/i.test(script);
-
-        if (!hasReturnTopic) {
-          errors.push(
-            `[Gap 2] ${prefix}: Transform script must return object with 'topic' property. ` +
-              `Fix: return { topic: "TOPIC_NAME", content: {...} }`
-          );
-        }
-
-        if (!hasReturnContent) {
-          errors.push(
-            `[Gap 2] ${prefix}: Transform script must return object with 'content' property. ` +
-              `Fix: return { topic: "...", content: { data: result } }`
-          );
-        }
-      }
+      validateTransformScript(hook, prefix, errors);
 
       // === GAP 7: CLUSTER_OPERATIONS payload validation ===
       // Causes runtime crash at orchestrator.js:722
-      if (
-        agent.role === 'conductor' &&
-        (hook.config?.topic === 'CLUSTER_OPERATIONS' ||
-          hook.transform?.script?.includes('CLUSTER_OPERATIONS'))
-      ) {
-        // Check if operations field is valid JSON structure
-        if (hook.transform?.script) {
-          const script = hook.transform.script;
-          // Look for operations field in return statement
-          const hasOperations = /operations\s*:/i.test(script);
-          if (!hasOperations) {
-            errors.push(
-              `[Gap 7] ${prefix}: CLUSTER_OPERATIONS message must include 'operations' field. ` +
-                `Fix: return { topic: "CLUSTER_OPERATIONS", content: { data: { operations: JSON.stringify([...]) } } }`
-            );
-          }
-        }
-      }
+      validateConductorOperations(agent, hook, prefix, errors);
+
+      // === Logic block validation ===
+      // Logic blocks allow conditional config overrides (like trigger logic)
+      validateHookLogic(hook, prefix, errors);
     }
   }
 
@@ -942,6 +1127,66 @@ function validateRuleCoverage(config) {
     return { errors, warnings };
   }
 
+  const applyIterationPattern = (coveredIterations, pattern, maxIterations) => {
+    if (!pattern) return;
+
+    if (pattern === 'all') {
+      for (let i = 1; i <= maxIterations; i++) {
+        coveredIterations.add(i);
+      }
+      return;
+    }
+
+    if (/^\d+$/.test(pattern)) {
+      coveredIterations.add(parseInt(pattern, 10));
+      return;
+    }
+
+    if (/^\d+-\d+$/.test(pattern)) {
+      const [start, end] = pattern.split('-').map((n) => parseInt(n, 10));
+      for (let i = start; i <= end; i++) {
+        coveredIterations.add(i);
+      }
+      return;
+    }
+
+    if (/^\d+\+$/.test(pattern)) {
+      const start = parseInt(pattern, 10);
+      for (let i = start; i <= maxIterations; i++) {
+        coveredIterations.add(i);
+      }
+    }
+  };
+
+  const collectCoverage = (rules, maxIterations) => {
+    const coveredIterations = new Set();
+    for (const rule of rules) {
+      applyIterationPattern(coveredIterations, rule.iterations, maxIterations);
+    }
+    return coveredIterations;
+  };
+
+  const findUncoveredIterations = (coveredIterations, maxIterations) => {
+    const uncoveredIterations = [];
+    for (let i = 1; i <= maxIterations; i++) {
+      if (!coveredIterations.has(i)) {
+        uncoveredIterations.push(i);
+      }
+    }
+    return uncoveredIterations;
+  };
+
+  const reportCoverageGap = (agent, gapNumber, label, fixHint, uncoveredIterations) => {
+    if (uncoveredIterations.length === 0) {
+      return;
+    }
+    const ranges = groupConsecutive(uncoveredIterations);
+    errors.push(
+      `[Gap ${gapNumber}] Agent '${agent.id}': ${label} have gaps at iterations ${ranges.join(', ')}. ` +
+        `Fix: ${fixHint}`
+    );
+  };
+
   for (const agent of config.agents) {
     if (agent.type === 'subcluster') {
       continue;
@@ -952,50 +1197,15 @@ function validateRuleCoverage(config) {
     // === GAP 4: Model rule iteration gaps ===
     // Causes runtime crash at agent-wrapper.js:154
     if (agent.modelRules && Array.isArray(agent.modelRules)) {
-      const coveredIterations = new Set();
-
-      for (const rule of agent.modelRules) {
-        const pattern = rule.iterations;
-
-        if (pattern === 'all') {
-          // Covers all iterations
-          for (let i = 1; i <= maxIterations; i++) {
-            coveredIterations.add(i);
-          }
-        } else if (/^\d+$/.test(pattern)) {
-          // Single iteration: "5"
-          coveredIterations.add(parseInt(pattern));
-        } else if (/^\d+-\d+$/.test(pattern)) {
-          // Range: "1-3"
-          const [start, end] = pattern.split('-').map((n) => parseInt(n));
-          for (let i = start; i <= end; i++) {
-            coveredIterations.add(i);
-          }
-        } else if (/^\d+\+$/.test(pattern)) {
-          // Open-ended: "5+"
-          const start = parseInt(pattern);
-          for (let i = start; i <= maxIterations; i++) {
-            coveredIterations.add(i);
-          }
-        }
-      }
-
-      // Find gaps
-      const uncoveredIterations = [];
-      for (let i = 1; i <= maxIterations; i++) {
-        if (!coveredIterations.has(i)) {
-          uncoveredIterations.push(i);
-        }
-      }
-
-      if (uncoveredIterations.length > 0) {
-        // Group consecutive iterations for readability
-        const ranges = groupConsecutive(uncoveredIterations);
-        errors.push(
-          `[Gap 4] Agent '${agent.id}': Model rules have gaps at iterations ${ranges.join(', ')}. ` +
-            `Fix: Add catch-all rule { "iterations": "all", "model": "sonnet" } or extend existing ranges.`
-        );
-      }
+      const coveredIterations = collectCoverage(agent.modelRules, maxIterations);
+      const uncoveredIterations = findUncoveredIterations(coveredIterations, maxIterations);
+      reportCoverageGap(
+        agent,
+        4,
+        'Model rules',
+        'Add catch-all rule { "iterations": "all", "model": "sonnet" } or extend existing ranges.',
+        uncoveredIterations
+      );
     }
 
     // === GAP 5: Prompt rule iteration gaps ===
@@ -1006,44 +1216,15 @@ function validateRuleCoverage(config) {
       agent.promptConfig.rules &&
       Array.isArray(agent.promptConfig.rules)
     ) {
-      const coveredIterations = new Set();
-
-      for (const rule of agent.promptConfig.rules) {
-        const pattern = rule.iterations;
-
-        if (pattern === 'all') {
-          for (let i = 1; i <= maxIterations; i++) {
-            coveredIterations.add(i);
-          }
-        } else if (/^\d+$/.test(pattern)) {
-          coveredIterations.add(parseInt(pattern));
-        } else if (/^\d+-\d+$/.test(pattern)) {
-          const [start, end] = pattern.split('-').map((n) => parseInt(n));
-          for (let i = start; i <= end; i++) {
-            coveredIterations.add(i);
-          }
-        } else if (/^\d+\+$/.test(pattern)) {
-          const start = parseInt(pattern);
-          for (let i = start; i <= maxIterations; i++) {
-            coveredIterations.add(i);
-          }
-        }
-      }
-
-      const uncoveredIterations = [];
-      for (let i = 1; i <= maxIterations; i++) {
-        if (!coveredIterations.has(i)) {
-          uncoveredIterations.push(i);
-        }
-      }
-
-      if (uncoveredIterations.length > 0) {
-        const ranges = groupConsecutive(uncoveredIterations);
-        errors.push(
-          `[Gap 5] Agent '${agent.id}': Prompt rules have gaps at iterations ${ranges.join(', ')}. ` +
-            `Fix: Add catch-all rule { "iterations": "all", "prompt": "..." } or extend existing ranges.`
-        );
-      }
+      const coveredIterations = collectCoverage(agent.promptConfig.rules, maxIterations);
+      const uncoveredIterations = findUncoveredIterations(coveredIterations, maxIterations);
+      reportCoverageGap(
+        agent,
+        5,
+        'Prompt rules',
+        'Add catch-all rule { "iterations": "all", "prompt": "..." } or extend existing ranges.',
+        uncoveredIterations
+      );
     }
   }
 
@@ -1097,70 +1278,63 @@ function groupConsecutive(numbers) {
  * @param {Object} config - Cluster configuration
  * @returns {{ errors: string[], warnings: string[] }}
  */
-function detectNAgentCycles(config) {
-  const errors = [];
-  const warnings = [];
+function collectAgentDependencies(agent, topicProducers) {
+  const dependencies = new Set();
 
-  if (!config.agents || !Array.isArray(config.agents)) {
-    return { errors, warnings };
+  for (const trigger of agent.triggers || []) {
+    const topic = trigger.topic;
+    if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') continue;
+    if (topic.endsWith('*')) continue;
+
+    const producers = topicProducers.get(topic) || [];
+    for (const producer of producers) {
+      if (producer !== agent.id) {
+        dependencies.add(producer);
+      }
+    }
   }
 
-  // Build agent dependency graph: agent -> [agents it depends on]
-  const agentGraph = new Map();
-  const topicProducers = new Map(); // topic -> [agentIds]
+  return Array.from(dependencies);
+}
 
-  // Initialize graph
+function buildAgentGraph(config) {
+  const agentGraph = new Map();
+  const topicProducers = new Map();
+
   for (const agent of config.agents) {
     if (agent.type === 'subcluster') continue;
     agentGraph.set(agent.id, []);
 
-    // Track what topics this agent produces
     const outputTopic = agent.hooks?.onComplete?.config?.topic;
-    if (outputTopic) {
-      if (!topicProducers.has(outputTopic)) {
-        topicProducers.set(outputTopic, []);
-      }
-      topicProducers.get(outputTopic).push(agent.id);
+    if (!outputTopic) continue;
+
+    if (!topicProducers.has(outputTopic)) {
+      topicProducers.set(outputTopic, []);
     }
+    topicProducers.get(outputTopic).push(agent.id);
   }
 
-  // Build dependencies: agent consumes topic -> depends on agents that produce it
   for (const agent of config.agents) {
     if (agent.type === 'subcluster') continue;
-
-    const dependencies = new Set();
-
-    for (const trigger of agent.triggers || []) {
-      const topic = trigger.topic;
-      if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') continue;
-      if (topic.endsWith('*')) continue; // Skip wildcards
-
-      const producers = topicProducers.get(topic) || [];
-      for (const producer of producers) {
-        if (producer !== agent.id) {
-          dependencies.add(producer);
-        }
-      }
-    }
-
-    agentGraph.set(agent.id, Array.from(dependencies));
+    agentGraph.set(agent.id, collectAgentDependencies(agent, topicProducers));
   }
 
-  // === GAP 6: Detect cycles with DFS ===
+  return agentGraph;
+}
+
+function findFirstCycle(agentGraph) {
   const visited = new Set();
   const recursionStack = new Set();
 
-  function dfs(agentId, path) {
+  const dfs = (agentId, path) => {
     visited.add(agentId);
     recursionStack.add(agentId);
 
     const dependencies = agentGraph.get(agentId) || [];
     for (const nextAgent of dependencies) {
       if (recursionStack.has(nextAgent)) {
-        // Cycle detected - return the full cycle path
         const cycleStartIndex = path.indexOf(nextAgent);
-        const cyclePath = [...path.slice(cycleStartIndex), nextAgent];
-        return cyclePath;
+        return [...path.slice(cycleStartIndex), nextAgent];
       }
 
       if (!visited.has(nextAgent)) {
@@ -1171,38 +1345,255 @@ function detectNAgentCycles(config) {
 
     recursionStack.delete(agentId);
     return null;
-  }
+  };
 
-  // Check all agents as starting points
   for (const agentId of agentGraph.keys()) {
     if (!visited.has(agentId)) {
       const cycle = dfs(agentId, [agentId]);
-      if (cycle) {
-        // Check if cycle has escape logic (any agent in cycle has trigger logic)
-        const hasEscapeLogic = cycle.some((id) => {
-          const agent = config.agents.find((a) => a.id === id);
-          return agent?.triggers?.some((t) => t.logic);
-        });
+      if (cycle) return cycle;
+    }
+  }
 
-        const cycleStr = cycle.join(' → ');
-        if (!hasEscapeLogic) {
-          errors.push(
-            `[Gap 6] Circular dependency detected: ${cycleStr}. ` +
-              `Fix: Add logic conditions to break the loop, or set maxIterations on involved agents.`
-          );
-        } else {
-          warnings.push(
-            `Circular dependency detected: ${cycleStr}. ` +
-              `Has escape logic in triggers, but verify maxIterations is set to prevent infinite loops.`
-          );
-        }
-        // Only report first cycle to avoid noise
-        break;
-      }
+  return null;
+}
+
+function detectNAgentCycles(config) {
+  const errors = [];
+  const warnings = [];
+
+  if (!config.agents || !Array.isArray(config.agents)) {
+    return { errors, warnings };
+  }
+
+  const agentGraph = buildAgentGraph(config);
+  const cycle = findFirstCycle(agentGraph);
+
+  if (cycle) {
+    const agentsById = new Map(
+      config.agents.filter((agent) => agent.type !== 'subcluster').map((agent) => [agent.id, agent])
+    );
+    const hasEscapeLogic = cycle.some((id) => agentsById.get(id)?.triggers?.some((t) => t.logic));
+    const cycleStr = cycle.join(' → ');
+
+    if (!hasEscapeLogic) {
+      errors.push(
+        `[Gap 6] Circular dependency detected: ${cycleStr}. ` +
+          `Fix: Add logic conditions to break the loop, or set maxIterations on involved agents.`
+      );
+    } else {
+      warnings.push(
+        `Circular dependency detected: ${cycleStr}. ` +
+          `Has escape logic in triggers, but verify maxIterations is set to prevent infinite loops.`
+      );
     }
   }
 
   return { errors, warnings };
+}
+
+function collectAgentIdConflicts(agents, errors) {
+  const allAgentIds = new Map();
+
+  const collectAgentIds = (list, depth = 0) => {
+    if (!list) return;
+
+    for (const agent of list) {
+      if (!agent.id) continue;
+
+      if (allAgentIds.has(agent.id)) {
+        const firstSeenDepth = allAgentIds.get(agent.id);
+        errors.push(
+          `[Gap 11] Duplicate agent ID '${agent.id}' found across cluster hierarchy ` +
+            `(first at depth ${firstSeenDepth}, duplicate at depth ${depth}). ` +
+            `Fix: Ensure all agent IDs are unique across the entire cluster.`
+        );
+      } else {
+        allAgentIds.set(agent.id, depth);
+      }
+
+      if (agent.type === 'subcluster' && agent.config?.agents) {
+        collectAgentIds(agent.config.agents, depth + 1);
+      }
+    }
+  };
+
+  collectAgentIds(agents);
+}
+
+function buildTopicProducers(agents) {
+  const topicProducers = new Map();
+
+  for (const agent of agents) {
+    if (agent.type === 'subcluster') continue;
+    const outputTopic = agent.hooks?.onComplete?.config?.topic;
+    if (!outputTopic) continue;
+
+    if (!topicProducers.has(outputTopic)) {
+      topicProducers.set(outputTopic, []);
+    }
+    topicProducers.get(outputTopic).push(agent.id);
+  }
+
+  return topicProducers;
+}
+
+function validateJsonSchema(prefix, agent, errors) {
+  if (!agent.jsonSchema) return;
+
+  try {
+    JSON.stringify(agent.jsonSchema);
+
+    if (typeof agent.jsonSchema !== 'object') {
+      errors.push(
+        `[Gap 8] ${prefix}: jsonSchema must be an object, got ${typeof agent.jsonSchema}. ` +
+          `Fix: Use valid JSON Schema format with 'type' and 'properties' fields.`
+      );
+    }
+  } catch (error) {
+    errors.push(
+      `[Gap 8] ${prefix}: jsonSchema is not valid JSON: ${error.message}. ` +
+        `Fix: Ensure schema is a valid JSON object.`
+    );
+  }
+}
+
+function validateContextSource(prefix, source, topicProducers, errors, warnings) {
+  const topic = source.topic;
+  if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') return;
+  if (topic.endsWith('*')) return;
+
+  const producers = topicProducers.get(topic) || [];
+  if (producers.length === 0) {
+    warnings.push(
+      `[Gap 9] ${prefix}: Context source topic '${topic}' is never produced. ` +
+        `Agent will get empty context for this source.`
+    );
+  }
+
+  if (source.amount === undefined) {
+    warnings.push(
+      `[Gap 14] ${prefix}: Context source for topic '${topic}' missing 'amount' field. ` +
+        `Defaults may not be what you expect.`
+    );
+  }
+
+  if (source.strategy && !['latest', 'all', 'oldest'].includes(source.strategy)) {
+    errors.push(
+      `[Gap 14] ${prefix}: Context source strategy '${source.strategy}' is invalid. ` +
+        `Fix: Use 'latest', 'all', or 'oldest'.`
+    );
+  }
+}
+
+function validateContextSources(prefix, agent, topicProducers, errors, warnings) {
+  if (!agent.contextStrategy?.sources) return;
+
+  for (const source of agent.contextStrategy.sources) {
+    validateContextSource(prefix, source, topicProducers, errors, warnings);
+  }
+}
+
+function validateIsolationConfig(prefix, agent, path, errors, warnings) {
+  if (!agent.isolation) return;
+
+  if (agent.isolation.type === 'docker') {
+    if (!agent.isolation.image) {
+      errors.push(
+        `[Gap 10] ${prefix}: Docker isolation requires 'image' field. ` +
+          `Fix: Add "image": "zeroshot-runner" or custom image name.`
+      );
+    }
+
+    if (agent.isolation.mounts) {
+      for (const mount of agent.isolation.mounts) {
+        if (mount.host && !path.isAbsolute(mount.host)) {
+          warnings.push(
+            `[Gap 10] ${prefix}: Docker mount host path '${mount.host}' is not absolute. ` +
+              `May cause runtime errors.`
+          );
+        }
+      }
+    }
+
+    return;
+  }
+
+  if (agent.isolation.type && agent.isolation.type !== 'worktree') {
+    errors.push(
+      `[Gap 10] ${prefix}: Unknown isolation type '${agent.isolation.type}'. ` +
+        `Fix: Use 'docker' or 'worktree'.`
+    );
+  }
+}
+
+function validateLoadConfig(prefix, agent, fs, errors) {
+  if (!agent.loadConfig) return;
+  const configPath = agent.loadConfig.path;
+  if (configPath && !fs.existsSync(configPath)) {
+    errors.push(
+      `[Gap 12] ${prefix}: Load config file '${configPath}' does not exist. ` +
+        `Fix: Check file path or remove loadConfig.`
+    );
+  }
+}
+
+function validateTaskExecutor(prefix, agent, errors) {
+  if (!agent.taskExecutor) return;
+
+  if (agent.taskExecutor.command === undefined) {
+    errors.push(
+      `[Gap 13] ${prefix}: Task executor missing 'command' field. ` +
+        `Fix: Add "command": "claude" or custom command.`
+    );
+  }
+
+  if (agent.taskExecutor.retries !== undefined) {
+    if (typeof agent.taskExecutor.retries !== 'number' || agent.taskExecutor.retries < 0) {
+      errors.push(
+        `[Gap 13] ${prefix}: Task executor 'retries' must be a non-negative number, got ${agent.taskExecutor.retries}. ` +
+          `Fix: Use a positive integer or 0.`
+      );
+    }
+  }
+
+  if (agent.taskExecutor.timeout !== undefined) {
+    if (typeof agent.taskExecutor.timeout !== 'number' || agent.taskExecutor.timeout <= 0) {
+      errors.push(
+        `[Gap 13] ${prefix}: Task executor 'timeout' must be a positive number, got ${agent.taskExecutor.timeout}. ` +
+          `Fix: Use a positive number in milliseconds.`
+      );
+    }
+  }
+}
+
+function validateRoleReferences(prefix, agent, roles, errors) {
+  for (const trigger of agent.triggers || []) {
+    if (!trigger.logic?.script) continue;
+    const script = trigger.logic.script;
+    const roleMatches = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
+
+    if (!roleMatches) continue;
+
+    for (const match of roleMatches) {
+      const role = match.match(/['"](\w+)['"]/)[1];
+      if (roles.has(role)) continue;
+
+      const isCritical =
+        /\.length\s*[><=!]/.test(script) ||
+        /allResponded/.test(script) ||
+        /hasConsensus/.test(script);
+
+      const hasZeroLengthFallback =
+        /\.length\s*===?\s*0\s*\)\s*return/.test(script) || /\.length\s*[<]=\s*0/.test(script);
+
+      if (isCritical && !hasZeroLengthFallback) {
+        errors.push(
+          `[Gap 15] ${prefix}: Logic references role '${role}' which doesn't exist. ` +
+            `This will cause logic to fail. Fix: Add agent with role '${role}' or update logic.`
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -1234,33 +1625,12 @@ function validateConfigSemantics(config) {
   const path = require('path');
 
   // === GAP 11: Agent ID conflicts across subclusters ===
-  // Collect all agent IDs recursively (including subclusters)
-  const allAgentIds = new Map(); // Map of agentId -> depth where first seen
+  collectAgentIdConflicts(config.agents, errors);
 
-  function collectAgentIds(agents, depth = 0) {
-    if (!agents) return;
-
-    for (const agent of agents) {
-      if (!agent.id) continue; // Skip agents without IDs (caught in Phase 1)
-
-      if (allAgentIds.has(agent.id)) {
-        const firstSeenDepth = allAgentIds.get(agent.id);
-        errors.push(
-          `[Gap 11] Duplicate agent ID '${agent.id}' found across cluster hierarchy ` +
-            `(first at depth ${firstSeenDepth}, duplicate at depth ${depth}). ` +
-            `Fix: Ensure all agent IDs are unique across the entire cluster.`
-        );
-      } else {
-        allAgentIds.set(agent.id, depth);
-      }
-
-      if (agent.type === 'subcluster' && agent.config?.agents) {
-        collectAgentIds(agent.config.agents, depth + 1);
-      }
-    }
-  }
-
-  collectAgentIds(config.agents);
+  const topicProducers = buildTopicProducers(config.agents);
+  const roles = new Set(
+    config.agents.filter((agent) => agent.type !== 'subcluster').map((agent) => agent.role)
+  );
 
   for (const agent of config.agents) {
     if (agent.type === 'subcluster') continue;
@@ -1268,176 +1638,24 @@ function validateConfigSemantics(config) {
     const prefix = `Agent '${agent.id}'`;
 
     // === GAP 8: JSON schema structurally invalid ===
-    if (agent.jsonSchema) {
-      try {
-        // Check if schema can be stringified (basic structural check)
-        JSON.stringify(agent.jsonSchema);
-
-        // Check required fields for JSON schema
-        if (typeof agent.jsonSchema !== 'object') {
-          errors.push(
-            `[Gap 8] ${prefix}: jsonSchema must be an object, got ${typeof agent.jsonSchema}. ` +
-              `Fix: Use valid JSON Schema format with 'type' and 'properties' fields.`
-          );
-        }
-      } catch (e) {
-        errors.push(
-          `[Gap 8] ${prefix}: jsonSchema is not valid JSON: ${e.message}. ` +
-            `Fix: Ensure schema is a valid JSON object.`
-        );
-      }
-    }
+    validateJsonSchema(prefix, agent, errors);
 
     // === GAP 9: Context sources never produced (enhanced check) ===
     // Already partially covered in Phase 2, but add stricter checks
-    if (agent.contextStrategy?.sources) {
-      const topicProducers = new Map();
-
-      // Build topic producers map
-      for (const a of config.agents) {
-        if (a.type === 'subcluster') continue;
-        const outputTopic = a.hooks?.onComplete?.config?.topic;
-        if (outputTopic) {
-          if (!topicProducers.has(outputTopic)) {
-            topicProducers.set(outputTopic, []);
-          }
-          topicProducers.get(outputTopic).push(a.id);
-        }
-      }
-
-      for (const source of agent.contextStrategy.sources) {
-        const topic = source.topic;
-        if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') continue;
-        if (topic.endsWith('*')) continue;
-
-        const producers = topicProducers.get(topic) || [];
-        if (producers.length === 0) {
-          warnings.push(
-            `[Gap 9] ${prefix}: Context source topic '${topic}' is never produced. ` +
-              `Agent will get empty context for this source.`
-          );
-        }
-
-        // === GAP 14: Context source format invalid ===
-        if (source.amount === undefined) {
-          warnings.push(
-            `[Gap 14] ${prefix}: Context source for topic '${topic}' missing 'amount' field. ` +
-              `Defaults may not be what you expect.`
-          );
-        }
-        if (source.strategy && !['latest', 'all', 'oldest'].includes(source.strategy)) {
-          errors.push(
-            `[Gap 14] ${prefix}: Context source strategy '${source.strategy}' is invalid. ` +
-              `Fix: Use 'latest', 'all', or 'oldest'.`
-          );
-        }
-      }
-    }
+    validateContextSources(prefix, agent, topicProducers, errors, warnings);
 
     // === GAP 10: Isolation config invalid ===
-    if (agent.isolation) {
-      if (agent.isolation.type === 'docker') {
-        if (!agent.isolation.image) {
-          errors.push(
-            `[Gap 10] ${prefix}: Docker isolation requires 'image' field. ` +
-              `Fix: Add "image": "zeroshot-runner" or custom image name.`
-          );
-        }
-
-        // Check mount paths are absolute
-        if (agent.isolation.mounts) {
-          for (const mount of agent.isolation.mounts) {
-            if (mount.host && !path.isAbsolute(mount.host)) {
-              warnings.push(
-                `[Gap 10] ${prefix}: Docker mount host path '${mount.host}' is not absolute. ` +
-                  `May cause runtime errors.`
-              );
-            }
-          }
-        }
-      } else if (agent.isolation.type && agent.isolation.type !== 'worktree') {
-        errors.push(
-          `[Gap 10] ${prefix}: Unknown isolation type '${agent.isolation.type}'. ` +
-            `Fix: Use 'docker' or 'worktree'.`
-        );
-      }
-    }
+    validateIsolationConfig(prefix, agent, path, errors, warnings);
 
     // === GAP 12: Load config file paths don't exist ===
-    if (agent.loadConfig) {
-      const configPath = agent.loadConfig.path;
-      if (configPath && !fs.existsSync(configPath)) {
-        errors.push(
-          `[Gap 12] ${prefix}: Load config file '${configPath}' does not exist. ` +
-            `Fix: Check file path or remove loadConfig.`
-        );
-      }
-    }
+    validateLoadConfig(prefix, agent, fs, errors);
 
     // === GAP 13: Task executor config invalid ===
-    if (agent.taskExecutor) {
-      if (agent.taskExecutor.command === undefined) {
-        errors.push(
-          `[Gap 13] ${prefix}: Task executor missing 'command' field. ` +
-            `Fix: Add "command": "claude" or custom command.`
-        );
-      }
-
-      if (agent.taskExecutor.retries !== undefined) {
-        if (typeof agent.taskExecutor.retries !== 'number' || agent.taskExecutor.retries < 0) {
-          errors.push(
-            `[Gap 13] ${prefix}: Task executor 'retries' must be a non-negative number, got ${agent.taskExecutor.retries}. ` +
-              `Fix: Use a positive integer or 0.`
-          );
-        }
-      }
-
-      if (agent.taskExecutor.timeout !== undefined) {
-        if (typeof agent.taskExecutor.timeout !== 'number' || agent.taskExecutor.timeout <= 0) {
-          errors.push(
-            `[Gap 13] ${prefix}: Task executor 'timeout' must be a positive number, got ${agent.taskExecutor.timeout}. ` +
-              `Fix: Use a positive number in milliseconds.`
-          );
-        }
-      }
-    }
+    validateTaskExecutor(prefix, agent, errors);
 
     // === GAP 15: Stricter role reference validation ===
     // Upgrade from WARNING to ERROR when role is used in critical logic
-    const roles = new Set(config.agents.filter((a) => a.type !== 'subcluster').map((a) => a.role));
-
-    for (const trigger of agent.triggers || []) {
-      if (trigger.logic?.script) {
-        const script = trigger.logic.script;
-        const roleMatches = script.match(/getAgentsByRole\(['"](\w+)['"]\)/g);
-
-        if (roleMatches) {
-          for (const match of roleMatches) {
-            const role = match.match(/['"](\w+)['"]/)[1];
-            if (!roles.has(role)) {
-              // Check if the logic depends on this role for critical decisions
-              const isCritical =
-                /\.length\s*[><=!]/.test(script) || // Checking count
-                /allResponded/.test(script) || // Waiting for responses
-                /hasConsensus/.test(script); // Consensus check
-
-              // Check if logic has a valid "zero length" fallback pattern
-              // e.g., "if (validators.length === 0) return true" handles missing role gracefully
-              const hasZeroLengthFallback =
-                /\.length\s*===?\s*0\s*\)\s*return/.test(script) || // length === 0) return
-                /\.length\s*[<]=\s*0/.test(script); // length <= 0 or length < 1
-
-              if (isCritical && !hasZeroLengthFallback) {
-                errors.push(
-                  `[Gap 15] ${prefix}: Logic references role '${role}' which doesn't exist. ` +
-                    `This will cause logic to fail. Fix: Add agent with role '${role}' or update logic.`
-                );
-              }
-            }
-          }
-        }
-      }
-    }
+    validateRoleReferences(prefix, agent, roles, errors);
   }
 
   return { errors, warnings };
@@ -1511,8 +1729,8 @@ function validateProviderSettings(provider, providerSettings) {
         `Invalid model override (must be non-empty string) for provider "${provider}"`
       );
     }
-    if (override?.reasoningEffort && provider !== 'codex') {
-      throw new Error(`reasoningEffort overrides are only supported for Codex`);
+    if (override?.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
+      throw new Error(`reasoningEffort overrides are only supported for Codex and Opencode`);
     }
     if (
       override?.reasoningEffort &&
@@ -1522,6 +1740,117 @@ function validateProviderSettings(provider, providerSettings) {
         `Invalid reasoningEffort "${override.reasoningEffort}" (low|medium|high|xhigh)`
       );
     }
+  }
+}
+
+function resolveAgentProvider(agent, config, settings, errors) {
+  const provider = resolveProviderName(agent, config, settings);
+  if (!VALID_PROVIDERS.includes(provider)) {
+    errors.push(`Agent "${agent.id}" references unknown provider "${provider}"`);
+    return null;
+  }
+  return provider;
+}
+
+function buildProviderContext(provider, settings) {
+  const providerModule = getProvider(provider);
+  const levels = providerModule.getLevelMapping();
+  const catalog = providerModule.getModelCatalog();
+  const providerSettings = settings.providerSettings?.[provider] || {};
+  const minLevel = providerSettings.minLevel;
+  const maxLevel = providerSettings.maxLevel;
+  const rank = (level) => levels[level]?.rank;
+
+  return {
+    providerModule,
+    levels,
+    catalog,
+    providerSettings,
+    minLevel,
+    maxLevel,
+    rank,
+  };
+}
+
+function validateJsonSchemaSupport(agent, provider, warnings) {
+  if (!agent.jsonSchema) return;
+  const cap = CAPABILITIES[provider]?.jsonSchema;
+  if (cap === 'experimental') {
+    warnings.push(
+      `Agent "${agent.id}" uses jsonSchema with ${provider} provider - ` +
+        `this feature is experimental and may not work reliably`
+    );
+  } else if (!cap) {
+    warnings.push(
+      `Agent "${agent.id}" uses jsonSchema but ${provider} provider doesn't support it`
+    );
+  }
+}
+
+function validateModelLevelSupport(agent, provider, levels, warnings) {
+  if (agent.modelLevel && !levels[agent.modelLevel]) {
+    warnings.push(
+      `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" which is not valid for ${provider}`
+    );
+  }
+}
+
+function validateModelSelection(agent, context, warnings) {
+  const { provider, catalog, minLevel, maxLevel, rank } = context;
+
+  if (agent.model) {
+    if (!catalog[agent.model]) {
+      warnings.push(
+        `Agent "${agent.id}" uses model "${agent.model}" which is not valid for ${provider}`
+      );
+    }
+    return;
+  }
+
+  if (agent.modelLevel && minLevel && maxLevel) {
+    if (rank(minLevel) > rank(maxLevel)) {
+      warnings.push(
+        `Provider "${provider}" has minLevel "${minLevel}" above maxLevel "${maxLevel}"`
+      );
+    } else if (rank(agent.modelLevel) < rank(minLevel)) {
+      warnings.push(
+        `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" below minLevel "${minLevel}" for ${provider}`
+      );
+    } else if (rank(agent.modelLevel) > rank(maxLevel)) {
+      warnings.push(
+        `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" above maxLevel "${maxLevel}" for ${provider}`
+      );
+    }
+  }
+}
+
+function validateModelRulesSupport(agent, provider, catalog, levels, warnings) {
+  if (!agent.modelRules || !Array.isArray(agent.modelRules)) return;
+
+  for (const rule of agent.modelRules) {
+    if (rule.modelLevel && !levels[rule.modelLevel]) {
+      warnings.push(
+        `Agent "${agent.id}" uses modelLevel "${rule.modelLevel}" in modelRules which is not valid for ${provider}`
+      );
+    }
+    if (rule.model && !catalog[rule.model]) {
+      warnings.push(
+        `Agent "${agent.id}" uses model "${rule.model}" in modelRules which is not valid for ${provider}`
+      );
+    }
+  }
+}
+
+function validateReasoningEffortSupport(agent, provider, warnings) {
+  if (agent.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
+    warnings.push(`Agent "${agent.id}" sets reasoningEffort but ${provider} does not support it`);
+  } else if (
+    agent.reasoningEffort &&
+    !['low', 'medium', 'high', 'xhigh'].includes(agent.reasoningEffort)
+  ) {
+    warnings.push(
+      `Agent "${agent.id}" has invalid reasoningEffort "${agent.reasoningEffort}" (low|medium|high|xhigh)`
+    );
   }
 }
 
@@ -1548,87 +1877,23 @@ function validateProviderFeatures(config, settings) {
       continue;
     }
 
-    const provider = resolveProviderName(agent, config, settings);
-    if (!VALID_PROVIDERS.includes(provider)) {
-      errors.push(`Agent "${agent.id}" references unknown provider "${provider}"`);
-      continue;
-    }
+    const provider = resolveAgentProvider(agent, config, settings, errors);
+    if (!provider) continue;
 
-    const providerModule = getProvider(provider);
-    const levels = providerModule.getLevelMapping();
-    const catalog = providerModule.getModelCatalog();
-    const providerSettings = settings.providerSettings?.[provider] || {};
-    const minLevel = providerSettings.minLevel;
-    const maxLevel = providerSettings.maxLevel;
-    const rank = (level) => levels[level]?.rank;
+    const { levels, catalog, minLevel, maxLevel, rank } = buildProviderContext(provider, settings);
+    const modelSelectionContext = {
+      provider,
+      catalog,
+      minLevel,
+      maxLevel,
+      rank,
+    };
 
-    if (agent.jsonSchema) {
-      const cap = CAPABILITIES[provider]?.jsonSchema;
-      if (cap === 'experimental') {
-        warnings.push(
-          `Agent "${agent.id}" uses jsonSchema with ${provider} provider - ` +
-            `this feature is experimental and may not work reliably`
-        );
-      } else if (!cap) {
-        warnings.push(
-          `Agent "${agent.id}" uses jsonSchema but ${provider} provider doesn't support it`
-        );
-      }
-    }
-
-    if (agent.modelLevel && !levels[agent.modelLevel]) {
-      warnings.push(
-        `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" which is not valid for ${provider}`
-      );
-    }
-
-    if (agent.model) {
-      if (!catalog[agent.model]) {
-        warnings.push(
-          `Agent "${agent.id}" uses model "${agent.model}" which is not valid for ${provider}`
-        );
-      }
-    } else if (agent.modelLevel && minLevel && maxLevel) {
-      if (rank(minLevel) > rank(maxLevel)) {
-        warnings.push(
-          `Provider "${provider}" has minLevel "${minLevel}" above maxLevel "${maxLevel}"`
-        );
-      } else if (rank(agent.modelLevel) < rank(minLevel)) {
-        warnings.push(
-          `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" below minLevel "${minLevel}" for ${provider}`
-        );
-      } else if (rank(agent.modelLevel) > rank(maxLevel)) {
-        warnings.push(
-          `Agent "${agent.id}" uses modelLevel "${agent.modelLevel}" above maxLevel "${maxLevel}" for ${provider}`
-        );
-      }
-    }
-
-    if (agent.modelRules && Array.isArray(agent.modelRules)) {
-      for (const rule of agent.modelRules) {
-        if (rule.modelLevel && !levels[rule.modelLevel]) {
-          warnings.push(
-            `Agent "${agent.id}" uses modelLevel "${rule.modelLevel}" in modelRules which is not valid for ${provider}`
-          );
-        }
-        if (rule.model && !catalog[rule.model]) {
-          warnings.push(
-            `Agent "${agent.id}" uses model "${rule.model}" in modelRules which is not valid for ${provider}`
-          );
-        }
-      }
-    }
-
-    if (agent.reasoningEffort && provider !== 'codex') {
-      warnings.push(`Agent "${agent.id}" sets reasoningEffort but ${provider} does not support it`);
-    } else if (
-      agent.reasoningEffort &&
-      !['low', 'medium', 'high', 'xhigh'].includes(agent.reasoningEffort)
-    ) {
-      warnings.push(
-        `Agent "${agent.id}" has invalid reasoningEffort "${agent.reasoningEffort}" (low|medium|high|xhigh)`
-      );
-    }
+    validateJsonSchemaSupport(agent, provider, warnings);
+    validateModelLevelSupport(agent, provider, levels, warnings);
+    validateModelSelection(agent, modelSelectionContext, warnings);
+    validateModelRulesSupport(agent, provider, catalog, levels, warnings);
+    validateReasoningEffortSupport(agent, provider, warnings);
   }
 
   return { errors, warnings };

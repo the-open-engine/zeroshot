@@ -1,12 +1,78 @@
-# Skip all checks in CI - semantic-release handles tags correctly there
+#!/bin/bash
+# Pre-push hook: Block direct pushes to main/dev + enforce PR workflow
+
+set -e
+
+# Skip all checks in CI - semantic-release handles everything there
 if [ -n "$CI" ]; then
   exit 0
 fi
 
-# Block manual version tags - let semantic-release handle them (local only)
+# ============================================================================
+# PART 1: Block direct pushes to main and dev branches
+# ============================================================================
+
+# Read push details from stdin
+while read local_ref local_sha remote_ref remote_sha; do
+  # Extract branch name from remote ref (refs/heads/main → main)
+  remote_branch=$(echo "$remote_ref" | sed 's|refs/heads/||')
+
+  # Block pushes to main
+  if [ "$remote_branch" = "main" ]; then
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                   ║"
+    echo "║  ❌ BLOCKED: Direct push to 'main' branch                         ║"
+    echo "║                                                                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "❌ ERROR: You cannot push directly to 'main' branch"
+    echo ""
+    echo "Releases flow:  dev → PR → main → semantic-release"
+    echo ""
+    echo "To release:"
+    echo "  gh pr create --base main --head dev --title \"Release\""
+    echo ""
+    exit 1
+  fi
+
+  # Block pushes to dev
+  if [ "$remote_branch" = "dev" ]; then
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                   ║"
+    echo "║  ❌ BLOCKED: Direct push to 'dev' branch                          ║"
+    echo "║                                                                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "❌ ERROR: You cannot push directly to 'dev' branch"
+    echo ""
+    echo "Required workflow:"
+    echo "  1. Create feature branch: git switch -c feat/my-feature"
+    echo "  2. Push feature branch:   git push -u origin feat/my-feature"
+    echo "  3. Create PR:             gh pr create --base dev"
+    echo "  4. Enable auto-merge:     gh pr merge --auto --squash"
+    echo ""
+    echo "Merge queue will:"
+    echo "  • Rebase your PR on latest dev"
+    echo "  • Re-run CI on rebased code"
+    echo "  • Merge only if CI passes"
+    echo ""
+    exit 1
+  fi
+done < /dev/stdin
+
+# ============================================================================
+# PART 2: Block manual version tags
+# ============================================================================
+
 if git tag --points-at HEAD 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+'; then
   echo "ERROR: Manual version tags forbidden. Let semantic-release create them."
   exit 1
 fi
+
+# ============================================================================
+# PART 3: Run linting and type checking
+# ============================================================================
 
 npm run lint && npm run typecheck

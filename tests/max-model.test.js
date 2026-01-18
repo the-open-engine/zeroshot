@@ -20,35 +20,32 @@ const os = require('os');
 const TEST_STORAGE_DIR = path.join(os.tmpdir(), 'zeroshot-maxmodel-test-' + Date.now());
 const TEST_SETTINGS_FILE = path.join(TEST_STORAGE_DIR, 'settings.json');
 
-describe('maxModel Ceiling Enforcement', function () {
-  this.timeout(10000);
+let AgentWrapper;
+let validateAgentConfig;
+let settingsModule;
+let mockMessageBus;
+let mockCluster;
 
-  let AgentWrapper;
-  let validateAgentConfig;
-  let settingsModule;
-  let mockMessageBus;
-  let mockCluster;
+function saveTestSettings(settings) {
+  fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+}
 
+function registerMaxModelHooks() {
   before(function () {
-    // Create test directory
     if (!fs.existsSync(TEST_STORAGE_DIR)) {
       fs.mkdirSync(TEST_STORAGE_DIR, { recursive: true });
     }
 
-    // Set environment variable for settings path BEFORE loading modules
     process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
 
-    // Clear module cache to ensure fresh load with test settings path
     delete require.cache[require.resolve('../lib/settings')];
     delete require.cache[require.resolve('../src/agent/agent-config')];
     delete require.cache[require.resolve('../src/agent-wrapper')];
 
-    // Load modules after setting env var
     settingsModule = require('../lib/settings');
     validateAgentConfig = require('../src/agent/agent-config').validateAgentConfig;
     AgentWrapper = require('../src/agent-wrapper');
 
-    // Mock message bus and cluster
     mockMessageBus = {
       publish: () => {},
       subscribe: () => () => {},
@@ -61,30 +58,22 @@ describe('maxModel Ceiling Enforcement', function () {
   });
 
   after(function () {
-    // Clean up test directory
     try {
       fs.rmSync(TEST_STORAGE_DIR, { recursive: true, force: true });
     } catch (e) {
       console.error('Cleanup failed:', e.message);
     }
-    // Clean up environment variable
     delete process.env.ZEROSHOT_SETTINGS_FILE;
   });
 
   beforeEach(function () {
-    // Reset settings to default before each test
     if (fs.existsSync(TEST_SETTINGS_FILE)) {
       fs.unlinkSync(TEST_SETTINGS_FILE);
     }
   });
+}
 
-  /**
-   * Helper to save test settings
-   */
-  function saveTestSettings(settings) {
-    fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
-  }
-
+function registerStaticModelCeilingTests() {
   describe('Static model ceiling enforcement', function () {
     it('should ERROR when agent requests opus but maxModel is sonnet', function () {
       // Set maxModel to sonnet
@@ -144,7 +133,9 @@ describe('maxModel Ceiling Enforcement', function () {
       });
     });
   });
+}
 
+function registerDynamicModelRulesTests() {
   describe('Dynamic modelRules ceiling enforcement', function () {
     it('should ERROR when any modelRule exceeds maxModel', function () {
       saveTestSettings({ maxModel: 'sonnet' });
@@ -223,7 +214,9 @@ describe('maxModel Ceiling Enforcement', function () {
       );
     });
   });
+}
 
+function registerDefaultModelTests() {
   describe('Default model when unspecified', function () {
     it('should use maxModel ceiling when it constrains default', function () {
       saveTestSettings({ maxModel: 'haiku' });
@@ -275,7 +268,9 @@ describe('maxModel Ceiling Enforcement', function () {
       assert.strictEqual(agent._selectModel(), 'sonnet');
     });
   });
+}
 
+function registerSettingsValidationTests() {
   describe('Settings validation', function () {
     it('should reject invalid maxModel values', function () {
       const error = settingsModule.validateSetting('maxModel', 'gpt4');
@@ -290,7 +285,9 @@ describe('maxModel Ceiling Enforcement', function () {
       assert.strictEqual(settingsModule.validateSetting('maxModel', 'haiku'), null);
     });
   });
+}
 
+function registerModelHierarchyValidationTests() {
   describe('Model hierarchy validation function', function () {
     it('should return requested model when within ceiling', function () {
       const result = settingsModule.validateModelAgainstMax('haiku', 'opus');
@@ -323,7 +320,9 @@ describe('maxModel Ceiling Enforcement', function () {
       );
     });
   });
+}
 
+function registerIntegrationCeilingTests() {
   describe('Integration: Full agent lifecycle with ceiling', function () {
     it('should enforce ceiling throughout agent execution', function () {
       saveTestSettings({ maxModel: 'sonnet' });
@@ -385,7 +384,9 @@ describe('maxModel Ceiling Enforcement', function () {
       assert.throws(() => agent._selectModel(), /Agent requests "sonnet" but maxModel is "haiku"/);
     });
   });
+}
 
+function registerModelHierarchyConstantTests() {
   describe('MODEL_HIERARCHY constant', function () {
     it('should have correct hierarchy values', function () {
       const { MODEL_HIERARCHY } = settingsModule;
@@ -403,4 +404,17 @@ describe('maxModel Ceiling Enforcement', function () {
       }
     });
   });
+}
+
+describe('maxModel Ceiling Enforcement', function () {
+  this.timeout(10000);
+
+  registerMaxModelHooks();
+  registerStaticModelCeilingTests();
+  registerDynamicModelRulesTests();
+  registerDefaultModelTests();
+  registerSettingsValidationTests();
+  registerModelHierarchyValidationTests();
+  registerIntegrationCeilingTests();
+  registerModelHierarchyConstantTests();
 });

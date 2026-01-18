@@ -153,10 +153,10 @@ describe('Model Override (--model flag)', () => {
     );
 
     // Save clusters
-    orchestrator._saveClusters();
+    await orchestrator._saveClusters();
 
     // Create new orchestrator and load clusters
-    const newOrchestrator = new Orchestrator({
+    const newOrchestrator = await Orchestrator.create({
       storageDir,
       quiet: true,
       taskRunner: new MockTaskRunner(),

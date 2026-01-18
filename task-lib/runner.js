@@ -20,34 +20,14 @@ export async function spawnTask(prompt, options = {}) {
   const cwd = options.cwd || process.cwd();
 
   const settings = loadSettings();
-  const providerName = normalizeProviderName(
-    options.provider || settings.defaultProvider || 'claude'
+  const { providerName, provider, providerSettings, levelOverrides } = resolveProviderContext(
+    options,
+    settings
   );
-  const provider = getProvider(providerName);
-  const providerSettings = settings.providerSettings?.[providerName] || {};
-  const levelOverrides = providerSettings.levelOverrides || {};
 
-  const outputFormat = options.outputFormat || 'stream-json';
-
-  let jsonSchema = options.jsonSchema || null;
-  if (jsonSchema && outputFormat !== 'json') {
-    console.warn('Warning: --json-schema requires --output-format json, ignoring schema');
-    jsonSchema = null;
-  }
-
-  let modelSpec;
-  if (options.model) {
-    modelSpec = {
-      model: options.model,
-      reasoningEffort: options.reasoningEffort,
-    };
-  } else {
-    const level = options.modelLevel || providerSettings.defaultLevel || provider.getDefaultLevel();
-    modelSpec = provider.resolveModelSpec(level, levelOverrides);
-    if (options.reasoningEffort) {
-      modelSpec = { ...modelSpec, reasoningEffort: options.reasoningEffort };
-    }
-  }
+  const outputFormat = resolveOutputFormat(options);
+  const jsonSchema = resolveJsonSchema(options, outputFormat);
+  const modelSpec = resolveModelSpec(options, provider, providerSettings, levelOverrides);
 
   const cliFeatures = await provider.getCliFeatures();
   const commandSpec = provider.buildCommand(prompt, {
@@ -59,6 +39,79 @@ export async function spawnTask(prompt, options = {}) {
     cliFeatures,
   });
 
+  const finalArgs = resolveFinalArgs(commandSpec, providerName, options);
+  const task = buildTaskRecord({
+    id,
+    prompt,
+    cwd,
+    options,
+    logFile,
+    providerName,
+    modelSpec,
+  });
+
+  addTask(task);
+
+  const watcherConfig = buildWatcherConfig(
+    outputFormat,
+    jsonSchema,
+    options,
+    providerName,
+    commandSpec
+  );
+  const watcherScript = resolveWatcherScript(options);
+  spawnWatcher({
+    watcherScript,
+    id,
+    cwd,
+    logFile,
+    finalArgs,
+    watcherConfig,
+  });
+
+  return task;
+}
+
+function resolveProviderContext(options, settings) {
+  const providerName = normalizeProviderName(
+    options.provider || settings.defaultProvider || 'claude'
+  );
+  const provider = getProvider(providerName);
+  const providerSettings = settings.providerSettings?.[providerName] || {};
+  const levelOverrides = providerSettings.levelOverrides || {};
+  return { providerName, provider, providerSettings, levelOverrides };
+}
+
+function resolveOutputFormat(options) {
+  return options.outputFormat || 'stream-json';
+}
+
+function resolveJsonSchema(options, outputFormat) {
+  let jsonSchema = options.jsonSchema || null;
+  if (jsonSchema && outputFormat !== 'json') {
+    console.warn('Warning: --json-schema requires --output-format json, ignoring schema');
+    jsonSchema = null;
+  }
+  return jsonSchema;
+}
+
+function resolveModelSpec(options, provider, providerSettings, levelOverrides) {
+  if (options.model) {
+    return {
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+    };
+  }
+
+  const level = options.modelLevel || providerSettings.defaultLevel || provider.getDefaultLevel();
+  let modelSpec = provider.resolveModelSpec(level, levelOverrides);
+  if (options.reasoningEffort) {
+    modelSpec = { ...modelSpec, reasoningEffort: options.reasoningEffort };
+  }
+  return modelSpec;
+}
+
+function resolveFinalArgs(commandSpec, providerName, options) {
   const finalArgs = [...commandSpec.args];
   if (providerName === 'claude') {
     const promptIndex = finalArgs.length - 1;
@@ -70,8 +123,11 @@ export async function spawnTask(prompt, options = {}) {
   } else if (options.resume || options.continue) {
     console.warn('Warning: resume/continue is only supported for Claude CLI; ignoring.');
   }
+  return finalArgs;
+}
 
-  const task = {
+function buildTaskRecord({ id, prompt, cwd, options, logFile, providerName, modelSpec }) {
+  return {
     id,
     prompt: prompt.slice(0, 200) + (prompt.length > 200 ? '...' : ''),
     fullPrompt: prompt,
@@ -92,10 +148,10 @@ export async function spawnTask(prompt, options = {}) {
     socketPath: null,
     attachable: false,
   };
+}
 
-  addTask(task);
-
-  const watcherConfig = {
+function buildWatcherConfig(outputFormat, jsonSchema, options, providerName, commandSpec) {
+  return {
     outputFormat,
     jsonSchema,
     silentJsonOutput: options.silentJsonOutput || false,
@@ -103,12 +159,14 @@ export async function spawnTask(prompt, options = {}) {
     command: commandSpec.binary,
     env: commandSpec.env || {},
   };
+}
 
+function resolveWatcherScript(options) {
   const useAttachable = options.attachable !== false && !options.jsonSchema;
-  const watcherScript = useAttachable
-    ? join(__dirname, 'attachable-watcher.js')
-    : join(__dirname, 'watcher.js');
+  return useAttachable ? join(__dirname, 'attachable-watcher.js') : join(__dirname, 'watcher.js');
+}
 
+function spawnWatcher({ watcherScript, id, cwd, logFile, finalArgs, watcherConfig }) {
   const watcher = fork(
     watcherScript,
     [id, cwd, logFile, JSON.stringify(finalArgs), JSON.stringify(watcherConfig)],
@@ -119,8 +177,7 @@ export async function spawnTask(prompt, options = {}) {
   );
 
   watcher.unref();
-
-  return task;
+  watcher.disconnect(); // Close IPC channel so parent can exit
 }
 
 export function isProcessRunning(pid) {

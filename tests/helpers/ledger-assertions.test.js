@@ -6,16 +6,27 @@ const assert = require('assert');
 const Ledger = require('../../src/ledger');
 const LedgerAssertions = require('./ledger-assertions');
 
-describe('LedgerAssertions', function () {
-  let ledger;
-  let assertions;
-  const clusterId = 'test-cluster-123';
+let ledger;
+let assertions;
+const clusterId = 'test-cluster-123';
 
+describe('LedgerAssertions', function () {
   beforeEach(() => {
     ledger = new Ledger(':memory:');
     assertions = new LedgerAssertions(ledger, clusterId);
   });
 
+  registerConstructorTests();
+  registerAssertPublishedTests();
+  registerAssertCountTests();
+  registerAssertSequenceTests();
+  registerLastMessageTests();
+  registerGetMessagesTests();
+  registerMethodChainingTests();
+  registerIsolationTests();
+});
+
+function registerConstructorTests() {
   describe('constructor', function () {
     it('should require ledger', function () {
       assert.throws(() => new LedgerAssertions(null, 'cluster-1'), /ledger is required/);
@@ -30,7 +41,9 @@ describe('LedgerAssertions', function () {
       assert.ok(a);
     });
   });
+}
 
+function registerAssertPublishedTests() {
   describe('assertPublished', function () {
     it('should pass when topic exists', function () {
       ledger.append({
@@ -98,7 +111,9 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(result, assertions, 'Should return this for chaining');
     });
   });
+}
 
+function registerAssertCountTests() {
   describe('assertCount', function () {
     it('should pass when count matches', function () {
       ledger.append({
@@ -149,7 +164,9 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(result, assertions, 'Should return this for chaining');
     });
   });
+}
 
+function registerAssertSequenceTests() {
   describe('assertSequence', function () {
     it('should pass when topics appear in order', function () {
       ledger.append({
@@ -276,7 +293,9 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(result, assertions, 'Should return this for chaining');
     });
   });
+}
 
+function registerLastMessageTests() {
   describe('lastMessage', function () {
     it('should return null when topic does not exist', function () {
       const result = assertions.lastMessage('NONEXISTENT');
@@ -325,7 +344,9 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(result.sender, 'target-agent');
     });
   });
+}
 
+function registerGetMessagesTests() {
   describe('getMessages', function () {
     it('should return empty array when topic does not exist', function () {
       const result = assertions.getMessages('NONEXISTENT');
@@ -411,7 +432,9 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(result[1].timestamp, baseTime + 1000);
     });
   });
+}
 
+function registerMethodChainingTests() {
   describe('method chaining', function () {
     it('should allow chaining multiple assertions', function () {
       ledger.append({
@@ -436,7 +459,9 @@ describe('LedgerAssertions', function () {
         .assertSequence(['ISSUE_OPENED', 'ANALYSIS_COMPLETE']);
     });
   });
+}
 
+function registerIsolationTests() {
   describe('isolation between clusters', function () {
     it('should only query messages from specified cluster', function () {
       ledger.append({
@@ -467,4 +492,4 @@ describe('LedgerAssertions', function () {
       assert.strictEqual(msgsB[0].sender, 'agent-b');
     });
   });
-});
+}

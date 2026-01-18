@@ -1,6 +1,7 @@
 const BaseProvider = require('../base-provider');
-const { getClaudeCommand } = require('../../../lib/settings');
+const { getClaudeCommand, loadSettings } = require('../../../lib/settings');
 const { commandExists, getCommandPath, getHelpOutput } = require('../../../lib/provider-detection');
+const { resolveClaudeAuth } = require('../../../lib/settings/claude-auth');
 const { buildCommand } = require('./cli-builder');
 const { parseEvent } = require('./output-parser');
 const {
@@ -68,6 +69,16 @@ class AnthropicProvider extends BaseProvider {
     return ['~/.claude'];
   }
 
+  /**
+   * Resolve authentication environment variables for Claude CLI.
+   * Handles Bedrock, API key, and OAuth authentication.
+   * @returns {Object} Environment variables for authentication
+   */
+  resolveAuthEnv() {
+    const settings = loadSettings();
+    return resolveClaudeAuth(settings);
+  }
+
   buildCommand(context, options) {
     const { command, args } = getClaudeCommand();
     const cliFeatures = options.cliFeatures || {};
@@ -97,7 +108,10 @@ class AnthropicProvider extends BaseProvider {
       );
     }
 
-    return buildCommand(context, { ...options, cliFeatures }, { command, args });
+    const authEnv = this.resolveAuthEnv();
+    const resolvedOptions = { ...options, cliFeatures, authEnv };
+
+    return buildCommand(context, resolvedOptions, { command, args });
   }
 
   parseEvent(line) {
@@ -128,6 +142,62 @@ class AnthropicProvider extends BaseProvider {
     if (warned.has(key)) return;
     warned.add(key);
     console.warn(`⚠️ ${message}`);
+  }
+
+  /**
+   * Get default settings including Claude-specific auth fields
+   * @override
+   */
+  getDefaultSettings() {
+    return {
+      ...super.getDefaultSettings(),
+      // Authentication (optional persistent storage)
+      anthropicApiKey: null, // sk-ant-* key
+      bedrockApiKey: null, // AWS_BEARER_TOKEN_BEDROCK value
+      bedrockRegion: null, // AWS_REGION for Bedrock
+    };
+  }
+
+  /**
+   * Validate Claude-specific settings including auth fields
+   * @override
+   */
+  validateSettings(settings) {
+    // First validate base provider settings (levels, etc.)
+    const baseError = super.validateSettings(settings);
+    if (baseError) return baseError;
+
+    // Claude-specific auth field validation
+    const {
+      isValidAnthropicKey,
+      ANTHROPIC_KEY_PREFIX,
+    } = require('../../../lib/settings/claude-auth');
+
+    // Validate string-or-null fields
+    for (const field of ['anthropicApiKey', 'bedrockApiKey', 'bedrockRegion']) {
+      if (
+        settings[field] !== undefined &&
+        settings[field] !== null &&
+        typeof settings[field] !== 'string'
+      ) {
+        return `providerSettings.claude.${field} must be a string or null`;
+      }
+    }
+
+    // Additional prefix validation for Anthropic API key
+    if (settings.anthropicApiKey && !isValidAnthropicKey(settings.anthropicApiKey)) {
+      return `providerSettings.claude.anthropicApiKey must start with ${ANTHROPIC_KEY_PREFIX}`;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get Claude-specific setting field names
+   * @override
+   */
+  getSettingsFields() {
+    return [...super.getSettingsFields(), 'anthropicApiKey', 'bedrockApiKey', 'bedrockRegion'];
   }
 }
 

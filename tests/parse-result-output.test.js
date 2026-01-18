@@ -43,6 +43,15 @@ function createMockAgent(options = {}) {
 }
 
 describe('parseResultOutput', function () {
+  defineClaudeProviderTests();
+  defineCodexProviderTests();
+  defineGeminiProviderTests();
+  defineEdgeCaseTests();
+  defineSchemaValidationTests();
+  defineRegressionTests();
+});
+
+function defineClaudeProviderTests() {
   // ============================================================================
   // CLAUDE (Claude CLI) OUTPUT FORMAT TESTS
   // ============================================================================
@@ -50,7 +59,8 @@ describe('parseResultOutput', function () {
     const agent = createMockAgent({ provider: 'claude' });
 
     it('should parse result wrapped in type:result with result field', async function () {
-      const output = `{"type":"result","subtype":"success","result":{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Single question"},"is_error":false}`;
+      const output =
+        '{"type":"result","subtype":"success","result":{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Single question"},"is_error":false}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -60,7 +70,8 @@ describe('parseResultOutput', function () {
     });
 
     it('should parse result with timestamp prefix', async function () {
-      const output = `[1768207508291]{"type":"result","subtype":"success","result":{"complexity":"STANDARD","taskType":"TASK","reasoning":"Multi-file change"},"is_error":false}`;
+      const output =
+        '[1768207508291]{"type":"result","subtype":"success","result":{"complexity":"STANDARD","taskType":"TASK","reasoning":"Multi-file change"},"is_error":false}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -80,7 +91,8 @@ describe('parseResultOutput', function () {
     });
 
     it('should parse structured_output field', async function () {
-      const output = `{"type":"result","structured_output":{"complexity":"CRITICAL","taskType":"DEBUG","reasoning":"Security issue"}}`;
+      const output =
+        '{"type":"result","structured_output":{"complexity":"CRITICAL","taskType":"DEBUG","reasoning":"Security issue"}}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -103,7 +115,9 @@ Done.`;
       assert.strictEqual(result.taskType, 'TASK');
     });
   });
+}
 
+function defineCodexProviderTests() {
   // ============================================================================
   // CODEX (Codex CLI) OUTPUT FORMAT TESTS
   // ============================================================================
@@ -112,7 +126,8 @@ Done.`;
 
     it('should parse raw JSON text output (not wrapped)', async function () {
       // Codex outputs raw JSON when model returns structured data
-      const output = `{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Single arithmetic question"}`;
+      const output =
+        '{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Single arithmetic question"}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -158,7 +173,9 @@ Done.`;
       assert.strictEqual(result.taskType, 'INQUIRY');
     });
   });
+}
 
+function defineGeminiProviderTests() {
   // ============================================================================
   // GEMINI (Gemini CLI) OUTPUT FORMAT TESTS
   // ============================================================================
@@ -166,7 +183,7 @@ Done.`;
     const agent = createMockAgent({ provider: 'gemini' });
 
     it('should parse raw JSON text output', async function () {
-      const output = `{"complexity":"SIMPLE","taskType":"DEBUG","reasoning":"Fix typo"}`;
+      const output = '{"complexity":"SIMPLE","taskType":"DEBUG","reasoning":"Fix typo"}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -196,7 +213,9 @@ Done.`;
       assert.strictEqual(result.taskType, 'DEBUG');
     });
   });
+}
 
+function defineEdgeCaseTests() {
   // ============================================================================
   // EDGE CASES AND ERROR HANDLING
   // ============================================================================
@@ -239,7 +258,8 @@ Done.`;
     });
 
     it('should handle CRLF line endings', async function () {
-      const output = `{"type":"result","result":{"complexity":"SIMPLE","taskType":"TASK","reasoning":"Windows"}}\r\n`;
+      const output =
+        '{"type":"result","result":{"complexity":"SIMPLE","taskType":"TASK","reasoning":"Windows"}}\r\n';
       const result = await parseResultOutput(agent, output);
       assert.strictEqual(result.complexity, 'SIMPLE');
     });
@@ -255,7 +275,9 @@ Done.`;
       assert.strictEqual(result.reasoning, 'Real result');
     });
   });
+}
 
+function defineSchemaValidationTests() {
   // ============================================================================
   // SCHEMA VALIDATION
   // ============================================================================
@@ -274,7 +296,7 @@ Done.`;
         },
       });
 
-      const output = `{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Valid"}`;
+      const output = '{"complexity":"SIMPLE","taskType":"INQUIRY","reasoning":"Valid"}';
       const result = await parseResultOutput(agent, output);
 
       assert.strictEqual(result.complexity, 'SIMPLE');
@@ -294,7 +316,7 @@ Done.`;
       });
 
       // Missing required 'score' field
-      const output = `{"wrongField":"value"}`;
+      const output = '{"wrongField":"value"}';
 
       await assert.rejects(() => parseResultOutput(agent, output), /failed JSON schema validation/);
     });
@@ -316,14 +338,16 @@ Done.`;
       // Output with wrong type for 'complexity' (number instead of string)
       // But since the schema has string type and we're passing a valid string,
       // let's test with missing required field instead
-      const output = `{"complexity":"SIMPLE"}`; // Missing taskType and reasoning
+      const output = '{"complexity":"SIMPLE"}'; // Missing taskType and reasoning
 
       // Should NOT throw, but should publish warning
       const result = await parseResultOutput(agent, output);
       assert.strictEqual(result.complexity, 'SIMPLE');
     });
   });
+}
 
+function defineRegressionTests() {
   // ============================================================================
   // REGRESSION TESTS
   // ============================================================================
@@ -364,7 +388,8 @@ Done.`;
       // Claude CLI sometimes returns result as string with markdown
       const agent = createMockAgent({ provider: 'claude' });
 
-      const output = `{"type":"result","subtype":"success","result":"\`\`\`json\\n{\\"complexity\\":\\"TRIVIAL\\",\\"taskType\\":\\"INQUIRY\\",\\"reasoning\\":\\"Quick lookup\\"}\\n\`\`\`"}`;
+      const output =
+        '{"type":"result","subtype":"success","result":"```json\\n{\\"complexity\\":\\"TRIVIAL\\",\\"taskType\\":\\"INQUIRY\\",\\"reasoning\\":\\"Quick lookup\\"}\\n```"}';
 
       const result = await parseResultOutput(agent, output);
 
@@ -388,4 +413,4 @@ Done.`;
       assert.strictEqual(result.taskType, 'DEBUG');
     });
   });
-});
+}

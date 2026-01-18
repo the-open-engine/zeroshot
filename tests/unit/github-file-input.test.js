@@ -1,5 +1,5 @@
 /**
- * Test: GitHub.createFileInput()
+ * Test: InputHelpers.createFileInput()
  *
  * Verifies markdown file reading and parsing logic
  * Tests: file reading, title extraction, path resolution, error handling
@@ -9,11 +9,11 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const GitHub = require('../../src/github');
+const InputHelpers = require('../../src/input-helpers');
 
-describe('GitHub.createFileInput()', function () {
-  let tempDir;
+let tempDir;
 
+describe('InputHelpers.createFileInput()', function () {
   beforeEach(function () {
     // Create temp directory for test files
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-'));
@@ -26,13 +26,21 @@ describe('GitHub.createFileInput()', function () {
     }
   });
 
+  registerFileReadingTests();
+  registerTitleExtractionTests();
+  registerOutputStructureTests();
+  registerMarkdownFormattingTests();
+  registerEdgeCaseTests();
+});
+
+function registerFileReadingTests() {
   describe('File reading', function () {
     it('should read file content correctly', function () {
       const filePath = path.join(tempDir, 'test.md');
       const content = '# Test Feature\n\nThis is a test.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
       assert.ok(result.context.includes(content));
@@ -42,7 +50,7 @@ describe('GitHub.createFileInput()', function () {
       const filePath = path.join(tempDir, 'nonexistent.md');
 
       assert.throws(
-        () => GitHub.createFileInput(filePath),
+        () => InputHelpers.createFileInput(filePath),
         (err) => {
           return err.message.includes('File not found') && err.message.includes('nonexistent.md');
         }
@@ -57,7 +65,7 @@ describe('GitHub.createFileInput()', function () {
       fs.writeFileSync(fileName, content);
 
       try {
-        const result = GitHub.createFileInput(fileName);
+        const result = InputHelpers.createFileInput(fileName);
         assert.strictEqual(result.body, content);
       } finally {
         // Clean up
@@ -72,19 +80,21 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Absolute Path Test';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
     });
   });
+}
 
+function registerTitleExtractionTests() {
   describe('Title extraction', function () {
     it('should extract title from first # header', function () {
       const filePath = path.join(tempDir, 'test.md');
       const content = '# Feature Title\n\nDescription here.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Feature Title');
     });
@@ -94,7 +104,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '#   Spaced Title   \n\nDescription.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Spaced Title');
     });
@@ -104,7 +114,7 @@ describe('GitHub.createFileInput()', function () {
       const content = 'No header here, just text.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'my-feature');
     });
@@ -114,7 +124,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '## Second Level\n\nThis should use filename.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'test');
     });
@@ -124,19 +134,21 @@ describe('GitHub.createFileInput()', function () {
       const content = 'Some intro text\n\n# Main Title\n\nMore text.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Main Title');
     });
   });
+}
 
+function registerOutputStructureTests() {
   describe('Output structure', function () {
     it('should match _parseIssue format', function () {
       const filePath = path.join(tempDir, 'test.md');
       const content = '# Test\n\nContent here.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.number, null);
       assert.strictEqual(typeof result.title, 'string');
@@ -154,20 +166,22 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Feature Request\n\nAdd dark mode.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.ok(result.context.includes('Feature Request'));
       assert.ok(result.context.includes('Add dark mode.'));
     });
   });
+}
 
+function registerMarkdownFormattingTests() {
   describe('Markdown formatting preservation', function () {
     it('should preserve headers', function () {
       const filePath = path.join(tempDir, 'test.md');
       const content = '# Main\n\n## Section\n\n### Subsection';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
     });
@@ -177,7 +191,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '# List Test\n\n- Item 1\n- Item 2\n  - Nested\n';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
     });
@@ -187,7 +201,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Code Test\n\n```js\nconst x = 1;\n```';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
       assert.ok(result.body.includes('```js'));
@@ -198,19 +212,21 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Test\n\nUse `npm install` to install.';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, content);
       assert.ok(result.body.includes('`npm install`'));
     });
   });
+}
 
+function registerEdgeCaseTests() {
   describe('Edge cases', function () {
     it('should handle empty file', function () {
       const filePath = path.join(tempDir, 'empty.md');
       fs.writeFileSync(filePath, '');
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, '');
       assert.strictEqual(result.title, 'empty');
@@ -221,7 +237,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Large File\n\n' + 'x'.repeat(200000); // 200KB
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Large File');
       assert.strictEqual(result.body.length, content.length);
@@ -232,7 +248,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Special Path';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Special Path');
     });
@@ -242,7 +258,7 @@ describe('GitHub.createFileInput()', function () {
       const content = '# Markdown Extension';
       fs.writeFileSync(filePath, content);
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.title, 'Markdown Extension');
     });
@@ -251,10 +267,10 @@ describe('GitHub.createFileInput()', function () {
       const filePath = path.join(tempDir, 'whitespace.md');
       fs.writeFileSync(filePath, '   \n\n   ');
 
-      const result = GitHub.createFileInput(filePath);
+      const result = InputHelpers.createFileInput(filePath);
 
       assert.strictEqual(result.body, '   \n\n   ');
       assert.strictEqual(result.title, 'whitespace');
     });
   });
-});
+}

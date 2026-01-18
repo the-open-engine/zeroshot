@@ -12,27 +12,11 @@ const os = require('os');
 const MessageBus = require('../../src/message-bus');
 const Ledger = require('../../src/ledger');
 
-describe('MessageBus Integration', function () {
-  this.timeout(10000);
+let tempDir;
+let ledger;
+let messageBus;
 
-  let tempDir;
-  let ledger;
-  let messageBus;
-
-  beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-msgbus-test-'));
-    const dbPath = path.join(tempDir, 'test.db');
-    ledger = new Ledger(dbPath);
-    messageBus = new MessageBus(ledger);
-  });
-
-  afterEach(() => {
-    if (ledger) ledger.close();
-    if (tempDir && fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
+function registerMessageValidationTests() {
   describe('Message Validation', () => {
     it('should require cluster_id', () => {
       assert.throws(() => {
@@ -72,7 +56,9 @@ describe('MessageBus Integration', function () {
       });
     });
   });
+}
 
+function registerTopicSubscriptionTests() {
   describe('Topic Subscriptions', () => {
     it('should receive messages via subscribe()', (done) => {
       const receivedMessages = [];
@@ -172,7 +158,9 @@ describe('MessageBus Integration', function () {
       }, 100);
     });
   });
+}
 
+function registerMessagePersistenceTests() {
   describe('Message Persistence', () => {
     it('should persist messages to ledger', () => {
       messageBus.publish({
@@ -214,7 +202,9 @@ describe('MessageBus Integration', function () {
       });
     });
   });
+}
 
+function registerClusterIsolationTests() {
   describe('Cluster Isolation', () => {
     it('should not leak messages between clusters', () => {
       messageBus.publish({
@@ -246,7 +236,9 @@ describe('MessageBus Integration', function () {
       assert.strictEqual(cluster2Messages[0].sender, 'agent-2');
     });
   });
+}
 
+function registerContentSerializationTests() {
   describe('Content Serialization', () => {
     it('should handle nested content data', () => {
       const complexContent = {
@@ -278,7 +270,9 @@ describe('MessageBus Integration', function () {
       assert.strictEqual(messages[0].content.data.approved, true);
     });
   });
+}
 
+function registerEventEmissionTests() {
   describe('Event Emission', () => {
     it('should emit topic-specific events', (done) => {
       let topicEventReceived = false;
@@ -320,298 +314,362 @@ describe('MessageBus Integration', function () {
       }, 100);
     });
   });
+}
 
+function registerBatchPublishingTests() {
   describe('Batch Publishing (Atomic)', () => {
-    it('should publish multiple messages atomically', () => {
-      const messages = [
-        { cluster_id: 'batch-test', topic: 'TOKEN_USAGE', sender: 'worker', content: { data: { tokens: 100 } } },
-        { cluster_id: 'batch-test', topic: 'TASK_COMPLETED', sender: 'worker', content: { text: 'Done' } },
-        { cluster_id: 'batch-test', topic: 'HOOK_RESULT', sender: 'worker', content: { data: { approved: true } } },
-      ];
+    registerBatchPublishingBasics();
+    registerBatchPublishingTimestamps();
+    registerBatchPublishingEvents();
+    registerBatchPublishingValidation();
+    registerBatchPublishingOrdering();
+    registerBatchPublishingInterleaving();
+  });
+}
 
-      const published = messageBus.batchPublish(messages);
+function registerBatchPublishingBasics() {
+  it('should publish multiple messages atomically', () => {
+    const messages = [
+      {
+        cluster_id: 'batch-test',
+        topic: 'TOKEN_USAGE',
+        sender: 'worker',
+        content: { data: { tokens: 100 } },
+      },
+      {
+        cluster_id: 'batch-test',
+        topic: 'TASK_COMPLETED',
+        sender: 'worker',
+        content: { text: 'Done' },
+      },
+      {
+        cluster_id: 'batch-test',
+        topic: 'HOOK_RESULT',
+        sender: 'worker',
+        content: { data: { approved: true } },
+      },
+    ];
 
-      assert.strictEqual(published.length, 3);
-      assert.strictEqual(published[0].topic, 'TOKEN_USAGE');
-      assert.strictEqual(published[1].topic, 'TASK_COMPLETED');
-      assert.strictEqual(published[2].topic, 'HOOK_RESULT');
-    });
+    const published = messageBus.batchPublish(messages);
 
-    it('should assign contiguous timestamps to batch messages', () => {
-      const messages = [
-        { cluster_id: 'batch-test', topic: 'MSG_1', sender: 'agent' },
-        { cluster_id: 'batch-test', topic: 'MSG_2', sender: 'agent' },
-        { cluster_id: 'batch-test', topic: 'MSG_3', sender: 'agent' },
-      ];
+    assert.strictEqual(published.length, 3);
+    assert.strictEqual(published[0].topic, 'TOKEN_USAGE');
+    assert.strictEqual(published[1].topic, 'TASK_COMPLETED');
+    assert.strictEqual(published[2].topic, 'HOOK_RESULT');
+  });
+}
 
-      const published = messageBus.batchPublish(messages);
+function registerBatchPublishingTimestamps() {
+  it('should assign contiguous timestamps to batch messages', () => {
+    const messages = [
+      { cluster_id: 'batch-test', topic: 'MSG_1', sender: 'agent' },
+      { cluster_id: 'batch-test', topic: 'MSG_2', sender: 'agent' },
+      { cluster_id: 'batch-test', topic: 'MSG_3', sender: 'agent' },
+    ];
 
-      // Verify timestamps are contiguous (incrementing by 1ms each)
-      for (let i = 1; i < published.length; i++) {
-        assert.strictEqual(
-          published[i].timestamp,
-          published[i - 1].timestamp + 1,
-          `Message ${i} should have timestamp exactly 1ms after message ${i - 1}`
-        );
-      }
-    });
+    const published = messageBus.batchPublish(messages);
 
-    it('should emit topic events for all batch messages', (done) => {
-      const receivedTopics = [];
+    for (let i = 1; i < published.length; i++) {
+      assert.strictEqual(
+        published[i].timestamp,
+        published[i - 1].timestamp + 1,
+        `Message ${i} should have timestamp exactly 1ms after message ${i - 1}`
+      );
+    }
+  });
+}
 
-      messageBus.subscribeTopic('BATCH_TOPIC_A', (msg) => receivedTopics.push(msg.topic));
-      messageBus.subscribeTopic('BATCH_TOPIC_B', (msg) => receivedTopics.push(msg.topic));
+function registerBatchPublishingEvents() {
+  it('should emit topic events for all batch messages', (done) => {
+    const receivedTopics = [];
 
-      messageBus.batchPublish([
-        { cluster_id: 'batch-test', topic: 'BATCH_TOPIC_A', sender: 'agent' },
-        { cluster_id: 'batch-test', topic: 'BATCH_TOPIC_B', sender: 'agent' },
-      ]);
+    messageBus.subscribeTopic('BATCH_TOPIC_A', (msg) => receivedTopics.push(msg.topic));
+    messageBus.subscribeTopic('BATCH_TOPIC_B', (msg) => receivedTopics.push(msg.topic));
 
-      setTimeout(() => {
-        assert.strictEqual(receivedTopics.length, 2);
-        assert(receivedTopics.includes('BATCH_TOPIC_A'));
-        assert(receivedTopics.includes('BATCH_TOPIC_B'));
-        done();
-      }, 100);
-    });
+    messageBus.batchPublish([
+      { cluster_id: 'batch-test', topic: 'BATCH_TOPIC_A', sender: 'agent' },
+      { cluster_id: 'batch-test', topic: 'BATCH_TOPIC_B', sender: 'agent' },
+    ]);
 
-    it('should validate all messages before publishing any', () => {
-      const messages = [
-        { cluster_id: 'batch-test', topic: 'VALID', sender: 'agent' },
-        { cluster_id: 'batch-test', topic: 'MISSING_SENDER' }, // Missing sender
-      ];
+    setTimeout(() => {
+      assert.strictEqual(receivedTopics.length, 2);
+      assert(receivedTopics.includes('BATCH_TOPIC_A'));
+      assert(receivedTopics.includes('BATCH_TOPIC_B'));
+      done();
+    }, 100);
+  });
+}
 
-      assert.throws(() => {
-        messageBus.batchPublish(messages);
-      }, /sender.*required/i);
+function registerBatchPublishingValidation() {
+  it('should validate all messages before publishing any', () => {
+    const messages = [
+      { cluster_id: 'batch-test', topic: 'VALID', sender: 'agent' },
+      { cluster_id: 'batch-test', topic: 'MISSING_SENDER' }, // Missing sender
+    ];
 
-      // Verify no messages were published (atomic rollback)
-      const allMessages = ledger.query({ cluster_id: 'batch-test' });
-      assert.strictEqual(allMessages.length, 0);
-    });
-
-    it('should return empty array for empty batch', () => {
-      const published = messageBus.batchPublish([]);
-      assert.deepStrictEqual(published, []);
-    });
-
-    it('should preserve message ordering in batch', () => {
-      const messages = [];
-      for (let i = 0; i < 10; i++) {
-        messages.push({
-          cluster_id: 'order-batch-test',
-          topic: `TOPIC_${i}`,
-          sender: 'agent',
-        });
-      }
-
+    assert.throws(() => {
       messageBus.batchPublish(messages);
+    }, /sender.*required/i);
 
-      const stored = ledger.query({ cluster_id: 'order-batch-test' });
-      assert.strictEqual(stored.length, 10);
-
-      for (let i = 0; i < 10; i++) {
-        assert.strictEqual(stored[i].topic, `TOPIC_${i}`);
-      }
-    });
-
-    it('should prevent interleaving with concurrent agents', () => {
-      // Simulate Agent A publishing a batch
-      const agentAMessages = [
-        { cluster_id: 'interleave-test', topic: 'A_TOKEN_USAGE', sender: 'agent-A' },
-        { cluster_id: 'interleave-test', topic: 'A_COMPLETED', sender: 'agent-A' },
-      ];
-
-      // Simulate Agent B publishing a batch
-      const agentBMessages = [
-        { cluster_id: 'interleave-test', topic: 'B_TOKEN_USAGE', sender: 'agent-B' },
-        { cluster_id: 'interleave-test', topic: 'B_COMPLETED', sender: 'agent-B' },
-      ];
-
-      // Both agents publish batches
-      messageBus.batchPublish(agentAMessages);
-      messageBus.batchPublish(agentBMessages);
-
-      const stored = ledger.query({ cluster_id: 'interleave-test' });
-
-      // Verify Agent A's messages are contiguous
-      const agentAIndices = stored
-        .map((m, idx) => (m.sender === 'agent-A' ? idx : -1))
-        .filter((idx) => idx >= 0);
-      assert.strictEqual(agentAIndices[1] - agentAIndices[0], 1, "Agent A's messages should be contiguous");
-
-      // Verify Agent B's messages are contiguous
-      const agentBIndices = stored
-        .map((m, idx) => (m.sender === 'agent-B' ? idx : -1))
-        .filter((idx) => idx >= 0);
-      assert.strictEqual(agentBIndices[1] - agentBIndices[0], 1, "Agent B's messages should be contiguous");
-    });
+    const allMessages = ledger.query({ cluster_id: 'batch-test' });
+    assert.strictEqual(allMessages.length, 0);
   });
 
+  it('should return empty array for empty batch', () => {
+    const published = messageBus.batchPublish([]);
+    assert.deepStrictEqual(published, []);
+  });
+}
+
+function registerBatchPublishingOrdering() {
+  it('should preserve message ordering in batch', () => {
+    const messages = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push({
+        cluster_id: 'order-batch-test',
+        topic: `TOPIC_${i}`,
+        sender: 'agent',
+      });
+    }
+
+    messageBus.batchPublish(messages);
+
+    const stored = ledger.query({ cluster_id: 'order-batch-test' });
+    assert.strictEqual(stored.length, 10);
+
+    for (let i = 0; i < 10; i++) {
+      assert.strictEqual(stored[i].topic, `TOPIC_${i}`);
+    }
+  });
+}
+
+function registerBatchPublishingInterleaving() {
+  it('should prevent interleaving with concurrent agents', () => {
+    const agentAMessages = [
+      { cluster_id: 'interleave-test', topic: 'A_TOKEN_USAGE', sender: 'agent-A' },
+      { cluster_id: 'interleave-test', topic: 'A_COMPLETED', sender: 'agent-A' },
+    ];
+
+    const agentBMessages = [
+      { cluster_id: 'interleave-test', topic: 'B_TOKEN_USAGE', sender: 'agent-B' },
+      { cluster_id: 'interleave-test', topic: 'B_COMPLETED', sender: 'agent-B' },
+    ];
+
+    messageBus.batchPublish(agentAMessages);
+    messageBus.batchPublish(agentBMessages);
+
+    const stored = ledger.query({ cluster_id: 'interleave-test' });
+
+    const agentAIndices = stored
+      .map((m, idx) => (m.sender === 'agent-A' ? idx : -1))
+      .filter((idx) => idx >= 0);
+    assert.strictEqual(
+      agentAIndices[1] - agentAIndices[0],
+      1,
+      "Agent A's messages should be contiguous"
+    );
+
+    const agentBIndices = stored
+      .map((m, idx) => (m.sender === 'agent-B' ? idx : -1))
+      .filter((idx) => idx >= 0);
+    assert.strictEqual(
+      agentBIndices[1] - agentBIndices[0],
+      1,
+      "Agent B's messages should be contiguous"
+    );
+  });
+}
+
+function registerTaskIdCausalLinkingTests() {
   describe('TaskId Causal Linking (Multi-Agent)', () => {
-    it('should allow grouping messages by taskId even when interleaved', () => {
-      // Simulate interleaved messages from concurrent agents
-      // (non-batch publishing, as happens during async hook execution)
-      const taskIdA = 'worker-1735398000000-1';
-      const taskIdB = 'worker-1735398000100-2';
-
-      // Messages arrive interleaved due to async/await yielding event loop
-      messageBus.publish({
-        cluster_id: 'causal-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'agent-A',
-        content: { data: { taskId: taskIdA, tokens: 100 } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'causal-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'agent-B',
-        content: { data: { taskId: taskIdB, tokens: 200 } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'causal-test',
-        topic: 'TASK_COMPLETED',
-        sender: 'agent-A',
-        content: { data: { taskId: taskIdA, success: true } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'causal-test',
-        topic: 'VALIDATION_RESULT',
-        sender: 'agent-A',
-        content: { data: { taskId: taskIdA, approved: true } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'causal-test',
-        topic: 'TASK_COMPLETED',
-        sender: 'agent-B',
-        content: { data: { taskId: taskIdB, success: true } },
-      });
-
-      const stored = ledger.query({ cluster_id: 'causal-test' });
-
-      // Group by taskId
-      const groupedByTask = {};
-      for (const msg of stored) {
-        const taskId = msg.content?.data?.taskId;
-        if (taskId) {
-          if (!groupedByTask[taskId]) {
-            groupedByTask[taskId] = [];
-          }
-          groupedByTask[taskId].push(msg);
-        }
-      }
-
-      // Verify Task A has all 3 messages
-      assert.strictEqual(groupedByTask[taskIdA].length, 3, 'Task A should have 3 messages');
-      assert.strictEqual(groupedByTask[taskIdA][0].topic, 'TOKEN_USAGE');
-      assert.strictEqual(groupedByTask[taskIdA][1].topic, 'TASK_COMPLETED');
-      assert.strictEqual(groupedByTask[taskIdA][2].topic, 'VALIDATION_RESULT');
-
-      // Verify Task B has all 2 messages
-      assert.strictEqual(groupedByTask[taskIdB].length, 2, 'Task B should have 2 messages');
-      assert.strictEqual(groupedByTask[taskIdB][0].topic, 'TOKEN_USAGE');
-      assert.strictEqual(groupedByTask[taskIdB][1].topic, 'TASK_COMPLETED');
-    });
-
-    it('should maintain correct order within each task group by timestamp', () => {
-      const taskId = 'worker-order-test-1';
-
-      // Publish messages with explicit timestamps to test ordering
-      const baseTime = Date.now();
-
-      messageBus.publish({
-        cluster_id: 'order-causal-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'worker',
-        timestamp: baseTime + 0,
-        content: { data: { taskId, phase: 'start' } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'order-causal-test',
-        topic: 'VALIDATION_RESULT',
-        sender: 'validator',
-        timestamp: baseTime + 100,
-        content: { data: { taskId, phase: 'validate' } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'order-causal-test',
-        topic: 'TASK_COMPLETED',
-        sender: 'worker',
-        timestamp: baseTime + 200,
-        content: { data: { taskId, phase: 'complete' } },
-      });
-
-      const stored = ledger.query({ cluster_id: 'order-causal-test' });
-
-      // Filter by taskId and verify order preserved
-      const taskMessages = stored.filter((m) => m.content?.data?.taskId === taskId);
-
-      assert.strictEqual(taskMessages.length, 3);
-      assert.strictEqual(taskMessages[0].content.data.phase, 'start');
-      assert.strictEqual(taskMessages[1].content.data.phase, 'validate');
-      assert.strictEqual(taskMessages[2].content.data.phase, 'complete');
-
-      // Verify timestamps are in order
-      for (let i = 1; i < taskMessages.length; i++) {
-        assert(
-          taskMessages[i].timestamp >= taskMessages[i - 1].timestamp,
-          `Message ${i} should have timestamp >= message ${i - 1}`
-        );
-      }
-    });
-
-    it('should calculate correct token totals per task via taskId grouping', () => {
-      // Multiple iterations from same agent
-      const taskId1 = 'worker-iter-1';
-      const taskId2 = 'worker-iter-2';
-
-      messageBus.publish({
-        cluster_id: 'token-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'worker',
-        content: { data: { taskId: taskId1, inputTokens: 1000, outputTokens: 500 } },
-      });
-
-      messageBus.publish({
-        cluster_id: 'token-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'worker',
-        content: { data: { taskId: taskId2, inputTokens: 2000, outputTokens: 800 } },
-      });
-
-      // Another agent's tokens (different task)
-      messageBus.publish({
-        cluster_id: 'token-test',
-        topic: 'TOKEN_USAGE',
-        sender: 'validator',
-        content: { data: { taskId: 'validator-task-1', inputTokens: 500, outputTokens: 200 } },
-      });
-
-      const stored = ledger.query({ cluster_id: 'token-test', topic: 'TOKEN_USAGE' });
-
-      // Aggregate by taskId
-      const tokensByTask = {};
-      for (const msg of stored) {
-        const taskId = msg.content?.data?.taskId;
-        if (!tokensByTask[taskId]) {
-          tokensByTask[taskId] = { input: 0, output: 0 };
-        }
-        tokensByTask[taskId].input += msg.content?.data?.inputTokens || 0;
-        tokensByTask[taskId].output += msg.content?.data?.outputTokens || 0;
-      }
-
-      assert.strictEqual(tokensByTask[taskId1].input, 1000);
-      assert.strictEqual(tokensByTask[taskId1].output, 500);
-      assert.strictEqual(tokensByTask[taskId2].input, 2000);
-      assert.strictEqual(tokensByTask[taskId2].output, 800);
-      assert.strictEqual(tokensByTask['validator-task-1'].input, 500);
-      assert.strictEqual(tokensByTask['validator-task-1'].output, 200);
-    });
+    registerTaskIdGroupingTest();
+    registerTaskIdOrderingTest();
+    registerTaskIdTokenTotalsTest();
   });
+}
+
+function registerTaskIdGroupingTest() {
+  it('should allow grouping messages by taskId even when interleaved', () => {
+    const taskIdA = 'worker-1735398000000-1';
+    const taskIdB = 'worker-1735398000100-2';
+
+    messageBus.publish({
+      cluster_id: 'causal-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'agent-A',
+      content: { data: { taskId: taskIdA, tokens: 100 } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'causal-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'agent-B',
+      content: { data: { taskId: taskIdB, tokens: 200 } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'causal-test',
+      topic: 'TASK_COMPLETED',
+      sender: 'agent-A',
+      content: { data: { taskId: taskIdA, success: true } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'causal-test',
+      topic: 'VALIDATION_RESULT',
+      sender: 'agent-A',
+      content: { data: { taskId: taskIdA, approved: true } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'causal-test',
+      topic: 'TASK_COMPLETED',
+      sender: 'agent-B',
+      content: { data: { taskId: taskIdB, success: true } },
+    });
+
+    const stored = ledger.query({ cluster_id: 'causal-test' });
+
+    const groupedByTask = {};
+    for (const msg of stored) {
+      const taskId = msg.content?.data?.taskId;
+      if (taskId) {
+        if (!groupedByTask[taskId]) {
+          groupedByTask[taskId] = [];
+        }
+        groupedByTask[taskId].push(msg);
+      }
+    }
+
+    assert.strictEqual(groupedByTask[taskIdA].length, 3, 'Task A should have 3 messages');
+    assert.strictEqual(groupedByTask[taskIdA][0].topic, 'TOKEN_USAGE');
+    assert.strictEqual(groupedByTask[taskIdA][1].topic, 'TASK_COMPLETED');
+    assert.strictEqual(groupedByTask[taskIdA][2].topic, 'VALIDATION_RESULT');
+
+    assert.strictEqual(groupedByTask[taskIdB].length, 2, 'Task B should have 2 messages');
+    assert.strictEqual(groupedByTask[taskIdB][0].topic, 'TOKEN_USAGE');
+    assert.strictEqual(groupedByTask[taskIdB][1].topic, 'TASK_COMPLETED');
+  });
+}
+
+function registerTaskIdOrderingTest() {
+  it('should maintain correct order within each task group by timestamp', () => {
+    const taskId = 'worker-order-test-1';
+
+    const baseTime = Date.now();
+
+    messageBus.publish({
+      cluster_id: 'order-causal-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'worker',
+      timestamp: baseTime + 0,
+      content: { data: { taskId, phase: 'start' } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'order-causal-test',
+      topic: 'VALIDATION_RESULT',
+      sender: 'validator',
+      timestamp: baseTime + 100,
+      content: { data: { taskId, phase: 'validate' } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'order-causal-test',
+      topic: 'TASK_COMPLETED',
+      sender: 'worker',
+      timestamp: baseTime + 200,
+      content: { data: { taskId, phase: 'complete' } },
+    });
+
+    const stored = ledger.query({ cluster_id: 'order-causal-test' });
+
+    const taskMessages = stored.filter((m) => m.content?.data?.taskId === taskId);
+
+    assert.strictEqual(taskMessages.length, 3);
+    assert.strictEqual(taskMessages[0].content.data.phase, 'start');
+    assert.strictEqual(taskMessages[1].content.data.phase, 'validate');
+    assert.strictEqual(taskMessages[2].content.data.phase, 'complete');
+
+    for (let i = 1; i < taskMessages.length; i++) {
+      assert(
+        taskMessages[i].timestamp >= taskMessages[i - 1].timestamp,
+        `Message ${i} should have timestamp >= message ${i - 1}`
+      );
+    }
+  });
+}
+
+function registerTaskIdTokenTotalsTest() {
+  it('should calculate correct token totals per task via taskId grouping', () => {
+    const taskId1 = 'worker-iter-1';
+    const taskId2 = 'worker-iter-2';
+
+    messageBus.publish({
+      cluster_id: 'token-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'worker',
+      content: { data: { taskId: taskId1, inputTokens: 1000, outputTokens: 500 } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'token-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'worker',
+      content: { data: { taskId: taskId2, inputTokens: 2000, outputTokens: 800 } },
+    });
+
+    messageBus.publish({
+      cluster_id: 'token-test',
+      topic: 'TOKEN_USAGE',
+      sender: 'validator',
+      content: { data: { taskId: 'validator-task-1', inputTokens: 500, outputTokens: 200 } },
+    });
+
+    const stored = ledger.query({ cluster_id: 'token-test', topic: 'TOKEN_USAGE' });
+
+    const tokensByTask = {};
+    for (const msg of stored) {
+      const taskId = msg.content?.data?.taskId;
+      if (!tokensByTask[taskId]) {
+        tokensByTask[taskId] = { input: 0, output: 0 };
+      }
+      tokensByTask[taskId].input += msg.content?.data?.inputTokens || 0;
+      tokensByTask[taskId].output += msg.content?.data?.outputTokens || 0;
+    }
+
+    assert.strictEqual(tokensByTask[taskId1].input, 1000);
+    assert.strictEqual(tokensByTask[taskId1].output, 500);
+    assert.strictEqual(tokensByTask[taskId2].input, 2000);
+    assert.strictEqual(tokensByTask[taskId2].output, 800);
+    assert.strictEqual(tokensByTask['validator-task-1'].input, 500);
+    assert.strictEqual(tokensByTask['validator-task-1'].output, 200);
+  });
+}
+
+describe('MessageBus Integration', function () {
+  this.timeout(10000);
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-msgbus-test-'));
+    const dbPath = path.join(tempDir, 'test.db');
+    ledger = new Ledger(dbPath);
+    messageBus = new MessageBus(ledger);
+  });
+
+  afterEach(() => {
+    if (ledger) ledger.close();
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  registerMessageValidationTests();
+  registerTopicSubscriptionTests();
+  registerMessagePersistenceTests();
+  registerClusterIsolationTests();
+  registerContentSerializationTests();
+  registerEventEmissionTests();
+  registerBatchPublishingTests();
+  registerTaskIdCausalLinkingTests();
 });

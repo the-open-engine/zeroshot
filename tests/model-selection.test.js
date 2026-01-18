@@ -12,13 +12,18 @@ const mockCluster = { id: 'test-cluster', agents: [] };
 const TEST_STORAGE_DIR = path.join(os.tmpdir(), 'zeroshot-model-selection-test-' + Date.now());
 const TEST_SETTINGS_FILE = path.join(TEST_STORAGE_DIR, 'settings.json');
 
-describe('Model Selection', () => {
-  // Set up test settings with maxModel: 'opus' so tests can use all models
+function createAgent(agentConfig) {
+  return new AgentWrapper(agentConfig, mockMessageBus, mockCluster, {
+    testMode: true,
+    mockSpawnFn: () => {},
+  });
+}
+
+function registerModelSelectionHooks() {
   before(function () {
     if (!fs.existsSync(TEST_STORAGE_DIR)) {
       fs.mkdirSync(TEST_STORAGE_DIR, { recursive: true });
     }
-    // Create settings with maxModel: 'opus' to allow testing all model levels
     const testSettings = {
       maxModel: 'opus',
       defaultConfig: 'conductor-bootstrap',
@@ -31,58 +36,45 @@ describe('Model Selection', () => {
   });
 
   after(function () {
-    // Clean up env var
     delete process.env.ZEROSHOT_SETTINGS_FILE;
 
-    // Clean up test directory
     try {
       fs.rmSync(TEST_STORAGE_DIR, { recursive: true, force: true });
     } catch (e) {
       console.error('Cleanup failed:', e.message);
     }
   });
+}
+
+function registerStaticModelTests() {
   describe('Static model (backward compatibility)', () => {
     it('should use static model when no rules provided', () => {
-      const agent = new AgentWrapper(
-        { id: 'test', model: 'opus', timeout: 0 },
-        mockMessageBus,
-        mockCluster,
-        {
-          testMode: true,
-          mockSpawnFn: () => {},
-        }
-      );
+      const agent = createAgent({ id: 'test', model: 'opus', timeout: 0 });
 
       assert.strictEqual(agent._selectModel(), 'opus');
     });
 
     it('should default to provider level2 if no model specified', () => {
-      const agent = new AgentWrapper({ id: 'test', timeout: 0 }, mockMessageBus, mockCluster, {
-        testMode: true,
-        mockSpawnFn: () => {},
-      });
+      const agent = createAgent({ id: 'test', timeout: 0 });
 
       // When no model specified, defaults to provider level2 (sonnet for claude)
       assert.strictEqual(agent._selectModel(), 'sonnet');
     });
   });
+}
 
+function registerDynamicModelRulesTests() {
   describe('Dynamic model rules', () => {
     it('should match exact iteration', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1', model: 'haiku' },
-            { iterations: '2', model: 'sonnet' },
-            { iterations: '3+', model: 'opus' },
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1', model: 'haiku' },
+          { iterations: '2', model: 'sonnet' },
+          { iterations: '3+', model: 'opus' },
+        ],
+      });
 
       agent.iteration = 1;
       assert.strictEqual(agent._selectModel(), 'haiku');
@@ -92,19 +84,14 @@ describe('Model Selection', () => {
     });
 
     it('should match range', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1-3', model: 'sonnet' },
-            { iterations: 'all', model: 'opus' },
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1-3', model: 'sonnet' },
+          { iterations: 'all', model: 'opus' },
+        ],
+      });
 
       agent.iteration = 1;
       assert.strictEqual(agent._selectModel(), 'sonnet');
@@ -117,19 +104,14 @@ describe('Model Selection', () => {
     });
 
     it('should match open-ended range', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1', model: 'sonnet' },
-            { iterations: '2+', model: 'opus' },
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1', model: 'sonnet' },
+          { iterations: '2+', model: 'opus' },
+        ],
+      });
 
       agent.iteration = 1;
       assert.strictEqual(agent._selectModel(), 'sonnet');
@@ -145,93 +127,72 @@ describe('Model Selection', () => {
     });
 
     it('should use catch-all as fallback', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1', model: 'haiku' },
-            { iterations: 'all', model: 'sonnet' },
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1', model: 'haiku' },
+          { iterations: 'all', model: 'sonnet' },
+        ],
+      });
 
       agent.iteration = 999;
       assert.strictEqual(agent._selectModel(), 'sonnet');
     });
 
     it('should use first matching rule', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1-10', model: 'sonnet' },
-            { iterations: '5+', model: 'opus' }, // Overlaps but shouldn't match
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1-10', model: 'sonnet' },
+          { iterations: '5+', model: 'opus' }, // Overlaps but shouldn't match
+        ],
+      });
 
       agent.iteration = 7;
       assert.strictEqual(agent._selectModel(), 'sonnet'); // First rule wins
     });
   });
+}
 
+function registerErrorHandlingTests() {
   describe('Error handling', () => {
     it('should throw if no rules match', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [{ iterations: '1-2', model: 'sonnet' }],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [{ iterations: '1-2', model: 'sonnet' }],
+      });
 
       agent.iteration = 5;
       assert.throws(() => agent._selectModel(), /No model rule matched iteration 5/);
     });
 
     it('should throw on invalid pattern syntax', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'test',
-          timeout: 0,
-          modelRules: [{ iterations: 'invalid', model: 'sonnet' }],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'test',
+        timeout: 0,
+        modelRules: [{ iterations: 'invalid', model: 'sonnet' }],
+      });
 
       agent.iteration = 1;
       assert.throws(() => agent._selectModel(), /Invalid iteration pattern 'invalid'/);
     });
   });
+}
 
+function registerRealWorldUseCaseTests() {
   describe('Real-world use case', () => {
     it('should escalate from sonnet to opus on second iteration', () => {
-      const agent = new AgentWrapper(
-        {
-          id: 'worker',
-          timeout: 0,
-          modelRules: [
-            { iterations: '1', model: 'sonnet' },
-            { iterations: '2+', model: 'opus' },
-          ],
-        },
-        mockMessageBus,
-        mockCluster,
-        { testMode: true, mockSpawnFn: () => {} }
-      );
+      const agent = createAgent({
+        id: 'worker',
+        timeout: 0,
+        modelRules: [
+          { iterations: '1', model: 'sonnet' },
+          { iterations: '2+', model: 'opus' },
+        ],
+      });
 
       agent.iteration = 1;
       assert.strictEqual(agent._selectModel(), 'sonnet', 'First iteration should use sonnet');
@@ -243,4 +204,12 @@ describe('Model Selection', () => {
       assert.strictEqual(agent._selectModel(), 'opus', 'Third iteration should stay on opus');
     });
   });
+}
+
+describe('Model Selection', () => {
+  registerModelSelectionHooks();
+  registerStaticModelTests();
+  registerDynamicModelRulesTests();
+  registerErrorHandlingTests();
+  registerRealWorldUseCaseTests();
 });

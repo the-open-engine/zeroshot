@@ -25,6 +25,7 @@ describe('Provider settings', function () {
   it('validates defaultProvider values (including legacy aliases)', function () {
     assert.strictEqual(validateSetting('defaultProvider', 'codex'), null);
     assert.strictEqual(validateSetting('defaultProvider', 'openai'), null);
+    assert.strictEqual(validateSetting('defaultProvider', 'opencode'), null);
     const error = validateSetting('defaultProvider', 'invalid-provider');
     assert.ok(error);
   });
@@ -47,6 +48,17 @@ describe('Provider settings', function () {
         defaultLevel: 'level2',
         levelOverrides: {
           level1: { model: 'codex-model-main', reasoningEffort: 'low' },
+        },
+      });
+    });
+
+    assert.doesNotThrow(() => {
+      validateProviderSettings('opencode', {
+        minLevel: 'level1',
+        maxLevel: 'level3',
+        defaultLevel: 'level2',
+        levelOverrides: {
+          level2: { reasoningEffort: 'high' },
         },
       });
     });

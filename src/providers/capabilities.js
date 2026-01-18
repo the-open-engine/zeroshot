@@ -43,6 +43,15 @@ const CAPABILITIES = {
     streaming: true,
     structuredOutput: true,
   },
+  opencode: {
+    dockerIsolation: true,
+    worktreeIsolation: true,
+    mcpServers: true,
+    jsonSchema: 'experimental',
+    streamJson: true,
+    thinkingMode: true,
+    reasoningEffort: true,
+  },
 };
 
 // Minimal fallback capabilities for unknown providers

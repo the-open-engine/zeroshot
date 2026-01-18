@@ -6,24 +6,53 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+function parseAssistantMessage(item) {
+  const events = [];
+  const content = Array.isArray(item.content)
+    ? item.content
+    : [{ type: 'text', text: item.content }];
+  const text = content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text)
+    .join('');
+  const thinking = content
+    .filter((c) => c.type === 'thinking' || c.type === 'reasoning')
+    .map((c) => c.text)
+    .join('');
+  if (text) events.push({ type: 'text', text });
+  if (thinking) events.push({ type: 'thinking', text: thinking });
+  return events;
+}
+
+function parseFunctionCall(item) {
+  const toolId = item.call_id || item.id || item.tool_call_id || item.tool_id;
+  const args =
+    typeof item.arguments === 'string' ? safeJsonParse(item.arguments, {}) : item.arguments || {};
+  return {
+    type: 'tool_call',
+    toolName: item.name,
+    toolId,
+    input: args,
+  };
+}
+
+function parseFunctionCallOutput(item) {
+  const toolId = item.call_id || item.id || item.tool_call_id || item.tool_id;
+  const content = item.output ?? item.result ?? item.content ?? '';
+  return {
+    type: 'tool_result',
+    toolId,
+    content,
+    isError: !!item.error,
+  };
+}
+
 function parseItem(item) {
   const events = [];
 
   // Handle assistant messages (Claude-style: type=message, role=assistant)
   if (item.type === 'message' && item.role === 'assistant') {
-    const content = Array.isArray(item.content)
-      ? item.content
-      : [{ type: 'text', text: item.content }];
-    const text = content
-      .filter((c) => c.type === 'text')
-      .map((c) => c.text)
-      .join('');
-    const thinking = content
-      .filter((c) => c.type === 'thinking' || c.type === 'reasoning')
-      .map((c) => c.text)
-      .join('');
-    if (text) events.push({ type: 'text', text });
-    if (thinking) events.push({ type: 'thinking', text: thinking });
+    events.push(...parseAssistantMessage(item));
   }
 
   // Handle agent messages (Codex-style: type=agent_message, text=string)
@@ -32,26 +61,11 @@ function parseItem(item) {
   }
 
   if (item.type === 'function_call') {
-    const toolId = item.call_id || item.id || item.tool_call_id || item.tool_id;
-    const args =
-      typeof item.arguments === 'string' ? safeJsonParse(item.arguments, {}) : item.arguments || {};
-    events.push({
-      type: 'tool_call',
-      toolName: item.name,
-      toolId,
-      input: args,
-    });
+    events.push(parseFunctionCall(item));
   }
 
   if (item.type === 'function_call_output') {
-    const toolId = item.call_id || item.id || item.tool_call_id || item.tool_id;
-    const content = item.output ?? item.result ?? item.content ?? '';
-    events.push({
-      type: 'tool_result',
-      toolId,
-      content,
-      isError: !!item.error,
-    });
+    events.push(parseFunctionCallOutput(item));
   }
 
   if (events.length === 1) return events[0];

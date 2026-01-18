@@ -54,6 +54,7 @@ class OpenAIProvider extends BaseProvider {
       supportsCwd: unknown ? true : /\s-C\b/.test(help) || /--cwd\b/.test(help),
       supportsConfigOverride: unknown ? true : /--config\b/.test(help),
       supportsModel: unknown ? true : /\s-m\b/.test(help) || /--model\b/.test(help),
+      supportsSkipGitRepoCheck: unknown ? true : /--skip-git-repo-check\b/.test(help),
       unknown,
     };
 

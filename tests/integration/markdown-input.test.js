@@ -18,73 +18,50 @@ const Orchestrator = require('../../src/orchestrator');
 const _Ledger = require('../../src/ledger');
 const MockTaskRunner = require('../helpers/mock-task-runner');
 
-describe('Markdown File Input Integration', function () {
-  this.timeout(30000);
+let tempDir;
+let orchestrator;
+let mockRunner;
 
-  let tempDir;
-  let orchestrator;
-  let mockRunner;
-
-  beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-markdown-test-'));
-    mockRunner = new MockTaskRunner();
-  });
-
-  afterEach(async () => {
-    if (orchestrator) {
-      const clusters = orchestrator.listClusters();
-      for (const cluster of clusters) {
-        try {
-          await orchestrator.kill(cluster.id);
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
-    }
-    if (tempDir && fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  const simpleConfig = {
-    agents: [
-      {
-        id: 'worker',
-        role: 'implementation',
-        timeout: 0,
-        triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-        prompt: 'Process the markdown input',
-        hooks: {
-          onComplete: {
-            action: 'publish_message',
-            config: { topic: 'TASK_COMPLETE', content: { text: 'Done' } },
-          },
+const simpleConfig = {
+  agents: [
+    {
+      id: 'worker',
+      role: 'implementation',
+      timeout: 0,
+      triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+      prompt: 'Process the markdown input',
+      hooks: {
+        onComplete: {
+          action: 'publish_message',
+          config: { topic: 'TASK_COMPLETE', content: { text: 'Done' } },
         },
       },
-      {
-        id: 'completion-detector',
-        role: 'orchestrator',
-        timeout: 0,
-        triggers: [{ topic: 'TASK_COMPLETE', action: 'stop_cluster' }],
-      },
-    ],
-  };
+    },
+    {
+      id: 'completion-detector',
+      role: 'orchestrator',
+      timeout: 0,
+      triggers: [{ topic: 'TASK_COMPLETE', action: 'stop_cluster' }],
+    },
+  ],
+};
 
-  async function waitForClusterState(orch, clusterId, targetState, timeoutMs = 10000) {
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-      const cluster = orch.getCluster(clusterId);
-      if (!cluster) {
-        throw new Error(`Cluster ${clusterId} not found`);
-      }
-      if (cluster.state === targetState) {
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+async function waitForClusterState(orch, clusterId, targetState, timeoutMs = 10000) {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeoutMs) {
+    const cluster = orch.getCluster(clusterId);
+    if (!cluster) {
+      throw new Error(`Cluster ${clusterId} not found`);
     }
-    throw new Error(`Cluster did not reach state "${targetState}" within ${timeoutMs}ms`);
+    if (cluster.state === targetState) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  throw new Error(`Cluster did not reach state "${targetState}" within ${timeoutMs}ms`);
+}
 
+function registerBasicMarkdownInputTests() {
   describe('Basic markdown file input', function () {
     it('should read markdown file and pass content to cluster', async function () {
       // Create test markdown file
@@ -167,7 +144,9 @@ describe('Markdown File Input Integration', function () {
       ledger.close();
     });
   });
+}
 
+function registerMarkdownFormattingTests() {
   describe('Markdown formatting preservation', function () {
     it('should preserve markdown headers', async function () {
       const markdownPath = path.join(tempDir, 'headers.md');
@@ -238,7 +217,9 @@ describe('Markdown File Input Integration', function () {
       assert(calls[0].context.includes('- Nested'));
     });
   });
+}
 
+function registerIssueOpenedMetadataTests() {
   describe('ISSUE_OPENED message metadata', function () {
     it('should set source to "file" in metadata', async function () {
       const markdownPath = path.join(tempDir, 'test.md');
@@ -265,7 +246,9 @@ describe('Markdown File Input Integration', function () {
       ledger.close();
     });
   });
+}
 
+function registerMarkdownErrorHandlingTests() {
   describe('Error handling', function () {
     it('should throw error for nonexistent file', async function () {
       const markdownPath = path.join(tempDir, 'nonexistent.md');
@@ -334,4 +317,34 @@ describe('Markdown File Input Integration', function () {
       mockRunner.assertCalled('worker', 1);
     });
   });
+}
+
+describe('Markdown File Input Integration', function () {
+  this.timeout(30000);
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-markdown-test-'));
+    mockRunner = new MockTaskRunner();
+  });
+
+  afterEach(async () => {
+    if (orchestrator) {
+      const clusters = orchestrator.listClusters();
+      for (const cluster of clusters) {
+        try {
+          await orchestrator.kill(cluster.id);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+    if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  registerBasicMarkdownInputTests();
+  registerMarkdownFormattingTests();
+  registerIssueOpenedMetadataTests();
+  registerMarkdownErrorHandlingTests();
 });

@@ -24,6 +24,18 @@ class Renderer {
   }
 
   /**
+   * Format task prompt for display (truncate if needed)
+   * @param {string|undefined} prompt - Task prompt
+   * @returns {string} Formatted prompt or empty string
+   * @private
+   */
+  _formatTaskPrompt(prompt) {
+    if (!prompt) return '';
+    const truncated = prompt.length > 80 ? prompt.substring(0, 80) + '...' : prompt;
+    return `{bold}Task:{/bold} {gray-fg}${truncated}{/}`;
+  }
+
+  /**
    * Render task info box
    * @param {object} taskInfo - Task metadata
    * @param {object} stats - CPU/memory stats
@@ -40,9 +52,7 @@ class Renderer {
       `${icon} {bold}Status:{/bold} {white-fg}${taskInfo.status || 'unknown'}{/}`,
       `{bold}Runtime:{/bold} {white-fg}${runtime}{/}`,
       `{bold}CPU:{/bold} {white-fg}${cpu}{/}  {bold}Memory:{/bold} {white-fg}${memory}{/}`,
-      taskInfo.prompt
-        ? `{bold}Task:{/bold} {gray-fg}${taskInfo.prompt.substring(0, 80)}${taskInfo.prompt.length > 80 ? '...' : ''}{/}`
-        : '',
+      this._formatTaskPrompt(taskInfo.prompt),
     ]
       .filter(Boolean)
       .join('  ');

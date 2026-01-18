@@ -15,7 +15,15 @@ const crypto = require('crypto');
 class Ledger extends EventEmitter {
   constructor(dbPath = ':memory:') {
     super();
-    this.db = new Database(dbPath);
+    this.dbPath = dbPath;
+    const busyTimeoutMs = (() => {
+      const raw = process.env.ZEROSHOT_SQLITE_BUSY_TIMEOUT_MS;
+      if (!raw) return 5000;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : 5000;
+    })();
+
+    this.db = new Database(dbPath, { timeout: busyTimeoutMs });
     this.cache = new Map(); // LRU cache for queries
     this.cacheLimit = 1000;
     this._closed = false; // Track closed state to prevent write-after-close
@@ -24,12 +32,21 @@ class Ledger extends EventEmitter {
   }
 
   _initSchema() {
-    // Enable WAL mode for concurrent reads
-    this.db.pragma('journal_mode = WAL');
+    const journalMode = (process.env.ZEROSHOT_SQLITE_JOURNAL_MODE || 'WAL').trim().toUpperCase();
+    // Enable WAL mode for concurrent reads (default), but allow overrides for network filesystems.
+    this.db.pragma(`journal_mode = ${journalMode}`);
     // Force synchronous writes so other processes see changes immediately
     this.db.pragma('synchronous = NORMAL');
-    // Checkpoint WAL frequently for cross-process visibility
-    this.db.pragma('wal_autocheckpoint = 1');
+    // Autocheckpoint trades latency for WAL growth; 1-page checkpoints are extremely slow on
+    // higher-latency disks (common in Kubernetes PVs). Default to SQLite-ish behavior (1000 pages),
+    // but allow override for niche correctness/debugging needs.
+    const walAutocheckpointPages = (() => {
+      const raw = process.env.ZEROSHOT_SQLITE_WAL_AUTOCHECKPOINT_PAGES;
+      if (!raw) return 1000;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 1000;
+    })();
+    this.db.pragma(`wal_autocheckpoint = ${walAutocheckpointPages}`);
 
     // Create messages table
     this.db.exec(`

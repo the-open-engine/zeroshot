@@ -32,6 +32,16 @@ describe('Preflight Validation', function () {
   // Allow slower tests for CLI checks
   this.timeout(10000);
 
+  defineFormatErrorTests();
+  defineClaudeVersionTests();
+  defineClaudeAuthTests();
+  defineGhAuthTests();
+  defineDockerTests();
+  defineRunPreflightTests();
+  defineCliIntegrationTests();
+});
+
+function defineFormatErrorTests() {
   describe('formatError()', () => {
     it('should format error with title, detail, and recovery steps', () => {
       const result = formatError('Test Error Title', 'This is the error detail', [
@@ -53,7 +63,9 @@ describe('Preflight Validation', function () {
       expect(result).to.not.include('To fix:');
     });
   });
+}
 
+function defineClaudeVersionTests() {
   describe('getClaudeVersion()', () => {
     it('should detect Claude CLI when installed', function () {
       // Skip if Claude CLI is not installed (CI without Claude)
@@ -82,7 +94,9 @@ describe('Preflight Validation', function () {
       expect(result.version).to.be.null;
     });
   });
+}
 
+function defineClaudeAuthTests() {
   describe('checkClaudeAuth()', () => {
     it('should detect authentication when credentials exist', function () {
       const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -237,7 +251,9 @@ describe('Preflight Validation', function () {
       expect(result.method).to.equal('keychain');
     });
   });
+}
 
+function defineGhAuthTests() {
   describe('checkGhAuth()', () => {
     it('should detect gh CLI when installed', function () {
       try {
@@ -265,7 +281,9 @@ describe('Preflight Validation', function () {
       expect(result.error).to.include('not installed');
     });
   });
+}
 
+function defineDockerTests() {
   describe('checkDocker()', () => {
     it('should detect Docker when available', function () {
       try {
@@ -292,7 +310,9 @@ describe('Preflight Validation', function () {
       expect(result.error).to.include('not installed');
     });
   });
+}
 
+function defineRunPreflightTests() {
   describe('runPreflight()', () => {
     it('should fail when Claude CLI is missing', () => {
       const originalPath = process.env.PATH;
@@ -382,7 +402,9 @@ describe('Preflight Validation', function () {
       expect(Array.isArray(result.warnings)).to.be.true;
     });
   });
+}
 
+function defineCliIntegrationTests() {
   describe('CLI Integration', function () {
     it('should fail fast when provider CLI is missing', function () {
       this.timeout(10000);
@@ -404,7 +426,7 @@ describe('Preflight Validation', function () {
       expect(output).to.include('Codex CLI not available');
     });
   });
-});
+}
 
 describe('Preflight in Container Environment', () => {
   it('should work with mounted credentials', function () {

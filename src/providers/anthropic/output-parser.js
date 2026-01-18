@@ -3,6 +3,28 @@
  */
 
 /**
+ * Parse result event type
+ * @param {Object} event
+ * @returns {Object}
+ */
+function parseResultEvent(event) {
+  const usage = event.usage || {};
+  return {
+    type: 'result',
+    success: event.subtype === 'success',
+    result: event.result,
+    error: event.is_error ? event.result : null,
+    cost: event.total_cost_usd,
+    duration: event.duration_ms,
+    inputTokens: usage.input_tokens || 0,
+    outputTokens: usage.output_tokens || 0,
+    cacheReadInputTokens: usage.cache_read_input_tokens || 0,
+    cacheCreationInputTokens: usage.cache_creation_input_tokens || 0,
+    modelUsage: event.modelUsage || null,
+  };
+}
+
+/**
  * Parse a single JSON line and extract displayable content
  * @param {string} line
  * @returns {Object|null}
@@ -33,20 +55,7 @@ function parseEvent(line) {
   }
 
   if (event.type === 'result') {
-    const usage = event.usage || {};
-    return {
-      type: 'result',
-      success: event.subtype === 'success',
-      result: event.result,
-      error: event.is_error ? event.result : null,
-      cost: event.total_cost_usd,
-      duration: event.duration_ms,
-      inputTokens: usage.input_tokens || 0,
-      outputTokens: usage.output_tokens || 0,
-      cacheReadInputTokens: usage.cache_read_input_tokens || 0,
-      cacheCreationInputTokens: usage.cache_creation_input_tokens || 0,
-      modelUsage: event.modelUsage || null,
-    };
+    return parseResultEvent(event);
   }
 
   if (event.type === 'system') {
@@ -82,6 +91,15 @@ function parseAssistantMessage(message) {
   const results = [];
 
   for (const block of message.content) {
+    // Handle text content blocks (CRITICAL for Haiku/weaker models that return JSON in text)
+    // Issue #52: Haiku returns JSON in type:text blocks, not in result wrapper
+    if (block.type === 'text' && block.text) {
+      results.push({
+        type: 'text',
+        text: block.text,
+      });
+    }
+
     if (block.type === 'tool_use') {
       results.push({
         type: 'tool_call',

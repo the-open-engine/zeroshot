@@ -10,6 +10,7 @@ authentication. Use each CLI's login flow or API key setup.
 | Claude   | Claude Code | `npm install -g @anthropic-ai/claude-code` |
 | Codex    | Codex       | `npm install -g @openai/codex`             |
 | Gemini   | Gemini      | `npm install -g @google/gemini-cli`        |
+| Opencode | Opencode    | See https://opencode.ai                    |
 
 ## Selecting a Provider
 
@@ -47,7 +48,7 @@ Set levels per provider in settings:
 
 Notes:
 
-- `reasoningEffort` applies to Codex only.
+- `reasoningEffort` applies to Codex and Opencode only.
 - `model` is still supported as a provider-specific escape hatch.
 
 ## Docker Isolation and Credentials
@@ -66,7 +67,7 @@ zeroshot run 123 --docker --mount ~/.config/gemini:/home/node/.config/gemini:ro
 zeroshot run 123 --docker --mount ~/.config/gcloud:/home/node/.config/gcloud:ro
 ```
 
-Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`.
+Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`, `opencode`.
 
 Use `--no-mounts` to disable all credential mounts (you will get a warning if
 credentials are missing).

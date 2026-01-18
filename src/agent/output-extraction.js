@@ -27,10 +27,24 @@ const { getProvider, parseChunkWithProvider } = require('../providers');
  */
 function stripTimestamp(line) {
   if (!line || typeof line !== 'string') return '';
-  const trimmed = line.trim().replace(/\r$/, '');
+  let trimmed = line.trim().replace(/\r$/, '');
   if (!trimmed) return '';
-  const match = trimmed.match(/^\[(\d{13})\](.*)$/);
-  return match ? match[2] : trimmed;
+
+  const tsMatch = trimmed.match(/^\[(\d{13})\](.*)$/);
+  if (tsMatch) trimmed = (tsMatch[2] || '').trimStart();
+
+  // In cluster logs, lines are often prefixed like:
+  // "validator       | {json...}"
+  // Strip the "<agent> | " prefix so we can JSON.parse the event line.
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    const pipeMatch = trimmed.match(/^[^|]{1,40}\|\s*(.*)$/);
+    if (pipeMatch) {
+      const afterPipe = (pipeMatch[1] || '').trimStart();
+      if (afterPipe.startsWith('{') || afterPipe.startsWith('[')) return afterPipe;
+    }
+  }
+
+  return trimmed;
 }
 
 /**
@@ -49,33 +63,36 @@ function extractFromResultWrapper(output) {
 
     try {
       const obj = JSON.parse(content);
-
-      // Must be type:result WITH actual content
-      if (obj.type !== 'result') continue;
-
-      // Check structured_output first (standard CLI format)
-      if (obj.structured_output && typeof obj.structured_output === 'object') {
-        return obj.structured_output;
-      }
-
-      // Check result field - can be object or string
-      if (obj.result) {
-        if (typeof obj.result === 'object') {
-          return obj.result;
-        }
-
-        // Result is string - might contain markdown-wrapped JSON
-        if (typeof obj.result === 'string') {
-          const extracted = extractFromMarkdown(obj.result) || extractDirectJson(obj.result);
-          if (extracted) return extracted;
-        }
-      }
+      const extracted = extractResultContent(obj);
+      if (extracted) return extracted;
     } catch {
       // Not valid JSON, continue to next line
     }
   }
 
   return null;
+}
+
+function extractResultContent(obj) {
+  // Must be type:result WITH actual content
+  if (obj?.type !== 'result') return null;
+
+  // Check structured_output first (standard CLI format)
+  if (obj.structured_output && typeof obj.structured_output === 'object') {
+    return obj.structured_output;
+  }
+
+  // Check result field - can be object or string
+  if (!obj.result) return null;
+
+  if (typeof obj.result === 'object') {
+    return obj.result;
+  }
+
+  if (typeof obj.result !== 'string') return null;
+
+  // Result is string - might contain markdown-wrapped JSON
+  return extractFromMarkdown(obj.result) || extractDirectJson(obj.result);
 }
 
 /**

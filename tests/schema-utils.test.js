@@ -8,25 +8,25 @@
 const { expect } = require('chai');
 const { normalizeEnumValues } = require('../src/agent/schema-utils');
 
-describe('normalizeEnumValues', () => {
-  const conductorSchema = {
-    type: 'object',
-    properties: {
-      complexity: {
-        type: 'string',
-        enum: ['TRIVIAL', 'SIMPLE', 'STANDARD', 'CRITICAL', 'UNCERTAIN'],
-      },
-      taskType: {
-        type: 'string',
-        enum: ['INQUIRY', 'TASK', 'DEBUG'],
-      },
-      reasoning: {
-        type: 'string',
-      },
+const conductorSchema = {
+  type: 'object',
+  properties: {
+    complexity: {
+      type: 'string',
+      enum: ['TRIVIAL', 'SIMPLE', 'STANDARD', 'CRITICAL', 'UNCERTAIN'],
     },
-    required: ['complexity', 'taskType', 'reasoning'],
-  };
+    taskType: {
+      type: 'string',
+      enum: ['INQUIRY', 'TASK', 'DEBUG'],
+    },
+    reasoning: {
+      type: 'string',
+    },
+  },
+  required: ['complexity', 'taskType', 'reasoning'],
+};
 
+function registerCaseNormalizationTests() {
   describe('case normalization', () => {
     it('normalizes lowercase to uppercase', () => {
       const result = { complexity: 'simple', taskType: 'task', reasoning: 'test' };
@@ -49,7 +49,9 @@ describe('normalizeEnumValues', () => {
       expect(result.taskType).to.equal('DEBUG');
     });
   });
+}
 
+function registerWhitespaceHandlingTests() {
   describe('whitespace handling', () => {
     it('trims leading/trailing whitespace', () => {
       const result = { complexity: ' SIMPLE ', taskType: '  TASK  ', reasoning: 'test' };
@@ -58,7 +60,9 @@ describe('normalizeEnumValues', () => {
       expect(result.taskType).to.equal('TASK');
     });
   });
+}
 
+function registerCommonVariationTests() {
   describe('common variations', () => {
     it('maps BUG to DEBUG', () => {
       const result = { complexity: 'SIMPLE', taskType: 'BUG', reasoning: 'test' };
@@ -114,7 +118,9 @@ describe('normalizeEnumValues', () => {
       expect(result.complexity).to.equal('CRITICAL');
     });
   });
+}
 
+function registerPipeSeparatedFormatTests() {
   describe('pipe-separated format detection', () => {
     it('extracts first valid value from copied enum list', () => {
       const result = {
@@ -148,7 +154,9 @@ describe('normalizeEnumValues', () => {
       expect(result.reasoning).to.equal('test | with pipe');
     });
   });
+}
 
+function registerEdgeCaseTests() {
   describe('edge cases', () => {
     it('handles null result', () => {
       const result = normalizeEnumValues(null, conductorSchema);
@@ -193,7 +201,9 @@ describe('normalizeEnumValues', () => {
       expect(result.reasoning).to.equal('Some reasoning text');
     });
   });
+}
 
+function registerNestedObjectTests() {
   describe('nested objects', () => {
     const nestedSchema = {
       type: 'object',
@@ -216,7 +226,9 @@ describe('normalizeEnumValues', () => {
       expect(result.outer.status).to.equal('RUNNING');
     });
   });
+}
 
+function registerArrayObjectTests() {
   describe('arrays of objects', () => {
     const arraySchema = {
       type: 'object',
@@ -246,4 +258,14 @@ describe('normalizeEnumValues', () => {
       expect(result.items[2].status).to.equal('COMPLETE');
     });
   });
+}
+
+describe('normalizeEnumValues', () => {
+  registerCaseNormalizationTests();
+  registerWhitespaceHandlingTests();
+  registerCommonVariationTests();
+  registerPipeSeparatedFormatTests();
+  registerEdgeCaseTests();
+  registerNestedObjectTests();
+  registerArrayObjectTests();
 });

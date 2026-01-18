@@ -19,6 +19,22 @@ Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @co
 
 **Destructive (needs permission):** `zeroshot kill`, `zeroshot clear`, `zeroshot purge`
 
+## 🔴 BEHAVIORAL STANDARDS
+
+```
+WHEN USER POSTS LOGS → THERE IS A BUG. INVESTIGATE.
+WHEN TESTS FAIL → Test is source of truth unless PROVEN otherwise.
+TEST BEHAVIOR, NOT IMPLEMENTATION. TESTS FIND BUGS, NOT PASS.
+READ THE STACK TRACE. FIX ROOT CAUSE, NOT SYMPTOM.
+FAIL FAST. Silent failures are worst. Errors > Warnings.
+VERIFY ASSUMPTIONS. Don't assume - check.
+BUILD WHAT WAS ASKED. Not what you think should be built.
+DON'T OVERENGINEER. No abstractions before they're needed.
+DON'T REINVENT. Read existing code before writing new.
+DON'T SWALLOW ERRORS. Try/catch that ignores = hidden bugs.
+IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
+```
+
 ## Where to Look
 
 | Concept                  | File                                |
@@ -32,6 +48,9 @@ Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @co
 | TUI dashboard            | `src/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
+| Issue providers          | `src/issue-providers/`              |
+| Git remote detection     | `lib/git-remote-utils.js`           |
+| Input helpers            | `src/input-helpers.js`              |
 | Settings                 | `lib/settings.js`                   |
 
 ## CLI Quick Reference
@@ -67,6 +86,15 @@ zeroshot settings                 # View/modify settings
 - Attach (`zeroshot attach`): Connect to daemon, Ctrl+C **detaches** only
 
 **Settings:** `maxModel` (opus/sonnet/haiku cost ceiling), `defaultConfig`, `logLevel`
+
+**Git Auto-Detection:** Bare numbers (e.g., `123`) automatically detect provider from git remote URL. No configuration needed when working in a git repository.
+
+Priority order for bare numbers:
+
+1. Force flags (`--github`, `--gitlab`, `--devops`) - Explicit CLI override
+2. Git remote detection - Automatic from `git remote get-url origin`
+3. Settings (`defaultIssueSource`) - Global user preference
+4. Legacy fallback - GitHub (only when no git context and no settings)
 
 ## Architecture
 
@@ -322,9 +350,68 @@ const maxValidators = cluster.config.complexity === 'CRITICAL' ? 5 : 3;
 
 **WHY THIS MATTERS:** Conductor dynamically adjusts based on task complexity.
 
+### 7. Bypassing dev → main Workflow (ENFORCED via CI)
+
+**CI blocks PRs to main from any branch except `dev`.** See `.github/workflows/ci.yml` → `enforce-main-pr-source` job.
+
+```bash
+# ❌ CI WILL BLOCK - PRs to main from feature branches
+gh pr create --base main --head fix/my-feature  # FAILS in CI
+
+# ✅ CORRECT - Always go through dev first
+gh pr create --base dev --head fix/my-feature   # PR to dev
+# After merge to dev:
+gh pr create --base main --head dev --title "Release"  # dev → main (allowed)
+```
+
+**POSTMORTEM (2026-01-16):** Agent found merge conflicts between dev and main. Instead of resolving conflicts properly (merge main into dev), created a feature branch directly from main and merged fixes to main. This bypassed dev, created divergence, and left dev without the fixes.
+
+**FIX:** Added CI enforcement (`enforce-main-pr-source` job). Now mechanically impossible to merge non-dev branches to main.
+
 ## 🔴 BEHAVIORAL RULES
 
-### Git Workflow (Multi-Agent Context)
+### Git Workflow (Contributing to Zeroshot)
+
+**Merge queue enforces CI on rebased code before merge.**
+
+```
+feature-branch (local)
+↓
+pre-push hook → lint + typecheck (~5s)
+↓
+push to origin/feature-branch
+↓
+gh pr create --base dev
+↓
+CI runs tests on PR branch
+↓
+gh pr merge --auto --squash → enters merge queue
+↓
+Queue rebases PR on latest dev + runs CI again
+↓
+Merge to dev (only if CI passes on rebased code)
+```
+
+**Pre-push hook blocks:** Direct pushes to `main` or `dev`. Must use PR workflow.
+
+**Commands:**
+
+```bash
+# Feature work
+git switch -c feat/my-feature
+# ... make changes ...
+git push -u origin feat/my-feature
+gh pr create --base dev
+gh pr merge --auto --squash
+
+# Release (dev → main)
+gh pr create --base main --head dev --title "Release"
+# → CI passes → merge → semantic-release publishes
+```
+
+**Setup merge queue (admin):** `./scripts/setup-merge-queue.sh`
+
+### Git Safety (Multi-Agent Context)
 
 **CRITICAL: Use WIP commits instead of stashing:**
 
@@ -438,11 +525,95 @@ npm run typecheck         # TypeScript (if applicable)
 
 ## Mechanical Enforcement
 
-| Antipattern               | Enforcement               |
-| ------------------------- | ------------------------- |
-| Dangerous fallbacks       | ESLint ERROR              |
-| Manual git tags           | Pre-push hook             |
-| Git in validator prompts  | Config validator          |
-| Multiple impl files (-v2) | Pre-commit hook           |
-| Spawn without permission  | Runtime check (CLI)       |
-| Git stash usage           | Pre-commit hook (planned) |
+| Antipattern               | Enforcement                              |
+| ------------------------- | ---------------------------------------- |
+| Dangerous fallbacks       | ESLint ERROR                             |
+| Manual git tags           | Pre-push hook                            |
+| Direct push to main/dev   | Pre-push hook (blocks with instructions) |
+| Git in validator prompts  | Config validator                         |
+| Multiple impl files (-v2) | Pre-commit hook                          |
+| Spawn without permission  | Runtime check (CLI)                      |
+| Git stash usage           | Pre-commit hook (planned)                |
+| Merge without CI rebase   | GitHub merge queue                       |
+
+## 🔴 NODE.JS PATTERNS (Zeroshot-Specific)
+
+### Async/Promises
+
+| Pattern                          | Why                                               |
+| -------------------------------- | ------------------------------------------------- |
+| ALWAYS await async functions     | Missing await = silent failure, unhandled Promise |
+| NEVER swallow Promise rejections | Unhandled rejection = process crash in Node 15+   |
+| Handle Promise.all failures      | One rejection = entire Promise.all rejects        |
+
+```javascript
+// ❌ WRONG - Missing await
+async function process() {
+  doAsyncThing(); // Returns immediately, error lost
+}
+
+// ✅ CORRECT
+async function process() {
+  await doAsyncThing();
+}
+
+// ❌ WRONG - Swallowed rejection
+try {
+  await riskyOperation();
+} catch (e) {
+  // Silent - bug hidden
+}
+
+// ✅ CORRECT
+try {
+  await riskyOperation();
+} catch (e) {
+  logger.error('Operation failed', { error: e });
+  throw e; // Re-throw or handle explicitly
+}
+```
+
+### Process/Signals (CLI-specific)
+
+| Pattern                  | Why                                                      |
+| ------------------------ | -------------------------------------------------------- |
+| Clean up child processes | Orphaned processes = resource leaks, port conflicts      |
+| Handle SIGTERM/SIGINT    | Users will Ctrl+C. Handle gracefully.                    |
+| Exit codes matter        | 0 = success, non-zero = failure. Scripts depend on this. |
+
+```javascript
+// ✅ CORRECT - Signal handling
+process.on('SIGTERM', async () => {
+  await cleanup();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  await cleanup();
+  process.exit(0);
+});
+
+// ✅ CORRECT - Child process cleanup
+const child = spawn('command');
+process.on('exit', () => child.kill());
+```
+
+### Multi-Agent Constraints
+
+| Pattern                   | Why                                                   |
+| ------------------------- | ----------------------------------------------------- |
+| No global mutable state   | Agents run in parallel. Globals = race conditions.    |
+| Never block on user input | Agents are non-interactive. Blocking = stuck forever. |
+
+## 🔴 JUNIOR MISTAKES (Don't Do These)
+
+| Mistake                | Why It's Wrong                              |
+| ---------------------- | ------------------------------------------- |
+| Overengineering        | No abstraction layers before they're needed |
+| Copy-paste coding      | If duplicating, you should be abstracting   |
+| Gold plating           | No features nobody asked for                |
+| Premature optimization | Measure first, optimize second              |
+| Reinventing            | Read existing code before writing new       |
+| Leaving edge cases     | Incomplete solutions are not solutions      |
+| Assuming it works      | Test it. Verify it. Prove it.               |
+| Catch-and-ignore       | Try/catch that swallows = hidden bugs       |

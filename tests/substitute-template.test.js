@@ -29,6 +29,12 @@ const createMockAgent = (overrides = {}) => ({
 const mockCluster = { id: 'test-cluster-123', createdAt: 1234567890 };
 
 describe('substituteTemplate', () => {
+  defineKnownVariableTests();
+  defineArbitraryPatternTests();
+  defineEdgeCaseTests();
+});
+
+function defineKnownVariableTests() {
   describe('known template variables', () => {
     it('should substitute {{cluster.id}}', async () => {
       const config = {
@@ -116,7 +122,9 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.text, null);
     });
   });
+}
 
+function defineArbitraryPatternTests() {
   describe('arbitrary {{...}} patterns in content', () => {
     it('should allow React dangerouslySetInnerHTML patterns in content', async () => {
       const config = {
@@ -229,7 +237,9 @@ describe('substituteTemplate', () => {
       );
     });
   });
+}
 
+function defineEdgeCaseTests() {
   describe('edge cases', () => {
     it('should handle empty config', async () => {
       await assert.rejects(
@@ -298,4 +308,4 @@ describe('substituteTemplate', () => {
       assert.ok(result.content.text.includes('{{value}}'));
     });
   });
-});
+}

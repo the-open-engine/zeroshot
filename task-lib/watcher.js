@@ -44,61 +44,143 @@ let finalResultJson = null;
 let streamingModeError = null;
 
 let stdoutBuffer = '';
+let stderrBuffer = '';
+
+function splitBufferLines(buffer, chunk) {
+  const nextBuffer = buffer + chunk;
+  const lines = nextBuffer.split('\n');
+  const remaining = lines.pop() || '';
+  return { lines, remaining };
+}
+
+function captureStreamingError(line, timestamp) {
+  if (!enableRecovery) {
+    return false;
+  }
+
+  const detectedError = detectStreamingModeError(line);
+  if (!detectedError) {
+    return false;
+  }
+
+  streamingModeError = { ...detectedError, timestamp };
+  return true;
+}
+
+function maybeCaptureStructuredOutput(line) {
+  try {
+    const json = JSON.parse(line);
+    if (json.structured_output) {
+      finalResultJson = line;
+    }
+  } catch {
+    // Not JSON, skip
+  }
+}
+
+function handleSilentJsonLines(lines, timestamp) {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (captureStreamingError(line, timestamp)) {
+      continue;
+    }
+    maybeCaptureStructuredOutput(line);
+  }
+}
+
+function handleStreamingLines(lines, timestamp) {
+  for (const line of lines) {
+    if (captureStreamingError(line, timestamp)) {
+      continue;
+    }
+    log(`[${timestamp}]${line}\n`);
+  }
+}
+
+function flushStdoutBuffer(timestamp) {
+  if (!stdoutBuffer.trim()) {
+    return;
+  }
+
+  if (!enableRecovery) {
+    if (!silentJsonMode) {
+      log(`[${timestamp}]${stdoutBuffer}\n`);
+    }
+    return;
+  }
+
+  if (captureStreamingError(stdoutBuffer, timestamp)) {
+    return;
+  }
+
+  if (silentJsonMode) {
+    maybeCaptureStructuredOutput(stdoutBuffer);
+    return;
+  }
+
+  log(`[${timestamp}]${stdoutBuffer}\n`);
+}
+
+function flushStderrBuffer(timestamp) {
+  if (stderrBuffer.trim()) {
+    log(`[${timestamp}]${stderrBuffer}\n`);
+  }
+}
+
+function attemptRecovery(code, timestamp) {
+  if (!(enableRecovery && code !== 0 && streamingModeError?.sessionId)) {
+    return null;
+  }
+
+  const recovered = recoverStructuredOutput(streamingModeError.sessionId);
+  if (recovered?.payload) {
+    const recoveredLine = JSON.stringify(recovered.payload);
+    if (silentJsonMode) {
+      finalResultJson = recoveredLine;
+    } else {
+      log(`[${timestamp}]${recoveredLine}\n`);
+    }
+  } else if (streamingModeError.line) {
+    if (silentJsonMode) {
+      log(streamingModeError.line + '\n');
+    } else {
+      log(`[${streamingModeError.timestamp}]${streamingModeError.line}\n`);
+    }
+  }
+
+  return recovered;
+}
+
+function writeCompletionFooter(code, signal) {
+  if (config.outputFormat === 'json') {
+    return;
+  }
+
+  log(`\n${'='.repeat(50)}\n`);
+  log(`Finished: ${new Date().toISOString()}\n`);
+  log(`Exit code: ${code}, Signal: ${signal}\n`);
+}
 
 child.stdout.on('data', (data) => {
   const chunk = data.toString();
   const timestamp = Date.now();
 
+  const { lines, remaining } = splitBufferLines(stdoutBuffer, chunk);
+  stdoutBuffer = remaining;
+
   if (silentJsonMode) {
-    stdoutBuffer += chunk;
-    const lines = stdoutBuffer.split('\n');
-    stdoutBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      if (enableRecovery) {
-        const detectedError = detectStreamingModeError(line);
-        if (detectedError) {
-          streamingModeError = { ...detectedError, timestamp };
-          continue;
-        }
-      }
-      try {
-        const json = JSON.parse(line);
-        if (json.structured_output) {
-          finalResultJson = line;
-        }
-      } catch {
-        // Not JSON, skip
-      }
-    }
+    handleSilentJsonLines(lines, timestamp);
   } else {
-    stdoutBuffer += chunk;
-    const lines = stdoutBuffer.split('\n');
-    stdoutBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (enableRecovery) {
-        const detectedError = detectStreamingModeError(line);
-        if (detectedError) {
-          streamingModeError = { ...detectedError, timestamp };
-          continue;
-        }
-      }
-      log(`[${timestamp}]${line}\n`);
-    }
+    handleStreamingLines(lines, timestamp);
   }
 });
-
-let stderrBuffer = '';
 
 child.stderr.on('data', (data) => {
   const chunk = data.toString();
   const timestamp = Date.now();
 
-  stderrBuffer += chunk;
-  const lines = stderrBuffer.split('\n');
-  stderrBuffer = lines.pop() || '';
+  const { lines, remaining } = splitBufferLines(stderrBuffer, chunk);
+  stderrBuffer = remaining;
 
   for (const line of lines) {
     log(`[${timestamp}]${line}\n`);
@@ -108,60 +190,16 @@ child.stderr.on('data', (data) => {
 child.on('close', async (code, signal) => {
   const timestamp = Date.now();
 
-  if (stdoutBuffer.trim()) {
-    if (enableRecovery) {
-      const detectedError = detectStreamingModeError(stdoutBuffer);
-      if (detectedError) {
-        streamingModeError = { ...detectedError, timestamp };
-      } else if (silentJsonMode) {
-        try {
-          const json = JSON.parse(stdoutBuffer);
-          if (json.structured_output) {
-            finalResultJson = stdoutBuffer;
-          }
-        } catch {
-          // Not valid JSON
-        }
-      } else {
-        log(`[${timestamp}]${stdoutBuffer}\n`);
-      }
-    } else if (!silentJsonMode) {
-      log(`[${timestamp}]${stdoutBuffer}\n`);
-    }
-  }
+  flushStdoutBuffer(timestamp);
+  flushStderrBuffer(timestamp);
 
-  if (stderrBuffer.trim()) {
-    log(`[${timestamp}]${stderrBuffer}\n`);
-  }
-
-  let recovered = null;
-  if (enableRecovery && code !== 0 && streamingModeError?.sessionId) {
-    recovered = recoverStructuredOutput(streamingModeError.sessionId);
-    if (recovered?.payload) {
-      const recoveredLine = JSON.stringify(recovered.payload);
-      if (silentJsonMode) {
-        finalResultJson = recoveredLine;
-      } else {
-        log(`[${timestamp}]${recoveredLine}\n`);
-      }
-    } else if (streamingModeError.line) {
-      if (silentJsonMode) {
-        log(streamingModeError.line + '\n');
-      } else {
-        log(`[${streamingModeError.timestamp}]${streamingModeError.line}\n`);
-      }
-    }
-  }
+  const recovered = attemptRecovery(code, timestamp);
 
   if (silentJsonMode && finalResultJson) {
     log(finalResultJson + '\n');
   }
 
-  if (config.outputFormat !== 'json') {
-    log(`\n${'='.repeat(50)}\n`);
-    log(`Finished: ${new Date().toISOString()}\n`);
-    log(`Exit code: ${code}, Signal: ${signal}\n`);
-  }
+  writeCompletionFooter(code, signal);
 
   const resolvedCode = recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
@@ -169,7 +207,7 @@ child.on('close', async (code, signal) => {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode === 0 ? null : signal ? `Killed by ${signal}` : null,
+      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
     });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);

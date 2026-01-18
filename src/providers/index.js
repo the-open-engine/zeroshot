@@ -1,12 +1,14 @@
 const AnthropicProvider = require('./anthropic');
 const OpenAIProvider = require('./openai');
 const GoogleProvider = require('./google');
+const OpencodeProvider = require('./opencode');
 const { normalizeProviderName } = require('../../lib/provider-names');
 
 const PROVIDERS = {
   claude: AnthropicProvider,
   codex: OpenAIProvider,
   gemini: GoogleProvider,
+  opencode: OpencodeProvider,
 };
 
 function getProvider(name) {
@@ -35,10 +37,24 @@ function listProviders() {
 
 function stripTimestampPrefix(line) {
   if (!line || typeof line !== 'string') return '';
-  const trimmed = line.trim().replace(/\r$/, '');
+  let trimmed = line.trim().replace(/\r$/, '');
   if (!trimmed) return '';
-  const match = trimmed.match(/^\[(\d{13})\](.*)$/);
-  return match ? match[2] : trimmed;
+
+  const tsMatch = trimmed.match(/^\[(\d{13})\](.*)$/);
+  if (tsMatch) trimmed = (tsMatch[2] || '').trimStart();
+
+  // In cluster logs, lines are often prefixed like:
+  // "validator       | {json...}"
+  // Strip the "<agent> | " prefix so provider parsers can JSON.parse the event.
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    const pipeMatch = trimmed.match(/^[^|]{1,40}\|\s*(.*)$/);
+    if (pipeMatch) {
+      const afterPipe = (pipeMatch[1] || '').trimStart();
+      if (afterPipe.startsWith('{') || afterPipe.startsWith('[')) return afterPipe;
+    }
+  }
+
+  return trimmed;
 }
 
 function parseChunkWithProvider(provider, chunk) {

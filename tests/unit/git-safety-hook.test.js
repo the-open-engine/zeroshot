@@ -21,6 +21,61 @@ const fs = require('fs');
 // Path to the hook script
 const HOOK_PATH = path.join(__dirname, '../../hooks/block-dangerous-git.py');
 
+/**
+ * Run the hook with a simulated Bash tool input
+ * Hook ONLY activates when ZEROSHOT_WORKTREE=1 is set.
+ * @param {string} command - The bash command to test
+ * @returns {{ decision: string, message?: string }}
+ */
+function runHook(command) {
+  const input = JSON.stringify({
+    tool_name: 'Bash',
+    tool_input: { command },
+  });
+
+  try {
+    // CRITICAL: Must set ZEROSHOT_WORKTREE=1 or hook exits without checking
+    const output = execSync(`echo '${input}' | python3 "${HOOK_PATH}"`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ZEROSHOT_WORKTREE: '1' },
+    });
+
+    // Hook exits 0 with no output when allowing - normalize to { decision: 'allow' }
+    if (!output || !output.trim()) {
+      return { decision: 'allow' };
+    }
+
+    // Parse hook's output format: { hookSpecificOutput: { permissionDecision: 'deny', ... } }
+    const parsed = JSON.parse(output.trim());
+    if (parsed.hookSpecificOutput?.permissionDecision === 'deny') {
+      return {
+        decision: 'block',
+        message: parsed.hookSpecificOutput.permissionDecisionReason,
+      };
+    }
+
+    // Unknown format - treat as allow
+    return { decision: 'allow' };
+  } catch (err) {
+    // If hook exits with error, parse stdout anyway
+    if (err.stdout) {
+      try {
+        const parsed = JSON.parse(err.stdout.trim());
+        if (parsed.hookSpecificOutput?.permissionDecision === 'deny') {
+          return {
+            decision: 'block',
+            message: parsed.hookSpecificOutput.permissionDecisionReason,
+          };
+        }
+      } catch {
+        // Fall through to error case
+      }
+    }
+    return { decision: 'error', message: err.message };
+  }
+}
+
 describe('Git Safety Hook', function () {
   before(function () {
     // Skip if hook doesn't exist
@@ -37,61 +92,14 @@ describe('Git Safety Hook', function () {
     }
   });
 
-  /**
-   * Run the hook with a simulated Bash tool input
-   * Hook ONLY activates when ZEROSHOT_WORKTREE=1 is set.
-   * @param {string} command - The bash command to test
-   * @returns {{ decision: string, message?: string }}
-   */
-  function runHook(command) {
-    const input = JSON.stringify({
-      tool_name: 'Bash',
-      tool_input: { command }
-    });
+  registerBlockedCommandsTests();
+  registerAllowedCommandsTests();
+  registerNonGitCommandsTests();
+  registerNonBashToolsTests();
+  registerEdgeCasesTests();
+});
 
-    try {
-      // CRITICAL: Must set ZEROSHOT_WORKTREE=1 or hook exits without checking
-      const output = execSync(`echo '${input}' | python3 "${HOOK_PATH}"`, {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ZEROSHOT_WORKTREE: '1' }
-      });
-
-      // Hook exits 0 with no output when allowing - normalize to { decision: 'allow' }
-      if (!output || !output.trim()) {
-        return { decision: 'allow' };
-      }
-
-      // Parse hook's output format: { hookSpecificOutput: { permissionDecision: 'deny', ... } }
-      const parsed = JSON.parse(output.trim());
-      if (parsed.hookSpecificOutput?.permissionDecision === 'deny') {
-        return {
-          decision: 'block',
-          message: parsed.hookSpecificOutput.permissionDecisionReason
-        };
-      }
-
-      // Unknown format - treat as allow
-      return { decision: 'allow' };
-    } catch (err) {
-      // If hook exits with error, parse stdout anyway
-      if (err.stdout) {
-        try {
-          const parsed = JSON.parse(err.stdout.trim());
-          if (parsed.hookSpecificOutput?.permissionDecision === 'deny') {
-            return {
-              decision: 'block',
-              message: parsed.hookSpecificOutput.permissionDecisionReason
-            };
-          }
-        } catch {
-          // Fall through to error case
-        }
-      }
-      return { decision: 'error', message: err.message };
-    }
-  }
-
+function registerBlockedCommandsTests() {
   describe('Blocked commands', function () {
     const blockedCommands = [
       { cmd: 'git stash', reason: 'hides work from agents' },
@@ -123,7 +131,9 @@ describe('Git Safety Hook', function () {
       });
     }
   });
+}
 
+function registerAllowedCommandsTests() {
   describe('Allowed commands', function () {
     const allowedCommands = [
       'git status',
@@ -164,7 +174,9 @@ describe('Git Safety Hook', function () {
       });
     }
   });
+}
 
+function registerNonGitCommandsTests() {
   describe('Non-git commands', function () {
     it('should allow non-git bash commands', function () {
       const result = runHook('npm install');
@@ -176,25 +188,29 @@ describe('Git Safety Hook', function () {
       assert.strictEqual(result.decision, 'allow');
     });
   });
+}
 
+function registerNonBashToolsTests() {
   describe('Non-Bash tools', function () {
     it('should allow other tools (not Bash)', function () {
       const input = JSON.stringify({
         tool_name: 'Read',
-        tool_input: { file_path: '/some/file.txt' }
+        tool_input: { file_path: '/some/file.txt' },
       });
 
       // Hook exits 0 with no output for non-Bash tools (passthrough)
       const output = execSync(`echo '${input}' | python3 "${HOOK_PATH}"`, {
         encoding: 'utf8',
-        env: { ...process.env, ZEROSHOT_WORKTREE: '1' }
+        env: { ...process.env, ZEROSHOT_WORKTREE: '1' },
       });
 
       // Empty output means passthrough (allow)
       assert.strictEqual(output.trim(), '', 'Non-Bash tools should passthrough with no output');
     });
   });
+}
 
+function registerEdgeCasesTests() {
   describe('Edge cases', function () {
     it('should handle commands with pipes containing git', function () {
       const result = runHook('git log | head -10');
@@ -218,4 +234,4 @@ describe('Git Safety Hook', function () {
       assert.strictEqual(result.decision, 'block');
     });
   });
-});
+}

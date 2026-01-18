@@ -66,7 +66,7 @@ Fix this issue in your response.`;
  * @param {Object} options
  * @param {string} options.rawOutput - The non-JSON output to reformat
  * @param {Object} options.schema - Target JSON schema
- * @param {string} options.providerName - Provider name (claude, codex, gemini)
+ * @param {string} options.providerName - Provider name (claude, codex, gemini, opencode)
  * @param {number} [options.maxAttempts=3] - Maximum reformatting attempts
  * @param {Function} [options.onAttempt] - Callback for each attempt (attempt, error)
  * @returns {Promise<Object>} The reformatted JSON object

@@ -9,6 +9,47 @@ function normalizeMessageContent(content) {
   return '';
 }
 
+function parseMessageEvent(event) {
+  if (event.role === 'assistant') {
+    const text = normalizeMessageContent(event.content);
+    if (text) {
+      return { type: 'text', text };
+    }
+  }
+  return null;
+}
+
+function parseToolUseEvent(event, state) {
+  const toolId = event.tool_call_id || event.tool_id || event.id || state.lastToolId;
+  const toolName = event.tool_name || event.name;
+  state.lastToolId = toolId;
+  return {
+    type: 'tool_call',
+    toolName,
+    toolId,
+    input: event.parameters || event.input || {},
+  };
+}
+
+function parseToolResultEvent(event, state) {
+  const toolId = event.tool_call_id || event.tool_id || event.id || state.lastToolId;
+  return {
+    type: 'tool_result',
+    toolId,
+    content: event.output ?? event.content ?? '',
+    isError: event.success === false,
+  };
+}
+
+function parseResultEvent(event) {
+  return {
+    type: 'result',
+    success: event.success !== false,
+    result: event.result || '',
+    error: event.success === false ? event.error || 'Result failed' : null,
+  };
+}
+
 function parseEvent(line, state = {}, options = {}) {
   let event;
   try {
@@ -20,46 +61,14 @@ function parseEvent(line, state = {}, options = {}) {
   switch (event.type) {
     case 'init':
       return null;
-
     case 'message':
-      if (event.role === 'assistant') {
-        const text = normalizeMessageContent(event.content);
-        if (text) {
-          return { type: 'text', text };
-        }
-      }
-      return null;
-
-    case 'tool_use': {
-      const toolId = event.tool_call_id || event.tool_id || event.id || state.lastToolId;
-      const toolName = event.tool_name || event.name;
-      state.lastToolId = toolId;
-      return {
-        type: 'tool_call',
-        toolName,
-        toolId,
-        input: event.parameters || event.input || {},
-      };
-    }
-
-    case 'tool_result': {
-      const toolId = event.tool_call_id || event.tool_id || event.id || state.lastToolId;
-      return {
-        type: 'tool_result',
-        toolId,
-        content: event.output ?? event.content ?? '',
-        isError: event.success === false,
-      };
-    }
-
+      return parseMessageEvent(event);
+    case 'tool_use':
+      return parseToolUseEvent(event, state);
+    case 'tool_result':
+      return parseToolResultEvent(event, state);
     case 'result':
-      return {
-        type: 'result',
-        success: event.success !== false,
-        result: event.result || '',
-        error: event.success === false ? event.error || 'Result failed' : null,
-      };
-
+      return parseResultEvent(event);
     default:
       if (options.onUnknown) {
         options.onUnknown(event.type, event);

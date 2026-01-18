@@ -66,40 +66,80 @@ export function recoverStructuredOutput(sessionId) {
   const jsonlPath = findSessionJsonlPath(sessionId);
   if (!jsonlPath) return null;
 
-  let fileContents;
+  const fileContents = readJsonlFile(jsonlPath);
+  if (!fileContents) return null;
+
+  const { structuredOutput, usage } = findStructuredOutput(fileContents);
+
+  if (!structuredOutput) return null;
+
+  return {
+    payload: buildStructuredOutputPayload(sessionId, structuredOutput, usage),
+    sourcePath: jsonlPath,
+  };
+}
+
+function readJsonlFile(jsonlPath) {
   try {
-    fileContents = readFileSync(jsonlPath, 'utf8');
+    return readFileSync(jsonlPath, 'utf8');
   } catch {
     return null;
   }
+}
 
+function findStructuredOutput(fileContents) {
   const lines = fileContents.split('\n');
   let structuredOutput = null;
   let usage = null;
 
   for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      const message = entry?.message;
-      const content = message?.content;
-      if (!Array.isArray(content)) continue;
+    const entry = parseJsonLine(line);
+    if (!entry) {
+      continue;
+    }
 
-      for (const block of content) {
-        if (block?.type === 'tool_use' && block?.name === 'StructuredOutput' && block?.input) {
-          structuredOutput = block.input;
-          if (message?.usage && typeof message.usage === 'object') {
-            usage = message.usage;
-          }
-        }
-      }
-    } catch {
-      // Skip invalid JSON lines
+    const extracted = extractStructuredOutputFromEntry(entry);
+    if (extracted) {
+      structuredOutput = extracted.structuredOutput;
+      usage = extracted.usage;
     }
   }
 
-  if (!structuredOutput) return null;
+  return { structuredOutput, usage };
+}
 
+function parseJsonLine(line) {
+  if (!line.trim()) return null;
+  try {
+    return JSON.parse(line);
+  } catch {
+    // Skip invalid JSON lines
+    return null;
+  }
+}
+
+function extractStructuredOutputFromEntry(entry) {
+  const message = entry?.message;
+  const content = message?.content;
+  if (!Array.isArray(content)) return null;
+
+  let structuredOutput = null;
+  let usage = null;
+  for (const block of content) {
+    if (block?.type === 'tool_use' && block?.name === 'StructuredOutput' && block?.input) {
+      structuredOutput = block.input;
+      usage = message?.usage && typeof message.usage === 'object' ? message.usage : null;
+    }
+  }
+
+  if (!structuredOutput) {
+    return null;
+  }
+
+  return { structuredOutput, usage };
+}
+
+function buildStructuredOutputPayload(sessionId, structuredOutput, usage) {
   const payload = {
     type: 'result',
     subtype: 'success',
@@ -112,8 +152,5 @@ export function recoverStructuredOutput(sessionId) {
     payload.usage = usage;
   }
 
-  return {
-    payload,
-    sourcePath: jsonlPath,
-  };
+  return payload;
 }

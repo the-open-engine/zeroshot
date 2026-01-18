@@ -5,7 +5,8 @@
  * following logs, and assembling results.
  */
 
-const { spawn, exec, execSync } = require('child_process');
+const { spawn } = require('child_process');
+const { exec, execSync } = require('./lib/safe-exec'); // Enforces timeouts
 const fs = require('fs');
 const TaskRunner = require('./task-runner');
 const { loadSettings } = require('../lib/settings');
@@ -61,23 +62,19 @@ class ClaudeTaskRunner extends TaskRunner {
 
     const settings = loadSettings();
     const providerName = normalizeProviderName(provider || settings.defaultProvider || 'claude');
-    const providerModule = getProvider(providerName);
-    const providerSettings = settings.providerSettings?.[providerName] || {};
-    const levelOverrides = providerSettings.levelOverrides || {};
-
-    let resolvedModelSpec = explicitModelSpec;
-    if (!resolvedModelSpec) {
-      if (model) {
-        resolvedModelSpec = { model, reasoningEffort };
-      } else {
-        const level =
-          modelLevel || providerSettings.defaultLevel || providerModule.getDefaultLevel();
-        resolvedModelSpec = providerModule.resolveModelSpec(level, levelOverrides);
-        if (reasoningEffort) {
-          resolvedModelSpec = { ...resolvedModelSpec, reasoningEffort };
-        }
-      }
-    }
+    const { providerModule, providerSettings, levelOverrides } = this._getProviderContext(
+      providerName,
+      settings
+    );
+    const resolvedModelSpec = this._resolveModelSpec({
+      explicitModelSpec,
+      model,
+      reasoningEffort,
+      modelLevel,
+      providerModule,
+      providerSettings,
+      levelOverrides,
+    });
 
     // Isolation mode delegates to separate method
     if (isolation?.enabled) {
@@ -90,15 +87,74 @@ class ClaudeTaskRunner extends TaskRunner {
 
     const ctPath = 'zeroshot';
 
-    // Build args.
+    const runOutputFormat = this._resolveOutputFormat({
+      outputFormat,
+      jsonSchema,
+      strictSchema,
+    });
+    const args = this._buildRunArgs({
+      context,
+      providerName,
+      runOutputFormat,
+      resolvedModelSpec,
+      jsonSchema,
+    });
+
+    // Spawn and get task ID
+    const spawnEnv = this._buildSpawnEnv(providerName, resolvedModelSpec);
+
+    const taskId = await this._spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, agentId);
+
+    this._log(`📋 [${agentId}]: Following zeroshot logs for ${taskId}`);
+
+    // Wait for task registration
+    await this._waitForTaskReady(ctPath, taskId);
+
+    // Follow logs until completion
+    return this._followLogs(ctPath, taskId, agentId);
+  }
+
+  _getProviderContext(providerName, settings) {
+    const providerModule = getProvider(providerName);
+    const providerSettings = settings.providerSettings?.[providerName] || {};
+    const levelOverrides = providerSettings.levelOverrides || {};
+    return { providerModule, providerSettings, levelOverrides };
+  }
+
+  _resolveModelSpec({
+    explicitModelSpec,
+    model,
+    reasoningEffort,
+    modelLevel,
+    providerModule,
+    providerSettings,
+    levelOverrides,
+  }) {
+    if (explicitModelSpec) {
+      return explicitModelSpec;
+    }
+
+    if (model) {
+      return { model, reasoningEffort };
+    }
+
+    const level = modelLevel || providerSettings.defaultLevel || providerModule.getDefaultLevel();
+    let resolvedModelSpec = providerModule.resolveModelSpec(level, levelOverrides);
+    if (reasoningEffort) {
+      resolvedModelSpec = { ...resolvedModelSpec, reasoningEffort };
+    }
+
+    return resolvedModelSpec;
+  }
+
+  _resolveOutputFormat({ outputFormat, jsonSchema, strictSchema }) {
     // json output does not stream; if a jsonSchema is configured we run stream-json
     // for live logs and validate/parse JSON after completion.
     // Set strictSchema=true to disable live streaming and use CLI's native schema enforcement.
-    const desiredOutputFormat = outputFormat;
-    const runOutputFormat =
-      jsonSchema && desiredOutputFormat === 'json' && !strictSchema
-        ? 'stream-json'
-        : desiredOutputFormat;
+    return jsonSchema && outputFormat === 'json' && !strictSchema ? 'stream-json' : outputFormat;
+  }
+
+  _buildRunArgs({ context, providerName, runOutputFormat, resolvedModelSpec, jsonSchema }) {
     const args = ['task', 'run', '--output-format', runOutputFormat, '--provider', providerName];
 
     if (resolvedModelSpec?.model) {
@@ -116,7 +172,10 @@ class ClaudeTaskRunner extends TaskRunner {
 
     args.push(context);
 
-    // Spawn and get task ID
+    return args;
+  }
+
+  _buildSpawnEnv(providerName, resolvedModelSpec) {
     const spawnEnv = {
       ...process.env,
     };
@@ -124,15 +183,7 @@ class ClaudeTaskRunner extends TaskRunner {
       spawnEnv.ANTHROPIC_MODEL = resolvedModelSpec.model;
     }
 
-    const taskId = await this._spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, agentId);
-
-    this._log(`📋 [${agentId}]: Following zeroshot logs for ${taskId}`);
-
-    // Wait for task registration
-    await this._waitForTaskReady(ctPath, taskId);
-
-    // Follow logs until completion
-    return this._followLogs(ctPath, taskId, agentId);
+    return spawnEnv;
   }
 
   /**

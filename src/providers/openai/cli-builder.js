@@ -3,10 +3,12 @@ const path = require('path');
 const os = require('os');
 
 /**
- * Codex structured outputs require additionalProperties: false on ALL object schemas.
- * This function recursively adds that constraint to ensure schema validation passes.
+ * OpenAI structured outputs have strict schema requirements:
+ * 1. additionalProperties: false on ALL object schemas
+ * 2. 'required' must include ALL keys in 'properties'
+ * This function recursively enforces both constraints.
  * @param {Object} schema - JSON Schema object
- * @returns {Object} - Modified schema with additionalProperties: false on all objects
+ * @returns {Object} - Modified schema compliant with OpenAI structured output requirements
  */
 function enforceStrictSchema(schema) {
   if (!schema || typeof schema !== 'object') return schema;
@@ -14,8 +16,12 @@ function enforceStrictSchema(schema) {
   const result = { ...schema };
 
   // Add additionalProperties: false to object types
+  // OpenAI also requires 'required' to include ALL property keys
   if (result.type === 'object') {
     result.additionalProperties = false;
+    if (result.properties) {
+      result.required = Object.keys(result.properties);
+    }
   }
 
   // Recurse into properties
@@ -70,6 +76,11 @@ function buildCommand(context, options = {}) {
 
   if (autoApprove && cliFeatures.supportsAutoApprove) {
     args.push('--dangerously-bypass-approvals-and-sandbox');
+  }
+
+  // Always skip git repo check - zeroshot runs non-interactively and may run in any directory
+  if (cliFeatures.supportsSkipGitRepoCheck !== false) {
+    args.push('--skip-git-repo-check');
   }
 
   // Augment context with schema if CLI doesn't support native --output-schema

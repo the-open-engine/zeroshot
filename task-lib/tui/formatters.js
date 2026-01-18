@@ -100,6 +100,23 @@ function truncate(str, maxLen) {
  * @returns {object|null} Parsed event with type, text, toolName, error
  */
 function parseEvent(line) {
+  const { trimmed, timestamp } = extractTimestamp(line);
+
+  // Keep non-JSON lines as-is
+  if (!trimmed.startsWith('{')) {
+    return trimmed ? { type: 'raw', text: trimmed, timestamp } : null;
+  }
+
+  // Parse JSON events
+  const event = safeParseEvent(trimmed);
+  if (!event) {
+    return null;
+  }
+
+  return parseStreamEvent(event, timestamp);
+}
+
+function extractTimestamp(line) {
   let trimmed = line.trim();
 
   // Strip timestamp prefix if present: [1234567890]{...} -> {...}
@@ -110,57 +127,89 @@ function parseEvent(line) {
     trimmed = timestampMatch[2];
   }
 
-  // Keep non-JSON lines as-is
-  if (!trimmed.startsWith('{')) {
-    return trimmed ? { type: 'raw', text: trimmed, timestamp } : null;
+  return { trimmed, timestamp };
+}
+
+function safeParseEvent(trimmed) {
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function parseStreamEvent(event, timestamp) {
+  if (event.type === 'stream_event') {
+    return parseStreamDelta(event, timestamp);
   }
 
-  // Parse JSON events
-  try {
-    const event = JSON.parse(trimmed);
+  if (event.type === 'assistant') {
+    return parseAssistantMessage(event, timestamp);
+  }
 
-    // Text delta
-    if (event.type === 'stream_event' && event.event?.type === 'content_block_delta') {
-      return {
-        type: 'text',
-        text: event.event?.delta?.text || '',
-        timestamp,
-      };
-    }
-    // Tool use
-    else if (event.type === 'stream_event' && event.event?.type === 'content_block_start') {
-      const block = event.event?.content_block;
-      if (block?.type === 'tool_use' && block?.name) {
-        return {
-          type: 'tool',
-          toolName: block.name,
-          timestamp,
-        };
-      }
-    }
-    // Assistant message
-    else if (event.type === 'assistant' && event.message?.content) {
-      let text = '';
-      for (const content of event.message.content) {
-        if (content.type === 'text') {
-          text += content.text;
-        }
-      }
-      return text ? { type: 'text', text, timestamp } : null;
-    }
-    // Error
-    else if (event.type === 'result' && event.is_error) {
-      return {
-        type: 'error',
-        text: event.result || 'Unknown error',
-        timestamp,
-      };
-    }
-  } catch {
-    // Parse error - skip
+  if (event.type === 'result') {
+    return parseResultEvent(event, timestamp);
   }
 
   return null;
+}
+
+function parseStreamDelta(event, timestamp) {
+  const eventType = event.event?.type;
+
+  if (eventType === 'content_block_delta') {
+    return {
+      type: 'text',
+      text: event.event?.delta?.text || '',
+      timestamp,
+    };
+  }
+
+  if (eventType === 'content_block_start') {
+    return parseToolUseEvent(event.event?.content_block, timestamp);
+  }
+
+  return null;
+}
+
+function parseToolUseEvent(block, timestamp) {
+  if (block?.type === 'tool_use' && block?.name) {
+    return {
+      type: 'tool',
+      toolName: block.name,
+      timestamp,
+    };
+  }
+
+  return null;
+}
+
+function parseAssistantMessage(event, timestamp) {
+  const contentBlocks = event.message?.content;
+  if (!Array.isArray(contentBlocks)) {
+    return null;
+  }
+
+  let text = '';
+  for (const content of contentBlocks) {
+    if (content.type === 'text') {
+      text += content.text;
+    }
+  }
+
+  return text ? { type: 'text', text, timestamp } : null;
+}
+
+function parseResultEvent(event, timestamp) {
+  if (!event.is_error) {
+    return null;
+  }
+
+  return {
+    type: 'error',
+    text: event.result || 'Unknown error',
+    timestamp,
+  };
 }
 
 export { formatTimestamp, formatBytes, formatCPU, stateIcon, truncate, parseEvent };

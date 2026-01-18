@@ -286,47 +286,88 @@ class SubClusterWrapper {
   _buildChildContext(triggeringMessage) {
     const parentTopics = this.config.contextStrategy?.parentTopics || [];
 
-    let context = `# Child Cluster Context\n\n`;
-    context += `Parent Cluster: ${this.parentCluster.id}\n`;
-    context += `SubCluster ID: ${this.id}\n`;
-    context += `Iteration: ${this.iteration}\n\n`;
+    const lines = [
+      '# Child Cluster Context',
+      '',
+      `Parent Cluster: ${this.parentCluster.id}`,
+      `SubCluster ID: ${this.id}`,
+      `Iteration: ${this.iteration}`,
+      '',
+    ];
 
-    // Add messages from specified parent topics
-    if (parentTopics.length > 0) {
-      context += `## Parent Cluster Messages\n\n`;
+    this._appendParentTopicContext(lines, parentTopics);
+    this._appendTriggeringMessageContext(lines, triggeringMessage);
 
-      for (const topic of parentTopics) {
-        const messages = this.messageBus.query({
-          cluster_id: this.parentCluster.id,
-          topic,
-          limit: 10,
-        });
+    return lines.join('\n');
+  }
 
-        if (messages.length > 0) {
-          context += `### Topic: ${topic}\n\n`;
-          for (const msg of messages) {
-            context += `[${new Date(msg.timestamp).toISOString()}] ${msg.sender}:\n`;
-            if (msg.content?.text) {
-              context += `${msg.content.text}\n`;
-            }
-            if (msg.content?.data) {
-              context += `Data: ${JSON.stringify(msg.content.data, null, 2)}\n`;
-            }
-            context += '\n';
-          }
-        }
+  _appendParentTopicContext(lines, parentTopics) {
+    if (parentTopics.length === 0) {
+      return;
+    }
+
+    lines.push('## Parent Cluster Messages', '');
+
+    for (const topic of parentTopics) {
+      const topicLines = this._buildTopicContextLines(topic);
+      if (topicLines.length === 0) {
+        continue;
       }
+
+      lines.push(...topicLines);
+    }
+  }
+
+  _buildTopicContextLines(topic) {
+    const messages = this.messageBus.query({
+      cluster_id: this.parentCluster.id,
+      topic,
+      limit: 10,
+    });
+
+    if (messages.length === 0) {
+      return [];
     }
 
-    // Add triggering message
-    context += `\n## Triggering Message\n\n`;
-    context += `Topic: ${triggeringMessage.topic}\n`;
-    context += `Sender: ${triggeringMessage.sender}\n`;
-    if (triggeringMessage.content?.text) {
-      context += `\n${triggeringMessage.content.text}\n`;
+    const lines = [`### Topic: ${topic}`, ''];
+
+    for (const message of messages) {
+      lines.push(...this._buildMessageContextLines(message));
+      lines.push('');
     }
 
-    return context;
+    return lines;
+  }
+
+  _buildMessageContextLines(message) {
+    const lines = [`[${new Date(message.timestamp).toISOString()}] ${message.sender}:`];
+    const text = message.content?.text;
+    const data = message.content?.data;
+
+    if (text) {
+      lines.push(text);
+    }
+
+    if (data) {
+      lines.push(`Data: ${JSON.stringify(data, null, 2)}`);
+    }
+
+    return lines;
+  }
+
+  _appendTriggeringMessageContext(lines, triggeringMessage) {
+    lines.push(
+      '',
+      '## Triggering Message',
+      '',
+      `Topic: ${triggeringMessage.topic}`,
+      `Sender: ${triggeringMessage.sender}`
+    );
+
+    const text = triggeringMessage.content?.text;
+    if (text) {
+      lines.push('', text);
+    }
   }
 
   /**

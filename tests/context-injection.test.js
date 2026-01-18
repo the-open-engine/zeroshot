@@ -13,11 +13,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-describe('Context Injection - CRITICAL', () => {
-  let tempDir;
-  let ledger;
-  let messageBus;
+let tempDir;
+let ledger;
+let messageBus;
 
+describe('Context Injection - CRITICAL', () => {
   beforeEach(() => {
     // Create temp directory for test ledger
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-'));
@@ -34,6 +34,11 @@ describe('Context Injection - CRITICAL', () => {
     }
   });
 
+  registerFullRejectionContextTest();
+  registerMultipleRejectionsContextTest();
+});
+
+function registerFullRejectionContextTest() {
   it('should inject FULL rejection details into worker context', () => {
     const clusterId = 'test-cluster-123';
     const clusterCreatedAt = Date.now() - 60000;
@@ -151,7 +156,9 @@ describe('Context Injection - CRITICAL', () => {
 
     console.log('✅ ALL rejection details are FULLY injected into worker context!');
   });
+}
 
+function registerMultipleRejectionsContextTest() {
   it('should include multiple validator rejections in worker context', () => {
     const clusterId = 'test-cluster-456';
     const clusterCreatedAt = Date.now() - 60000;
@@ -240,4 +247,4 @@ describe('Context Injection - CRITICAL', () => {
 
     console.log('✅ MULTIPLE validator rejections are ALL injected into worker context!');
   });
-});
+}

@@ -23,7 +23,7 @@
  * Threshold: stuckScore >= 3.5 = likely stuck
  */
 
-const { execSync } = require('child_process');
+const { execSync } = require('../lib/safe-exec'); // Enforces timeouts
 const fs = require('fs');
 
 // Stuck detection thresholds
@@ -205,12 +205,12 @@ async function analyzeProcessHealth(pid, samplePeriodMs = 5000) {
   }
 
   const isLikelyStuck = stuckScore >= STUCK_THRESHOLD;
-  const confidence =
-    stuckScore >= HIGH_CONFIDENCE_THRESHOLD
-      ? 'high'
-      : stuckScore >= STUCK_THRESHOLD
-        ? 'medium'
-        : 'low';
+  let confidence = 'low';
+  if (stuckScore >= HIGH_CONFIDENCE_THRESHOLD) {
+    confidence = 'high';
+  } else if (stuckScore >= STUCK_THRESHOLD) {
+    confidence = 'medium';
+  }
 
   return {
     pid,

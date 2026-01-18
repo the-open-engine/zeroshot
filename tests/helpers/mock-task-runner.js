@@ -8,6 +8,168 @@ const assert = require('node:assert');
 const TaskRunner = require('../../src/task-runner.js');
 const Ajv = require('ajv');
 
+class BehaviorBuilder {
+  constructor(runner, agentId) {
+    this.runner = runner;
+    this.agentId = agentId;
+  }
+
+  _getBehavior(defaultBehavior) {
+    const existingBehavior = this.runner.behaviors.get(this.agentId);
+    if (existingBehavior) {
+      return existingBehavior;
+    }
+
+    const behavior = { ...defaultBehavior };
+    this.runner.behaviors.set(this.agentId, behavior);
+    return behavior;
+  }
+
+  withModel(model) {
+    const behavior = this._getBehavior({ type: 'success', output: '{}' });
+    behavior.expectedModel = model;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this;
+  }
+
+  withOutputFormat(format) {
+    if (!['text', 'json', 'stream-json'].includes(format)) {
+      throw new Error(`Invalid output format: ${format}. Must be 'text', 'json', or 'stream-json'`);
+    }
+    const behavior = this._getBehavior({ type: 'success', output: '{}' });
+    behavior.outputFormat = format;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this;
+  }
+
+  withJsonSchema(schema) {
+    if (!schema || typeof schema !== 'object') {
+      throw new Error('JSON schema must be an object');
+    }
+    const behavior = this._getBehavior({ type: 'success', output: '{}' });
+    behavior.jsonSchema = schema;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this;
+  }
+
+  returns(output) {
+    const behavior = this._getBehavior({ type: 'success', output: '{}' });
+    behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
+
+    if (!behavior.ms && behavior.expectedModel) {
+      behavior.type = 'delay';
+      behavior.ms = this.runner._getModelDefaultDelay(behavior.expectedModel);
+    } else {
+      behavior.type = 'success';
+    }
+
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  fails(error) {
+    const behavior = this._getBehavior({ type: 'error', error: '' });
+    behavior.type = 'error';
+    behavior.error = error instanceof Error ? error.message : error;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  delays(ms, output) {
+    const behavior = this._getBehavior({ type: 'delay', ms: 0, output: '{}' });
+    behavior.type = 'delay';
+    behavior.ms = ms;
+    behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  calls(fn) {
+    const behavior = this._getBehavior({ type: 'function' });
+    behavior.type = 'function';
+    behavior.fn = fn;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  streams(events, delayMs = 50) {
+    const behavior = this._getBehavior({ type: 'streaming' });
+    behavior.type = 'streaming';
+    behavior.events = events;
+    behavior.delayMs = delayMs;
+
+    return {
+      thenReturns: (output) => {
+        behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
+        this.runner.behaviors.set(this.agentId, behavior);
+        return this.runner;
+      },
+    };
+  }
+
+  failsWithRateLimit(retryAfter) {
+    const behavior = this._getBehavior({ type: 'rate_limit' });
+    behavior.type = 'rate_limit';
+    behavior.retryAfter = retryAfter;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  failsWithAuth(message = 'Authentication failed') {
+    const behavior = this._getBehavior({ type: 'auth_error' });
+    behavior.type = 'auth_error';
+    behavior.message = message;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  failsWithMalformed(partial = '{"incomplete":') {
+    const behavior = this._getBehavior({ type: 'malformed' });
+    behavior.type = 'malformed';
+    behavior.partial = partial;
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  failsWithTimeout() {
+    const behavior = this._getBehavior({ type: 'timeout' });
+    behavior.type = 'timeout';
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  failsWithNetworkError() {
+    const behavior = this._getBehavior({ type: 'network_error' });
+    behavior.type = 'network_error';
+    this.runner.behaviors.set(this.agentId, behavior);
+    return this.runner;
+  }
+
+  failsOnCall(callNumber, errorType) {
+    const existingBehavior = this.runner.behaviors.get(this.agentId);
+    this.runner.behaviors.set(this.agentId, {
+      type: 'conditional',
+      callNumber,
+      errorType,
+      fallbackBehavior: existingBehavior || {
+        type: 'success',
+        output: '{}',
+      },
+    });
+
+    return {
+      thenReturns: (output) => {
+        const behavior = this.runner.behaviors.get(this.agentId);
+        behavior.fallbackBehavior = {
+          type: 'success',
+          output: typeof output === 'string' ? output : JSON.stringify(output),
+        };
+        return this.runner;
+      },
+    };
+  }
+}
+
 class MockTaskRunner extends TaskRunner {
   constructor() {
     super();
@@ -18,224 +180,7 @@ class MockTaskRunner extends TaskRunner {
   }
 
   when(agentId) {
-    const self = this;
-
-    return {
-      withModel(model) {
-        const existingBehavior = self.behaviors.get(agentId) || {
-          type: 'success',
-          output: '{}',
-        };
-        existingBehavior.expectedModel = model;
-        self.behaviors.set(agentId, existingBehavior);
-
-        return {
-          returns(output) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-
-            if (!behavior.ms && behavior.expectedModel) {
-              behavior.type = 'delay';
-              behavior.ms = self._getModelDefaultDelay(behavior.expectedModel);
-            } else {
-              behavior.type = 'success';
-            }
-
-            self.behaviors.set(agentId, behavior);
-            return self;
-          },
-
-          fails(error) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.type = 'error';
-            behavior.error = error instanceof Error ? error.message : error;
-            self.behaviors.set(agentId, behavior);
-            return self;
-          },
-
-          delays(ms, output) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.type = 'delay';
-            behavior.ms = ms;
-            behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-            self.behaviors.set(agentId, behavior);
-            return self;
-          },
-
-          calls(fn) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.type = 'function';
-            behavior.fn = fn;
-            self.behaviors.set(agentId, behavior);
-            return self;
-          },
-
-          streams(events, delayMs = 50) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.type = 'streaming';
-            behavior.events = events;
-            behavior.delayMs = delayMs;
-
-            return {
-              thenReturns(output) {
-                behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-                self.behaviors.set(agentId, behavior);
-                return self;
-              },
-            };
-          },
-        };
-      },
-
-      withOutputFormat(format) {
-        if (!['text', 'json', 'stream-json'].includes(format)) {
-          throw new Error(
-            `Invalid output format: ${format}. Must be 'text', 'json', or 'stream-json'`
-          );
-        }
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'success',
-          output: '{}',
-        };
-        behavior.outputFormat = format;
-        self.behaviors.set(agentId, behavior);
-        return this;
-      },
-
-      withJsonSchema(schema) {
-        if (!schema || typeof schema !== 'object') {
-          throw new Error('JSON schema must be an object');
-        }
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'success',
-          output: '{}',
-        };
-        behavior.jsonSchema = schema;
-        self.behaviors.set(agentId, behavior);
-        return this;
-      },
-
-      returns(output) {
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'success',
-          output: '{}',
-        };
-        behavior.type = 'success';
-        behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      fails(error) {
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'error',
-          error: '',
-        };
-        behavior.type = 'error';
-        behavior.error = error instanceof Error ? error.message : error;
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      delays(ms, output) {
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'delay',
-          ms: 0,
-          output: '{}',
-        };
-        behavior.type = 'delay';
-        behavior.ms = ms;
-        behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      calls(fn) {
-        const behavior = self.behaviors.get(agentId) || { type: 'function' };
-        behavior.type = 'function';
-        behavior.fn = fn;
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      streams(events, delayMs = 50) {
-        const behavior = self.behaviors.get(agentId) || { type: 'streaming' };
-        behavior.type = 'streaming';
-        behavior.events = events;
-        behavior.delayMs = delayMs;
-
-        return {
-          thenReturns(output) {
-            behavior.output = typeof output === 'string' ? output : JSON.stringify(output);
-            self.behaviors.set(agentId, behavior);
-            return self;
-          },
-        };
-      },
-
-      failsWithRateLimit(retryAfter) {
-        const behavior = self.behaviors.get(agentId) || { type: 'rate_limit' };
-        behavior.type = 'rate_limit';
-        behavior.retryAfter = retryAfter;
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      failsWithAuth(message = 'Authentication failed') {
-        const behavior = self.behaviors.get(agentId) || { type: 'auth_error' };
-        behavior.type = 'auth_error';
-        behavior.message = message;
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      failsWithMalformed(partial = '{"incomplete":') {
-        const behavior = self.behaviors.get(agentId) || { type: 'malformed' };
-        behavior.type = 'malformed';
-        behavior.partial = partial;
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      failsWithTimeout() {
-        const behavior = self.behaviors.get(agentId) || { type: 'timeout' };
-        behavior.type = 'timeout';
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      failsWithNetworkError() {
-        const behavior = self.behaviors.get(agentId) || {
-          type: 'network_error',
-        };
-        behavior.type = 'network_error';
-        self.behaviors.set(agentId, behavior);
-        return self;
-      },
-
-      failsOnCall(callNumber, errorType) {
-        const existingBehavior = self.behaviors.get(agentId);
-        self.behaviors.set(agentId, {
-          type: 'conditional',
-          callNumber,
-          errorType,
-          fallbackBehavior: existingBehavior || {
-            type: 'success',
-            output: '{}',
-          },
-        });
-        return {
-          thenReturns(output) {
-            const behavior = self.behaviors.get(agentId);
-            behavior.fallbackBehavior = {
-              type: 'success',
-              output: typeof output === 'string' ? output : JSON.stringify(output),
-            };
-            return self;
-          },
-        };
-      },
-    };
+    return new BehaviorBuilder(this, agentId);
   }
 
   _getModelDefaultDelay(model) {
@@ -303,20 +248,29 @@ class MockTaskRunner extends TaskRunner {
     return { valid: true };
   }
 
-  async run(context, options) {
-    const { agentId } = options;
-    const resolvedModel =
-      options.model ||
-      (options.modelLevel === 'level1'
-        ? 'haiku'
-        : options.modelLevel === 'level2'
-          ? 'sonnet'
-          : options.modelLevel === 'level3'
-            ? 'opus'
-            : undefined);
+  _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
+  _resolveModel(options) {
+    if (options.model) {
+      return options.model;
+    }
+
+    switch (options.modelLevel) {
+      case 'level1':
+        return 'haiku';
+      case 'level2':
+        return 'sonnet';
+      case 'level3':
+        return 'opus';
+      default:
+        return undefined;
+    }
+  }
+
+  _recordCall(agentId, context, options, resolvedModel) {
     const callCount = this.calls.filter((c) => c.agentId === agentId).length + 1;
-
     const callRecord = {
       agentId,
       context,
@@ -326,138 +280,137 @@ class MockTaskRunner extends TaskRunner {
       streamEvents: [],
     };
     this.calls.push(callRecord);
+    return { callCount, callRecord };
+  }
 
+  _resolveBehavior(agentId, resolvedModel, callCount) {
     let behavior = this.behaviors.get(agentId) || {
       type: 'success',
       output: '{}',
     };
 
-    // Validate model if expectedModel is set
     if (behavior.expectedModel && resolvedModel !== behavior.expectedModel) {
       throw new Error(
         `Expected agent "${agentId}" to be called with model "${behavior.expectedModel}", but was called with "${resolvedModel}"`
       );
     }
 
-    // Handle conditional behavior (fail on specific call)
     if (behavior.type === 'conditional') {
       if (callCount === behavior.callNumber) {
-        behavior = this._getErrorBehavior(behavior.errorType);
-      } else {
-        behavior = behavior.fallbackBehavior;
+        return this._getErrorBehavior(behavior.errorType);
+      }
+      return behavior.fallbackBehavior;
+    }
+
+    return behavior;
+  }
+
+  async _handleDelayBehavior(behavior) {
+    await this._sleep(behavior.ms);
+    return {
+      success: true,
+      output: behavior.output,
+      error: null,
+    };
+  }
+
+  async _handleStreamingBehavior(behavior, options, callRecord, agentId) {
+    for (const event of behavior.events) {
+      callRecord.streamEvents.push(event);
+
+      if (options.onOutput) {
+        const eventJson = JSON.stringify(event);
+        options.onOutput(eventJson, agentId);
+      }
+
+      if (behavior.delayMs > 0) {
+        await this._sleep(behavior.delayMs);
       }
     }
 
-    let result;
+    if (!this.streamEvents.has(agentId)) {
+      this.streamEvents.set(agentId, []);
+    }
+    this.streamEvents.get(agentId).push([...behavior.events]);
+
+    return {
+      success: true,
+      output: behavior.output || '{}',
+      error: null,
+    };
+  }
+
+  _executeBehavior(behavior, context, options, callRecord, agentId) {
     switch (behavior.type) {
       case 'success':
-        result = {
+        return {
           success: true,
           output: behavior.output,
           error: null,
         };
-        break;
-
       case 'error':
-        result = {
+        return {
           success: false,
           output: '',
           error: behavior.error,
         };
-        break;
-
       case 'delay':
-        await new Promise((resolve) => setTimeout(resolve, behavior.ms));
-        result = {
-          success: true,
-          output: behavior.output,
-          error: null,
-        };
-        break;
-
+        return this._handleDelayBehavior(behavior);
       case 'function':
-        result = behavior.fn(context, options);
-        break;
-
+        return behavior.fn(context, options);
       case 'streaming':
-        for (const event of behavior.events) {
-          callRecord.streamEvents.push(event);
-
-          if (options.onOutput) {
-            const eventJson = JSON.stringify(event);
-            options.onOutput(eventJson, agentId);
-          }
-
-          if (behavior.delayMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, behavior.delayMs));
-          }
-        }
-
-        if (!this.streamEvents.has(agentId)) {
-          this.streamEvents.set(agentId, []);
-        }
-        this.streamEvents.get(agentId).push([...behavior.events]);
-
-        result = {
-          success: true,
-          output: behavior.output || '{}',
-          error: null,
-        };
-        break;
-
+        return this._handleStreamingBehavior(behavior, options, callRecord, agentId);
       case 'rate_limit':
-        result = {
+        return {
           success: false,
           output: '',
           error: `Rate limit exceeded. Retry after ${behavior.retryAfter} seconds.`,
           errorType: 'RATE_LIMIT',
           retryAfter: behavior.retryAfter,
         };
-        break;
-
       case 'auth_error':
-        result = {
+        return {
           success: false,
           output: '',
           error: behavior.message,
           errorType: 'AUTH_ERROR',
         };
-        break;
-
       case 'malformed':
-        result = {
+        return {
           success: false,
           output: behavior.partial,
           error: 'Malformed response from API',
           errorType: 'MALFORMED_RESPONSE',
         };
-        break;
-
       case 'timeout':
-        result = {
+        return {
           success: false,
           output: '',
           error: 'Request timed out',
           errorType: 'TIMEOUT',
         };
-        break;
-
       case 'network_error':
-        result = {
+        return {
           success: false,
           output: '',
           error: 'Network connection failed',
           errorType: 'NETWORK_ERROR',
         };
-        break;
-
       default:
-        result = {
+        return {
           success: true,
           output: '{}',
           error: null,
         };
     }
+  }
+
+  async run(context, options) {
+    const { agentId } = options;
+    const resolvedModel = this._resolveModel(options);
+    const { callCount, callRecord } = this._recordCall(agentId, context, options, resolvedModel);
+    const behavior = this._resolveBehavior(agentId, resolvedModel, callCount);
+    const result = await this._executeBehavior(behavior, context, options, callRecord, agentId);
 
     // Validate output if schema is configured and result is success
     if (result.success && result.output) {

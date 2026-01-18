@@ -96,6 +96,115 @@ let finalResultJson = null;
 let outputBuffer = '';
 let streamingModeError = null;
 
+function splitBufferLines(buffer, chunk) {
+  const nextBuffer = buffer + chunk;
+  const lines = nextBuffer.split('\n');
+  const remaining = lines.pop() || '';
+  return { lines, remaining };
+}
+
+function captureStreamingError(line, timestamp) {
+  if (!enableRecovery) {
+    return false;
+  }
+
+  const detectedError = detectStreamingModeError(line);
+  if (!detectedError) {
+    return false;
+  }
+
+  streamingModeError = { ...detectedError, timestamp };
+  return true;
+}
+
+function maybeCaptureStructuredOutput(line) {
+  try {
+    const json = JSON.parse(line);
+    if (json.structured_output) {
+      finalResultJson = line;
+    }
+  } catch {
+    // Not JSON, skip
+  }
+}
+
+function handleSilentJsonLines(lines, timestamp) {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (captureStreamingError(line, timestamp)) {
+      continue;
+    }
+    maybeCaptureStructuredOutput(line);
+  }
+}
+
+function handleStreamingLines(lines, timestamp) {
+  for (const line of lines) {
+    if (captureStreamingError(line, timestamp)) {
+      continue;
+    }
+    log(`[${timestamp}]${line}\n`);
+  }
+}
+
+function flushOutputBuffer(timestamp) {
+  if (!outputBuffer.trim()) {
+    return;
+  }
+
+  if (!enableRecovery) {
+    if (!silentJsonMode) {
+      log(`[${timestamp}]${outputBuffer}\n`);
+    }
+    return;
+  }
+
+  if (captureStreamingError(outputBuffer, timestamp)) {
+    return;
+  }
+
+  if (silentJsonMode) {
+    maybeCaptureStructuredOutput(outputBuffer);
+    return;
+  }
+
+  log(`[${timestamp}]${outputBuffer}\n`);
+}
+
+function attemptRecovery(code, timestamp) {
+  if (!(enableRecovery && code !== 0 && streamingModeError?.sessionId)) {
+    return null;
+  }
+
+  const recovered = recoverStructuredOutput(streamingModeError.sessionId);
+  if (recovered?.payload) {
+    const recoveredLine = JSON.stringify(recovered.payload);
+    if (silentJsonMode) {
+      finalResultJson = recoveredLine;
+    } else {
+      log(`[${timestamp}]${recoveredLine}\n`);
+    }
+  } else if (streamingModeError.line) {
+    if (silentJsonMode) {
+      log(streamingModeError.line + '\n');
+    } else {
+      log(`[${streamingModeError.timestamp}]${streamingModeError.line}\n`);
+    }
+  }
+
+  return recovered;
+}
+
+function writeCompletionFooter(code, signal) {
+  if (config.outputFormat === 'json') {
+    return;
+  }
+
+  log(`\n${'='.repeat(50)}\n`);
+  log(`Finished: ${new Date().toISOString()}\n`);
+  log(`Exit code: ${code}, Signal: ${signal}\n`);
+}
+
 const server = new AttachServer({
   id: taskId,
   socketPath,
@@ -111,44 +220,13 @@ server.on('output', (data) => {
   const chunk = data.toString();
   const timestamp = Date.now();
 
+  const { lines, remaining } = splitBufferLines(outputBuffer, chunk);
+  outputBuffer = remaining;
+
   if (silentJsonMode) {
-    outputBuffer += chunk;
-    const lines = outputBuffer.split('\n');
-    outputBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      if (enableRecovery) {
-        const detectedError = detectStreamingModeError(line);
-        if (detectedError) {
-          streamingModeError = { ...detectedError, timestamp };
-          continue;
-        }
-      }
-      try {
-        const json = JSON.parse(line);
-        if (json.structured_output) {
-          finalResultJson = line;
-        }
-      } catch {
-        // Not JSON, skip
-      }
-    }
+    handleSilentJsonLines(lines, timestamp);
   } else {
-    outputBuffer += chunk;
-    const lines = outputBuffer.split('\n');
-    outputBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (enableRecovery) {
-        const detectedError = detectStreamingModeError(line);
-        if (detectedError) {
-          streamingModeError = { ...detectedError, timestamp };
-          continue;
-        }
-      }
-      log(`[${timestamp}]${line}\n`);
-    }
+    handleStreamingLines(lines, timestamp);
   }
 });
 
@@ -156,56 +234,15 @@ server.on('exit', async ({ exitCode, signal }) => {
   const timestamp = Date.now();
   const code = exitCode;
 
-  if (outputBuffer.trim()) {
-    if (enableRecovery) {
-      const detectedError = detectStreamingModeError(outputBuffer);
-      if (detectedError) {
-        streamingModeError = { ...detectedError, timestamp };
-      } else if (silentJsonMode) {
-        try {
-          const json = JSON.parse(outputBuffer);
-          if (json.structured_output) {
-            finalResultJson = outputBuffer;
-          }
-        } catch {
-          // Not valid JSON
-        }
-      } else {
-        log(`[${timestamp}]${outputBuffer}\n`);
-      }
-    } else if (!silentJsonMode) {
-      log(`[${timestamp}]${outputBuffer}\n`);
-    }
-  }
+  flushOutputBuffer(timestamp);
 
-  let recovered = null;
-  if (enableRecovery && code !== 0 && streamingModeError?.sessionId) {
-    recovered = recoverStructuredOutput(streamingModeError.sessionId);
-    if (recovered?.payload) {
-      const recoveredLine = JSON.stringify(recovered.payload);
-      if (silentJsonMode) {
-        finalResultJson = recoveredLine;
-      } else {
-        log(`[${timestamp}]${recoveredLine}\n`);
-      }
-    } else if (streamingModeError.line) {
-      if (silentJsonMode) {
-        log(streamingModeError.line + '\n');
-      } else {
-        log(`[${streamingModeError.timestamp}]${streamingModeError.line}\n`);
-      }
-    }
-  }
+  const recovered = attemptRecovery(code, timestamp);
 
   if (silentJsonMode && finalResultJson) {
     log(finalResultJson + '\n');
   }
 
-  if (config.outputFormat !== 'json') {
-    log(`\n${'='.repeat(50)}\n`);
-    log(`Finished: ${new Date().toISOString()}\n`);
-    log(`Exit code: ${code}, Signal: ${signal}\n`);
-  }
+  writeCompletionFooter(code, signal);
 
   const resolvedCode = recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
@@ -213,7 +250,7 @@ server.on('exit', async ({ exitCode, signal }) => {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode === 0 ? null : signal ? `Killed by ${signal}` : null,
+      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
       socketPath: null,
     });
   } catch (updateError) {

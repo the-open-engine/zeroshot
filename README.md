@@ -1,6 +1,6 @@
 # zeroshot CLI
 
-> **🎉 New Release:** Now supports **Codex** and **Gemini** CLI in addition to Claude! Use any provider or mix them in multi-agent workflows. See [Providers](#providers) for details.
+> **🎉 New in v5.4:** Now supports **OpenCode** CLI! Use Claude, Codex, Gemini, or OpenCode as your AI provider. Also supports **GitHub, GitLab, Jira, and Azure DevOps** as issue backends. See [Providers](#providers) and [Multi-Platform Issue Support](#multi-platform-issue-support).
 
 <!-- install-placeholder -->
 <p align="center">
@@ -41,9 +41,11 @@ Built for tasks where correctness matters more than speed.
 
 ```bash
 zeroshot run 123                    # GitHub issue number
+zeroshot run feature.md             # Markdown file
+zeroshot run "Add dark mode"        # Inline text
 ```
 
-Or describe the task inline:
+Or describe a complex task inline:
 
 ```bash
 zeroshot run "Add optimistic locking with automatic retry: when updating a user,
@@ -83,18 +85,20 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 npm install -g @covibes/zeroshot
 ```
 
-**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini). [GitHub CLI](https://cli.github.com/) is required when running by issue number.
+**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode).
 
 ```bash
 # Install one or more providers
 npm i -g @anthropic-ai/claude-code
 npm i -g @openai/codex
 npm i -g @google/gemini-cli
+# Opencode: see https://opencode.ai
 
 # Authenticate with the provider CLI
 claude login        # Claude
 codex login         # Codex
 gemini auth login   # Gemini
+opencode auth login # Opencode
 
 # GitHub auth (for issue numbers)
 gh auth login
@@ -147,8 +151,9 @@ Rule of thumb: if you cannot describe what "done" means, validators cannot verif
 
 ```bash
 # Run
-zeroshot run 123
-zeroshot run "Add dark mode"
+zeroshot run 123                      # GitHub issue
+zeroshot run feature.md               # Markdown file
+zeroshot run "Add dark mode"          # Inline text
 
 # Isolation
 zeroshot run 123 --worktree       # git worktree
@@ -184,6 +189,32 @@ zeroshot clean
 zeroshot purge
 ```
 
+## Multi-Platform Issue Support
+
+Zeroshot works with **GitHub, GitLab, Jira, and Azure DevOps**. Just paste the issue URL or key.
+When working in a git repository, zeroshot automatically detects the issue provider from your git remote URL. No configuration needed!
+
+```bash
+# GitHub
+zeroshot run 123
+zeroshot run https://github.com/org/repo/issues/123
+
+# GitLab (cloud and self-hosted)
+zeroshot run https://gitlab.com/org/repo/-/issues/456
+zeroshot run https://gitlab.mycompany.com/org/repo/-/issues/789
+
+# Jira
+zeroshot run PROJ-789
+zeroshot run https://company.atlassian.net/browse/PROJ-789
+
+# Azure DevOps
+zeroshot run https://dev.azure.com/org/project/_workitems/edit/999
+```
+
+**Requires**: CLI tools ([`gh`](https://cli.github.com/), [`glab`](https://gitlab.com/gitlab-org/cli), [`jira`](https://github.com/go-jira/jira), or [`az`](https://docs.microsoft.com/cli/azure/)) for the platform you use. See [issue-providers README](src/issue-providers/README.md) for setup and self-hosted instances.
+
+**Important for `--pr` mode**: Run zeroshot from the target repository directory. PRs are created on the git remote of your current directory. If you run from a different repo, zeroshot will warn you and skip the "Closes #X" reference (the PR is still created, but won't auto-close the issue).
+
 ## Architecture
 
 Zeroshot is a message-driven coordination layer with smart defaults.
@@ -193,6 +224,54 @@ Zeroshot is a message-driven coordination layer with smart defaults.
 - Agents publish results to a SQLite ledger.
 - Validators approve or reject with specific findings.
 - Rejections route back to the worker for fixes.
+
+```
+                                ┌─────────────────┐
+                                │      TASK       │
+                                └────────┬────────┘
+                                         │
+                                         ▼
+                ┌────────────────────────────────────────────┐
+                │                 CONDUCTOR                  │
+                │     Complexity × TaskType → Workflow       │
+                └────────────────────────┬───────────────────┘
+                                         │
+           ┌─────────────────────────────┼─────────────────────────────┐
+           │                             │                             │
+           ▼                             ▼                             ▼
+     ┌───────────┐                ┌───────────┐                ┌───────────┐
+     │  TRIVIAL  │                │  SIMPLE   │                │ STANDARD+ │
+     │  1 agent  │──────────▶     │  worker   │                │ planner   │
+     │ (level1)  │  COMPLETE      │ + 1 valid.│                │ + worker  │
+     │ no valid. │                └─────┬─────┘                │ + 3-5 val.│
+     └───────────┘                      │                      └─────┬─────┘
+                                        ▼                            │
+                                 ┌─────────────┐                     ▼
+                             ┌──▶│   WORKER    │             ┌─────────────┐
+                             │   └──────┬──────┘             │   PLANNER   │
+                             │          │                    └──────┬──────┘
+                             │          ▼                           │
+                             │   ┌─────────────────────┐            ▼
+                             │   │ ✓ validator         │     ┌─────────────┐
+                             │   │   (generic check)   │ ┌──▶│   WORKER    │
+                             │   └──────────┬──────────┘ │   └──────┬──────┘
+                             │       REJECT │ ALL OK     │          │
+                             └──────────────┘     │      │          ▼
+                                                  │      │   ┌──────────────────────┐
+                                                  │      │   │ ✓ requirements       │
+                                                  │      │   │ ✓ code (STANDARD+)   │
+                                                  │      │   │ ✓ security (CRIT)    │
+                                                  │      │   │ ✓ tester (CRIT)      │
+                                                  │      │   │ ✓ adversarial        │
+                                                  │      │   │   (real execution)   │
+                                                  │      │   └──────────┬───────────┘
+                                                  │      │       REJECT │ ALL OK
+                                                  │      └──────────────┘     │
+                                                  ▼                           ▼
+     ┌─────────────────────────────────────────────────────────────────────────────┐
+     │                                COMPLETE                                     │
+     └─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ### Complexity Model
 
@@ -367,16 +446,17 @@ zeroshot settings set dockerEnvPassthrough '["MY_API_KEY", "TF_VAR_*"]'
 <details>
 <summary><strong>Troubleshooting</strong></summary>
 
-| Issue                         | Fix                                                       |
-| ----------------------------- | --------------------------------------------------------- |
-| `claude: command not found`   | `npm i -g @anthropic-ai/claude-code && claude auth login` |
-| `codex: command not found`    | `npm i -g @openai/codex && codex login`                   |
-| `gemini: command not found`   | `npm i -g @google/gemini-cli && gemini auth login`        |
-| `gh: command not found`       | [Install GitHub CLI](https://cli.github.com/)             |
-| `--docker` fails              | Docker must be running: `docker ps` to verify             |
-| Cluster stuck                 | `zeroshot resume <id>` to continue                        |
-| Agent keeps failing           | Check `zeroshot logs <id>` for actual error               |
-| `zeroshot: command not found` | `npm install -g @covibes/zeroshot`                        |
+| Issue                         | Fix                                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `claude: command not found`   | `npm i -g @anthropic-ai/claude-code && claude auth login`                                 |
+| `codex: command not found`    | `npm i -g @openai/codex && codex login`                                                   |
+| `gemini: command not found`   | `npm i -g @google/gemini-cli && gemini auth login`                                        |
+| `gh: command not found`       | [Install GitHub CLI](https://cli.github.com/)                                             |
+| `--docker` fails              | Docker must be running: `docker ps` to verify                                             |
+| Cluster stuck                 | `zeroshot resume <id>` to continue                                                        |
+| Agent keeps failing           | Check `zeroshot logs <id>` for actual error                                               |
+| `zeroshot: command not found` | `npm install -g @covibes/zeroshot`                                                        |
+| Agents misbehave              | `/analyze-cluster-postmortem <id>` in Claude Code (creates issue if fix is generalizable) |
 
 </details>
 

@@ -108,7 +108,7 @@ try {
   console.warn('Some tests will be skipped. This is expected before refactoring.');
 }
 
-describe('CLI Rendering (Pre-Refactor Baseline)', () => {
+describe('CLI Rendering (Pre-Refactor Baseline - Markdown)', () => {
   describe('formatMarkdownLine', () => {
     const formatMarkdownLine = extractedFunctions.formatMarkdownLine;
 
@@ -197,7 +197,9 @@ describe('CLI Rendering (Pre-Refactor Baseline)', () => {
       assert(result.length > 0);
     });
   });
+});
 
+describe('CLI Rendering (Pre-Refactor Baseline - Tools)', () => {
   describe('getToolIcon', () => {
     const getToolIcon = extractedFunctions.getToolIcon;
 
@@ -270,7 +272,6 @@ describe('CLI Rendering (Pre-Refactor Baseline)', () => {
       const result = formatToolCall('UnknownTool', input);
 
       assert(typeof result === 'string');
-      assert(result.length >= 0); // May be empty or show JSON
     });
   });
 
@@ -316,7 +317,9 @@ describe('CLI Rendering (Pre-Refactor Baseline)', () => {
       assert(result.length < longContent.length || result.length <= 500);
     });
   });
+});
 
+describe('CLI Rendering (Pre-Refactor Baseline - Integration)', () => {
   describe('Message Rendering Integration', () => {
     // These are integration tests for the full renderMessagesToTerminal function
     // We'll skip these for now since the function is complex and depends on

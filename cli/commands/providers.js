@@ -59,7 +59,7 @@ function setDefaultCommand(args) {
 async function setupCommand(args) {
   const provider = normalizeProviderName(args[0]);
   if (!provider) {
-    console.error('Provider is required (claude, codex, gemini)');
+    console.error('Provider is required (claude, codex, gemini, opencode)');
     process.exit(1);
   }
 
@@ -115,14 +115,13 @@ async function setupCommand(args) {
       for (const level of levelKeys) {
         const modelChoice = await question(rl, `Model for ${level} (${catalog.join(', ')}): `);
         if (modelChoice) levelOverrides[level] = { model: modelChoice };
-        if (provider === 'codex') {
-          const reasoning = await question(rl, `Reasoning for ${level} (low|medium|high|xhigh): `);
-          if (reasoning) {
-            levelOverrides[level] = {
-              ...(levelOverrides[level] || {}),
-              reasoningEffort: reasoning,
-            };
-          }
+        if (provider !== 'codex') continue;
+        const reasoning = await question(rl, `Reasoning for ${level} (low|medium|high|xhigh): `);
+        if (reasoning) {
+          levelOverrides[level] = {
+            ...(levelOverrides[level] || {}),
+            reasoningEffort: reasoning,
+          };
         }
       }
     }

@@ -10,6 +10,7 @@
 
 const pidusage = require('pidusage');
 const Ledger = require('../ledger');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
@@ -138,47 +139,11 @@ class DataPoller {
     try {
       const clusters = this.orchestrator.listClusters();
       const stats = {};
+      const pids = this._collectClusterPids(clusters);
 
-      // Collect all PIDs from all agents
-      const pids = [];
-      for (const cluster of clusters) {
-        try {
-          const status = this.orchestrator.getStatus(cluster.id);
-          for (const agent of status.agents || []) {
-            if (agent.pid) {
-              pids.push(agent.pid);
-            }
-          }
-        } catch {
-          // Skip clusters that error
-          continue;
-        }
-      }
-
-      // Get stats for all PIDs
       if (pids.length > 0) {
-        try {
-          const pidStats = await pidusage(pids);
-
-          // Convert to map format: pid -> { cpu, memory }
-          for (const pid of pids) {
-            if (pidStats[pid]) {
-              stats[pid] = {
-                cpu: pidStats[pid].cpu || 0,
-                memory: pidStats[pid].memory || 0,
-              };
-            } else {
-              // Process died - set to zero
-              stats[pid] = { cpu: 0, memory: 0 };
-            }
-          }
-        } catch {
-          // pidusage throws if any process is dead
-          // Set all to zero and continue
-          for (const pid of pids) {
-            stats[pid] = { cpu: 0, memory: 0 };
-          }
-        }
+        const pidStats = await this._safePidUsage(pids);
+        this._populatePidStats(stats, pids, pidStats);
       }
 
       this.onUpdate({
@@ -198,54 +163,36 @@ class DataPoller {
    */
   _watchForNewClusters() {
     this.watchForNewClustersStopFn = this.orchestrator.watchForNewClusters((cluster) => {
-      try {
-        // Lazy load ledger only when we need to stream messages
-        // This avoids loading all ledgers on startup
-        if (!this.ledgers.has(cluster.id)) {
-          const storageDir = this.orchestrator.storageDir || path.join(os.homedir(), '.zeroshot');
-          const dbPath = path.join(storageDir, `${cluster.id}.db`);
+      // Lazy load ledger only when we need to stream messages
+      // This avoids loading all ledgers on startup
+      const ledger = this._loadLedgerForCluster(cluster, {
+        label: 'cluster',
+        requireExisting: true,
+      });
 
-          // Only load if database file exists
-          const fs = require('fs');
-          if (!fs.existsSync(dbPath)) {
-            return; // Skip non-existent ledgers
-          }
-
-          const ledger = new Ledger(dbPath);
-          this.ledgers.set(cluster.id, ledger);
-        }
-
-        // Start streaming messages
-        this._streamLedgerMessages(cluster.id);
-
-        // Emit update about new cluster
-        this.onUpdate({
-          type: 'new_cluster',
-          cluster,
-        });
-      } catch (error) {
-        console.error(
-          `[DataPoller] Failed to load ledger for cluster ${cluster.id}:`,
-          error.message
-        );
+      if (!ledger) {
+        return;
       }
+
+      // Start streaming messages
+      this._streamLedgerMessages(cluster.id);
+
+      // Emit update about new cluster
+      this.onUpdate({
+        type: 'new_cluster',
+        cluster,
+      });
     }, 2000);
 
     // Also load ledgers for all existing clusters
     const existingClusters = this.orchestrator.listClusters();
     for (const cluster of existingClusters) {
-      try {
-        const storageDir = this.orchestrator.storageDir || path.join(os.homedir(), '.zeroshot');
-        const dbPath = path.join(storageDir, `${cluster.id}.db`);
-        const ledger = new Ledger(dbPath);
-        this.ledgers.set(cluster.id, ledger);
-        this._streamLedgerMessages(cluster.id);
-      } catch (error) {
-        console.error(
-          `[DataPoller] Failed to load ledger for existing cluster ${cluster.id}:`,
-          error.message
-        );
+      const ledger = this._loadLedgerForCluster(cluster, { label: 'existing cluster' });
+      if (!ledger) {
+        continue;
       }
+
+      this._streamLedgerMessages(cluster.id);
     }
   }
 
@@ -295,30 +242,107 @@ class DataPoller {
     const clusters = this.orchestrator.listClusters();
 
     for (const cluster of clusters) {
-      try {
-        const status = this.orchestrator.getStatus(cluster.id);
-
-        for (const agent of status.agents || []) {
-          if (agent.pid) {
-            try {
-              const pidStat = await pidusage(agent.pid);
-              stats[agent.pid] = {
-                cpu: pidStat.cpu || 0,
-                memory: pidStat.memory || 0,
-              };
-            } catch {
-              // Process died - set to zero
-              stats[agent.pid] = { cpu: 0, memory: 0 };
-            }
-          }
-        }
-      } catch {
-        // Skip clusters that error
-        continue;
+      const pids = this._getClusterAgentPids(cluster);
+      for (const pid of pids) {
+        stats[pid] = await this._getSinglePidStat(pid);
       }
     }
 
     return stats;
+  }
+
+  _collectClusterPids(clusters) {
+    const pids = [];
+
+    for (const cluster of clusters) {
+      pids.push(...this._getClusterAgentPids(cluster));
+    }
+
+    return pids;
+  }
+
+  _getClusterAgentPids(cluster) {
+    try {
+      const status = this.orchestrator.getStatus(cluster.id);
+      const pids = [];
+
+      for (const agent of status.agents || []) {
+        if (agent.pid) {
+          pids.push(agent.pid);
+        }
+      }
+
+      return pids;
+    } catch {
+      // Skip clusters that error
+      return [];
+    }
+  }
+
+  async _getSinglePidStat(pid) {
+    try {
+      const pidStat = await pidusage(pid);
+      return {
+        cpu: pidStat.cpu || 0,
+        memory: pidStat.memory || 0,
+      };
+    } catch {
+      // Process died - set to zero
+      return { cpu: 0, memory: 0 };
+    }
+  }
+
+  async _safePidUsage(pids) {
+    try {
+      return await pidusage(pids);
+    } catch {
+      return null;
+    }
+  }
+
+  _populatePidStats(stats, pids, pidStats) {
+    for (const pid of pids) {
+      const entry = pidStats?.[pid];
+      stats[pid] = {
+        cpu: entry?.cpu || 0,
+        memory: entry?.memory || 0,
+      };
+    }
+  }
+
+  _loadLedgerForCluster(cluster, options) {
+    const { label, requireExisting = false } = options;
+
+    try {
+      return this._ensureLedger(cluster.id, { requireExisting });
+    } catch (error) {
+      console.error(
+        `[DataPoller] Failed to load ledger for ${label} ${cluster.id}:`,
+        error.message
+      );
+      return null;
+    }
+  }
+
+  _ensureLedger(clusterId, { requireExisting = false } = {}) {
+    const existing = this.ledgers.get(clusterId);
+    if (existing) {
+      return existing;
+    }
+
+    const dbPath = this._getLedgerPath(clusterId);
+    if (requireExisting && !fs.existsSync(dbPath)) {
+      return null;
+    }
+
+    const ledger = new Ledger(dbPath);
+    this.ledgers.set(clusterId, ledger);
+    return ledger;
+  }
+
+  _getLedgerPath(clusterId) {
+    const storageDir = this.orchestrator.storageDir || path.join(os.homedir(), '.zeroshot');
+    return path.join(storageDir, `${clusterId}.db`);
   }
 }
 

@@ -1,9 +1,9 @@
 const assert = require('assert');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
-describe('MockTaskRunner - Model-specific behavior', () => {
-  let mockRunner;
+let mockRunner;
 
+describe('MockTaskRunner - Model-specific behavior', () => {
   beforeEach(() => {
     mockRunner = new MockTaskRunner();
   });
@@ -12,6 +12,14 @@ describe('MockTaskRunner - Model-specific behavior', () => {
     mockRunner.reset();
   });
 
+  defineWithModelTests();
+  defineOverrideModelDefaultsTests();
+  defineModelAwareBehaviorTests();
+  defineAssertCalledWithModelTests();
+  defineModelDefaultsWithoutWithModelTests();
+});
+
+function defineWithModelTests() {
   describe('withModel() API', () => {
     it('should store expected model in behavior', () => {
       mockRunner.when('planner').withModel('opus').returns({ plan: 'detailed' });
@@ -67,10 +75,12 @@ describe('MockTaskRunner - Model-specific behavior', () => {
       assert.strictEqual(result2.success, true);
     });
   });
+}
 
-  // DELETED: "Model-specific default delays" tests - too slow (~4.5s of real delays)
-  // Testing mock infrastructure delays has low value - if delays break we'd notice in usage
+// DELETED: "Model-specific default delays" tests - too slow (~4.5s of real delays)
+// Testing mock infrastructure delays has low value - if delays break we'd notice in usage
 
+function defineOverrideModelDefaultsTests() {
   describe('Override model defaults', () => {
     it('should allow explicit delay to override model default', async () => {
       mockRunner.when('planner').withModel('opus').delays(100, { plan: 'quick' });
@@ -101,7 +111,9 @@ describe('MockTaskRunner - Model-specific behavior', () => {
       );
     });
   });
+}
 
+function defineModelAwareBehaviorTests() {
   describe('Model-aware behaviors', () => {
     it('should work with fails()', async () => {
       mockRunner.when('worker').withModel('sonnet').fails('error message');
@@ -155,7 +167,9 @@ describe('MockTaskRunner - Model-specific behavior', () => {
       assert.strictEqual(calls[0].streamEvents.length, 2);
     });
   });
+}
 
+function defineAssertCalledWithModelTests() {
   describe('assertCalledWithModel()', () => {
     it('should pass when model matches', async () => {
       await mockRunner.run('context', { agentId: 'planner', model: 'opus' });
@@ -214,11 +228,13 @@ describe('MockTaskRunner - Model-specific behavior', () => {
       );
     });
   });
+}
 
-  // DELETED: "Real-world use case: Model escalation" test - too slow (~2.5s of real delays)
-  // DELETED: "Real-world use case: Parallel validators" test - too slow (~3.5s of real delays)
-  // Testing mock infrastructure delays has low value - if delays break we'd notice in usage
+// DELETED: "Real-world use case: Model escalation" test - too slow (~2.5s of real delays)
+// DELETED: "Real-world use case: Parallel validators" test - too slow (~3.5s of real delays)
+// Testing mock infrastructure delays has low value - if delays break we'd notice in usage
 
+function defineModelDefaultsWithoutWithModelTests() {
   describe('Model defaults without withModel()', () => {
     it('should not apply default delays when withModel() is not used', async () => {
       mockRunner.when('agent').returns({ result: 'instant' });
@@ -242,4 +258,4 @@ describe('MockTaskRunner - Model-specific behavior', () => {
       assert(duration >= 150 && duration < 350, `Expected ~200ms delay, got ${duration}ms`);
     });
   });
-});
+}

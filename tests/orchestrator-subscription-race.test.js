@@ -25,20 +25,16 @@ const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
 
-describe('Orchestrator Subscription Race Condition (issue #31)', function () {
-  this.timeout(10000);
+let orchestrator;
+let mockRunner;
+let testDir;
+let clusterId;
 
-  let orchestrator;
-  let mockRunner;
-  let testDir;
-  let clusterId;
-
+function registerSubscriptionRaceHooks() {
   beforeEach(function () {
-    // Create isolated test storage
     testDir = path.join(os.tmpdir(), `zeroshot-test-${crypto.randomBytes(8).toString('hex')}`);
     fs.mkdirSync(testDir, { recursive: true });
 
-    // Create settings file
     const settingsPath = path.join(testDir, 'settings.json');
     fs.writeFileSync(
       settingsPath,
@@ -53,11 +49,7 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
       )
     );
 
-    // Create mock task runner with IMMEDIATE completion
     mockRunner = new MockTaskRunner();
-
-    // Configure fast-completing worker
-    // Returns immediately (0ms delay) to trigger race condition
     mockRunner.when('fast-worker').returns('Task completed successfully');
 
     orchestrator = new Orchestrator({
@@ -81,7 +73,20 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
       fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
+}
 
+async function waitForStoppedCluster(orchestratorInstance, clusterIdToCheck, maxWait) {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const cluster = orchestratorInstance.getCluster(clusterIdToCheck);
+    if (cluster.state === 'stopped') {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function registerImmediateCompletionTest() {
   it('should receive CLUSTER_COMPLETE even when task finishes immediately', async function () {
     // Cluster config with fast-completing worker
     const config = {
@@ -126,21 +131,7 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
     );
     clusterId = result.id;
 
-    // Wait for cluster to stop automatically
-    // If subscription race exists, this will timeout because
-    // orchestrator never receives CLUSTER_COMPLETE
-    const maxWait = 5000;
-    const start = Date.now();
-
-    while (Date.now() - start < maxWait) {
-      const cluster = orchestrator.getCluster(clusterId);
-
-      if (cluster.state === 'stopped') {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await waitForStoppedCluster(orchestrator, clusterId, 5000);
 
     // Verify cluster stopped (not hung in 'running' state)
     const finalCluster = orchestrator.getCluster(clusterId);
@@ -152,7 +143,9 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
     // Verify worker was actually called
     mockRunner.assertCalled('fast-worker', 1);
   });
+}
 
+function registerRapidCompletionTest() {
   it('should handle multiple rapid completions without missing messages', async function () {
     // Configure multiple fast workers that all complete immediately
     mockRunner.when('worker-1').returns('Done 1');
@@ -248,18 +241,7 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
     clusterId = result.id;
 
     // Wait for completion
-    const maxWait = 5000;
-    const start = Date.now();
-
-    while (Date.now() - start < maxWait) {
-      const cluster = orchestrator.getCluster(clusterId);
-
-      if (cluster.state === 'stopped') {
-        break;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await waitForStoppedCluster(orchestrator, clusterId, 5000);
 
     const finalCluster = orchestrator.getCluster(clusterId);
     expect(finalCluster.state).to.equal(
@@ -273,4 +255,12 @@ describe('Orchestrator Subscription Race Condition (issue #31)', function () {
     mockRunner.assertCalled('worker-3', 1);
     mockRunner.assertCalled('completion-detector', 1);
   });
+}
+
+describe('Orchestrator Subscription Race Condition (issue #31)', function () {
+  this.timeout(10000);
+
+  registerSubscriptionRaceHooks();
+  registerImmediateCompletionTest();
+  registerRapidCompletionTest();
 });
