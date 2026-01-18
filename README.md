@@ -1,6 +1,6 @@
 # zeroshot CLI
 
-> **🎉 New Release:** Now supports **Codex** and **Gemini** CLI in addition to Claude! Use any provider or mix them in multi-agent workflows. See [Providers](#providers) for details.
+> **🎉 New in v5.4:** Now supports **OpenCode** CLI! Use Claude, Codex, Gemini, or OpenCode - mix providers in multi-agent workflows. Also supports **GitHub, GitLab, Jira, and Azure DevOps** as issue backends. See [Providers](#providers) and [Multi-Platform Issue Support](#multi-platform-issue-support).
 
 <!-- install-placeholder -->
 <p align="center">
