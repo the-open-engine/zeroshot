@@ -8,6 +8,7 @@ const GitHubProvider = require('./github-provider');
 const GitLabProvider = require('./gitlab-provider');
 const JiraProvider = require('./jira-provider');
 const AzureDevOpsProvider = require('./azure-devops-provider');
+const GiteaProvider = require('./gitea-provider');
 const { detectGitContext } = require('../../lib/git-remote-utils');
 
 /** @type {Map<string, typeof IssueProvider>} */
@@ -181,6 +182,7 @@ registerProvider(GitHubProvider);
 registerProvider(GitLabProvider);
 registerProvider(JiraProvider);
 registerProvider(AzureDevOpsProvider);
+registerProvider(GiteaProvider);
 
 module.exports = {
   registerProvider,
