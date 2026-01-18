@@ -20,22 +20,25 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                  | File                                |
-| ------------------------ | ----------------------------------- |
-| Conductor classification | `src/conductor-bootstrap.js`        |
-| Base templates           | `cluster-templates/base-templates/` |
-| Message bus              | `src/message-bus.js`                |
-| Ledger (SQLite)          | `src/ledger.js`                     |
-| Trigger evaluation       | `src/logic-engine.js`               |
-| Agent wrapper            | `src/agent-wrapper.js`              |
-| Providers registry       | `src/providers/index.js`            |
-| Provider implementations | `src/providers/`                    |
-| Provider detection       | `lib/provider-detection.js`         |
-| Provider capabilities    | `src/providers/capabilities.js`     |
-| TUI dashboard            | `src/tui/`                          |
-| Docker mounts/env        | `lib/docker-config.js`              |
-| Container lifecycle      | `src/isolation-manager.js`          |
-| Settings                 | `lib/settings.js`                   |
+| Concept                  | File                                       |
+| ------------------------ | ------------------------------------------ |
+| Conductor classification | `src/conductor-bootstrap.js`               |
+| Base templates           | `cluster-templates/base-templates/`        |
+| Capability extensions    | `cluster-templates/capability-extensions/` |
+| Prompt injection         | `lib/prompt-injector.js`                   |
+| Template resolution      | `src/template-resolver.js`                 |
+| Message bus              | `src/message-bus.js`                       |
+| Ledger (SQLite)          | `src/ledger.js`                            |
+| Trigger evaluation       | `src/logic-engine.js`                      |
+| Agent wrapper            | `src/agent-wrapper.js`                     |
+| Providers registry       | `src/providers/index.js`                   |
+| Provider implementations | `src/providers/`                           |
+| Provider detection       | `lib/provider-detection.js`                |
+| Provider capabilities    | `src/providers/capabilities.js`            |
+| TUI dashboard            | `src/tui/`                                 |
+| Docker mounts/env        | `lib/docker-config.js`                     |
+| Container lifecycle      | `src/isolation-manager.js`                 |
+| Settings                 | `lib/settings.js`                          |
 
 ## CLI Quick Reference
 
@@ -150,6 +153,41 @@ Classifies tasks on Complexity x TaskType, routes to parameterized templates.
 | DEBUG    | Fix broken code       |
 
 Base templates: `single-worker`, `worker-validator`, `debug-workflow`, `full-workflow`.
+
+## Provider Capability Injection
+
+Templates are provider-agnostic. Provider-specific features (like sub-agent spawning) are injected at runtime.
+
+**Architecture:**
+
+1. Base templates contain `{{CAPABILITY_EXTENSIONS}}` marker
+2. `TemplateResolver` detects provider (from `defaultProvider` or `forceProvider`)
+3. `PromptInjector` loads capability extensions from `cluster-templates/capability-extensions/`
+4. Extensions are injected based on provider capabilities
+5. Final prompt sent to agent
+
+**Capabilities by Provider:**
+
+| Capability        | Claude | Codex (OpenAI) | Gemini |
+| ----------------- | ------ | -------------- | ------ |
+| Sub-agents        | ✅     | ❌             | ❌     |
+| Parallel tools    | ✅     | ❌             | ✅     |
+| Streaming         | ✅     | ❌             | ✅     |
+| Structured output | ✅     | ✅             | ✅     |
+
+**Extensions:**
+
+- `sub-agents.md`: Task tool delegation (Claude only)
+- `parallel-execution.md`: Multi-tool calls in one response (Claude, Gemini)
+
+**Adding New Capabilities:**
+
+1. Add capability flag to `src/providers/capabilities.js`
+2. Create extension file in `cluster-templates/capability-extensions/`
+3. Update `PromptInjector` to check capability and load extension
+4. Add `{{CAPABILITY_EXTENSIONS}}` marker in base templates where needed
+
+**Why this matters:** Prevents sending confusing instructions to providers that can't execute them.
 
 ## Isolation Modes
 
