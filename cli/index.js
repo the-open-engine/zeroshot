@@ -859,6 +859,7 @@ taskCmd
   )
   .option('--json-schema <schema>', 'JSON schema for structured output')
   .option('--silent-json-output', 'Log ONLY final structured output')
+  .option('--cli-args <args>', 'Extra CLI args to pass to Claude (e.g., "--chrome --verbose")')
   .action(async (prompt, options) => {
     try {
       // === PREFLIGHT CHECKS ===

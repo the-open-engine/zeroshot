@@ -21,6 +21,12 @@ export function spawnTask(prompt, options = {}) {
   const outputFormat = options.outputFormat || 'stream-json';
   const args = ['--print', '--dangerously-skip-permissions', '--output-format', outputFormat];
 
+  // Add any extra CLI args passed through (e.g., "--chrome" for browser control)
+  if (options.cliArgs) {
+    const extraArgs = options.cliArgs.split(/\s+/).filter(arg => arg.length > 0);
+    args.push(...extraArgs);
+  }
+
   // Only add streaming options for stream-json format
   if (outputFormat === 'stream-json') {
     args.push('--verbose');

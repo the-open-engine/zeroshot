@@ -15,6 +15,9 @@ export function runTask(prompt, options = {}) {
   if (options.model) {
     console.log(chalk.dim(`  Model: ${options.model}`));
   }
+  if (options.cliArgs) {
+    console.log(chalk.dim(`  CLI args: ${options.cliArgs}`));
+  }
   if (jsonSchema && outputFormat === 'json') {
     console.log(chalk.dim(`  JSON Schema: enforced`));
     if (silentJsonOutput) {
@@ -30,6 +33,7 @@ export function runTask(prompt, options = {}) {
     outputFormat,
     jsonSchema,
     silentJsonOutput,
+    cliArgs: options.cliArgs,
   });
 
   console.log(chalk.green(`\n✓ Task spawned: ${chalk.cyan(task.id)}`));
