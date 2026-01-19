@@ -2,17 +2,25 @@
  * Preflight Validation - Check all dependencies before starting
  *
  * Validates:
- * - Claude CLI installed and authenticated
+ * - Selected provider CLI installed
  * - gh CLI installed and authenticated (if using issue numbers)
  * - Docker available (if using --docker)
  *
  * Provides CLEAR, ACTIONABLE error messages with recovery instructions.
  */
 
-const { execSync } = require('child_process');
+const { execSync } = require('./lib/safe-exec'); // Enforces timeouts
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const {
+  isValidAnthropicKey,
+  ANTHROPIC_KEY_PREFIX,
+  resolveClaudeAuth,
+} = require('../lib/settings/claude-auth.js');
+const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
+const { normalizeProviderName } = require('../lib/provider-names');
+const { detectGitContext } = require('../lib/git-remote-utils');
 
 /**
  * Validation result
@@ -42,13 +50,15 @@ function formatError(title, detail, recovery) {
 }
 
 /**
- * Check if a command exists
+ * Check if a command exists (cross-platform)
  * @param {string} cmd - Command to check
  * @returns {boolean}
  */
 function commandExists(cmd) {
   try {
-    execSync(`which ${cmd}`, { encoding: 'utf8', stdio: 'pipe' });
+    // Windows uses 'where', Unix uses 'which'
+    const checkCmd = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
+    execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -120,29 +130,55 @@ function checkMacOsKeychain() {
  */
 function checkClaudeAuth() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+
+  // Helper to create consistent result objects
+  const authResult = (authenticated, error = null, method = null) => ({
+    authenticated,
+    error,
+    configDir,
+    ...(method && { method }),
+  });
+
+  // Check for Bedrock bearer token (highest priority)
+  if (process.env.AWS_BEARER_TOKEN_BEDROCK) {
+    if (!process.env.AWS_REGION) {
+      return authResult(false, 'AWS_BEARER_TOKEN_BEDROCK set but AWS_REGION is missing');
+    }
+    return authResult(true, null, 'bedrock_api_key');
+  }
+
+  // Check for ANTHROPIC_API_KEY environment variable
+  const apiKeyEnv = process.env.ANTHROPIC_API_KEY;
+  if (apiKeyEnv) {
+    if (!isValidAnthropicKey(apiKeyEnv)) {
+      return authResult(false, `ANTHROPIC_API_KEY must start with ${ANTHROPIC_KEY_PREFIX}`);
+    }
+    return authResult(true, null, 'env_api_key');
+  }
+
+  // Check for settings-based auth (anthropicApiKey or bedrockApiKey in settings)
+  const settings = loadSettings();
+  const settingsAuth = resolveClaudeAuth(settings);
+  if (settingsAuth.ANTHROPIC_API_KEY) {
+    return authResult(true, null, 'settings_api_key');
+  }
+  if (settingsAuth.AWS_BEARER_TOKEN_BEDROCK) {
+    if (!settingsAuth.AWS_REGION && !process.env.AWS_REGION) {
+      return authResult(false, 'Bedrock configured in settings but AWS_REGION is missing');
+    }
+    return authResult(true, null, 'settings_bedrock');
+  }
+
   const credentialsPath = path.join(configDir, '.credentials.json');
 
   // Check if credentials file exists
   if (!fs.existsSync(credentialsPath)) {
     // No credentials file - check macOS Keychain as fallback
     // Only use Keychain when using default config dir (not custom CLAUDE_CONFIG_DIR)
-    const isDefaultConfigDir = !process.env.CLAUDE_CONFIG_DIR;
-    if (isDefaultConfigDir) {
-      const keychainResult = checkMacOsKeychain();
-      if (keychainResult.authenticated) {
-        return {
-          authenticated: true,
-          error: null,
-          configDir,
-          method: 'keychain',
-        };
-      }
+    if (!process.env.CLAUDE_CONFIG_DIR && checkMacOsKeychain().authenticated) {
+      return authResult(true, null, 'keychain');
     }
-    return {
-      authenticated: false,
-      error: 'No credentials file found',
-      configDir,
-    };
+    return authResult(false, 'No credentials file found');
   }
 
   // Check if credentials file has content
@@ -152,42 +188,21 @@ function checkClaudeAuth() {
 
     // Check for OAuth token (primary auth method)
     if (creds.claudeAiOauth?.accessToken) {
-      // Check if token is expired
       const expiresAt = creds.claudeAiOauth.expiresAt;
       if (expiresAt && new Date(expiresAt) < new Date()) {
-        return {
-          authenticated: false,
-          error: 'OAuth token expired',
-          configDir,
-        };
+        return authResult(false, 'OAuth token expired');
       }
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
+      return authResult(true);
     }
 
     // Check for API key auth
     if (creds.apiKey) {
-      return {
-        authenticated: true,
-        error: null,
-        configDir,
-      };
+      return authResult(true);
     }
 
-    return {
-      authenticated: false,
-      error: 'No valid authentication found in credentials',
-      configDir,
-    };
+    return authResult(false, 'No valid authentication found in credentials');
   } catch (err) {
-    return {
-      authenticated: false,
-      error: `Failed to parse credentials: ${err.message}`,
-      configDir,
-    };
+    return authResult(false, `Failed to parse credentials: ${err.message}`);
   }
 }
 
@@ -272,26 +287,16 @@ function checkDocker() {
   }
 }
 
-/**
- * Run all preflight checks
- * @param {Object} options - Preflight options
- * @param {boolean} options.requireGh - Whether gh CLI is required (true if using issue number)
- * @param {boolean} options.requireDocker - Whether Docker is required (true if using --docker)
- * @param {boolean} options.requireGit - Whether git repo is required (true if using --worktree)
- * @param {boolean} options.quiet - Suppress success messages
- * @param {string} options.claudeCommand - Custom Claude command (from settings)
- * @returns {ValidationResult}
- */
-function runPreflight(options = {}) {
+function buildClaudeCommand(options) {
+  const { command, args } = getClaudeCommand();
+  return options.claudeCommand || [command, ...args].join(' ');
+}
+
+function validateClaudeProvider(options) {
   const errors = [];
   const warnings = [];
+  const claudeCommand = buildClaudeCommand(options);
 
-  // Get configured Claude command (supports custom commands like 'ccr code')
-  const { getClaudeCommand } = require('../lib/settings.js');
-  const { command, args } = getClaudeCommand();
-  const claudeCommand = options.claudeCommand || [command, ...args].join(' ');
-
-  // 1. Check Claude CLI installation
   const claude = getClaudeVersion(claudeCommand);
   if (!claude.installed) {
     errors.push(
@@ -312,35 +317,15 @@ function runPreflight(options = {}) {
             ]
       )
     );
-  } else {
-    // 2. Check Claude CLI authentication
-    const auth = checkClaudeAuth();
-    if (!auth.authenticated) {
-      errors.push(
-        formatError(
-          'Claude CLI not authenticated',
-          auth.error,
-          [
-            'Run: claude login',
-            'Follow the browser prompts to authenticate',
-            `Config directory: ${auth.configDir}`,
-          ]
-        )
+  } else if (claude.version) {
+    const [major, minor] = claude.version.split('.').map(Number);
+    if (major < 1 || (major === 1 && minor < 0)) {
+      warnings.push(
+        `⚠️  Claude CLI version ${claude.version} may be outdated. Consider upgrading.`
       );
-    }
-
-    // Check version (warn if old)
-    if (claude.version) {
-      const [major, minor] = claude.version.split('.').map(Number);
-      if (major < 1 || (major === 1 && minor < 0)) {
-        warnings.push(
-          `⚠️  Claude CLI version ${claude.version} may be outdated. Consider upgrading.`
-        );
-      }
     }
   }
 
-  // 3. Check if running as root (blocks --dangerously-skip-permissions)
   if (process.getuid && process.getuid() === 0) {
     errors.push(
       formatError(
@@ -356,76 +341,247 @@ function runPreflight(options = {}) {
     );
   }
 
-  // 4. Check gh CLI (if required)
-  if (options.requireGh) {
-    const gh = checkGhAuth();
-    if (!gh.installed) {
-      errors.push(
-        formatError(
-          'GitHub CLI (gh) not installed',
-          'Required for fetching issues by number',
-          [
-            'Install: brew install gh (macOS) or apt install gh (Linux)',
-            'Or download from: https://cli.github.com/',
-          ]
-        )
-      );
-    } else if (!gh.authenticated) {
-      errors.push(
-        formatError(
-          'GitHub CLI (gh) not authenticated',
-          gh.error,
-          [
-            'Run: gh auth login',
-            'Select GitHub.com, HTTPS, and authenticate via browser',
-            'Then verify: gh auth status',
-          ]
-        )
-      );
+  return { errors, warnings };
+}
+
+function validateCliProvider(command, title, detail, recovery) {
+  const errors = [];
+  if (!commandExists(command)) {
+    errors.push(formatError(title, detail, recovery));
+  }
+
+  return { errors, warnings: [] };
+}
+
+function validateProvider(providerName, options) {
+  const validatorByProvider = {
+    claude: () => validateClaudeProvider(options),
+    codex: () =>
+      validateCliProvider('codex', 'Codex CLI not available', 'Command "codex" not installed', [
+        'Install Codex CLI: npm install -g @openai/codex',
+        'Then run: codex --version',
+      ]),
+    gemini: () =>
+      validateCliProvider('gemini', 'Gemini CLI not available', 'Command "gemini" not installed', [
+        'Install Gemini CLI: npm install -g @google/gemini-cli',
+        'Then run: gemini --version',
+      ]),
+    opencode: () =>
+      validateCliProvider(
+        'opencode',
+        'Opencode CLI not available',
+        'Command "opencode" not installed',
+        ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
+      ),
+  };
+
+  const validator = validatorByProvider[providerName];
+  if (!validator) {
+    return {
+      errors: [
+        formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
+          'Use claude, codex, gemini, or opencode',
+        ]),
+      ],
+      warnings: [],
+    };
+  }
+
+  return validator();
+}
+
+function validateGhRequirement() {
+  const errors = [];
+  const gh = checkGhAuth();
+  if (!gh.installed) {
+    errors.push(
+      formatError('GitHub CLI (gh) not installed', 'Required for fetching issues by number', [
+        'Install: brew install gh (macOS) or apt install gh (Linux)',
+        'Or download from: https://cli.github.com/',
+      ])
+    );
+  } else if (!gh.authenticated) {
+    errors.push(
+      formatError('GitHub CLI (gh) not authenticated', gh.error, [
+        'Run: gh auth login',
+        'Select GitHub.com, HTTPS, and authenticate via browser',
+        'Then verify: gh auth status',
+      ])
+    );
+  }
+
+  return errors;
+}
+
+function validateDockerRequirement() {
+  const errors = [];
+  const docker = checkDocker();
+  if (!docker.available) {
+    errors.push(
+      formatError(
+        'Docker not available',
+        docker.error,
+        docker.error.includes('daemon')
+          ? ['Start Docker Desktop', 'Or run: sudo systemctl start docker (Linux)']
+          : [
+              'Install Docker Desktop from: https://docker.com/products/docker-desktop',
+              'Then start Docker and verify: docker info',
+            ]
+      )
+    );
+  }
+
+  return errors;
+}
+
+function isGitRepository() {
+  try {
+    execSync('git rev-parse --git-dir', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateGitRequirement() {
+  if (isGitRepository()) {
+    return [];
+  }
+
+  return [
+    formatError('Not in a git repository', 'Worktree isolation requires a git repository', [
+      'Run from within a git repository',
+      'Or use --docker instead of --worktree for non-git directories',
+      'Initialize a repo with: git init',
+    ]),
+  ];
+}
+
+/**
+ * Run all preflight checks
+ * @param {Object} options - Preflight options
+ * @param {boolean} options.requireGh - Whether gh CLI is required (true if using issue number)
+ * @param {boolean} options.requireDocker - Whether Docker is required (true if using --docker)
+ * @param {boolean} options.requireGit - Whether git repo is required (true if using --worktree)
+ * @param {boolean} options.quiet - Suppress success messages
+ * @param {string} options.claudeCommand - Custom Claude command (from settings)
+ * @param {string} options.provider - Provider override
+ * @returns {ValidationResult}
+ */
+function runPreflight(options = {}) {
+  const errors = [];
+  const warnings = [];
+
+  const settings = loadSettings();
+  const providerName = normalizeProviderName(
+    options.provider || settings.defaultProvider || 'claude'
+  );
+
+  const providerResult = validateProvider(providerName, options);
+  errors.push(...providerResult.errors);
+  warnings.push(...providerResult.warnings);
+
+  // 4. Check issue provider CLI (if required)
+  if (options.issueProvider) {
+    const { getProvider } = require('./issue-providers');
+    const ProviderClass = getProvider(options.issueProvider);
+
+    if (ProviderClass) {
+      const tool = ProviderClass.getRequiredTool();
+
+      // Check if tool is installed
+      if (!commandExists(tool.name)) {
+        errors.push(
+          formatError(
+            `${ProviderClass.displayName} CLI (${tool.name}) not installed`,
+            `Required for fetching ${ProviderClass.displayName} issues`,
+            [tool.installHint, `Then verify: ${tool.checkCmd}`]
+          )
+        );
+      } else {
+        // Check provider authentication (abstracted per provider)
+        // Use targetHost from URL input if provided, otherwise detect from git context
+        // This ensures we check auth for the actual target, not the current repo
+        const targetHost =
+          options.targetHost || detectGitContext(options.cwd || process.cwd())?.host;
+        const authResult = ProviderClass.checkAuth(targetHost);
+        if (!authResult.authenticated) {
+          errors.push(
+            formatError(
+              `${ProviderClass.displayName} CLI (${tool.name}) not authenticated`,
+              authResult.error,
+              authResult.recovery
+            )
+          );
+        }
+      }
     }
   }
 
-  // 5. Check Docker (if required)
-  if (options.requireDocker) {
-    const docker = checkDocker();
-    if (!docker.available) {
-      errors.push(
-        formatError(
-          'Docker not available',
-          docker.error,
-          docker.error.includes('daemon')
-            ? ['Start Docker Desktop', 'Or run: sudo systemctl start docker (Linux)']
-            : [
-                'Install Docker Desktop from: https://docker.com/products/docker-desktop',
-                'Then start Docker and verify: docker info',
-              ]
-        )
-      );
-    }
-  }
+  // 5. Check PR/MR CLI tools (if --pr or --ship mode is active)
+  if (options.autoPr) {
+    const { getPlatformForPR, getPRToolForPlatform, getProvider } = require('./issue-providers');
 
-  // 6. Check git repo (if required for worktree isolation)
-  if (options.requireGit) {
-    let isGitRepo = false;
+    let platform;
+    let prGitContext;
     try {
-      execSync('git rev-parse --git-dir', { stdio: 'pipe' });
-      isGitRepo = true;
-    } catch {
-      // Not a git repo
-    }
-    if (!isGitRepo) {
+      // Detect git platform (independent of issue provider)
+      platform = getPlatformForPR(options.cwd || process.cwd());
+      // Get git context for hostname (needed for multi-instance auth checks)
+      prGitContext = detectGitContext(options.cwd || process.cwd());
+    } catch (error) {
+      // If platform detection fails, show clear error
       errors.push(
-        formatError(
-          'Not in a git repository',
-          'Worktree isolation requires a git repository',
-          [
-            'Run from within a git repository',
-            'Or use --docker instead of --worktree for non-git directories',
-            'Initialize a repo with: git init',
-          ]
-        )
+        formatError('--pr mode requires a git repository', error.message, [
+          'Ensure you are in a git repository with a remote URL from GitHub, GitLab, or Azure DevOps',
+        ])
       );
+      // Skip CLI tool check if platform unknown
     }
+
+    if (platform) {
+      // Get PR tool info from the provider (unified source of truth)
+      const tool = getPRToolForPlatform(platform);
+      const ProviderClass = getProvider(platform);
+
+      if (tool && !commandExists(tool.name)) {
+        errors.push(
+          formatError(
+            `${tool.displayName} CLI (${tool.name}) not installed`,
+            `Required for --pr mode with ${tool.displayName} repositories`,
+            [tool.installHint, `Then verify: ${tool.checkCmd}`]
+          )
+        );
+      } else if (tool && ProviderClass) {
+        // Check provider authentication (abstracted per provider)
+        // Pass hostname for multi-instance providers (e.g., GitLab with self-hosted)
+        const authResult = ProviderClass.checkAuth(prGitContext?.host);
+        if (!authResult.authenticated) {
+          errors.push(
+            formatError(
+              `${tool.displayName} CLI (${tool.name}) not authenticated`,
+              authResult.error,
+              authResult.recovery
+            )
+          );
+        }
+      }
+    }
+  }
+
+  // Legacy gh check for backward compatibility
+  if (options.requireGh) {
+    errors.push(...validateGhRequirement());
+  }
+
+  // 6. Check Docker (if required)
+  if (options.requireDocker) {
+    errors.push(...validateDockerRequirement());
+  }
+
+  // 7. Check git repo (if required for worktree isolation)
+  if (options.requireGit) {
+    errors.push(...validateGitRequirement());
   }
 
   return {
@@ -442,6 +598,7 @@ function runPreflight(options = {}) {
  * @param {boolean} options.requireDocker - Whether Docker is required
  * @param {boolean} options.requireGit - Whether git repo is required
  * @param {boolean} options.quiet - Suppress success messages
+ * @param {string} options.provider - Provider override
  */
 function requirePreflight(options = {}) {
   const result = runPreflight(options);

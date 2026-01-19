@@ -20,6 +20,18 @@ const {
 } = require('../../lib/docker-config');
 
 describe('Docker Configuration', function () {
+  registerMountPresetTests();
+  registerEnvPresetTests();
+  registerResolveMountsTests();
+  registerResolveEnvsTests();
+  registerExpandEnvPatternsTests();
+  registerValidateMountConfigTests();
+  registerValidateEnvPassthroughTests();
+  registerAwsWorkflowTests();
+  registerCustomMountWorkflowTests();
+});
+
+function registerMountPresetTests() {
   describe('MOUNT_PRESETS', function () {
     it('should have all expected presets', function () {
       const expected = ['gh', 'git', 'ssh', 'aws', 'azure', 'kube', 'terraform', 'gcloud'];
@@ -55,7 +67,9 @@ describe('Docker Configuration', function () {
       }
     });
   });
+}
 
+function registerEnvPresetTests() {
   describe('ENV_PRESETS', function () {
     it('should have expected preset keys', function () {
       assert.ok(ENV_PRESETS.aws);
@@ -79,7 +93,9 @@ describe('Docker Configuration', function () {
       );
     });
   });
+}
 
+function registerResolveMountsTests() {
   describe('resolveMounts()', function () {
     it('should resolve preset names to mount specs', function () {
       const result = resolveMounts(['aws']);
@@ -125,20 +141,16 @@ describe('Docker Configuration', function () {
     });
 
     it('should resolve mixed presets and custom mounts', function () {
-      const result = resolveMounts(
-        ['aws', { host: '~/.custom', container: '$HOME/.custom' }],
-        { containerHome: '/home/user' }
-      );
+      const result = resolveMounts(['aws', { host: '~/.custom', container: '$HOME/.custom' }], {
+        containerHome: '/home/user',
+      });
       assert.strictEqual(result.length, 2);
       assert.strictEqual(result[0].container, '/home/user/.aws');
       assert.strictEqual(result[1].container, '/home/user/.custom');
     });
 
     it('should throw on unknown preset', function () {
-      assert.throws(
-        () => resolveMounts(['unknown']),
-        /Unknown mount preset: "unknown"/
-      );
+      assert.throws(() => resolveMounts(['unknown']), /Unknown mount preset: "unknown"/);
     });
 
     it('should throw on missing host property', function () {
@@ -149,27 +161,20 @@ describe('Docker Configuration', function () {
     });
 
     it('should throw on missing container property', function () {
-      assert.throws(
-        () => resolveMounts([{ host: '~/.foo' }]),
-        /must have "host" and "container"/
-      );
+      assert.throws(() => resolveMounts([{ host: '~/.foo' }]), /must have "host" and "container"/);
     });
 
     it('should throw on non-array input', function () {
-      assert.throws(
-        () => resolveMounts('aws'),
-        /must be an array/
-      );
+      assert.throws(() => resolveMounts('aws'), /must be an array/);
     });
 
     it('should throw on invalid item type', function () {
-      assert.throws(
-        () => resolveMounts([123]),
-        /Invalid mount config/
-      );
+      assert.throws(() => resolveMounts([123]), /Invalid mount config/);
     });
   });
+}
 
+function registerResolveEnvsTests() {
   describe('resolveEnvs()', function () {
     it('should return empty array for empty config', function () {
       const result = resolveEnvs([]);
@@ -207,7 +212,9 @@ describe('Docker Configuration', function () {
       assert.deepStrictEqual(result, []);
     });
   });
+}
 
+function registerExpandEnvPatternsTests() {
   describe('expandEnvPatterns()', function () {
     it('should return simple vars as-is', function () {
       const result = expandEnvPatterns(['MY_VAR']);
@@ -264,7 +271,9 @@ describe('Docker Configuration', function () {
       assert.ok(forced && forced.forced && forced.value === '');
     });
   });
+}
 
+function registerValidateMountConfigTests() {
   describe('validateMountConfig()', function () {
     it('should accept valid preset names', function () {
       assert.strictEqual(validateMountConfig(['gh', 'git', 'ssh']), null);
@@ -305,7 +314,9 @@ describe('Docker Configuration', function () {
       assert.ok(error && error.includes('must be an array'));
     });
   });
+}
 
+function registerValidateEnvPassthroughTests() {
   describe('validateEnvPassthrough()', function () {
     it('should accept valid env var names', function () {
       assert.strictEqual(validateEnvPassthrough(['MY_VAR', 'OTHER_VAR']), null);
@@ -329,7 +340,9 @@ describe('Docker Configuration', function () {
       assert.ok(error && error.includes('Must be a string'));
     });
   });
+}
 
+function registerAwsWorkflowTests() {
   describe('Integration: AWS workflow', function () {
     it('should correctly configure AWS mounts and envs', function () {
       // User configures: dockerMounts: ['aws']
@@ -353,13 +366,12 @@ describe('Docker Configuration', function () {
       assert.ok(region && !region.forced);
     });
   });
+}
 
+function registerCustomMountWorkflowTests() {
   describe('Integration: Custom mount workflow', function () {
     it('should correctly configure custom mounts', function () {
-      const config = [
-        'git',
-        { host: '~/.myapp', container: '$HOME/.myapp', readonly: false },
-      ];
+      const config = ['git', { host: '~/.myapp', container: '$HOME/.myapp', readonly: false }];
 
       const mounts = resolveMounts(config, { containerHome: '/home/node' });
 
@@ -370,4 +382,4 @@ describe('Docker Configuration', function () {
       assert.strictEqual(mounts[1].readonly, false);
     });
   });
-});
+}

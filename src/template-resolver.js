@@ -272,25 +272,28 @@ class TemplateResolver {
    * @returns {any}
    */
   _parseValue(str) {
-    str = str.trim();
+    const trimmed = str.trim();
 
     // String literals (single or double quotes)
-    if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
-      return str.slice(1, -1);
+    if (
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+      return trimmed.slice(1, -1);
     }
 
     // Boolean literals
-    if (str === 'true') return true;
-    if (str === 'false') return false;
-    if (str === 'undefined' || str === 'null') return undefined;
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed === 'undefined' || trimmed === 'null') return undefined;
 
     // Numbers
-    if (/^-?\d+(\.\d+)?$/.test(str)) {
-      return parseFloat(str);
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      return parseFloat(trimmed);
     }
 
     // Return as-is for other cases
-    return str;
+    return trimmed;
   }
 
   /**

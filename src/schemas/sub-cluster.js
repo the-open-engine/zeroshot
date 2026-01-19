@@ -30,16 +30,18 @@
  * @param {Number} depth - Current nesting depth (for recursion limit)
  * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
  */
+const MAX_SUBCLUSTER_DEPTH = 5;
+
 function validateSubCluster(agentConfig, depth = 0) {
   const errors = [];
   const warnings = [];
 
   // Max nesting depth to prevent infinite recursion
-  const MAX_DEPTH = 5;
-
-  if (depth > MAX_DEPTH) {
-    errors.push(`Sub-cluster '${agentConfig.id}' exceeds max nesting depth (${MAX_DEPTH})`);
-    return { valid: false, errors, warnings };
+  if (depth > MAX_SUBCLUSTER_DEPTH) {
+    errors.push(
+      `Sub-cluster '${agentConfig.id}' exceeds max nesting depth (${MAX_SUBCLUSTER_DEPTH})`
+    );
+    return buildValidationResult(errors, warnings);
   }
 
   // Validate required fields
@@ -47,19 +49,44 @@ function validateSubCluster(agentConfig, depth = 0) {
     errors.push(`Agent '${agentConfig.id}' must have type: 'subcluster'`);
   }
 
+  if (!validateSubClusterConfig(agentConfig, depth, errors, warnings)) {
+    return buildValidationResult(errors, warnings);
+  }
+
+  // Validate triggers (sub-cluster must have triggers to activate)
+  validateSubClusterTriggers(agentConfig, errors);
+
+  // Validate hooks structure
+  validateSubClusterHooks(agentConfig, errors);
+
+  // Check for context bridging configuration
+  validateContextStrategy(agentConfig, errors);
+
+  return buildValidationResult(errors, warnings);
+}
+
+function buildValidationResult(errors, warnings) {
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+function validateSubClusterConfig(agentConfig, depth, errors, warnings) {
   if (!agentConfig.config) {
     errors.push(`Sub-cluster '${agentConfig.id}' missing config field`);
-    return { valid: false, errors, warnings };
+    return false;
   }
 
   if (!agentConfig.config.agents || !Array.isArray(agentConfig.config.agents)) {
     errors.push(`Sub-cluster '${agentConfig.id}' config.agents must be an array`);
-    return { valid: false, errors, warnings };
+    return false;
   }
 
   if (agentConfig.config.agents.length === 0) {
     errors.push(`Sub-cluster '${agentConfig.id}' config.agents cannot be empty`);
-    return { valid: false, errors, warnings };
+    return false;
   }
 
   // Recursively validate nested cluster config
@@ -71,46 +98,48 @@ function validateSubCluster(agentConfig, depth = 0) {
   }
 
   warnings.push(...childValidation.warnings.map((w) => `Sub-cluster '${agentConfig.id}': ${w}`));
+  return true;
+}
 
-  // Validate triggers (sub-cluster must have triggers to activate)
+function validateSubClusterTriggers(agentConfig, errors) {
   if (!agentConfig.triggers || agentConfig.triggers.length === 0) {
     errors.push(`Sub-cluster '${agentConfig.id}' must have triggers to activate`);
   }
+}
 
-  // Validate hooks structure
-  if (agentConfig.hooks) {
-    if (agentConfig.hooks.onComplete) {
-      const hook = agentConfig.hooks.onComplete;
-      if (!hook.action) {
-        errors.push(`Sub-cluster '${agentConfig.id}' onComplete hook missing action`);
-      }
-      if (hook.action === 'publish_message' && !hook.config?.topic) {
-        errors.push(`Sub-cluster '${agentConfig.id}' onComplete hook missing config.topic`);
-      }
-    }
+function validateSubClusterHooks(agentConfig, errors) {
+  if (!agentConfig.hooks?.onComplete) {
+    return;
   }
 
-  // Check for context bridging configuration
-  if (agentConfig.contextStrategy?.parentTopics) {
-    if (!Array.isArray(agentConfig.contextStrategy.parentTopics)) {
-      errors.push(`Sub-cluster '${agentConfig.id}' contextStrategy.parentTopics must be an array`);
-    } else {
-      // Validate each parent topic is a string
-      for (const topic of agentConfig.contextStrategy.parentTopics) {
-        if (typeof topic !== 'string') {
-          errors.push(
-            `Sub-cluster '${agentConfig.id}' parentTopics must contain strings, got ${typeof topic}`
-          );
-        }
-      }
-    }
+  const hook = agentConfig.hooks.onComplete;
+  if (!hook.action) {
+    errors.push(`Sub-cluster '${agentConfig.id}' onComplete hook missing action`);
+  }
+  if (hook.action === 'publish_message' && !hook.config?.topic) {
+    errors.push(`Sub-cluster '${agentConfig.id}' onComplete hook missing config.topic`);
+  }
+}
+
+function validateContextStrategy(agentConfig, errors) {
+  const parentTopics = agentConfig.contextStrategy?.parentTopics;
+  if (!parentTopics) {
+    return;
   }
 
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
-  };
+  if (!Array.isArray(parentTopics)) {
+    errors.push(`Sub-cluster '${agentConfig.id}' contextStrategy.parentTopics must be an array`);
+    return;
+  }
+
+  // Validate each parent topic is a string
+  for (const topic of parentTopics) {
+    if (typeof topic !== 'string') {
+      errors.push(
+        `Sub-cluster '${agentConfig.id}' parentTopics must contain strings, got ${typeof topic}`
+      );
+    }
+  }
 }
 
 /**

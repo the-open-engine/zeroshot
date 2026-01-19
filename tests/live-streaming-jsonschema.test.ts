@@ -11,7 +11,7 @@ describe('Vibe live logs with jsonSchema', () => {
     const config = {
       id: 'planner',
       role: 'planning',
-      model: 'sonnet',
+      modelLevel: 'level2',
       outputFormat: 'json',
       jsonSchema: {
         type: 'object',
@@ -69,7 +69,7 @@ describe('Vibe live logs with jsonSchema', () => {
 
     await runner.run('ctx', {
       agentId: 'planner',
-      model: 'sonnet',
+      modelLevel: 'level2',
       outputFormat: 'json',
       jsonSchema: {
         type: 'object',
@@ -92,7 +92,7 @@ describe('Vibe live logs with jsonSchema', () => {
     const config = {
       id: 'planner',
       role: 'planning',
-      model: 'sonnet',
+      modelLevel: 'level2',
       outputFormat: 'json',
       strictSchema: true, // <-- This should force json output
       jsonSchema: {
@@ -150,7 +150,7 @@ describe('Vibe live logs with jsonSchema', () => {
 
     await runner.run('ctx', {
       agentId: 'planner',
-      model: 'sonnet',
+      modelLevel: 'level2',
       outputFormat: 'json',
       strictSchema: true, // <-- This should force json output
       jsonSchema: {
@@ -168,11 +168,11 @@ describe('Vibe live logs with jsonSchema', () => {
     expect(args).toContain('--json-schema'); // Schema passed to CLI
   });
 
-  test('Non-validator schema mismatch warns but does not throw', () => {
+  test('Non-validator schema mismatch warns but does not throw', async () => {
     const config = {
       id: 'planner',
       role: 'planning',
-      model: 'sonnet',
+      modelLevel: 'level2',
       outputFormat: 'json',
       jsonSchema: {
         type: 'object',
@@ -199,7 +199,8 @@ describe('Vibe live logs with jsonSchema', () => {
     });
 
     const badOutput = `{\"type\":\"result\",\"structured_output\":{\"wrong\":1}}`;
-    expect(() => agent._parseResultOutput(badOutput)).not.toThrow();
+    // Should resolve without throwing (async function)
+    await expect(agent._parseResultOutput(badOutput)).resolves.toBeDefined();
     expect(messageBusStub.publish).toHaveBeenCalledWith(
       expect.objectContaining({ topic: 'AGENT_SCHEMA_WARNING' })
     );

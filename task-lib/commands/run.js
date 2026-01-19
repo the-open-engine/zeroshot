@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { spawnTask } from '../runner.js';
 
-export function runTask(prompt, options = {}) {
+export async function runTask(prompt, options = {}) {
   if (!prompt || prompt.trim().length === 0) {
     console.log(chalk.red('Error: Prompt is required'));
     process.exit(1);
@@ -11,9 +11,15 @@ export function runTask(prompt, options = {}) {
   const jsonSchema = options.jsonSchema;
   const silentJsonOutput = options.silentJsonOutput || false;
 
-  console.log(chalk.dim('Spawning Claude task...'));
+  console.log(chalk.dim('Spawning task...'));
+  if (options.provider) {
+    console.log(chalk.dim(`  Provider: ${options.provider}`));
+  }
   if (options.model) {
     console.log(chalk.dim(`  Model: ${options.model}`));
+  }
+  if (options.modelLevel) {
+    console.log(chalk.dim(`  Level: ${options.modelLevel}`));
   }
   if (options.cliArgs) {
     console.log(chalk.dim(`  CLI args: ${options.cliArgs}`));
@@ -25,9 +31,12 @@ export function runTask(prompt, options = {}) {
     }
   }
 
-  const task = spawnTask(prompt, {
+  const task = await spawnTask(prompt, {
     cwd: options.cwd || process.cwd(),
     model: options.model,
+    modelLevel: options.modelLevel,
+    reasoningEffort: options.reasoningEffort,
+    provider: options.provider,
     resume: options.resume,
     continue: options.continue,
     outputFormat,

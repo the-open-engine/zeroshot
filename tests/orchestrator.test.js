@@ -16,6 +16,12 @@ const Orchestrator = require('../src/orchestrator.js');
 const MockTaskRunner = require('./helpers/mock-task-runner.js');
 const LedgerAssertions = require('./helpers/ledger-assertions.js');
 
+// Isolate tests from user settings (prevents minModel/maxModel conflicts)
+const testSettingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-settings-'));
+const testSettingsFile = path.join(testSettingsDir, 'settings.json');
+fs.writeFileSync(testSettingsFile, JSON.stringify({ maxModel: 'opus', minModel: null }));
+process.env.ZEROSHOT_SETTINGS_FILE = testSettingsFile;
+
 // Test utilities
 function createTempDir() {
   const tmpBase = path.join(os.tmpdir(), 'zeroshot-test');
@@ -36,6 +42,22 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForClusterState(orchestratorInstance, clusterId, targetState, timeoutMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const status = orchestratorInstance.getStatus(clusterId);
+      if (status.state === targetState) {
+        return;
+      }
+    } catch {
+      // Cluster may be removed during shutdown
+    }
+    await sleep(50);
+  }
+  throw new Error(`Cluster ${clusterId} did not reach ${targetState} within ${timeoutMs}ms`);
+}
+
 // Load fixture config from tests/fixtures/
 function loadFixture(filename) {
   const fixturePath = path.join(__dirname, 'fixtures', filename);
@@ -49,7 +71,7 @@ function createSimpleConfig() {
       {
         id: 'worker',
         role: 'implementation',
-        model: 'sonnet',
+        modelLevel: 'level2',
         outputFormat: 'text',
         triggers: [
           {
@@ -78,7 +100,7 @@ function _createMultiAgentConfig() {
       {
         id: 'agent1',
         role: 'implementation',
-        model: 'sonnet',
+        modelLevel: 'level2',
         outputFormat: 'text',
         triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
         prompt: 'Agent 1',
@@ -86,7 +108,7 @@ function _createMultiAgentConfig() {
       {
         id: 'agent2',
         role: 'validator',
-        model: 'sonnet',
+        modelLevel: 'level2',
         outputFormat: 'text',
         triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
         prompt: 'Agent 2',
@@ -102,7 +124,7 @@ function _createValidatorConfig() {
       {
         id: 'worker',
         role: 'implementation',
-        model: 'sonnet',
+        modelLevel: 'level2',
         outputFormat: 'text',
         triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
         prompt: 'Worker',
@@ -116,7 +138,7 @@ function _createValidatorConfig() {
       {
         id: 'validator',
         role: 'validator',
-        model: 'sonnet',
+        modelLevel: 'level2',
         outputFormat: 'json',
         jsonSchema: {
           type: 'object',
@@ -131,45 +153,96 @@ function _createValidatorConfig() {
   };
 }
 
+let lifecycleOrchestrator;
+let lifecycleMockRunner;
+let lifecycleStorageDir;
+
 describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
   this.timeout(10000);
 
-  let orchestrator, mockRunner, storageDir;
-
   beforeEach(function () {
-    mockRunner = new MockTaskRunner();
-    storageDir = createTempDir();
-    orchestrator = new Orchestrator({
-      taskRunner: mockRunner,
-      storageDir,
+    lifecycleMockRunner = new MockTaskRunner();
+    lifecycleStorageDir = createTempDir();
+    lifecycleOrchestrator = new Orchestrator({
+      taskRunner: lifecycleMockRunner,
+      storageDir: lifecycleStorageDir,
       skipLoad: true,
       quiet: true,
     });
   });
 
   afterEach(function () {
-    if (orchestrator) {
-      orchestrator.close();
+    if (lifecycleOrchestrator) {
+      lifecycleOrchestrator.close();
     }
-    cleanupTempDir(storageDir);
+    cleanupTempDir(lifecycleStorageDir);
   });
 
+  defineLifecycleStartTests();
+  defineLifecycleStopTests();
+  defineLifecycleKillTests();
+  defineLifecycleResumeTests();
+  defineLifecycleGetStatusTests();
+  defineLifecycleListClustersTests();
+});
+
+function defineLifecycleStartTests() {
   describe('start()', function () {
     it('should spawn all agents and publish ISSUE_OPENED', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await orchestrator.start(config, { text: 'Fix bug' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Fix bug' });
       const clusterId = result.id;
 
       // Verify: Cluster created
-      const cluster = orchestrator.getCluster(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
       assert.ok(cluster, 'Cluster should exist');
       assert.strictEqual(cluster.agents.length, 1, 'Should have 1 agent');
 
       // Verify: ISSUE_OPENED published
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
       ledger.assertPublished('ISSUE_OPENED');
+    });
+
+    it('should retry once on SIGTERM termination even with maxRetries=1', async function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            modelLevel: 'level2',
+            outputFormat: 'text',
+            maxRetries: 1,
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: {
+                  topic: 'CLUSTER_COMPLETE',
+                  content: {
+                    data: { reason: 'sigterm-retry-test' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      let callCount = 0;
+      lifecycleMockRunner.when('worker').calls(() => {
+        callCount += 1;
+        if (callCount === 1) {
+          return { success: false, output: '', error: 'Killed by SIGTERM' };
+        }
+        return { success: true, output: 'ok' };
+      });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Fix bug' });
+      await waitForClusterState(lifecycleOrchestrator, result.id, 'stopped', 10000);
+
+      assert.strictEqual(callCount, 2, 'Expected SIGTERM failure to trigger one retry');
     });
 
     it('should inject worktree cwd when worktree enabled', function () {
@@ -183,12 +256,16 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
 
       // The orchestrator doesn't validate config structure upfront
       // It will fail when trying to start agents, but cluster is created
-      const result = await orchestrator._startInternal(badConfig, { text: 'Task' }, { testMode: true });
+      const result = await lifecycleOrchestrator._startInternal(
+        badConfig,
+        { text: 'Task' },
+        { testMode: true }
+      );
 
       // Cluster is created even with empty agents
       assert.ok(result.id, 'Cluster ID should be generated');
 
-      const cluster = orchestrator.getCluster(result.id);
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
       assert.ok(cluster, 'Cluster should exist');
       assert.strictEqual(cluster.agents.length, 0, 'Should have 0 agents');
     });
@@ -196,63 +273,69 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
     it('should handle missing config (TypeError from accessing config.dbPath)', async function () {
       await assert.rejects(
         async () => {
-          await orchestrator.start(null, { text: 'Task' });
+          await lifecycleOrchestrator.start(null, { text: 'Task' });
         },
         TypeError,
         'Should throw TypeError for null config'
       );
     });
 
-    it('should handle missing input (requires issue or text)', async function () {
+    it('should handle missing input (requires issue, file, or text)', async function () {
       const config = createSimpleConfig();
 
       await assert.rejects(
         async () => {
-          await orchestrator.start(config, {});
+          await lifecycleOrchestrator.start(config, {});
         },
-        /issue or text/i,
+        /issue.*or text/i,
         'Should reject missing input'
       );
     });
 
     it('should auto-generate unique cluster IDs', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result1 = await orchestrator.start(config, { text: 'Task 1' });
-      const result2 = await orchestrator.start(config, { text: 'Task 2' });
+      const result1 = await lifecycleOrchestrator.start(config, { text: 'Task 1' });
+      const result2 = await lifecycleOrchestrator.start(config, { text: 'Task 2' });
 
       assert.notStrictEqual(result1.id, result2.id, 'Cluster IDs should be unique');
     });
   });
+}
 
+function defineLifecycleStopTests() {
   describe('stop()', function () {
     it('should stop all agents and save state', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
-      await orchestrator.stop(clusterId);
+      await lifecycleOrchestrator.stop(clusterId);
 
       // Verify: Cluster marked stopped
-      const cluster = orchestrator.getCluster(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
       assert.strictEqual(cluster.state, 'stopped', 'Cluster should be stopped');
 
       // Verify: State persisted to disk
-      const clustersFile = path.join(storageDir, 'clusters.json');
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
       assert.ok(fs.existsSync(clustersFile), 'clusters.json should exist');
 
       const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
       assert.ok(persisted[clusterId], 'Cluster should be in clusters.json');
-      assert.strictEqual(persisted[clusterId].state, 'stopped', 'Persisted state should be stopped');
+      assert.strictEqual(
+        persisted[clusterId].state,
+        'stopped',
+        'Persisted state should be stopped'
+      );
     });
 
     it('should fail if cluster does not exist', async function () {
       await assert.rejects(
         async () => {
-          await orchestrator.stop('nonexistent-cluster-id');
+          await lifecycleOrchestrator.stop('nonexistent-cluster-id');
         },
         /not found/i,
         'Should reject nonexistent cluster'
@@ -261,40 +344,42 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
 
     it('should wait for initialization to complete before stopping', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').delays(100, { done: true });
+      lifecycleMockRunner.when('worker').delays(100, { done: true });
 
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
       // Stop immediately (while initializing)
-      const stopPromise = orchestrator.stop(clusterId);
+      const stopPromise = lifecycleOrchestrator.stop(clusterId);
 
       // Should wait for init to complete
       await stopPromise;
 
       // Verify: ISSUE_OPENED was published (initialization completed)
-      const cluster = orchestrator.getCluster(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
       ledger.assertPublished('ISSUE_OPENED');
     });
   });
+}
 
+function defineLifecycleKillTests() {
   describe('kill()', function () {
     it('should force stop all agents and remove from disk', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
-      await orchestrator.kill(clusterId);
+      await lifecycleOrchestrator.kill(clusterId);
 
       // Verify: Cluster removed from memory
-      const cluster = orchestrator.getCluster(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
       assert.strictEqual(cluster, undefined, 'Cluster should be removed from memory');
 
       // Verify: Cluster deleted from disk (not just marked killed)
-      const clustersFile = path.join(storageDir, 'clusters.json');
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
       const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
       assert.strictEqual(persisted[clusterId], undefined, 'Cluster should be deleted from disk');
     });
@@ -302,36 +387,38 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
     it('should fail if cluster does not exist', async function () {
       await assert.rejects(
         async () => {
-          await orchestrator.kill('nonexistent-cluster-id');
+          await lifecycleOrchestrator.kill('nonexistent-cluster-id');
         },
         /not found/i,
         'Should reject nonexistent cluster'
       );
     });
   });
+}
 
+function defineLifecycleResumeTests() {
   describe('resume()', function () {
     it('should restore ledger and cluster state', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
       // Create cluster
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
       // Wait for worker to complete
       await sleep(500);
 
       // Stop cluster
-      await orchestrator.stop(clusterId);
+      await lifecycleOrchestrator.stop(clusterId);
 
       // Resume cluster - need to provide handler for IMPLEMENTATION_READY
       // that was published by worker's onComplete hook
-      mockRunner.when('worker').returns({ done: true, resumed: true });
+      lifecycleMockRunner.when('worker').returns({ done: true, resumed: true });
 
       // Resume will fail if there's an unhandled message, so we just verify
       // the cluster state is persisted correctly
-      const cluster = orchestrator.getCluster(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
 
       // Verify: Ledger contains messages even after stop
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
@@ -344,7 +431,7 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
     it('should fail if cluster does not exist', async function () {
       await assert.rejects(
         async () => {
-          await orchestrator.resume('nonexistent-cluster-id');
+          await lifecycleOrchestrator.resume('nonexistent-cluster-id');
         },
         /not found/i,
         'Should reject nonexistent cluster'
@@ -353,31 +440,33 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
 
     it('should fail if cluster is still running', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
       // Try to resume while running
       await assert.rejects(
         async () => {
-          await orchestrator.resume(clusterId);
+          await lifecycleOrchestrator.resume(clusterId);
         },
         /still running/i,
         'Should reject resume of running cluster'
       );
     });
   });
+}
 
+function defineLifecycleGetStatusTests() {
   describe('getStatus()', function () {
     it('should return cluster status', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
-      const status = orchestrator.getStatus(clusterId);
+      const status = lifecycleOrchestrator.getStatus(clusterId);
 
       assert.strictEqual(status.id, clusterId, 'Status should have cluster ID');
       assert.strictEqual(status.state, 'running', 'Status should show running');
@@ -388,28 +477,30 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
     it('should fail if cluster does not exist', function () {
       assert.throws(
         () => {
-          orchestrator.getStatus('nonexistent-cluster-id');
+          lifecycleOrchestrator.getStatus('nonexistent-cluster-id');
         },
         /not found/i,
         'Should throw for nonexistent cluster'
       );
     });
   });
+}
 
+function defineLifecycleListClustersTests() {
   describe('listClusters()', function () {
     it('should return empty array when no clusters exist', function () {
-      const clusters = orchestrator.listClusters();
+      const clusters = lifecycleOrchestrator.listClusters();
       assert.strictEqual(clusters.length, 0, 'Should return empty array');
     });
 
     it('should return all clusters', async function () {
       const config = createSimpleConfig();
-      mockRunner.when('worker').returns({ done: true });
+      lifecycleMockRunner.when('worker').returns({ done: true });
 
-      await orchestrator.start(config, { text: 'Task 1' });
-      await orchestrator.start(config, { text: 'Task 2' });
+      await lifecycleOrchestrator.start(config, { text: 'Task 1' });
+      await lifecycleOrchestrator.start(config, { text: 'Task 2' });
 
-      const clusters = orchestrator.listClusters();
+      const clusters = lifecycleOrchestrator.listClusters();
       assert.strictEqual(clusters.length, 2, 'Should return 2 clusters');
 
       // Verify: Clusters have required fields
@@ -420,8 +511,7 @@ describe('Orchestrator - Cluster Lifecycle (CRITICAL)', function () {
       }
     });
   });
-});
-
+}
 describe('Orchestrator - Crash Recovery (CRITICAL)', function () {
   this.timeout(10000);
 
@@ -472,7 +562,7 @@ describe('Orchestrator - Crash Recovery (CRITICAL)', function () {
 
     // Phase 2: New orchestrator instance - auto-loads clusters
     {
-      const orchestrator2 = new Orchestrator({
+      const orchestrator2 = await Orchestrator.create({
         storageDir,
         quiet: true,
         // skipLoad: false (default) - should auto-load
@@ -631,16 +721,17 @@ describe('Orchestrator - Concurrent Operations (Race Conditions)', function () {
     orchestrator.close();
 
     // Create multiple orchestrators that all try to load at once
-    const orchestrators = Array(5)
-      .fill()
-      .map(
-        () =>
-          new Orchestrator({
+    const orchestrators = await Promise.all(
+      Array(5)
+        .fill()
+        .map(() =>
+          Orchestrator.create({
             storageDir,
             quiet: true,
             // skipLoad: false (default) - all load simultaneously
           })
-      );
+        )
+    );
 
     // Verify: All loaded the cluster successfully
     for (const orch of orchestrators) {
@@ -705,8 +796,10 @@ describe('Orchestrator - Error Handling', function () {
 
     // Cluster should still exist and not have crashed (state can be running, stopping, or stopped)
     assert.ok(cluster, 'Cluster should still exist');
-    assert.ok(['running', 'stopping', 'stopped'].includes(cluster.state),
-      `Cluster should be in valid state (got: ${cluster.state})`);
+    assert.ok(
+      ['running', 'stopping', 'stopped'].includes(cluster.state),
+      `Cluster should be in valid state (got: ${cluster.state})`
+    );
   });
 
   it('should handle missing storageDir gracefully', function () {
@@ -821,7 +914,7 @@ describe('Orchestrator - File Locking', function () {
     }
 
     // Load clusters (should acquire lock)
-    const orch2 = new Orchestrator({
+    const orch2 = await Orchestrator.create({
       storageDir,
       quiet: true,
       // skipLoad: false (default)

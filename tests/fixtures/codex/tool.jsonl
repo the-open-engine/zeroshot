@@ -1,0 +1,3 @@
+{"type":"item.created","item":{"type":"function_call","name":"read_file","arguments":"{\"path\":\"README.md\"}","id":"call-1"}}
+{"type":"item.created","item":{"type":"function_call_output","id":"call-1","output":"README contents"}}
+{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":9}}

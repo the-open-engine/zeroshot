@@ -8,350 +8,278 @@
  */
 
 const blessed = require('blessed');
+const fs = require('fs');
 const { spawn } = require('child_process');
+const { execSync } = require('../lib/safe-exec'); // Enforces timeouts
 
-function setupKeybindings(screen, widgets, tui, orchestrator) {
-  // Enter - drill into cluster detail view
-  screen.key(['enter'], () => {
-    if (tui.viewMode === 'overview' && tui.clusters.length > 0) {
-      const selectedCluster = tui.clusters[tui.selectedIndex];
-      if (selectedCluster) {
-        tui.viewMode = 'detail';
-        tui.detailClusterId = selectedCluster.id;
-        tui.renderer.setSelectedCluster(selectedCluster.id);
-        tui.messages = []; // Clear old messages
+const HELP_TEXT_DETAIL =
+  '{cyan-fg}[Esc]{/} Back  {cyan-fg}[k]{/} Kill  {cyan-fg}[s]{/} Stop  {cyan-fg}[e]{/} Export  {cyan-fg}[l]{/} Logs  {cyan-fg}[r]{/} Refresh  {cyan-fg}[q]{/} Quit';
+const HELP_TEXT_OVERVIEW =
+  '{cyan-fg}[Enter]{/} View  {cyan-fg}[↑/↓]{/} Navigate  {cyan-fg}[k]{/} Kill  {cyan-fg}[s]{/} Stop  {cyan-fg}[l]{/} Logs  {cyan-fg}[r]{/} Refresh  {cyan-fg}[q]{/} Quit';
 
-        // Update help text
-        widgets.helpBar.setContent(
-          '{cyan-fg}[Esc]{/} Back  {cyan-fg}[k]{/} Kill  {cyan-fg}[s]{/} Stop  {cyan-fg}[e]{/} Export  {cyan-fg}[l]{/} Logs  {cyan-fg}[r]{/} Refresh  {cyan-fg}[q]{/} Quit'
-        );
+function getSelectedCluster(tui) {
+  if (tui.clusters.length === 0) {
+    return null;
+  }
 
-        // Switch to detail layout: hide clusters/stats, show agents/logs
-        widgets.clustersTable.hide();
-        widgets.statsBox.hide();
-        widgets.agentTable.show();
-        widgets.logsBox.show();
-        screen.render();
-      }
+  return tui.clusters[tui.selectedIndex] || null;
+}
+
+function pushLogMessage(tui, text, level) {
+  tui.messages.push({
+    timestamp: new Date().toISOString(),
+    text,
+    level,
+  });
+  tui.renderer.renderLogs(tui.messages.slice(-20));
+}
+
+function enterDetailView(screen, widgets, tui) {
+  if (tui.viewMode !== 'overview') {
+    return;
+  }
+
+  const selectedCluster = getSelectedCluster(tui);
+  if (!selectedCluster) {
+    return;
+  }
+
+  tui.viewMode = 'detail';
+  tui.detailClusterId = selectedCluster.id;
+  tui.renderer.setSelectedCluster(selectedCluster.id);
+  tui.messages = [];
+
+  widgets.helpBar.setContent(HELP_TEXT_DETAIL);
+  widgets.clustersTable.hide();
+  widgets.statsBox.hide();
+  widgets.agentTable.show();
+  widgets.logsBox.show();
+  screen.render();
+}
+
+function exitDetailView(screen, widgets, tui) {
+  if (tui.viewMode !== 'detail') {
+    return;
+  }
+
+  tui.viewMode = 'overview';
+  tui.detailClusterId = null;
+  tui.renderer.setSelectedCluster(null);
+  tui.messages = [];
+
+  widgets.helpBar.setContent(HELP_TEXT_OVERVIEW);
+  widgets.clustersTable.show();
+  widgets.statsBox.show();
+  widgets.agentTable.hide();
+  widgets.logsBox.hide();
+  screen.render();
+}
+
+function moveSelection(screen, tui, orchestrator, delta) {
+  if (tui.clusters.length === 0) {
+    return;
+  }
+
+  tui.selectedIndex = Math.min(tui.clusters.length - 1, Math.max(0, tui.selectedIndex + delta));
+  tui.renderer.renderClustersTable(tui.clusters, tui.selectedIndex);
+
+  const selectedCluster = tui.clusters[tui.selectedIndex];
+  if (selectedCluster) {
+    tui.renderer.setSelectedCluster(selectedCluster.id);
+    tui.messages = [];
+
+    const status = orchestrator.getStatus(selectedCluster.id);
+    tui.renderer.renderAgentTable(status.agents, tui.resourceStats);
+  }
+
+  screen.render();
+}
+
+function createConfirmationDialog(screen, label, color) {
+  const labelText = color
+    ? ` {bold}{${color}-fg}${label}{/${color}-fg}{/bold} `
+    : ` {bold}${label}{/bold} `;
+
+  return blessed.question({
+    parent: screen,
+    border: 'line',
+    height: 'shrink',
+    width: 'half',
+    top: 'center',
+    left: 'center',
+    label: labelText,
+    tags: true,
+    keys: true,
+    vi: true,
+  });
+}
+
+function confirmClusterAction(options) {
+  const { screen, tui, selectedCluster, label, color, prompt, action, successText, failureText } =
+    options;
+  const question = createConfirmationDialog(screen, label, color);
+
+  question.ask(prompt, async (err, value) => {
+    if (err || !value) {
+      return;
     }
-  });
-
-  // Escape - back to overview
-  screen.key(['escape'], () => {
-    if (tui.viewMode === 'detail') {
-      tui.viewMode = 'overview';
-      tui.detailClusterId = null;
-      tui.renderer.setSelectedCluster(null);
-      tui.messages = []; // Clear messages
-
-      // Update help text
-      widgets.helpBar.setContent(
-        '{cyan-fg}[Enter]{/} View  {cyan-fg}[↑/↓]{/} Navigate  {cyan-fg}[k]{/} Kill  {cyan-fg}[s]{/} Stop  {cyan-fg}[l]{/} Logs  {cyan-fg}[r]{/} Refresh  {cyan-fg}[q]{/} Quit'
-      );
-
-      // Switch to overview layout: show clusters/stats, hide agents/logs
-      widgets.clustersTable.show();
-      widgets.statsBox.show();
-      widgets.agentTable.hide();
-      widgets.logsBox.hide();
-      screen.render();
-    }
-  });
-
-  // Navigation - up
-  screen.key(['up', 'k'], () => {
-    if (tui.clusters.length === 0) return;
-    tui.selectedIndex = Math.max(0, tui.selectedIndex - 1);
-    tui.renderer.renderClustersTable(tui.clusters, tui.selectedIndex);
-
-    // Update agent table and logs for newly selected cluster
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (selectedCluster) {
-      // CRITICAL: Tell renderer which cluster is selected
-      tui.renderer.setSelectedCluster(selectedCluster.id);
-
-      // Clear old messages from previous cluster
-      tui.messages = [];
-
-      const status = orchestrator.getStatus(selectedCluster.id);
-      tui.renderer.renderAgentTable(status.agents, tui.resourceStats);
-    }
-
-    screen.render();
-  });
-
-  // Navigation - down
-  screen.key(['down', 'j'], () => {
-    if (tui.clusters.length === 0) return;
-    tui.selectedIndex = Math.min(tui.clusters.length - 1, tui.selectedIndex + 1);
-    tui.renderer.renderClustersTable(tui.clusters, tui.selectedIndex);
-
-    // Update agent table and logs for newly selected cluster
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (selectedCluster) {
-      // CRITICAL: Tell renderer which cluster is selected
-      tui.renderer.setSelectedCluster(selectedCluster.id);
-
-      // Clear old messages from previous cluster
-      tui.messages = [];
-
-      const status = orchestrator.getStatus(selectedCluster.id);
-      tui.renderer.renderAgentTable(status.agents, tui.resourceStats);
-    }
-
-    screen.render();
-  });
-
-  // Kill selected cluster (with confirmation)
-  screen.key(['K'], () => {
-    if (tui.clusters.length === 0) return;
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (!selectedCluster) return;
-
-    // Create confirmation dialog
-    const question = blessed.question({
-      parent: screen,
-      border: 'line',
-      height: 'shrink',
-      width: 'half',
-      top: 'center',
-      left: 'center',
-      label: ' {bold}{red-fg}Confirm Kill{/red-fg}{/bold} ',
-      tags: true,
-      keys: true,
-      vi: true,
-    });
-
-    question.ask(
-      `Kill cluster ${selectedCluster.id}?\n\n(This will force-stop all agents)`,
-      async (err, value) => {
-        if (err) return;
-        if (value) {
-          try {
-            await orchestrator.kill(selectedCluster.id);
-            tui.messages.push({
-              timestamp: new Date().toISOString(),
-              text: `✓ Killed cluster ${selectedCluster.id}`,
-              level: 'success',
-            });
-            tui.renderer.renderLogs(tui.messages.slice(-20));
-          } catch (error) {
-            tui.messages.push({
-              timestamp: new Date().toISOString(),
-              text: `✗ Failed to kill cluster: ${error.message}`,
-              level: 'error',
-            });
-            tui.renderer.renderLogs(tui.messages.slice(-20));
-          }
-          screen.render();
-        }
-      }
-    );
-  });
-
-  // Stop selected cluster (with confirmation)
-  screen.key(['s'], () => {
-    if (tui.clusters.length === 0) return;
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (!selectedCluster) return;
-
-    // Create confirmation dialog
-    const question = blessed.question({
-      parent: screen,
-      border: 'line',
-      height: 'shrink',
-      width: 'half',
-      top: 'center',
-      left: 'center',
-      label: ' {bold}{yellow-fg}Confirm Stop{/yellow-fg}{/bold} ',
-      tags: true,
-      keys: true,
-      vi: true,
-    });
-
-    question.ask(
-      `Stop cluster ${selectedCluster.id}?\n\n(This will gracefully stop all agents)`,
-      async (err, value) => {
-        if (err) return;
-        if (value) {
-          try {
-            await orchestrator.stop(selectedCluster.id);
-            tui.messages.push({
-              timestamp: new Date().toISOString(),
-              text: `✓ Stopped cluster ${selectedCluster.id}`,
-              level: 'success',
-            });
-            tui.renderer.renderLogs(tui.messages.slice(-20));
-          } catch (error) {
-            tui.messages.push({
-              timestamp: new Date().toISOString(),
-              text: `✗ Failed to stop cluster: ${error.message}`,
-              level: 'error',
-            });
-            tui.renderer.renderLogs(tui.messages.slice(-20));
-          }
-          screen.render();
-        }
-      }
-    );
-  });
-
-  // Export selected cluster
-  screen.key(['e'], () => {
-    if (tui.clusters.length === 0) return;
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (!selectedCluster) return;
 
     try {
-      const markdown = orchestrator.export(selectedCluster.id, 'markdown');
-      const fs = require('fs');
-      const filename = `${selectedCluster.id}-export.md`;
-      fs.writeFileSync(filename, markdown);
-
-      tui.messages.push({
-        timestamp: new Date().toISOString(),
-        text: `✓ Exported cluster to ${filename}`,
-        level: 'success',
-      });
-      tui.renderer.renderLogs(tui.messages.slice(-20));
-      screen.render();
+      await action(selectedCluster);
+      pushLogMessage(tui, successText(selectedCluster), 'success');
     } catch (error) {
-      tui.messages.push({
-        timestamp: new Date().toISOString(),
-        text: `✗ Failed to export cluster: ${error.message}`,
-        level: 'error',
-      });
-      tui.renderer.renderLogs(tui.messages.slice(-20));
-      screen.render();
+      pushLogMessage(tui, failureText(error), 'error');
     }
-  });
 
-  // Show full logs (spawn zeroshot logs -f in new terminal)
-  screen.key(['l'], () => {
-    if (tui.clusters.length === 0) return;
-    const selectedCluster = tui.clusters[tui.selectedIndex];
-    if (!selectedCluster) return;
-
-    try {
-      // Detect terminal emulator
-      const term =
-        process.env.TERM_PROGRAM || (process.env.COLORTERM ? 'gnome-terminal' : null) || 'xterm';
-
-      let cmd, args;
-      if (term === 'iTerm.app' || term === 'Apple_Terminal') {
-        // macOS
-        cmd = 'osascript';
-        args = [
-          '-e',
-          `tell application "Terminal" to do script "zeroshot logs ${selectedCluster.id} -f"`,
-        ];
-      } else {
-        // Linux - try common terminal emulators
-        const terminals = ['gnome-terminal', 'konsole', 'xterm', 'urxvt', 'alacritty', 'kitty'];
-        cmd =
-          terminals.find((t) => {
-            try {
-              require('child_process').execSync(`which ${t}`, {
-                stdio: 'ignore',
-              });
-              return true;
-            } catch {
-              return false;
-            }
-          }) || 'xterm';
-
-        if (cmd === 'gnome-terminal' || cmd === 'konsole') {
-          args = [
-            '--',
-            'bash',
-            '-c',
-            `zeroshot logs ${selectedCluster.id} -f; read -p "Press enter to close..."`,
-          ];
-        } else {
-          args = [
-            '-e',
-            'bash',
-            '-c',
-            `zeroshot logs ${selectedCluster.id} -f; read -p "Press enter to close..."`,
-          ];
-        }
-      }
-
-      spawn(cmd, args, { detached: true, stdio: 'ignore' });
-
-      tui.messages.push({
-        timestamp: new Date().toISOString(),
-        text: `✓ Opened logs for ${selectedCluster.id} in new terminal`,
-        level: 'success',
-      });
-      tui.renderer.renderLogs(tui.messages.slice(-20));
-      screen.render();
-    } catch (error) {
-      tui.messages.push({
-        timestamp: new Date().toISOString(),
-        text: `✗ Failed to open logs: ${error.message}`,
-        level: 'error',
-      });
-      tui.renderer.renderLogs(tui.messages.slice(-20));
-      screen.render();
-    }
-  });
-
-  // Force refresh
-  screen.key(['r'], () => {
-    tui.messages.push({
-      timestamp: new Date().toISOString(),
-      text: '↻ Refreshing...',
-      level: 'info',
-    });
-    tui.renderer.renderLogs(tui.messages.slice(-20));
     screen.render();
+  });
+}
 
-    // Trigger immediate poll
-    if (tui.poller) {
-      tui.poller.poll();
+function handleKillCluster(screen, tui, orchestrator) {
+  const selectedCluster = getSelectedCluster(tui);
+  if (!selectedCluster) {
+    return;
+  }
+
+  confirmClusterAction({
+    screen,
+    tui,
+    selectedCluster,
+    label: 'Confirm Kill',
+    color: 'red',
+    prompt: `Kill cluster ${selectedCluster.id}?\n\n(This will force-stop all agents)`,
+    action: (cluster) => orchestrator.kill(cluster.id),
+    successText: (cluster) => `✓ Killed cluster ${cluster.id}`,
+    failureText: (error) => `✗ Failed to kill cluster: ${error.message}`,
+  });
+}
+
+function handleStopCluster(screen, tui, orchestrator) {
+  const selectedCluster = getSelectedCluster(tui);
+  if (!selectedCluster) {
+    return;
+  }
+
+  confirmClusterAction({
+    screen,
+    tui,
+    selectedCluster,
+    label: 'Confirm Stop',
+    color: 'yellow',
+    prompt: `Stop cluster ${selectedCluster.id}?\n\n(This will gracefully stop all agents)`,
+    action: (cluster) => orchestrator.stop(cluster.id),
+    successText: (cluster) => `✓ Stopped cluster ${cluster.id}`,
+    failureText: (error) => `✗ Failed to stop cluster: ${error.message}`,
+  });
+}
+
+function handleExportCluster(screen, tui, orchestrator) {
+  const selectedCluster = getSelectedCluster(tui);
+  if (!selectedCluster) {
+    return;
+  }
+
+  try {
+    const markdown = orchestrator.export(selectedCluster.id, 'markdown');
+    const filename = `${selectedCluster.id}-export.md`;
+    fs.writeFileSync(filename, markdown);
+    pushLogMessage(tui, `✓ Exported cluster to ${filename}`, 'success');
+  } catch (error) {
+    pushLogMessage(tui, `✗ Failed to export cluster: ${error.message}`, 'error');
+  }
+
+  screen.render();
+}
+
+function findTerminalCommand() {
+  const terminals = ['gnome-terminal', 'konsole', 'xterm', 'urxvt', 'alacritty', 'kitty'];
+
+  for (const terminal of terminals) {
+    try {
+      execSync(`which ${terminal}`, { stdio: 'ignore' });
+      return terminal;
+    } catch {
+      // Ignore missing terminal
     }
+  }
+
+  return 'xterm';
+}
+
+function buildLogCommand(clusterId) {
+  const term =
+    process.env.TERM_PROGRAM || (process.env.COLORTERM ? 'gnome-terminal' : null) || 'xterm';
+
+  if (term === 'iTerm.app' || term === 'Apple_Terminal') {
+    return {
+      cmd: 'osascript',
+      args: ['-e', `tell application "Terminal" to do script "zeroshot logs ${clusterId} -f"`],
+    };
+  }
+
+  const cmd = findTerminalCommand();
+  const logCommand = `zeroshot logs ${clusterId} -f; read -p "Press enter to close..."`;
+
+  if (cmd === 'gnome-terminal' || cmd === 'konsole') {
+    return { cmd, args: ['--', 'bash', '-c', logCommand] };
+  }
+
+  return { cmd, args: ['-e', 'bash', '-c', logCommand] };
+}
+
+function handleOpenLogs(screen, tui) {
+  const selectedCluster = getSelectedCluster(tui);
+  if (!selectedCluster) {
+    return;
+  }
+
+  try {
+    const { cmd, args } = buildLogCommand(selectedCluster.id);
+    spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    pushLogMessage(tui, `✓ Opened logs for ${selectedCluster.id} in new terminal`, 'success');
+  } catch (error) {
+    pushLogMessage(tui, `✗ Failed to open logs: ${error.message}`, 'error');
+  }
+
+  screen.render();
+}
+
+function handleRefresh(screen, tui) {
+  pushLogMessage(tui, '↻ Refreshing...', 'info');
+  screen.render();
+
+  if (tui.poller) {
+    tui.poller.poll();
+  }
+}
+
+function handleExit(screen, tui) {
+  const question = createConfirmationDialog(screen, 'Confirm Exit');
+
+  question.ask('Exit TUI?\n\n(Clusters will continue running)', (err, value) => {
+    if (err || !value) {
+      return;
+    }
+
+    tui.exit();
   });
+}
 
-  // Exit (with confirmation)
-  screen.key(['q', 'C-c'], () => {
-    const question = blessed.question({
-      parent: screen,
-      border: 'line',
-      height: 'shrink',
-      width: 'half',
-      top: 'center',
-      left: 'center',
-      label: ' {bold}Confirm Exit{/bold} ',
-      tags: true,
-      keys: true,
-      vi: true,
-    });
-
-    question.ask('Exit TUI?\n\n(Clusters will continue running)', (err, value) => {
-      if (err) return;
-      if (value) {
-        tui.exit();
-      }
-    });
-  });
-
-  // Help
-  screen.key(['?', 'h'], () => {
-    const helpBox = blessed.box({
-      parent: screen,
-      border: 'line',
-      height: '80%',
-      width: '60%',
-      top: 'center',
-      left: 'center',
-      label: ' {bold}Keybindings{/bold} ',
-      tags: true,
-      keys: true,
-      vi: true,
-      scrollable: true,
-      alwaysScroll: true,
-      content: `
+function handleHelp(screen) {
+  const helpBox = blessed.box({
+    parent: screen,
+    border: 'line',
+    height: '80%',
+    width: '60%',
+    top: 'center',
+    left: 'center',
+    label: ' {bold}Keybindings{/bold} ',
+    tags: true,
+    keys: true,
+    vi: true,
+    scrollable: true,
+    alwaysScroll: true,
+    content: `
 {bold}Navigation:{/bold}
   ↑/k       Move selection up
   ↓/j       Move selection down
@@ -368,16 +296,29 @@ function setupKeybindings(screen, widgets, tui, orchestrator) {
   q/Ctrl-C  Exit TUI
 
 Press any key to close...
-      `.trim(),
-    });
+    `.trim(),
+  });
 
-    helpBox.key(['escape', 'q', 'enter', 'space'], () => {
-      helpBox.destroy();
-      screen.render();
-    });
-
+  helpBox.key(['escape', 'q', 'enter', 'space'], () => {
+    helpBox.destroy();
     screen.render();
   });
+
+  screen.render();
+}
+
+function setupKeybindings(screen, widgets, tui, orchestrator) {
+  screen.key(['enter'], () => enterDetailView(screen, widgets, tui));
+  screen.key(['escape'], () => exitDetailView(screen, widgets, tui));
+  screen.key(['up', 'k'], () => moveSelection(screen, tui, orchestrator, -1));
+  screen.key(['down', 'j'], () => moveSelection(screen, tui, orchestrator, 1));
+  screen.key(['K'], () => handleKillCluster(screen, tui, orchestrator));
+  screen.key(['s'], () => handleStopCluster(screen, tui, orchestrator));
+  screen.key(['e'], () => handleExportCluster(screen, tui, orchestrator));
+  screen.key(['l'], () => handleOpenLogs(screen, tui));
+  screen.key(['r'], () => handleRefresh(screen, tui));
+  screen.key(['q', 'C-c'], () => handleExit(screen, tui));
+  screen.key(['?', 'h'], () => handleHelp(screen));
 }
 
 module.exports = { setupKeybindings };

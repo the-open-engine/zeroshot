@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { getTask } from '../store.js';
 import { spawnTask } from '../runner.js';
 
-export function resumeTask(taskId, newPrompt) {
+export async function resumeTask(taskId, newPrompt) {
   const task = getTask(taskId);
 
   if (!task) {
@@ -23,10 +23,11 @@ export function resumeTask(taskId, newPrompt) {
   console.log(chalk.dim(`Original prompt: ${task.prompt}`));
   console.log(chalk.dim(`Resume prompt: ${prompt}`));
 
-  const newTask = spawnTask(prompt, {
+  const newTask = await spawnTask(prompt, {
     cwd: task.cwd,
     continue: true, // Use --continue to load most recent session in that directory
     sessionId: task.sessionId,
+    provider: task.provider,
   });
 
   console.log(chalk.green(`\n✓ Resumed as new task: ${chalk.cyan(newTask.id)}`));

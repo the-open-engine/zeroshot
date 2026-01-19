@@ -29,8 +29,14 @@ const createMockAgent = (overrides = {}) => ({
 const mockCluster = { id: 'test-cluster-123', createdAt: 1234567890 };
 
 describe('substituteTemplate', () => {
+  defineKnownVariableTests();
+  defineArbitraryPatternTests();
+  defineEdgeCaseTests();
+});
+
+function defineKnownVariableTests() {
   describe('known template variables', () => {
-    it('should substitute {{cluster.id}}', () => {
+    it('should substitute {{cluster.id}}', async () => {
       const config = {
         topic: 'TEST',
         content: { text: 'Cluster: {{cluster.id}}' },
@@ -38,7 +44,7 @@ describe('substituteTemplate', () => {
       const context = {};
       const agent = createMockAgent();
 
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -48,7 +54,7 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.text, 'Cluster: test-cluster-123');
     });
 
-    it('should substitute {{iteration}}', () => {
+    it('should substitute {{iteration}}', async () => {
       const config = {
         topic: 'TEST',
         content: { text: 'Iteration: {{iteration}}' },
@@ -56,7 +62,7 @@ describe('substituteTemplate', () => {
       const context = {};
       const agent = createMockAgent({ iteration: 5 });
 
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -66,7 +72,7 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.text, 'Iteration: 5');
     });
 
-    it('should substitute {{result.*}} from parsed output', () => {
+    it('should substitute {{result.*}} from parsed output', async () => {
       const config = {
         topic: 'PLAN_READY',
         content: {
@@ -81,7 +87,7 @@ describe('substituteTemplate', () => {
       };
       const agent = createMockAgent();
 
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -92,7 +98,7 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.data.summary, 'Test summary');
     });
 
-    it('should fail on unsubstituted known variables', () => {
+    it('should fail on unsubstituted known variables', async () => {
       const config = {
         topic: 'TEST',
         content: { text: '{{result.missing}}' },
@@ -105,7 +111,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should NOT throw - missing result fields now default to null with warning
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -116,9 +122,11 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.text, null);
     });
   });
+}
 
+function defineArbitraryPatternTests() {
   describe('arbitrary {{...}} patterns in content', () => {
-    it('should allow React dangerouslySetInnerHTML patterns in content', () => {
+    it('should allow React dangerouslySetInnerHTML patterns in content', async () => {
       const config = {
         topic: 'PLAN_READY',
         content: {
@@ -138,7 +146,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should NOT throw on {{__html: userInput}} - it's just content
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -148,7 +156,7 @@ describe('substituteTemplate', () => {
       assert.ok(result.content.text.includes('{{__html: userInput}}'));
     });
 
-    it('should allow Mustache template patterns in content', () => {
+    it('should allow Mustache template patterns in content', async () => {
       const config = {
         topic: 'PLAN_READY',
         content: {
@@ -167,7 +175,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should NOT throw on Mustache patterns
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -177,7 +185,7 @@ describe('substituteTemplate', () => {
       assert.ok(result.content.text.includes('{{#items}}'));
     });
 
-    it('should allow Handlebars helper patterns in content', () => {
+    it('should allow Handlebars helper patterns in content', async () => {
       const config = {
         topic: 'PLAN_READY',
         content: {
@@ -196,7 +204,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should NOT throw on Handlebars patterns
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -206,7 +214,7 @@ describe('substituteTemplate', () => {
       assert.ok(result.content.text.includes('{{formatDate'));
     });
 
-    it('should still catch unsubstituted KNOWN variables even with arbitrary patterns', () => {
+    it('should still catch unsubstituted KNOWN variables even with arbitrary patterns', async () => {
       const config = {
         topic: 'TEST',
         // Mix of known variable (should fail) and arbitrary pattern (should be ignored)
@@ -217,7 +225,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should throw because {{result.plan}} is a KNOWN pattern but no result provided
-      assert.throws(
+      await assert.rejects(
         () =>
           substituteTemplate({
             config,
@@ -229,10 +237,12 @@ describe('substituteTemplate', () => {
       );
     });
   });
+}
 
+function defineEdgeCaseTests() {
   describe('edge cases', () => {
-    it('should handle empty config', () => {
-      assert.throws(
+    it('should handle empty config', async () => {
+      await assert.rejects(
         () =>
           substituteTemplate({
             config: null,
@@ -244,7 +254,7 @@ describe('substituteTemplate', () => {
       );
     });
 
-    it('should handle result with boolean values', () => {
+    it('should handle result with boolean values', async () => {
       const config = {
         topic: 'VALIDATION_RESULT',
         content: {
@@ -258,7 +268,7 @@ describe('substituteTemplate', () => {
       };
       const agent = createMockAgent();
 
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -269,7 +279,7 @@ describe('substituteTemplate', () => {
       assert.strictEqual(result.content.data.approved, true);
     });
 
-    it('should handle nested braces in content correctly', () => {
+    it('should handle nested braces in content correctly', async () => {
       const config = {
         topic: 'PLAN_READY',
         content: {
@@ -288,7 +298,7 @@ describe('substituteTemplate', () => {
       const agent = createMockAgent();
 
       // Should handle nested braces without breaking
-      const result = substituteTemplate({
+      const result = await substituteTemplate({
         config,
         context,
         agent,
@@ -298,4 +308,4 @@ describe('substituteTemplate', () => {
       assert.ok(result.content.text.includes('{{value}}'));
     });
   });
-});
+}

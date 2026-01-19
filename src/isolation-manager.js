@@ -3,18 +3,23 @@
  *
  * Handles:
  * - Container creation with workspace mounts
- * - Credential injection for Claude CLI
+ * - Credential injection for provider CLIs
  * - Command execution inside containers
  * - Container cleanup on stop/kill
  */
 
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
+const { execSync } = require('./lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
 const { Worker } = require('worker_threads');
+const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { loadSettings } = require('../lib/settings');
+const { CLAUDE_AUTH_ENV_VARS, resolveClaudeAuth } = require('../lib/settings/claude-auth');
+const { normalizeProviderName } = require('../lib/provider-names');
 const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
+const { getProvider } = require('./providers');
 
 /**
  * Escape a string for safe use in shell commands
@@ -26,6 +31,19 @@ function escapeShell(str) {
   // Replace single quotes with escaped version and wrap in single quotes
   // This is the safest approach for shell escaping
   return `'${str.replace(/'/g, "'\\''")}'`;
+}
+
+function expandHomePath(value) {
+  if (!value) return value;
+  if (value === '~') return os.homedir();
+  return value.replace(/^~(?=\/|$)/, os.homedir());
+}
+
+function pathContains(base, target) {
+  const resolvedBase = path.resolve(base);
+  const resolvedTarget = path.resolve(target);
+  if (resolvedBase === resolvedTarget) return true;
+  return resolvedTarget.startsWith(resolvedBase + path.sep);
 }
 
 const DEFAULT_IMAGE = 'zeroshot-cluster-base';
@@ -68,6 +86,7 @@ class IsolationManager {
    * @param {boolean} [config.reuseExistingWorkspace=false] - If true, reuse existing isolated workspace (for resume)
    * @param {Array<string|object>} [config.mounts] - Override default mounts (preset names or {host, container, readonly})
    * @param {boolean} [config.noMounts=false] - Disable all credential mounts
+   * @param {string} [config.provider] - Provider name for credential warnings
    * @returns {Promise<string>} Container ID
    */
   async createContainer(clusterId, config) {
@@ -76,145 +95,207 @@ class IsolationManager {
     const containerName = `zeroshot-cluster-${clusterId}`;
     const reuseExisting = config.reuseExistingWorkspace || false;
 
-    // Check if container already exists
-    if (this.containers.has(clusterId)) {
-      const existingId = this.containers.get(clusterId);
-      if (this._isContainerRunning(existingId)) {
-        return existingId;
-      }
+    const runningContainerId = this._getRunningContainerId(clusterId);
+    if (runningContainerId) {
+      return runningContainerId;
     }
 
-    // Clean up any existing container with same name
     this._removeContainerByName(containerName);
 
-    // For isolation mode: copy files to temp dir with fresh git repo (100% isolated)
-    // No worktrees - cleaner, no host path dependencies
-    // EXCEPTION: On resume (reuseExisting=true), skip copy and use existing workspace
-    if (this._isGitRepo(workDir)) {
-      const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
+    workDir = await this._prepareIsolatedWorkspace(clusterId, workDir, reuseExisting);
 
-      if (reuseExisting && fs.existsSync(isolatedPath)) {
-        // Resume mode: reuse existing isolated workspace (contains agent's work)
-        console.log(`[IsolationManager] Reusing existing isolated workspace at ${isolatedPath}`);
-        this.isolatedDirs = this.isolatedDirs || new Map();
-        this.isolatedDirs.set(clusterId, {
-          path: isolatedPath,
-          originalDir: workDir,
-        });
-        workDir = isolatedPath;
-      } else {
-        // Fresh start: create new isolated copy
-        const isolatedDir = await this._createIsolatedCopy(clusterId, workDir);
-        this.isolatedDirs = this.isolatedDirs || new Map();
-        this.isolatedDirs.set(clusterId, {
-          path: isolatedDir,
-          originalDir: workDir,
-        });
-        workDir = isolatedDir;
-        console.log(`[IsolationManager] Created isolated copy at ${workDir}`);
-      }
-    }
-
-    // Resolve container home directory EARLY - needed for Claude config mount and hooks
     const settings = loadSettings();
+    const providerName = normalizeProviderName(
+      config.provider || settings.defaultProvider || 'claude'
+    );
     const containerHome = config.containerHome || settings.dockerContainerHome || '/root';
 
-    // Create fresh Claude config dir for this cluster (avoids permission issues from host)
     const clusterConfigDir = this._createClusterConfigDir(clusterId, containerHome);
     console.log(`[IsolationManager] Created cluster config dir at ${clusterConfigDir}`);
 
-    // Build docker run command
-    // NOTE: Container runs as 'node' user (uid 1000) for --dangerously-skip-permissions
-    const args = [
+    const args = this._buildBaseDockerArgs({
+      containerName,
+      workDir,
+      containerHome,
+      clusterConfigDir,
+    });
+
+    const mountedHosts = this._applyCredentialMounts(args, config, settings, containerHome);
+    this._warnMissingProviderCredentials(providerName, mountedHosts, config, containerHome);
+
+    args.push('-w', '/workspace', image, 'tail', '-f', '/dev/null');
+
+    return this._spawnContainer(clusterId, args, workDir);
+  }
+
+  _getRunningContainerId(clusterId) {
+    const existingId = this.containers.get(clusterId);
+    if (!existingId) {
+      return null;
+    }
+
+    return this._isContainerRunning(existingId) ? existingId : null;
+  }
+
+  async _prepareIsolatedWorkspace(clusterId, workDir, reuseExisting) {
+    if (!this._isGitRepo(workDir)) {
+      return workDir;
+    }
+
+    this.isolatedDirs = this.isolatedDirs || new Map();
+    const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
+
+    if (reuseExisting && fs.existsSync(isolatedPath)) {
+      console.log(`[IsolationManager] Reusing existing isolated workspace at ${isolatedPath}`);
+      this.isolatedDirs.set(clusterId, {
+        path: isolatedPath,
+        originalDir: workDir,
+      });
+      return isolatedPath;
+    }
+
+    const isolatedDir = await this._createIsolatedCopy(clusterId, workDir);
+    this.isolatedDirs.set(clusterId, {
+      path: isolatedDir,
+      originalDir: workDir,
+    });
+    console.log(`[IsolationManager] Created isolated copy at ${isolatedDir}`);
+    return isolatedDir;
+  }
+
+  _buildBaseDockerArgs({ containerName, workDir, containerHome, clusterConfigDir }) {
+    return [
       'run',
-      '-d', // detached
+      '-d',
       '--name',
       containerName,
-      // Mount workspace
       '-v',
       `${workDir}:/workspace`,
-      // Mount Docker socket for Docker-in-Docker (e2e tests need docker compose)
       '-v',
       '/var/run/docker.sock:/var/run/docker.sock',
-      // Add node user to host's docker group (fixes permission denied)
-      // CRITICAL: Without this, agent can't run docker commands inside container
       '--group-add',
       this._getDockerGid(),
-      // Mount fresh Claude config to container user's home (read-write - Claude CLI writes settings, todos, etc.)
       '-v',
       `${clusterConfigDir}:${containerHome}/.claude`,
     ];
+  }
 
-    // Add configurable credential mounts
-    // Priority: CLI config > env var > settings > defaults
-    if (!config.noMounts) {
-      let mountConfig;
+  _resolveMountConfig(config, settings) {
+    if (config.mounts) {
+      return config.mounts;
+    }
 
-      if (config.mounts) {
-        // CLI override
-        mountConfig = config.mounts;
-      } else if (process.env.ZEROSHOT_DOCKER_MOUNTS) {
-        // Environment override
-        try {
-          mountConfig = JSON.parse(process.env.ZEROSHOT_DOCKER_MOUNTS);
-        } catch {
-          console.warn('[IsolationManager] Invalid ZEROSHOT_DOCKER_MOUNTS JSON, using settings');
-          mountConfig = settings.dockerMounts;
-        }
-      } else {
-        // User settings
-        mountConfig = settings.dockerMounts;
-      }
-
-      // Resolve presets to actual mount specs (containerHome already resolved above)
-      const mounts = resolveMounts(mountConfig, { containerHome });
-
-      for (const mount of mounts) {
-        const hostPath = mount.host.replace(/^~/, os.homedir());
-
-        // Check path exists and is mountable
-        try {
-          const stat = fs.statSync(hostPath);
-          // Files ending in 'config' must be files (some systems have dirs)
-          if (hostPath.endsWith('config') && !stat.isFile()) {
-            continue;
-          }
-        } catch {
-          // Path doesn't exist - skip silently
-          continue;
-        }
-
-        const mountSpec = mount.readonly
-          ? `${hostPath}:${mount.container}:ro`
-          : `${hostPath}:${mount.container}`;
-        args.push('-v', mountSpec);
-      }
-
-      // Pass env vars based on enabled presets
-      const envSpecs = expandEnvPatterns(
-        resolveEnvs(mountConfig, settings.dockerEnvPassthrough)
-      );
-      for (const spec of envSpecs) {
-        if (spec.forced) {
-          // Forced value - always pass with specified value
-          args.push('-e', `${spec.name}=${spec.value}`);
-        } else if (process.env[spec.name]) {
-          // Dynamic value - only pass if set in environment
-          args.push('-e', `${spec.name}=${process.env[spec.name]}`);
-        }
+    if (process.env.ZEROSHOT_DOCKER_MOUNTS) {
+      try {
+        return JSON.parse(process.env.ZEROSHOT_DOCKER_MOUNTS);
+      } catch {
+        console.warn('[IsolationManager] Invalid ZEROSHOT_DOCKER_MOUNTS JSON, using settings');
+        return settings.dockerMounts;
       }
     }
 
-    // Finish docker args
-    args.push(
-      '-w',
-      '/workspace',
-      image,
-      'tail',
-      '-f',
-      '/dev/null'
+    return settings.dockerMounts;
+  }
+
+  _applyCredentialMounts(args, config, settings, containerHome) {
+    const mountedHosts = [];
+    if (config.noMounts) {
+      return mountedHosts;
+    }
+
+    const mountConfig = this._resolveMountConfig(config, settings);
+    const mounts = resolveMounts(mountConfig, { containerHome });
+    const claudeContainerPath = path.posix.join(containerHome, '.claude');
+
+    for (const mount of mounts) {
+      if (mount.container === claudeContainerPath) {
+        console.warn(
+          `[IsolationManager] Skipping mount for ${mount.host} -> ${mount.container} ` +
+            '(Claude config is managed by zeroshot).'
+        );
+        continue;
+      }
+
+      const hostPath = expandHomePath(mount.host);
+
+      try {
+        const stat = fs.statSync(hostPath);
+        if (hostPath.endsWith('config') && !stat.isFile()) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      const mountSpec = mount.readonly
+        ? `${hostPath}:${mount.container}:ro`
+        : `${hostPath}:${mount.container}`;
+      args.push('-v', mountSpec);
+      mountedHosts.push(hostPath);
+    }
+
+    const envToPass = this._collectDockerEnvVars(mountConfig, settings);
+    for (const [key, value] of Object.entries(envToPass)) {
+      args.push('-e', `${key}=${value}`);
+    }
+
+    return mountedHosts;
+  }
+
+  _collectDockerEnvVars(mountConfig, settings) {
+    const envToPass = {};
+    const envSpecs = expandEnvPatterns(resolveEnvs(mountConfig, settings.dockerEnvPassthrough));
+
+    for (const spec of envSpecs) {
+      if (spec.forced) {
+        envToPass[spec.name] = spec.value;
+      } else if (process.env[spec.name]) {
+        envToPass[spec.name] = process.env[spec.name];
+      }
+    }
+
+    for (const envVar of CLAUDE_AUTH_ENV_VARS) {
+      if (process.env[envVar]) {
+        envToPass[envVar] = process.env[envVar];
+      }
+    }
+
+    const authEnv = resolveClaudeAuth(settings);
+    for (const [key, value] of Object.entries(authEnv)) {
+      if (!(key in envToPass)) {
+        envToPass[key] = value;
+      }
+    }
+
+    return envToPass;
+  }
+
+  _warnMissingProviderCredentials(providerName, mountedHosts, config, containerHome) {
+    if (providerName === 'claude') {
+      return;
+    }
+
+    const provider = getProvider(providerName);
+    const credentialPaths = provider.getCredentialPaths ? provider.getCredentialPaths() : [];
+    const expandedCreds = credentialPaths.map((cred) => expandHomePath(cred));
+    const hasCredentialMount = mountedHosts.some((hostPath) =>
+      expandedCreds.some(
+        (credPath) => pathContains(hostPath, credPath) || pathContains(credPath, hostPath)
+      )
     );
 
+    if (!hasCredentialMount && expandedCreds.length > 0) {
+      const exampleHost = credentialPaths[0];
+      const exampleContainer = exampleHost.replace(/^~(?=\/|$)/, containerHome);
+      const mountNote = config.noMounts ? 'Credential mounts are disabled. ' : '';
+      console.warn(
+        `[IsolationManager] ⚠️  ${mountNote}No credential mounts found for ${provider.displayName}. ` +
+          `Add one with --mount ${exampleHost}:${exampleContainer}:ro`
+      );
+    }
+  }
+
+  _spawnContainer(clusterId, args, workDir) {
     return new Promise((resolve, reject) => {
       const proc = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -229,144 +310,107 @@ class IsolationManager {
       });
 
       proc.on('close', async (code) => {
-        if (code === 0) {
-          const containerId = stdout.trim().substring(0, 12);
-          this.containers.set(clusterId, containerId);
-
-          // Install dependencies if package.json exists
-          // This enables e2e tests and other npm-based tools to run
-          // OPTIMIZATION: Use pre-baked deps when possible (30-40% faster startup)
-          // See: GitHub issue #20
-          try {
-            console.log(`[IsolationManager] Checking for package.json in ${workDir}...`);
-            if (fs.existsSync(path.join(workDir, 'package.json'))) {
-              // Check if node_modules already exists in container (pre-baked or previous run)
-              const checkResult = await this.execInContainer(
-                clusterId,
-                ['sh', '-c', 'test -d node_modules && test -f node_modules/.package-lock.json && echo "exists"'],
-                {}
-              );
-
-              if (checkResult.code === 0 && checkResult.stdout.trim() === 'exists') {
-                console.log(`[IsolationManager] ✓ Dependencies already installed (skipping npm install)`);
-              } else {
-                // Check if npm is available in container
-                const npmCheck = await this.execInContainer(clusterId, ['which', 'npm'], {});
-                if (npmCheck.code !== 0) {
-                  console.log(`[IsolationManager] npm not available in container, skipping dependency install`);
-                } else {
-                  // Issue #20: Try to use pre-baked dependencies first
-                  // Check if pre-baked deps exist and can satisfy project requirements
-                  const preBakeCheck = await this.execInContainer(
-                    clusterId,
-                    ['sh', '-c', 'test -d /pre-baked-deps/node_modules && echo "exists"'],
-                    {}
-                  );
-
-                  if (preBakeCheck.code === 0 && preBakeCheck.stdout.trim() === 'exists') {
-                    console.log(`[IsolationManager] Checking if pre-baked deps satisfy requirements...`);
-
-                    // Copy pre-baked deps, then run npm install to add any missing
-                    // This is faster than full npm install: copy is ~2s, npm install adds ~5-10s for missing
-                    const copyResult = await this.execInContainer(
-                      clusterId,
-                      ['sh', '-c', 'cp -rn /pre-baked-deps/node_modules . 2>/dev/null || true'],
-                      {}
-                    );
-
-                    if (copyResult.code === 0) {
-                      console.log(`[IsolationManager] ✓ Copied pre-baked dependencies`);
-
-                      // Run npm install to add any missing deps (much faster with pre-baked base)
-                      const installResult = await this.execInContainer(
-                        clusterId,
-                        ['sh', '-c', 'npm_config_engine_strict=false npm install --no-audit --no-fund --prefer-offline'],
-                        {}
-                      );
-
-                      if (installResult.code === 0) {
-                        console.log(`[IsolationManager] ✓ Dependencies installed (pre-baked + incremental)`);
-                      } else {
-                        // Fallback: full install (pre-baked copy may have caused issues)
-                        console.warn(`[IsolationManager] Incremental install failed, falling back to full install`);
-                        await this.execInContainer(
-                          clusterId,
-                          ['sh', '-c', 'rm -rf node_modules && npm_config_engine_strict=false npm install --no-audit --no-fund'],
-                          {}
-                        );
-                        console.log(`[IsolationManager] ✓ Dependencies installed (full fallback)`);
-                      }
-                    }
-                  } else {
-                    // No pre-baked deps, full npm install with retries
-                    console.log(`[IsolationManager] Installing npm dependencies in container...`);
-
-                    // Retry npm install with exponential backoff (network issues are common)
-                    const maxRetries = 3;
-                    const baseDelay = 2000; // 2 seconds
-                    let installResult = null;
-
-                    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                      try {
-                        installResult = await this.execInContainer(
-                          clusterId,
-                          ['sh', '-c', 'npm_config_engine_strict=false npm install --no-audit --no-fund'],
-                          {}
-                        );
-
-                        if (installResult.code === 0) {
-                          console.log(`[IsolationManager] ✓ Dependencies installed`);
-                          break; // Success - exit retry loop
-                        }
-
-                        // Failed - retry if not last attempt
-                        // Use stderr if available, otherwise stdout (npm writes some errors to stdout)
-                        const errorOutput = (installResult.stderr || installResult.stdout || '').slice(0, 500);
-                        if (attempt < maxRetries) {
-                          const delay = baseDelay * Math.pow(2, attempt - 1);
-                          console.warn(
-                            `[IsolationManager] ⚠️ npm install failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
-                          );
-                          console.warn(`[IsolationManager] Error: ${errorOutput}`);
-                          await new Promise((_resolve) => setTimeout(_resolve, delay));
-                        } else {
-                          console.warn(
-                            `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${errorOutput}`
-                          );
-                        }
-                      } catch (execErr) {
-                        if (attempt < maxRetries) {
-                          const delay = baseDelay * Math.pow(2, attempt - 1);
-                          console.warn(
-                            `[IsolationManager] ⚠️ npm install execution error (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
-                          );
-                          console.warn(`[IsolationManager] Error: ${execErr.message}`);
-                          await new Promise((_resolve) => setTimeout(_resolve, delay));
-                        } else {
-                          throw execErr; // Re-throw on last attempt
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          } catch (err) {
-            console.warn(
-              `[IsolationManager] ⚠️ Failed to install dependencies (non-fatal): ${err.message}`
-            );
-          }
-
-          resolve(containerId);
-        } else {
+        if (code !== 0) {
           reject(new Error(`Failed to create container: ${stderr}`));
+          return;
         }
+
+        const containerId = stdout.trim().substring(0, 12);
+        this.containers.set(clusterId, containerId);
+
+        try {
+          console.log(`[IsolationManager] Checking for package.json in ${workDir}...`);
+          if (fs.existsSync(path.join(workDir, 'package.json'))) {
+            await this._installDependenciesWithRetry(clusterId);
+          }
+        } catch (err) {
+          console.warn(
+            `[IsolationManager] ⚠️ Failed to install dependencies (non-fatal): ${err.message}`
+          );
+        }
+
+        resolve(containerId);
       });
 
       proc.on('error', (err) => {
         reject(new Error(`Docker spawn error: ${err.message}`));
       });
     });
+  }
+
+  async _installDependenciesWithRetry(clusterId) {
+    console.log(`[IsolationManager] Installing npm dependencies in container...`);
+
+    const maxRetries = 3;
+    const baseDelay = 2000; // 2 seconds
+    const installCommand = [
+      'sh',
+      '-c',
+      [
+        'if [ -d node_modules ] && [ -f node_modules/.package-lock.json ]; then',
+        'echo "__deps_present__";',
+        'exit 0;',
+        'fi;',
+        'if ! command -v npm >/dev/null 2>&1; then',
+        'echo "__npm_missing__";',
+        'exit 127;',
+        'fi;',
+        'if [ -d /pre-baked-deps/node_modules ]; then',
+        'cp -rn /pre-baked-deps/node_modules . 2>/dev/null || true;',
+        'npm_config_engine_strict=false npm install --no-audit --no-fund --prefer-offline;',
+        'install_code=$?;',
+        'if [ $install_code -ne 0 ]; then',
+        'rm -rf node_modules;',
+        'npm_config_engine_strict=false npm install --no-audit --no-fund;',
+        'fi;',
+        'else',
+        'npm_config_engine_strict=false npm install --no-audit --no-fund;',
+        'fi',
+      ].join(' '),
+    ];
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const installResult = await this.execInContainer(clusterId, installCommand, {});
+        const stdout = installResult.stdout || '';
+
+        if (installResult.code === 0) {
+          if (stdout.includes('__deps_present__')) {
+            console.log(
+              `[IsolationManager] ✓ Dependencies already installed (skipping npm install)`
+            );
+          } else {
+            console.log(`[IsolationManager] ✓ Dependencies installed`);
+          }
+          return;
+        }
+
+        const errorOutput = (installResult.stderr || installResult.stdout || '').slice(0, 500);
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          console.warn(
+            `[IsolationManager] ⚠️ npm install failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
+          );
+          console.warn(`[IsolationManager] Error: ${errorOutput}`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          console.warn(
+            `[IsolationManager] ⚠️ npm install failed after ${maxRetries} attempts (non-fatal): ${errorOutput}`
+          );
+        }
+      } catch (execErr) {
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          console.warn(
+            `[IsolationManager] ⚠️ npm install execution error (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`
+          );
+          console.warn(`[IsolationManager] Error: ${execErr.message}`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          throw execErr;
+        }
+      }
+    }
   }
 
   /**
@@ -376,6 +420,7 @@ class IsolationManager {
    * @param {object} [options] - Exec options
    * @param {boolean} [options.interactive] - Use -it flags
    * @param {object} [options.env] - Environment variables
+   * @param {number} [options.timeout=30000] - Timeout in ms (0 = no timeout). Prevents infinite hangs.
    * @returns {Promise<{stdout: string, stderr: string, code: number}>}
    */
   execInContainer(clusterId, command, options = {}) {
@@ -399,6 +444,9 @@ class IsolationManager {
 
     args.push(containerId, ...command);
 
+    // Default timeout: 30 seconds (prevents infinite hangs)
+    const timeout = options.timeout ?? 30000;
+
     return new Promise((resolve, reject) => {
       const proc = spawn('docker', args, {
         stdio: options.interactive ? 'inherit' : ['pipe', 'pipe', 'pipe'],
@@ -406,6 +454,16 @@ class IsolationManager {
 
       let stdout = '';
       let stderr = '';
+      let timedOut = false;
+      let timeoutId = null;
+
+      // Set up timeout if specified (0 = no timeout)
+      if (timeout > 0) {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          proc.kill('SIGKILL');
+        }, timeout);
+      }
 
       if (!options.interactive) {
         proc.stdout.on('data', (data) => {
@@ -417,10 +475,16 @@ class IsolationManager {
       }
 
       proc.on('close', (code) => {
-        resolve({ stdout, stderr, code });
+        if (timeoutId) clearTimeout(timeoutId);
+        if (timedOut) {
+          reject(new Error(`Docker exec timed out after ${timeout}ms`));
+        } else {
+          resolve({ stdout, stderr, code });
+        }
       });
 
       proc.on('error', (err) => {
+        if (timeoutId) clearTimeout(timeoutId);
         reject(new Error(`Docker exec error: ${err.message}`));
       });
     });
@@ -542,7 +606,9 @@ class IsolationManager {
       const isolatedInfo = this.isolatedDirs.get(clusterId);
 
       if (preserveWorkspace) {
-        console.log(`[IsolationManager] Preserving isolated workspace at ${isolatedInfo.path} for resume`);
+        console.log(
+          `[IsolationManager] Preserving isolated workspace at ${isolatedInfo.path} for resume`
+        );
         // Don't delete - but DON'T remove from Map either, resume() needs it
       } else {
         console.log(`[IsolationManager] Cleaning up isolated dir at ${isolatedInfo.path}`);
@@ -677,58 +743,80 @@ class IsolationManager {
     const files = [];
     const directories = new Set();
 
-    const collectFiles = (currentSrc, relativePath = '') => {
-      let entries;
+    const shouldIgnoreFsError = (err) =>
+      err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT';
+
+    const shouldExcludeEntry = (entryName) => {
+      return exclude.some((pattern) => {
+        if (pattern.startsWith('*.')) {
+          return entryName.endsWith(pattern.slice(1));
+        }
+        return entryName === pattern;
+      });
+    };
+
+    const ensureParentDirTracked = (relativePath) => {
+      if (relativePath) {
+        directories.add(relativePath);
+      }
+    };
+
+    const readEntries = (currentSrc) => {
       try {
-        entries = fs.readdirSync(currentSrc, { withFileTypes: true });
+        return fs.readdirSync(currentSrc, { withFileTypes: true });
       } catch (err) {
-        if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT') {
-          return;
+        if (shouldIgnoreFsError(err)) {
+          return [];
         }
         throw err;
       }
+    };
+
+    function handleEntry(entry, srcPath, relPath, relativePath) {
+      if (entry.isSymbolicLink()) {
+        const targetStats = fs.statSync(srcPath);
+        if (targetStats.isDirectory()) {
+          directories.add(relPath);
+          collectFiles(srcPath, relPath);
+          return;
+        }
+
+        files.push(relPath);
+        ensureParentDirTracked(relativePath);
+        return;
+      }
+
+      if (entry.isDirectory()) {
+        directories.add(relPath);
+        collectFiles(srcPath, relPath);
+        return;
+      }
+
+      files.push(relPath);
+      ensureParentDirTracked(relativePath);
+    }
+
+    function collectFiles(currentSrc, relativePath = '') {
+      const entries = readEntries(currentSrc);
 
       for (const entry of entries) {
-        // Check exclusions (exact match or glob pattern)
-        const shouldExclude = exclude.some((pattern) => {
-          if (pattern.startsWith('*.')) {
-            return entry.name.endsWith(pattern.slice(1));
-          }
-          return entry.name === pattern;
-        });
-        if (shouldExclude) continue;
+        if (shouldExcludeEntry(entry.name)) {
+          continue;
+        }
 
         const srcPath = path.join(currentSrc, entry.name);
         const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
 
         try {
-          // Handle symlinks: resolve to actual target
-          if (entry.isSymbolicLink()) {
-            const targetStats = fs.statSync(srcPath);
-            if (targetStats.isDirectory()) {
-              directories.add(relPath);
-              collectFiles(srcPath, relPath);
-            } else {
-              files.push(relPath);
-              // Ensure parent directory is tracked
-              if (relativePath) directories.add(relativePath);
-            }
-          } else if (entry.isDirectory()) {
-            directories.add(relPath);
-            collectFiles(srcPath, relPath);
-          } else {
-            files.push(relPath);
-            // Ensure parent directory is tracked
-            if (relativePath) directories.add(relativePath);
-          }
+          handleEntry(entry, srcPath, relPath, relativePath);
         } catch (err) {
-          if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT') {
+          if (shouldIgnoreFsError(err)) {
             continue;
           }
           throw err;
         }
       }
-    };
+    }
 
     collectFiles(src);
 
@@ -896,7 +984,10 @@ class IsolationManager {
         ],
       },
     };
-    fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify(clusterSettings, null, 2));
+    fs.writeFileSync(
+      path.join(configDir, 'settings.json'),
+      JSON.stringify(clusterSettings, null, 2)
+    );
 
     // Track for cleanup
     this.clusterConfigDirs = this.clusterConfigDirs || new Map();
@@ -932,33 +1023,48 @@ class IsolationManager {
   _preserveTerraformState(clusterId, isolatedPath) {
     const stateFiles = ['terraform.tfstate', 'terraform.tfstate.backup', 'tfplan'];
     const checkDirs = [isolatedPath, path.join(isolatedPath, 'terraform')];
+    const stateDir = path.join(os.homedir(), '.zeroshot', 'terraform-state', clusterId);
+
+    const hasStateFiles = (checkDir) => {
+      if (!fs.existsSync(checkDir)) {
+        return false;
+      }
+
+      return stateFiles.some((file) => fs.existsSync(path.join(checkDir, file)));
+    };
+
+    const copyStateFiles = (checkDir) => {
+      let copied = false;
+
+      for (const file of stateFiles) {
+        const srcPath = path.join(checkDir, file);
+        if (!fs.existsSync(srcPath)) {
+          continue;
+        }
+
+        const destPath = path.join(stateDir, file);
+        try {
+          fs.copyFileSync(srcPath, destPath);
+          console.log(`[IsolationManager] Preserved Terraform state: ${file} → ${stateDir}`);
+          copied = true;
+        } catch (err) {
+          console.warn(`[IsolationManager] Failed to preserve ${file}: ${err.message}`);
+        }
+      }
+
+      return copied;
+    };
 
     let foundState = false;
 
     for (const checkDir of checkDirs) {
-      if (!fs.existsSync(checkDir)) continue;
-
-      const hasStateFiles = stateFiles.some((file) => fs.existsSync(path.join(checkDir, file)));
-
-      if (hasStateFiles) {
-        const stateDir = path.join(os.homedir(), '.zeroshot', 'terraform-state', clusterId);
-        fs.mkdirSync(stateDir, { recursive: true });
-
-        for (const file of stateFiles) {
-          const srcPath = path.join(checkDir, file);
-          if (fs.existsSync(srcPath)) {
-            const destPath = path.join(stateDir, file);
-            try {
-              fs.copyFileSync(srcPath, destPath);
-              console.log(`[IsolationManager] Preserved Terraform state: ${file} → ${stateDir}`);
-              foundState = true;
-            } catch (err) {
-              console.warn(`[IsolationManager] Failed to preserve ${file}: ${err.message}`);
-            }
-          }
-        }
-        break; // Only backup from first dir with state files
+      if (!hasStateFiles(checkDir)) {
+        continue;
       }
+
+      fs.mkdirSync(stateDir, { recursive: true });
+      foundState = copyStateFiles(checkDir);
+      break;
     }
 
     if (!foundState) {
@@ -990,9 +1096,12 @@ class IsolationManager {
    */
   _isContainerRunning(containerId) {
     try {
-      const result = execSync(`docker inspect -f '{{.State.Running}}' ${escapeShell(containerId)} 2>/dev/null`, {
-        encoding: 'utf8',
-      });
+      const result = execSync(
+        `docker inspect -f '{{.State.Running}}' ${escapeShell(containerId)} 2>/dev/null`,
+        {
+          encoding: 'utf8',
+        }
+      );
       return result.trim() === 'true';
     } catch {
       return false;
@@ -1017,7 +1126,8 @@ class IsolationManager {
    */
   static isDockerAvailable() {
     try {
-      execSync('docker --version', { encoding: 'utf8', stdio: 'pipe' });
+      // Require both CLI binary and a reachable daemon.
+      execSync('docker info', { encoding: 'utf8', stdio: 'pipe' });
       return true;
     } catch {
       return false;
@@ -1146,14 +1256,16 @@ class IsolationManager {
 
   /**
    * Create worktree-based isolation for a cluster (lightweight alternative to Docker)
-   * Creates a git worktree at /tmp/zeroshot-worktrees/{clusterId}
+   * Creates a git worktree at {os.tmpdir()}/zeroshot-worktrees/{clusterId}
    * @param {string} clusterId - Cluster ID
    * @param {string} workDir - Original working directory (must be a git repo)
    * @returns {{ path: string, branch: string, repoRoot: string }}
    */
   createWorktreeIsolation(clusterId, workDir) {
     if (!this._isGitRepo(workDir)) {
-      throw new Error(`Worktree isolation requires a git repository. ${workDir} is not a git repo.`);
+      throw new Error(
+        `Worktree isolation requires a git repository. ${workDir} is not a git repo.`
+      );
     }
 
     const worktreeInfo = this.createWorktree(clusterId, workDir);
@@ -1196,7 +1308,8 @@ class IsolationManager {
     }
 
     // Create branch name from cluster ID (e.g., cluster-cosmic-meteor-87 -> zeroshot/cosmic-meteor-87)
-    const branchName = `zeroshot/${clusterId.replace(/^cluster-/, '')}`;
+    const baseBranchName = `zeroshot/${clusterId.replace(/^cluster-/, '')}`;
+    let branchName = baseBranchName;
 
     // Worktree path in tmp
     const worktreePath = path.join(os.tmpdir(), 'zeroshot-worktrees', clusterId);
@@ -1207,34 +1320,73 @@ class IsolationManager {
       fs.mkdirSync(parentDir, { recursive: true });
     }
 
-    // Remove existing worktree if it exists (cleanup from previous run)
+    // Best-effort cleanup of stale worktree metadata and directory.
+    // IMPORTANT: If a previous run deleted the directory without deregistering the worktree,
+    // git may keep the branch "checked out" and block deletion/reuse.
     try {
-      execSync(`git worktree remove --force "${worktreePath}" 2>/dev/null`, {
+      execSync(`git worktree remove --force ${escapeShell(worktreePath)}`, {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: 'pipe',
       });
     } catch {
-      // Ignore - worktree doesn't exist
+      // ignore
     }
-
-    // Delete the branch if it exists (from previous run)
     try {
-      execSync(`git branch -D "${branchName}" 2>/dev/null`, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        stdio: 'pipe',
-      });
+      execSync('git worktree prune', { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
     } catch {
-      // Ignore - branch doesn't exist
+      // ignore
+    }
+    try {
+      fs.rmSync(worktreePath, { recursive: true, force: true });
+    } catch {
+      // ignore
     }
 
-    // Create worktree with new branch based on HEAD
-    execSync(`git worktree add -b "${branchName}" "${worktreePath}" HEAD`, {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
+    // Create worktree with new branch based on HEAD (retry on branch collision/in-use)
+    for (let attempt = 0; attempt < 10; attempt++) {
+      // Best-effort delete if branch exists and is not in use by another worktree.
+      try {
+        execSync(`git branch -D ${escapeShell(branchName)}`, {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      } catch {
+        // ignore
+      }
+
+      try {
+        execSync(
+          `git worktree add -b ${escapeShell(branchName)} ${escapeShell(worktreePath)} HEAD`,
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            stdio: 'pipe',
+          }
+        );
+        break;
+      } catch (err) {
+        const stderr = (
+          err && (err.stderr || err.message) ? String(err.stderr || err.message) : ''
+        ).toLowerCase();
+        const isBranchCollision =
+          stderr.includes('already exists') ||
+          stderr.includes('cannot delete branch') ||
+          stderr.includes('checked out');
+
+        if (attempt < 9 && isBranchCollision) {
+          branchName = `${baseBranchName}-${crypto.randomBytes(3).toString('hex')}`;
+          try {
+            execSync('git worktree prune', { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+          } catch {
+            // ignore
+          }
+          continue;
+        }
+        throw err;
+      }
+    }
 
     return {
       path: worktreePath,
@@ -1250,19 +1402,46 @@ class IsolationManager {
    * @param {boolean} [options.deleteBranch=false] - Also delete the branch
    */
   removeWorktree(worktreeInfo, _options = {}) {
+    // Remove the worktree (prefer git so metadata is cleaned up).
     try {
-      // Remove the worktree
-      execSync(`git worktree remove --force "${worktreeInfo.path}" 2>/dev/null`, {
+      execSync(`git worktree remove --force ${escapeShell(worktreeInfo.path)}`, {
         cwd: worktreeInfo.repoRoot,
         encoding: 'utf8',
         stdio: 'pipe',
       });
     } catch {
-      // Fallback: manually remove directory if worktree command fails
+      // If git worktree metadata is stale, prune and retry once.
       try {
-        fs.rmSync(worktreeInfo.path, { recursive: true, force: true });
+        execSync('git worktree prune', {
+          cwd: worktreeInfo.repoRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
       } catch {
-        // Ignore
+        // ignore
+      }
+      try {
+        execSync(`git worktree remove --force ${escapeShell(worktreeInfo.path)}`, {
+          cwd: worktreeInfo.repoRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      } catch {
+        // Last resort: delete directory, then prune stale worktree entries.
+        try {
+          fs.rmSync(worktreeInfo.path, { recursive: true, force: true });
+        } catch {
+          // ignore
+        }
+        try {
+          execSync('git worktree prune', {
+            cwd: worktreeInfo.repoRoot,
+            encoding: 'utf8',
+            stdio: 'pipe',
+          });
+        } catch {
+          // ignore
+        }
       }
     }
 

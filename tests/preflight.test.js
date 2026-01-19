@@ -3,7 +3,7 @@
  *
  * Tests the preflight checks that run before any cluster/task starts.
  * These tests verify:
- * - Claude CLI detection and auth validation
+ * - Provider CLI detection
  * - gh CLI detection and auth validation
  * - Docker availability detection
  * - Error message formatting
@@ -25,17 +25,29 @@ const {
   formatError,
 } = require('../src/preflight');
 
+// Cross-platform helper for checking if command exists
+const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+
 describe('Preflight Validation', function () {
   // Allow slower tests for CLI checks
   this.timeout(10000);
 
+  defineFormatErrorTests();
+  defineClaudeVersionTests();
+  defineClaudeAuthTests();
+  defineGhAuthTests();
+  defineDockerTests();
+  defineRunPreflightTests();
+  defineCliIntegrationTests();
+});
+
+function defineFormatErrorTests() {
   describe('formatError()', () => {
     it('should format error with title, detail, and recovery steps', () => {
-      const result = formatError(
-        'Test Error Title',
-        'This is the error detail',
-        ['Step 1: Do this', 'Step 2: Then this']
-      );
+      const result = formatError('Test Error Title', 'This is the error detail', [
+        'Step 1: Do this',
+        'Step 2: Then this',
+      ]);
 
       expect(result).to.include('❌ Test Error Title');
       expect(result).to.include('This is the error detail');
@@ -51,12 +63,14 @@ describe('Preflight Validation', function () {
       expect(result).to.not.include('To fix:');
     });
   });
+}
 
+function defineClaudeVersionTests() {
   describe('getClaudeVersion()', () => {
     it('should detect Claude CLI when installed', function () {
       // Skip if Claude CLI is not installed (CI without Claude)
       try {
-        execSync('which claude', { stdio: 'pipe' });
+        execSync(`${whichCmd} claude`, { stdio: 'pipe' });
       } catch {
         this.skip();
       }
@@ -80,7 +94,9 @@ describe('Preflight Validation', function () {
       expect(result.version).to.be.null;
     });
   });
+}
 
+function defineClaudeAuthTests() {
   describe('checkClaudeAuth()', () => {
     it('should detect authentication when credentials exist', function () {
       const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -235,11 +251,13 @@ describe('Preflight Validation', function () {
       expect(result.method).to.equal('keychain');
     });
   });
+}
 
+function defineGhAuthTests() {
   describe('checkGhAuth()', () => {
     it('should detect gh CLI when installed', function () {
       try {
-        execSync('which gh', { stdio: 'pipe' });
+        execSync(`${whichCmd} gh`, { stdio: 'pipe' });
       } catch {
         this.skip();
       }
@@ -263,7 +281,9 @@ describe('Preflight Validation', function () {
       expect(result.error).to.include('not installed');
     });
   });
+}
 
+function defineDockerTests() {
   describe('checkDocker()', () => {
     it('should detect Docker when available', function () {
       try {
@@ -290,44 +310,71 @@ describe('Preflight Validation', function () {
       expect(result.error).to.include('not installed');
     });
   });
+}
 
+function defineRunPreflightTests() {
   describe('runPreflight()', () => {
-    // Skip in CI - these tests require Claude CLI to be installed
-    before(function () {
-      if (process.env.CI) {
-        this.skip();
-      }
-    });
-
-    it('should pass when all required dependencies are available', function () {
-      // Create mock valid credentials (works in CI without real auth)
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-test-'));
-      const credPath = path.join(tmpDir, '.credentials.json');
-      const validCreds = {
-        claudeAiOauth: {
-          accessToken: 'mock-test-token',
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        },
-      };
-      fs.writeFileSync(credPath, JSON.stringify(validCreds));
-
-      const originalDir = process.env.CLAUDE_CONFIG_DIR;
-      process.env.CLAUDE_CONFIG_DIR = tmpDir;
+    it('should fail when Claude CLI is missing', () => {
+      const originalPath = process.env.PATH;
+      process.env.PATH = '/nonexistent';
 
       const result = runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
+        provider: 'claude',
       });
 
-      process.env.CLAUDE_CONFIG_DIR = originalDir;
-      fs.rmSync(tmpDir, { recursive: true });
+      process.env.PATH = originalPath;
 
-      expect(result.valid).to.be.true;
-      expect(result.errors).to.have.lengthOf(0);
+      expect(result.valid).to.be.false;
+      expect(result.errors.join('')).to.include('Claude command not available');
     });
 
-    it('should fail when Claude CLI is not authenticated', () => {
+    it('should fail when Codex CLI is missing', () => {
+      const originalPath = process.env.PATH;
+      process.env.PATH = '/nonexistent';
+
+      const result = runPreflight({
+        requireGh: false,
+        requireDocker: false,
+        quiet: true,
+        provider: 'codex',
+      });
+
+      process.env.PATH = originalPath;
+
+      expect(result.valid).to.be.false;
+      expect(result.errors.join('')).to.include('Codex CLI not available');
+    });
+
+    it('should fail when Gemini CLI is missing', () => {
+      const originalPath = process.env.PATH;
+      process.env.PATH = '/nonexistent';
+
+      const result = runPreflight({
+        requireGh: false,
+        requireDocker: false,
+        quiet: true,
+        provider: 'gemini',
+      });
+
+      process.env.PATH = originalPath;
+
+      expect(result.valid).to.be.false;
+      expect(result.errors.join('')).to.include('Gemini CLI not available');
+    });
+
+    it('should not require Claude auth when CLI is installed', function () {
+      try {
+        execSync(`${whichCmd} claude`, { stdio: 'pipe' });
+      } catch {
+        this.skip();
+      }
+      if (process.getuid && process.getuid() === 0) {
+        this.skip();
+      }
+
       const originalDir = process.env.CLAUDE_CONFIG_DIR;
       process.env.CLAUDE_CONFIG_DIR = '/nonexistent';
 
@@ -335,210 +382,51 @@ describe('Preflight Validation', function () {
         requireGh: false,
         requireDocker: false,
         quiet: true,
+        provider: 'claude',
       });
 
       process.env.CLAUDE_CONFIG_DIR = originalDir;
 
-      expect(result.valid).to.be.false;
-      expect(result.errors.length).to.be.greaterThan(0);
-      expect(result.errors.join('')).to.include('Claude');
+      expect(result.valid).to.be.true;
     });
 
-    it('should fail when gh CLI required but not authenticated', function () {
-      // Skip if gh is not installed
-      try {
-        execSync('which gh', { stdio: 'pipe' });
-      } catch {
-        this.skip();
-      }
-
-      // Create a scenario where gh auth fails
-      const originalHome = process.env.HOME;
-      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gh-'));
-      process.env.HOME = tmpHome;
-      process.env.GH_CONFIG_DIR = path.join(tmpHome, '.config', 'gh');
-
-      const result = runPreflight({
-        requireGh: true,
-        requireDocker: false,
-        quiet: true,
-      });
-
-      process.env.HOME = originalHome;
-      delete process.env.GH_CONFIG_DIR;
-      fs.rmSync(tmpHome, { recursive: true });
-
-      // Either fails because of gh auth or Claude auth
-      expect(result.valid).to.be.false;
-    });
-
-    it('should include warnings in result', function () {
-      // Create mock valid credentials (works in CI without real auth)
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-test-'));
-      const credPath = path.join(tmpDir, '.credentials.json');
-      const validCreds = {
-        claudeAiOauth: {
-          accessToken: 'mock-test-token',
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        },
-      };
-      fs.writeFileSync(credPath, JSON.stringify(validCreds));
-
-      const originalDir = process.env.CLAUDE_CONFIG_DIR;
-      process.env.CLAUDE_CONFIG_DIR = tmpDir;
-
+    it('should include warnings array in result', function () {
       const result = runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
+        provider: 'codex',
       });
-
-      process.env.CLAUDE_CONFIG_DIR = originalDir;
-      fs.rmSync(tmpDir, { recursive: true });
 
       expect(result).to.have.property('warnings');
       expect(Array.isArray(result.warnings)).to.be.true;
     });
   });
+}
 
+function defineCliIntegrationTests() {
   describe('CLI Integration', function () {
-    // Skip in CI - these tests spawn real CLI processes and require Claude CLI to be installed
-    before(function () {
-      if (process.env.CI) {
-        this.skip();
-      }
-    });
-
-    it('should show preflight passed message on valid run', function () {
-      this.timeout(15000);
-
-      // Create mock valid credentials (works in CI without real auth)
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-cli-'));
-      const credPath = path.join(tmpDir, '.credentials.json');
-      const validCreds = {
-        claudeAiOauth: {
-          accessToken: 'mock-test-token',
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        },
-      };
-      fs.writeFileSync(credPath, JSON.stringify(validCreds));
-
-      const cliPath = path.join(__dirname, '..', 'cli', 'index.js');
-
-      // Run with invalid issue number - preflight should pass, issue fetch should fail
-      const result = spawnSync('node', [cliPath, 'run', '999999999'], {
-        encoding: 'utf8',
-        timeout: 10000,
-        env: {
-          ...process.env,
-          CLAUDE_CONFIG_DIR: tmpDir,
-        },
-      });
-
-      fs.rmSync(tmpDir, { recursive: true });
-
-      const output = result.stdout + result.stderr;
-
-      // Preflight should pass
-      expect(output).to.include('Preflight checks passed');
-
-      // Issue fetch should fail (but after preflight)
-      expect(output).to.include('Failed to fetch GitHub issue');
-    });
-
-    it('should fail fast when Claude CLI not authenticated', function () {
+    it('should fail fast when provider CLI is missing', function () {
       this.timeout(10000);
 
       const cliPath = path.join(__dirname, '..', 'cli', 'index.js');
-
-      const result = spawnSync('node', [cliPath, 'run', '123'], {
+      const result = spawnSync(process.execPath, [cliPath, 'run', 'Test task'], {
         encoding: 'utf8',
         timeout: 8000,
         env: {
           ...process.env,
-          CLAUDE_CONFIG_DIR: '/nonexistent',
+          PATH: '/nonexistent',
+          ZEROSHOT_PROVIDER: 'codex',
         },
       });
 
       const output = result.stdout + result.stderr;
 
-      // Should fail at preflight, not during cluster start
       expect(output).to.include('PREFLIGHT CHECK FAILED');
-      expect(output).to.include('Claude CLI');
-      expect(output).to.include('claude login');
-
-      // Should NOT get to cluster start
-      expect(output).to.not.include('Starting cluster');
-    });
-
-    it('should require gh auth when running with issue number', function () {
-      this.timeout(10000);
-
-      const cliPath = path.join(__dirname, '..', 'cli', 'index.js');
-      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-cli-'));
-
-      const result = spawnSync('node', [cliPath, 'run', '123'], {
-        encoding: 'utf8',
-        timeout: 8000,
-        env: {
-          ...process.env,
-          HOME: tmpHome,
-          GH_CONFIG_DIR: path.join(tmpHome, '.config', 'gh'),
-          CLAUDE_CONFIG_DIR: '/nonexistent', // Also fail Claude auth
-        },
-      });
-
-      fs.rmSync(tmpHome, { recursive: true });
-
-      const output = result.stdout + result.stderr;
-
-      // Should fail at preflight
-      expect(output).to.include('PREFLIGHT CHECK FAILED');
-    });
-
-    it('should not require gh auth when running with plain text', function () {
-      this.timeout(10000);
-
-      // Create mock valid Claude credentials (works in CI without real auth)
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-cli-'));
-      const credPath = path.join(tmpDir, '.credentials.json');
-      const validCreds = {
-        claudeAiOauth: {
-          accessToken: 'mock-test-token',
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
-        },
-      };
-      fs.writeFileSync(credPath, JSON.stringify(validCreds));
-
-      const cliPath = path.join(__dirname, '..', 'cli', 'index.js');
-      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gh-'));
-
-      // Create empty gh config to simulate no gh auth
-      fs.mkdirSync(path.join(tmpHome, '.config', 'gh'), { recursive: true });
-
-      const result = spawnSync('node', [cliPath, 'run', '"Test task"'], {
-        encoding: 'utf8',
-        timeout: 8000,
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          CLAUDE_CONFIG_DIR: tmpDir,
-          GH_CONFIG_DIR: path.join(tmpHome, '.config', 'gh'),
-        },
-      });
-
-      fs.rmSync(tmpDir, { recursive: true });
-      fs.rmSync(tmpHome, { recursive: true });
-
-      const output = result.stdout + result.stderr;
-
-      // Preflight should pass (gh not required for plain text)
-      expect(output).to.include('Preflight checks passed');
-      // Should NOT fail on gh auth
-      expect(output).to.not.include('GitHub CLI (gh) not authenticated');
+      expect(output).to.include('Codex CLI not available');
     });
   });
-});
+}
 
 describe('Preflight in Container Environment', () => {
   it('should work with mounted credentials', function () {

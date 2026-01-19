@@ -14,10 +14,10 @@ const {
   clearLogs,
 } = require('../src/tui/layout');
 
-describe('TUI Layout', () => {
-  let screen;
-  let layout;
+let screen;
+let layout;
 
+describe('TUI Layout', () => {
   beforeEach(() => {
     // Create a mock screen for testing
     screen = blessed.screen({ mouse: true, title: 'Test Dashboard' });
@@ -29,6 +29,16 @@ describe('TUI Layout', () => {
     }
   });
 
+  defineCreateLayoutTests();
+  defineUpdateClustersTableTests();
+  defineUpdateAgentsTableTests();
+  defineUpdateStatsBoxTests();
+  defineAddLogEntryTests();
+  defineClearLogsTests();
+  defineFocusNavigationTests();
+});
+
+function defineCreateLayoutTests() {
   describe('createLayout', () => {
     it('should create layout with all widgets', () => {
       layout = createLayout(screen);
@@ -70,7 +80,9 @@ describe('TUI Layout', () => {
       expect(layout.getCurrentFocus()).to.equal(0);
     });
   });
+}
 
+function defineUpdateClustersTableTests() {
   describe('updateClustersTable', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -119,7 +131,9 @@ describe('TUI Layout', () => {
       expect(layout.clustersTable).to.exist;
     });
   });
+}
 
+function defineUpdateAgentsTableTests() {
   describe('updateAgentsTable', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -171,7 +185,9 @@ describe('TUI Layout', () => {
       expect(layout.agentTable).to.exist;
     });
   });
+}
 
+function defineUpdateStatsBoxTests() {
   describe('updateStatsBox', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -208,7 +224,9 @@ describe('TUI Layout', () => {
       expect(layout.statsBox).to.exist;
     });
   });
+}
 
+function defineAddLogEntryTests() {
   describe('addLogEntry', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -250,7 +268,9 @@ describe('TUI Layout', () => {
       expect(layout.logsBox).to.exist;
     });
   });
+}
 
+function defineClearLogsTests() {
   describe('clearLogs', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -265,7 +285,9 @@ describe('TUI Layout', () => {
       expect(layout.logsBox).to.exist;
     });
   });
+}
 
+function defineFocusNavigationTests() {
   describe('focus navigation', () => {
     beforeEach(() => {
       layout = createLayout(screen);
@@ -294,4 +316,4 @@ describe('TUI Layout', () => {
       expect(layout.getCurrentFocus()).to.equal(initialFocus);
     });
   });
-});
+}

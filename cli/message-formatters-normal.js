@@ -115,9 +115,7 @@ function formatIssueOpened(msg, prefix, timestamp, shownNewTaskForCluster, print
  * @returns {boolean} True if message was handled
  */
 function formatImplementationReady(msg, prefix, timestamp, print = console.log) {
-  print(
-    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`
-  );
+  print(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`);
 
   if (msg.content?.data?.commit) {
     print(
@@ -148,10 +146,34 @@ function formatValidationResult(msg, prefix, timestamp, print = console.log) {
     print(`${prefix} ${msg.content.text.substring(0, 100)}`);
   }
 
+  // Show CANNOT_VALIDATE (permanent) as warnings, CANNOT_VALIDATE_YET (temporary) as errors
+  const criteriaResults = data.criteriaResults;
+  if (Array.isArray(criteriaResults)) {
+    // CANNOT_VALIDATE_YET = temporary, treated as FAIL (work incomplete)
+    const cannotValidateYet = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE_YET');
+    if (cannotValidateYet.length > 0) {
+      print(
+        `${prefix} ${chalk.red('❌ Cannot validate yet')} (${cannotValidateYet.length} criteria - work incomplete):`
+      );
+      for (const cv of cannotValidateYet) {
+        print(`${prefix}   ${chalk.red('•')} ${cv.id}: ${cv.reason || 'No reason provided'}`);
+      }
+    }
+
+    // CANNOT_VALIDATE = permanent, treated as PASS (environmental limitation)
+    const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+    if (cannotValidate.length > 0) {
+      print(
+        `${prefix} ${chalk.yellow('⚠️ Could not validate')} (${cannotValidate.length} criteria - permanent):`
+      );
+      for (const cv of cannotValidate) {
+        print(`${prefix}   ${chalk.yellow('•')} ${cv.id}: ${cv.reason || 'No reason provided'}`);
+      }
+    }
+  }
+
   // Show full JSON data structure
-  print(
-    `${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`
-  );
+  print(`${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`);
 
   return true;
 }

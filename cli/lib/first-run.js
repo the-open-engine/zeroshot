@@ -10,6 +10,7 @@
 
 const readline = require('readline');
 const { loadSettings, saveSettings } = require('../../lib/settings');
+const { detectProviders } = require('../../src/providers');
 
 /**
  * Print welcome banner
@@ -19,7 +20,7 @@ function printWelcome() {
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║   Welcome to Zeroshot!                                        ║
-║   Multi-agent orchestration for Claude                        ║
+║   Multi-agent orchestration engine                            ║
 ║                                                               ║
 ║   Let's configure a few settings to get started.              ║
 ║                                                               ║
@@ -39,13 +40,44 @@ function createReadline() {
 }
 
 /**
+ * Prompt for provider selection
+ * @param {readline.Interface} rl
+ * @param {object} detected
+ * @returns {Promise<string>}
+ */
+function promptProvider(rl, detected) {
+  console.log('\nWhich AI provider would you like to use by default?\n');
+
+  const available = Object.entries(detected).filter(([_, status]) => status.available);
+
+  if (available.length === 0) {
+    console.log('No AI CLI tools detected. Please install one of:');
+    console.log('  - Claude Code: npm install -g @anthropic-ai/claude-code');
+    console.log('  - Codex CLI:   npm install -g @openai/codex');
+    console.log('  - Gemini CLI:  npm install -g @google/gemini-cli');
+    process.exit(1);
+  }
+
+  available.forEach(([name], i) => {
+    console.log(`  ${i + 1}) ${name} (installed)`);
+  });
+
+  return new Promise((resolve) => {
+    rl.question('\nChoice [1]: ', (answer) => {
+      const idx = parseInt(answer) - 1 || 0;
+      resolve(available[idx]?.[0] || available[0][0]);
+    });
+  });
+}
+
+/**
  * Prompt for model selection
  * @param {readline.Interface} rl
  * @returns {Promise<string>}
  */
 function promptModel(rl) {
   return new Promise((resolve) => {
-    console.log('What is the maximum model agents can use? (cost ceiling)\n');
+    console.log('What is the maximum Claude model agents can use? (cost ceiling)\n');
     console.log('  1) sonnet  - Agents can use sonnet or haiku (recommended)');
     console.log('  2) opus    - Agents can use opus, sonnet, or haiku');
     console.log('  3) haiku   - Agents can only use haiku (lowest cost)\n');
@@ -95,7 +127,8 @@ function printComplete(settings) {
 ╚═══════════════════════════════════════════════════════════════╝
 
 Your settings:
-  • Max model:    ${settings.maxModel} (agents can use this model or lower)
+  • Provider:     ${settings.defaultProvider}
+  • Max model:    ${settings.maxModel} (Claude ceiling)
   • Auto-updates: ${settings.autoCheckUpdates ? 'enabled' : 'disabled'}
 
 Change anytime with: zeroshot settings set <key> <value>
@@ -144,6 +177,10 @@ async function checkFirstRun(options = {}) {
   const rl = createReadline();
 
   try {
+    const detected = await detectProviders();
+    const provider = await promptProvider(rl, detected);
+    settings.defaultProvider = provider;
+
     // Model ceiling selection
     const model = await promptModel(rl);
     settings.maxModel = model;

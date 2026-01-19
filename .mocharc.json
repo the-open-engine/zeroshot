@@ -1,0 +1,7 @@
+{
+  "parallel": true,
+  "jobs": 4,
+  "timeout": 10000,
+  "slow": 1000,
+  "spec": "tests/**/*.test.js"
+}

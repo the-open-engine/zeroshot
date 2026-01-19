@@ -17,7 +17,7 @@ const CHECK_INTERVAL = 60000; // 60 seconds
  * Supports: 30s, 5m, 2h, 1d, 1w
  */
 export function parseInterval(str) {
-  const match = str.match(/^(\d+)(s|m|h|d|w)$/i);
+  const match = str.match(/^(\d+)([smhdw])$/i);
   if (!match) return null;
 
   const value = parseInt(match[1], 10);
@@ -108,7 +108,7 @@ function log(msg) {
 /**
  * Check and run due schedules
  */
-function checkSchedules() {
+async function checkSchedules() {
   const schedules = loadSchedules();
   const now = new Date();
 
@@ -122,7 +122,7 @@ function checkSchedules() {
     log(`Running scheduled task: ${schedule.id} - "${schedule.prompt.slice(0, 50)}..."`);
 
     try {
-      const task = spawnTask(schedule.prompt, {
+      const task = await spawnTask(schedule.prompt, {
         cwd: schedule.cwd,
         scheduleId: schedule.id,
       });

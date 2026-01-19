@@ -5,6 +5,7 @@
 const assert = require('assert');
 const path = require('path');
 const TemplateResolver = require('../src/template-resolver');
+const { DEFAULT_MAX_ITERATIONS } = require('../src/agent/agent-config');
 
 // Copy of getConfig logic from config-router.js for testing
 function getConfig(complexity, taskType) {
@@ -21,10 +22,10 @@ function getConfig(complexity, taskType) {
     return 'full-workflow';
   };
 
-  const getModel = (role) => {
-    if (complexity === 'CRITICAL' && role === 'planner') return 'opus';
-    if (complexity === 'TRIVIAL') return 'haiku';
-    return 'sonnet';
+  const getLevel = (role) => {
+    if (complexity === 'CRITICAL' && role === 'planner') return 'level3';
+    if (complexity === 'TRIVIAL') return 'level1';
+    return 'level2';
   };
 
   const getValidatorCount = () => {
@@ -33,14 +34,6 @@ function getConfig(complexity, taskType) {
     if (complexity === 'STANDARD') return 2;
     if (complexity === 'CRITICAL') return 4;
     return 1;
-  };
-
-  const getMaxIterations = () => {
-    if (complexity === 'TRIVIAL') return 1;
-    if (complexity === 'SIMPLE') return 3;
-    if (complexity === 'STANDARD') return 5;
-    if (complexity === 'CRITICAL') return 7;
-    return 3;
   };
 
   const getMaxTokens = () => {
@@ -57,22 +50,22 @@ function getConfig(complexity, taskType) {
     task_type: taskType,
     complexity,
     max_tokens: getMaxTokens(),
-    max_iterations: getMaxIterations(),
+    max_iterations: DEFAULT_MAX_ITERATIONS,
   };
 
   if (base === 'single-worker') {
-    params.worker_model = getModel('worker');
+    params.worker_level = getLevel('worker');
   } else if (base === 'worker-validator') {
-    params.worker_model = getModel('worker');
-    params.validator_model = getModel('validator');
+    params.worker_level = getLevel('worker');
+    params.validator_level = getLevel('validator');
   } else if (base === 'debug-workflow') {
-    params.investigator_model = getModel('planner');
-    params.fixer_model = getModel('worker');
-    params.tester_model = getModel('validator');
+    params.investigator_level = getLevel('planner');
+    params.fixer_level = getLevel('worker');
+    params.tester_level = getLevel('validator');
   } else if (base === 'full-workflow') {
-    params.planner_model = getModel('planner');
-    params.worker_model = getModel('worker');
-    params.validator_model = getModel('validator');
+    params.planner_level = getLevel('planner');
+    params.worker_level = getLevel('worker');
+    params.validator_level = getLevel('validator');
     params.validator_count = getValidatorCount();
   }
 
@@ -106,7 +99,7 @@ describe('TemplateResolver', function () {
       assert.ok(info.name);
       assert.ok(info.description);
       assert.ok(info.params);
-      assert.ok(info.params.worker_model);
+      assert.ok(info.params.worker_level);
     });
 
     it('should return null for non-existent template', function () {
@@ -121,15 +114,15 @@ describe('TemplateResolver', function () {
         task_type: 'TASK',
         complexity: 'TRIVIAL',
         max_tokens: 50000,
-        max_iterations: 1,
-        worker_model: 'haiku',
+        max_iterations: DEFAULT_MAX_ITERATIONS,
+        worker_level: 'level1',
       });
 
       assert.ok(resolved.agents);
-      assert.strictEqual(resolved.agents.length, 2); // worker + completion-detector
+      assert.strictEqual(resolved.agents.length, 1);
 
       const worker = resolved.agents.find((a) => a.id === 'worker');
-      assert.strictEqual(worker.model, 'haiku');
+      assert.strictEqual(worker.modelLevel, 'level1');
     });
 
     it('should resolve full-workflow with conditional validators', function () {
@@ -137,21 +130,21 @@ describe('TemplateResolver', function () {
         task_type: 'TASK',
         complexity: 'CRITICAL',
         max_tokens: 150000,
-        max_iterations: 7,
-        planner_model: 'opus',
-        worker_model: 'sonnet',
-        validator_model: 'sonnet',
+        max_iterations: DEFAULT_MAX_ITERATIONS,
+        planner_level: 'level3',
+        worker_level: 'level2',
+        validator_level: 'level2',
         validator_count: 4,
       });
 
       assert.ok(resolved.agents);
 
       const planner = resolved.agents.find((a) => a.id === 'planner');
-      assert.strictEqual(planner.model, 'opus');
+      assert.strictEqual(planner.modelLevel, 'level3');
 
-      // Should have 4 validators for CRITICAL
+      // Should have 5 validators for CRITICAL
       const validators = resolved.agents.filter((a) => a.role === 'validator');
-      assert.strictEqual(validators.length, 4);
+      assert.strictEqual(validators.length, 5);
     });
 
     it('should fail on missing required params', function () {
@@ -183,28 +176,22 @@ describe('2D Classification Routing', function () {
 
           assert.ok(resolved.agents, `${key}: No agents`);
           assert.ok(resolved.agents.length > 0, `${key}: Empty agents array`);
-
-          // Verify orchestrator exists
-          const hasOrchestrator = resolved.agents.some(
-            (a) => a.role === 'orchestrator' || a.id === 'completion-detector'
-          );
-          assert.ok(hasOrchestrator, `${key}: No orchestrator`);
         });
       }
     }
   });
 
   describe('Classification correctness', function () {
-    it('TRIVIAL should use single-worker with haiku', function () {
+    it('TRIVIAL should use single-worker with level1', function () {
       const { base, params } = getConfig('TRIVIAL', 'TASK');
       assert.strictEqual(base, 'single-worker');
-      assert.strictEqual(params.worker_model, 'haiku');
+      assert.strictEqual(params.worker_level, 'level1');
     });
 
     it('SIMPLE DEBUG should use debug-workflow', function () {
       const { base, params } = getConfig('SIMPLE', 'DEBUG');
       assert.strictEqual(base, 'debug-workflow');
-      assert.strictEqual(params.investigator_model, 'sonnet');
+      assert.strictEqual(params.investigator_level, 'level2');
     });
 
     it('SIMPLE TASK should use worker-validator', function () {
@@ -216,15 +203,15 @@ describe('2D Classification Routing', function () {
       const { base, params } = getConfig('STANDARD', 'TASK');
       assert.strictEqual(base, 'full-workflow');
       assert.strictEqual(params.validator_count, 2);
-      assert.strictEqual(params.planner_model, 'sonnet');
+      assert.strictEqual(params.planner_level, 'level2');
     });
 
-    it('CRITICAL should use opus planner and 4 validators', function () {
+    it('CRITICAL should use level3 planner and 4 validators', function () {
       const { base, params } = getConfig('CRITICAL', 'TASK');
       assert.strictEqual(base, 'full-workflow');
-      assert.strictEqual(params.planner_model, 'opus');
+      assert.strictEqual(params.planner_level, 'level3');
       assert.strictEqual(params.validator_count, 4);
-      assert.strictEqual(params.max_iterations, 7);
+      assert.strictEqual(params.max_iterations, DEFAULT_MAX_ITERATIONS);
     });
 
     it('TRIVIAL DEBUG should still use single-worker (not debug-workflow)', function () {

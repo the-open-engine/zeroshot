@@ -18,10 +18,10 @@ const { Command } = require('commander');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { URL } = require('url');
 const chalk = require('chalk');
 const Orchestrator = require('../src/orchestrator');
 const { setupCompletion } = require('../lib/completion');
-const { parseChunk } = require('../lib/stream-json-parser');
 const { formatWatchMode } = require('./message-formatters-watch');
 const {
   formatAgentLifecycle,
@@ -46,8 +46,11 @@ const {
   coerceValue,
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
+const { normalizeProviderName } = require('../lib/provider-names');
+const { getProvider, parseProviderChunk } = require('../src/providers');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
 const { requirePreflight } = require('../src/preflight');
+const { providersCommand, setDefaultCommand, setupCommand } = require('./commands/providers');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates } = require('./lib/update-checker');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
@@ -73,9 +76,7 @@ let activeStatusFooter = null;
  * @param {...any} args - Arguments to print (like console.log)
  */
 function safePrint(...args) {
-  const text = args.map(arg =>
-    typeof arg === 'string' ? arg : String(arg)
-  ).join(' ');
+  const text = args.map((arg) => (typeof arg === 'string' ? arg : String(arg))).join(' ');
 
   if (activeStatusFooter) {
     activeStatusFooter.print(text + '\n');
@@ -188,17 +189,1880 @@ function parseMountSpecs(specs) {
   });
 }
 
+function normalizeRunOptions(options) {
+  if (options.ship) {
+    options.pr = true;
+    if (!options.docker) {
+      options.worktree = true;
+    }
+  }
+  if (options.pr && !options.docker && !options.worktree) {
+    options.worktree = true;
+  }
+  if (options.docker) {
+    options.worktree = false;
+  }
+}
+
+function detectRunInput(inputArg) {
+  const input = {};
+
+  // Check if it looks like an issue URL or key
+  const isGitHubUrl = /^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/.test(inputArg);
+  const isGitLabUrl = /gitlab\.(com|[\w.-]+)\/[\w-]+\/[\w-]+\/-\/issues\/\d+/.test(inputArg);
+  const isJiraUrl = /(atlassian\.net|jira\.[\w.-]+)\/browse\/[A-Z][A-Z0-9]+-\d+/.test(inputArg);
+  const isAzureUrl =
+    /dev\.azure\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg) ||
+    /visualstudio\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg);
+  const isJiraKey = /^[A-Z][A-Z0-9]+-\d+$/.test(inputArg);
+  const isIssueNumber = /^\d+$/.test(inputArg);
+  const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
+  const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
+
+  if (
+    isGitHubUrl ||
+    isGitLabUrl ||
+    isJiraUrl ||
+    isAzureUrl ||
+    isJiraKey ||
+    isIssueNumber ||
+    isRepoIssue
+  ) {
+    input.issue = inputArg;
+  } else if (isMarkdownFile) {
+    input.file = inputArg;
+  } else {
+    input.text = inputArg;
+  }
+  return input;
+}
+
+function resolveProviderOverride(options, settings) {
+  return normalizeProviderName(
+    options.provider || process.env.ZEROSHOT_PROVIDER || settings.defaultProvider
+  );
+}
+
+function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
+  // Detect which issue provider tool is needed
+  let issueProvider = null;
+  let targetHost = null;
+
+  if (input.issue) {
+    const { detectProvider: detectIssueProvider } = require('../src/issue-providers');
+    const ProviderClass = detectIssueProvider(input.issue, settings, forceProvider);
+    if (ProviderClass) {
+      issueProvider = ProviderClass.id;
+    }
+
+    // Extract hostname from URL input for auth checks
+    // This ensures we check auth for the target host, not the current git repo
+    if (/^https?:\/\//.test(input.issue)) {
+      try {
+        const url = new URL(input.issue);
+        targetHost = url.hostname;
+      } catch {
+        // Invalid URL - let provider handle the error
+      }
+    }
+  }
+
+  requirePreflight({
+    requireGh: issueProvider === 'github', // gh CLI required for GitHub
+    requireDocker: options.docker,
+    requireGit: options.worktree,
+    quiet: process.env.ZEROSHOT_DAEMON === '1',
+    provider: providerOverride,
+    issueProvider, // Pass detected issue provider for tool checking
+    targetHost, // Pass target host for multi-instance auth checks (e.g., GitLab self-hosted)
+  });
+}
+
+function shouldRunDetached(options) {
+  return options.detach && !process.env.ZEROSHOT_DAEMON;
+}
+
+function printDetachedClusterStart(options, clusterId) {
+  if (options.docker) {
+    console.log(`Started ${clusterId} (docker)`);
+  } else {
+    console.log(`Started ${clusterId}`);
+  }
+  console.log(`Monitor: zeroshot logs ${clusterId} -f`);
+  console.log(`Attach:  zeroshot attach ${clusterId}`);
+}
+
+function createDaemonLogFile(clusterId) {
+  const storageDir = path.join(os.homedir(), '.zeroshot');
+  if (!fs.existsSync(storageDir)) {
+    fs.mkdirSync(storageDir, { recursive: true });
+  }
+  const logPath = path.join(storageDir, `${clusterId}-daemon.log`);
+  return fs.openSync(logPath, 'w');
+}
+
+function buildDaemonEnv(options, clusterId, targetCwd) {
+  return {
+    ...process.env,
+    ZEROSHOT_DAEMON: '1',
+    ZEROSHOT_CLUSTER_ID: clusterId,
+    ZEROSHOT_DOCKER: options.docker ? '1' : '',
+    ZEROSHOT_DOCKER_IMAGE: options.dockerImage || '',
+    ZEROSHOT_PR: options.pr ? '1' : '',
+    ZEROSHOT_WORKTREE: options.worktree ? '1' : '',
+    ZEROSHOT_WORKERS: options.workers?.toString() || '',
+    ZEROSHOT_MODEL: options.model || '',
+    ZEROSHOT_PROVIDER: options.provider || '',
+    ZEROSHOT_CWD: targetCwd,
+  };
+}
+
+function spawnDetachedCluster(options, clusterId) {
+  const { spawn } = require('child_process');
+  printDetachedClusterStart(options, clusterId);
+  const logFd = createDaemonLogFile(clusterId);
+  const targetCwd = detectGitRepoRoot();
+  const daemon = spawn(process.execPath, process.argv.slice(1), {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    cwd: targetCwd,
+    env: buildDaemonEnv(options, clusterId, targetCwd),
+  });
+  daemon.unref();
+  fs.closeSync(logFd);
+}
+
+function resolveClusterId(generateName) {
+  const clusterId = process.env.ZEROSHOT_CLUSTER_ID || generateName('cluster');
+  process.env.ZEROSHOT_CLUSTER_ID = clusterId;
+  return clusterId;
+}
+
+function resolveConfigName(options, settings) {
+  return options.config || settings.defaultConfig;
+}
+
+function resolveConfigPath(configName) {
+  if (path.isAbsolute(configName) || configName.startsWith('./') || configName.startsWith('../')) {
+    return path.resolve(process.cwd(), configName);
+  }
+  if (configName.endsWith('.json')) {
+    return path.join(PACKAGE_ROOT, 'cluster-templates', configName);
+  }
+  return path.join(PACKAGE_ROOT, 'cluster-templates', `${configName}.json`);
+}
+
+function ensureConfigProviderDefaults(config, settings) {
+  if (!config.defaultProvider) {
+    config.defaultProvider = settings.defaultProvider || 'claude';
+  }
+  config.defaultProvider = normalizeProviderName(config.defaultProvider) || 'claude';
+}
+
+function applyProviderOverrideToConfig(config, providerOverride, settings) {
+  const provider = getProvider(providerOverride);
+  const providerSettings = settings.providerSettings?.[providerOverride] || {};
+  config.forceProvider = providerOverride;
+  config.defaultProvider = providerOverride;
+  config.forceLevel = providerSettings.defaultLevel || provider.getDefaultLevel();
+  config.defaultLevel = config.forceLevel;
+  console.log(chalk.dim(`Provider override: ${providerOverride} (all agents)`));
+}
+
+function loadClusterConfig(orchestrator, configPath, settings, providerOverride) {
+  const config = orchestrator.loadConfig(configPath);
+  ensureConfigProviderDefaults(config, settings);
+  if (providerOverride) {
+    applyProviderOverrideToConfig(config, providerOverride, settings);
+  }
+  return config;
+}
+
+function trackActiveCluster(clusterId, orchestrator) {
+  activeClusterId = clusterId;
+  orchestratorInstance = orchestrator;
+}
+
+function printForegroundStartInfo(options, clusterId, configName) {
+  if (process.env.ZEROSHOT_DAEMON) {
+    return;
+  }
+  if (options.docker) {
+    console.log(`Starting ${clusterId} (docker)`);
+  } else if (options.worktree) {
+    console.log(`Starting ${clusterId} (worktree)`);
+  } else {
+    console.log(`Starting ${clusterId}`);
+  }
+  console.log(chalk.dim(`Config: ${configName}`));
+  console.log(chalk.dim('Ctrl+C to stop following (cluster keeps running)\n'));
+}
+
+function resolveStrictSchema(options, settings) {
+  return (
+    options.strictSchema || process.env.ZEROSHOT_STRICT_SCHEMA === '1' || settings.strictSchema
+  );
+}
+
+function applyStrictSchema(config, strictSchema) {
+  if (!strictSchema) {
+    return;
+  }
+  for (const agent of config.agents) {
+    agent.strictSchema = true;
+  }
+}
+
+function resolveModelOverride(options) {
+  return options.model || process.env.ZEROSHOT_MODEL;
+}
+
+function applyModelOverrideToConfig(config, modelOverride, providerOverride, settings) {
+  if (!modelOverride) {
+    return;
+  }
+
+  const providerName = normalizeProviderName(
+    providerOverride || config.defaultProvider || settings.defaultProvider || 'claude'
+  );
+  const provider = getProvider(providerName);
+  const catalog = provider.getModelCatalog();
+
+  if (catalog && !catalog[modelOverride]) {
+    console.warn(
+      chalk.yellow(
+        `Warning: model override "${modelOverride}" is not in the ${providerName} catalog`
+      )
+    );
+  }
+
+  if (providerName === 'claude' && ['opus', 'sonnet', 'haiku'].includes(modelOverride)) {
+    const { validateModelAgainstMax } = require('../lib/settings');
+    try {
+      validateModelAgainstMax(modelOverride, settings.maxModel);
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
+    }
+  }
+
+  for (const agent of config.agents) {
+    agent.model = modelOverride;
+    if (agent.modelRules) {
+      delete agent.modelRules;
+    }
+  }
+  console.log(chalk.dim(`Model override: ${modelOverride} (all agents)`));
+}
+
+function buildStartOptions({
+  clusterId,
+  options,
+  settings,
+  providerOverride,
+  modelOverride,
+  forceProvider,
+}) {
+  const targetCwd = process.env.ZEROSHOT_CWD || detectGitRepoRoot();
+  return {
+    clusterId,
+    cwd: targetCwd,
+    isolation: options.docker || process.env.ZEROSHOT_DOCKER === '1' || settings.defaultDocker,
+    isolationImage: options.dockerImage || process.env.ZEROSHOT_DOCKER_IMAGE || undefined,
+    worktree: options.worktree || process.env.ZEROSHOT_WORKTREE === '1',
+    autoPr: options.pr || process.env.ZEROSHOT_PR === '1',
+    autoMerge: process.env.ZEROSHOT_MERGE === '1',
+    autoPush: process.env.ZEROSHOT_PUSH === '1',
+    modelOverride: modelOverride || undefined,
+    providerOverride: providerOverride || undefined,
+    noMounts: options.noMounts || false,
+    mounts: options.mount ? parseMountSpecs(options.mount) : undefined,
+    containerHome: options.containerHome || undefined,
+    forceProvider: forceProvider || undefined,
+    settings, // Pass settings for provider detection
+  };
+}
+
+function createStatusFooter(clusterId, messageBus) {
+  const statusFooter = new StatusFooter({
+    refreshInterval: 1000,
+    enabled: process.stdout.isTTY,
+  });
+  statusFooter.setCluster(clusterId);
+  statusFooter.setClusterState('running');
+  statusFooter.setMessageBus(messageBus);
+  activeStatusFooter = statusFooter;
+  return statusFooter;
+}
+
+function createLifecycleHandler(statusFooter) {
+  return (msg) => {
+    const data = msg.content?.data || {};
+    const event = data.event;
+    const agentId = data.agent || msg.sender;
+
+    if (event === 'STARTED') {
+      statusFooter.updateAgent({
+        id: agentId,
+        state: AGENT_STATE.IDLE,
+        processPid: null,
+        iteration: data.iteration || 0,
+      });
+      return;
+    }
+
+    if (event === 'TASK_STARTED') {
+      statusFooter.updateAgent({
+        id: agentId,
+        state: AGENT_STATE.EXECUTING_TASK,
+        processPid: statusFooter.agents.get(agentId)?.processPid || null,
+        iteration: data.iteration || 0,
+      });
+      return;
+    }
+
+    if (event === 'PROCESS_SPAWNED') {
+      const current = statusFooter.agents.get(agentId) || { iteration: 0 };
+      statusFooter.updateAgent({
+        id: agentId,
+        state: AGENT_STATE.EXECUTING_TASK,
+        processPid: data.pid,
+        iteration: current.iteration,
+      });
+      return;
+    }
+
+    if (event === 'TASK_COMPLETED' || event === 'TASK_FAILED') {
+      statusFooter.updateAgent({
+        id: agentId,
+        state: AGENT_STATE.IDLE,
+        processPid: null,
+        iteration: data.iteration || 0,
+      });
+      return;
+    }
+
+    if (event === 'STOPPED') {
+      statusFooter.removeAgent(agentId);
+    }
+  };
+}
+
+function replayLifecycleMessages(cluster, clusterId, handler) {
+  const historicalLifecycle = cluster.messageBus
+    .getAll(clusterId)
+    .filter((msg) => msg.topic === 'AGENT_LIFECYCLE');
+  for (const msg of historicalLifecycle) {
+    handler(msg);
+  }
+}
+
+function createClusterMessageHandler(clusterId, processedMessageIds, sendersWithOutput) {
+  return (msg) => {
+    if (msg.cluster_id !== clusterId) return;
+    if (processedMessageIds.has(msg.id)) return;
+    processedMessageIds.add(msg.id);
+
+    if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
+      sendersWithOutput.add(msg.sender);
+    }
+    printMessage(msg, false, false, true);
+  };
+}
+
+function replayClusterMessages(cluster, clusterId, handler) {
+  const historicalMessages = cluster.messageBus.getAll(clusterId);
+  for (const msg of historicalMessages) {
+    handler(msg);
+  }
+}
+
+function flushForegroundSenders(sendersWithOutput) {
+  for (const sender of sendersWithOutput) {
+    const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
+    flushLineBuffer(prefix, sender);
+  }
+}
+
+function createForegroundCleanup({
+  statusFooter,
+  lifecycleUnsubscribe,
+  unsubscribe,
+  flushInterval,
+  sendersWithOutput,
+}) {
+  const stop = () => {
+    clearInterval(flushInterval);
+    lifecycleUnsubscribe();
+    unsubscribe();
+    statusFooter.stop();
+    activeStatusFooter = null;
+  };
+
+  const stopWithFlush = () => {
+    flushForegroundSenders(sendersWithOutput);
+    stop();
+  };
+
+  return { stop, stopWithFlush };
+}
+
+function setupForegroundSigintHandler({ orchestrator, clusterId, cleanup, stopChecking }) {
+  const handler = async () => {
+    cleanup.stop();
+    stopChecking();
+    console.log(chalk.dim('\n\n--- Interrupted ---'));
+
+    try {
+      console.log(chalk.dim(`Stopping cluster ${clusterId}...`));
+      await orchestrator.stop(clusterId);
+      console.log(chalk.dim(`Cluster ${clusterId} stopped.`));
+    } catch (stopErr) {
+      console.error(chalk.red(`Failed to stop cluster: ${stopErr.message}`));
+    }
+
+    process.exit(0);
+  };
+
+  process.on('SIGINT', handler);
+  return () => {
+    process.off('SIGINT', handler);
+  };
+}
+
+function waitForClusterCompletion(orchestrator, clusterId, cleanup) {
+  return new Promise((resolve) => {
+    let checkInterval;
+    const stopChecking = () => {
+      if (checkInterval) {
+        clearInterval(checkInterval);
+      }
+    };
+    const removeSigint = setupForegroundSigintHandler({
+      orchestrator,
+      clusterId,
+      cleanup,
+      stopChecking,
+    });
+
+    const finish = (finalizer) => {
+      stopChecking();
+      removeSigint();
+      finalizer();
+      resolve();
+    };
+
+    checkInterval = setInterval(() => {
+      try {
+        const status = orchestrator.getStatus(clusterId);
+        if (status.state !== 'running') {
+          finish(cleanup.stopWithFlush);
+        }
+      } catch {
+        finish(cleanup.stop);
+      }
+    }, 500);
+  });
+}
+
+async function streamClusterInForeground(cluster, orchestrator, clusterId) {
+  const sendersWithOutput = new Set();
+  const processedMessageIds = new Set();
+
+  const statusFooter = createStatusFooter(clusterId, cluster.messageBus);
+  const handleLifecycleMessage = createLifecycleHandler(statusFooter);
+  const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic(
+    'AGENT_LIFECYCLE',
+    handleLifecycleMessage
+  );
+  replayLifecycleMessages(cluster, clusterId, handleLifecycleMessage);
+  statusFooter.start();
+
+  const handleMessage = createClusterMessageHandler(
+    clusterId,
+    processedMessageIds,
+    sendersWithOutput
+  );
+  const unsubscribe = cluster.messageBus.subscribe(handleMessage);
+  replayClusterMessages(cluster, clusterId, handleMessage);
+
+  const flushInterval = setInterval(() => {
+    flushForegroundSenders(sendersWithOutput);
+  }, 250);
+
+  const cleanup = createForegroundCleanup({
+    statusFooter,
+    lifecycleUnsubscribe,
+    unsubscribe,
+    flushInterval,
+    sendersWithOutput,
+  });
+
+  await waitForClusterCompletion(orchestrator, clusterId, cleanup);
+  console.log(chalk.dim(`\nCluster ${clusterId} completed.`));
+}
+
+function setupDaemonCleanup(orchestrator, clusterId) {
+  if (!process.env.ZEROSHOT_DAEMON) {
+    return;
+  }
+
+  const cleanup = async (signal) => {
+    console.log(`\n[DAEMON] Received ${signal}, cleaning up cluster ${clusterId}...`);
+    try {
+      await orchestrator.stop(clusterId);
+      console.log(`[DAEMON] Cluster ${clusterId} stopped.`);
+    } catch (e) {
+      console.error(`[DAEMON] Cleanup error: ${e.message}`);
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => cleanup('SIGTERM'));
+  process.on('SIGINT', () => cleanup('SIGINT'));
+}
+
+function readClusterTokenTotals(orchestrator, clusterId) {
+  let totalTokens = 0;
+  let totalCostUsd = 0;
+  try {
+    const clusterObj = orchestrator.getCluster(clusterId);
+    if (clusterObj?.messageBus) {
+      const tokensByRole = clusterObj.messageBus.getTokensByRole(clusterId);
+      if (tokensByRole?._total?.count > 0) {
+        const total = tokensByRole._total;
+        totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
+        totalCostUsd = total.totalCostUsd || 0;
+      }
+    }
+  } catch {
+    /* Token tracking not available */
+  }
+  return { totalTokens, totalCostUsd };
+}
+
+function enrichClustersWithTokens(clusters, orchestrator) {
+  return clusters.map((cluster) => {
+    const totals = readClusterTokenTotals(orchestrator, cluster.id);
+    return {
+      ...cluster,
+      ...totals,
+    };
+  });
+}
+
+function formatClusterRow(cluster) {
+  const created = new Date(cluster.createdAt).toLocaleString();
+  const tokenDisplay = cluster.totalTokens > 0 ? cluster.totalTokens.toLocaleString() : '-';
+  const costDisplay = cluster.totalCostUsd > 0 ? '$' + cluster.totalCostUsd.toFixed(3) : '-';
+
+  const stateDisplay =
+    cluster.state === 'zombie' ? chalk.red(cluster.state.padEnd(12)) : cluster.state.padEnd(12);
+  const rowColor = cluster.state === 'zombie' ? chalk.red : (text) => text;
+
+  return `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount
+    .toString()
+    .padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${created}`;
+}
+
+function printClusterTable(enrichedClusters) {
+  if (enrichedClusters.length === 0) {
+    console.log(chalk.dim('\n=== Clusters ==='));
+    console.log('No active clusters');
+    return;
+  }
+
+  console.log(chalk.bold('\n=== Clusters ==='));
+  console.log(
+    `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(
+      12
+    )} ${'Cost'.padEnd(8)} Created`
+  );
+  console.log('-'.repeat(100));
+  for (const cluster of enrichedClusters) {
+    console.log(formatClusterRow(cluster));
+  }
+}
+
+async function tryGetTasksData(getTasksData, options) {
+  if (typeof getTasksData !== 'function') {
+    return [];
+  }
+  try {
+    return await getTasksData(options);
+  } catch {
+    return [];
+  }
+}
+
+function printListJson(enrichedClusters, tasks) {
+  console.log(
+    JSON.stringify(
+      {
+        clusters: enrichedClusters,
+        tasks,
+      },
+      null,
+      2
+    )
+  );
+}
+
+function reportMissingId(id, options) {
+  if (options.json) {
+    console.log(JSON.stringify({ error: 'ID not found', id }, null, 2));
+  } else {
+    console.error(`ID not found: ${id}`);
+    console.error('Not found in tasks or clusters');
+  }
+  process.exit(1);
+}
+
+function getClusterTokensByRole(orchestrator, clusterId) {
+  try {
+    const cluster = orchestrator.getCluster(clusterId);
+    if (cluster?.messageBus) {
+      return cluster.messageBus.getTokensByRole(clusterId);
+    }
+  } catch {
+    /* Token tracking not available */
+  }
+  return null;
+}
+
+function printClusterStatusJson(status, tokensByRole) {
+  console.log(
+    JSON.stringify(
+      {
+        type: 'cluster',
+        ...status,
+        createdAtISO: new Date(status.createdAt).toISOString(),
+        tokensByRole,
+      },
+      null,
+      2
+    )
+  );
+}
+
+function printClusterStatusHeader(status, clusterId) {
+  console.log(`\nCluster: ${status.id}`);
+  if (status.isZombie) {
+    console.log(
+      chalk.red(
+        `State: ${status.state} (process ${status.pid} died, cluster has no backing process)`
+      )
+    );
+    console.log(
+      chalk.yellow(
+        `  → Run 'zeroshot kill ${clusterId}' to clean up, or 'zeroshot resume ${clusterId}' to restart`
+      )
+    );
+  } else {
+    console.log(`State: ${status.state}`);
+  }
+  if (status.pid) {
+    console.log(`PID: ${status.pid}`);
+  }
+  console.log(`Created: ${new Date(status.createdAt).toLocaleString()}`);
+  console.log(`Messages: ${status.messageCount}`);
+}
+
+function printClusterTokenUsage(tokensByRole) {
+  if (!tokensByRole) {
+    return;
+  }
+  const tokenLines = formatTokenUsage(tokensByRole);
+  if (!tokenLines) {
+    return;
+  }
+  console.log('');
+  for (const line of tokenLines) {
+    console.log(line);
+  }
+}
+
+function printClusterAgent(agent) {
+  if (agent.type === 'subcluster') {
+    console.log(`  - ${agent.id} (${agent.role}) [SubCluster]`);
+    console.log(`    State: ${agent.state}`);
+    console.log(`    Iteration: ${agent.iteration}`);
+    console.log(`    Child Cluster: ${agent.childClusterId || 'none'}`);
+    console.log(`    Child Running: ${agent.childRunning ? 'Yes' : 'No'}`);
+    return;
+  }
+  const modelLabel = agent.model ? ` [${agent.model}]` : '';
+  console.log(`  - ${agent.id} (${agent.role})${modelLabel}`);
+  console.log(`    State: ${agent.state}`);
+  console.log(`    Iteration: ${agent.iteration}`);
+  console.log(`    Running task: ${agent.currentTask ? 'Yes' : 'No'}`);
+}
+
+function printClusterAgents(status) {
+  console.log(`\nAgents:`);
+  for (const agent of status.agents) {
+    printClusterAgent(agent);
+  }
+  console.log('');
+}
+
+function printClusterStatusHuman(status, tokensByRole, clusterId) {
+  printClusterStatusHeader(status, clusterId);
+  printClusterTokenUsage(tokensByRole);
+  printClusterAgents(status);
+}
+
+async function tryGetTaskStatusData(getStatusData, id) {
+  if (typeof getStatusData !== 'function') {
+    return null;
+  }
+  try {
+    return await getStatusData(id);
+  } catch {
+    return null;
+  }
+}
+
+async function showTaskStatus(id, options) {
+  const { showStatus, getStatusData } = await import('../task-lib/commands/status.js');
+  if (options.json) {
+    const taskData = await tryGetTaskStatusData(getStatusData, id);
+    console.log(JSON.stringify({ type: 'task', id, ...taskData }, null, 2));
+    return;
+  }
+  await showStatus(id);
+}
+
+async function showTaskLogs(id, options) {
+  const { showLogs } = await import('../task-lib/commands/logs.js');
+  await showLogs(id, options);
+}
+
+async function handleLogsById(id, options) {
+  const { detectIdType } = require('../lib/id-detector');
+  const type = detectIdType(id);
+
+  if (!type) {
+    console.error(`ID not found: ${id}`);
+    process.exit(1);
+  }
+
+  if (type === 'task') {
+    await showTaskLogs(id, options);
+    return true;
+  }
+
+  return false;
+}
+
+function parseLogLimit(options) {
+  return parseInt(options.limit, 10);
+}
+
+function printClusterFollowHeader(allClusters, activeClusters) {
+  if (activeClusters.length === 0) {
+    console.log(
+      chalk.dim(
+        `--- Showing history from ${allClusters.length} cluster(s), waiting for new activity (Ctrl+C to stop) ---\n`
+      )
+    );
+    return;
+  }
+  if (activeClusters.length === 1) {
+    console.log(chalk.dim(`--- Following ${activeClusters[0].id} (Ctrl+C to stop) ---\n`));
+    return;
+  }
+  console.log(
+    chalk.dim(`--- Following ${activeClusters.length} active clusters (Ctrl+C to stop) ---`)
+  );
+  for (const cluster of activeClusters) {
+    console.log(chalk.dim(`    • ${cluster.id} [${cluster.state}]`));
+  }
+  console.log('');
+}
+
+function printClusterHistory(quietOrchestrator, allClusters, limit, options) {
+  for (const clusterInfo of allClusters) {
+    const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+    if (!cluster) {
+      continue;
+    }
+    const messages = cluster.messageBus.getAll(clusterInfo.id);
+    const recentMessages = messages.slice(-limit);
+    const isActive = clusterInfo.state === 'running';
+    for (const msg of recentMessages) {
+      printMessage(msg, clusterInfo.id, options.watch, isActive);
+    }
+  }
+}
+
+function collectClusterTaskTitles(quietOrchestrator, allClusters) {
+  const taskTitles = [];
+  for (const clusterInfo of allClusters) {
+    const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+    if (!cluster) {
+      continue;
+    }
+    const messages = cluster.messageBus.getAll(clusterInfo.id);
+    const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
+    if (issueOpened) {
+      taskTitles.push({
+        id: clusterInfo.id,
+        summary: formatTaskSummary(issueOpened, 30),
+      });
+    }
+  }
+  return taskTitles;
+}
+
+function setTerminalTitleForClusters(taskTitles) {
+  if (taskTitles.length === 1) {
+    setTerminalTitle(`zeroshot [${taskTitles[0].id}]: ${taskTitles[0].summary}`);
+    return;
+  }
+  if (taskTitles.length > 1) {
+    setTerminalTitle(`zeroshot: ${taskTitles.length} clusters`);
+    return;
+  }
+  setTerminalTitle('zeroshot: waiting...');
+}
+
+function printInitialWatchTasks(quietOrchestrator, allClusters, multiCluster) {
+  for (const clusterInfo of allClusters) {
+    const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+    if (!cluster) {
+      continue;
+    }
+    const messages = cluster.messageBus.getAll(clusterInfo.id);
+    const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
+    if (!issueOpened) {
+      continue;
+    }
+    const clusterLabel = multiCluster ? `[${clusterInfo.id}] ` : '';
+    const taskSummary = formatTaskSummary(issueOpened);
+    console.log(chalk.cyan(`${clusterLabel}Task: ${chalk.bold(taskSummary)}\n`));
+  }
+}
+
+function buildClusterStatesMap(allClusters) {
+  const clusterStates = new Map();
+  for (const cluster of allClusters) {
+    clusterStates.set(cluster.id, cluster.state);
+  }
+  return clusterStates;
+}
+
+function createLogsStatusFooter(allClusters, clusterStates, options) {
+  if (!process.stdout.isTTY) {
+    return null;
+  }
+  if (!options.follow && !options.watch) {
+    return null;
+  }
+  const statusFooter = new StatusFooter({
+    refreshInterval: 1000,
+    enabled: true,
+  });
+  if (allClusters.length > 0) {
+    statusFooter.setCluster(allClusters[0].id);
+    statusFooter.setClusterState(clusterStates.get(allClusters[0].id) || 'running');
+  }
+  activeStatusFooter = statusFooter;
+  statusFooter.start();
+  return statusFooter;
+}
+
+function collectSendersFromBuffer(messageBuffer) {
+  const sendersWithOutput = new Set();
+  for (const msg of messageBuffer) {
+    if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
+      sendersWithOutput.add(msg.sender);
+    }
+  }
+  return sendersWithOutput;
+}
+
+function flushBufferedSenders(sendersWithOutput, clusterId) {
+  for (const sender of sendersWithOutput) {
+    const senderLabel = `${clusterId || ''}/${sender}`;
+    const prefix = getColorForSender(sender)(`${senderLabel.padEnd(25)} |`);
+    flushLineBuffer(prefix, sender);
+  }
+}
+
+function buildMessageBufferFlusher({ messageBuffer, options, clusterStates, statusFooter }) {
+  const handleLifecycleMessage = statusFooter ? createLifecycleHandler(statusFooter) : null;
+  return () => {
+    if (messageBuffer.length === 0) {
+      return;
+    }
+    messageBuffer.sort((a, b) => a.timestamp - b.timestamp);
+    const sendersWithOutput = collectSendersFromBuffer(messageBuffer);
+    for (const msg of messageBuffer) {
+      if (msg.topic === 'AGENT_LIFECYCLE' && handleLifecycleMessage) {
+        handleLifecycleMessage(msg);
+      }
+      const isActive = clusterStates.get(msg.cluster_id) === 'running';
+      printMessage(msg, true, options.watch, isActive);
+    }
+    const firstClusterId = messageBuffer[0]?.cluster_id;
+    messageBuffer.length = 0;
+    flushBufferedSenders(sendersWithOutput, firstClusterId);
+  };
+}
+
+function addClusterPollers(quietOrchestrator, allClusters, messageBuffer, stopPollers) {
+  for (const clusterInfo of allClusters) {
+    const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+    if (!cluster) {
+      continue;
+    }
+    const stopPoll = cluster.ledger.pollForMessages(
+      clusterInfo.id,
+      (msg) => {
+        messageBuffer.push(msg);
+      },
+      300
+    );
+    stopPollers.push(stopPoll);
+  }
+}
+
+function watchForNewClusters(quietOrchestrator, clusterStates, messageBuffer, stopPollers) {
+  return quietOrchestrator.watchForNewClusters((newCluster) => {
+    console.log(chalk.green(`\n✓ New cluster detected: ${newCluster.id}\n`));
+    clusterStates.set(newCluster.id, 'running');
+    const stopPoll = newCluster.ledger.pollForMessages(
+      newCluster.id,
+      (msg) => {
+        messageBuffer.push(msg);
+      },
+      300
+    );
+    stopPollers.push(stopPoll);
+  });
+}
+
+function cleanupClusterFollow({
+  flushInterval,
+  flushMessages,
+  stopPollers,
+  stopWatching,
+  statusFooter,
+}) {
+  clearInterval(flushInterval);
+  flushMessages();
+  stopPollers.forEach((stop) => stop());
+  stopWatching();
+  if (statusFooter) {
+    statusFooter.stop();
+    activeStatusFooter = null;
+  }
+  restoreTerminalTitle();
+}
+
+function followAllClusters(quietOrchestrator, allClusters, options, multiCluster) {
+  const taskTitles = collectClusterTaskTitles(quietOrchestrator, allClusters);
+  setTerminalTitleForClusters(taskTitles);
+
+  if (options.watch) {
+    printInitialWatchTasks(quietOrchestrator, allClusters, multiCluster);
+  }
+
+  const stopPollers = [];
+  const messageBuffer = [];
+  const clusterStates = buildClusterStatesMap(allClusters);
+  const statusFooter = createLogsStatusFooter(allClusters, clusterStates, options);
+
+  // Replay historical lifecycle messages to initialize agent states
+  // Without this, agents that completed before logs -f started show "(starting...)"
+  if (statusFooter) {
+    const lifecycleHandler = createLifecycleHandler(statusFooter);
+    for (const clusterInfo of allClusters) {
+      const cluster = quietOrchestrator.getCluster(clusterInfo.id);
+      if (cluster) {
+        replayLifecycleMessages(cluster, clusterInfo.id, lifecycleHandler);
+      }
+    }
+  }
+
+  const flushMessages = buildMessageBufferFlusher({
+    messageBuffer,
+    options,
+    clusterStates,
+    statusFooter,
+  });
+  const flushInterval = setInterval(flushMessages, 250);
+
+  addClusterPollers(quietOrchestrator, allClusters, messageBuffer, stopPollers);
+  const stopWatching = watchForNewClusters(
+    quietOrchestrator,
+    clusterStates,
+    messageBuffer,
+    stopPollers
+  );
+
+  keepProcessAlive(() => {
+    cleanupClusterFollow({
+      flushInterval,
+      flushMessages,
+      stopPollers,
+      stopWatching,
+      statusFooter,
+    });
+  });
+}
+
+function showAllClusterLogs(quietOrchestrator, options, limit) {
+  const allClusters = quietOrchestrator.listClusters();
+  const activeClusters = allClusters.filter((cluster) => cluster.state === 'running');
+
+  if (allClusters.length === 0) {
+    if (options.follow) {
+      console.log('No clusters found. Waiting for new clusters...\n');
+      console.log(chalk.dim('--- Waiting for clusters (Ctrl+C to stop) ---\n'));
+    } else {
+      console.log('No clusters found');
+      return;
+    }
+  }
+
+  const multiCluster = allClusters.length > 1;
+  if (options.follow && allClusters.length > 0) {
+    printClusterFollowHeader(allClusters, activeClusters);
+  }
+
+  printClusterHistory(quietOrchestrator, allClusters, limit, options);
+
+  if (options.follow) {
+    followAllClusters(quietOrchestrator, allClusters, options, multiCluster);
+  }
+}
+
+function getClusterOrExit(quietOrchestrator, id) {
+  const cluster = quietOrchestrator.getCluster(id);
+  if (!cluster) {
+    console.error(`Cluster ${id} not found`);
+    process.exit(1);
+  }
+  return cluster;
+}
+
+function getClusterActiveState(quietOrchestrator, id) {
+  const clusterInfo = quietOrchestrator.listClusters().find((cluster) => cluster.id === id);
+  return clusterInfo?.state === 'running';
+}
+
+function getClusterMessages(cluster, id) {
+  const dbMessages = cluster.messageBus.getAll(id);
+  const taskLogMessages = readAgentTaskLogs(cluster);
+  const allMessages = [...dbMessages, ...taskLogMessages].sort((a, b) => a.timestamp - b.timestamp);
+  return { dbMessages, allMessages };
+}
+
+function printRecentMessages(messages, limit, isActive, options) {
+  const recentMessages = messages.slice(-limit);
+  for (const msg of recentMessages) {
+    printMessage(msg, true, options.watch, isActive);
+  }
+}
+
+function setTerminalTitleForCluster(clusterId, dbMessages) {
+  const issueOpened = dbMessages.find((m) => m.topic === 'ISSUE_OPENED');
+  if (issueOpened) {
+    setTerminalTitle(`zeroshot [${clusterId}]: ${formatTaskSummary(issueOpened, 30)}`);
+  } else {
+    setTerminalTitle(`zeroshot [${clusterId}]`);
+  }
+}
+
+function startClusterDbPolling(cluster, clusterId, isActive, options) {
+  return cluster.ledger.pollForMessages(
+    clusterId,
+    (msg) => {
+      printMessage(msg, true, options.watch, isActive);
+      if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
+        const senderLabel = `${msg.cluster_id || ''}/${msg.sender}`;
+        const prefix = getColorForSender(msg.sender)(`${senderLabel.padEnd(25)} |`);
+        flushLineBuffer(prefix, msg.sender);
+      }
+    },
+    500
+  );
+}
+
+function parseIncrementalTaskLogLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{')) {
+    return null;
+  }
+
+  let timestamp = Date.now();
+  let jsonContent = trimmed;
+
+  const timestampMatch = jsonContent.match(/^\[(\d{13})\](.*)$/);
+  if (timestampMatch) {
+    timestamp = parseInt(timestampMatch[1], 10);
+    jsonContent = timestampMatch[2];
+  }
+
+  if (!jsonContent.startsWith('{')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonContent);
+    if (parsed.type === 'system' && parsed.subtype === 'init') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return { timestamp, jsonContent };
+}
+
+function readNewTaskLogContent(logPath, lastSize) {
+  const stats = fs.statSync(logPath);
+  const currentSize = stats.size;
+  if (currentSize <= lastSize) {
+    return null;
+  }
+
+  const fd = fs.openSync(logPath, 'r');
+  const buffer = Buffer.alloc(currentSize - lastSize);
+  fs.readSync(fd, buffer, 0, buffer.length, lastSize);
+  fs.closeSync(fd);
+
+  return { content: buffer.toString('utf-8'), size: currentSize };
+}
+
+function extractTaskLogLines(content) {
+  return content.split('\n').filter((line) => line.trim());
+}
+
+function processTaskLogLines({ lines, agent, state, cluster, isActive, options, taskId }) {
+  for (const line of lines) {
+    const parsed = parseIncrementalTaskLogLine(line);
+    if (!parsed) {
+      continue;
+    }
+    const msg = buildTaskLogMessage({
+      taskId,
+      timestamp: parsed.timestamp,
+      jsonContent: parsed.jsonContent,
+      cluster,
+      agent,
+      iteration: state.iteration,
+    });
+
+    printMessage(msg, true, options.watch, isActive);
+    const senderLabel = `${cluster.id}/${agent.id}`;
+    const prefix = getColorForSender(agent.id)(`${senderLabel.padEnd(25)} |`);
+    flushLineBuffer(prefix, agent.id);
+  }
+}
+
+function pollTaskLogs(cluster, isActive, options, taskLogSizes) {
+  for (const agent of cluster.agents) {
+    const state = agent.getState();
+    const taskId = state.currentTaskId;
+    if (!taskId) {
+      continue;
+    }
+
+    const logPath = path.join(os.homedir(), '.claude-zeroshot', 'logs', `${taskId}.log`);
+    if (!fs.existsSync(logPath)) {
+      continue;
+    }
+
+    try {
+      const lastSize = taskLogSizes.get(taskId) || 0;
+      const update = readNewTaskLogContent(logPath, lastSize);
+      if (!update) {
+        continue;
+      }
+
+      const lines = extractTaskLogLines(update.content);
+      processTaskLogLines({
+        lines,
+        agent,
+        state,
+        cluster,
+        isActive,
+        options,
+        taskId,
+      });
+      taskLogSizes.set(taskId, update.size);
+    } catch {
+      // File read error - skip
+    }
+  }
+}
+
+function startTaskLogPolling(cluster, isActive, options) {
+  const taskLogSizes = new Map();
+  const interval = setInterval(() => {
+    pollTaskLogs(cluster, isActive, options, taskLogSizes);
+  }, 300);
+  return () => clearInterval(interval);
+}
+
+function followClusterLogs(cluster, id, dbMessages, isActive, options) {
+  setTerminalTitleForCluster(id, dbMessages);
+  console.log('\n--- Following logs (Ctrl+C to stop) ---\n');
+
+  const stopDbPoll = startClusterDbPolling(cluster, id, isActive, options);
+  const stopTaskLogPolling = startTaskLogPolling(cluster, isActive, options);
+
+  keepProcessAlive(() => {
+    stopDbPoll();
+    stopTaskLogPolling();
+    restoreTerminalTitle();
+  });
+}
+
+function showClusterLogsById(quietOrchestrator, id, options, limit) {
+  const cluster = getClusterOrExit(quietOrchestrator, id);
+  const isActive = getClusterActiveState(quietOrchestrator, id);
+  const { dbMessages, allMessages } = getClusterMessages(cluster, id);
+  printRecentMessages(allMessages, limit, isActive, options);
+
+  if (options.follow) {
+    followClusterLogs(cluster, id, dbMessages, isActive, options);
+  }
+}
+
+async function listAttachableProcesses(socketDiscovery) {
+  const tasks = await socketDiscovery.listAttachableTasks();
+  const clusters = await socketDiscovery.listAttachableClusters();
+
+  if (tasks.length === 0 && clusters.length === 0) {
+    console.log(chalk.dim('No attachable tasks or clusters found.'));
+    console.log(chalk.dim('Start a task with: zeroshot task run "prompt"'));
+    return;
+  }
+
+  console.log(chalk.bold('\nAttachable processes:\n'));
+
+  if (tasks.length > 0) {
+    console.log(chalk.cyan('Tasks:'));
+    for (const taskId of tasks) {
+      console.log(`  ${taskId}`);
+    }
+  }
+
+  if (clusters.length > 0) {
+    await printAttachableClusters(clusters, socketDiscovery);
+  }
+
+  console.log(chalk.dim('\nUsage: zeroshot attach <id> [--agent <name>]'));
+}
+
+function getClusterAgentInfo(OrchestratorModule, clusterId) {
+  const agentModels = {};
+  let tokenUsageLines = null;
+  try {
+    const orchestrator = OrchestratorModule.getInstance();
+    const status = orchestrator.getStatus(clusterId);
+    for (const agent of status.agents) {
+      agentModels[agent.id] = agent.model;
+    }
+    const cluster = orchestrator.getCluster(clusterId);
+    if (cluster?.messageBus) {
+      const tokensByRole = cluster.messageBus.getTokensByRole(clusterId);
+      tokenUsageLines = formatTokenUsage(tokensByRole);
+    }
+  } catch {
+    /* orchestrator not running - models/tokens unavailable */
+  }
+  return { agentModels, tokenUsageLines };
+}
+
+async function printAttachableClusters(clusters, socketDiscovery) {
+  console.log(chalk.yellow('\nClusters:'));
+  const OrchestratorModule = require('../src/orchestrator');
+  for (const clusterId of clusters) {
+    const agents = await socketDiscovery.listAttachableAgents(clusterId);
+    console.log(`  ${clusterId}`);
+    const { agentModels, tokenUsageLines } = getClusterAgentInfo(OrchestratorModule, clusterId);
+    if (tokenUsageLines) {
+      for (const line of tokenUsageLines) {
+        console.log(`    ${line}`);
+      }
+    }
+    for (const agent of agents) {
+      const modelLabel = agentModels[agent] ? chalk.dim(` [${agentModels[agent]}]`) : '';
+      console.log(chalk.dim(`    --agent ${agent}`) + modelLabel);
+    }
+  }
+}
+
+function readClusterFromDisk(id) {
+  const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
+  try {
+    const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    return clusters[id] || null;
+  } catch {
+    return null;
+  }
+}
+
+function ensureClusterRunning(cluster, id) {
+  if (!cluster) {
+    console.error(chalk.red(`Cluster ${id} not found`));
+    process.exit(1);
+  }
+  if (cluster.state !== 'running') {
+    console.error(chalk.red(`Cluster ${id} is not running (state: ${cluster.state})`));
+    console.error(chalk.dim('Only running clusters have attachable agents.'));
+    process.exit(1);
+  }
+}
+
+function getActiveAgents(status) {
+  return status.agents.filter((agent) => ACTIVE_STATES.has(agent.state));
+}
+
+function reportNoActiveAgents(status, id) {
+  console.error(chalk.yellow(`No agents currently executing tasks in cluster ${id}`));
+  console.log(chalk.dim('\nAgent states:'));
+  for (const agent of status.agents) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    console.log(
+      chalk.dim(
+        `  ${agent.id}${modelLabel}: ${agent.state}${agent.currentTaskId ? ` (last task: ${agent.currentTaskId})` : ''}`
+      )
+    );
+  }
+}
+
+function printAttachableAgentList(id, activeAgents) {
+  console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
+  for (const agent of activeAgents) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    if (agent.currentTaskId) {
+      console.log(
+        `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
+      );
+      console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
+    } else {
+      console.log(`  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow('starting...')}`);
+      console.log(chalk.dim(`    (task ID not yet assigned, try again in a moment)`));
+    }
+  }
+  console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
+}
+
+function reportMissingAgent(agentName, status) {
+  console.error(chalk.red(`Agent '${agentName}' not found in cluster`));
+  console.log(chalk.dim('Available agents: ' + status.agents.map((a) => a.id).join(', ')));
+  process.exit(1);
+}
+
+function reportAgentWithoutTask(agent, agentName) {
+  if (ACTIVE_STATES.has(agent.state)) {
+    console.error(
+      chalk.yellow(
+        `Agent '${agentName}' is working (state: ${agent.state}, task ID not yet assigned)`
+      )
+    );
+    console.log(chalk.dim('Try again in a moment...'));
+    return;
+  }
+  console.error(chalk.yellow(`Agent '${agentName}' is not currently running a task`));
+  console.log(chalk.dim(`State: ${agent.state}`));
+}
+
+async function reportClusterStatusUnavailable(err, socketDiscovery) {
+  console.error(chalk.yellow(`Could not get cluster status: ${err.message}`));
+  console.log(chalk.dim('Try attaching directly to a task ID instead: zeroshot attach <taskId>'));
+
+  const tasks = await socketDiscovery.listAttachableTasks();
+  if (tasks.length === 0) {
+    return;
+  }
+  console.log(chalk.dim('\nAttachable tasks:'));
+  for (const taskId of tasks) {
+    console.log(chalk.dim(`  zeroshot attach ${taskId}`));
+  }
+}
+
+async function resolveClusterSocketPath(id, options, socketDiscovery) {
+  const cluster = readClusterFromDisk(id);
+  ensureClusterRunning(cluster, id);
+
+  const orchestrator = await Orchestrator.create({ quiet: true });
+  try {
+    const status = orchestrator.getStatus(id);
+    const activeAgents = getActiveAgents(status);
+    if (activeAgents.length === 0) {
+      reportNoActiveAgents(status, id);
+      return null;
+    }
+
+    if (!options.agent) {
+      printAttachableAgentList(id, activeAgents);
+      return null;
+    }
+
+    const agent = status.agents.find((item) => item.id === options.agent);
+    if (!agent) {
+      reportMissingAgent(options.agent, status);
+      return null;
+    }
+
+    if (!agent.currentTaskId) {
+      reportAgentWithoutTask(agent, options.agent);
+      return null;
+    }
+
+    console.log(
+      chalk.dim(`Attaching to agent ${options.agent} via task ${agent.currentTaskId}...`)
+    );
+    return socketDiscovery.getTaskSocketPath(agent.currentTaskId);
+  } catch (err) {
+    await reportClusterStatusUnavailable(err, socketDiscovery);
+    return null;
+  }
+}
+
+function resolveAttachSocketPath(id, options, socketDiscovery) {
+  if (id.startsWith('task-')) {
+    return socketDiscovery.getTaskSocketPath(id);
+  }
+  if (id.startsWith('cluster-') || socketDiscovery.isKnownCluster(id)) {
+    return resolveClusterSocketPath(id, options, socketDiscovery);
+  }
+  return socketDiscovery.getSocketPath(id, options.agent);
+}
+
+function reportCannotAttach(id) {
+  console.error(chalk.red(`Cannot attach to ${id}`));
+
+  const { detectIdType } = require('../lib/id-detector');
+  const type = detectIdType(id);
+
+  if (type === 'task') {
+    console.error(chalk.dim('Task may have been spawned before attach support was added.'));
+    console.error(chalk.dim(`Try: zeroshot logs ${id} -f`));
+    return;
+  }
+  if (type === 'cluster') {
+    console.error(chalk.dim('Cluster may not be running or agent may not exist.'));
+    console.error(chalk.dim(`Check status: zeroshot status ${id}`));
+    return;
+  }
+  console.error(chalk.dim('Process not found or not attachable.'));
+}
+
+async function connectAttachClient({ AttachClient, socketPath, id, agentName }) {
+  console.log(chalk.dim(`Attaching to ${id}${agentName ? ` (agent: ${agentName})` : ''}...`));
+  console.log(chalk.dim('Press Ctrl+B ? for help, Ctrl+B d to detach\n'));
+
+  const client = new AttachClient({ socketPath });
+  client.on('state', (_state) => {
+    // Could show status bar here in future
+  });
+  client.on('exit', ({ code, signal }) => {
+    console.log(chalk.dim(`\n\nProcess exited (code: ${code}, signal: ${signal})`));
+    process.exit(code || 0);
+  });
+  client.on('error', (err) => {
+    console.error(chalk.red(`\nConnection error: ${err.message}`));
+    process.exit(1);
+  });
+  client.on('detach', () => {
+    console.log(chalk.dim('\n\nDetached. Task continues running.'));
+    console.log(
+      chalk.dim(`Re-attach: zeroshot attach ${id}${agentName ? ` --agent ${agentName}` : ''}`)
+    );
+    process.exit(0);
+  });
+  client.on('close', () => {
+    console.log(chalk.dim('\n\nConnection closed.'));
+    process.exit(0);
+  });
+
+  await client.connect();
+}
+
+function getFinishCluster(orchestrator, id) {
+  const cluster = orchestrator.getCluster(id);
+  if (!cluster) {
+    console.error(chalk.red(`Error: Cluster ${id} not found`));
+    console.error(chalk.dim('Use "zeroshot list" to see available clusters'));
+    process.exit(1);
+  }
+  return cluster;
+}
+
+async function promptStopCluster(id) {
+  console.log(chalk.yellow(`Cluster ${id} is still running.`));
+  console.log(chalk.dim('Stopping it before converting to completion task...'));
+  console.log('');
+
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const answer = await new Promise((resolve) => {
+    rl.question(chalk.yellow('Continue? (y/N) '), resolve);
+  });
+  rl.close();
+
+  return answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
+}
+
+async function stopClusterIfRunning(cluster, id, options, orchestrator) {
+  if (cluster.state !== 'running') {
+    return;
+  }
+
+  if (!options.y && !options.yes) {
+    const shouldContinue = await promptStopCluster(id);
+    if (!shouldContinue) {
+      console.log(chalk.red('Aborted'));
+      process.exit(0);
+    }
+  }
+
+  console.log(chalk.cyan('Stopping cluster...'));
+  await orchestrator.stop(id);
+  console.log(chalk.green('✓ Cluster stopped'));
+  console.log('');
+}
+
+function extractFinishContext(messages) {
+  const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
+  const taskText = issueOpened?.content?.text || 'Unknown task';
+  const issueNumber = issueOpened?.content?.data?.issue_number;
+  const issueTitle = issueOpened?.content?.data?.title || 'Implementation';
+  const agentOutputs = messages.filter((m) => m.topic === 'AGENT_OUTPUT');
+  const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
+  const approvedValidations = validations.filter(
+    (validation) =>
+      validation.content?.data?.approved === true || validation.content?.data?.approved === 'true'
+  );
+  return {
+    taskText,
+    issueNumber,
+    issueTitle,
+    agentOutputs,
+    validations,
+    approvedValidations,
+  };
+}
+
+function buildContextSummary({
+  taskText,
+  issueNumber,
+  issueTitle,
+  agentOutputs,
+  validations,
+  approvedValidations,
+}) {
+  let contextSummary = `# Original Task\n\n${taskText}\n\n`;
+
+  if (issueNumber) {
+    contextSummary += `Issue: #${issueNumber} - ${issueTitle}\n\n`;
+  }
+
+  contextSummary += `# Progress So Far\n\n`;
+  contextSummary += `- ${agentOutputs.length} agent outputs\n`;
+  contextSummary += `- ${validations.length} validation results\n`;
+  contextSummary += `- ${approvedValidations.length} approvals\n\n`;
+
+  if (validations.length > 0) {
+    contextSummary += `## Recent Validations\n\n`;
+    for (const validation of validations.slice(-3)) {
+      const approved =
+        validation.content?.data?.approved === true ||
+        validation.content?.data?.approved === 'true';
+      const icon = approved ? '✅' : '❌';
+      contextSummary += `${icon} **${validation.sender}**: ${validation.content?.data?.summary || 'No summary'}\n`;
+    }
+    contextSummary += '\n';
+  }
+
+  return contextSummary;
+}
+
+function buildCompletionPrompt({ contextSummary, taskText, issueNumber, issueTitle }) {
+  const mergeGoal = 'CREATE PR AND MERGE IT';
+  const mergeStep = `
+8. MERGE THE PR - THIS IS MANDATORY:
+   \`\`\`bash
+   gh pr merge --merge --auto
+   \`\`\`
+
+   IF MERGE FAILS DUE TO CONFLICTS:
+   a) Pull and rebase: \`git fetch origin main && git rebase origin/main\`
+   b) Resolve conflicts manually (read files, make decisions, edit)
+   c) \`git add <resolved-files> && git rebase --continue\`
+   d) Force push: \`git push --force-with-lease\`
+   e) Retry merge: \`gh pr merge --merge\`
+
+   REPEAT UNTIL MERGED. DO NOT GIVE UP.`;
+
+  return `# YOUR MISSION: ${mergeGoal}
+
+${contextSummary}
+
+# WHAT YOU MUST DO NOW
+
+You are the FINISHER. Your ONLY job is to take this cluster's work and push it across the finish line.
+
+**FAILURE IS NOT AN OPTION. YOU MUST COMPLETE THIS TASK.**
+
+## Steps (MUST complete ALL):
+
+1. REVIEW CURRENT STATE - Check git status, see what's changed:
+   \`\`\`bash
+   git status
+   git diff
+   \`\`\`
+
+2. COMMIT ALL CHANGES - Stage and commit everything:
+   \`\`\`bash
+   git add .
+   git commit -m "${issueTitle || 'feat: implement task'}"
+   \`\`\`
+
+3. CREATE BRANCH - Use issue number if available:
+   \`\`\`bash
+   ${issueNumber ? `git checkout -b issue-${issueNumber}` : 'git checkout -b feature/implementation'}
+   \`\`\`
+
+4. PUSH TO REMOTE:
+   \`\`\`bash
+   git push -u origin HEAD
+   \`\`\`
+
+5. CREATE PULL REQUEST:
+   \`\`\`bash
+   gh pr create --title "${issueTitle || 'Implementation'}" --body "Closes #${issueNumber || 'N/A'}
+
+## Summary
+${taskText.slice(0, 200)}...
+
+## Changes
+- Implementation complete
+- All validations addressed
+
+🤖 Generated with zeroshot finish"
+   \`\`\`
+
+6. GET PR URL:
+   \`\`\`bash
+   gh pr view --json url -q .url
+   \`\`\`
+
+7. OUTPUT THE PR URL - Print it clearly so user can see it
+${mergeStep}
+
+## RULES
+
+- NO EXCUSES: If something fails, FIX IT and retry
+- NO SHORTCUTS: Follow ALL steps above
+- NO PARTIAL WORK: Must reach PR creation and merge
+- IF TESTS FAIL: Fix them until they pass
+- IF CI FAILS: Wait for it, fix issues, retry
+- IF CONFLICTS: Resolve them intelligently
+
+**DO NOT STOP UNTIL YOU HAVE A MERGED PR.**`;
+}
+
+function printCompletionPromptPreview(completionPrompt) {
+  console.log(chalk.dim('='.repeat(80)));
+  console.log(chalk.dim('Task prompt preview:'));
+  console.log(chalk.dim('='.repeat(80)));
+  console.log(completionPrompt.split('\n').slice(0, 20).join('\n'));
+  console.log(chalk.dim('... (truncated) ...\n'));
+  console.log(chalk.dim('='.repeat(80)));
+  console.log('');
+}
+
+function buildFinishTaskOptions(cluster) {
+  const taskOptions = {
+    cwd: process.cwd(),
+  };
+
+  if (cluster.isolation?.enabled && cluster.isolation?.containerId) {
+    console.log(chalk.dim(`Using isolation container: ${cluster.isolation.containerId}`));
+    taskOptions.isolation = {
+      containerId: cluster.isolation.containerId,
+      workDir: '/workspace',
+    };
+  }
+
+  return taskOptions;
+}
+
+function printFinishTaskStarted(cluster) {
+  console.log('');
+  console.log(chalk.green(`✓ Completion task started`));
+  if (cluster.isolation?.enabled) {
+    console.log(chalk.dim('Running in isolation container (same as cluster)'));
+  }
+  console.log(chalk.dim('Monitor with: zeroshot list'));
+}
+
+async function getPurgeData(orchestrator) {
+  const clusters = orchestrator.listClusters();
+  const runningClusters = clusters.filter(
+    (cluster) => cluster.state === 'running' || cluster.state === 'initializing'
+  );
+  const { loadTasks } = await import('../task-lib/store.js');
+  const { isProcessRunning } = await import('../task-lib/runner.js');
+  const tasks = Object.values(loadTasks());
+  const runningTasks = tasks.filter(
+    (task) => task.status === 'running' && isProcessRunning(task.pid)
+  );
+  return { clusters, runningClusters, tasks, runningTasks, isProcessRunning };
+}
+
+function printPurgeSummary({ clusters, runningClusters, tasks, runningTasks }) {
+  console.log(chalk.bold('\nWill kill and delete:'));
+  if (clusters.length > 0) {
+    console.log(chalk.cyan(`  ${clusters.length} cluster(s) with all history`));
+    if (runningClusters.length > 0) {
+      console.log(chalk.yellow(`    ${runningClusters.length} running`));
+    }
+  }
+  if (tasks.length > 0) {
+    console.log(chalk.yellow(`  ${tasks.length} task(s) with all logs`));
+    if (runningTasks.length > 0) {
+      console.log(chalk.yellow(`    ${runningTasks.length} running`));
+    }
+  }
+  console.log('');
+}
+
+async function confirmPurge(options) {
+  if (options.yes) {
+    return true;
+  }
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const answer = await new Promise((resolve) => {
+    rl.question(
+      chalk.bold.red(
+        'This will kill all processes and permanently delete all data. Proceed? [y/N] '
+      ),
+      resolve
+    );
+  });
+  rl.close();
+  return answer.toLowerCase() === 'y';
+}
+
+async function killRunningClusters(orchestrator, runningClusters) {
+  if (runningClusters.length === 0) {
+    return;
+  }
+  console.log(chalk.bold('Killing running clusters...'));
+  const clusterResults = await orchestrator.killAll();
+  for (const id of clusterResults.killed) {
+    console.log(chalk.green(`✓ Killed cluster: ${id}`));
+  }
+  for (const err of clusterResults.errors) {
+    console.log(chalk.red(`✗ Failed to kill cluster ${err.id}: ${err.error}`));
+  }
+}
+
+async function killRunningTasks(runningTasks, isProcessRunning) {
+  if (runningTasks.length === 0) {
+    return;
+  }
+  console.log(chalk.bold('Killing running tasks...'));
+  const { killTask } = await import('../task-lib/runner.js');
+  const { updateTask } = await import('../task-lib/store.js');
+
+  for (const task of runningTasks) {
+    if (!isProcessRunning(task.pid)) {
+      updateTask(task.id, {
+        status: 'stale',
+        error: 'Process died unexpectedly',
+      });
+      console.log(chalk.yellow(`○ Task ${task.id} was already dead, marked stale`));
+      continue;
+    }
+
+    const killed = killTask(task.pid);
+    if (killed) {
+      updateTask(task.id, { status: 'killed', error: 'Killed by clear' });
+      console.log(chalk.green(`✓ Killed task: ${task.id}`));
+    } else {
+      console.log(chalk.red(`✗ Failed to kill task: ${task.id}`));
+    }
+  }
+}
+
+function deleteClusterData(orchestrator, clusters) {
+  if (clusters.length === 0) {
+    return;
+  }
+  console.log(chalk.bold('Deleting cluster data...'));
+  const clustersFile = path.join(orchestrator.storageDir, 'clusters.json');
+  const clustersDir = path.join(orchestrator.storageDir, 'clusters');
+
+  for (const cluster of clusters) {
+    const dbPath = path.join(orchestrator.storageDir, `${cluster.id}.db`);
+    if (fs.existsSync(dbPath)) {
+      fs.unlinkSync(dbPath);
+      console.log(chalk.green(`✓ Deleted cluster database: ${cluster.id}.db`));
+    }
+  }
+
+  if (fs.existsSync(clustersFile)) {
+    fs.unlinkSync(clustersFile);
+    console.log(chalk.green(`✓ Deleted clusters.json`));
+  }
+
+  if (fs.existsSync(clustersDir)) {
+    fs.rmSync(clustersDir, { recursive: true, force: true });
+    console.log(chalk.green(`✓ Deleted clusters/ directory`));
+  }
+
+  orchestrator.clusters.clear();
+}
+
+async function deleteTaskData(tasks) {
+  if (tasks.length === 0) {
+    return;
+  }
+  console.log(chalk.bold('Deleting task data...'));
+  const { cleanTasks } = await import('../task-lib/commands/clean.js');
+  await cleanTasks({ all: true });
+}
+
 // Lazy-loaded orchestrator (quiet by default) - created on first use
 /** @type {import('../src/orchestrator') | null} */
 let _orchestrator = null;
+/** @type {Promise<import('../src/orchestrator')> | null} */
+let _orchestratorPromise = null;
 /**
- * @returns {import('../src/orchestrator')}
+ * @returns {Promise<import('../src/orchestrator')>}
  */
 function getOrchestrator() {
-  if (!_orchestrator) {
-    _orchestrator = new Orchestrator({ quiet: true });
+  if (_orchestrator) {
+    return Promise.resolve(_orchestrator);
   }
-  return _orchestrator;
+  // Use a promise to prevent multiple concurrent initializations
+  if (!_orchestratorPromise) {
+    _orchestratorPromise = Orchestrator.create({ quiet: true }).then((orch) => {
+      _orchestrator = orch;
+      return orch;
+    });
+  }
+  return _orchestratorPromise;
 }
 
 /**
@@ -218,45 +2082,102 @@ function getOrchestrator() {
 function readAgentTaskLogs(cluster) {
   /** @type {TaskLogMessage[]} */
   const messages = [];
-  const zeroshotLogsDir = path.join(os.homedir(), '.claude-zeroshot', 'logs');
+  const zeroshotLogsDir = getZeroshotLogsDir();
 
   if (!fs.existsSync(zeroshotLogsDir)) {
     return messages;
   }
 
-  // Strategy 1: Find task IDs from AGENT_LIFECYCLE messages
   const lifecycleMessages = cluster.messageBus.query({
     cluster_id: cluster.id,
     topic: 'AGENT_LIFECYCLE',
   });
 
-  const taskIds = new Set(); // All task IDs we've found
+  const taskIds = collectTaskIds(cluster, lifecycleMessages, zeroshotLogsDir);
+
+  for (const taskId of taskIds) {
+    const logPath = path.join(zeroshotLogsDir, `${taskId}.log`);
+    const lines = readTaskLogLines(taskId, logPath);
+    if (!lines || lines.length === 0) {
+      continue;
+    }
+
+    const agent = resolveAgentForTask(cluster, taskId, lifecycleMessages);
+    if (!agent) {
+      continue;
+    }
+
+    const state = agent.getState();
+    for (const line of lines) {
+      const parsed = parseTaskLogLine(line);
+      if (!parsed) {
+        continue;
+      }
+      messages.push(
+        buildTaskLogMessage({
+          taskId,
+          timestamp: parsed.timestamp,
+          jsonContent: parsed.jsonContent,
+          cluster,
+          agent,
+          iteration: state.iteration,
+        })
+      );
+    }
+  }
+
+  return messages;
+}
+
+function getZeroshotLogsDir() {
+  return path.join(os.homedir(), '.claude-zeroshot', 'logs');
+}
+
+function collectTaskIds(cluster, lifecycleMessages, logsDir) {
+  const taskIds = new Set();
+  addTaskIds(taskIds, collectTaskIdsFromLifecycle(lifecycleMessages));
+  addTaskIds(taskIds, collectTaskIdsFromAgents(cluster.agents));
+  addTaskIds(taskIds, collectTaskIdsFromLogFiles(logsDir, cluster.createdAt));
+  return taskIds;
+}
+
+function addTaskIds(target, ids) {
+  for (const id of ids) {
+    target.add(id);
+  }
+}
+
+function collectTaskIdsFromLifecycle(lifecycleMessages) {
+  const taskIds = new Set();
   for (const msg of lifecycleMessages) {
     const taskId = msg.content?.data?.taskId;
     if (taskId) {
       taskIds.add(taskId);
     }
   }
+  return taskIds;
+}
 
-  // Strategy 2: Find task IDs from current agent state
-  for (const agent of cluster.agents) {
+function collectTaskIdsFromAgents(agents) {
+  const taskIds = new Set();
+  for (const agent of agents) {
     const state = agent.getState();
     if (state.currentTaskId) {
       taskIds.add(state.currentTaskId);
     }
   }
+  return taskIds;
+}
 
-  // Strategy 3: Scan for log files matching cluster start time (catch orphaned tasks)
-  // This handles the case where TASK_ID_ASSIGNED wasn't published to cluster DB
-  const clusterStartTime = cluster.createdAt;
-  const logFiles = fs.readdirSync(zeroshotLogsDir);
-
+function collectTaskIdsFromLogFiles(logsDir, clusterStartTime) {
+  const taskIds = new Set();
+  const logFiles = fs.readdirSync(logsDir);
   for (const logFile of logFiles) {
-    if (!logFile.endsWith('.log')) continue;
+    if (!logFile.endsWith('.log')) {
+      continue;
+    }
     const taskId = logFile.replace(/\.log$/, '');
-
-    // Check file modification time - only include logs modified after cluster started
-    const logPath = path.join(zeroshotLogsDir, logFile);
+    const logPath = path.join(logsDir, logFile);
     try {
       const stats = fs.statSync(logPath);
       if (stats.mtimeMs >= clusterStartTime) {
@@ -266,109 +2187,106 @@ function readAgentTaskLogs(cluster) {
       // Skip files we can't stat
     }
   }
+  return taskIds;
+}
 
-  // Read logs for all discovered tasks
-  for (const taskId of taskIds) {
-    const logPath = path.join(zeroshotLogsDir, `${taskId}.log`);
-    if (!fs.existsSync(logPath)) {
-      continue;
-    }
+function readTaskLogLines(taskId, logPath) {
+  if (!fs.existsSync(logPath)) {
+    return null;
+  }
+  try {
+    const content = fs.readFileSync(logPath, 'utf8');
+    return content.split('\n').filter((line) => line.trim());
+  } catch (err) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: Could not read log for ${taskId}: ${errMessage}`);
+    return null;
+  }
+}
 
-    try {
-      const content = fs.readFileSync(logPath, 'utf8');
-      const lines = content.split('\n').filter((line) => line.trim());
+function resolveAgentForTask(cluster, taskId, lifecycleMessages) {
+  const directMatch = findAgentByTaskId(cluster.agents, taskId);
+  if (directMatch) {
+    return directMatch;
+  }
+  const inferredMatch = findAgentFromLifecycle(cluster.agents, taskId, lifecycleMessages);
+  return inferredMatch || cluster.agents[0] || null;
+}
 
-      // Try to match task to agent (best effort, may not find a match for orphaned tasks)
-      let matchedAgent = null;
-      for (const agent of cluster.agents) {
-        const state = agent.getState();
-        if (state.currentTaskId === taskId) {
-          matchedAgent = agent;
-          break;
-        }
-      }
-
-      // If no agent match, try to infer from lifecycle messages
-      if (!matchedAgent) {
-        for (const msg of lifecycleMessages) {
-          if (msg.content?.data?.taskId === taskId) {
-            const agentId = msg.content?.data?.agent || msg.sender;
-            matchedAgent = cluster.agents.find((a) => a.id === agentId);
-            break;
-          }
-        }
-      }
-
-      // Default to first agent if no match found (best effort for orphaned tasks)
-      const agent = matchedAgent || cluster.agents[0];
-      if (!agent) {
-        continue;
-      }
-
-      const state = agent.getState();
-
-      for (const line of lines) {
-        // Lines are prefixed with [timestamp] - parse that first
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('[')) {
-          continue;
-        }
-
-        try {
-          // Parse timestamp-prefixed line: [1733301234567]{json...} or [1733301234567][SYSTEM]...
-          let timestamp = Date.now();
-          let jsonContent = trimmed;
-
-          const timestampMatch = jsonContent.match(/^\[(\d{13})\](.*)$/);
-          if (timestampMatch) {
-            timestamp = parseInt(timestampMatch[1], 10);
-            jsonContent = timestampMatch[2];
-          }
-
-          // Skip non-JSON (e.g., [SYSTEM] lines)
-          if (!jsonContent.startsWith('{')) {
-            continue;
-          }
-
-          // Parse JSON
-          const parsed = JSON.parse(jsonContent);
-
-          // Skip system init messages
-          if (parsed.type === 'system' && parsed.subtype === 'init') {
-            continue;
-          }
-
-          // Convert to cluster message format
-          messages.push({
-            id: `task-${taskId}-${timestamp}`,
-            timestamp,
-            topic: 'AGENT_OUTPUT',
-            sender: agent.id,
-            receiver: 'broadcast',
-            cluster_id: cluster.id,
-            content: {
-              text: jsonContent,
-              data: {
-                type: 'stdout',
-                line: jsonContent,
-                agent: agent.id,
-                role: agent.role,
-                iteration: state.iteration,
-                fromTaskLog: true, // Mark as coming from task log
-              },
-            },
-          });
-        } catch {
-          // Skip invalid JSON
-        }
-      }
-    } catch (err) {
-      // Log file read error - skip this task
-      console.warn(`Warning: Could not read log for ${taskId}: ${err.message}`);
+function findAgentByTaskId(agents, taskId) {
+  for (const agent of agents) {
+    const state = agent.getState();
+    if (state.currentTaskId === taskId) {
+      return agent;
     }
   }
+  return null;
+}
 
-  return messages;
+function findAgentFromLifecycle(agents, taskId, lifecycleMessages) {
+  for (const msg of lifecycleMessages) {
+    if (msg.content?.data?.taskId === taskId) {
+      const agentId = msg.content?.data?.agent || msg.sender;
+      return agents.find((agent) => agent.id === agentId) || null;
+    }
+  }
+  return null;
+}
+
+function parseTaskLogLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('[')) {
+    return null;
+  }
+
+  const parsed = parseTimestampedLine(trimmed);
+  if (!parsed.jsonContent.startsWith('{')) {
+    return null;
+  }
+
+  try {
+    const json = JSON.parse(parsed.jsonContent);
+    if (json.type === 'system' && json.subtype === 'init') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseTimestampedLine(line) {
+  const timestampMatch = line.match(/^\[(\d{13})\](.*)$/);
+  if (!timestampMatch) {
+    return { timestamp: Date.now(), jsonContent: line };
+  }
+  return {
+    timestamp: parseInt(timestampMatch[1], 10),
+    jsonContent: timestampMatch[2],
+  };
+}
+
+function buildTaskLogMessage({ taskId, timestamp, jsonContent, cluster, agent, iteration }) {
+  return {
+    id: `task-${taskId}-${timestamp}`,
+    timestamp,
+    topic: 'AGENT_OUTPUT',
+    sender: agent.id,
+    receiver: 'broadcast',
+    cluster_id: cluster.id,
+    content: {
+      text: jsonContent,
+      data: {
+        type: 'stdout',
+        line: jsonContent,
+        agent: agent.id,
+        role: agent.role,
+        iteration,
+        fromTaskLog: true,
+      },
+    },
+  };
 }
 
 // Setup shell completion
@@ -394,7 +2312,7 @@ if (shouldShowBanner) {
 
 program
   .name('zeroshot')
-  .description('Multi-agent orchestration and task management for Claude')
+  .description('Multi-agent orchestration and task management for Claude, Codex, and Gemini')
   .version(require('../package.json').version)
   .option('-q, --quiet', 'Suppress prompts (first-run wizard, update checks)')
   .addHelpText(
@@ -402,9 +2320,10 @@ program
     `
 Examples:
   ${chalk.cyan('zeroshot run 123 --ship')}             Full automation: isolated + auto-merge PR
-  ${chalk.cyan('zeroshot run 123')}                    Run cluster and attach to first agent
-  ${chalk.cyan('zeroshot run 123 -d')}                 Run cluster in background (detached)
-  ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster on plain text task
+  ${chalk.cyan('zeroshot run 123')}                    Run cluster from GitHub issue
+  ${chalk.cyan('zeroshot run feature.md')}             Run cluster from markdown file
+  ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster from plain text
+  ${chalk.cyan('zeroshot run 123 -d')}                 Run in background (detached)
   ${chalk.cyan('zeroshot run 123 --docker')}           Run in Docker container (safe for e2e tests)
   ${chalk.cyan('zeroshot task run "Fix the bug"')}     Run single-agent background task
   ${chalk.cyan('zeroshot list')}                       List all tasks and clusters
@@ -421,6 +2340,7 @@ Examples:
   ${chalk.cyan('zeroshot purge -y')}                   Purge everything without confirmation
   ${chalk.cyan('zeroshot settings')}                   Show/manage zeroshot settings (maxModel, config, etc.)
   ${chalk.cyan('zeroshot settings set <key> <val>')}   Set a setting (e.g., maxModel haiku)
+  ${chalk.cyan('zeroshot providers')}                  Show provider status and defaults
   ${chalk.cyan('zeroshot config list')}                List available cluster configs
   ${chalk.cyan('zeroshot config show <name>')}         Visualize a cluster config (agents, triggers, flow)
   ${chalk.cyan('zeroshot export <id>')}                Export cluster conversation to file
@@ -441,7 +2361,7 @@ Shell completion:
 // Run command - CLUSTER with auto-detection
 program
   .command('run <input>')
-  .description('Start a multi-agent cluster (auto-detects GitHub issue or plain text)')
+  .description('Start a multi-agent cluster (GitHub issue, markdown file, or plain text)')
   .option('--config <file>', 'Path to cluster config JSON (default: conductor-bootstrap)')
   .option('--docker', 'Run cluster inside Docker container (full isolation)')
   .option('--worktree', 'Use git worktree for isolation (lightweight, no Docker required)')
@@ -453,389 +2373,120 @@ program
     '--strict-schema',
     'Enforce JSON schema via CLI (no live streaming). Default: live streaming with local validation'
   )
-  .option('--pr', 'Create PR for human review (uses worktree isolation by default, use --docker for Docker)')
-  .option('--ship', 'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)')
+  .option(
+    '--pr',
+    'Create PR for human review (uses worktree isolation by default, use --docker for Docker)'
+  )
+  .option(
+    '--ship',
+    'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)'
+  )
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
+  .option(
+    '--provider <provider>',
+    'Override all agents to use a provider (claude, codex, gemini, opencode)'
+  )
+  .option('--model <model>', 'Override all agent models (provider-specific model id)')
+  .option('-G, --github', 'Force GitHub as issue source')
+  .option('-L, --gitlab', 'Force GitLab as issue source')
+  .option('-J, --jira', 'Force Jira as issue source')
+  .option('-D, --devops', 'Force Azure DevOps as issue source')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
   .option('--no-mounts', 'Disable all Docker credential mounts')
-  .option('--container-home <path>', 'Container home directory for $HOME expansion (default: /root)')
+  .option(
+    '--container-home <path>',
+    'Container home directory for $HOME expansion (default: /root)'
+  )
   .addHelpText(
     'after',
     `
 Input formats:
-  123                              GitHub issue number (uses current repo)
-  org/repo#123                     GitHub issue with explicit repo
-  https://github.com/.../issues/1  Full GitHub issue URL
-  "Implement feature X"            Plain text task description
+  GitHub:
+    123                              Issue number (uses current repo)
+    org/repo#123                     Issue with explicit repo
+    https://github.com/.../issues/1  Full issue URL
+
+  GitLab:
+    https://gitlab.com/org/repo/-/issues/123   GitLab cloud
+    https://gitlab.company.com/.../issues/123  Self-hosted
+
+  Jira:
+    PROJ-123                         Issue key
+    https://company.atlassian.net/browse/PROJ-123
+
+  Azure DevOps:
+    https://dev.azure.com/org/proj/_workitems/edit/123
+
+  File/Text:
+    feature.md                       Markdown file
+    "Implement feature X"            Plain text task
+
+Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 `
   )
   .action(async (inputArg, options) => {
     try {
-      // Cascading flag implications: --ship → --pr → worktree (unless --docker)
-      // --ship = full automation (worktree isolation + PR + auto-merge)
-      if (options.ship) {
-        options.pr = true;
-        // Use worktree by default, Docker only if explicitly requested
-        if (!options.docker) {
-          options.worktree = true;
-        }
-      }
-      // --pr = PR for human review (worktree by default, Docker if requested)
-      if (options.pr && !options.docker && !options.worktree) {
-        options.worktree = true;
-      }
+      // Normalize options (--ship → --pr → --worktree flags)
+      normalizeRunOptions(options);
 
-      // Mutual exclusivity: --docker explicitly disables worktree
-      if (options.docker) {
-        options.worktree = false;
-      }
+      // Determine force provider from CLI flags
+      let forceProvider = null;
+      if (options.github) forceProvider = 'github';
+      else if (options.gitlab) forceProvider = 'gitlab';
+      else if (options.jira) forceProvider = 'jira';
+      else if (options.devops) forceProvider = 'azure-devops';
 
       // Auto-detect input type
-      let input = {};
+      const input = detectRunInput(inputArg);
+      const settings = loadSettings();
+      const providerOverride = resolveProviderOverride(options, settings);
 
-      // Check if it's a GitHub issue URL
-      if (inputArg.match(/^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/)) {
-        input.issue = inputArg;
-      }
-      // Check if it's a GitHub issue number (just digits)
-      else if (/^\d+$/.test(inputArg)) {
-        input.issue = inputArg;
-      }
-      // Check if it's org/repo#123 format
-      else if (inputArg.match(/^[\w-]+\/[\w-]+#\d+$/)) {
-        input.issue = inputArg;
-      }
-      // Otherwise, treat as plain text
-      else {
-        input.text = inputArg;
-      }
-
-      // === PREFLIGHT CHECKS ===
-      // Validate all dependencies BEFORE starting anything
-      // This gives users clear, actionable error messages upfront
-      const preflightOptions = {
-        requireGh: !!input.issue, // gh CLI required when fetching GitHub issues
-        requireDocker: options.docker, // Docker required for --docker mode
-        requireGit: options.worktree, // Git required for worktree isolation
-        quiet: process.env.ZEROSHOT_DAEMON === '1', // Suppress success in daemon mode
-      };
-      requirePreflight(preflightOptions);
-
-      // === CLUSTER MODE ===
+      // Preflight checks
+      runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
 
       const { generateName } = require('../src/name-generator');
 
-      // === DETACHED MODE (-d flag) ===
-      // Spawn daemon and exit immediately
-      if (options.detach && !process.env.ZEROSHOT_DAEMON) {
-        const { spawn } = require('child_process');
-
-        // Generate cluster ID in parent so we can display it
+      if (shouldRunDetached(options)) {
         const clusterId = generateName('cluster');
-
-        // Output cluster ID and help
-        if (options.docker) {
-          console.log(`Started ${clusterId} (docker)`);
-        } else {
-          console.log(`Started ${clusterId}`);
-        }
-        console.log(`Monitor: zeroshot logs ${clusterId} -f`);
-        console.log(`Attach:  zeroshot attach ${clusterId}`);
-
-        // Create log file for daemon output (captures startup errors)
-        const osModule = require('os');
-        const storageDir = path.join(osModule.homedir(), '.zeroshot');
-        if (!fs.existsSync(storageDir)) {
-          fs.mkdirSync(storageDir, { recursive: true });
-        }
-        const logPath = path.join(storageDir, `${clusterId}-daemon.log`);
-        const logFd = fs.openSync(logPath, 'w');
-
-        // Detect git repo root for CWD propagation
-        // CRITICAL: Agents must work in the target repo, not where CLI was invoked
-        const targetCwd = detectGitRepoRoot();
-
-        // Spawn ourselves as daemon (detached, logs to file)
-        const daemon = spawn(process.execPath, process.argv.slice(1), {
-          detached: true,
-          stdio: ['ignore', logFd, logFd], // stdout + stderr go to log file
-          cwd: targetCwd, // Daemon inherits correct working directory
-          env: {
-            ...process.env,
-            ZEROSHOT_DAEMON: '1',
-            ZEROSHOT_CLUSTER_ID: clusterId,
-            ZEROSHOT_DOCKER: options.docker ? '1' : '',
-            ZEROSHOT_DOCKER_IMAGE: options.dockerImage || '',
-            ZEROSHOT_PR: options.pr ? '1' : '',
-            ZEROSHOT_WORKTREE: options.worktree ? '1' : '',
-            ZEROSHOT_WORKERS: options.workers?.toString() || '',
-            ZEROSHOT_CWD: targetCwd, // Explicit CWD for orchestrator
-          },
-        });
-
-        daemon.unref();
-        fs.closeSync(logFd);
-        process.exit(0);
+        spawnDetachedCluster(options, clusterId);
+        return;
       }
 
-      // === FOREGROUND MODE (default) or DAEMON CHILD ===
-      // Load user settings
-      const settings = loadSettings();
-
-      // Use cluster ID from env (daemon mode) or generate new one (foreground mode)
-      // IMPORTANT: Set env var so orchestrator picks it up
-      const clusterId = process.env.ZEROSHOT_CLUSTER_ID || generateName('cluster');
-      process.env.ZEROSHOT_CLUSTER_ID = clusterId;
+      const clusterId = resolveClusterId(generateName);
 
       // === LOAD CONFIG ===
       // Priority: CLI --config > settings.defaultConfig
-      let config;
-      const configName = options.config || settings.defaultConfig;
+      const configName = resolveConfigName(options, settings);
+      const configPath = resolveConfigPath(configName);
+      const orchestrator = await getOrchestrator();
+      const config = loadClusterConfig(orchestrator, configPath, settings, providerOverride);
+      trackActiveCluster(clusterId, orchestrator);
+      printForegroundStartInfo(options, clusterId, configName);
 
-      // Resolve config path (check examples/ directory if not absolute/relative path)
-      let configPath;
-      if (
-        path.isAbsolute(configName) ||
-        configName.startsWith('./') ||
-        configName.startsWith('../')
-      ) {
-        configPath = path.resolve(process.cwd(), configName);
-      } else if (configName.endsWith('.json')) {
-        // If it has .json extension, check examples/ directory
-        configPath = path.join(PACKAGE_ROOT, 'cluster-templates', configName);
-      } else {
-        // Otherwise assume it's a template name (add .json)
-        configPath = path.join(PACKAGE_ROOT, 'cluster-templates', `${configName}.json`);
-      }
+      const strictSchema = resolveStrictSchema(options, settings);
+      applyStrictSchema(config, strictSchema);
 
-      // Create orchestrator with clusterId override for foreground mode
-      const orchestrator = getOrchestrator();
-      config = orchestrator.loadConfig(configPath);
+      const modelOverride = resolveModelOverride(options);
+      applyModelOverrideToConfig(config, modelOverride, providerOverride, settings);
 
-      // Track for global error handler cleanup
-      activeClusterId = clusterId;
-      orchestratorInstance = orchestrator;
-
-      // In foreground mode, show startup info
-      if (!process.env.ZEROSHOT_DAEMON) {
-        if (options.docker) {
-          console.log(`Starting ${clusterId} (docker)`);
-        } else if (options.worktree) {
-          console.log(`Starting ${clusterId} (worktree)`);
-        } else {
-          console.log(`Starting ${clusterId}`);
-        }
-        console.log(chalk.dim(`Config: ${configName}`));
-        console.log(chalk.dim('Ctrl+C to stop following (cluster keeps running)\n'));
-      }
-
-      // Apply strictSchema setting to all agents (CLI > env > settings)
-      const strictSchema =
-        options.strictSchema || process.env.ZEROSHOT_STRICT_SCHEMA === '1' || settings.strictSchema;
-      if (strictSchema) {
-        for (const agent of config.agents) {
-          agent.strictSchema = true;
-        }
-      }
-
-      // Build start options (CLI flags > env vars > settings)
-      // In foreground mode, use CLI options directly; in daemon mode, use env vars
-      // CRITICAL: cwd must be passed to orchestrator for agent CWD propagation
-      const targetCwd = process.env.ZEROSHOT_CWD || detectGitRepoRoot();
-      const startOptions = {
-        cwd: targetCwd, // Target working directory for agents
-        isolation:
-          options.docker || process.env.ZEROSHOT_DOCKER === '1' || settings.defaultDocker,
-        isolationImage: options.dockerImage || process.env.ZEROSHOT_DOCKER_IMAGE || undefined,
-        worktree: options.worktree || process.env.ZEROSHOT_WORKTREE === '1',
-        autoPr: options.pr || process.env.ZEROSHOT_PR === '1',
-        autoMerge: process.env.ZEROSHOT_MERGE === '1',
-        autoPush: process.env.ZEROSHOT_PUSH === '1',
-        // Docker mount options
-        noMounts: options.noMounts || false,
-        mounts: options.mount ? parseMountSpecs(options.mount) : undefined,
-        containerHome: options.containerHome || undefined,
-      };
+      const startOptions = buildStartOptions({
+        clusterId,
+        options,
+        settings,
+        providerOverride,
+        modelOverride,
+        forceProvider,
+      });
 
       // Start cluster
       const cluster = await orchestrator.start(config, input, startOptions);
 
-      // === FOREGROUND MODE: Stream logs in real-time ===
-      // Subscribe to message bus directly (same process) for instant output
       if (!process.env.ZEROSHOT_DAEMON) {
-        // Track senders that have output (for periodic flushing)
-        const sendersWithOutput = new Set();
-        // Track messages we've already processed (to avoid duplicates between history and subscription)
-        const processedMessageIds = new Set();
-
-        // === STATUS FOOTER: Live agent monitoring ===
-        // Shows CPU, memory, network metrics for all agents at bottom of terminal
-        const statusFooter = new StatusFooter({
-          refreshInterval: 1000,
-          enabled: process.stdout.isTTY,
-        });
-        statusFooter.setCluster(clusterId);
-        statusFooter.setClusterState('running');
-        statusFooter.setMessageBus(cluster.messageBus);
-        // Set module-level reference so safePrint/safeWrite route through footer
-        activeStatusFooter = statusFooter;
-
-        // Subscribe to AGENT_LIFECYCLE to track agent states and PIDs
-        const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic('AGENT_LIFECYCLE', (msg) => {
-          const data = msg.content?.data || {};
-          const event = data.event;
-          const agentId = data.agent || msg.sender;
-
-          // Update agent state based on lifecycle event
-          if (event === 'STARTED') {
-            statusFooter.updateAgent({
-              id: agentId,
-              state: AGENT_STATE.IDLE,
-              pid: null,
-              iteration: data.iteration || 0,
-            });
-          } else if (event === 'TASK_STARTED') {
-            statusFooter.updateAgent({
-              id: agentId,
-              state: AGENT_STATE.EXECUTING_TASK,
-              pid: statusFooter.agents.get(agentId)?.pid || null,
-              iteration: data.iteration || 0,
-            });
-          } else if (event === 'PROCESS_SPAWNED') {
-            // PROCESS_SPAWNED = proof of execution. If a process spawned, agent is executing.
-            const current = statusFooter.agents.get(agentId) || { iteration: 0 };
-            statusFooter.updateAgent({
-              id: agentId,
-              state: AGENT_STATE.EXECUTING_TASK,
-              pid: data.pid,
-              iteration: current.iteration,
-            });
-          } else if (event === 'TASK_COMPLETED' || event === 'TASK_FAILED') {
-            statusFooter.updateAgent({
-              id: agentId,
-              state: AGENT_STATE.IDLE,
-              pid: null,
-              iteration: data.iteration || 0,
-            });
-          } else if (event === 'STOPPED') {
-            statusFooter.removeAgent(agentId);
-          }
-        });
-
-        // Start the status footer
-        statusFooter.start();
-
-        // Message handler - processes messages, deduplicates by ID
-        const handleMessage = (msg) => {
-          if (msg.cluster_id !== clusterId) return;
-          if (processedMessageIds.has(msg.id)) return;
-          processedMessageIds.add(msg.id);
-
-          if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
-            sendersWithOutput.add(msg.sender);
-          }
-          printMessage(msg, false, false, true);
-        };
-
-        // Subscribe to NEW messages
-        const unsubscribe = cluster.messageBus.subscribe(handleMessage);
-
-        // CRITICAL: Replay historical messages that may have been published BEFORE we subscribed
-        // This fixes the race condition where fast-completing clusters miss output
-        const historicalMessages = cluster.messageBus.getAll(clusterId);
-        for (const msg of historicalMessages) {
-          handleMessage(msg);
-        }
-
-        // Periodic flush of text buffers (streaming text may not have newlines)
-        const flushInterval = setInterval(() => {
-          for (const sender of sendersWithOutput) {
-            const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
-            flushLineBuffer(prefix, sender);
-          }
-        }, 250);
-
-        // Wait for cluster to complete
-        await new Promise((resolve) => {
-          const checkInterval = setInterval(() => {
-            try {
-              const status = orchestrator.getStatus(clusterId);
-              if (status.state !== 'running') {
-                clearInterval(checkInterval);
-                clearInterval(flushInterval);
-                lifecycleUnsubscribe();
-                // Final flush BEFORE stopping status footer
-                // (statusFooter.stop() sends ANSI codes that can clear terminal area)
-                for (const sender of sendersWithOutput) {
-                  const prefix = getColorForSender(sender)(`${sender.padEnd(15)} |`);
-                  flushLineBuffer(prefix, sender);
-                }
-                // Stop status footer AFTER output is done
-                statusFooter.stop();
-                activeStatusFooter = null;
-                unsubscribe();
-                resolve();
-              }
-            } catch {
-              // Cluster may have been removed
-              clearInterval(checkInterval);
-              clearInterval(flushInterval);
-              statusFooter.stop();
-              activeStatusFooter = null;
-              lifecycleUnsubscribe();
-              unsubscribe();
-              resolve();
-            }
-          }, 500);
-
-          // Handle Ctrl+C: Stop cluster since foreground mode has no daemon
-          // CRITICAL: In foreground mode, the cluster runs IN this process.
-          // If we exit without stopping, the cluster becomes a zombie (state=running but no process).
-          process.on('SIGINT', async () => {
-            // Stop status footer first to restore terminal
-            statusFooter.stop();
-            activeStatusFooter = null;
-            lifecycleUnsubscribe();
-
-            console.log(chalk.dim('\n\n--- Interrupted ---'));
-            clearInterval(checkInterval);
-            clearInterval(flushInterval);
-            unsubscribe();
-
-            // Stop the cluster properly so state is updated
-            try {
-              console.log(chalk.dim(`Stopping cluster ${clusterId}...`));
-              await orchestrator.stop(clusterId);
-              console.log(chalk.dim(`Cluster ${clusterId} stopped.`));
-            } catch (stopErr) {
-              console.error(chalk.red(`Failed to stop cluster: ${stopErr.message}`));
-            }
-
-            process.exit(0);
-          });
-        });
-
-        console.log(chalk.dim(`\nCluster ${clusterId} completed.`));
+        await streamClusterInForeground(cluster, orchestrator, clusterId);
       }
 
-      // Daemon mode: cluster runs in background, stay alive via orchestrator's setInterval
-      // Add cleanup handlers for daemon mode to ensure container cleanup on process exit
-      // CRITICAL: Without this, containers become orphaned when daemon process dies
-      if (process.env.ZEROSHOT_DAEMON) {
-        const cleanup = async (signal) => {
-          console.log(`\n[DAEMON] Received ${signal}, cleaning up cluster ${clusterId}...`);
-          try {
-            await orchestrator.stop(clusterId);
-            console.log(`[DAEMON] Cluster ${clusterId} stopped.`);
-          } catch (e) {
-            console.error(`[DAEMON] Cleanup error: ${e.message}`);
-          }
-          process.exit(0);
-        };
-        process.on('SIGTERM', () => cleanup('SIGTERM'));
-        process.on('SIGINT', () => cleanup('SIGINT'));
-      }
+      setupDaemonCleanup(orchestrator, clusterId);
     } catch (error) {
       console.error('Error:', error.message);
       process.exit(1);
@@ -850,8 +2501,12 @@ taskCmd
   .command('run <prompt>')
   .description('Run a single-agent background task')
   .option('-C, --cwd <path>', 'Working directory for task')
-  .option('-r, --resume <sessionId>', 'Resume a specific Claude session')
-  .option('-c, --continue', 'Continue the most recent session')
+  .option('--provider <provider>', 'Provider to use (claude, codex, gemini, opencode)')
+  .option('--model <model>', 'Model id override for the provider')
+  .option('--model-level <level>', 'Model level override (level1, level2, level3)')
+  .option('--reasoning-effort <effort>', 'Reasoning effort (low, medium, high, xhigh)')
+  .option('-r, --resume <sessionId>', 'Resume a specific Claude session (claude only)')
+  .option('-c, --continue', 'Continue the most recent Claude session (claude only)')
   .option(
     '-o, --output-format <format>',
     'Output format: stream-json (default), text, json',
@@ -863,11 +2518,16 @@ taskCmd
   .action(async (prompt, options) => {
     try {
       // === PREFLIGHT CHECKS ===
-      // Claude CLI must be installed and authenticated for task execution
+      // Provider CLI must be installed for task execution
+      const settings = loadSettings();
+      const providerOverride = normalizeProviderName(
+        options.provider || process.env.ZEROSHOT_PROVIDER || settings.defaultProvider
+      );
       requirePreflight({
         requireGh: false, // gh not needed for plain tasks
         requireDocker: false, // Docker not needed for plain tasks
         quiet: false,
+        provider: providerOverride,
       });
 
       // Dynamically import task command (ESM module)
@@ -925,94 +2585,20 @@ program
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     try {
-      // Get clusters
-      const clusters = getOrchestrator().listClusters();
-      const orchestrator = getOrchestrator();
+      const orchestrator = await getOrchestrator();
+      const clusters = orchestrator.listClusters();
+      const enrichedClusters = enrichClustersWithTokens(clusters, orchestrator);
 
-      // Enrich clusters with token data
-      const enrichedClusters = clusters.map((cluster) => {
-        let totalTokens = 0;
-        let totalCostUsd = 0;
-        try {
-          const clusterObj = orchestrator.getCluster(cluster.id);
-          if (clusterObj?.messageBus) {
-            const tokensByRole = clusterObj.messageBus.getTokensByRole(cluster.id);
-            if (tokensByRole?._total?.count > 0) {
-              const total = tokensByRole._total;
-              totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
-              totalCostUsd = total.totalCostUsd || 0;
-            }
-          }
-        } catch {
-          /* Token tracking not available */
-        }
-        return {
-          ...cluster,
-          totalTokens,
-          totalCostUsd,
-        };
-      });
-
-      // Get tasks (dynamic import)
       const { listTasks, getTasksData } = await import('../task-lib/commands/list.js');
 
-      // JSON output mode
       if (options.json) {
-        // Get tasks data if available
-        let tasks = [];
-        try {
-          if (typeof getTasksData === 'function') {
-            tasks = await getTasksData(options);
-          }
-        } catch {
-          /* Tasks not available */
-        }
-
-        console.log(
-          JSON.stringify(
-            {
-              clusters: enrichedClusters,
-              tasks,
-            },
-            null,
-            2
-          )
-        );
+        const tasks = await tryGetTasksData(getTasksData, options);
+        printListJson(enrichedClusters, tasks);
         return;
       }
 
-      // Human-readable output (default)
-      // Print clusters
-      if (enrichedClusters.length > 0) {
-        console.log(chalk.bold('\n=== Clusters ==='));
-        console.log(
-          `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(12)} ${'Cost'.padEnd(8)} Created`
-        );
-        console.log('-'.repeat(100));
+      printClusterTable(enrichedClusters);
 
-        for (const cluster of enrichedClusters) {
-          const created = new Date(cluster.createdAt).toLocaleString();
-          const tokenDisplay = cluster.totalTokens > 0 ? cluster.totalTokens.toLocaleString() : '-';
-          const costDisplay = cluster.totalCostUsd > 0 ? '$' + cluster.totalCostUsd.toFixed(3) : '-';
-
-          // Highlight zombie clusters in red
-          const stateDisplay =
-            cluster.state === 'zombie'
-              ? chalk.red(cluster.state.padEnd(12))
-              : cluster.state.padEnd(12);
-
-          const rowColor = cluster.state === 'zombie' ? chalk.red : (s) => s;
-
-          console.log(
-            `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount.toString().padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${created}`
-          );
-        }
-      } else {
-        console.log(chalk.dim('\n=== Clusters ==='));
-        console.log('No active clusters');
-      }
-
-      // Print tasks
       console.log(chalk.bold('\n=== Tasks ==='));
       await listTasks(options);
     } catch (error) {
@@ -1032,120 +2618,23 @@ program
       const type = detectIdType(id);
 
       if (!type) {
-        if (options.json) {
-          console.log(JSON.stringify({ error: 'ID not found', id }, null, 2));
-        } else {
-          console.error(`ID not found: ${id}`);
-          console.error('Not found in tasks or clusters');
-        }
-        process.exit(1);
+        reportMissingId(id, options);
+        return;
       }
 
       if (type === 'cluster') {
-        // Show cluster status
-        const status = getOrchestrator().getStatus(id);
-
-        // Get token usage
-        let tokensByRole = null;
-        try {
-          const cluster = getOrchestrator().getCluster(id);
-          if (cluster?.messageBus) {
-            tokensByRole = cluster.messageBus.getTokensByRole(id);
-          }
-        } catch {
-          /* Token tracking not available */
-        }
-
-        // JSON output mode
+        const orchestrator = await getOrchestrator();
+        const status = orchestrator.getStatus(id);
+        const tokensByRole = getClusterTokensByRole(orchestrator, id);
         if (options.json) {
-          console.log(
-            JSON.stringify(
-              {
-                type: 'cluster',
-                ...status,
-                createdAtISO: new Date(status.createdAt).toISOString(),
-                tokensByRole,
-              },
-              null,
-              2
-            )
-          );
+          printClusterStatusJson(status, tokensByRole);
           return;
         }
-
-        // Human-readable output
-        console.log(`\nCluster: ${status.id}`);
-        if (status.isZombie) {
-          console.log(
-            chalk.red(
-              `State: ${status.state} (process ${status.pid} died, cluster has no backing process)`
-            )
-          );
-          console.log(
-            chalk.yellow(
-              `  → Run 'zeroshot kill ${id}' to clean up, or 'zeroshot resume ${id}' to restart`
-            )
-          );
-        } else {
-          console.log(`State: ${status.state}`);
-        }
-        if (status.pid) {
-          console.log(`PID: ${status.pid}`);
-        }
-        console.log(`Created: ${new Date(status.createdAt).toLocaleString()}`);
-        console.log(`Messages: ${status.messageCount}`);
-
-        // Show token usage if available
-        if (tokensByRole) {
-          const tokenLines = formatTokenUsage(tokensByRole);
-          if (tokenLines) {
-            console.log('');
-            for (const line of tokenLines) {
-              console.log(line);
-            }
-          }
-        }
-
-        console.log(`\nAgents:`);
-
-        for (const agent of status.agents) {
-          // Check if subcluster
-          if (agent.type === 'subcluster') {
-            console.log(`  - ${agent.id} (${agent.role}) [SubCluster]`);
-            console.log(`    State: ${agent.state}`);
-            console.log(`    Iteration: ${agent.iteration}`);
-            console.log(`    Child Cluster: ${agent.childClusterId || 'none'}`);
-            console.log(`    Child Running: ${agent.childRunning ? 'Yes' : 'No'}`);
-          } else {
-            const modelLabel = agent.model ? ` [${agent.model}]` : '';
-            console.log(`  - ${agent.id} (${agent.role})${modelLabel}`);
-            console.log(`    State: ${agent.state}`);
-            console.log(`    Iteration: ${agent.iteration}`);
-            console.log(`    Running task: ${agent.currentTask ? 'Yes' : 'No'}`);
-          }
-        }
-
-        console.log('');
-      } else {
-        // Show task status
-        const { showStatus, getStatusData } = await import('../task-lib/commands/status.js');
-
-        if (options.json) {
-          // Try to get JSON data if available
-          let taskData = null;
-          try {
-            if (typeof getStatusData === 'function') {
-              taskData = await getStatusData(id);
-            }
-          } catch {
-            /* Not available */
-          }
-          console.log(JSON.stringify({ type: 'task', id, ...taskData }, null, 2));
-          return;
-        }
-
-        await showStatus(id);
+        printClusterStatusHuman(status, tokensByRole, id);
+        return;
       }
+
+      await showTaskStatus(id, options);
     } catch (error) {
       if (options.json) {
         console.log(JSON.stringify({ error: error.message }, null, 2));
@@ -1166,425 +2655,22 @@ program
   .option('-w, --watch', 'Watch mode: interactive TUI for tasks, high-level events for clusters')
   .action(async (id, options) => {
     try {
-      // If ID provided, detect type
       if (id) {
-        const { detectIdType } = require('../lib/id-detector');
-        const type = detectIdType(id);
-
-        if (!type) {
-          console.error(`ID not found: ${id}`);
-          process.exit(1);
-        }
-
-        if (type === 'task') {
-          // Show task logs
-          const { showLogs } = await import('../task-lib/commands/logs.js');
-          await showLogs(id, options);
+        const handled = await handleLogsById(id, options);
+        if (handled) {
           return;
         }
-        // Fall through to cluster logs below
       }
 
-      // === CLUSTER LOGS ===
-      const limit = parseInt(options.limit);
-      const quietOrchestrator = new Orchestrator({ quiet: true });
+      const limit = parseLogLimit(options);
+      const quietOrchestrator = await Orchestrator.create({ quiet: true });
 
-      // No ID: show/follow ALL clusters
       if (!id) {
-        const allClusters = quietOrchestrator.listClusters();
-        const activeClusters = allClusters.filter((c) => c.state === 'running');
-
-        if (allClusters.length === 0) {
-          if (options.follow) {
-            console.log('No clusters found. Waiting for new clusters...\n');
-            console.log(chalk.dim('--- Waiting for clusters (Ctrl+C to stop) ---\n'));
-          } else {
-            console.log('No clusters found');
-            return;
-          }
-        }
-
-        // Track if multiple clusters
-        const multiCluster = allClusters.length > 1;
-
-        // Follow mode: show header
-        if (options.follow && allClusters.length > 0) {
-          if (activeClusters.length === 0) {
-            console.log(
-              chalk.dim(
-                `--- Showing history from ${allClusters.length} cluster(s), waiting for new activity (Ctrl+C to stop) ---\n`
-              )
-            );
-          } else if (activeClusters.length === 1) {
-            console.log(chalk.dim(`--- Following ${activeClusters[0].id} (Ctrl+C to stop) ---\n`));
-          } else {
-            console.log(
-              chalk.dim(
-                `--- Following ${activeClusters.length} active clusters (Ctrl+C to stop) ---`
-              )
-            );
-            for (const c of activeClusters) {
-              console.log(chalk.dim(`    • ${c.id} [${c.state}]`));
-            }
-            console.log('');
-          }
-        }
-
-        // Show recent messages from ALL clusters (history)
-        // In follow mode, poll will handle new messages - this shows initial history
-        for (const clusterInfo of allClusters) {
-          const cluster = quietOrchestrator.getCluster(clusterInfo.id);
-          if (cluster) {
-            const messages = cluster.messageBus.getAll(clusterInfo.id);
-            const recentMessages = messages.slice(-limit);
-            const isActive = clusterInfo.state === 'running';
-            for (const msg of recentMessages) {
-              printMessage(msg, clusterInfo.id, options.watch, isActive);
-            }
-          }
-        }
-
-        // Follow mode: poll SQLite for new messages (cross-process support)
-        if (options.follow) {
-          // Set terminal title based on task(s)
-          const taskTitles = [];
-          for (const clusterInfo of allClusters) {
-            const cluster = quietOrchestrator.getCluster(clusterInfo.id);
-            if (cluster) {
-              const messages = cluster.messageBus.getAll(clusterInfo.id);
-              const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
-              if (issueOpened) {
-                taskTitles.push({
-                  id: clusterInfo.id,
-                  summary: formatTaskSummary(issueOpened, 30),
-                });
-              }
-            }
-          }
-          if (taskTitles.length === 1) {
-            setTerminalTitle(`zeroshot [${taskTitles[0].id}]: ${taskTitles[0].summary}`);
-          } else if (taskTitles.length > 1) {
-            setTerminalTitle(`zeroshot: ${taskTitles.length} clusters`);
-          } else {
-            setTerminalTitle('zeroshot: waiting...');
-          }
-
-          // In watch mode, show the initial task for each cluster (after history)
-          if (options.watch) {
-            for (const clusterInfo of allClusters) {
-              const cluster = quietOrchestrator.getCluster(clusterInfo.id);
-              if (cluster) {
-                const messages = cluster.messageBus.getAll(clusterInfo.id);
-                const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
-                if (issueOpened) {
-                  const clusterLabel = multiCluster ? `[${clusterInfo.id}] ` : '';
-                  const taskSummary = formatTaskSummary(issueOpened);
-                  console.log(chalk.cyan(`${clusterLabel}Task: ${chalk.bold(taskSummary)}\n`));
-                }
-              }
-            }
-          }
-
-          const stopPollers = [];
-          const messageBuffer = [];
-
-          // Track cluster states (for dim coloring of inactive clusters)
-          const clusterStates = new Map(); // cluster_id -> state
-          for (const c of allClusters) {
-            clusterStates.set(c.id, c.state);
-          }
-
-          // === STATUS FOOTER: Live agent monitoring (same as foreground mode) ===
-          // Shows CPU, memory, network metrics for all agents at bottom of terminal
-          let statusFooter = null;
-          if ((options.follow || options.watch) && process.stdout.isTTY) {
-            statusFooter = new StatusFooter({
-              refreshInterval: 1000,
-              enabled: true,
-            });
-            // Set first cluster as the active one (for display purposes)
-            if (allClusters.length > 0) {
-              statusFooter.setCluster(allClusters[0].id);
-              statusFooter.setClusterState(clusterStates.get(allClusters[0].id) || 'running');
-            }
-            // Set module-level reference so safePrint/safeWrite route through footer
-            activeStatusFooter = statusFooter;
-            statusFooter.start();
-          }
-
-          // Buffered message handler - collects messages and sorts by timestamp
-          const flushMessages = () => {
-            if (messageBuffer.length === 0) return;
-            // Sort by timestamp
-            messageBuffer.sort((a, b) => a.timestamp - b.timestamp);
-
-            // Track senders with pending output
-            const sendersWithOutput = new Set();
-            for (const msg of messageBuffer) {
-              if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
-                sendersWithOutput.add(msg.sender);
-              }
-
-              // Update StatusFooter from polled AGENT_LIFECYCLE messages (cross-process)
-              if (msg.topic === 'AGENT_LIFECYCLE' && statusFooter) {
-                const data = msg.content?.data || {};
-                const event = data.event;
-                const agentId = data.agent || msg.sender;
-
-                if (event === 'STARTED') {
-                  statusFooter.updateAgent({
-                    id: agentId,
-                    state: AGENT_STATE.IDLE,
-                    pid: null,
-                    iteration: data.iteration || 0,
-                  });
-                } else if (event === 'TASK_STARTED') {
-                  statusFooter.updateAgent({
-                    id: agentId,
-                    state: AGENT_STATE.EXECUTING_TASK,
-                    pid: statusFooter.agents.get(agentId)?.pid || null,
-                    iteration: data.iteration || 0,
-                  });
-                } else if (event === 'PROCESS_SPAWNED') {
-                  // PROCESS_SPAWNED = proof of execution. If a process spawned, agent is executing.
-                  const current = statusFooter.agents.get(agentId) || { iteration: 0 };
-                  statusFooter.updateAgent({
-                    id: agentId,
-                    state: AGENT_STATE.EXECUTING_TASK,
-                    pid: data.pid,
-                    iteration: current.iteration,
-                  });
-                } else if (event === 'TASK_COMPLETED' || event === 'TASK_FAILED') {
-                  statusFooter.updateAgent({
-                    id: agentId,
-                    state: AGENT_STATE.IDLE,
-                    pid: null,
-                    iteration: data.iteration || 0,
-                  });
-                } else if (event === 'STOPPED') {
-                  statusFooter.removeAgent(agentId);
-                }
-              }
-
-              const isActive = clusterStates.get(msg.cluster_id) === 'running';
-              printMessage(msg, true, options.watch, isActive);
-            }
-
-            // Save cluster ID before clearing buffer
-            const firstClusterId = messageBuffer[0]?.cluster_id;
-            messageBuffer.length = 0;
-
-            // Flush pending line buffers for all senders that had output
-            // This ensures streaming text without newlines gets displayed
-            for (const sender of sendersWithOutput) {
-              const senderLabel = `${firstClusterId || ''}/${sender}`;
-              const prefix = getColorForSender(sender)(`${senderLabel.padEnd(25)} |`);
-              flushLineBuffer(prefix, sender);
-            }
-          };
-
-          // Flush buffer every 250ms
-          const flushInterval = setInterval(flushMessages, 250);
-
-          for (const clusterInfo of allClusters) {
-            const cluster = quietOrchestrator.getCluster(clusterInfo.id);
-            if (cluster) {
-              // Use polling for cross-process message detection
-              const stopPoll = cluster.ledger.pollForMessages(
-                clusterInfo.id,
-                (msg) => {
-                  messageBuffer.push(msg);
-                },
-                300
-              );
-              stopPollers.push(stopPoll);
-            }
-          }
-
-          const stopWatching = quietOrchestrator.watchForNewClusters((newCluster) => {
-            console.log(chalk.green(`\n✓ New cluster detected: ${newCluster.id}\n`));
-            // Track new cluster as active
-            clusterStates.set(newCluster.id, 'running');
-            // Poll new cluster's ledger
-            const stopPoll = newCluster.ledger.pollForMessages(
-              newCluster.id,
-              (msg) => {
-                messageBuffer.push(msg);
-              },
-              300
-            );
-            stopPollers.push(stopPoll);
-          });
-
-          keepProcessAlive(() => {
-            clearInterval(flushInterval);
-            flushMessages();
-            stopPollers.forEach((stop) => stop());
-            stopWatching();
-            // Stop status footer and restore terminal
-            if (statusFooter) {
-              statusFooter.stop();
-              activeStatusFooter = null;
-            }
-            // Restore terminal title
-            restoreTerminalTitle();
-          });
-        }
+        showAllClusterLogs(quietOrchestrator, options, limit);
         return;
       }
 
-      // Specific cluster ID provided
-      const cluster = quietOrchestrator.getCluster(id);
-      if (!cluster) {
-        console.error(`Cluster ${id} not found`);
-        process.exit(1);
-      }
-
-      // Check if cluster is active
-      const allClustersList = quietOrchestrator.listClusters();
-      const clusterInfo = allClustersList.find((c) => c.id === id);
-      const isActive = clusterInfo?.state === 'running';
-
-      // Get messages from cluster database
-      const dbMessages = cluster.messageBus.getAll(id);
-
-      // Get messages from agent task logs
-      const taskLogMessages = readAgentTaskLogs(cluster);
-
-      // Merge and sort by timestamp
-      const allMessages = [...dbMessages, ...taskLogMessages].sort(
-        (a, b) => a.timestamp - b.timestamp
-      );
-      const recentMessages = allMessages.slice(-limit);
-
-      // Print messages
-      for (const msg of recentMessages) {
-        printMessage(msg, true, options.watch, isActive);
-      }
-
-      // Follow mode for specific cluster (poll SQLite AND task logs)
-      if (options.follow) {
-        // Set terminal title based on task
-        const issueOpened = dbMessages.find((m) => m.topic === 'ISSUE_OPENED');
-        if (issueOpened) {
-          setTerminalTitle(`zeroshot [${id}]: ${formatTaskSummary(issueOpened, 30)}`);
-        } else {
-          setTerminalTitle(`zeroshot [${id}]`);
-        }
-
-        console.log('\n--- Following logs (Ctrl+C to stop) ---\n');
-
-        // Poll cluster database for new messages
-        const stopDbPoll = cluster.ledger.pollForMessages(
-          id,
-          (msg) => {
-            printMessage(msg, true, options.watch, isActive);
-
-            // Flush pending line buffer for streaming text without newlines
-            if (msg.topic === 'AGENT_OUTPUT' && msg.sender) {
-              const senderLabel = `${msg.cluster_id || ''}/${msg.sender}`;
-              const prefix = getColorForSender(msg.sender)(`${senderLabel.padEnd(25)} |`);
-              flushLineBuffer(prefix, msg.sender);
-            }
-          },
-          500
-        );
-
-        // Poll agent task logs for new output
-        const taskLogSizes = new Map(); // taskId -> last size
-        const pollTaskLogs = () => {
-          for (const agent of cluster.agents) {
-            const state = agent.getState();
-            const taskId = state.currentTaskId;
-            if (!taskId) continue;
-
-            const logPath = path.join(os.homedir(), '.claude-zeroshot', 'logs', `${taskId}.log`);
-            if (!fs.existsSync(logPath)) continue;
-
-            try {
-              const stats = fs.statSync(logPath);
-              const currentSize = stats.size;
-              const lastSize = taskLogSizes.get(taskId) || 0;
-
-              if (currentSize > lastSize) {
-                // Read new content
-                const fd = fs.openSync(logPath, 'r');
-                const buffer = Buffer.alloc(currentSize - lastSize);
-                fs.readSync(fd, buffer, 0, buffer.length, lastSize);
-                fs.closeSync(fd);
-
-                const newContent = buffer.toString('utf-8');
-                const lines = newContent.split('\n').filter((line) => line.trim());
-
-                for (const line of lines) {
-                  if (!line.trim().startsWith('{')) continue;
-
-                  try {
-                    // Parse timestamp-prefixed line
-                    let timestamp = Date.now();
-                    let jsonContent = line.trim();
-
-                    const timestampMatch = jsonContent.match(/^\[(\d{13})\](.*)$/);
-                    if (timestampMatch) {
-                      timestamp = parseInt(timestampMatch[1], 10);
-                      jsonContent = timestampMatch[2];
-                    }
-
-                    if (!jsonContent.startsWith('{')) continue;
-
-                    // Parse and validate JSON
-                    const parsed = JSON.parse(jsonContent);
-                    if (parsed.type === 'system' && parsed.subtype === 'init') continue;
-
-                    // Create message and print immediately
-                    const msg = {
-                      id: `task-${taskId}-${timestamp}`,
-                      timestamp,
-                      topic: 'AGENT_OUTPUT',
-                      sender: agent.id,
-                      receiver: 'broadcast',
-                      cluster_id: cluster.id,
-                      content: {
-                        text: jsonContent,
-                        data: {
-                          type: 'stdout',
-                          line: jsonContent,
-                          agent: agent.id,
-                          role: agent.role,
-                          iteration: state.iteration,
-                          fromTaskLog: true,
-                        },
-                      },
-                    };
-
-                    printMessage(msg, true, options.watch, isActive);
-
-                    // Flush line buffer
-                    const senderLabel = `${cluster.id}/${agent.id}`;
-                    const prefix = getColorForSender(agent.id)(`${senderLabel.padEnd(25)} |`);
-                    flushLineBuffer(prefix, agent.id);
-                  } catch {
-                    // Skip invalid JSON
-                  }
-                }
-
-                taskLogSizes.set(taskId, currentSize);
-              }
-            } catch {
-              // File read error - skip
-            }
-          }
-        };
-
-        // Poll task logs every 300ms (same as agent-wrapper)
-        const taskLogInterval = setInterval(pollTaskLogs, 300);
-
-        keepProcessAlive(() => {
-          stopDbPoll();
-          clearInterval(taskLogInterval);
-          restoreTerminalTitle();
-        });
-      }
+      showClusterLogsById(quietOrchestrator, id, options, limit);
     } catch (error) {
       console.error('Error viewing logs:', error.message);
       process.exit(1);
@@ -1598,7 +2684,7 @@ program
   .action(async (clusterId) => {
     try {
       console.log(`Stopping cluster ${clusterId}...`);
-      await getOrchestrator().stop(clusterId);
+      await (await getOrchestrator()).stop(clusterId);
       console.log('Cluster stopped successfully');
     } catch (error) {
       console.error('Error stopping cluster:', error.message);
@@ -1622,7 +2708,7 @@ program
 
       if (type === 'cluster') {
         console.log(`Killing cluster ${id}...`);
-        await getOrchestrator().kill(id);
+        await (await getOrchestrator()).kill(id);
         console.log('Cluster killed successfully');
       } else {
         // Kill task
@@ -1659,251 +2745,28 @@ Key bindings:
     try {
       const { AttachClient, socketDiscovery } = require('../src/attach');
 
-      // If no ID provided, list attachable processes
       if (!id) {
-        const tasks = await socketDiscovery.listAttachableTasks();
-        const clusters = await socketDiscovery.listAttachableClusters();
-
-        if (tasks.length === 0 && clusters.length === 0) {
-          console.log(chalk.dim('No attachable tasks or clusters found.'));
-          console.log(chalk.dim('Start a task with: zeroshot task run "prompt"'));
-          return;
-        }
-
-        console.log(chalk.bold('\nAttachable processes:\n'));
-
-        if (tasks.length > 0) {
-          console.log(chalk.cyan('Tasks:'));
-          for (const taskId of tasks) {
-            console.log(`  ${taskId}`);
-          }
-        }
-
-        if (clusters.length > 0) {
-          console.log(chalk.yellow('\nClusters:'));
-          const OrchestratorModule = require('../src/orchestrator');
-          for (const clusterId of clusters) {
-            const agents = await socketDiscovery.listAttachableAgents(clusterId);
-            console.log(`  ${clusterId}`);
-            // Get agent models and token usage from orchestrator (if available)
-            let agentModels = {};
-            let tokenUsageLines = null;
-            try {
-              const orchestrator = OrchestratorModule.getInstance();
-              const status = orchestrator.getStatus(clusterId);
-              for (const a of status.agents) {
-                agentModels[a.id] = a.model;
-              }
-              // Get token usage from message bus
-              const cluster = orchestrator.getCluster(clusterId);
-              if (cluster?.messageBus) {
-                const tokensByRole = cluster.messageBus.getTokensByRole(clusterId);
-                tokenUsageLines = formatTokenUsage(tokensByRole);
-              }
-            } catch {
-              /* orchestrator not running - models/tokens unavailable */
-            }
-            // Display token usage if available
-            if (tokenUsageLines) {
-              for (const line of tokenUsageLines) {
-                console.log(`    ${line}`);
-              }
-            }
-            for (const agent of agents) {
-              const modelLabel = agentModels[agent] ? chalk.dim(` [${agentModels[agent]}]`) : '';
-              console.log(chalk.dim(`    --agent ${agent}`) + modelLabel);
-            }
-          }
-        }
-
-        console.log(chalk.dim('\nUsage: zeroshot attach <id> [--agent <name>]'));
+        await listAttachableProcesses(socketDiscovery);
         return;
       }
 
-      // Determine socket path
-      let socketPath;
-
-      if (id.startsWith('task-')) {
-        socketPath = socketDiscovery.getTaskSocketPath(id);
-      } else if (id.startsWith('cluster-') || socketDiscovery.isKnownCluster(id)) {
-        // Clusters use the task system - each agent spawns a task with its own socket
-        // Get cluster status to find which task each agent is running
-        const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
-        let cluster;
-        try {
-          const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
-          cluster = clusters[id];
-        } catch {
-          cluster = null;
-        }
-
-        if (!cluster) {
-          console.error(chalk.red(`Cluster ${id} not found`));
-          process.exit(1);
-        }
-
-        if (cluster.state !== 'running') {
-          console.error(chalk.red(`Cluster ${id} is not running (state: ${cluster.state})`));
-          console.error(chalk.dim('Only running clusters have attachable agents.'));
-          process.exit(1);
-        }
-
-        // Create orchestrator instance to query agent states
-        // This loads the cluster from disk including its ledger and agents
-        const orchestrator = new Orchestrator({ quiet: true });
-
-        try {
-          const status = orchestrator.getStatus(id);
-          // Agent is "active" if in any working state
-          // Note: currentTaskId may be null briefly between TASK_STARTED and TASK_ID_ASSIGNED
-          const activeAgents = status.agents.filter(
-            (a) => ACTIVE_STATES.has(a.state)
-          );
-
-          if (activeAgents.length === 0) {
-            console.error(chalk.yellow(`No agents currently executing tasks in cluster ${id}`));
-            console.log(chalk.dim('\nAgent states:'));
-            for (const agent of status.agents) {
-              const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
-              console.log(
-                chalk.dim(
-                  `  ${agent.id}${modelLabel}: ${agent.state}${agent.currentTaskId ? ` (last task: ${agent.currentTaskId})` : ''}`
-                )
-              );
-            }
-            return;
-          }
-
-          if (!options.agent) {
-            // Show list of agents and their task IDs
-            console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
-            for (const agent of activeAgents) {
-              const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
-              if (agent.currentTaskId) {
-                console.log(
-                  `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
-                );
-                console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
-              } else {
-                // Task ID not yet assigned (Claude CLI still starting)
-                console.log(
-                  `  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow('starting...')}`
-                );
-                console.log(chalk.dim(`    (task ID not yet assigned, try again in a moment)`));
-              }
-            }
-            console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
-            return;
-          }
-
-          // Find the specified agent
-          const agent = status.agents.find((a) => a.id === options.agent);
-          if (!agent) {
-            console.error(chalk.red(`Agent '${options.agent}' not found in cluster ${id}`));
-            console.log(
-              chalk.dim('Available agents: ' + status.agents.map((a) => a.id).join(', '))
-            );
-            process.exit(1);
-          }
-
-          if (!agent.currentTaskId) {
-            if (ACTIVE_STATES.has(agent.state)) {
-              // Agent is working but task ID not yet assigned
-              console.error(chalk.yellow(`Agent '${options.agent}' is working (state: ${agent.state}, task ID not yet assigned)`));
-              console.log(chalk.dim('Try again in a moment...'));
-            } else {
-              console.error(chalk.yellow(`Agent '${options.agent}' is not currently running a task`));
-              console.log(chalk.dim(`State: ${agent.state}`));
-            }
-            return;
-          }
-
-          // Use the agent's task socket
-          socketPath = socketDiscovery.getTaskSocketPath(agent.currentTaskId);
-          console.log(
-            chalk.dim(`Attaching to agent ${options.agent} via task ${agent.currentTaskId}...`)
-          );
-        } catch (err) {
-          // Orchestrator not running or cluster not loaded - fall back to socket discovery
-          console.error(chalk.yellow(`Could not get cluster status: ${err.message}`));
-          console.log(
-            chalk.dim('Try attaching directly to a task ID instead: zeroshot attach <taskId>')
-          );
-
-          // Try to find any task sockets that might belong to this cluster
-          const tasks = await socketDiscovery.listAttachableTasks();
-          if (tasks.length > 0) {
-            console.log(chalk.dim('\nAttachable tasks:'));
-            for (const taskId of tasks) {
-              console.log(chalk.dim(`  zeroshot attach ${taskId}`));
-            }
-          }
-          return;
-        }
-      } else {
-        // Try to auto-detect
-        socketPath = socketDiscovery.getSocketPath(id, options.agent);
+      const socketPath = await resolveAttachSocketPath(id, options, socketDiscovery);
+      if (!socketPath) {
+        return;
       }
 
-      // Check if socket exists
       const socketAlive = await socketDiscovery.isSocketAlive(socketPath);
       if (!socketAlive) {
-        console.error(chalk.red(`Cannot attach to ${id}`));
-
-        // Check if it's an old task without attach support
-        const { detectIdType } = require('../lib/id-detector');
-        const type = detectIdType(id);
-
-        if (type === 'task') {
-          console.error(chalk.dim('Task may have been spawned before attach support was added.'));
-          console.error(chalk.dim(`Try: zeroshot logs ${id} -f`));
-        } else if (type === 'cluster') {
-          console.error(chalk.dim('Cluster may not be running or agent may not exist.'));
-          console.error(chalk.dim(`Check status: zeroshot status ${id}`));
-        } else {
-          console.error(chalk.dim('Process not found or not attachable.'));
-        }
+        reportCannotAttach(id);
         process.exit(1);
       }
 
-      // Connect
-      console.log(
-        chalk.dim(`Attaching to ${id}${options.agent ? ` (agent: ${options.agent})` : ''}...`)
-      );
-      console.log(chalk.dim('Press Ctrl+B ? for help, Ctrl+B d to detach\n'));
-
-      const client = new AttachClient({ socketPath });
-
-      client.on('state', (_state) => {
-        // Could show status bar here in future
+      await connectAttachClient({
+        AttachClient,
+        socketPath,
+        id,
+        agentName: options.agent,
       });
-
-      client.on('exit', ({ code, signal }) => {
-        console.log(chalk.dim(`\n\nProcess exited (code: ${code}, signal: ${signal})`));
-        process.exit(code || 0);
-      });
-
-      client.on('error', (err) => {
-        console.error(chalk.red(`\nConnection error: ${err.message}`));
-        process.exit(1);
-      });
-
-      client.on('detach', () => {
-        console.log(chalk.dim('\n\nDetached. Task continues running.'));
-        console.log(
-          chalk.dim(
-            `Re-attach: zeroshot attach ${id}${options.agent ? ` --agent ${options.agent}` : ''}`
-          )
-        );
-        process.exit(0);
-      });
-
-      client.on('close', () => {
-        console.log(chalk.dim('\n\nConnection closed.'));
-        process.exit(0);
-      });
-
-      await client.connect();
     } catch (error) {
       console.error(chalk.red(`Error attaching: ${error.message}`));
       process.exit(1);
@@ -1918,7 +2781,7 @@ program
   .action(async (options) => {
     try {
       // Get counts first
-      const orchestrator = getOrchestrator();
+      const orchestrator = await getOrchestrator();
       const clusters = orchestrator.listClusters();
       const runningClusters = clusters.filter(
         (c) => c.state === 'running' || c.state === 'initializing'
@@ -2149,17 +3012,24 @@ program
       // Check if cluster exists
       const cluster = orchestrator.getCluster(id);
 
-      // === PREFLIGHT CHECKS ===
-      // Claude CLI must be installed and authenticated
-      // Check if cluster uses isolation (needs Docker)
-      const requiresDocker = cluster?.isolation?.enabled || false;
-      requirePreflight({
-        requireGh: false, // Resume doesn't fetch new issues
-        requireDocker: requiresDocker,
-        quiet: false,
-      });
+      const settings = loadSettings();
 
       if (cluster) {
+        // === PREFLIGHT CHECKS ===
+        // Provider CLI must be installed; Docker needed if isolation was used
+        const requiresDocker = cluster?.isolation?.enabled || false;
+        const providerName =
+          cluster.config?.forceProvider ||
+          cluster.config?.defaultProvider ||
+          settings.defaultProvider;
+
+        requirePreflight({
+          requireGh: false, // Resume doesn't fetch new issues
+          requireDocker: requiresDocker,
+          quiet: false,
+          provider: providerName,
+        });
+
         // Resume cluster
         console.log(chalk.cyan(`Resuming cluster ${id}...`));
         const result = await orchestrator.resume(id, prompt);
@@ -2274,6 +3144,24 @@ program
 
         console.log(chalk.dim(`\nCluster ${id} completed.`));
       } else {
+        let providerName = settings.defaultProvider;
+        try {
+          const { getTask } = await import('../task-lib/store.js');
+          const task = getTask(id);
+          if (task?.provider) {
+            providerName = task.provider;
+          }
+        } catch {
+          // If task store is unavailable, fall back to default provider
+        }
+
+        requirePreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: false,
+          provider: providerName,
+        });
+
         // Try resuming as task
         const { resumeTask } = await import('../task-lib/commands/resume.js');
         await resumeTask(id, prompt);
@@ -2294,208 +3182,29 @@ program
       const OrchestratorModule = require('../src/orchestrator');
       const orchestrator = new OrchestratorModule();
 
-      // Check if cluster exists
-      const cluster = orchestrator.getCluster(id);
-
-      if (!cluster) {
-        console.error(chalk.red(`Error: Cluster ${id} not found`));
-        console.error(chalk.dim('Use "zeroshot list" to see available clusters'));
-        process.exit(1);
-      }
-
-      // Stop cluster if it's running (with confirmation unless -y)
-      if (cluster.state === 'running') {
-        if (!options.y && !options.yes) {
-          console.log(chalk.yellow(`Cluster ${id} is still running.`));
-          console.log(chalk.dim('Stopping it before converting to completion task...'));
-          console.log('');
-
-          // Simple confirmation prompt
-          const readline = require('readline');
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-
-          const answer = await new Promise((resolve) => {
-            rl.question(chalk.yellow('Continue? (y/N) '), resolve);
-          });
-          rl.close();
-
-          if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-            console.log(chalk.red('Aborted'));
-            process.exit(0);
-          }
-        }
-
-        console.log(chalk.cyan('Stopping cluster...'));
-        await orchestrator.stop(id);
-        console.log(chalk.green('✓ Cluster stopped'));
-        console.log('');
-      }
+      const cluster = getFinishCluster(orchestrator, id);
+      await stopClusterIfRunning(cluster, id, options, orchestrator);
 
       console.log(chalk.cyan(`Converting cluster ${id} to completion task...`));
       console.log('');
 
-      // Extract cluster context from ledger
       const messages = cluster.messageBus.getAll(id);
-
-      // Find original task
-      const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
-      const taskText = issueOpened?.content?.text || 'Unknown task';
-      const issueNumber = issueOpened?.content?.data?.issue_number;
-      const issueTitle = issueOpened?.content?.data?.title || 'Implementation';
-
-      // Find what's been done
-      const agentOutputs = messages.filter((m) => m.topic === 'AGENT_OUTPUT');
-      const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
-
-      // Build context summary
-      let contextSummary = `# Original Task\n\n${taskText}\n\n`;
-
-      if (issueNumber) {
-        contextSummary += `Issue: #${issueNumber} - ${issueTitle}\n\n`;
-      }
-
-      contextSummary += `# Progress So Far\n\n`;
-      contextSummary += `- ${agentOutputs.length} agent outputs\n`;
-      contextSummary += `- ${validations.length} validation results\n`;
-
-      const approvedValidations = validations.filter(
-        (v) => v.content?.data?.approved === true || v.content?.data?.approved === 'true'
-      );
-      contextSummary += `- ${approvedValidations.length} approvals\n\n`;
-
-      // Add recent validation summaries
-      if (validations.length > 0) {
-        contextSummary += `## Recent Validations\n\n`;
-        for (const v of validations.slice(-3)) {
-          const approved =
-            v.content?.data?.approved === true || v.content?.data?.approved === 'true';
-          const icon = approved ? '✅' : '❌';
-          contextSummary += `${icon} **${v.sender}**: ${v.content?.data?.summary || 'No summary'}\n`;
-        }
-        contextSummary += '\n';
-      }
-
-      // Build ultra-aggressive completion prompt (always merges)
-      const mergeGoal = 'CREATE PR AND MERGE IT';
-      const mergeStep = `
-8. MERGE THE PR - THIS IS MANDATORY:
-   \`\`\`bash
-   gh pr merge --merge --auto
-   \`\`\`
-
-   IF MERGE FAILS DUE TO CONFLICTS:
-   a) Pull and rebase: \`git fetch origin main && git rebase origin/main\`
-   b) Resolve conflicts manually (read files, make decisions, edit)
-   c) \`git add <resolved-files> && git rebase --continue\`
-   d) Force push: \`git push --force-with-lease\`
-   e) Retry merge: \`gh pr merge --merge\`
-
-   REPEAT UNTIL MERGED. DO NOT GIVE UP.`;
-
-      const completionPrompt = `# YOUR MISSION: ${mergeGoal}
-
-${contextSummary}
-
-# WHAT YOU MUST DO NOW
-
-You are the FINISHER. Your ONLY job is to take this cluster's work and push it across the finish line.
-
-**FAILURE IS NOT AN OPTION. YOU MUST COMPLETE THIS TASK.**
-
-## Steps (MUST complete ALL):
-
-1. REVIEW CURRENT STATE - Check git status, see what's changed:
-   \`\`\`bash
-   git status
-   git diff
-   \`\`\`
-
-2. COMMIT ALL CHANGES - Stage and commit everything:
-   \`\`\`bash
-   git add .
-   git commit -m "${issueTitle || 'feat: implement task'}"
-   \`\`\`
-
-3. CREATE BRANCH - Use issue number if available:
-   \`\`\`bash
-   ${issueNumber ? `git checkout -b issue-${issueNumber}` : 'git checkout -b feature/implementation'}
-   \`\`\`
-
-4. PUSH TO REMOTE:
-   \`\`\`bash
-   git push -u origin HEAD
-   \`\`\`
-
-5. CREATE PULL REQUEST:
-   \`\`\`bash
-   gh pr create --title "${issueTitle || 'Implementation'}" --body "Closes #${issueNumber || 'N/A'}
-
-## Summary
-${taskText.slice(0, 200)}...
-
-## Changes
-- Implementation complete
-- All validations addressed
-
-🤖 Generated with zeroshot finish"
-   \`\`\`
-
-6. GET PR URL:
-   \`\`\`bash
-   gh pr view --json url -q .url
-   \`\`\`
-
-7. OUTPUT THE PR URL - Print it clearly so user can see it
-${mergeStep}
-
-## RULES
-
-- NO EXCUSES: If something fails, FIX IT and retry
-- NO SHORTCUTS: Follow ALL steps above
-- NO PARTIAL WORK: Must reach PR creation and merge
-- IF TESTS FAIL: Fix them until they pass
-- IF CI FAILS: Wait for it, fix issues, retry
-- IF CONFLICTS: Resolve them intelligently
-
-**DO NOT STOP UNTIL YOU HAVE A MERGED PR.**`;
-
-      // Show preview
-      console.log(chalk.dim('='.repeat(80)));
-      console.log(chalk.dim('Task prompt preview:'));
-      console.log(chalk.dim('='.repeat(80)));
-      console.log(completionPrompt.split('\n').slice(0, 20).join('\n'));
-      console.log(chalk.dim('... (truncated) ...\n'));
-      console.log(chalk.dim('='.repeat(80)));
-      console.log('');
+      const context = extractFinishContext(messages);
+      const contextSummary = buildContextSummary(context);
+      const completionPrompt = buildCompletionPrompt({
+        contextSummary,
+        taskText: context.taskText,
+        issueNumber: context.issueNumber,
+        issueTitle: context.issueTitle,
+      });
+      printCompletionPromptPreview(completionPrompt);
 
       // Launch as task (preserve isolation if cluster was isolated)
       console.log(chalk.cyan('Launching completion task...'));
       const { runTask } = await import('../task-lib/commands/run.js');
-
-      const taskOptions = {
-        cwd: process.cwd(),
-      };
-
-      // If cluster was in isolation mode, pass container info to task
-      if (cluster.isolation?.enabled && cluster.isolation?.containerId) {
-        console.log(chalk.dim(`Using isolation container: ${cluster.isolation.containerId}`));
-        taskOptions.isolation = {
-          containerId: cluster.isolation.containerId,
-          workDir: '/workspace', // Standard workspace mount point in isolation containers
-        };
-      }
-
+      const taskOptions = buildFinishTaskOptions(cluster);
       await runTask(completionPrompt, taskOptions);
-
-      console.log('');
-      console.log(chalk.green(`✓ Completion task started`));
-      if (cluster.isolation?.enabled) {
-        console.log(chalk.dim('Running in isolation container (same as cluster)'));
-      }
-      console.log(chalk.dim('Monitor with: zeroshot list'));
+      printFinishTaskStarted(cluster);
     } catch (error) {
       console.error(chalk.red('Error:'), error.message);
       process.exit(1);
@@ -2526,142 +3235,27 @@ program
   .option('-y, --yes', 'Skip confirmation')
   .action(async (options) => {
     try {
-      const orchestrator = getOrchestrator();
+      const orchestrator = await getOrchestrator();
+      const purgeData = await getPurgeData(orchestrator);
 
-      // Get counts first
-      const clusters = orchestrator.listClusters();
-      const runningClusters = clusters.filter(
-        (c) => c.state === 'running' || c.state === 'initializing'
-      );
-
-      const { loadTasks } = await import('../task-lib/store.js');
-      const { isProcessRunning } = await import('../task-lib/runner.js');
-      const tasks = Object.values(loadTasks());
-      const runningTasks = tasks.filter((t) => t.status === 'running' && isProcessRunning(t.pid));
-
-      // Check if there's anything to clear
-      if (clusters.length === 0 && tasks.length === 0) {
+      if (purgeData.clusters.length === 0 && purgeData.tasks.length === 0) {
         console.log(chalk.dim('No clusters or tasks to clear.'));
         return;
       }
 
-      // Show what will be cleared
-      console.log(chalk.bold('\nWill kill and delete:'));
-      if (clusters.length > 0) {
-        console.log(chalk.cyan(`  ${clusters.length} cluster(s) with all history`));
-        if (runningClusters.length > 0) {
-          console.log(chalk.yellow(`    ${runningClusters.length} running`));
-        }
-      }
-      if (tasks.length > 0) {
-        console.log(chalk.yellow(`  ${tasks.length} task(s) with all logs`));
-        if (runningTasks.length > 0) {
-          console.log(chalk.yellow(`    ${runningTasks.length} running`));
-        }
-      }
-      console.log('');
-
-      // Confirm unless -y flag
-      if (!options.yes) {
-        const readline = require('readline');
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-
-        const answer = await new Promise((resolve) => {
-          rl.question(
-            chalk.bold.red(
-              'This will kill all processes and permanently delete all data. Proceed? [y/N] '
-            ),
-            resolve
-          );
-        });
-        rl.close();
-
-        if (answer.toLowerCase() !== 'y') {
-          console.log('Aborted.');
-          return;
-        }
+      printPurgeSummary(purgeData);
+      const confirmed = await confirmPurge(options);
+      if (!confirmed) {
+        console.log('Aborted.');
+        return;
       }
 
       console.log('');
 
-      // Kill running clusters first
-      if (runningClusters.length > 0) {
-        console.log(chalk.bold('Killing running clusters...'));
-        const clusterResults = await orchestrator.killAll();
-        for (const id of clusterResults.killed) {
-          console.log(chalk.green(`✓ Killed cluster: ${id}`));
-        }
-        for (const err of clusterResults.errors) {
-          console.log(chalk.red(`✗ Failed to kill cluster ${err.id}: ${err.error}`));
-        }
-      }
-
-      // Kill running tasks
-      if (runningTasks.length > 0) {
-        console.log(chalk.bold('Killing running tasks...'));
-        const { killTask } = await import('../task-lib/runner.js');
-        const { updateTask } = await import('../task-lib/store.js');
-
-        for (const task of runningTasks) {
-          if (!isProcessRunning(task.pid)) {
-            updateTask(task.id, {
-              status: 'stale',
-              error: 'Process died unexpectedly',
-            });
-            console.log(chalk.yellow(`○ Task ${task.id} was already dead, marked stale`));
-            continue;
-          }
-
-          const killed = killTask(task.pid);
-          if (killed) {
-            updateTask(task.id, { status: 'killed', error: 'Killed by clear' });
-            console.log(chalk.green(`✓ Killed task: ${task.id}`));
-          } else {
-            console.log(chalk.red(`✗ Failed to kill task: ${task.id}`));
-          }
-        }
-      }
-
-      // Delete all cluster data
-      if (clusters.length > 0) {
-        console.log(chalk.bold('Deleting cluster data...'));
-        const clustersFile = path.join(orchestrator.storageDir, 'clusters.json');
-        const clustersDir = path.join(orchestrator.storageDir, 'clusters');
-
-        // Delete all cluster databases
-        for (const cluster of clusters) {
-          const dbPath = path.join(orchestrator.storageDir, `${cluster.id}.db`);
-          if (fs.existsSync(dbPath)) {
-            fs.unlinkSync(dbPath);
-            console.log(chalk.green(`✓ Deleted cluster database: ${cluster.id}.db`));
-          }
-        }
-
-        // Delete clusters.json
-        if (fs.existsSync(clustersFile)) {
-          fs.unlinkSync(clustersFile);
-          console.log(chalk.green(`✓ Deleted clusters.json`));
-        }
-
-        // Delete clusters directory if exists
-        if (fs.existsSync(clustersDir)) {
-          fs.rmSync(clustersDir, { recursive: true, force: true });
-          console.log(chalk.green(`✓ Deleted clusters/ directory`));
-        }
-
-        // Clear in-memory clusters
-        orchestrator.clusters.clear();
-      }
-
-      // Delete all task data
-      if (tasks.length > 0) {
-        console.log(chalk.bold('Deleting task data...'));
-        const { cleanTasks } = await import('../task-lib/commands/clean.js');
-        await cleanTasks({ all: true });
-      }
+      await killRunningClusters(orchestrator, purgeData.runningClusters);
+      await killRunningTasks(purgeData.runningTasks, purgeData.isProcessRunning);
+      deleteClusterData(orchestrator, purgeData.clusters);
+      await deleteTaskData(purgeData.tasks);
 
       console.log(chalk.bold.green('\nAll runs purged.'));
     } catch (error) {
@@ -2752,7 +3346,7 @@ program
     try {
       const TUI = require('../src/tui');
       const tui = new TUI({
-        orchestrator: getOrchestrator(),
+        orchestrator: await getOrchestrator(),
         refreshRate: parseInt(options.refreshRate, 10),
       });
       await tui.start();
@@ -2765,26 +3359,105 @@ program
 // Settings management
 const settingsCmd = program.command('settings').description('Manage zeroshot settings');
 
-/**
- * Format settings list with grouped Docker configuration
- * Docker mounts shown as expanded table instead of raw JSON
- */
-function formatSettingsList(settings, showUsage = false) {
-  const DOCKER_KEYS = ['dockerMounts', 'dockerEnvPassthrough', 'dockerContainerHome'];
+function printSettingsUsage() {
+  console.log(chalk.dim('Usage:'));
+  console.log(chalk.dim('  zeroshot settings set <key> <value>'));
+  console.log(chalk.dim('  zeroshot settings get <key>'));
+  console.log(chalk.dim('  zeroshot settings reset'));
+  console.log('');
+  console.log(chalk.dim('Examples:'));
+  console.log(chalk.dim('  zeroshot settings set maxModel opus'));
+  console.log(chalk.dim('  zeroshot settings set dockerMounts \'["gh","git","ssh","aws"]\''));
+  console.log(chalk.dim('  zeroshot settings set dockerEnvPassthrough \'["AWS_*","TF_VAR_*"]\''));
+  console.log('');
+  console.log(
+    chalk.dim(
+      'Available mount presets: gh, git, ssh, aws, azure, kube, terraform, gcloud, claude, codex, gemini'
+    )
+  );
+  console.log('');
+}
 
-  console.log(chalk.bold('\nSettings:\n'));
-
-  // Non-docker settings first
+function printNonDockerSettings(settings) {
+  const dockerKeys = new Set(['dockerMounts', 'dockerEnvPassthrough', 'dockerContainerHome']);
   for (const [key, value] of Object.entries(settings)) {
-    if (DOCKER_KEYS.includes(key)) continue;
-
+    if (dockerKeys.has(key)) {
+      continue;
+    }
     const isDefault = JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
     const label = isDefault ? chalk.dim(key) : chalk.cyan(key);
     const val = isDefault ? chalk.dim(String(value)) : chalk.white(String(value));
     console.log(`  ${label.padEnd(30)} ${val}`);
   }
+}
 
-  // Docker configuration section (collapsible/grouped)
+function printPresetMountRow(mountName, preset, containerHome) {
+  if (!preset) {
+    console.log(`      ${chalk.red(mountName.padEnd(10))} ${chalk.red('(unknown preset)')}`);
+    return;
+  }
+  const container = preset.container.replace(/\$HOME/g, containerHome);
+  const rwFlag = preset.readonly ? chalk.dim('ro') : chalk.green('rw');
+  console.log(
+    `      ${chalk.cyan(mountName.padEnd(10))} ${chalk.dim(preset.host.padEnd(20))} → ${container.padEnd(24)} (${rwFlag})`
+  );
+}
+
+function printCustomMountRow(mount, containerHome) {
+  const container = mount.container.replace(/\$HOME/g, containerHome);
+  const rwFlag = mount.readonly !== false ? chalk.dim('ro') : chalk.green('rw');
+  console.log(
+    `      ${chalk.yellow('custom'.padEnd(10))} ${chalk.dim(mount.host.padEnd(20))} → ${container.padEnd(24)} (${rwFlag})`
+  );
+}
+
+function printDockerMounts(mounts, containerHome) {
+  const presets = mounts.filter((m) => typeof m === 'string');
+  const customMounts = mounts.filter((m) => typeof m === 'object');
+  const mountLabel =
+    customMounts.length > 0
+      ? `Mounts (${presets.length} presets, ${customMounts.length} custom):`
+      : `Mounts (${presets.length} presets):`;
+  console.log(chalk.dim(`    ${mountLabel}`));
+
+  if (mounts.length === 0) {
+    console.log(chalk.dim('      (none)'));
+    return;
+  }
+
+  for (const mount of mounts) {
+    if (typeof mount === 'string') {
+      printPresetMountRow(mount, MOUNT_PRESETS[mount], containerHome);
+    } else {
+      printCustomMountRow(mount, containerHome);
+    }
+  }
+}
+
+function printDockerEnvironment(mounts, envPassthrough) {
+  const resolvedEnvs = resolveEnvs(mounts, envPassthrough);
+  if (resolvedEnvs.length === 0) {
+    console.log(chalk.dim('    Environment: (none)'));
+    return;
+  }
+  console.log(chalk.dim(`    Environment (${resolvedEnvs.length} vars):`));
+  const fromPresets = resolvedEnvs.filter((env) => !envPassthrough.includes(env));
+  if (fromPresets.length > 0) {
+    console.log(`      ${chalk.dim('From presets:')} ${fromPresets.join(', ')}`);
+  }
+  if (envPassthrough.length > 0) {
+    console.log(`      ${chalk.cyan('Explicit:')} ${envPassthrough.join(', ')}`);
+  }
+}
+
+function printDockerContainerHome(containerHome) {
+  const homeIsDefault = containerHome === '/root';
+  const homeLabel = homeIsDefault ? chalk.dim('Container home:') : chalk.cyan('Container home:');
+  const homeVal = homeIsDefault ? chalk.dim(containerHome) : chalk.white(containerHome);
+  console.log(`    ${homeLabel} ${homeVal}`);
+}
+
+function printDockerConfiguration(settings) {
   console.log('');
   console.log(chalk.bold('  Docker Configuration:'));
 
@@ -2792,84 +3465,207 @@ function formatSettingsList(settings, showUsage = false) {
   const mounts = settings.dockerMounts || [];
   const envPassthrough = settings.dockerEnvPassthrough || [];
 
-  // Count presets vs custom mounts
-  const presets = mounts.filter((m) => typeof m === 'string');
-  const customMounts = mounts.filter((m) => typeof m === 'object');
+  printDockerMounts(mounts, containerHome);
+  printDockerEnvironment(mounts, envPassthrough);
+  printDockerContainerHome(containerHome);
+  console.log('');
+}
 
-  // Mounts header with count
-  const mountLabel =
-    customMounts.length > 0
-      ? `Mounts (${presets.length} presets, ${customMounts.length} custom):`
-      : `Mounts (${presets.length} presets):`;
-  console.log(chalk.dim(`    ${mountLabel}`));
+/**
+ * Format settings list with grouped Docker configuration
+ * Docker mounts shown as expanded table instead of raw JSON
+ */
+function formatSettingsList(settings, showUsage = false) {
+  console.log(chalk.bold('\nSettings:\n'));
+  printNonDockerSettings(settings);
+  printDockerConfiguration(settings);
+  if (showUsage) {
+    printSettingsUsage();
+  }
+}
 
-  // Display each mount as a formatted row
-  for (const mount of mounts) {
-    if (typeof mount === 'string') {
-      const preset = MOUNT_PRESETS[mount];
-      if (preset) {
-        const container = preset.container.replace(/\$HOME/g, containerHome);
-        const rwFlag = preset.readonly ? chalk.dim('ro') : chalk.green('rw');
-        console.log(
-          `      ${chalk.cyan(mount.padEnd(10))} ${chalk.dim(preset.host.padEnd(20))} → ${container.padEnd(24)} (${rwFlag})`
-        );
-      } else {
-        console.log(`      ${chalk.red(mount.padEnd(10))} ${chalk.red('(unknown preset)')}`);
-      }
-    } else {
-      // Custom mount object
-      const container = mount.container.replace(/\$HOME/g, containerHome);
-      const rwFlag = mount.readonly !== false ? chalk.dim('ro') : chalk.green('rw');
-      console.log(
-        `      ${chalk.yellow('custom'.padEnd(10))} ${chalk.dim(mount.host.padEnd(20))} → ${container.padEnd(24)} (${rwFlag})`
-      );
-    }
+function listConfigFiles() {
+  return fs
+    .readdirSync(path.join(PACKAGE_ROOT, 'cluster-templates'))
+    .filter((file) => file.endsWith('.json'));
+}
+
+function printAvailableConfigs(files) {
+  files.forEach((file) => console.log(chalk.dim(`  - ${file.replace('.json', '')}`)));
+}
+
+function resolveConfigPathForShow(name) {
+  const configName = name.endsWith('.json') ? name : `${name}.json`;
+  const configPath = path.join(PACKAGE_ROOT, 'cluster-templates', configName);
+  if (fs.existsSync(configPath)) {
+    return { configPath, displayName: name.replace('.json', '') };
   }
 
-  if (mounts.length === 0) {
-    console.log(chalk.dim('      (none)'));
-  }
+  console.error(chalk.red(`Config not found: ${configName}`));
+  console.log(chalk.dim('\nAvailable configs:'));
+  printAvailableConfigs(listConfigFiles());
+  process.exit(1);
+}
 
-  // Environment variables (resolved from presets + explicit)
-  const resolvedEnvs = resolveEnvs(mounts, envPassthrough);
-  if (resolvedEnvs.length > 0) {
-    console.log(chalk.dim(`    Environment (${resolvedEnvs.length} vars):`));
-    // Group by source for clarity
-    const fromPresets = resolvedEnvs.filter((e) => !envPassthrough.includes(e));
-    const explicit = envPassthrough;
+function printConfigHeader(name) {
+  console.log('');
+  console.log(chalk.bold.cyan('═'.repeat(80)));
+  console.log(chalk.bold.cyan(`  Config: ${name}`));
+  console.log(chalk.bold.cyan('═'.repeat(80)));
+  console.log('');
+}
 
-    if (fromPresets.length > 0) {
-      console.log(`      ${chalk.dim('From presets:')} ${fromPresets.join(', ')}`);
-    }
-    if (explicit.length > 0) {
-      console.log(`      ${chalk.cyan('Explicit:')} ${explicit.join(', ')}`);
-    }
+function printConfigFooter() {
+  console.log(chalk.bold.cyan('═'.repeat(80)));
+  console.log('');
+}
+
+function getAgentsDir() {
+  return path.join(PACKAGE_ROOT, 'src', 'agents');
+}
+
+function printAgentsJson(agents) {
+  console.log(JSON.stringify({ agents, error: null }, null, 2));
+}
+
+function reportMissingAgentsDir(options) {
+  if (options.json) {
+    printAgentsJson([]);
   } else {
-    console.log(chalk.dim('    Environment: (none)'));
+    console.log(chalk.dim('No agents directory found.'));
+  }
+}
+
+function reportNoAgents(options) {
+  if (options.json) {
+    printAgentsJson([]);
+  } else {
+    console.log(chalk.dim('No agent definitions found in src/agents/'));
+  }
+}
+
+function parseAgentFile(file, agentsDir) {
+  try {
+    const agentPath = path.join(agentsDir, file);
+    const agent = JSON.parse(fs.readFileSync(agentPath, 'utf8'));
+    return {
+      file: file.replace('.json', ''),
+      id: agent.id || file.replace('.json', ''),
+      role: agent.role || 'unspecified',
+      model: agent.model || 'default',
+      triggers: agent.triggers?.length || 0,
+      prompt: agent.prompt || null,
+      output: agent.output || null,
+    };
+  } catch (err) {
+    console.error(chalk.yellow(`Warning: Could not parse ${file}: ${err.message}`));
+    return null;
+  }
+}
+
+function loadAgentDefinitions(files, agentsDir) {
+  const agents = [];
+  for (const file of files) {
+    const agent = parseAgentFile(file, agentsDir);
+    if (agent) {
+      agents.push(agent);
+    }
+  }
+  return agents;
+}
+
+function printAgentsList(agents) {
+  console.log(chalk.bold('\nAvailable agent definitions:\n'));
+  for (const agent of agents) {
+    console.log(
+      `  ${chalk.cyan(agent.id.padEnd(25))} ${chalk.dim('role:')} ${agent.role.padEnd(20)} ${chalk.dim('model:')} ${agent.model}`
+    );
+    console.log(chalk.dim(`    Triggers: ${agent.triggers}`));
+    if (agent.output) {
+      const outputTopic = typeof agent.output === 'object' ? agent.output.topic : null;
+      console.log(chalk.dim(`    Output topic: ${outputTopic || 'none'}`));
+    }
+    if (agent.prompt) {
+      const promptPreview = agent.prompt.substring(0, 100).replace(/\n/g, ' ');
+      console.log(chalk.dim(`    Prompt: ${promptPreview}...`));
+    }
+    console.log('');
+  }
+}
+
+function getTriggerTopics(triggers) {
+  return triggers
+    .map((trigger) => (typeof trigger === 'string' ? trigger : trigger.topic))
+    .filter(Boolean);
+}
+
+function printAgentDetails(agent) {
+  const color = getColorForSender(agent.id);
+  console.log(color.bold(`  ${agent.id}`));
+  console.log(chalk.dim(`    Role: ${agent.role || 'none'}`));
+
+  if (agent.model) {
+    console.log(chalk.dim(`    Model: ${agent.model}`));
   }
 
-  // Container home
-  const homeIsDefault = containerHome === '/root';
-  const homeLabel = homeIsDefault ? chalk.dim('Container home:') : chalk.cyan('Container home:');
-  const homeVal = homeIsDefault ? chalk.dim(containerHome) : chalk.white(containerHome);
-  console.log(`    ${homeLabel} ${homeVal}`);
+  if (agent.triggers && agent.triggers.length > 0) {
+    const triggerTopics = getTriggerTopics(agent.triggers);
+    console.log(chalk.dim(`    Triggers: ${triggerTopics.join(', ')}`));
+  } else {
+    console.log(chalk.dim(`    Triggers: none (manual only)`));
+  }
 
   console.log('');
+}
 
-  if (showUsage) {
-    console.log(chalk.dim('Usage:'));
-    console.log(chalk.dim('  zeroshot settings set <key> <value>'));
-    console.log(chalk.dim('  zeroshot settings get <key>'));
-    console.log(chalk.dim('  zeroshot settings reset'));
-    console.log('');
-    console.log(chalk.dim('Examples:'));
-    console.log(chalk.dim('  zeroshot settings set maxModel opus'));
-    console.log(chalk.dim('  zeroshot settings set dockerMounts \'["gh","git","ssh","aws"]\''));
-    console.log(chalk.dim('  zeroshot settings set dockerEnvPassthrough \'["AWS_*","TF_VAR_*"]\''));
-    console.log('');
-    console.log(chalk.dim('Available mount presets: gh, git, ssh, aws, azure, kube, terraform, gcloud'));
-    console.log('');
+function printAgentsSection(agents) {
+  console.log(chalk.bold('Agents:\n'));
+  if (!agents || agents.length === 0) {
+    console.log(chalk.dim('  No agents defined'));
+    return;
   }
+  for (const agent of agents) {
+    printAgentDetails(agent);
+  }
+}
+
+function buildTriggerMap(agents) {
+  const triggerMap = new Map();
+  for (const agent of agents) {
+    if (!agent.triggers) {
+      continue;
+    }
+    for (const trigger of agent.triggers) {
+      const topic = typeof trigger === 'string' ? trigger : trigger.topic;
+      if (!topic) {
+        continue;
+      }
+      if (!triggerMap.has(topic)) {
+        triggerMap.set(topic, []);
+      }
+      triggerMap.get(topic).push(agent.id);
+    }
+  }
+  return triggerMap;
+}
+
+function printMessageFlow(agents) {
+  if (!agents || agents.length === 0) {
+    return;
+  }
+
+  console.log(chalk.bold('Message Flow:\n'));
+  const triggerMap = buildTriggerMap(agents);
+  if (triggerMap.size === 0) {
+    console.log(chalk.dim('  No automatic triggers defined\n'));
+    return;
+  }
+
+  for (const [topic, agentIds] of triggerMap) {
+    const coloredAgents = agentIds.map((id) => getColorForSender(id)(id)).join(', ');
+    console.log(`  ${chalk.yellow(topic)} ${chalk.dim('→')} ${coloredAgents}`);
+  }
+  console.log('');
 }
 
 settingsCmd
@@ -2880,32 +3676,140 @@ settingsCmd
     formatSettingsList(settings, false);
   });
 
+/**
+ * Get nested value by dot-notation path
+ * @param {object} obj - Object to traverse
+ * @param {string} dotPath - Dot-notation path (e.g., 'providerSettings.claude.anthropicApiKey')
+ * @returns {{ value: any, found: boolean }}
+ */
+function getNestedValue(obj, dotPath) {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return { value: undefined, found: false };
+    }
+    if (!(part in current)) {
+      return { value: undefined, found: false };
+    }
+    current = current[part];
+  }
+  return { value: current, found: true };
+}
+
+/**
+ * Set nested value by dot-notation path, creating intermediate objects as needed
+ * @param {object} obj - Object to modify
+ * @param {string} dotPath - Dot-notation path
+ * @param {any} value - Value to set
+ */
+function setNestedValue(obj, dotPath, value) {
+  const parts = dotPath.split('.');
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!(part in current) || typeof current[part] !== 'object' || current[part] === null) {
+      current[part] = {};
+    }
+    current = current[part];
+  }
+  current[parts[parts.length - 1]] = value;
+}
+
+/**
+ * Parse a setting value string into appropriate type
+ * Handles null, boolean, JSON, and falls back to string
+ * @param {string} value - Raw value string
+ * @returns {any} Parsed value
+ */
+function parseSettingValue(value) {
+  if (value === 'null') return null;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value; // Keep as string if not valid JSON
+  }
+}
+
 settingsCmd
   .command('get <key>')
-  .description('Get a setting value')
+  .description(
+    'Get a setting value (supports dot-notation: providerSettings.claude.anthropicApiKey)'
+  )
   .action((key) => {
     const settings = loadSettings();
+
+    // Support dot-notation for nested values
+    if (key.includes('.')) {
+      const { value, found } = getNestedValue(settings, key);
+      if (!found) {
+        console.error(chalk.red(`Setting not found: ${key}`));
+        process.exit(1);
+      }
+      console.log(typeof value === 'object' ? JSON.stringify(value, null, 2) : value);
+      return;
+    }
+
     if (!(key in settings)) {
       console.error(chalk.red(`Unknown setting: ${key}`));
       console.log(chalk.dim('\nAvailable settings:'));
       Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
       process.exit(1);
     }
-    console.log(settings[key]);
+    console.log(
+      typeof settings[key] === 'object' ? JSON.stringify(settings[key], null, 2) : settings[key]
+    );
   });
 
 settingsCmd
   .command('set <key> <value>')
-  .description('Set a setting value')
+  .description(
+    'Set a setting value (supports dot-notation: providerSettings.claude.anthropicApiKey)'
+  )
   .action((key, value) => {
+    const settings = loadSettings();
+
+    // Support dot-notation for nested values
+    if (key.includes('.')) {
+      const parts = key.split('.');
+      const rootKey = parts[0];
+
+      // Validate root key exists in defaults
+      if (!(rootKey in DEFAULT_SETTINGS)) {
+        console.error(chalk.red(`Unknown setting: ${rootKey}`));
+        console.log(chalk.dim('\nAvailable settings:'));
+        Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
+        process.exit(1);
+      }
+
+      const parsedValue = parseSettingValue(value);
+
+      // Set nested value
+      setNestedValue(settings, key, parsedValue);
+
+      // Validate the root key after modification
+      const validationError = validateSetting(rootKey, settings[rootKey]);
+      if (validationError) {
+        console.error(chalk.red(validationError));
+        process.exit(1);
+      }
+
+      saveSettings(settings);
+      const displayValue =
+        typeof parsedValue === 'string' ? parsedValue : JSON.stringify(parsedValue);
+      console.log(chalk.green(`✓ Set ${key} = ${displayValue}`));
+      return;
+    }
+
+    // Original flat key handling
     if (!(key in DEFAULT_SETTINGS)) {
       console.error(chalk.red(`Unknown setting: ${key}`));
       console.log(chalk.dim('\nAvailable settings:'));
       Object.keys(DEFAULT_SETTINGS).forEach((k) => console.log(chalk.dim(`  - ${k}`)));
       process.exit(1);
     }
-
-    const settings = loadSettings();
 
     // Type coercion
     let parsedValue;
@@ -2925,7 +3829,7 @@ settingsCmd
 
     settings[key] = parsedValue;
     saveSettings(settings);
-    console.log(chalk.green(`✓ Set ${key} = ${parsedValue}`));
+    console.log(chalk.green(`✓ Set ${key} = ${JSON.stringify(parsedValue)}`));
   });
 
 settingsCmd
@@ -2960,6 +3864,26 @@ settingsCmd.action(() => {
   const settings = loadSettings();
   formatSettingsList(settings, true);
 });
+
+// Providers management
+const providersCmd = program.command('providers').description('Manage AI providers');
+providersCmd.action(async () => {
+  await providersCommand();
+});
+
+providersCmd
+  .command('set-default <provider>')
+  .description('Set default provider (claude, codex, gemini, opencode)')
+  .action(async (provider) => {
+    await setDefaultCommand([provider]);
+  });
+
+providersCmd
+  .command('setup <provider>')
+  .description('Configure provider model levels and overrides')
+  .action(async (provider) => {
+    await setupCommand([provider]);
+  });
 
 // Update command
 program
@@ -3040,92 +3964,13 @@ configCmd
   .description('Visualize a cluster config')
   .action((name) => {
     try {
-      // Support both with and without .json extension
-      const configName = name.endsWith('.json') ? name : `${name}.json`;
-      const configPath = path.join(PACKAGE_ROOT, 'cluster-templates', configName);
-
-      if (!fs.existsSync(configPath)) {
-        console.error(chalk.red(`Config not found: ${configName}`));
-        console.log(chalk.dim('\nAvailable configs:'));
-        const files = fs
-          .readdirSync(path.join(PACKAGE_ROOT, 'cluster-templates'))
-          .filter((f) => f.endsWith('.json'));
-        files.forEach((f) => console.log(chalk.dim(`  - ${f.replace('.json', '')}`)));
-        process.exit(1);
-      }
-
+      const { configPath, displayName } = resolveConfigPathForShow(name);
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-      // Header
-      console.log('');
-      console.log(chalk.bold.cyan('═'.repeat(80)));
-      console.log(chalk.bold.cyan(`  Config: ${name.replace('.json', '')}`));
-      console.log(chalk.bold.cyan('═'.repeat(80)));
-      console.log('');
-
-      // Agents section
-      console.log(chalk.bold('Agents:\n'));
-
-      if (!config.agents || config.agents.length === 0) {
-        console.log(chalk.dim('  No agents defined'));
-      } else {
-        for (const agent of config.agents) {
-          const color = getColorForSender(agent.id);
-          console.log(color.bold(`  ${agent.id}`));
-          console.log(chalk.dim(`    Role: ${agent.role || 'none'}`));
-
-          if (agent.model) {
-            console.log(chalk.dim(`    Model: ${agent.model}`));
-          }
-
-          if (agent.triggers && agent.triggers.length > 0) {
-            // Triggers are objects with topic field
-            const triggerTopics = agent.triggers
-              .map((t) => (typeof t === 'string' ? t : t.topic))
-              .filter(Boolean);
-            console.log(chalk.dim(`    Triggers: ${triggerTopics.join(', ')}`));
-          } else {
-            console.log(chalk.dim(`    Triggers: none (manual only)`));
-          }
-
-          console.log('');
-        }
-      }
-
-      // Message flow visualization
-      if (config.agents && config.agents.length > 0) {
-        console.log(chalk.bold('Message Flow:\n'));
-
-        // Build trigger map: topic -> [agents that listen]
-        const triggerMap = new Map();
-        for (const agent of config.agents) {
-          if (agent.triggers) {
-            for (const trigger of agent.triggers) {
-              const topic = typeof trigger === 'string' ? trigger : trigger.topic;
-              if (topic) {
-                if (!triggerMap.has(topic)) {
-                  triggerMap.set(topic, []);
-                }
-                triggerMap.get(topic).push(agent.id);
-              }
-            }
-          }
-        }
-
-        if (triggerMap.size === 0) {
-          console.log(chalk.dim('  No automatic triggers defined\n'));
-        } else {
-          for (const [topic, agents] of triggerMap) {
-            console.log(
-              `  ${chalk.yellow(topic)} ${chalk.dim('→')} ${agents.map((a) => getColorForSender(a)(a)).join(', ')}`
-            );
-          }
-          console.log('');
-        }
-      }
-
-      console.log(chalk.bold.cyan('═'.repeat(80)));
-      console.log('');
+      printConfigHeader(displayName);
+      printAgentsSection(config.agents);
+      printMessageFlow(config.agents);
+      printConfigFooter();
     } catch (error) {
       console.error('Error showing config:', error.message);
       process.exit(1);
@@ -3204,81 +4049,39 @@ agentsCmd
   .option('--json', 'Output as JSON')
   .action((options) => {
     try {
-      const agentsDir = path.join(PACKAGE_ROOT, 'src', 'agents');
-
-      // Check if agents directory exists
+      const agentsDir = getAgentsDir();
       if (!fs.existsSync(agentsDir)) {
-        if (options.json) {
-          console.log(JSON.stringify({ agents: [], error: null }, null, 2));
-        } else {
-          console.log(chalk.dim('No agents directory found.'));
-        }
+        reportMissingAgentsDir(options);
         return;
       }
 
-      const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
-
+      const files = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.json'));
       if (files.length === 0) {
-        if (options.json) {
-          console.log(JSON.stringify({ agents: [], error: null }, null, 2));
-        } else {
-          console.log(chalk.dim('No agent definitions found in src/agents/'));
-        }
+        reportNoAgents(options);
         return;
       }
 
-      // Parse all agent files
-      const agents = [];
-      for (const file of files) {
-        try {
-          const agentPath = path.join(agentsDir, file);
-          const agent = JSON.parse(fs.readFileSync(agentPath, 'utf8'));
-          agents.push({
-            file: file.replace('.json', ''),
-            id: agent.id || file.replace('.json', ''),
-            role: agent.role || 'unspecified',
-            model: agent.model || 'default',
-            triggers: agent.triggers?.length || 0,
-            prompt: agent.prompt || null,
-            output: agent.output || null,
-          });
-        } catch (err) {
-          // Skip invalid JSON files
-          console.error(chalk.yellow(`Warning: Could not parse ${file}: ${err.message}`));
-        }
-      }
+      const agents = loadAgentDefinitions(files, agentsDir);
+      agents.sort((a, b) => a.id.localeCompare(b.id));
 
-      // JSON output
       if (options.json) {
-        console.log(JSON.stringify({ agents, error: null }, null, 2));
+        printAgentsJson(agents);
         return;
       }
 
-      // Human-readable output
-      console.log(chalk.bold('\nAvailable agent definitions:\n'));
+      if (options.verbose) {
+        printAgentsList(agents);
+        return;
+      }
 
+      console.log(chalk.bold('\nAvailable agent definitions:\n'));
       for (const agent of agents) {
         console.log(
           `  ${chalk.cyan(agent.id.padEnd(25))} ${chalk.dim('role:')} ${agent.role.padEnd(20)} ${chalk.dim('model:')} ${agent.model}`
         );
-
-        if (options.verbose) {
-          console.log(chalk.dim(`    Triggers: ${agent.triggers}`));
-          if (agent.output) {
-            console.log(chalk.dim(`    Output topic: ${agent.output.topic || 'none'}`));
-          }
-          if (agent.prompt) {
-            const promptPreview = agent.prompt.substring(0, 100).replace(/\n/g, ' ');
-            console.log(chalk.dim(`    Prompt: ${promptPreview}...`));
-          }
-          console.log('');
-        }
       }
-
-      if (!options.verbose) {
-        console.log('');
-        console.log(chalk.dim('  Use --verbose for full details'));
-      }
+      console.log('');
+      console.log(chalk.dim('  Use --verbose for full details'));
       console.log('');
     } catch (error) {
       if (options.json) {
@@ -3437,59 +4240,68 @@ function getToolIcon(toolName) {
   return icons[toolName] || '🔧';
 }
 
+function formatToolCallPath(filePath) {
+  return filePath ? filePath.split('/').slice(-2).join('/') : '';
+}
+
+function formatTodoWriteCall(todos) {
+  if (!Array.isArray(todos) || todos.length === 0) return '';
+
+  const statusCounts = {};
+  for (const todo of todos) {
+    statusCounts[todo.status] = (statusCounts[todo.status] || 0) + 1;
+  }
+
+  const parts = Object.entries(statusCounts).map(
+    ([status, count]) => `${count} ${status.replace('_', ' ')}`
+  );
+  return `${todos.length} todo${todos.length === 1 ? '' : 's'} (${parts.join(', ')})`;
+}
+
+function formatAskUserQuestionCall(questions) {
+  if (!Array.isArray(questions) || questions.length === 0) return '';
+
+  const question = questions[0];
+  const preview = question.question.substring(0, 50);
+  const suffix = question.question.length > 50 ? '...' : '';
+  return questions.length > 1
+    ? `${questions.length} questions: "${preview}..."`
+    : `"${preview}${suffix}"`;
+}
+
+function formatToolCallFallback(input) {
+  const keys = Object.keys(input);
+  if (keys.length === 0) return '';
+  const rawValue = String(input[keys[0]]);
+  const preview = rawValue.substring(0, 40);
+  return preview.length < rawValue.length ? preview + '...' : preview;
+}
+
+const TOOL_CALL_INPUT_FORMATTERS = {
+  Bash: (input) => (input.command ? `$ ${input.command}` : ''),
+  Read: (input) => formatToolCallPath(input.file_path),
+  Write: (input) => (input.file_path ? `→ ${formatToolCallPath(input.file_path)}` : ''),
+  Edit: (input) => formatToolCallPath(input.file_path),
+  Glob: (input) => input.pattern || '',
+  Grep: (input) => (input.pattern ? `/${input.pattern}/` : ''),
+  WebFetch: (input) => (input.url ? input.url.substring(0, 50) : ''),
+  WebSearch: (input) => (input.query ? `"${input.query}"` : ''),
+  Task: (input) => input.description || '',
+  TodoWrite: (input) => formatTodoWriteCall(input.todos),
+  AskUserQuestion: (input) => formatAskUserQuestionCall(input.questions),
+};
+
 // Format tool call input for display
 function formatToolCall(toolName, input) {
   if (!input) return '';
 
-  switch (toolName) {
-    case 'Bash':
-      return input.command ? `$ ${input.command}` : '';
-    case 'Read':
-      return input.file_path ? input.file_path.split('/').slice(-2).join('/') : '';
-    case 'Write':
-      return input.file_path ? `→ ${input.file_path.split('/').slice(-2).join('/')}` : '';
-    case 'Edit':
-      return input.file_path ? input.file_path.split('/').slice(-2).join('/') : '';
-    case 'Glob':
-      return input.pattern || '';
-    case 'Grep':
-      return input.pattern ? `/${input.pattern}/` : '';
-    case 'WebFetch':
-      return input.url ? input.url.substring(0, 50) : '';
-    case 'WebSearch':
-      return input.query ? `"${input.query}"` : '';
-    case 'Task':
-      return input.description || '';
-    case 'TodoWrite':
-      if (input.todos && Array.isArray(input.todos)) {
-        const statusCounts = {};
-        input.todos.forEach((todo) => {
-          statusCounts[todo.status] = (statusCounts[todo.status] || 0) + 1;
-        });
-        const parts = Object.entries(statusCounts).map(
-          ([status, count]) => `${count} ${status.replace('_', ' ')}`
-        );
-        return `${input.todos.length} todo${input.todos.length === 1 ? '' : 's'} (${parts.join(', ')})`;
-      }
-      return '';
-    case 'AskUserQuestion':
-      if (input.questions && Array.isArray(input.questions)) {
-        const q = input.questions[0];
-        const preview = q.question.substring(0, 50);
-        return input.questions.length > 1
-          ? `${input.questions.length} questions: "${preview}..."`
-          : `"${preview}${q.question.length > 50 ? '...' : ''}"`;
-      }
-      return '';
-    default:
-      // For unknown tools, show first key-value pair
-      const keys = Object.keys(input);
-      if (keys.length > 0) {
-        const val = String(input[keys[0]]).substring(0, 40);
-        return val.length < String(input[keys[0]]).length ? val + '...' : val;
-      }
-      return '';
+  const formatter = TOOL_CALL_INPUT_FORMATTERS[toolName];
+  if (formatter) {
+    return formatter(input);
   }
+
+  // For unknown tools, show first key-value pair
+  return formatToolCallFallback(input);
 }
 
 // Format tool result for display
@@ -3506,16 +4318,21 @@ function formatToolResult(content, isError, toolName, toolInput) {
   if (toolName === 'TodoWrite' && toolInput?.todos && Array.isArray(toolInput.todos)) {
     const todos = toolInput.todos;
     if (todos.length === 0) return chalk.dim('no todos');
+
+    // Helper to get status icon
+    const getStatusIcon = (todoStatus) => {
+      if (todoStatus === 'completed') return '✓';
+      if (todoStatus === 'in_progress') return '⧗';
+      return '○';
+    };
+
     if (todos.length === 1) {
-      const status =
-        todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
-      return chalk.dim(
-        `${status} ${todos[0].content.substring(0, 50)}${todos[0].content.length > 50 ? '...' : ''}`
-      );
+      const status = getStatusIcon(todos[0].status);
+      const suffix = todos[0].content.length > 50 ? '...' : '';
+      return chalk.dim(`${status} ${todos[0].content.substring(0, 50)}${suffix}`);
     }
     // Multiple todos - show first one as preview
-    const status =
-      todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
+    const status = getStatusIcon(todos[0].status);
     return chalk.dim(
       `${status} ${todos[0].content.substring(0, 40)}... (+${todos.length - 1} more)`
     );
@@ -3706,244 +4523,323 @@ const lineBuffers = new Map();
 // Track current tool call per sender - needed for matching tool results with calls
 const currentToolCall = new Map();
 
+function formatLogTimestamp(timestamp) {
+  return new Date(timestamp).toLocaleTimeString('en-US', {
+    hour12: false,
+  });
+}
+
+function getRenderPrefix(sender) {
+  const color = getColorForSender(sender);
+  return color(`${sender.padEnd(15)} |`);
+}
+
+function getRenderBuffer(buffers, sender) {
+  if (!buffers.has(sender)) {
+    buffers.set(sender, { text: '', needsPrefix: true });
+  }
+  return buffers.get(sender);
+}
+
+function flushRenderBuffer(buffers, sender, prefix, lines) {
+  const buf = buffers.get(sender);
+  if (!buf || !buf.text.trim()) {
+    if (buf) {
+      buf.text = '';
+      buf.needsPrefix = true;
+    }
+    return;
+  }
+
+  const textLines = buf.text.split('\n');
+  for (const line of textLines) {
+    if (line.trim()) {
+      lines.push(`${prefix} ${formatMarkdownLine(line)}`);
+    }
+  }
+  buf.text = '';
+  buf.needsPrefix = true;
+}
+
+function flushAllRenderBuffers(lines, buffers) {
+  for (const [sender, buf] of buffers) {
+    if (!buf.text.trim()) continue;
+    const prefix = getRenderPrefix(sender);
+    for (const line of buf.text.split('\n')) {
+      if (line.trim()) {
+        lines.push(`${prefix} ${line}`);
+      }
+    }
+  }
+}
+
+function formatLifecycleEvent(data) {
+  const event = data?.event;
+  let icon;
+  let eventText;
+
+  switch (event) {
+    case 'STARTED': {
+      icon = chalk.green('▶');
+      const triggers = data?.triggers?.join(', ') || 'none';
+      eventText = `started (listening for: ${chalk.dim(triggers)})`;
+      break;
+    }
+    case 'TASK_STARTED':
+      icon = chalk.yellow('⚡');
+      eventText = `${chalk.cyan(data.triggeredBy)} → task #${data.iteration} (${chalk.dim(data.model)})`;
+      break;
+    case 'TASK_COMPLETED':
+      icon = chalk.green('✓');
+      eventText = `task #${data.iteration} completed`;
+      break;
+    default:
+      icon = chalk.dim('•');
+      eventText = event || 'unknown event';
+  }
+
+  return { icon, eventText };
+}
+
+function handleLifecycleRender({ msg, prefix, lines }) {
+  const data = msg.content?.data;
+  const { icon, eventText } = formatLifecycleEvent(data);
+  lines.push(`${prefix} ${icon} ${eventText}`);
+}
+
+function getIssuePreviewLine(text) {
+  if (!text) return '';
+  return text.split('\n').find((line) => line.trim() && line.trim() !== '# Manual Input');
+}
+
+function handleIssueOpenedRender({ msg, prefix, timestamp, lines }) {
+  lines.push('');
+  lines.push(chalk.bold.blue('─'.repeat(80)));
+
+  const issueData = msg.content?.data || {};
+  const issueUrl = issueData.url || issueData.html_url;
+  const issueTitle = issueData.title;
+  const issueNum = issueData.issue_number || issueData.number;
+
+  if (issueUrl) {
+    lines.push(
+      `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋')} ${chalk.cyan(issueUrl)}`
+    );
+    if (issueTitle) {
+      lines.push(`${prefix} ${chalk.white(issueTitle)}`);
+    }
+  } else if (issueNum) {
+    lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋')} Issue #${issueNum}`);
+    if (issueTitle) {
+      lines.push(`${prefix} ${chalk.white(issueTitle)}`);
+    }
+  } else {
+    lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋 TASK')}`);
+    const firstLine = getIssuePreviewLine(msg.content?.text);
+    if (firstLine) {
+      lines.push(`${prefix} ${chalk.white(firstLine.slice(0, 100))}`);
+    }
+  }
+
+  lines.push(chalk.bold.blue('─'.repeat(80)));
+}
+
+function handleImplementationReadyRender({ prefix, timestamp, lines }) {
+  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`);
+}
+
+function normalizeIssueList(rawIssues) {
+  if (!rawIssues) return [];
+  if (Array.isArray(rawIssues)) return rawIssues;
+  if (typeof rawIssues === 'string') {
+    try {
+      const parsed = JSON.parse(rawIssues);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function appendCriteriaGroup({ lines, prefix, label, items, color, reasonLabel }) {
+  if (!items.length) return;
+  lines.push(`${prefix}   ${color(label)} (${items.length} criteria - ${reasonLabel}):`);
+  for (const item of items) {
+    lines.push(`${prefix}     ${color('•')} ${item.id}: ${item.reason || 'No reason provided'}`);
+  }
+}
+
+function appendCriteriaResults(lines, prefix, criteriaResults) {
+  if (!Array.isArray(criteriaResults)) return;
+
+  const cannotValidateYet = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE_YET');
+  appendCriteriaGroup({
+    lines,
+    prefix,
+    label: '❌ Cannot validate yet',
+    items: cannotValidateYet,
+    color: chalk.red,
+    reasonLabel: 'work incomplete',
+  });
+
+  const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+  appendCriteriaGroup({
+    lines,
+    prefix,
+    label: '⚠️ Could not validate',
+    items: cannotValidate,
+    color: chalk.yellow,
+    reasonLabel: 'permanent',
+  });
+}
+
+function handleValidationResultRender({ msg, prefix, timestamp, lines }) {
+  const data = msg.content?.data || {};
+  const approved = data.approved === true || data.approved === 'true';
+  const icon = approved ? chalk.green('✓ APPROVED') : chalk.red('✗ REJECTED');
+  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.magenta('VALIDATION_RESULT')}`);
+  lines.push(`${prefix}   ${icon} ${chalk.dim(data.summary || '')}`);
+
+  if (!approved) {
+    const issues = normalizeIssueList(data.issues || data.errors);
+    for (const issue of issues) {
+      lines.push(`${prefix}     ${chalk.red('•')} ${issue}`);
+    }
+  }
+
+  appendCriteriaResults(lines, prefix, data.criteriaResults);
+}
+
+function handlePrCreatedRender({ msg, prefix, timestamp, lines }) {
+  lines.push('');
+  lines.push(chalk.bold.green('─'.repeat(80)));
+  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('🔗 PR CREATED')}`);
+  if (msg.content?.data?.pr_url) {
+    lines.push(`${prefix} ${chalk.cyan(msg.content.data.pr_url)}`);
+  }
+  if (msg.content?.data?.merged) {
+    lines.push(`${prefix} ${chalk.bold.cyan('✓ MERGED')}`);
+  }
+  lines.push(chalk.bold.green('─'.repeat(80)));
+}
+
+function handleClusterCompleteRender({ prefix, timestamp, lines }) {
+  lines.push('');
+  lines.push(chalk.bold.green('─'.repeat(80)));
+  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('✅ CLUSTER COMPLETE')}`);
+  lines.push(chalk.bold.green('─'.repeat(80)));
+}
+
+function handleAgentErrorRender({ msg, prefix, timestamp, lines }) {
+  lines.push('');
+  lines.push(chalk.bold.red('─'.repeat(80)));
+  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.red('🔴 AGENT ERROR')}`);
+  if (msg.content?.text) {
+    lines.push(`${prefix} ${chalk.red(msg.content.text)}`);
+  }
+  lines.push(chalk.bold.red('─'.repeat(80)));
+}
+
+function appendAgentTextEvent(lines, sender, prefix, buffers, text) {
+  const buf = getRenderBuffer(buffers, sender);
+  buf.text += text;
+
+  while (buf.text.includes('\n')) {
+    const idx = buf.text.indexOf('\n');
+    const line = buf.text.slice(0, idx);
+    buf.text = buf.text.slice(idx + 1);
+    if (line.trim()) {
+      lines.push(`${prefix} ${formatMarkdownLine(line)}`);
+    }
+  }
+}
+
+function appendAgentToolCallEvent({ lines, sender, prefix, buffers, toolCalls, event }) {
+  flushRenderBuffer(buffers, sender, prefix, lines);
+  const icon = getToolIcon(event.toolName);
+  const toolDesc = formatToolCall(event.toolName, event.input);
+  lines.push(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
+  toolCalls.set(sender, { toolName: event.toolName, input: event.input });
+}
+
+function appendAgentToolResultEvent(lines, sender, prefix, toolCalls, event) {
+  const status = event.isError ? chalk.red('✗') : chalk.green('✓');
+  const toolCall = toolCalls.get(sender);
+  const resultDesc = formatToolResult(
+    event.content,
+    event.isError,
+    toolCall?.toolName,
+    toolCall?.input
+  );
+  lines.push(`${prefix}   ${status} ${resultDesc}`);
+  toolCalls.delete(sender);
+}
+
+function handleAgentOutputRender({ msg, prefix, lines, buffers, toolCalls }) {
+  const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
+  if (!content || !content.trim()) return;
+
+  const provider = normalizeProviderName(
+    msg.content?.data?.provider || msg.sender_provider || 'claude'
+  );
+  const events = parseProviderChunk(provider, content);
+  for (const event of events) {
+    if (event.type === 'text') {
+      appendAgentTextEvent(lines, msg.sender, prefix, buffers, event.text);
+      continue;
+    }
+    if (event.type === 'tool_call') {
+      appendAgentToolCallEvent({
+        lines,
+        sender: msg.sender,
+        prefix,
+        buffers,
+        toolCalls,
+        event,
+      });
+      continue;
+    }
+    if (event.type === 'tool_result') {
+      appendAgentToolResultEvent(lines, msg.sender, prefix, toolCalls, event);
+    }
+  }
+}
+
+const RENDER_TOPIC_HANDLERS = {
+  AGENT_LIFECYCLE: handleLifecycleRender,
+  ISSUE_OPENED: handleIssueOpenedRender,
+  IMPLEMENTATION_READY: handleImplementationReadyRender,
+  VALIDATION_RESULT: handleValidationResultRender,
+  PR_CREATED: handlePrCreatedRender,
+  CLUSTER_COMPLETE: handleClusterCompleteRender,
+  AGENT_ERROR: handleAgentErrorRender,
+  AGENT_OUTPUT: handleAgentOutputRender,
+};
+
 /**
  * Render messages to terminal-style output with ANSI colors (same as zeroshot logs)
  */
 function renderMessagesToTerminal(clusterId, messages) {
   const lines = [];
-  const buffers = new Map(); // Line buffers per sender
-  const toolCalls = new Map(); // Track tool calls per sender
-
-  const getBuffer = (sender) => {
-    if (!buffers.has(sender)) {
-      buffers.set(sender, { text: '', needsPrefix: true });
-    }
-    return buffers.get(sender);
-  };
-
-  const flushBuffer = (sender, prefix) => {
-    const buf = buffers.get(sender);
-    if (buf && buf.text.trim()) {
-      const textLines = buf.text.split('\n');
-      for (const line of textLines) {
-        if (line.trim()) {
-          lines.push(`${prefix} ${formatMarkdownLine(line)}`);
-        }
-      }
-      buf.text = '';
-      buf.needsPrefix = true;
-    }
-  };
+  const buffers = new Map();
+  const toolCalls = new Map();
 
   for (const msg of messages) {
-    const timestamp = new Date(msg.timestamp).toLocaleTimeString('en-US', {
-      hour12: false,
-    });
-    const color = getColorForSender(msg.sender);
-    const prefix = color(`${msg.sender.padEnd(15)} |`);
-
-    // AGENT_LIFECYCLE
-    if (msg.topic === 'AGENT_LIFECYCLE') {
-      const data = msg.content?.data;
-      const event = data?.event;
-      let icon, eventText;
-      switch (event) {
-        case 'STARTED':
-          icon = chalk.green('▶');
-          const triggers = data.triggers?.join(', ') || 'none';
-          eventText = `started (listening for: ${chalk.dim(triggers)})`;
-          break;
-        case 'TASK_STARTED':
-          icon = chalk.yellow('⚡');
-          eventText = `${chalk.cyan(data.triggeredBy)} → task #${data.iteration} (${chalk.dim(data.model)})`;
-          break;
-        case 'TASK_COMPLETED':
-          icon = chalk.green('✓');
-          eventText = `task #${data.iteration} completed`;
-          break;
-        default:
-          icon = chalk.dim('•');
-          eventText = event || 'unknown event';
-      }
-      lines.push(`${prefix} ${icon} ${eventText}`);
+    const timestamp = formatLogTimestamp(msg.timestamp);
+    const prefix = getRenderPrefix(msg.sender);
+    const handler = RENDER_TOPIC_HANDLERS[msg.topic];
+    if (handler) {
+      handler({ msg, prefix, timestamp, lines, buffers, toolCalls });
       continue;
     }
 
-    // ISSUE_OPENED
-    if (msg.topic === 'ISSUE_OPENED') {
-      lines.push('');
-      lines.push(chalk.bold.blue('─'.repeat(80)));
-      // Extract issue URL if present
-      const issueData = msg.content?.data || {};
-      const issueUrl = issueData.url || issueData.html_url;
-      const issueTitle = issueData.title;
-      const issueNum = issueData.issue_number || issueData.number;
-
-      if (issueUrl) {
-        lines.push(
-          `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋')} ${chalk.cyan(issueUrl)}`
-        );
-        if (issueTitle) {
-          lines.push(`${prefix} ${chalk.white(issueTitle)}`);
-        }
-      } else if (issueNum) {
-        lines.push(
-          `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋')} Issue #${issueNum}`
-        );
-        if (issueTitle) {
-          lines.push(`${prefix} ${chalk.white(issueTitle)}`);
-        }
-      } else {
-        // Fallback: show first line of text only
-        lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋 TASK')}`);
-        if (msg.content?.text) {
-          const firstLine = msg.content.text
-            .split('\n')
-            .find((l) => l.trim() && l.trim() !== '# Manual Input');
-          if (firstLine) {
-            lines.push(`${prefix} ${chalk.white(firstLine.slice(0, 100))}`);
-          }
-        }
-      }
-      lines.push(chalk.bold.blue('─'.repeat(80)));
-      continue;
-    }
-
-    // IMPLEMENTATION_READY
-    if (msg.topic === 'IMPLEMENTATION_READY') {
-      lines.push(
-        `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`
-      );
-      continue;
-    }
-
-    // VALIDATION_RESULT
-    if (msg.topic === 'VALIDATION_RESULT') {
-      const data = msg.content?.data || {};
-      const approved = data.approved === true || data.approved === 'true';
-      const icon = approved ? chalk.green('✓ APPROVED') : chalk.red('✗ REJECTED');
-      lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.magenta('VALIDATION_RESULT')}`);
-      lines.push(`${prefix}   ${icon} ${chalk.dim(data.summary || '')}`);
-      if (!approved) {
-        let issues = data.issues || data.errors;
-        if (typeof issues === 'string') {
-          try {
-            issues = JSON.parse(issues);
-          } catch {
-            issues = [];
-          }
-        }
-        if (Array.isArray(issues)) {
-          for (const issue of issues) {
-            lines.push(`${prefix}     ${chalk.red('•')} ${issue}`);
-          }
-        }
-      }
-      continue;
-    }
-
-    // PR_CREATED
-    if (msg.topic === 'PR_CREATED') {
-      lines.push('');
-      lines.push(chalk.bold.green('─'.repeat(80)));
-      lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('🔗 PR CREATED')}`);
-      if (msg.content?.data?.pr_url) {
-        lines.push(`${prefix} ${chalk.cyan(msg.content.data.pr_url)}`);
-      }
-      if (msg.content?.data?.merged) {
-        lines.push(`${prefix} ${chalk.bold.cyan('✓ MERGED')}`);
-      }
-      lines.push(chalk.bold.green('─'.repeat(80)));
-      continue;
-    }
-
-    // CLUSTER_COMPLETE
-    if (msg.topic === 'CLUSTER_COMPLETE') {
-      lines.push('');
-      lines.push(chalk.bold.green('─'.repeat(80)));
-      lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('✅ CLUSTER COMPLETE')}`);
-      lines.push(chalk.bold.green('─'.repeat(80)));
-      continue;
-    }
-
-    // AGENT_ERROR
-    if (msg.topic === 'AGENT_ERROR') {
-      lines.push('');
-      lines.push(chalk.bold.red('─'.repeat(80)));
-      lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.red('🔴 AGENT ERROR')}`);
-      if (msg.content?.text) {
-        lines.push(`${prefix} ${chalk.red(msg.content.text)}`);
-      }
-      lines.push(chalk.bold.red('─'.repeat(80)));
-      continue;
-    }
-
-    // AGENT_OUTPUT - parse streaming JSON
-    if (msg.topic === 'AGENT_OUTPUT') {
-      const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
-      if (!content || !content.trim()) continue;
-
-      const events = parseChunk(content);
-      for (const event of events) {
-        switch (event.type) {
-          case 'text':
-            const buf = getBuffer(msg.sender);
-            buf.text += event.text;
-            // Print complete lines
-            while (buf.text.includes('\n')) {
-              const idx = buf.text.indexOf('\n');
-              const line = buf.text.slice(0, idx);
-              buf.text = buf.text.slice(idx + 1);
-              if (line.trim()) {
-                lines.push(`${prefix} ${formatMarkdownLine(line)}`);
-              }
-            }
-            break;
-          case 'tool_call':
-            flushBuffer(msg.sender, prefix);
-            const icon = getToolIcon(event.toolName);
-            const toolDesc = formatToolCall(event.toolName, event.input);
-            lines.push(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
-            toolCalls.set(msg.sender, {
-              toolName: event.toolName,
-              input: event.input,
-            });
-            break;
-          case 'tool_result':
-            const status = event.isError ? chalk.red('✗') : chalk.green('✓');
-            const tc = toolCalls.get(msg.sender);
-            const resultDesc = formatToolResult(
-              event.content,
-              event.isError,
-              tc?.toolName,
-              tc?.input
-            );
-            lines.push(`${prefix}   ${status} ${resultDesc}`);
-            toolCalls.delete(msg.sender);
-            break;
-        }
-      }
-      continue;
-    }
-
-    // Other topics - show topic name
-    if (msg.topic && !['AGENT_OUTPUT', 'AGENT_LIFECYCLE'].includes(msg.topic)) {
+    if (msg.topic) {
       lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.yellow(msg.topic)}`);
     }
   }
 
-  // Flush any remaining buffers
-  for (const [sender, buf] of buffers) {
-    if (buf.text.trim()) {
-      const color = getColorForSender(sender);
-      const prefix = color(`${sender.padEnd(15)} |`);
-      for (const line of buf.text.split('\n')) {
-        if (line.trim()) {
-          lines.push(`${prefix} ${line}`);
-        }
-      }
-    }
-  }
+  flushAllRenderBuffers(lines, buffers);
 
   return lines.join('\n');
 }
@@ -4182,7 +5078,7 @@ const FILTERED_PATTERNS = [
   /^--- Following log/,
   /--- Following logs/,
   /Ctrl\+C to stop/,
-  /^=== Claude Task:/,
+  /^=== (Claude|Codex|Gemini) Task:/,
   /^Started:/,
   /^Finished:/,
   /^Exit code:/,
@@ -4213,14 +5109,140 @@ const FILTERED_PATTERNS = [
   /\{\{[a-z.]+\}\}/,
 ];
 
+function getAgentOutputContent(msg) {
+  return msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text || '';
+}
+
+function parseAgentOutputEvents(msg, content) {
+  const provider = normalizeProviderName(
+    msg.content?.data?.provider || msg.sender_provider || 'claude'
+  );
+  return parseProviderChunk(provider, content);
+}
+
+function handleAgentOutputText({ msg, prefix, event }) {
+  accumulateText(prefix, msg.sender, event.text);
+}
+
+function handleAgentOutputThinking({ msg, prefix, event }) {
+  if (event.text) {
+    accumulateThinking(prefix, msg.sender, event.text);
+    return;
+  }
+  if (event.type === 'thinking_start') {
+    safePrint(`${prefix} ${chalk.dim.italic('💭 thinking...')}`);
+  }
+}
+
+function handleAgentOutputToolStart({ msg, prefix }) {
+  flushLineBuffer(prefix, msg.sender);
+}
+
+function handleAgentOutputToolCall({ msg, prefix, event }) {
+  flushLineBuffer(prefix, msg.sender);
+  const icon = getToolIcon(event.toolName);
+  const toolDesc = formatToolCall(event.toolName, event.input);
+  safePrint(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
+  currentToolCall.set(msg.sender, { toolName: event.toolName, input: event.input });
+}
+
+function handleAgentOutputToolResult({ msg, prefix, event }) {
+  const status = event.isError ? chalk.red('✗') : chalk.green('✓');
+  const toolCall = currentToolCall.get(msg.sender);
+  const resultDesc = formatToolResult(
+    event.content,
+    event.isError,
+    toolCall?.toolName,
+    toolCall?.input
+  );
+  safePrint(`${prefix}   ${status} ${resultDesc}`);
+  currentToolCall.delete(msg.sender);
+}
+
+function handleAgentOutputResult({ msg, prefix, event }) {
+  flushLineBuffer(prefix, msg.sender);
+  if (!event.success) {
+    safePrint(`${prefix} ${chalk.bold.red('✗ Error:')} ${event.error || 'Task failed'}`);
+  }
+}
+
+function handleAgentOutputNoop() {}
+
+const AGENT_OUTPUT_EVENT_HANDLERS = {
+  text: handleAgentOutputText,
+  thinking: handleAgentOutputThinking,
+  thinking_start: handleAgentOutputThinking,
+  tool_start: handleAgentOutputToolStart,
+  tool_call: handleAgentOutputToolCall,
+  tool_input: handleAgentOutputNoop,
+  tool_result: handleAgentOutputToolResult,
+  result: handleAgentOutputResult,
+  block_end: handleAgentOutputNoop,
+};
+
+function isInlineJsonLine(trimmed) {
+  return (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  );
+}
+
+function shouldSkipAgentOutputLine(trimmed) {
+  if (!trimmed) return true;
+  if (FILTERED_PATTERNS.some((pattern) => pattern.test(trimmed))) return true;
+  if (isInlineJsonLine(trimmed)) return true;
+  return isDuplicate(trimmed);
+}
+
+function printFilteredAgentOutputLines(content, prefix) {
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (shouldSkipAgentOutputLine(trimmed)) continue;
+    safePrint(`${prefix} ${line}`);
+  }
+}
+
+// Handle AGENT_OUTPUT messages (streaming events from agent task execution)
+function formatAgentOutput(msg, prefix) {
+  const content = getAgentOutputContent(msg);
+  if (!content || !content.trim()) return;
+
+  const events = parseAgentOutputEvents(msg, content);
+  for (const event of events) {
+    const handler = AGENT_OUTPUT_EVENT_HANDLERS[event.type];
+    if (handler) {
+      handler({ msg, prefix, event });
+    }
+  }
+
+  if (events.length === 0) {
+    printFilteredAgentOutputLines(content, prefix);
+  }
+}
+
+const NORMAL_MESSAGE_HANDLERS = {
+  AGENT_LIFECYCLE: ({ msg, prefix }) => formatAgentLifecycle(msg, prefix),
+  AGENT_ERROR: ({ msg, prefix, timestamp }) => formatAgentErrorNormal(msg, prefix, timestamp),
+  ISSUE_OPENED: ({ msg, prefix, timestamp }) =>
+    formatIssueOpenedNormal(msg, prefix, timestamp, shownNewTaskForCluster),
+  IMPLEMENTATION_READY: ({ msg, prefix, timestamp }) =>
+    formatImplementationReadyNormal(msg, prefix, timestamp),
+  VALIDATION_RESULT: ({ msg, prefix, timestamp }) =>
+    formatValidationResultNormal(msg, prefix, timestamp),
+  PR_CREATED: ({ msg, prefix, timestamp }) => formatPrCreated(msg, prefix, timestamp, safePrint),
+  CLUSTER_COMPLETE: ({ msg, prefix, timestamp }) =>
+    formatClusterComplete(msg, prefix, timestamp, safePrint),
+  CLUSTER_FAILED: ({ msg, prefix, timestamp }) =>
+    formatClusterFailed(msg, prefix, timestamp, safePrint),
+  AGENT_OUTPUT: ({ msg, prefix }) => formatAgentOutput(msg, prefix),
+};
+
 // Helper function to print a message (docker-compose style with colors)
 function printMessage(msg, showClusterId = false, watchMode = false, isActive = true) {
   // Build prefix using utility function
   const prefix = buildMessagePrefix(msg, showClusterId, isActive);
-
-  const timestamp = new Date(msg.timestamp).toLocaleTimeString('en-US', {
-    hour12: false,
-  });
+  const timestamp = formatLogTimestamp(msg.timestamp);
 
   // Watch mode: delegate to watch mode formatter
   if (watchMode) {
@@ -4230,255 +5252,9 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
   }
 
   // Normal mode: delegate to appropriate formatter based on topic
-  if (msg.topic === 'AGENT_LIFECYCLE') {
-    formatAgentLifecycle(msg, prefix);
-    return;
-  }
-
-  if (msg.topic === 'AGENT_ERROR') {
-    formatAgentErrorNormal(msg, prefix, timestamp);
-    return;
-  }
-
-  if (msg.topic === 'ISSUE_OPENED') {
-    formatIssueOpenedNormal(msg, prefix, timestamp, shownNewTaskForCluster);
-    return;
-  }
-
-  if (msg.topic === 'IMPLEMENTATION_READY') {
-    formatImplementationReadyNormal(msg, prefix, timestamp);
-    return;
-  }
-
-  if (msg.topic === 'VALIDATION_RESULT') {
-    formatValidationResultNormal(msg, prefix, timestamp);
-    return;
-  }
-
-  if (msg.topic === 'PR_CREATED') {
-    formatPrCreated(msg, prefix, timestamp, safePrint);
-    return;
-  }
-
-  if (msg.topic === 'CLUSTER_COMPLETE') {
-    formatClusterComplete(msg, prefix, timestamp, safePrint);
-    return;
-  }
-
-  if (msg.topic === 'CLUSTER_FAILED') {
-    formatClusterFailed(msg, prefix, timestamp, safePrint);
-    return;
-  }
-
-  // AGENT_OUTPUT: handle separately (complex streaming logic - kept in main file due to dependencies)
-  if (msg.topic === 'AGENT_OUTPUT') {
-    // Support both old 'chunk' and new 'line' formats
-    const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
-    if (!content || !content.trim()) return;
-
-    // Parse streaming JSON events using the parser
-    const events = parseChunk(content);
-
-    for (const event of events) {
-      switch (event.type) {
-        case 'text':
-          // Accumulate text, print complete lines
-          accumulateText(prefix, msg.sender, event.text);
-          break;
-
-        case 'thinking':
-        case 'thinking_start':
-          // Accumulate thinking, print complete lines
-          if (event.text) {
-            accumulateThinking(prefix, msg.sender, event.text);
-          } else if (event.type === 'thinking_start') {
-            safePrint(`${prefix} ${chalk.dim.italic('💭 thinking...')}`);
-          }
-          break;
-
-        case 'tool_start':
-          // Flush pending text before tool - don't print, tool_call has details
-          flushLineBuffer(prefix, msg.sender);
-          break;
-
-        case 'tool_call':
-          // Flush pending text before tool
-          flushLineBuffer(prefix, msg.sender);
-          const icon = getToolIcon(event.toolName);
-          const toolDesc = formatToolCall(event.toolName, event.input);
-          safePrint(`${prefix} ${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
-          // Store tool call info for matching with result
-          currentToolCall.set(msg.sender, {
-            toolName: event.toolName,
-            input: event.input,
-          });
-          break;
-
-        case 'tool_input':
-          // Streaming tool input JSON - skip (shown in tool_call)
-          break;
-
-        case 'tool_result':
-          const status = event.isError ? chalk.red('✗') : chalk.green('✓');
-          // Get stored tool call info for better formatting
-          const toolCall = currentToolCall.get(msg.sender);
-          const resultDesc = formatToolResult(
-            event.content,
-            event.isError,
-            toolCall?.toolName,
-            toolCall?.input
-          );
-          safePrint(`${prefix}   ${status} ${resultDesc}`);
-          // Clear stored tool call after result
-          currentToolCall.delete(msg.sender);
-          break;
-
-        case 'result':
-          // Flush remaining buffer before result
-          flushLineBuffer(prefix, msg.sender);
-          // Final result - only show errors (success text already streamed)
-          if (!event.success) {
-            safePrint(`${prefix} ${chalk.bold.red('✗ Error:')} ${event.error || 'Task failed'}`);
-          }
-          break;
-
-        case 'block_end':
-          // Block ended - skip
-          break;
-
-        default:
-          // Unknown event type - skip
-          break;
-      }
-    }
-
-    // If no JSON events parsed, fall through to text filtering
-    if (events.length === 0) {
-      const lines = content.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        // Check against filtered patterns
-        let shouldSkip = false;
-        for (const pattern of FILTERED_PATTERNS) {
-          if (pattern.test(trimmed)) {
-            shouldSkip = true;
-            break;
-          }
-        }
-        if (shouldSkip) continue;
-
-        // Skip JSON-like content
-        if (
-          (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-          (trimmed.startsWith('[') && trimmed.endsWith(']'))
-        )
-          continue;
-
-        // Skip duplicate content
-        if (isDuplicate(trimmed)) continue;
-
-        safePrint(`${prefix} ${line}`);
-      }
-    }
-    return;
-  }
-
-  // AGENT_ERROR: Show errors with visual prominence
-  if (msg.topic === 'AGENT_ERROR') {
-    safePrint(''); // Blank line before error
-    safePrint(chalk.bold.red(`${'─'.repeat(60)}`));
-    safePrint(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.red('🔴 AGENT ERROR')}`);
-    if (msg.content?.text) {
-      safePrint(`${prefix} ${chalk.red(msg.content.text)}`);
-    }
-    if (msg.content?.data?.stack) {
-      // Show first 5 lines of stack trace
-      const stackLines = msg.content.data.stack.split('\n').slice(0, 5);
-      for (const line of stackLines) {
-        if (line.trim()) {
-          safePrint(`${prefix} ${chalk.dim(line)}`);
-        }
-      }
-    }
-    safePrint(chalk.bold.red(`${'─'.repeat(60)}`));
-    return;
-  }
-
-  // ISSUE_OPENED: Show as task header with visual separation
-  // Skip duplicate - conductor re-publishes after spawning agents (same task, confusing UX)
-  if (msg.topic === 'ISSUE_OPENED') {
-    if (shownNewTaskForCluster.has(msg.cluster_id)) {
-      return; // Already shown NEW TASK for this cluster
-    }
-    shownNewTaskForCluster.add(msg.cluster_id);
-
-    safePrint(''); // Blank line before new task
-    safePrint(chalk.bold.blue(`${'─'.repeat(60)}`));
-    safePrint(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.blue('📋 NEW TASK')}`);
-    if (msg.content?.text) {
-      // Show task description (first 3 lines max)
-      const lines = msg.content.text.split('\n').slice(0, 3);
-      for (const line of lines) {
-        if (line.trim() && line.trim() !== '# Manual Input') {
-          safePrint(`${prefix} ${chalk.white(line)}`);
-        }
-      }
-    }
-    safePrint(chalk.bold.blue(`${'─'.repeat(60)}`));
-    return;
-  }
-
-  // IMPLEMENTATION_READY: milestone marker
-  if (msg.topic === 'IMPLEMENTATION_READY') {
-    safePrint(
-      `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`
-    );
-    if (msg.content?.data?.commit) {
-      safePrint(
-        `${prefix} ${chalk.gray('Commit:')} ${chalk.cyan(msg.content.data.commit.substring(0, 8))}`
-      );
-    }
-    return;
-  }
-
-  // VALIDATION_RESULT: show approval/rejection clearly
-  if (msg.topic === 'VALIDATION_RESULT') {
-    const data = msg.content?.data || {};
-    const approved = data.approved === true || data.approved === 'true';
-    const status = approved ? chalk.bold.green('✓ APPROVED') : chalk.bold.red('✗ REJECTED');
-
-    safePrint(`${prefix} ${chalk.gray(timestamp)} ${status}`);
-
-    // Show summary if present and not a template variable
-    if (msg.content?.text && !msg.content.text.includes('{{')) {
-      safePrint(`${prefix} ${msg.content.text.substring(0, 100)}`);
-    }
-
-    // Show full JSON data structure
-    safePrint(
-      `${prefix} ${chalk.dim(JSON.stringify(data, null, 2).split('\n').join(`\n${prefix} `))}`
-    );
-
-    // Show errors/issues if any
-    if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) {
-      safePrint(`${prefix} ${chalk.red('Errors:')}`);
-      data.errors.forEach((err) => {
-        if (err && typeof err === 'string') {
-          safePrint(`${prefix}   - ${err}`);
-        }
-      });
-    }
-
-    if (data.issues && Array.isArray(data.issues) && data.issues.length > 0) {
-      safePrint(`${prefix} ${chalk.yellow('Issues:')}`);
-      data.issues.forEach((issue) => {
-        if (issue && typeof issue === 'string') {
-          safePrint(`${prefix}   - ${issue}`);
-        }
-      });
-    }
+  const handler = NORMAL_MESSAGE_HANDLERS[msg.topic];
+  if (handler) {
+    handler({ msg, prefix, timestamp });
     return;
   }
 
@@ -4488,7 +5264,10 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
 
 // Main async entry point
 async function main() {
-  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet') || process.env.NODE_ENV === 'test';
+  const isQuiet =
+    process.argv.includes('-q') ||
+    process.argv.includes('--quiet') ||
+    process.env.NODE_ENV === 'test';
 
   // Check for updates (non-blocking if offline)
   await checkForUpdates({ quiet: isQuiet });

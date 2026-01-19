@@ -27,10 +27,10 @@ function getConfig(complexity, taskType) {
     return 'full-workflow';
   };
 
-  const getModel = (role) => {
-    if (complexity === 'CRITICAL' && role === 'planner') return 'opus';
-    if (complexity === 'TRIVIAL') return 'haiku';
-    return 'sonnet';
+  const getLevel = (role) => {
+    if (complexity === 'CRITICAL' && role === 'planner') return 'level3';
+    if (complexity === 'TRIVIAL') return 'level1';
+    return 'level2';
   };
 
   const getValidatorCount = () => {
@@ -59,18 +59,18 @@ function getConfig(complexity, taskType) {
   };
 
   if (base === 'single-worker') {
-    params.worker_model = getModel('worker');
+    params.worker_level = getLevel('worker');
   } else if (base === 'worker-validator') {
-    params.worker_model = getModel('worker');
-    params.validator_model = getModel('validator');
+    params.worker_level = getLevel('worker');
+    params.validator_level = getLevel('validator');
   } else if (base === 'debug-workflow') {
-    params.investigator_model = getModel('planner');
-    params.fixer_model = getModel('worker');
-    params.tester_model = getModel('validator');
+    params.investigator_level = getLevel('planner');
+    params.fixer_level = getLevel('worker');
+    params.tester_level = getLevel('validator');
   } else if (base === 'full-workflow') {
-    params.planner_model = getModel('planner');
-    params.worker_model = getModel('worker');
-    params.validator_model = getModel('validator');
+    params.planner_level = getLevel('planner');
+    params.worker_level = getLevel('worker');
+    params.validator_level = getLevel('validator');
     params.validator_count = getValidatorCount();
   }
 

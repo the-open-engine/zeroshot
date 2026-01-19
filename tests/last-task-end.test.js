@@ -47,7 +47,7 @@ describe('last_task_end - Context Filtering', () => {
     const workerConfig = {
       id: 'worker',
       role: 'implementation',
-      model: 'sonnet',
+      modelLevel: 'level2',
       timeout: 0,
       contextStrategy: {
         sources: [

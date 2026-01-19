@@ -14,6 +14,12 @@ describe('Docker Image Build with Retry', function () {
   // Skip Docker tests in CI (no Docker image available)
   // To run locally: docker build -t zeroshot-cluster-base docker/zeroshot-cluster/
   before(function () {
+    // Opt-in only: building images is slow and environment-dependent.
+    if (process.env.ZEROSHOT_DOCKER_IMAGE_TESTS !== '1') {
+      this.skip();
+      return;
+    }
+
     if (process.env.CI) {
       this.skip();
       return;

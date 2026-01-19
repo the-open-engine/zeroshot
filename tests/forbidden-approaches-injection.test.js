@@ -14,11 +14,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-describe('Fixer Instructions - CRITICAL', () => {
-  let tempDir;
-  let ledger;
-  let messageBus;
+let tempDir;
+let ledger;
+let messageBus;
 
+describe('Fixer Instructions - CRITICAL', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-fixer-test-'));
     const dbPath = path.join(tempDir, 'test-ledger.db');
@@ -31,22 +31,29 @@ describe('Fixer Instructions - CRITICAL', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+  registerForbiddenApproachesTests();
+  registerAggressiveRejectionHandlingTests();
+  registerContextInjectionTests();
+});
 
+function loadFixerPrompt() {
+  const templatePath = path.join(
+    __dirname,
+    '..',
+    'cluster-templates',
+    'base-templates',
+    'debug-workflow.json'
+  );
+  const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
+  const fixerConfig = template.agents.find((a) => a.id === 'fixer');
+  assert(fixerConfig, 'Fixer agent must exist');
+  return fixerConfig.prompt.system;
+}
+
+function registerForbiddenApproachesTests() {
   describe('FORBIDDEN approaches section', () => {
     it('must exist in fixer prompt', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-
-      assert(fixerConfig, 'Fixer agent must exist');
-
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(prompt.includes('FORBIDDEN'), 'Prompt must have FORBIDDEN section');
       assert(
@@ -56,16 +63,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must forbid suppressing/disabling errors', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       // Generic - not tool-specific
       assert(
@@ -75,16 +73,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must forbid changing test expectations to match broken behavior', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('test expectations') || prompt.includes('broken behavior'),
@@ -93,16 +82,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must state that hidden problems are NOT fixed', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('HIDDEN') || prompt.includes('NOT FIXED'),
@@ -110,19 +90,12 @@ describe('Fixer Instructions - CRITICAL', () => {
       );
     });
   });
+}
 
+function registerAggressiveRejectionHandlingTests() {
   describe('AGGRESSIVE rejection handling', () => {
     it('must use AGGRESSIVE language - no polite bullshit', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       // Must have aggressive tone - not polite suggestions
       const hasAggressiveLanguage =
@@ -136,16 +109,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must explicitly tell agent to STOP and READ on rejection', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('STOP') || prompt.includes('READ'),
@@ -154,16 +118,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must instruct fixer to READ feedback', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('READ') && prompt.includes('FEEDBACK'),
@@ -172,16 +127,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must warn against repeating failed approaches', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('repeat') || prompt.includes('same approach') || prompt.includes('blindly'),
@@ -190,16 +136,7 @@ describe('Fixer Instructions - CRITICAL', () => {
     });
 
     it('must tell fixer to try DIFFERENT approach on failure', () => {
-      const templatePath = path.join(
-        __dirname,
-        '..',
-        'cluster-templates',
-        'base-templates',
-        'debug-workflow.json'
-      );
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
-      const fixerConfig = template.agents.find((a) => a.id === 'fixer');
-      const prompt = fixerConfig.prompt.system;
+      const prompt = loadFixerPrompt();
 
       assert(
         prompt.includes('DIFFERENT') || prompt.includes('rethink'),
@@ -207,7 +144,9 @@ describe('Fixer Instructions - CRITICAL', () => {
       );
     });
   });
+}
 
+function registerContextInjectionTests() {
   describe('Context injection on rejection', () => {
     it('must inject VALIDATION_RESULT content into fixer context on retry', () => {
       const clusterId = 'test-rejection-context';
@@ -349,4 +288,4 @@ describe('Fixer Instructions - CRITICAL', () => {
       console.log('✅ Multiple rejections are ALL included in fixer context');
     });
   });
-});
+}

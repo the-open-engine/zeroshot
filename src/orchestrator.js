@@ -13,15 +13,51 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const lockfile = require('proper-lockfile');
+
+// Stale lock timeout in ms - if lock file is older than this, delete it
+const LOCK_STALE_MS = 5000;
+
+/**
+ * Remove lock file if it's stale (older than LOCK_STALE_MS)
+ * Handles crashes that leave orphaned lock files
+ */
+function cleanStaleLock(lockPath) {
+  try {
+    if (fs.existsSync(lockPath)) {
+      const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        fs.unlinkSync(lockPath);
+      }
+    }
+  } catch {
+    // Ignore - another process may have cleaned it
+  }
+}
 const AgentWrapper = require('./agent-wrapper');
 const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
 const Ledger = require('./ledger');
-const GitHub = require('./github');
+const InputHelpers = require('./input-helpers');
+const { detectProvider } = require('./issue-providers');
 const IsolationManager = require('./isolation-manager');
 const { generateName } = require('./name-generator');
 const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
+const { loadSettings } = require('../lib/settings');
+const { normalizeProviderName } = require('../lib/provider-names');
+const crypto = require('crypto');
+
+function applyModelOverride(agentConfig, modelOverride) {
+  if (!modelOverride) return;
+
+  agentConfig.model = modelOverride;
+  if (agentConfig.modelRules) {
+    delete agentConfig.modelRules;
+  }
+  if (agentConfig.modelConfig) {
+    delete agentConfig.modelConfig;
+  }
+}
 
 /**
  * Operation Chain Schema
@@ -66,10 +102,23 @@ class Orchestrator {
     // Track if orchestrator is closed (prevents _saveClusters race conditions during cleanup)
     this.closed = false;
 
-    // Load existing clusters from disk (skip if explicitly disabled)
+    // Track if clusters are loaded (for lazy loading pattern)
+    this._clustersLoaded = options.skipLoad === true;
+  }
+
+  /**
+   * Factory method for async initialization
+   * Use this instead of `new Orchestrator()` for proper async cluster loading
+   * @param {Object} options - Same options as constructor
+   * @returns {Promise<Orchestrator>}
+   */
+  static async create(options = {}) {
+    const instance = new Orchestrator({ ...options, skipLoad: true });
     if (options.skipLoad !== true) {
-      this._loadClusters();
+      await instance._loadClusters();
+      instance._clustersLoaded = true;
     }
+    return instance;
   }
 
   /**
@@ -83,11 +132,23 @@ class Orchestrator {
   }
 
   /**
+   * Get input source type for metadata
+   * @param {Object} input - Input object
+   * @returns {string} Source type: 'github', 'file', or 'text'
+   * @private
+   */
+  _getInputSource(input) {
+    if (input.issue) return 'github';
+    if (input.file) return 'file';
+    return 'text';
+  }
+
+  /**
    * Load clusters from persistent storage
    * Uses file locking for consistent reads
    * @private
    */
-  _loadClusters() {
+  async _loadClusters() {
     const clustersFile = path.join(this.storageDir, 'clusters.json');
     this._log(`[Orchestrator] Loading clusters from: ${clustersFile}`);
 
@@ -100,30 +161,20 @@ class Orchestrator {
     let release;
 
     try {
-      // Acquire lock (sync API doesn't support retries, so we retry manually)
-      const maxAttempts = 20;
-      const retryDelayMs = 100;
+      // Clean stale locks from crashed processes
+      cleanStaleLock(lockfilePath);
 
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          release = lockfile.lockSync(clustersFile, {
-            lockfilePath,
-            stale: 30000,
-          });
-          break; // Lock acquired
-        } catch (lockErr) {
-          if (lockErr.code === 'ELOCKED' && attempt < maxAttempts - 1) {
-            // Wait and retry
-            const waitMs = retryDelayMs + Math.random() * retryDelayMs;
-            const start = Date.now();
-            while (Date.now() - start < waitMs) {
-              /* spin wait */
-            }
-            continue;
-          }
-          throw lockErr;
-        }
-      }
+      // Acquire lock with async API (proper retries without CPU spin-wait)
+      release = await lockfile.lock(clustersFile, {
+        lockfilePath,
+        stale: LOCK_STALE_MS,
+        retries: {
+          retries: 20,
+          minTimeout: 100,
+          maxTimeout: 200,
+          randomize: true,
+        },
+      });
 
       const data = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
       const clusterIds = Object.keys(data);
@@ -138,7 +189,9 @@ class Orchestrator {
         // Skip clusters whose .db file doesn't exist (orphaned registry entries)
         const dbPath = path.join(this.storageDir, `${clusterId}.db`);
         if (!fs.existsSync(dbPath)) {
-          console.warn(`[Orchestrator] Cluster ${clusterId} has no database file, removing from registry`);
+          console.warn(
+            `[Orchestrator] Cluster ${clusterId} has no database file, removing from registry`
+          );
           clustersToRemove.push(clusterId);
           continue;
         }
@@ -152,8 +205,12 @@ class Orchestrator {
           const messageCount = cluster.messageBus.count({ cluster_id: clusterId });
           if (messageCount === 0) {
             console.warn(`[Orchestrator] ⚠️  Cluster ${clusterId} has 0 messages (corrupted)`);
-            console.warn(`[Orchestrator]    This likely occurred from SIGINT during initialization.`);
-            console.warn(`[Orchestrator]    Marking as 'corrupted' - use 'zeroshot kill ${clusterId}' to remove.`);
+            console.warn(
+              `[Orchestrator]    This likely occurred from SIGINT during initialization.`
+            );
+            console.warn(
+              `[Orchestrator]    Marking as 'corrupted' - use 'zeroshot kill ${clusterId}' to remove.`
+            );
             corruptedClusters.push(clusterId);
             // Mark cluster as corrupted for visibility in status/list commands
             cluster.state = 'corrupted';
@@ -168,12 +225,16 @@ class Orchestrator {
           delete data[clusterId];
         }
         fs.writeFileSync(clustersFile, JSON.stringify(data, null, 2));
-        this._log(`[Orchestrator] Removed ${clustersToRemove.length} orphaned cluster(s) from registry`);
+        this._log(
+          `[Orchestrator] Removed ${clustersToRemove.length} orphaned cluster(s) from registry`
+        );
       }
 
       // Log summary of corrupted clusters
       if (corruptedClusters.length > 0) {
-        console.warn(`\n[Orchestrator] ⚠️  Found ${corruptedClusters.length} corrupted cluster(s):`);
+        console.warn(
+          `\n[Orchestrator] ⚠️  Found ${corruptedClusters.length} corrupted cluster(s):`
+        );
         for (const clusterId of corruptedClusters) {
           console.warn(`    - ${clusterId}`);
         }
@@ -186,7 +247,7 @@ class Orchestrator {
       console.error(error.stack);
     } finally {
       if (release) {
-        release();
+        await release();
       }
     }
   }
@@ -207,8 +268,37 @@ class Orchestrator {
     const messageBus = new MessageBus(ledger);
 
     // Restore isolation manager FIRST if cluster was running in isolation mode
+    const { isolation, isolationManager } = this._restoreClusterIsolation(clusterId, clusterData);
+
+    // Reconstruct agent metadata from config (processes are ephemeral)
+    // CRITICAL: Pass isolation context to agents if cluster was running in isolation
+    const agents = this._rebuildClusterAgents(
+      clusterId,
+      clusterData,
+      messageBus,
+      isolation,
+      isolationManager
+    );
+
+    const cluster = {
+      ...clusterData,
+      ledger,
+      messageBus,
+      agents,
+      isolation,
+      autoPr: clusterData.autoPr || false,
+    };
+
+    this.clusters.set(clusterId, cluster);
+    this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
+
+    return cluster;
+  }
+
+  _restoreClusterIsolation(clusterId, clusterData) {
     let isolation = clusterData.isolation || null;
     let isolationManager = null;
+
     if (isolation?.enabled && isolation.containerId) {
       isolationManager = new IsolationManager({ image: isolation.image });
       // Restore the container mapping so cleanup works
@@ -229,74 +319,84 @@ class Orchestrator {
       );
     }
 
-    // Reconstruct agent metadata from config (processes are ephemeral)
-    // CRITICAL: Pass isolation context to agents if cluster was running in isolation
-    const agents = [];
+    return { isolation, isolationManager };
+  }
 
-    // CRITICAL: Determine the correct cwd for agents (worktree > isolation > saved cwd)
-    // This fixes clusters saved before the cwd injection bug was fixed
+  _resolveAgentCwd(clusterData) {
     const worktreePath = clusterData.worktree?.path;
     const isolationWorkDir = clusterData.isolation?.workDir;
-    const agentCwd = worktreePath || isolationWorkDir || null;
+    return worktreePath || isolationWorkDir || null;
+  }
 
-    if (clusterData.config?.agents) {
-      for (const agentConfig of clusterData.config.agents) {
-        // Fix agents that were saved without cwd (pre-bugfix clusters)
-        if (!agentConfig.cwd && agentCwd) {
-          agentConfig.cwd = agentCwd;
-          this._log(`[Orchestrator] Fixed missing cwd for agent ${agentConfig.id}: ${agentCwd}`);
-        }
-
-        const agentOptions = {
-          id: clusterId,
-          quiet: this.quiet,
-        };
-
-        // Inject isolation context if enabled (MUST be done during agent creation)
-        if (isolation?.enabled && isolationManager) {
-          agentOptions.isolation = {
-            enabled: true,
-            manager: isolationManager,
-            clusterId,
-          };
-        }
-
-        // Create agent or subcluster wrapper based on type
-        let agent;
-        if (agentConfig.type === 'subcluster') {
-          agent = new SubClusterWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
-        } else {
-          agent = new AgentWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
-        }
-
-        // Restore agent runtime state if available (for accurate status display)
-        if (clusterData.agentStates) {
-          const savedState = clusterData.agentStates.find((s) => s.id === agentConfig.id);
-          if (savedState) {
-            agent.state = savedState.state || 'idle';
-            agent.iteration = savedState.iteration || 0;
-            agent.currentTask = savedState.currentTask || false;
-            agent.currentTaskId = savedState.currentTaskId || null;
-            agent.processPid = savedState.processPid || null;
-          }
-        }
-
-        agents.push(agent);
-      }
-    }
-
-    const cluster = {
-      ...clusterData,
-      ledger,
-      messageBus,
-      agents,
-      isolation,
+  _buildAgentOptions(clusterId, clusterData, isolation, isolationManager) {
+    const agentOptions = {
+      id: clusterId,
+      quiet: this.quiet,
+      modelOverride: clusterData.modelOverride || null,
     };
 
-    this.clusters.set(clusterId, cluster);
-    this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
+    if (isolation?.enabled && isolationManager) {
+      agentOptions.isolation = {
+        enabled: true,
+        manager: isolationManager,
+        clusterId,
+      };
+    }
 
-    return cluster;
+    return agentOptions;
+  }
+
+  _instantiateAgent(agentConfig, messageBus, clusterId, agentOptions) {
+    if (agentConfig.type === 'subcluster') {
+      return new SubClusterWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
+    }
+
+    return new AgentWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
+  }
+
+  _restoreAgentState(agent, agentConfig, clusterData) {
+    if (!clusterData.agentStates) return;
+
+    const savedState = clusterData.agentStates.find((state) => state.id === agentConfig.id);
+    if (!savedState) return;
+
+    agent.state = savedState.state || 'idle';
+    agent.iteration = savedState.iteration || 0;
+    agent.currentTask = savedState.currentTask || false;
+    agent.currentTaskId = savedState.currentTaskId || null;
+    agent.processPid = savedState.processPid || null;
+  }
+
+  _rebuildClusterAgents(clusterId, clusterData, messageBus, isolation, isolationManager) {
+    const agents = [];
+    const agentCwd = this._resolveAgentCwd(clusterData);
+
+    if (!clusterData.config?.agents) {
+      return agents;
+    }
+
+    for (const agentConfig of clusterData.config.agents) {
+      if (!agentConfig.cwd && agentCwd) {
+        agentConfig.cwd = agentCwd;
+        this._log(`[Orchestrator] Fixed missing cwd for agent ${agentConfig.id}: ${agentCwd}`);
+      }
+
+      if (clusterData.modelOverride) {
+        applyModelOverride(agentConfig, clusterData.modelOverride);
+      }
+
+      const agentOptions = this._buildAgentOptions(
+        clusterId,
+        clusterData,
+        isolation,
+        isolationManager
+      );
+      const agent = this._instantiateAgent(agentConfig, messageBus, clusterId, agentOptions);
+      this._restoreAgentState(agent, agentConfig, clusterData);
+      agents.push(agent);
+    }
+
+    return agents;
   }
 
   /**
@@ -316,7 +416,7 @@ class Orchestrator {
    * Uses file locking to prevent race conditions with other processes
    * @private
    */
-  _saveClusters() {
+  async _saveClusters() {
     // Skip saving if orchestrator is closed (prevents race conditions during cleanup)
     if (this.closed) {
       return;
@@ -327,30 +427,20 @@ class Orchestrator {
     let release;
 
     try {
-      // Acquire exclusive lock (sync API doesn't support retries, so we retry manually)
-      const maxAttempts = 50;
-      const retryDelayMs = 100;
+      // Clean stale locks from crashed processes
+      cleanStaleLock(lockfilePath);
 
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          release = lockfile.lockSync(clustersFile, {
-            lockfilePath,
-            stale: 30000, // Lock expires after 30s (in case process dies)
-          });
-          break; // Lock acquired
-        } catch (lockErr) {
-          if (lockErr.code === 'ELOCKED' && attempt < maxAttempts - 1) {
-            // Wait and retry with jitter
-            const waitMs = retryDelayMs + Math.random() * retryDelayMs * 2;
-            const start = Date.now();
-            while (Date.now() - start < waitMs) {
-              /* spin wait */
-            }
-            continue;
-          }
-          throw lockErr;
-        }
-      }
+      // Acquire exclusive lock with async API (proper retries without CPU spin-wait)
+      release = await lockfile.lock(clustersFile, {
+        lockfilePath,
+        stale: LOCK_STALE_MS,
+        retries: {
+          retries: 50,
+          minTimeout: 100,
+          maxTimeout: 300,
+          randomize: true,
+        },
+      });
 
       // Read existing clusters from file (other processes may have added clusters)
       let existingClusters = {};
@@ -391,6 +481,10 @@ class Orchestrator {
           pid: cluster.state === 'running' ? cluster.pid : null,
           // Persist failure info for resume capability
           failureInfo: cluster.failureInfo || null,
+          // Persist PR mode for completion agent selection
+          autoPr: cluster.autoPr || false,
+          // Persist model override for consistent agent spawning on resume
+          modelOverride: cluster.modelOverride || null,
           // Persist isolation info (excluding manager instance which can't be serialized)
           // CRITICAL: workDir is required for resume() to recreate container with same workspace
           isolation: cluster.isolation
@@ -423,7 +517,7 @@ class Orchestrator {
     } finally {
       // Always release lock
       if (release) {
-        release();
+        await release();
       }
     }
   }
@@ -445,11 +539,14 @@ class Orchestrator {
       try {
         if (!fs.existsSync(clustersFile)) return;
 
+        // Clean stale locks from crashed processes
+        cleanStaleLock(lockfilePath);
+
         // Try to acquire lock once (polling is best-effort, will retry on next cycle)
         try {
           release = lockfile.lockSync(clustersFile, {
             lockfilePath,
-            stale: 30000,
+            stale: LOCK_STALE_MS,
           });
         } catch (lockErr) {
           // Lock busy - skip this poll cycle, try again next interval
@@ -541,7 +638,11 @@ class Orchestrator {
       isolation: options.isolation || false,
       isolationImage: options.isolationImage,
       worktree: options.worktree || false,
-      autoPr: process.env.ZEROSHOT_PR === '1',
+      autoPr: options.autoPr || process.env.ZEROSHOT_PR === '1',
+      modelOverride: options.modelOverride, // Model override for all agents
+      clusterId: options.clusterId, // Explicit ID from CLI/daemon parent
+      settings: options.settings, // User settings for issue provider detection
+      forceProvider: options.forceProvider, // Force specific issue provider
     });
   }
 
@@ -550,8 +651,15 @@ class Orchestrator {
    * @private
    */
   async _startInternal(config, input = {}, options = {}) {
-    // Use pre-generated ID from parent process, or generate new one
-    const clusterId = process.env.ZEROSHOT_CLUSTER_ID || generateName('cluster');
+    // Generate a unique cluster ID for this process call.
+    // IMPORTANT: Do NOT implicitly reuse ZEROSHOT_CLUSTER_ID, because:
+    // - test harnesses may set it globally (breaking multi-start tests)
+    // - callers may start multiple clusters in one process
+    // Use it only when explicitly passed (CLI/daemon parent) via options.clusterId.
+    const clusterId = this._generateUniqueClusterId(
+      options.clusterId || null,
+      config?.dbPath || null
+    );
 
     // Create ledger and message bus with persistent storage
     const dbPath = config.dbPath || path.join(this.storageDir, `${clusterId}.db`);
@@ -559,46 +667,11 @@ class Orchestrator {
     const messageBus = new MessageBus(ledger);
 
     // Handle isolation mode (Docker container OR git worktree)
-    let isolationManager = null;
-    let containerId = null;
-    let worktreeInfo = null;
-
-    if (options.isolation) {
-      // Check Docker availability
-      if (!IsolationManager.isDockerAvailable()) {
-        throw new Error('Docker is not available. Install Docker to use --docker mode.');
-      }
-
-      // Ensure image exists (auto-build if missing)
-      const image = options.isolationImage || 'zeroshot-cluster-base';
-      await IsolationManager.ensureImage(image);
-
-      isolationManager = new IsolationManager({ image });
-      this._log(`[Orchestrator] Starting cluster in isolation mode (image: ${image})`);
-
-      // Create container with workspace mounted
-      // CRITICAL: Use options.cwd (git repo root) instead of process.cwd()
-      const workDir = options.cwd || process.cwd();
-      containerId = await isolationManager.createContainer(clusterId, {
-        workDir,
-        image,
-        // Mount configuration (CLI overrides)
-        noMounts: options.noMounts,
-        mounts: options.mounts,
-        containerHome: options.containerHome,
-      });
-      this._log(`[Orchestrator] Container created: ${containerId} (workDir: ${workDir})`);
-    } else if (options.worktree) {
-      // Worktree isolation: lightweight git-based isolation (no Docker required)
-      const workDir = options.cwd || process.cwd();
-
-      isolationManager = new IsolationManager({});
-      worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir);
-
-      this._log(`[Orchestrator] Starting cluster in worktree isolation mode`);
-      this._log(`[Orchestrator] Worktree: ${worktreeInfo.path}`);
-      this._log(`[Orchestrator] Branch: ${worktreeInfo.branch}`);
-    }
+    const { isolationManager, containerId, worktreeInfo } = await this._initializeIsolation(
+      options,
+      config,
+      clusterId
+    );
 
     // Build cluster object
     // CRITICAL: initComplete promise ensures ISSUE_OPENED is published before stop() completes
@@ -621,6 +694,13 @@ class Orchestrator {
       // Initialization completion tracking (for safe SIGINT handling)
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
+      autoPr: options.autoPr || false,
+      // Model override for all agents (applied to dynamically added agents)
+      modelOverride: options.modelOverride || null,
+      // Issue provider tracking (where issue was fetched from)
+      issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops)
+      // Git platform tracking (where PR/MR will be created - independent of issue provider)
+      gitPlatform: null, // Set when --pr mode is active
       // Isolation state (only if enabled)
       // CRITICAL: Store workDir for resume capability - without this, resume() can't recreate container
       isolation: options.isolation
@@ -648,122 +728,67 @@ class Orchestrator {
     this.clusters.set(clusterId, cluster);
 
     try {
-      // Fetch input (GitHub issue or text)
+      // Fetch input (issue from provider, file, or text)
       let inputData;
       if (input.issue) {
-        inputData = await GitHub.fetchIssue(input.issue);
+        // Detect provider and fetch issue
+        const ProviderClass = detectProvider(
+          input.issue,
+          options.settings || {},
+          options.forceProvider
+        );
+        if (!ProviderClass) {
+          throw new Error(`No issue provider matched input: ${input.issue}`);
+        }
+
+        const provider = new ProviderClass();
+        inputData = await provider.fetchIssue(input.issue, options.settings || {});
+
+        // Store issue provider for logging/debugging and cross-provider workflows
+        cluster.issueProvider = ProviderClass.id;
+
         // Log clickable issue link
         if (inputData.url) {
-          this._log(`[Orchestrator] Issue: ${inputData.url}`);
+          this._log(`[Orchestrator] Issue (${ProviderClass.displayName}): ${inputData.url}`);
         }
+      } else if (input.file) {
+        inputData = InputHelpers.createFileInput(input.file);
+        this._log(`[Orchestrator] File: ${input.file}`);
       } else if (input.text) {
-        inputData = GitHub.createTextInput(input.text);
+        inputData = InputHelpers.createTextInput(input.text);
       } else {
-        throw new Error('Either issue or text input is required');
+        throw new Error('Either issue, file, or text input is required');
+      }
+
+      // Detect git platform for --pr mode (independent of issue provider)
+      if (options.autoPr) {
+        const { detectGitContext } = require('../lib/git-remote-utils');
+        const gitContext = detectGitContext(options.cwd);
+        cluster.gitPlatform = gitContext?.provider || null;
+
+        if (cluster.gitPlatform) {
+          this._log(`[Orchestrator] Git platform detected: ${cluster.gitPlatform.toUpperCase()}`);
+        }
       }
 
       // Inject git-pusher agent if --pr is set (replaces completion-detector)
-      if (options.autoPr) {
-        // Remove completion-detector by ID (git-pusher handles completion + PR)
-        config.agents = config.agents.filter((a) => a.id !== 'completion-detector');
-
-        // Load and configure git-pusher agent (use fs.readFileSync to avoid require cache)
-        const gitPusherPath = path.join(__dirname, 'agents', 'git-pusher-agent.json');
-        const gitPusherConfig = JSON.parse(fs.readFileSync(gitPusherPath, 'utf8'));
-
-        // Inject issue context placeholders
-        gitPusherConfig.prompt = gitPusherConfig.prompt.replace(
-          /\{\{issue_number\}\}/g,
-          inputData.number || 'unknown'
-        );
-        gitPusherConfig.prompt = gitPusherConfig.prompt.replace(
-          /\{\{issue_title\}\}/g,
-          inputData.title || 'Implementation'
-        );
-
-        config.agents.push(gitPusherConfig);
-        this._log(`[Orchestrator] Injected git-pusher agent (creates PR and auto-merges)`);
-      }
+      this._applyAutoPrConfig(config, inputData, options);
 
       // Inject workers instruction if --workers explicitly provided and > 1
-      const workersCount = process.env.ZEROSHOT_WORKERS ? parseInt(process.env.ZEROSHOT_WORKERS) : 0;
-      if (workersCount > 1) {
-        const workerAgent = config.agents.find((a) => a.id === 'worker');
-        if (workerAgent) {
-          const instruction = `PARALLELIZATION: Use up to ${workersCount} sub-agents to parallelize your work where appropriate.\n\n`;
-
-          if (!workerAgent.prompt) {
-            workerAgent.prompt = instruction;
-          } else if (typeof workerAgent.prompt === 'string') {
-            workerAgent.prompt = instruction + workerAgent.prompt;
-          } else if (workerAgent.prompt.system) {
-            workerAgent.prompt.system = instruction + workerAgent.prompt.system;
-          }
-          this._log(
-            `[Orchestrator] Injected parallelization instruction (workers=${workersCount})`
-          );
-        }
-      }
+      this._applyWorkerInstruction(config);
 
       // Initialize agents with optional mock injection
       // Check agent type: regular agent or subcluster
       // CRITICAL: Inject cwd into each agent config for proper working directory
       // In worktree mode, agents run in the worktree path (not original cwd)
-      const agentCwd = cluster.worktree ? cluster.worktree.path : options.cwd || process.cwd();
-      for (const agentConfig of config.agents) {
-        // Inject cwd if not already set (config may override)
-        if (!agentConfig.cwd) {
-          agentConfig.cwd = agentCwd;
-        }
-
-        const agentOptions = {
-          testMode: options.testMode || !!this.taskRunner, // Enable testMode if taskRunner provided
-          quiet: this.quiet,
-        };
-
-        // Inject mock spawn function if provided (legacy mockExecutor API)
-        if (options.mockExecutor) {
-          agentOptions.mockSpawnFn = options.mockExecutor.createMockSpawnFn(agentConfig.id);
-        }
-
-        // TaskRunner DI - new pattern for mocking task execution
-        // Creates a mockSpawnFn wrapper that delegates to the taskRunner
-        if (this.taskRunner) {
-          // CRITICAL: agent is a closure variable capturing the AgentWrapper instance
-          // We cannot access agent._selectModel() here because agent doesn't exist yet
-          // Solution: Pass a factory function that will be called when agent is available
-          agentOptions.taskRunner = this.taskRunner;
-        }
-
-        // Pass isolation context if enabled
-        if (cluster.isolation) {
-          agentOptions.isolation = {
-            enabled: true,
-            manager: isolationManager,
-            clusterId,
-          };
-        }
-
-        // Pass worktree context if enabled (lightweight isolation without Docker)
-        if (cluster.worktree) {
-          agentOptions.worktree = {
-            enabled: true,
-            path: cluster.worktree.path,
-            branch: cluster.worktree.branch,
-            repoRoot: cluster.worktree.repoRoot,
-          };
-        }
-
-        // Create agent or subcluster wrapper based on type
-        let agent;
-        if (agentConfig.type === 'subcluster') {
-          agent = new SubClusterWrapper(agentConfig, messageBus, cluster, agentOptions);
-        } else {
-          agent = new AgentWrapper(agentConfig, messageBus, cluster, agentOptions);
-        }
-
-        cluster.agents.push(agent);
-      }
+      this._initializeClusterAgents({
+        config,
+        cluster,
+        messageBus,
+        options,
+        isolationManager,
+        clusterId,
+      });
 
       // ========================================================================
       // CRITICAL ORDERING INVARIANT (Issue #31 - Subscription Race Condition)
@@ -777,167 +802,17 @@ class Orchestrator {
       //
       // ORDER:
       //   1. Register subscriptions (lines below)
-      //   2. Start agents (line ~XXX)
-      //   3. Publish ISSUE_OPENED (line ~XXX)
+      //   2. Start agents
+      //   3. Publish ISSUE_OPENED
       //
       // DO NOT move subscriptions after agent.start() - this will reintroduce
       // the race condition fixed in issue #31.
       // ========================================================================
-
-      // Helper: Subscribe to cluster-scoped topic
-      const subscribeToClusterTopic = (topic, handler) => {
-        messageBus.subscribe((message) => {
-          if (message.topic === topic && message.cluster_id === clusterId) {
-            handler(message);
-          }
-        });
-      };
-
-      // Watch for CLUSTER_COMPLETE message to auto-stop
-      subscribeToClusterTopic('CLUSTER_COMPLETE', (message) => {
-        this._log(`\n${'='.repeat(80)}`);
-        this._log(`✅ CLUSTER COMPLETED SUCCESSFULLY: ${clusterId}`);
-        this._log(`${'='.repeat(80)}`);
-        this._log(`Reason: ${message.content?.data?.reason || 'unknown'}`);
-        this._log(`Initiated by: ${message.sender}`);
-        this._log(`${'='.repeat(80)}\n`);
-
-        // Auto-stop cluster
-        this.stop(clusterId).catch((err) => {
-          console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
-        });
-      });
-
-      // Watch for CLUSTER_FAILED message to auto-stop
-      subscribeToClusterTopic('CLUSTER_FAILED', (message) => {
-        this._log(`\n${'='.repeat(80)}`);
-        this._log(`❌ CLUSTER FAILED: ${clusterId}`);
-        this._log(`${'='.repeat(80)}`);
-        this._log(`Reason: ${message.content?.data?.reason || 'unknown'}`);
-        this._log(`Agent: ${message.sender}`);
-        if (message.content?.text) {
-          this._log(`Details: ${message.content.text}`);
-        }
-        this._log(`${'='.repeat(80)}\n`);
-
-        // Auto-stop cluster
-        this.stop(clusterId).catch((err) => {
-          console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
-        });
-      });
-
-      // Watch for AGENT_ERROR - if critical agent fails, stop cluster
-      subscribeToClusterTopic('AGENT_ERROR', (message) => {
-        const agentRole = message.content?.data?.role;
-        const attempts = message.content?.data?.attempts || 1;
-
-        // Save cluster state to persist failureInfo
-        this._saveClusters();
-
-        // Only stop cluster if non-validator agent exhausted retries
-        if (agentRole === 'implementation' && attempts >= 3) {
-          this._log(`\n${'='.repeat(80)}`);
-          this._log(`❌ WORKER AGENT FAILED: ${clusterId}`);
-          this._log(`${'='.repeat(80)}`);
-          this._log(`Worker agent ${message.sender} failed after ${attempts} attempts`);
-          this._log(`Error: ${message.content?.data?.error || 'unknown'}`);
-          this._log(`Stopping cluster - worker cannot continue`);
-          this._log(`${'='.repeat(80)}\n`);
-
-          // Auto-stop cluster
-          this.stop(clusterId).catch((err) => {
-            console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
-          });
-        }
-      });
-
-      // Persist agent state changes for accurate status display
-      messageBus.on('topic:AGENT_LIFECYCLE', (message) => {
-        const event = message.content?.data?.event;
-        // Save on key state transitions that affect status display
-        if (
-          ['TASK_STARTED', 'TASK_COMPLETED', 'PROCESS_SPAWNED', 'TASK_ID_ASSIGNED', 'STARTED'].includes(
-            event
-          )
-        ) {
-          this._saveClusters();
-        }
-      });
-
-      // Watch for stale agent detection (informational only)
-      messageBus.on('topic:AGENT_LIFECYCLE', (message) => {
-        if (message.content?.data?.event !== 'AGENT_STALE_WARNING') return;
-
-        const agentId = message.content?.data?.agent;
-        const timeSinceLastOutput = message.content?.data?.timeSinceLastOutput;
-        const analysis = message.content?.data?.analysis || 'No analysis available';
-
-        this._log(
-          `⚠️  Orchestrator: Agent ${agentId} appears stale (${Math.round(timeSinceLastOutput / 1000)}s no output) but will NOT be killed`
-        );
-        this._log(`    Analysis: ${analysis}`);
-        this._log(`    Manual intervention may be needed - use 'zeroshot resume ${clusterId}' if stuck`);
-      });
-
-      // Watch for CLUSTER_OPERATIONS - dynamic agent spawn/removal/update
-      subscribeToClusterTopic('CLUSTER_OPERATIONS', (message) => {
-        let operations = message.content?.data?.operations;
-
-        // Parse operations if they came as a JSON string
-        if (typeof operations === 'string') {
-          try {
-            operations = JSON.parse(operations);
-          } catch (e) {
-            this._log(`⚠️ CLUSTER_OPERATIONS has invalid operations JSON: ${e.message}`);
-            return;
-          }
-        }
-
-        if (!operations || !Array.isArray(operations)) {
-          this._log(`⚠️ CLUSTER_OPERATIONS missing operations array, ignoring`);
-          return;
-        }
-
-        this._log(`\n${'='.repeat(80)}`);
-        this._log(`🔧 CLUSTER_OPERATIONS received from ${message.sender}`);
-        this._log(`${'='.repeat(80)}`);
-        if (message.content?.data?.reasoning) {
-          this._log(`Reasoning: ${message.content.data.reasoning}`);
-        }
-        this._log(`Operations: ${operations.length}`);
-        this._log(`${'='.repeat(80)}\n`);
-
-        // Execute operation chain
-        this._handleOperations(clusterId, operations, message.sender, {
-          isolationManager,
-          containerId,
-        }).catch((err) => {
-          console.error(`Failed to execute CLUSTER_OPERATIONS:`, err.message);
-          // Publish failure message
-          messageBus.publish({
-            cluster_id: clusterId,
-            topic: 'CLUSTER_OPERATIONS_FAILED',
-            sender: 'orchestrator',
-            content: {
-              text: `Operation chain failed: ${err.message}`,
-              data: {
-                error: err.message,
-                operations: operations,
-              },
-            },
-          });
-
-          // CRITICAL: Stop cluster on operation failure
-          this._log(`\n${'='.repeat(80)}`);
-          this._log(`❌ CLUSTER_OPERATIONS FAILED - STOPPING CLUSTER`);
-          this._log(`${'='.repeat(80)}`);
-          this._log(`Error: ${err.message}`);
-          this._log(`${'='.repeat(80)}\n`);
-
-          this.stop(clusterId).catch((stopErr) => {
-            console.error(`Failed to stop cluster after operation failure:`, stopErr.message);
-          });
-        });
+      this._registerClusterSubscriptions({
+        messageBus,
+        clusterId,
+        isolationManager,
+        containerId,
       });
 
       // Start all agents
@@ -961,7 +836,7 @@ class Orchestrator {
           },
         },
         metadata: {
-          source: input.issue ? 'github' : 'text',
+          source: this._getInputSource(input),
         },
       });
 
@@ -989,7 +864,7 @@ class Orchestrator {
       // ^^^^^^ REMOVED - clusters run until explicitly stopped or completed
 
       // Save cluster to disk
-      this._saveClusters();
+      await this._saveClusters();
 
       return {
         id: clusterId,
@@ -1007,6 +882,481 @@ class Orchestrator {
       console.error(`Cluster ${clusterId} failed to start:`, error);
       throw error;
     }
+  }
+
+  _initializeClusterAgents({ config, cluster, messageBus, options, isolationManager, clusterId }) {
+    const agentCwd = cluster.worktree ? cluster.worktree.path : options.cwd || process.cwd();
+
+    for (const agentConfig of config.agents) {
+      if (!agentConfig.cwd) {
+        agentConfig.cwd = agentCwd;
+      }
+
+      if (options.modelOverride) {
+        applyModelOverride(agentConfig, options.modelOverride);
+        this._log(`    [model] Overridden model for ${agentConfig.id}: ${options.modelOverride}`);
+      }
+
+      const agentOptions = {
+        testMode: options.testMode || !!this.taskRunner,
+        quiet: this.quiet,
+        modelOverride: options.modelOverride || null,
+      };
+
+      if (options.mockExecutor) {
+        agentOptions.mockSpawnFn = options.mockExecutor.createMockSpawnFn(agentConfig.id);
+      }
+
+      if (this.taskRunner) {
+        agentOptions.taskRunner = this.taskRunner;
+      }
+
+      if (cluster.isolation) {
+        agentOptions.isolation = {
+          enabled: true,
+          manager: isolationManager,
+          clusterId,
+        };
+      }
+
+      if (cluster.worktree) {
+        agentOptions.worktree = {
+          enabled: true,
+          path: cluster.worktree.path,
+          branch: cluster.worktree.branch,
+          repoRoot: cluster.worktree.repoRoot,
+        };
+      }
+
+      const agent =
+        agentConfig.type === 'subcluster'
+          ? new SubClusterWrapper(agentConfig, messageBus, cluster, agentOptions)
+          : new AgentWrapper(agentConfig, messageBus, cluster, agentOptions);
+
+      cluster.agents.push(agent);
+    }
+  }
+
+  _subscribeToClusterTopic(messageBus, clusterId, topic, handler) {
+    messageBus.subscribe((message) => {
+      if (message.topic === topic && message.cluster_id === clusterId) {
+        handler(message);
+      }
+    });
+  }
+
+  _registerClusterCompletionHandlers(messageBus, clusterId) {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_COMPLETE', (message) => {
+      this._log(`\n${'='.repeat(80)}`);
+      this._log(`✅ CLUSTER COMPLETED SUCCESSFULLY: ${clusterId}`);
+      this._log(`${'='.repeat(80)}`);
+      this._log(`Reason: ${message.content?.data?.reason || 'unknown'}`);
+      this._log(`Initiated by: ${message.sender}`);
+      this._log(`${'='.repeat(80)}\n`);
+
+      this.stop(clusterId).catch((err) => {
+        console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
+      });
+    });
+
+    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_FAILED', (message) => {
+      this._log(`\n${'='.repeat(80)}`);
+      this._log(`❌ CLUSTER FAILED: ${clusterId}`);
+      this._log(`${'='.repeat(80)}`);
+      this._log(`Reason: ${message.content?.data?.reason || 'unknown'}`);
+      this._log(`Agent: ${message.sender}`);
+      if (message.content?.text) {
+        this._log(`Details: ${message.content.text}`);
+      }
+      this._log(`${'='.repeat(80)}\n`);
+
+      this.stop(clusterId).catch((err) => {
+        console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
+      });
+    });
+  }
+
+  _registerAgentErrorHandler(messageBus, clusterId) {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'AGENT_ERROR', async (message) => {
+      const agentRole = message.content?.data?.role;
+      const attempts = message.content?.data?.attempts || 1;
+
+      await this._saveClusters();
+
+      if (agentRole === 'implementation' && attempts >= 3) {
+        this._log(`\n${'='.repeat(80)}`);
+        this._log(`❌ WORKER AGENT FAILED: ${clusterId}`);
+        this._log(`${'='.repeat(80)}`);
+        this._log(`Worker agent ${message.sender} failed after ${attempts} attempts`);
+        this._log(`Error: ${message.content?.data?.error || 'unknown'}`);
+        this._log(`Stopping cluster - worker cannot continue`);
+        this._log(`${'='.repeat(80)}\n`);
+
+        this.stop(clusterId).catch((err) => {
+          console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
+        });
+      }
+    });
+  }
+
+  _registerAgentLifecycleHandlers(messageBus, clusterId) {
+    messageBus.on('topic:AGENT_LIFECYCLE', async (message) => {
+      const event = message.content?.data?.event;
+      if (
+        [
+          'TASK_STARTED',
+          'TASK_COMPLETED',
+          'PROCESS_SPAWNED',
+          'TASK_ID_ASSIGNED',
+          'STARTED',
+        ].includes(event)
+      ) {
+        await this._saveClusters();
+      }
+    });
+
+    messageBus.on('topic:AGENT_LIFECYCLE', (message) => {
+      if (message.content?.data?.event !== 'AGENT_STALE_WARNING') return;
+
+      const agentId = message.content?.data?.agent;
+      const timeSinceLastOutput = message.content?.data?.timeSinceLastOutput;
+      const analysis = message.content?.data?.analysis || 'No analysis available';
+
+      this._log(
+        `⚠️  Orchestrator: Agent ${agentId} appears stale (${Math.round(timeSinceLastOutput / 1000)}s no output) but will NOT be killed`
+      );
+      this._log(`    Analysis: ${analysis}`);
+      this._log(
+        `    Manual intervention may be needed - use 'zeroshot resume ${clusterId}' if stuck`
+      );
+    });
+  }
+
+  _registerConductorWatchdog(messageBus, clusterId) {
+    const timeoutMs = 30000;
+    let watchdogTimer = null;
+    let completedAt = null;
+
+    this._subscribeToClusterTopic(messageBus, clusterId, 'AGENT_LIFECYCLE', (message) => {
+      const event = message.content?.data?.event;
+      const role = message.content?.data?.role;
+
+      if (event === 'TASK_COMPLETED' && role === 'conductor') {
+        completedAt = Date.now();
+        this._log(
+          `⏱️  Conductor completed. Watchdog started - expecting CLUSTER_OPERATIONS within ${timeoutMs / 1000}s`
+        );
+
+        watchdogTimer = setTimeout(() => {
+          const clusterOps = messageBus.query({
+            cluster_id: clusterId,
+            topic: 'CLUSTER_OPERATIONS',
+            limit: 1,
+          });
+          if (clusterOps.length === 0) {
+            console.error(`\n${'='.repeat(80)}`);
+            console.error(`🔴 CONDUCTOR WATCHDOG TRIGGERED - CLUSTER_OPERATIONS NEVER RECEIVED`);
+            console.error(`${'='.repeat(80)}`);
+            console.error(`Conductor completed ${timeoutMs / 1000}s ago but no CLUSTER_OPERATIONS`);
+            console.error(`This indicates the conductor's onComplete hook FAILED SILENTLY`);
+            console.error(
+              `Check: 1) Result parsing 2) Transform script errors 3) Schema validation`
+            );
+            console.error(`${'='.repeat(80)}\n`);
+
+            messageBus.publish({
+              cluster_id: clusterId,
+              topic: 'CLUSTER_FAILED',
+              sender: 'orchestrator',
+              content: {
+                text: `Conductor completed but CLUSTER_OPERATIONS never published - hook failure`,
+                data: {
+                  reason: 'CONDUCTOR_WATCHDOG_TIMEOUT',
+                  conductorCompletedAt: completedAt,
+                  timeoutMs: timeoutMs,
+                },
+              },
+            });
+          }
+        }, timeoutMs);
+      }
+    });
+
+    return {
+      clear: () => {
+        if (!watchdogTimer) {
+          return;
+        }
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+        const elapsed = completedAt ? Date.now() - completedAt : 0;
+        this._log(
+          `✅ CLUSTER_OPERATIONS received (${elapsed}ms after conductor completed) - watchdog cleared`
+        );
+      },
+    };
+  }
+
+  _registerClusterOperationsHandler(
+    messageBus,
+    clusterId,
+    isolationManager,
+    containerId,
+    watchdog
+  ) {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_OPERATIONS', (message) => {
+      watchdog?.clear?.();
+
+      let operations = message.content?.data?.operations;
+      if (typeof operations === 'string') {
+        try {
+          operations = JSON.parse(operations);
+        } catch (e) {
+          this._log(`⚠️ CLUSTER_OPERATIONS has invalid operations JSON: ${e.message}`);
+          return;
+        }
+      }
+
+      if (!operations || !Array.isArray(operations)) {
+        this._log(`⚠️ CLUSTER_OPERATIONS missing operations array, ignoring`);
+        return;
+      }
+
+      this._log(`\n${'='.repeat(80)}`);
+      this._log(`🔧 CLUSTER_OPERATIONS received from ${message.sender}`);
+      this._log(`${'='.repeat(80)}`);
+      if (message.content?.data?.reasoning) {
+        this._log(`Reasoning: ${message.content.data.reasoning}`);
+      }
+      this._log(`Operations: ${operations.length}`);
+      this._log(`${'='.repeat(80)}\n`);
+
+      this._handleOperations(clusterId, operations, message.sender, {
+        isolationManager,
+        containerId,
+      }).catch((err) => {
+        console.error(`Failed to execute CLUSTER_OPERATIONS:`, err.message);
+        messageBus.publish({
+          cluster_id: clusterId,
+          topic: 'CLUSTER_OPERATIONS_FAILED',
+          sender: 'orchestrator',
+          content: {
+            text: `Operation chain failed: ${err.message}`,
+            data: {
+              error: err.message,
+              operations: operations,
+            },
+          },
+        });
+
+        this._log(`\n${'='.repeat(80)}`);
+        this._log(`❌ CLUSTER_OPERATIONS FAILED - STOPPING CLUSTER`);
+        this._log(`${'='.repeat(80)}`);
+        this._log(`Error: ${err.message}`);
+        this._log(`${'='.repeat(80)}\n`);
+
+        this.stop(clusterId).catch((stopErr) => {
+          console.error(`Failed to stop cluster after operation failure:`, stopErr.message);
+        });
+      });
+    });
+  }
+
+  _registerClusterSubscriptions({ messageBus, clusterId, isolationManager, containerId }) {
+    this._registerClusterCompletionHandlers(messageBus, clusterId);
+    this._registerAgentErrorHandler(messageBus, clusterId);
+    this._registerAgentLifecycleHandlers(messageBus, clusterId);
+
+    const watchdog = this._registerConductorWatchdog(messageBus, clusterId);
+    this._registerClusterOperationsHandler(
+      messageBus,
+      clusterId,
+      isolationManager,
+      containerId,
+      watchdog
+    );
+  }
+
+  async _initializeIsolation(options, config, clusterId) {
+    let isolationManager = null;
+    let containerId = null;
+    let worktreeInfo = null;
+
+    if (options.isolation) {
+      if (!IsolationManager.isDockerAvailable()) {
+        throw new Error('Docker is not available. Install Docker to use --docker mode.');
+      }
+
+      const image = options.isolationImage || 'zeroshot-cluster-base';
+      await IsolationManager.ensureImage(image);
+
+      isolationManager = new IsolationManager({ image });
+      this._log(`[Orchestrator] Starting cluster in isolation mode (image: ${image})`);
+
+      const workDir = options.cwd || process.cwd();
+      const providerName = normalizeProviderName(
+        config.forceProvider || config.defaultProvider || loadSettings().defaultProvider || 'claude'
+      );
+      containerId = await isolationManager.createContainer(clusterId, {
+        workDir,
+        image,
+        noMounts: options.noMounts,
+        mounts: options.mounts,
+        containerHome: options.containerHome,
+        provider: providerName,
+      });
+      this._log(`[Orchestrator] Container created: ${containerId} (workDir: ${workDir})`);
+    } else if (options.worktree) {
+      const workDir = options.cwd || process.cwd();
+
+      isolationManager = new IsolationManager({});
+      worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir);
+
+      this._log(`[Orchestrator] Starting cluster in worktree isolation mode`);
+      this._log(`[Orchestrator] Worktree: ${worktreeInfo.path}`);
+      this._log(`[Orchestrator] Branch: ${worktreeInfo.branch}`);
+    }
+
+    return { isolationManager, containerId, worktreeInfo };
+  }
+
+  _applyAutoPrConfig(config, inputData, options) {
+    if (!options.autoPr) {
+      return;
+    }
+
+    config.agents = config.agents.filter((a) => a.id !== 'completion-detector');
+
+    // Detect git platform (independent of issue provider)
+    const { getPlatformForPR } = require('./issue-providers');
+    const { detectGitContext } = require('../lib/git-remote-utils');
+
+    let platform;
+    try {
+      // ALWAYS use git context, regardless of issue provider
+      // This allows Jira issues in GitHub repos, etc.
+      platform = getPlatformForPR(options.cwd);
+    } catch (error) {
+      throw new Error(`--pr mode failed: ${error.message}`);
+    }
+
+    // Check for repo mismatch (issue URL repo vs current git remote)
+    // This catches cases like: running `zeroshot run https://gitlab.com/foo/bar/-/issues/1`
+    // from a different repo directory
+    let skipCloseIssue = false;
+    const gitContext = detectGitContext(options.cwd);
+    if (inputData.url && gitContext) {
+      const issueHost = this._extractHostFromUrl(inputData.url);
+      const gitHost = gitContext.host;
+
+      // Compare hosts - if different platforms, warn and don't close issue
+      if (issueHost && gitHost && issueHost !== gitHost) {
+        this._log(
+          `[Orchestrator] ⚠️  WARNING: Issue is from ${issueHost} but PR will be created on ${gitHost}`
+        );
+        this._log(
+          `[Orchestrator] ⚠️  The PR will NOT auto-close the issue (different repositories)`
+        );
+        this._log(`[Orchestrator] ⚠️  To fix: run zeroshot from the target repository directory`);
+        skipCloseIssue = true;
+      }
+    }
+
+    // Generate platform-specific git-pusher agent from template
+    const { generateGitPusherAgent, isPlatformSupported } = require('./agents/git-pusher-template');
+
+    if (!isPlatformSupported(platform)) {
+      throw new Error(
+        `Platform '${platform}' does not support --pr mode. Supported: github, gitlab, azure-devops`
+      );
+    }
+
+    const gitPusherConfig = generateGitPusherAgent(platform);
+
+    // Template replacement for issue context
+    const issueRef = skipCloseIssue ? '' : `Closes #${inputData.number || 'unknown'}`;
+    gitPusherConfig.prompt = gitPusherConfig.prompt
+      .replace(/\{\{issue_number\}\}/g, inputData.number || 'unknown')
+      .replace(/\{\{issue_title\}\}/g, inputData.title || 'Implementation')
+      .replace(/Closes #\{\{issue_number\}\}/g, issueRef);
+
+    config.agents.push(gitPusherConfig);
+    this._log(
+      `[Orchestrator] Injected ${platform}-git-pusher agent (issue: ${inputData.number || 'N/A'}, PR platform: ${platform.toUpperCase()})`
+    );
+  }
+
+  /**
+   * Extract hostname from a URL
+   * @private
+   */
+  _extractHostFromUrl(url) {
+    try {
+      const match = url.match(/https?:\/\/([^/]+)/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  _applyWorkerInstruction(config) {
+    const workersCount = process.env.ZEROSHOT_WORKERS ? parseInt(process.env.ZEROSHOT_WORKERS) : 0;
+    if (workersCount <= 1) {
+      return;
+    }
+
+    const workerAgent = config.agents.find((a) => a.id === 'worker');
+    if (!workerAgent) {
+      return;
+    }
+
+    const instruction = `PARALLELIZATION: Use up to ${workersCount} sub-agents to parallelize your work where appropriate.\n\n`;
+
+    if (!workerAgent.prompt) {
+      workerAgent.prompt = instruction;
+    } else if (typeof workerAgent.prompt === 'string') {
+      workerAgent.prompt = instruction + workerAgent.prompt;
+    } else if (workerAgent.prompt.system) {
+      workerAgent.prompt.system = instruction + workerAgent.prompt.system;
+    }
+
+    this._log(`[Orchestrator] Injected parallelization instruction (workers=${workersCount})`);
+  }
+
+  /**
+   * Generate a unique cluster ID, safe for concurrent starts in-process.
+   * If an explicit ID is provided, uses it as a base and suffixes on collision.
+   * @private
+   */
+  _generateUniqueClusterId(explicitId, explicitDbPath) {
+    const baseId = explicitId || generateName('cluster');
+    const baseDbPath = explicitDbPath || path.join(this.storageDir, `${baseId}.db`);
+
+    // Fast path: base is unused.
+    if (!this.clusters.has(baseId) && !fs.existsSync(baseDbPath)) {
+      return baseId;
+    }
+
+    // Collision: suffix with random bytes to avoid race conditions under concurrency.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const suffix = crypto.randomBytes(3).toString('hex');
+      const candidateId = `${baseId}-${suffix}`;
+      const candidateDbPath = explicitDbPath || path.join(this.storageDir, `${candidateId}.db`);
+      if (!this.clusters.has(candidateId) && !fs.existsSync(candidateDbPath)) {
+        return candidateId;
+      }
+    }
+
+    // Last resort: new generated name (should never happen).
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const candidateId = generateName('cluster');
+      const candidateDbPath = explicitDbPath || path.join(this.storageDir, `${candidateId}.db`);
+      if (!this.clusters.has(candidateId) && !fs.existsSync(candidateDbPath)) {
+        return candidateId;
+      }
+    }
+
+    throw new Error('Failed to generate unique cluster ID after many attempts');
   }
 
   /**
@@ -1040,7 +1390,9 @@ class Orchestrator {
     // Clean up isolation container if enabled
     // CRITICAL: Preserve workspace for resume capability - only delete on kill()
     if (cluster.isolation?.manager) {
-      this._log(`[Orchestrator] Stopping isolation container for ${clusterId} (preserving workspace for resume)...`);
+      this._log(
+        `[Orchestrator] Stopping isolation container for ${clusterId} (preserving workspace for resume)...`
+      );
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
       this._log(`[Orchestrator] Container stopped, workspace preserved`);
     }
@@ -1058,7 +1410,7 @@ class Orchestrator {
     this._log(`Cluster ${clusterId} stopped`);
 
     // Save updated state
-    this._saveClusters();
+    await this._saveClusters();
   }
 
   /**
@@ -1080,7 +1432,9 @@ class Orchestrator {
 
     // Force remove isolation container AND workspace (full cleanup, no resume)
     if (cluster.isolation?.manager) {
-      this._log(`[Orchestrator] Force removing isolation container and workspace for ${clusterId}...`);
+      this._log(
+        `[Orchestrator] Force removing isolation container and workspace for ${clusterId}...`
+      );
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: false });
       this._log(`[Orchestrator] Container and workspace removed`);
     }
@@ -1104,7 +1458,7 @@ class Orchestrator {
     this._log(`Cluster ${clusterId} killed`);
 
     // Save updated state (will be marked as 'killed' in file)
-    this._saveClusters();
+    await this._saveClusters();
 
     // Now remove from memory after persisting
     this.clusters.delete(clusterId);
@@ -1175,271 +1529,303 @@ class Orchestrator {
       );
     }
 
-    // Get failure info - either from saved state or from ledger
-    let failureInfo = cluster.failureInfo;
+    const failureInfo = this._resolveFailureInfo(cluster, clusterId);
 
-    if (!failureInfo) {
-      // Query ledger for AGENT_ERROR messages to find failed agent
-      const errors = cluster.messageBus.query({
-        cluster_id: clusterId,
-        topic: 'AGENT_ERROR',
-        limit: 10,
-      });
+    await this._ensureIsolationForResume(clusterId, cluster);
+    this._ensureWorktreeForResume(clusterId, cluster);
+    await this._restartClusterAgents(cluster);
 
-      if (errors.length > 0) {
-        // Use the first error found
-        const firstError = errors[0];
-        failureInfo = {
-          agentId: firstError.sender,
-          taskId: firstError.content?.data?.taskId || null,
-          iteration: firstError.content?.data?.iteration || 0,
-          error: firstError.content?.data?.error || firstError.content?.text,
-          timestamp: firstError.timestamp,
-        };
-        this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
+    const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);
+
+    if (failureInfo) {
+      return this._resumeFailedCluster(clusterId, cluster, failureInfo, recentMessages, prompt);
+    }
+
+    return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt);
+  }
+
+  _resolveFailureInfo(cluster, clusterId) {
+    if (cluster.failureInfo) {
+      return cluster.failureInfo;
+    }
+
+    const errors = cluster.messageBus.query({
+      cluster_id: clusterId,
+      topic: 'AGENT_ERROR',
+      limit: 10,
+      order: 'desc',
+    });
+
+    if (errors.length === 0) {
+      return null;
+    }
+
+    const firstError = errors[0];
+    const failureInfo = {
+      agentId: firstError.sender,
+      taskId: firstError.content?.data?.taskId || null,
+      iteration: firstError.content?.data?.iteration || 0,
+      error: firstError.content?.data?.error || firstError.content?.text,
+      timestamp: firstError.timestamp,
+    };
+    this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
+    return failureInfo;
+  }
+
+  _checkContainerExists(containerId) {
+    const { spawn } = require('child_process');
+    const checkContainer = spawn('docker', ['inspect', containerId], { stdio: 'ignore' });
+    return new Promise((resolve) => {
+      checkContainer.on('close', (code) => resolve(code === 0));
+    });
+  }
+
+  async _ensureIsolationForResume(clusterId, cluster) {
+    if (!cluster.isolation?.enabled) {
+      return;
+    }
+
+    const oldContainerId = cluster.isolation.containerId;
+    const containerExists = await this._checkContainerExists(oldContainerId);
+    if (containerExists) {
+      this._log(`[Orchestrator] Container ${oldContainerId} still exists, reusing`);
+      return;
+    }
+
+    this._log(`[Orchestrator] Container ${oldContainerId} not found, recreating...`);
+
+    const workDir = cluster.isolation.workDir;
+    if (!workDir) {
+      throw new Error(`Cannot resume cluster ${clusterId}: workDir not saved in isolation state`);
+    }
+
+    const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
+    if (!fs.existsSync(isolatedPath)) {
+      throw new Error(
+        `Cannot resume cluster ${clusterId}: isolated workspace deleted. ` +
+          `Was the cluster killed (not stopped)? Use 'zeroshot run' to start fresh.`
+      );
+    }
+
+    const providerName = normalizeProviderName(
+      cluster.config?.forceProvider ||
+        cluster.config?.defaultProvider ||
+        loadSettings().defaultProvider ||
+        'claude'
+    );
+    const newContainerId = await cluster.isolation.manager.createContainer(clusterId, {
+      workDir,
+      image: cluster.isolation.image,
+      reuseExistingWorkspace: true,
+      provider: providerName,
+    });
+
+    this._log(`[Orchestrator] New container created: ${newContainerId}`);
+    cluster.isolation.containerId = newContainerId;
+
+    for (const agent of cluster.agents) {
+      if (agent.isolation?.enabled) {
+        agent.isolation.containerId = newContainerId;
+        agent.isolation.manager = cluster.isolation.manager;
       }
     }
 
-    // CRITICAL: Recreate isolation container if needed
-    if (cluster.isolation?.enabled) {
-      const { spawn } = require('child_process');
-      const oldContainerId = cluster.isolation.containerId;
+    this._log(`[Orchestrator] All agents updated with new container ID`);
+  }
 
-      // Check if container exists
-      const checkContainer = spawn('docker', ['inspect', oldContainerId], {
-        stdio: 'ignore',
-      });
-      const containerExists = await new Promise((resolve) => {
-        checkContainer.on('close', (code) => resolve(code === 0));
-      });
-
-      if (!containerExists) {
-        this._log(`[Orchestrator] Container ${oldContainerId} not found, recreating...`);
-
-        // Create new container using saved workDir (CRITICAL for isolation mode resume)
-        // The isolated workspace at /tmp/zeroshot-isolated/{clusterId} was preserved by stop()
-        const workDir = cluster.isolation.workDir;
-        if (!workDir) {
-          throw new Error(`Cannot resume cluster ${clusterId}: workDir not saved in isolation state`);
-        }
-
-        // Check if isolated workspace still exists (it should, if stop() was used)
-        const isolatedPath = path.join(os.tmpdir(), 'zeroshot-isolated', clusterId);
-        if (!fs.existsSync(isolatedPath)) {
-          throw new Error(
-            `Cannot resume cluster ${clusterId}: isolated workspace deleted. ` +
-              `Was the cluster killed (not stopped)? Use 'zeroshot run' to start fresh.`
-          );
-        }
-
-        const newContainerId = await cluster.isolation.manager.createContainer(clusterId, {
-          workDir, // Use saved workDir, NOT process.cwd()
-          image: cluster.isolation.image,
-          reuseExistingWorkspace: true, // CRITICAL: Don't wipe existing work
-        });
-
-        this._log(`[Orchestrator] New container created: ${newContainerId}`);
-
-        // Update cluster isolation state
-        cluster.isolation.containerId = newContainerId;
-
-        // CRITICAL: Update all agents' isolation context with new container ID
-        for (const agent of cluster.agents) {
-          if (agent.isolation?.enabled) {
-            agent.isolation.containerId = newContainerId;
-            agent.isolation.manager = cluster.isolation.manager;
-          }
-        }
-
-        this._log(`[Orchestrator] All agents updated with new container ID`);
-      } else {
-        this._log(`[Orchestrator] Container ${oldContainerId} still exists, reusing`);
-      }
+  _ensureWorktreeForResume(clusterId, cluster) {
+    if (!cluster.worktree?.enabled) {
+      return;
     }
 
-    // Verify worktree still exists for worktree isolation mode
-    if (cluster.worktree?.enabled) {
-      const worktreePath = cluster.worktree.path;
-      if (!fs.existsSync(worktreePath)) {
-        throw new Error(
-          `Cannot resume cluster ${clusterId}: worktree at ${worktreePath} no longer exists. ` +
-            `Was the worktree manually removed? Use 'zeroshot run' to start fresh.`
-        );
-      }
-
-      this._log(`[Orchestrator] Worktree at ${worktreePath} exists, reusing`);
-      this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
+    const worktreePath = cluster.worktree.path;
+    if (!fs.existsSync(worktreePath)) {
+      throw new Error(
+        `Cannot resume cluster ${clusterId}: worktree at ${worktreePath} no longer exists. ` +
+          `Was the worktree manually removed? Use 'zeroshot run' to start fresh.`
+      );
     }
 
-    // Restart all agents
+    this._log(`[Orchestrator] Worktree at ${worktreePath} exists, reusing`);
+    this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
+  }
+
+  async _restartClusterAgents(cluster) {
     cluster.state = 'running';
     for (const agent of cluster.agents) {
       if (!agent.running) {
         await agent.start();
       }
     }
+  }
 
-    // Query recent messages from ledger to provide context
-    const recentMessages = cluster.messageBus.query({
-      cluster_id: clusterId,
-      limit: 50,
-    });
+  _loadRecentMessages(cluster, clusterId, limit) {
+    return cluster.messageBus
+      .query({
+        cluster_id: clusterId,
+        limit,
+        order: 'desc',
+      })
+      .reverse();
+  }
 
-    // CASE 1: Failed cluster - Resume the failed agent with error context
-    if (failureInfo) {
-      const { agentId, iteration, error } = failureInfo;
-      this._log(
-        `[Orchestrator] Resuming failed cluster ${clusterId} from agent ${agentId} iteration ${iteration}`
-      );
-      this._log(`[Orchestrator] Previous error: ${error}`);
+  _buildResumeContext(recentMessages, prompt, options) {
+    const resumePrompt = prompt || 'Continue from where you left off. Complete the task.';
+    let context = `${options.header}\n\n`;
 
-      // Find the failed agent
-      const failedAgent = cluster.agents.find((a) => a.id === agentId);
-      if (!failedAgent) {
-        throw new Error(`Failed agent '${agentId}' not found in cluster`);
-      }
-
-      // Build failure resume context
-      const resumePrompt = prompt || 'Continue from where you left off. Complete the task.';
-      let context = `You are resuming from a previous failed attempt.\n\n`;
-      context += `Previous error: ${error}\n\n`;
-      context += `## Recent Context\n\n`;
-
-      for (const msg of recentMessages.slice(-10)) {
-        if (msg.topic === 'AGENT_OUTPUT' || msg.topic === 'VALIDATION_RESULT') {
-          context += `[${msg.sender}] ${msg.content?.text?.slice(0, 200) || ''}\n`;
-        }
-      }
-
-      context += `\n## Resume Instructions\n\n${resumePrompt}\n`;
-
-      // Clear failure info since we're resuming
-      cluster.failureInfo = null;
-
-      // Save updated state
-      this._saveClusters();
-
-      // Resume the failed agent
-      failedAgent.resume(context).catch((err) => {
-        console.error(`[Orchestrator] Resume failed for agent ${agentId}:`, err.message);
-      });
-
-      this._log(`[Orchestrator] Cluster ${clusterId} resumed from failure`);
-
-      return {
-        id: clusterId,
-        state: cluster.state,
-        resumeType: 'failure',
-        resumedAgent: agentId,
-        previousError: error,
-      };
+    if (options.error) {
+      context += `Previous error: ${options.error}\n\n`;
     }
 
-    // CASE 2: Cleanly stopped cluster - Resume by re-triggering based on ledger state
-    this._log(`[Orchestrator] Resuming stopped cluster ${clusterId} (no failure)`);
-
-    // Build generic resume context
-    const resumePrompt = prompt || 'Continue from where you left off. Complete the task.';
-    let context = `Resuming cluster from previous session.\n\n`;
     context += `## Recent Context\n\n`;
-
     for (const msg of recentMessages.slice(-10)) {
-      if (
-        msg.topic === 'AGENT_OUTPUT' ||
-        msg.topic === 'VALIDATION_RESULT' ||
-        msg.topic === 'ISSUE_OPENED'
-      ) {
+      if (options.topics.includes(msg.topic)) {
         context += `[${msg.sender}] ${msg.content?.text?.slice(0, 200) || ''}\n`;
       }
     }
 
     context += `\n## Resume Instructions\n\n${resumePrompt}\n`;
+    return context;
+  }
 
-    // Find the LAST workflow trigger - not arbitrary last 5 messages
-    // This is the message that indicates current workflow state
-    const lastTrigger = this._findLastWorkflowTrigger(recentMessages);
+  _triggerMatchesTopic(triggerTopic, topic) {
+    if (triggerTopic === topic) return true;
+    if (triggerTopic === '*') return true;
+    if (triggerTopic.endsWith('*')) {
+      const prefix = triggerTopic.slice(0, -1);
+      return topic.startsWith(prefix);
+    }
+    return false;
+  }
+
+  _selectAgentsToResume(cluster, lastTrigger) {
     const agentsToResume = [];
 
+    for (const agent of cluster.agents) {
+      if (!agent.config.triggers) continue;
+
+      const matchingTrigger = agent.config.triggers.find((trigger) =>
+        this._triggerMatchesTopic(trigger.topic, lastTrigger.topic)
+      );
+      if (!matchingTrigger) continue;
+
+      if (matchingTrigger.logic?.script) {
+        const shouldTrigger = agent._evaluateTrigger(matchingTrigger, lastTrigger);
+        if (!shouldTrigger) continue;
+      }
+
+      agentsToResume.push({ agent, message: lastTrigger, trigger: matchingTrigger });
+    }
+
+    return agentsToResume;
+  }
+
+  _resumeAgents(agentsToResume, context) {
+    for (const { agent, message } of agentsToResume) {
+      this._log(`[Orchestrator] - Resuming agent ${agent.id} (triggered by ${message.topic})`);
+      agent.resume(context).catch((err) => {
+        console.error(`[Orchestrator] Resume failed for agent ${agent.id}:`, err.message);
+      });
+    }
+  }
+
+  _republishIssue(cluster, clusterId, recentMessages) {
+    const issueMessage = recentMessages.find((m) => m.topic === 'ISSUE_OPENED');
+    if (!issueMessage) {
+      return false;
+    }
+
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'ISSUE_OPENED',
+      sender: 'system',
+      receiver: 'broadcast',
+      content: issueMessage.content,
+      metadata: { _resumed: true, _originalId: issueMessage.id },
+    });
+
+    return true;
+  }
+
+  async _resumeFailedCluster(clusterId, cluster, failureInfo, recentMessages, prompt) {
+    const { agentId, iteration, error } = failureInfo;
+    this._log(
+      `[Orchestrator] Resuming failed cluster ${clusterId} from agent ${agentId} iteration ${iteration}`
+    );
+    this._log(`[Orchestrator] Previous error: ${error}`);
+
+    const failedAgent = cluster.agents.find((agent) => agent.id === agentId);
+    if (!failedAgent) {
+      throw new Error(`Failed agent '${agentId}' not found in cluster`);
+    }
+
+    const context = this._buildResumeContext(recentMessages, prompt, {
+      header: 'You are resuming from a previous failed attempt.',
+      error,
+      topics: ['AGENT_OUTPUT', 'VALIDATION_RESULT'],
+    });
+
+    cluster.failureInfo = null;
+    await this._saveClusters();
+
+    failedAgent.resume(context).catch((err) => {
+      console.error(`[Orchestrator] Resume failed for agent ${agentId}:`, err.message);
+    });
+
+    this._log(`[Orchestrator] Cluster ${clusterId} resumed from failure`);
+
+    return {
+      id: clusterId,
+      state: cluster.state,
+      resumeType: 'failure',
+      resumedAgent: agentId,
+      previousError: error,
+    };
+  }
+
+  async _resumeCleanCluster(clusterId, cluster, recentMessages, prompt) {
+    this._log(`[Orchestrator] Resuming stopped cluster ${clusterId} (no failure)`);
+
+    const context = this._buildResumeContext(recentMessages, prompt, {
+      header: 'Resuming cluster from previous session.',
+      topics: ['AGENT_OUTPUT', 'VALIDATION_RESULT', 'ISSUE_OPENED'],
+    });
+
+    const lastTrigger = this._findLastWorkflowTrigger(recentMessages);
     if (lastTrigger) {
       this._log(
         `[Orchestrator] Last workflow trigger: ${lastTrigger.topic} (${new Date(lastTrigger.timestamp).toISOString()})`
       );
-
-      for (const agent of cluster.agents) {
-        if (!agent.config.triggers) continue;
-
-        const matchingTrigger = agent.config.triggers.find((trigger) => {
-          // Exact match
-          if (trigger.topic === lastTrigger.topic) return true;
-          // Wildcard match
-          if (trigger.topic === '*') return true;
-          // Prefix match (e.g., "VALIDATION_*")
-          if (trigger.topic.endsWith('*')) {
-            const prefix = trigger.topic.slice(0, -1);
-            return lastTrigger.topic.startsWith(prefix);
-          }
-          return false;
-        });
-
-        if (matchingTrigger) {
-          // Evaluate logic script if present
-          if (matchingTrigger.logic?.script) {
-            const shouldTrigger = agent._evaluateTrigger(matchingTrigger, lastTrigger);
-            if (!shouldTrigger) continue;
-          }
-          agentsToResume.push({ agent, message: lastTrigger, trigger: matchingTrigger });
-        }
-      }
     } else {
       this._log(`[Orchestrator] No workflow triggers found in ledger`);
     }
 
+    const agentsToResume = lastTrigger ? this._selectAgentsToResume(cluster, lastTrigger) : [];
     if (agentsToResume.length === 0) {
       if (!lastTrigger) {
-        // No workflow activity - cluster never really started
         this._log(
           `[Orchestrator] WARNING: No workflow triggers in ledger. Cluster may not have started properly.`
         );
         this._log(`[Orchestrator] Publishing ISSUE_OPENED to bootstrap workflow...`);
 
-        // Re-publish the original issue if we have it
-        const issueMessage = recentMessages.find((m) => m.topic === 'ISSUE_OPENED');
-        if (issueMessage) {
-          cluster.messageBus.publish({
-            cluster_id: clusterId,
-            topic: 'ISSUE_OPENED',
-            sender: 'system',
-            receiver: 'broadcast',
-            content: issueMessage.content,
-            metadata: { _resumed: true, _originalId: issueMessage.id },
-          });
-        } else {
+        if (!this._republishIssue(cluster, clusterId, recentMessages)) {
           throw new Error(
             `Cannot resume cluster ${clusterId}: No workflow triggers found and no ISSUE_OPENED message. ` +
               `The cluster may not have started properly. Try: zeroshot run <issue> instead.`
           );
         }
       } else {
-        // Had a trigger but no agents matched - something is wrong with agent configs
         throw new Error(
           `Cannot resume cluster ${clusterId}: Found trigger ${lastTrigger.topic} but no agents handle it. ` +
             `Check agent trigger configurations.`
         );
       }
     } else {
-      // Resume agents that should run based on ledger state
       this._log(`[Orchestrator] Resuming ${agentsToResume.length} agent(s) based on ledger state`);
-      for (const { agent, message } of agentsToResume) {
-        this._log(`[Orchestrator] - Resuming agent ${agent.id} (triggered by ${message.topic})`);
-        agent.resume(context).catch((err) => {
-          console.error(`[Orchestrator] Resume failed for agent ${agent.id}:`, err.message);
-        });
-      }
+      this._resumeAgents(agentsToResume, context);
     }
 
-    // Save updated state
-    this._saveClusters();
-
+    await this._saveClusters();
     this._log(`[Orchestrator] Cluster ${clusterId} resumed`);
 
     return {
@@ -1505,10 +1891,13 @@ Continue from where you left off. Review your previous output to understand what
 `.trim();
 
     // Get recent context from ledger
-    const recentMessages = cluster.messageBus.query({
-      cluster_id: cluster.id,
-      limit: 10,
-    });
+    const recentMessages = cluster.messageBus
+      .query({
+        cluster_id: cluster.id,
+        limit: 10,
+        order: 'desc',
+      })
+      .reverse();
 
     const contextText = recentMessages
       .map((m) => `[${m.sender}] ${m.content?.text || JSON.stringify(m.content)}`)
@@ -1555,7 +1944,63 @@ Continue from where you left off. Review your previous output to understand what
     this._log(`[Orchestrator] Validating ${operations.length} operation(s) from ${sender}`);
 
     // Phase 1: Pre-validate operation structure
+    const validationErrors = this._validateOperationChain(operations);
+
+    if (validationErrors.length > 0) {
+      const errorMsg = `Operation chain validation failed:\n  - ${validationErrors.join('\n  - ')}`;
+      this._log(`[Orchestrator] ❌ ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+
+    // Phase 2: Build mock cluster config with proposed agents
+    // Collect all agents that would exist after operations complete
+    const existingAgentConfigs = cluster.config.agents || [];
+    const proposedAgentConfigs = this._buildProposedAgentConfigs(existingAgentConfigs, operations);
+
+    // Phase 3: Validate proposed cluster config
+    const validation = this._validateProposedConfig(
+      clusterId,
+      cluster,
+      proposedAgentConfigs,
+      operations
+    );
+
+    // Log warnings but proceed
+    if (validation.warnings.length > 0) {
+      this._log(`[Orchestrator] ⚠️ Warnings (proceeding anyway):`);
+      for (const warning of validation.warnings) {
+        this._log(`    - ${warning}`);
+      }
+    }
+
+    // Phase 4: Execute validated operations
+    this._log(`[Orchestrator] ✓ Validation passed, executing ${operations.length} operation(s)`);
+
+    await this._executeOperations(cluster, operations, sender, context);
+
+    this._log(`[Orchestrator] All ${operations.length} operation(s) executed successfully`);
+
+    // Publish success notification
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'CLUSTER_OPERATIONS_SUCCESS',
+      sender: 'orchestrator',
+      content: {
+        text: `Executed ${operations.length} operation(s)`,
+        data: {
+          operationCount: operations.length,
+          agentCount: cluster.agents.length,
+        },
+      },
+    });
+
+    // Save updated cluster state to disk
+    await this._saveClusters();
+  }
+
+  _validateOperationChain(operations) {
     const validationErrors = [];
+
     for (let i = 0; i < operations.length; i++) {
       const op = operations[i];
       if (!op.action) {
@@ -1569,21 +2014,15 @@ Continue from where you left off. Review your previous output to understand what
       }
     }
 
-    if (validationErrors.length > 0) {
-      const errorMsg = `Operation chain validation failed:\n  - ${validationErrors.join('\n  - ')}`;
-      this._log(`[Orchestrator] ❌ ${errorMsg}`);
-      throw new Error(errorMsg);
-    }
+    return validationErrors;
+  }
 
-    // Phase 2: Build mock cluster config with proposed agents
-    // Collect all agents that would exist after operations complete
-    const existingAgentConfigs = cluster.config.agents || [];
+  _buildProposedAgentConfigs(existingAgentConfigs, operations) {
     const proposedAgentConfigs = [...existingAgentConfigs];
 
     for (const op of operations) {
       if (op.action === 'add_agents' && op.agents) {
         for (const agentConfig of op.agents) {
-          // Check for duplicate before adding
           const existingIdx = proposedAgentConfigs.findIndex((a) => a.id === agentConfig.id);
           if (existingIdx === -1) {
             proposedAgentConfigs.push(agentConfig);
@@ -1604,7 +2043,10 @@ Continue from where you left off. Review your previous output to understand what
       }
     }
 
-    // Phase 3: Validate proposed cluster config
+    return proposedAgentConfigs;
+  }
+
+  _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
     const mockConfig = { agents: proposedAgentConfigs };
     const validation = configValidator.validateConfig(mockConfig);
 
@@ -1630,62 +2072,35 @@ Continue from where you left off. Review your previous output to understand what
       throw new Error(errorMsg);
     }
 
-    // Log warnings but proceed
-    if (validation.warnings.length > 0) {
-      this._log(`[Orchestrator] ⚠️ Warnings (proceeding anyway):`);
-      for (const warning of validation.warnings) {
-        this._log(`    - ${warning}`);
-      }
-    }
+    return validation;
+  }
 
-    // Phase 4: Execute validated operations
-    this._log(`[Orchestrator] ✓ Validation passed, executing ${operations.length} operation(s)`);
-
+  async _executeOperations(cluster, operations, sender, context) {
     for (let i = 0; i < operations.length; i++) {
       const op = operations[i];
       this._log(`  [${i + 1}/${operations.length}] ${op.action}`);
-
-      switch (op.action) {
-        case 'add_agents':
-          await this._opAddAgents(cluster, op, context);
-          break;
-
-        case 'remove_agents':
-          await this._opRemoveAgents(cluster, op);
-          break;
-
-        case 'update_agent':
-          this._opUpdateAgent(cluster, op);
-          break;
-
-        case 'publish':
-          this._opPublish(cluster, op, sender);
-          break;
-
-        case 'load_config':
-          await this._opLoadConfig(cluster, op, context);
-          break;
-      }
+      await this._executeOperation(cluster, op, sender, context);
     }
+  }
 
-    this._log(`[Orchestrator] All ${operations.length} operation(s) executed successfully`);
-
-    // Publish success notification
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: 'CLUSTER_OPERATIONS_SUCCESS',
-      sender: 'orchestrator',
-      content: {
-        text: `Executed ${operations.length} operation(s)`,
-        data: {
-          operationCount: operations.length,
-          agentCount: cluster.agents.length,
-        },
-      },
-    });
-
-    // Save updated cluster state to disk
-    this._saveClusters();
+  async _executeOperation(cluster, op, sender, context) {
+    switch (op.action) {
+      case 'add_agents':
+        await this._opAddAgents(cluster, op, context);
+        break;
+      case 'remove_agents':
+        await this._opRemoveAgents(cluster, op);
+        break;
+      case 'update_agent':
+        this._opUpdateAgent(cluster, op);
+        break;
+      case 'publish':
+        this._opPublish(cluster, op, sender);
+        break;
+      case 'load_config':
+        await this._opLoadConfig(cluster, op, context);
+        break;
+    }
   }
 
   /**
@@ -1709,6 +2124,12 @@ Continue from where you left off. Review your previous output to understand what
         agentConfig.cwd = agentCwd;
         this._log(`    [cwd] Injected worktree cwd for ${agentConfig.id}: ${agentCwd}`);
       }
+
+      // Apply model override if set (for consistency with initial agents)
+      if (cluster.modelOverride) {
+        applyModelOverride(agentConfig, cluster.modelOverride);
+        this._log(`    [model] Overridden model for ${agentConfig.id}: ${cluster.modelOverride}`);
+      }
       // Validate agent config has required fields
       if (!agentConfig.id) {
         throw new Error('Agent config missing required field: id');
@@ -1731,6 +2152,7 @@ Continue from where you left off. Review your previous output to understand what
       const agentOptions = {
         testMode: !!this.taskRunner, // Enable testMode if taskRunner provided
         quiet: this.quiet,
+        modelOverride: cluster.modelOverride || null,
       };
 
       // TaskRunner DI - propagate to dynamically spawned agents
@@ -1905,6 +2327,111 @@ Continue from where you left off. Review your previous output to understand what
     await this._opAddAgents(cluster, { agents: loadedConfig.agents }, context);
 
     this._log(`    ✓ Config loaded (${loadedConfig.agents.length} agents)`);
+
+    // Inject completion agent (templates don't include one - orchestrator controls termination)
+    await this._injectCompletionAgent(cluster, context);
+  }
+
+  /**
+   * Inject appropriate completion agent based on mode
+   * Templates define work, orchestrator controls termination strategy
+   * @private
+   */
+  async _injectCompletionAgent(cluster, context) {
+    // Skip if completion agent already exists
+    const hasCompletionAgent = cluster.agents.some(
+      (a) => a.config?.id === 'completion-detector' || a.config?.id === 'git-pusher'
+    );
+    if (hasCompletionAgent) {
+      return;
+    }
+
+    const isPrMode = cluster.autoPr || process.env.ZEROSHOT_PR === '1';
+
+    if (isPrMode) {
+      // Detect platform from stored cluster metadata OR git context
+      let platform = cluster.gitPlatform; // Use stored git platform (not issueProvider!)
+
+      // Fallback to git context detection if cluster metadata missing
+      if (!platform) {
+        const { getPlatformForPR } = require('./issue-providers');
+        try {
+          platform = getPlatformForPR(cluster.cwd || process.cwd());
+        } catch (error) {
+          throw new Error(`Cannot determine platform for PR creation on resume: ${error.message}`);
+        }
+      }
+
+      // Generate platform-specific git-pusher agent from template
+      const {
+        generateGitPusherAgent,
+        isPlatformSupported,
+      } = require('./agents/git-pusher-template');
+
+      if (!isPlatformSupported(platform)) {
+        throw new Error(
+          `Platform '${platform}' does not support --pr mode. Supported: github, gitlab, azure-devops`
+        );
+      }
+
+      const gitPusherConfig = generateGitPusherAgent(platform);
+
+      // Get issue context from ledger
+      const issueMsg = cluster.messageBus.ledger.findLast({ topic: 'ISSUE_OPENED' });
+      const issueNumber = issueMsg?.content?.data?.number || 'unknown';
+      const issueTitle = issueMsg?.content?.data?.title || 'Implementation';
+
+      // Inject issue context into prompt
+      gitPusherConfig.prompt = gitPusherConfig.prompt
+        .replace(/\{\{issue_number\}\}/g, issueNumber)
+        .replace(/\{\{issue_title\}\}/g, issueTitle);
+
+      await this._opAddAgents(cluster, { agents: [gitPusherConfig] }, context);
+      this._log(`    [--pr mode] Injected ${platform}-git-pusher agent`);
+    } else {
+      // Default completion-detector
+      const completionDetector = {
+        id: 'completion-detector',
+        role: 'orchestrator',
+        model: 'haiku',
+        timeout: 0,
+        triggers: [
+          {
+            topic: 'VALIDATION_RESULT',
+            logic: {
+              engine: 'javascript',
+              script: `const validators = cluster.getAgentsByRole('validator');
+const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
+if (!lastPush) return false;
+if (validators.length === 0) return true;
+
+const validatorIds = new Set(validators.map((v) => v.id));
+const results = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });
+
+const latestByValidator = new Map();
+for (const msg of results) {
+  if (!validatorIds.has(msg.sender)) continue;
+  latestByValidator.set(msg.sender, msg);
+}
+
+if (latestByValidator.size < validators.length) return false;
+
+for (const validator of validators) {
+  const msg = latestByValidator.get(validator.id);
+  const approved = msg?.content?.data?.approved;
+  if (!(approved === true || approved === 'true')) return false;
+}
+
+return true;`,
+            },
+            action: 'stop_cluster',
+          },
+        ],
+      };
+
+      await this._opAddAgents(cluster, { agents: [completionDetector] }, context);
+      this._log(`    Injected completion-detector agent`);
+    }
   }
 
   /**
@@ -2047,7 +2574,7 @@ Continue from where you left off. Review your previous output to understand what
    * @private
    */
   _exportMarkdown(cluster, clusterId, messages) {
-    const { parseChunk } = require('../lib/stream-json-parser');
+    const { parseProviderChunk } = require('./providers');
 
     // Find task info
     const issueOpened = messages.find((m) => m.topic === 'ISSUE_OPENED');
@@ -2071,100 +2598,164 @@ Continue from where you left off. Review your previous output to understand what
     md += `## Task\n\n${taskText}\n\n`;
 
     // Group messages by agent for cleaner output
-    const agentOutputs = new Map();
+    const agentOutputs = this._collectAgentOutputs(messages);
 
-    for (const msg of messages) {
-      if (msg.topic === 'AGENT_OUTPUT') {
-        if (!agentOutputs.has(msg.sender)) {
-          agentOutputs.set(msg.sender, []);
-        }
-        agentOutputs.get(msg.sender).push(msg);
-      }
-    }
-
-    // Agent sections
     for (const [agentId, agentMsgs] of agentOutputs) {
-      md += `## Agent: ${agentId}\n\n`;
-
-      let text = '';
-      let tools = [];
-
-      for (const msg of agentMsgs) {
-        const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
-        if (!content) continue;
-
-        const events = parseChunk(content);
-        for (const event of events) {
-          switch (event.type) {
-            case 'text':
-              text += event.text;
-              break;
-            case 'tool_call':
-              tools.push({ name: event.toolName, input: event.input });
-              break;
-            case 'tool_result':
-              if (tools.length > 0) {
-                const lastTool = tools[tools.length - 1];
-                lastTool.result = event.content;
-                lastTool.isError = event.isError;
-              }
-              break;
-          }
-        }
-      }
-
-      // Output text
-      if (text.trim()) {
-        md += `### Output\n\n${text.trim()}\n\n`;
-      }
-
-      // Tools used
-      if (tools.length > 0) {
-        md += `### Tools Used\n\n`;
-        for (const tool of tools) {
-          const status = tool.isError ? '❌' : '✓';
-          md += `- **${tool.name}** ${status}\n`;
-          if (tool.input) {
-            const inputStr =
-              typeof tool.input === 'string' ? tool.input : JSON.stringify(tool.input);
-            if (inputStr.length < 100) {
-              md += `  - Input: \`${inputStr}\`\n`;
-            }
-          }
-        }
-        md += '\n';
-      }
+      md += this._renderAgentMarkdown(agentId, agentMsgs, parseProviderChunk);
     }
 
-    // Validation results
-    const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
-    if (validations.length > 0) {
-      md += `## Validation Results\n\n`;
-      for (const v of validations) {
-        const data = v.content?.data || {};
-        const approved = data.approved === true || data.approved === 'true';
-        const icon = approved ? '✅' : '❌';
-        md += `### ${v.sender} ${icon}\n\n`;
-        if (data.summary) {
-          md += `${data.summary}\n\n`;
-        }
-        if (!approved && data.issues) {
-          const issues = typeof data.issues === 'string' ? JSON.parse(data.issues) : data.issues;
-          if (Array.isArray(issues) && issues.length > 0) {
-            md += `**Issues:**\n`;
-            for (const issue of issues) {
-              md += `- ${issue}\n`;
-            }
-            md += '\n';
-          }
-        }
-      }
-    }
+    md += this._renderValidationMarkdown(messages);
 
     // Final status
     const clusterComplete = messages.find((m) => m.topic === 'CLUSTER_COMPLETE');
     if (clusterComplete) {
       md += `## Result\n\n✅ **Cluster completed successfully**\n`;
+    }
+
+    return md;
+  }
+
+  _collectAgentOutputs(messages) {
+    const agentOutputs = new Map();
+
+    for (const msg of messages) {
+      if (msg.topic !== 'AGENT_OUTPUT') continue;
+      if (!agentOutputs.has(msg.sender)) {
+        agentOutputs.set(msg.sender, []);
+      }
+      agentOutputs.get(msg.sender).push(msg);
+    }
+
+    return agentOutputs;
+  }
+
+  _extractAgentOutput(agentMsgs, parseProviderChunk) {
+    let text = '';
+    const tools = [];
+
+    for (const msg of agentMsgs) {
+      const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
+      if (!content) continue;
+
+      const provider = normalizeProviderName(
+        msg.content?.data?.provider || msg.sender_provider || 'claude'
+      );
+      const events = parseProviderChunk(provider, content);
+      for (const event of events) {
+        switch (event.type) {
+          case 'text':
+            text += event.text;
+            break;
+          case 'tool_call':
+            tools.push({ name: event.toolName, input: event.input });
+            break;
+          case 'tool_result':
+            if (tools.length > 0) {
+              const lastTool = tools[tools.length - 1];
+              lastTool.result = event.content;
+              lastTool.isError = event.isError;
+            }
+            break;
+        }
+      }
+    }
+
+    return { text, tools };
+  }
+
+  _renderToolMarkdown(tools) {
+    let md = `### Tools Used\n\n`;
+
+    for (const tool of tools) {
+      const status = tool.isError ? '❌' : '✓';
+      md += `- **${tool.name}** ${status}\n`;
+      if (tool.input) {
+        const inputStr = typeof tool.input === 'string' ? tool.input : JSON.stringify(tool.input);
+        if (inputStr.length < 100) {
+          md += `  - Input: \`${inputStr}\`\n`;
+        }
+      }
+    }
+
+    return `${md}\n`;
+  }
+
+  _renderAgentMarkdown(agentId, agentMsgs, parseProviderChunk) {
+    let md = `## Agent: ${agentId}\n\n`;
+    const { text, tools } = this._extractAgentOutput(agentMsgs, parseProviderChunk);
+
+    if (text.trim()) {
+      md += `### Output\n\n${text.trim()}\n\n`;
+    }
+
+    if (tools.length > 0) {
+      md += this._renderToolMarkdown(tools);
+    }
+
+    return md;
+  }
+
+  _renderCriteriaMarkdown(criteriaResults) {
+    if (!Array.isArray(criteriaResults)) {
+      return '';
+    }
+
+    let md = '';
+    const cannotValidateYet = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE_YET');
+    if (cannotValidateYet.length > 0) {
+      md += `**❌ Cannot Validate Yet (${cannotValidateYet.length} criteria - work incomplete):**\n`;
+      for (const cv of cannotValidateYet) {
+        md += `- ${cv.id}: ${cv.reason || 'No reason provided'}\n`;
+      }
+      md += '\n';
+    }
+
+    const cannotValidate = criteriaResults.filter((c) => c.status === 'CANNOT_VALIDATE');
+    if (cannotValidate.length > 0) {
+      md += `**⚠️ Could Not Validate (${cannotValidate.length} criteria - permanent):**\n`;
+      for (const cv of cannotValidate) {
+        md += `- ${cv.id}: ${cv.reason || 'No reason provided'}\n`;
+      }
+      md += '\n';
+    }
+
+    return md;
+  }
+
+  _renderValidationEntryMarkdown(validation) {
+    const data = validation.content?.data || {};
+    const approved = data.approved === true || data.approved === 'true';
+    const icon = approved ? '✅' : '❌';
+    let md = `### ${validation.sender} ${icon}\n\n`;
+
+    if (data.summary) {
+      md += `${data.summary}\n\n`;
+    }
+
+    if (!approved && data.issues) {
+      const issues = typeof data.issues === 'string' ? JSON.parse(data.issues) : data.issues;
+      if (Array.isArray(issues) && issues.length > 0) {
+        md += `**Issues:**\n`;
+        for (const issue of issues) {
+          md += `- ${issue}\n`;
+        }
+        md += '\n';
+      }
+    }
+
+    md += this._renderCriteriaMarkdown(data.criteriaResults);
+    return md;
+  }
+
+  _renderValidationMarkdown(messages) {
+    const validations = messages.filter((m) => m.topic === 'VALIDATION_RESULT');
+    if (validations.length === 0) {
+      return '';
+    }
+
+    let md = `## Validation Results\n\n`;
+    for (const validation of validations) {
+      md += this._renderValidationEntryMarkdown(validation);
     }
 
     return md;

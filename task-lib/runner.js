@@ -1,62 +1,138 @@
 import { fork } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { LOGS_DIR, DEFAULT_MODEL } from './config.js';
+import { LOGS_DIR } from './config.js';
 import { addTask, generateId, ensureDirs } from './store.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { loadSettings } = require('../lib/settings.js');
+const { normalizeProviderName } = require('../lib/provider-names');
+const { getProvider } = require('../src/providers');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export function spawnTask(prompt, options = {}) {
+export async function spawnTask(prompt, options = {}) {
   ensureDirs();
 
   const id = generateId();
   const logFile = join(LOGS_DIR, `${id}.log`);
   const cwd = options.cwd || process.cwd();
-  const model = options.model || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
 
-  // Build claude command args
-  // --print: non-interactive mode
-  // --dangerously-skip-permissions: background tasks can't prompt for approval (CRITICAL)
-  // --output-format: stream-json (default) for real-time, text for clean output, json for structured
-  const outputFormat = options.outputFormat || 'stream-json';
-  const args = ['--print', '--dangerously-skip-permissions', '--output-format', outputFormat];
+  const settings = loadSettings();
+  const { providerName, provider, providerSettings, levelOverrides } = resolveProviderContext(
+    options,
+    settings
+  );
 
-  // Add any extra CLI args passed through (e.g., "--chrome" for browser control)
-  if (options.cliArgs) {
-    const extraArgs = options.cliArgs.split(/\s+/).filter(arg => arg.length > 0);
-    args.push(...extraArgs);
+  const outputFormat = resolveOutputFormat(options);
+  const jsonSchema = resolveJsonSchema(options, outputFormat);
+  const modelSpec = resolveModelSpec(options, provider, providerSettings, levelOverrides);
+
+  const cliFeatures = await provider.getCliFeatures();
+  const commandSpec = provider.buildCommand(prompt, {
+    modelSpec,
+    outputFormat,
+    jsonSchema,
+    cwd,
+    autoApprove: true,
+    cliFeatures,
+  });
+
+  const finalArgs = resolveFinalArgs(commandSpec, providerName, options);
+  const task = buildTaskRecord({
+    id,
+    prompt,
+    cwd,
+    options,
+    logFile,
+    providerName,
+    modelSpec,
+  });
+
+  addTask(task);
+
+  const watcherConfig = buildWatcherConfig(
+    outputFormat,
+    jsonSchema,
+    options,
+    providerName,
+    commandSpec
+  );
+  const watcherScript = resolveWatcherScript(options);
+  spawnWatcher({
+    watcherScript,
+    id,
+    cwd,
+    logFile,
+    finalArgs,
+    watcherConfig,
+  });
+
+  return task;
+}
+
+function resolveProviderContext(options, settings) {
+  const providerName = normalizeProviderName(
+    options.provider || settings.defaultProvider || 'claude'
+  );
+  const provider = getProvider(providerName);
+  const providerSettings = settings.providerSettings?.[providerName] || {};
+  const levelOverrides = providerSettings.levelOverrides || {};
+  return { providerName, provider, providerSettings, levelOverrides };
+}
+
+function resolveOutputFormat(options) {
+  return options.outputFormat || 'stream-json';
+}
+
+function resolveJsonSchema(options, outputFormat) {
+  let jsonSchema = options.jsonSchema || null;
+  if (jsonSchema && outputFormat !== 'json') {
+    console.warn('Warning: --json-schema requires --output-format json, ignoring schema');
+    jsonSchema = null;
+  }
+  return jsonSchema;
+}
+
+function resolveModelSpec(options, provider, providerSettings, levelOverrides) {
+  if (options.model) {
+    return {
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+    };
   }
 
-  // Only add streaming options for stream-json format
-  if (outputFormat === 'stream-json') {
-    args.push('--verbose');
-    // Include partial messages to get streaming updates before completion (required for stream-json format)
-    args.push('--include-partial-messages');
+  const level = options.modelLevel || providerSettings.defaultLevel || provider.getDefaultLevel();
+  let modelSpec = provider.resolveModelSpec(level, levelOverrides);
+  if (options.reasoningEffort) {
+    modelSpec = { ...modelSpec, reasoningEffort: options.reasoningEffort };
   }
+  return modelSpec;
+}
 
-  // Add JSON schema if provided (only works with --output-format json)
-  if (options.jsonSchema) {
-    if (outputFormat !== 'json') {
-      console.warn('Warning: --json-schema requires --output-format json, ignoring schema');
-    } else {
-      // CRITICAL: Must stringify schema object before passing to CLI (like zeroshot does)
-      const schemaString =
-        typeof options.jsonSchema === 'string'
-          ? options.jsonSchema
-          : JSON.stringify(options.jsonSchema);
-      args.push('--json-schema', schemaString);
+function resolveFinalArgs(commandSpec, providerName, options) {
+  const finalArgs = [...commandSpec.args];
+  if (providerName === 'claude') {
+    const promptIndex = finalArgs.length - 1;
+    if (options.resume) {
+      finalArgs.splice(promptIndex, 0, '--resume', options.resume);
+    } else if (options.continue) {
+      finalArgs.splice(promptIndex, 0, '--continue');
     }
+    // Pass through additional CLI args (e.g., --chrome for browser access)
+    if (options.cliArgs) {
+      const extraArgs = options.cliArgs.split(' ').filter(Boolean);
+      finalArgs.splice(promptIndex, 0, ...extraArgs);
+    }
+  } else if (options.resume || options.continue) {
+    console.warn('Warning: resume/continue is only supported for Claude CLI; ignoring.');
   }
+  return finalArgs;
+}
 
-  if (options.resume) {
-    args.push('--resume', options.resume);
-  } else if (options.continue) {
-    args.push('--continue');
-  }
-
-  args.push(prompt);
-
-  const task = {
+function buildTaskRecord({ id, prompt, cwd, options, logFile, providerName, modelSpec }) {
+  return {
     id,
     prompt: prompt.slice(0, 200) + (prompt.length > 200 ? '...' : ''),
     fullPrompt: prompt,
@@ -69,33 +145,36 @@ export function spawnTask(prompt, options = {}) {
     updatedAt: new Date().toISOString(),
     exitCode: null,
     error: null,
+    provider: providerName,
+    model: modelSpec?.model || null,
     // Schedule reference (if spawned by scheduler)
     scheduleId: options.scheduleId || null,
     // Attach support
     socketPath: null,
     attachable: false,
   };
+}
 
-  addTask(task);
-
-  // Fork a watcher process that will manage the claude process
-  const watcherConfig = {
+function buildWatcherConfig(outputFormat, jsonSchema, options, providerName, commandSpec) {
+  return {
     outputFormat,
-    jsonSchema: options.jsonSchema || null,
+    jsonSchema,
     silentJsonOutput: options.silentJsonOutput || false,
-    model,
+    provider: providerName,
+    command: commandSpec.binary,
+    env: commandSpec.env || {},
   };
+}
 
-  // Use attachable watcher by default (unless explicitly disabled)
-  // Attachable watcher uses node-pty and creates a Unix socket for attach/detach
-  const useAttachable = options.attachable !== false;
-  const watcherScript = useAttachable
-    ? join(__dirname, 'attachable-watcher.js')
-    : join(__dirname, 'watcher.js');
+function resolveWatcherScript(options) {
+  const useAttachable = options.attachable !== false && !options.jsonSchema;
+  return useAttachable ? join(__dirname, 'attachable-watcher.js') : join(__dirname, 'watcher.js');
+}
 
+function spawnWatcher({ watcherScript, id, cwd, logFile, finalArgs, watcherConfig }) {
   const watcher = fork(
     watcherScript,
-    [id, cwd, logFile, JSON.stringify(args), JSON.stringify(watcherConfig)],
+    [id, cwd, logFile, JSON.stringify(finalArgs), JSON.stringify(watcherConfig)],
     {
       detached: true,
       stdio: 'ignore',
@@ -103,9 +182,7 @@ export function spawnTask(prompt, options = {}) {
   );
 
   watcher.unref();
-
-  // Return task immediately - watcher will update PID async
-  return task;
+  watcher.disconnect(); // Close IPC channel so parent can exit
 }
 
 export function isProcessRunning(pid) {

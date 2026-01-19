@@ -30,58 +30,70 @@ function getToolIcon(toolName) {
 }
 
 // Format tool call input for display
+const TOOL_CALL_FORMATTERS = {
+  Bash: (input) => (input.command ? `$ ${input.command}` : ''),
+  Read: (input) => formatFilePathTail(input.file_path),
+  Write: (input) => formatFilePathTail(input.file_path, '→ '),
+  Edit: (input) => formatFilePathTail(input.file_path),
+  Glob: (input) => input.pattern || '',
+  Grep: (input) => (input.pattern ? `/${input.pattern}/` : ''),
+  WebFetch: (input) => (input.url ? input.url.substring(0, 50) : ''),
+  WebSearch: (input) => (input.query ? `"${input.query}"` : ''),
+  Task: (input) => input.description || '',
+  TodoWrite: (input) => formatTodoSummary(input),
+  AskUserQuestion: (input) => formatQuestionSummary(input),
+};
+
 function formatToolCall(toolName, input) {
   if (!input) return '';
 
-  switch (toolName) {
-    case 'Bash':
-      return input.command ? `$ ${input.command}` : '';
-    case 'Read':
-      return input.file_path ? input.file_path.split('/').slice(-2).join('/') : '';
-    case 'Write':
-      return input.file_path ? `→ ${input.file_path.split('/').slice(-2).join('/')}` : '';
-    case 'Edit':
-      return input.file_path ? input.file_path.split('/').slice(-2).join('/') : '';
-    case 'Glob':
-      return input.pattern || '';
-    case 'Grep':
-      return input.pattern ? `/${input.pattern}/` : '';
-    case 'WebFetch':
-      return input.url ? input.url.substring(0, 50) : '';
-    case 'WebSearch':
-      return input.query ? `"${input.query}"` : '';
-    case 'Task':
-      return input.description || '';
-    case 'TodoWrite':
-      if (input.todos && Array.isArray(input.todos)) {
-        const statusCounts = {};
-        input.todos.forEach((todo) => {
-          statusCounts[todo.status] = (statusCounts[todo.status] || 0) + 1;
-        });
-        const parts = Object.entries(statusCounts).map(
-          ([status, count]) => `${count} ${status.replace('_', ' ')}`
-        );
-        return `${input.todos.length} todo${input.todos.length === 1 ? '' : 's'} (${parts.join(', ')})`;
-      }
-      return '';
-    case 'AskUserQuestion':
-      if (input.questions && Array.isArray(input.questions)) {
-        const q = input.questions[0];
-        const preview = q.question.substring(0, 50);
-        return input.questions.length > 1
-          ? `${input.questions.length} questions: "${preview}..."`
-          : `"${preview}${q.question.length > 50 ? '...' : ''}"`;
-      }
-      return '';
-    default:
-      // For unknown tools, show first key-value pair
-      const keys = Object.keys(input);
-      if (keys.length > 0) {
-        const val = String(input[keys[0]]).substring(0, 40);
-        return val.length < String(input[keys[0]]).length ? val + '...' : val;
-      }
-      return '';
+  const formatter = TOOL_CALL_FORMATTERS[toolName] || formatUnknownToolCall;
+  return formatter(input);
+}
+
+function formatFilePathTail(filePath, prefix = '') {
+  if (!filePath) return '';
+  return `${prefix}${filePath.split('/').slice(-2).join('/')}`;
+}
+
+function formatTodoSummary(input) {
+  const todos = input.todos;
+  if (!Array.isArray(todos)) return '';
+
+  const statusCounts = {};
+  for (const todo of todos) {
+    statusCounts[todo.status] = (statusCounts[todo.status] || 0) + 1;
   }
+
+  const parts = Object.entries(statusCounts).map(
+    ([status, count]) => `${count} ${status.replace('_', ' ')}`
+  );
+
+  return `${todos.length} todo${todos.length === 1 ? '' : 's'} (${parts.join(', ')})`;
+}
+
+function formatQuestionSummary(input) {
+  const questions = input.questions;
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return '';
+  }
+
+  const preview = questions[0].question.substring(0, 50);
+  const suffix = questions[0].question.length > 50 ? '...' : '';
+  return questions.length > 1
+    ? `${questions.length} questions: "${preview}..."`
+    : `"${preview}${suffix}"`;
+}
+
+function formatUnknownToolCall(input) {
+  const keys = Object.keys(input);
+  if (keys.length === 0) {
+    return '';
+  }
+
+  const value = String(input[keys[0]]);
+  const preview = value.substring(0, 40);
+  return preview.length < value.length ? `${preview}...` : preview;
 }
 
 // Format tool result for display
@@ -98,16 +110,21 @@ function formatToolResult(content, isError, toolName, toolInput) {
   if (toolName === 'TodoWrite' && toolInput?.todos && Array.isArray(toolInput.todos)) {
     const todos = toolInput.todos;
     if (todos.length === 0) return chalk.dim('no todos');
+
+    // Helper to get status icon
+    const getStatusIcon = (todoStatus) => {
+      if (todoStatus === 'completed') return '✓';
+      if (todoStatus === 'in_progress') return '⧗';
+      return '○';
+    };
+
     if (todos.length === 1) {
-      const status =
-        todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
-      return chalk.dim(
-        `${status} ${todos[0].content.substring(0, 50)}${todos[0].content.length > 50 ? '...' : ''}`
-      );
+      const status = getStatusIcon(todos[0].status);
+      const suffix = todos[0].content.length > 50 ? '...' : '';
+      return chalk.dim(`${status} ${todos[0].content.substring(0, 50)}${suffix}`);
     }
     // Multiple todos - show first one as preview
-    const status =
-      todos[0].status === 'completed' ? '✓' : todos[0].status === 'in_progress' ? '⧗' : '○';
+    const status = getStatusIcon(todos[0].status);
     return chalk.dim(
       `${status} ${todos[0].content.substring(0, 40)}... (+${todos.length - 1} more)`
     );
@@ -161,77 +178,95 @@ function accumulateText(text) {
 }
 
 // Process parsed events and output formatted content
+const EVENT_HANDLERS = {
+  text: handleTextEvent,
+  thinking: handleThinkingEvent,
+  thinking_start: handleThinkingEvent,
+  tool_start: handleToolStart,
+  tool_call: handleToolCall,
+  tool_input: handleToolInput,
+  tool_result: handleToolResult,
+  result: handleResult,
+  block_end: handleBlockEnd,
+  multi: handleMulti,
+};
+
 function processEvent(event) {
-  switch (event.type) {
-    case 'text':
-      accumulateText(event.text);
-      break;
+  const handler = EVENT_HANDLERS[event.type];
+  if (handler) {
+    handler(event);
+  }
+}
 
-    case 'thinking':
-    case 'thinking_start':
-      if (event.text) {
-        console.log(chalk.dim.italic(event.text));
-      } else if (event.type === 'thinking_start') {
-        console.log(chalk.dim.italic('💭 thinking...'));
-      }
-      break;
+function handleTextEvent(event) {
+  accumulateText(event.text);
+}
 
-    case 'tool_start':
-      flushLineBuffer();
-      break;
+function handleThinkingEvent(event) {
+  if (event.text) {
+    console.log(chalk.dim.italic(event.text));
+    return;
+  }
 
-    case 'tool_call':
-      flushLineBuffer();
-      const icon = getToolIcon(event.toolName);
-      const toolDesc = formatToolCall(event.toolName, event.input);
-      console.log(`${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
-      currentToolCall = { toolName: event.toolName, input: event.input };
-      break;
+  if (event.type === 'thinking_start') {
+    console.log(chalk.dim.italic('💭 thinking...'));
+  }
+}
 
-    case 'tool_input':
-      // Streaming tool input JSON - skip (shown in tool_call)
-      break;
+function handleToolStart() {
+  flushLineBuffer();
+}
 
-    case 'tool_result':
-      const status = event.isError ? chalk.red('✗') : chalk.green('✓');
-      const resultDesc = formatToolResult(
-        event.content,
-        event.isError,
-        currentToolCall?.toolName,
-        currentToolCall?.input
-      );
-      console.log(`  ${status} ${resultDesc}`);
-      break;
+function handleToolCall(event) {
+  flushLineBuffer();
+  const icon = getToolIcon(event.toolName);
+  const toolDesc = formatToolCall(event.toolName, event.input);
+  console.log(`${icon} ${chalk.cyan(event.toolName)} ${chalk.dim(toolDesc)}`);
+  currentToolCall = { toolName: event.toolName, input: event.input };
+}
 
-    case 'result':
-      flushLineBuffer();
-      if (event.error) {
-        console.log(chalk.red(`\n✗ ERROR: ${event.error}`));
-      } else {
-        console.log(chalk.green(`\n✓ Completed`));
-        if (event.cost) {
-          console.log(chalk.dim(`   Cost: $${event.cost.toFixed(4)}`));
-        }
-        if (event.duration) {
-          const mins = Math.floor(event.duration / 60000);
-          const secs = Math.floor((event.duration % 60000) / 1000);
-          console.log(chalk.dim(`   Duration: ${mins}m ${secs}s`));
-        }
-      }
-      break;
+function handleToolInput() {
+  // Streaming tool input JSON - skip (shown in tool_call)
+}
 
-    case 'block_end':
-      // Content block ended
-      break;
+function handleToolResult(event) {
+  const status = event.isError ? chalk.red('✗') : chalk.green('✓');
+  const resultDesc = formatToolResult(
+    event.content,
+    event.isError,
+    currentToolCall?.toolName,
+    currentToolCall?.input
+  );
+  console.log(`  ${status} ${resultDesc}`);
+}
 
-    case 'multi':
-      // Multiple events
-      if (event.events) {
-        for (const e of event.events) {
-          processEvent(e);
-        }
-      }
-      break;
+function handleResult(event) {
+  flushLineBuffer();
+  if (event.error) {
+    console.log(chalk.red(`\n✗ ERROR: ${event.error}`));
+    return;
+  }
+
+  console.log(chalk.green(`\n✓ Completed`));
+  if (event.cost) {
+    console.log(chalk.dim(`   Cost: $${event.cost.toFixed(4)}`));
+  }
+  if (event.duration) {
+    const mins = Math.floor(event.duration / 60000);
+    const secs = Math.floor((event.duration % 60000) / 1000);
+    console.log(chalk.dim(`   Duration: ${mins}m ${secs}s`));
+  }
+}
+
+function handleBlockEnd() {
+  // Content block ended
+}
+
+function handleMulti(event) {
+  if (event.events) {
+    for (const subEvent of event.events) {
+      processEvent(subEvent);
+    }
   }
 }
 
@@ -296,23 +331,73 @@ export async function showLogs(taskId, options = {}) {
   }
 }
 
+function parseEventsFromLines(lines) {
+  const events = [];
+  for (const line of lines) {
+    events.push(...parseLogLine(line));
+  }
+  return events;
+}
+
+function renderEvents(events) {
+  for (const event of events) {
+    processEvent(event);
+  }
+}
+
+function renderLines(lines) {
+  for (const line of lines) {
+    renderEvents(parseLogLine(line));
+  }
+}
+
+function readFileSlice(file, start, end) {
+  const length = Math.max(0, end - start);
+  if (!length) return '';
+
+  const buffer = Buffer.alloc(length);
+  const fd = openSync(file, 'r');
+  readSync(fd, buffer, 0, buffer.length, start);
+  closeSync(fd);
+
+  return buffer.toString();
+}
+
+function shouldStopFollowing(noChangeCount, pid) {
+  return noChangeCount >= 10 && pid && !isProcessRunning(pid);
+}
+
+function handleFinalContent(file, lastSize, interval) {
+  const finalSize = statSync(file).size;
+  if (finalSize > lastSize) {
+    const finalContent = readFileSlice(file, lastSize, finalSize);
+    renderLines(finalContent.split('\n'));
+    flushLineBuffer();
+  }
+
+  console.log(chalk.dim('\n--- Task completed ---'));
+  clearInterval(interval);
+  process.exit(0);
+}
+
+function handleNewContent(file, lastSize, currentSize) {
+  const newContent = readFileSlice(file, lastSize, currentSize);
+  if (newContent) {
+    renderLines(newContent.split('\n'));
+    flushLineBuffer();
+  }
+  return currentSize;
+}
+
 function tailLines(file, n) {
   resetState();
   const rawContent = readFileSync(file, 'utf-8');
   const rawLines = rawContent.split('\n');
 
   // Parse and process all events
-  const allEvents = [];
-  for (const line of rawLines) {
-    const events = parseLogLine(line);
-    allEvents.push(...events);
-  }
-
+  const allEvents = parseEventsFromLines(rawLines);
   // Tail to last n events
-  const tailedEvents = allEvents.slice(-n);
-  for (const event of tailedEvents) {
-    processEvent(event);
-  }
+  renderEvents(allEvents.slice(-n));
   flushLineBuffer();
 }
 
@@ -323,17 +408,9 @@ async function tailFollow(file, pid, lines = 50) {
   const rawLines = rawContent.split('\n');
 
   // Parse all events first
-  const allEvents = [];
-  for (const line of rawLines) {
-    const events = parseLogLine(line);
-    allEvents.push(...events);
-  }
-
+  const allEvents = parseEventsFromLines(rawLines);
   // Output only the last N events
-  const tailedEvents = allEvents.slice(-lines);
-  for (const event of tailedEvents) {
-    processEvent(event);
-  }
+  renderEvents(allEvents.slice(-lines));
   flushLineBuffer();
 
   // Poll for changes (more reliable than fs.watch)
@@ -345,51 +422,16 @@ async function tailFollow(file, pid, lines = 50) {
       const currentSize = statSync(file).size;
 
       if (currentSize > lastSize) {
-        // Read new content
-        const buffer = Buffer.alloc(currentSize - lastSize);
-        const fd = openSync(file, 'r');
-        readSync(fd, buffer, 0, buffer.length, lastSize);
-        closeSync(fd);
-
-        // Parse and output new lines
-        const newLines = buffer.toString().split('\n');
-        for (const line of newLines) {
-          const events = parseLogLine(line);
-          for (const event of events) {
-            processEvent(event);
-          }
-        }
-        flushLineBuffer();
-
-        lastSize = currentSize;
+        lastSize = handleNewContent(file, lastSize, currentSize);
         noChangeCount = 0;
-      } else {
-        noChangeCount++;
+        return;
+      }
 
-        // Check if process is still running after 5 seconds of no output
-        if (noChangeCount >= 10 && pid && !isProcessRunning(pid)) {
-          // Read any final content
-          const finalSize = statSync(file).size;
-          if (finalSize > lastSize) {
-            const buffer = Buffer.alloc(finalSize - lastSize);
-            const fd = openSync(file, 'r');
-            readSync(fd, buffer, 0, buffer.length, lastSize);
-            closeSync(fd);
+      noChangeCount++;
 
-            const finalLines = buffer.toString().split('\n');
-            for (const line of finalLines) {
-              const events = parseLogLine(line);
-              for (const event of events) {
-                processEvent(event);
-              }
-            }
-            flushLineBuffer();
-          }
-
-          console.log(chalk.dim('\n--- Task completed ---'));
-          clearInterval(interval);
-          process.exit(0);
-        }
+      // Check if process is still running after 5 seconds of no output
+      if (shouldStopFollowing(noChangeCount, pid)) {
+        handleFinalContent(file, lastSize, interval);
       }
     } catch (err) {
       // File might have been deleted

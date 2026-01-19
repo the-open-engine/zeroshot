@@ -11,8 +11,8 @@ export function listTasks(options = {}) {
     return;
   }
 
-  // Sort by creation date, newest first
-  taskList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // Sort by creation date, oldest first (chronological)
+  taskList.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   // Filter by status if specified
   let filtered = taskList;
@@ -27,7 +27,7 @@ export function listTasks(options = {}) {
   // Table format (default) or verbose format
   if (options.verbose) {
     // Verbose format (old behavior)
-    console.log(chalk.bold(`\nClaude Tasks (${filtered.length}/${taskList.length})\n`));
+    console.log(chalk.bold(`\nTasks (${filtered.length}/${taskList.length})\n`));
 
     for (const task of filtered) {
       // Verify running status

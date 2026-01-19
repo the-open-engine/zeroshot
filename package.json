@@ -1,7 +1,7 @@
 {
   "name": "@covibes/zeroshot",
-  "version": "5.2.1",
-  "description": "Multi-agent orchestration engine for Claude - cluster coordinator and CLI",
+  "version": "5.4.0",
+  "description": "Multi-agent orchestration engine for Claude, Codex, and Gemini",
   "main": "src/orchestrator.js",
   "bin": {
     "zeroshot": "./cli/index.js"
@@ -11,14 +11,18 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "mocha 'tests/**/*.test.js'",
-    "test:coverage": "c8 npm test",
-    "test:coverage:report": "c8 --reporter=html npm test && echo 'Coverage report generated at coverage/index.html'",
+    "test": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
+    "test:unit": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
+    "test:slow": "mocha 'tests/integration/**/*.test.js' --timeout 180000",
+    "test:all": "npm run test && npm run test:slow",
+    "test:coverage": "c8 npm run test:unit",
+    "test:coverage:report": "c8 --reporter=html npm run test:unit && echo 'Coverage report generated at coverage/index.html'",
     "postinstall": "node scripts/fix-node-pty-permissions.js",
     "start": "node cli/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "validate:templates": "node scripts/validate-templates.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "deadcode": "ts-prune --skip node_modules",
@@ -55,6 +59,8 @@
     "multi-agent",
     "orchestration",
     "claude",
+    "codex",
+    "gemini",
     "automation"
   ],
   "author": "Covibes",
@@ -112,10 +118,14 @@
     "depcheck": "^1.4.7",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-security": "^3.0.1",
+    "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unused-imports": "^4.3.0",
     "husky": "^9.1.7",
     "jscpd": "^3.5.10",
+    "lint-staged": "^16.2.7",
     "mocha": "^11.7.5",
+    "prettier": "^3.7.4",
     "semantic-release": "^25.0.2",
     "sinon": "^21.0.0",
     "ts-prune": "^0.10.3",
@@ -123,6 +133,17 @@
     "unimported": "^1.31.0"
   },
   "overrides": {
-    "xml2js": "^0.5.0"
+    "xml2js": "^0.5.0",
+    "diff": ">=8.0.3",
+    "tar": ">=7.5.3",
+    "undici": ">=7.18.2"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs}": [
+      "eslint --fix"
+    ],
+    "*.{js,mjs,cjs,json,md}": [
+      "prettier --write"
+    ]
   }
 }

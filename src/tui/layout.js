@@ -33,7 +33,7 @@ function createLayout(screen) {
   // - Help Bar (18-20 rows, 12 cols)
   // ============================================================
 
-  const clustersTable = grid.set(0, 0, 16, 8, contrib.table, {
+  const clustersTable = grid.set(0, 0, 15, 8, contrib.table, {
     keys: true,
     fg: 'white',
     selectedFg: 'black',
@@ -63,7 +63,7 @@ function createLayout(screen) {
     data: [],
   });
 
-  const statsBox = grid.set(0, 8, 16, 4, blessed.box, {
+  const statsBox = grid.set(0, 8, 15, 4, blessed.box, {
     label: ' System Stats ',
     content: '',
     tags: true,
@@ -132,11 +132,27 @@ function createLayout(screen) {
   });
 
   // ============================================================
+  // WARNING BAR (experimental notice)
+  // ============================================================
+
+  const warningBar = grid.set(15, 0, 2, 12, blessed.box, {
+    content: '{yellow-fg}⚠ Watch TUI is experimental{/}',
+    tags: true,
+    border: { type: 'line', fg: 'yellow' },
+    style: {
+      border: { fg: 'yellow' },
+    },
+    padding: {
+      left: 1,
+    },
+  });
+
+  // ============================================================
   // HELP BAR (2 rows x 12 cols):
   // - Keyboard shortcuts and commands
   // ============================================================
 
-  const helpBar = grid.set(18, 0, 2, 12, blessed.box, {
+  const helpBar = grid.set(17, 0, 3, 12, blessed.box, {
     label: ' Help ',
     content:
       '{cyan-fg}[Enter]{/} View  ' +
@@ -200,6 +216,7 @@ function createLayout(screen) {
     statsBox,
     agentTable,
     logsBox,
+    warningBar,
     helpBar,
     widgets,
     focus: (widgetIndex) => {

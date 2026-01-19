@@ -15,20 +15,38 @@ const crypto = require('crypto');
 class Ledger extends EventEmitter {
   constructor(dbPath = ':memory:') {
     super();
-    this.db = new Database(dbPath);
+    this.dbPath = dbPath;
+    const busyTimeoutMs = (() => {
+      const raw = process.env.ZEROSHOT_SQLITE_BUSY_TIMEOUT_MS;
+      if (!raw) return 5000;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : 5000;
+    })();
+
+    this.db = new Database(dbPath, { timeout: busyTimeoutMs });
     this.cache = new Map(); // LRU cache for queries
     this.cacheLimit = 1000;
     this._closed = false; // Track closed state to prevent write-after-close
+    this._lastTimestamp = 0;
     this._initSchema();
   }
 
   _initSchema() {
-    // Enable WAL mode for concurrent reads
-    this.db.pragma('journal_mode = WAL');
+    const journalMode = (process.env.ZEROSHOT_SQLITE_JOURNAL_MODE || 'WAL').trim().toUpperCase();
+    // Enable WAL mode for concurrent reads (default), but allow overrides for network filesystems.
+    this.db.pragma(`journal_mode = ${journalMode}`);
     // Force synchronous writes so other processes see changes immediately
     this.db.pragma('synchronous = NORMAL');
-    // Checkpoint WAL frequently for cross-process visibility
-    this.db.pragma('wal_autocheckpoint = 1');
+    // Autocheckpoint trades latency for WAL growth; 1-page checkpoints are extremely slow on
+    // higher-latency disks (common in Kubernetes PVs). Default to SQLite-ish behavior (1000 pages),
+    // but allow override for niche correctness/debugging needs.
+    const walAutocheckpointPages = (() => {
+      const raw = process.env.ZEROSHOT_SQLITE_WAL_AUTOCHECKPOINT_PAGES;
+      if (!raw) return 1000;
+      const value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 1000;
+    })();
+    this.db.pragma(`wal_autocheckpoint = ${walAutocheckpointPages}`);
 
     // Create messages table
     this.db.exec(`
@@ -52,6 +70,7 @@ class Ledger extends EventEmitter {
     `);
 
     this._prepareStatements();
+    this._loadLastTimestamp();
   }
 
   _prepareStatements() {
@@ -69,6 +88,13 @@ class Ledger extends EventEmitter {
     };
   }
 
+  _loadLastTimestamp() {
+    const row = this.db.prepare('SELECT MAX(timestamp) AS max_timestamp FROM messages').get();
+    if (row && Number.isFinite(row.max_timestamp)) {
+      this._lastTimestamp = row.max_timestamp;
+    }
+  }
+
   /**
    * Append a message to the ledger
    * @param {Object} message - Message object
@@ -83,7 +109,10 @@ class Ledger extends EventEmitter {
     }
 
     const id = message.id || `msg_${crypto.randomBytes(16).toString('hex')}`;
-    const timestamp = message.timestamp || Date.now();
+    const baseTimestamp = Math.max(Date.now(), this._lastTimestamp + 1);
+    const requestedTimestamp = typeof message.timestamp === 'number' ? message.timestamp : null;
+    const timestamp =
+      requestedTimestamp !== null ? Math.max(requestedTimestamp, baseTimestamp) : baseTimestamp;
 
     const record = {
       id,
@@ -112,6 +141,8 @@ class Ledger extends EventEmitter {
 
       // Invalidate cache
       this.cache.clear();
+
+      this._lastTimestamp = Math.max(this._lastTimestamp, timestamp);
 
       // Emit event for subscriptions
       const fullMessage = this._deserializeMessage(record);
@@ -149,13 +180,13 @@ class Ledger extends EventEmitter {
     // Create transaction function - all inserts happen atomically
     const insertMany = this.db.transaction((msgs) => {
       const results = [];
-      const baseTimestamp = Date.now();
+      const baseTimestamp = Math.max(Date.now(), this._lastTimestamp + 1);
 
       for (let i = 0; i < msgs.length; i++) {
         const message = msgs[i];
         const id = message.id || `msg_${crypto.randomBytes(16).toString('hex')}`;
         // Use incrementing timestamps to preserve order within batch
-        const timestamp = message.timestamp || (baseTimestamp + i);
+        const timestamp = baseTimestamp + i;
 
         const record = {
           id,
@@ -184,15 +215,17 @@ class Ledger extends EventEmitter {
         results.push(this._deserializeMessage(record));
       }
 
-      return results;
+      return { results, baseTimestamp };
     });
 
     try {
       // Execute transaction (atomic - all or nothing)
-      const appendedMessages = insertMany(messages);
+      const { results: appendedMessages, baseTimestamp } = insertMany(messages);
 
       // Invalidate cache
       this.cache.clear();
+
+      this._lastTimestamp = Math.max(this._lastTimestamp, baseTimestamp + messages.length - 1);
 
       // Emit events for subscriptions AFTER transaction commits
       // This ensures listeners see consistent state
@@ -248,7 +281,13 @@ class Ledger extends EventEmitter {
       params.push(typeof until === 'number' ? until : new Date(until).getTime());
     }
 
-    let sql = `SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY timestamp ASC`;
+    // Defend against prototype pollution affecting default query ordering.
+    // Only treat `criteria.order` as set if it's an own property.
+    const orderValue = Object.prototype.hasOwnProperty.call(criteria, 'order')
+      ? criteria.order
+      : undefined;
+    const direction = String(orderValue ?? 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    let sql = `SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY timestamp ${direction}`;
 
     if (limit) {
       sql += ` LIMIT ?`;

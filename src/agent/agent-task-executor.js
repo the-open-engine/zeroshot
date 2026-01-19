@@ -14,6 +14,42 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { exec, execSync } = require('../lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
+const { getProvider, parseChunkWithProvider } = require('../providers');
+const { getTask } = require('../../task-lib/store.js');
+const { loadSettings } = require('../../lib/settings.js');
+const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
+
+// Schema utilities for normalizing LLM output
+const { normalizeEnumValues } = require('./schema-utils');
+
+/**
+ * Build Claude-specific environment variables for task spawning
+ * Consolidates auth resolution and model mapping logic used by both isolated and non-isolated modes
+ * @param {Object} modelSpec - Model specification from agent
+ * @param {Object} [options] - Options
+ * @param {boolean} [options.includeAuth=true] - Include auth env vars (false for isolated mode where IsolationManager handles auth)
+ * @returns {Object} Environment variables to merge into spawn env
+ */
+function buildClaudeEnv(modelSpec, options = {}) {
+  const { includeAuth = true } = options;
+  const env = {};
+
+  if (includeAuth) {
+    const settings = loadSettings();
+    const authEnv = resolveClaudeAuth(settings);
+    Object.assign(env, authEnv);
+  }
+
+  if (modelSpec?.model) {
+    env.ANTHROPIC_MODEL = modelSpec.model;
+  }
+
+  // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
+  env.ZEROSHOT_BLOCK_ASK_USER = '1';
+
+  return env;
+}
 
 /**
  * Validate and sanitize error messages.
@@ -34,12 +70,17 @@ function sanitizeErrorMessage(error) {
     /^unknown$/i,
     /^void$/i,
     /^never$/i,
-    /^[A-Z][a-zA-Z]*\s*\|\s*(null|undefined)$/, // e.g., "Error | null"
-    /^[a-z]+(\s*\|\s*[a-z]+)+$/i, // e.g., "string | number | boolean"
+    /^[A-Z][a-zA-Z]*\s*\|\s*(?:null|undefined)$/, // e.g., "Error | null"
   ];
 
+  const trimmedError = error.trim();
+
+  // Check if it's a union type like "string | number | boolean" (ReDoS-safe approach)
+  const unionParts = trimmedError.split(/\s*\|\s*/);
+  const isUnionType = unionParts.length > 1 && unionParts.every((p) => /^[a-z]+$/i.test(p));
+
   for (const pattern of typeAnnotationPatterns) {
-    if (pattern.test(error.trim())) {
+    if (pattern.test(trimmedError) || isUnionType) {
       console.warn(
         `[agent-task-executor] WARNING: Error message looks like a TypeScript type annotation: "${error}". ` +
           `This indicates corrupted data. Replacing with generic error.`
@@ -49,21 +90,6 @@ function sanitizeErrorMessage(error) {
   }
 
   return error;
-}
-
-/**
- * Strip timestamp prefix from log lines.
- * Log lines may have format: [epochMs]{json...} or [epochMs]text
- *
- * @param {string} line - Raw log line
- * @returns {string} Line content without timestamp prefix, empty string for invalid input
- */
-function stripTimestampPrefix(line) {
-  if (!line || typeof line !== 'string') return '';
-  const trimmed = line.trim().replace(/\r$/, '');
-  if (!trimmed) return '';
-  const match = trimmed.match(/^\[(\d{13})\](.*)$/);
-  return match ? match[2] : trimmed;
 }
 
 /**
@@ -91,13 +117,62 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false 
     }
   }
 
-  // Fall back to extracting from output (last 500 chars)
-  const lastOutput = (output || '').slice(-500).trim();
-  if (!lastOutput) {
-    return sanitizeErrorMessage('Task failed with no output (check if task was interrupted or timed out)');
+  // KNOWN CLAUDE CODE LIMITATIONS - detect and provide actionable guidance
+  const fullOutput = output || '';
+
+  // 256KB file limit error
+  if (fullOutput.includes('exceeds maximum allowed size') || fullOutput.includes('256KB')) {
+    return sanitizeErrorMessage(
+      `FILE TOO LARGE (Claude Code 256KB limit). ` +
+        `Use offset and limit parameters when reading large files. ` +
+        `Example: Read tool with offset=0, limit=1000 to read first 1000 lines.`
+    );
   }
 
-  // Common error patterns
+  // Streaming mode error (interactive tools in non-interactive mode)
+  if (fullOutput.includes('only prompt commands are supported in streaming mode')) {
+    return sanitizeErrorMessage(
+      `STREAMING MODE ERROR: Agent tried to use interactive tools in streaming mode. ` +
+        `This usually happens with AskUserQuestion or interactive prompts. ` +
+        `Zeroshot agents must run non-interactively.`
+    );
+  }
+
+  // NEVER TRUNCATE OUTPUT - truncation corrupts structured JSON and causes false "crash" status
+  // If output is too verbose, that's a prompt problem - fix the prompts, not the data
+  const trimmedOutput = (output || '').trim();
+  if (!trimmedOutput) {
+    return sanitizeErrorMessage(
+      'Task failed with no output (check if task was interrupted or timed out)'
+    );
+  }
+
+  // Try to extract structured JSON from output first - it may contain the actual result
+  // even if the task was marked as "failed" due to timeout/stale status
+  try {
+    const { extractJsonFromOutput } = require('./output-extraction');
+    const extracted = extractJsonFromOutput(trimmedOutput);
+    if (extracted && typeof extracted === 'object') {
+      // If we found valid JSON, return it as the error context
+      // This preserves the actual agent output for downstream processing
+      return JSON.stringify(extracted);
+    }
+  } catch {
+    // Extraction failed, fall through to error pattern matching
+  }
+
+  // Extract non-JSON lines only (JSON lines contain "is_error": true which falsely matches)
+  const nonJsonLines = trimmedOutput
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      // Skip JSON objects and JSON-like content
+      return trimmed && !trimmed.startsWith('{') && !trimmed.startsWith('"');
+    })
+    .join('\n');
+
+  // Common error patterns - match against non-JSON content
+  const textToSearch = nonJsonLines || trimmedOutput;
   const errorPatterns = [
     /Error:\s*(.+)/i,
     /error:\s*(.+)/i,
@@ -107,14 +182,16 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false 
   ];
 
   for (const pattern of errorPatterns) {
-    const match = lastOutput.match(pattern);
+    const match = textToSearch.match(pattern);
     if (match) {
-      return sanitizeErrorMessage(match[1].slice(0, 200));
+      // Don't truncate - let the full error message through
+      return sanitizeErrorMessage(match[1]);
     }
   }
 
-  // No pattern matched - include last portion of output
-  return sanitizeErrorMessage(`Task failed. Last output: ${lastOutput.slice(-200)}`);
+  // No pattern matched - return full output (no truncation)
+  // If this is too long, the solution is to make agents output less, not to corrupt data
+  return sanitizeErrorMessage(`Task failed. Output: ${trimmedOutput}`);
 }
 
 // Track if we've already ensured the AskUserQuestion hook is installed
@@ -130,36 +207,26 @@ let dangerousGitHookInstalled = false;
  * @param {string} output - Full NDJSON output from Claude CLI
  * @returns {Object|null} Token usage data or null if not found
  */
-function extractTokenUsage(output) {
+function extractTokenUsage(output, providerName = 'claude') {
   if (!output) return null;
 
-  const lines = output.split('\n');
+  const provider = getProvider(providerName);
+  const events = parseChunkWithProvider(provider, output);
+  const resultEvent = events.find((event) => event.type === 'result');
 
-  // Find the result line containing usage data
-  for (const line of lines) {
-    const content = stripTimestampPrefix(line);
-    if (!content) continue;
-
-    try {
-      const event = JSON.parse(content);
-      if (event.type === 'result') {
-        const usage = event.usage || {};
-        return {
-          inputTokens: usage.input_tokens || 0,
-          outputTokens: usage.output_tokens || 0,
-          cacheReadInputTokens: usage.cache_read_input_tokens || 0,
-          cacheCreationInputTokens: usage.cache_creation_input_tokens || 0,
-          totalCostUsd: event.total_cost_usd || null,
-          durationMs: event.duration_ms || null,
-          modelUsage: event.modelUsage || null,
-        };
-      }
-    } catch {
-      // Not valid JSON, continue
-    }
+  if (!resultEvent) {
+    return null;
   }
 
-  return null;
+  return {
+    inputTokens: resultEvent.inputTokens || 0,
+    outputTokens: resultEvent.outputTokens || 0,
+    cacheReadInputTokens: resultEvent.cacheReadInputTokens || 0,
+    cacheCreationInputTokens: resultEvent.cacheCreationInputTokens || 0,
+    totalCostUsd: resultEvent.cost || null,
+    durationMs: resultEvent.duration || null,
+    modelUsage: resultEvent.modelUsage || null,
+  };
 }
 
 /**
@@ -325,6 +392,9 @@ function ensureDangerousGitHook() {
  * @returns {Promise<Object>} Result object { success, output, error }
  */
 async function spawnClaudeTask(agent, context) {
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
+  const modelSpec = resolveAgentModelSpec(agent);
+
   const ctPath = getClaudeTasksPath();
   const cwd = agent.config.cwd || process.cwd();
 
@@ -332,50 +402,27 @@ async function spawnClaudeTask(agent, context) {
   // CRITICAL: Default to strict schema validation to prevent cluster crashes from parse failures
   // strictSchema=true uses Claude CLI's native --json-schema enforcement (no streaming but guaranteed structure)
   // strictSchema=false uses stream-json with post-run validation (live logs but fragile)
-  const desiredOutputFormat = agent.config.outputFormat || 'json';
-  const strictSchema = agent.config.strictSchema !== false; // DEFAULT TO TRUE
-  const runOutputFormat =
-    agent.config.jsonSchema && desiredOutputFormat === 'json' && !strictSchema
-      ? 'stream-json'
-      : desiredOutputFormat;
-  const args = ['task', 'run', '--output-format', runOutputFormat];
-
-  // Add verification mode flag if configured
-  if (agent.config.verificationMode) {
-    args.push('-v');
-  }
+  const { desiredOutputFormat, runOutputFormat } = resolveOutputFormatConfig(agent);
+  const args = buildTaskRunArgs({
+    agent,
+    providerName,
+    modelSpec,
+    runOutputFormat,
+  });
 
   // NOTE: maxRetries is handled by the agent wrapper's internal retry loop,
   // not passed to the CLI. See _handleTrigger() for retry logic.
 
-  // Add JSON schema if specified in agent config.
-  // If we are running stream-json for live logs (strictSchema=false), do NOT pass schema to CLI.
-  if (agent.config.jsonSchema) {
-    if (runOutputFormat === 'json') {
-      // strictSchema=true OR no schema conflict: pass schema to CLI for native enforcement
-      const schema = JSON.stringify(agent.config.jsonSchema);
-      args.push('--json-schema', schema);
-    } else if (!agent.quiet) {
-      agent._log(
-        `[Agent ${agent.id}] jsonSchema configured; running stream-json for live logs (strictSchema=false). Schema will be validated after completion.`
-      );
-    }
-  }
+  maybeLogStreamJsonNotice(agent, runOutputFormat);
 
   // If schema enforcement is desired but we had to run stream-json for live logs,
   // add explicit output instructions so the model still knows the required shape.
-  let finalContext = context;
-  if (
-    agent.config.jsonSchema &&
-    desiredOutputFormat === 'json' &&
-    runOutputFormat === 'stream-json'
-  ) {
-    finalContext += `\n\n## Output Format (REQUIRED)\n\nReturn a JSON object that matches this schema exactly.\n\nSchema:\n\`\`\`json\n${JSON.stringify(
-      agent.config.jsonSchema,
-      null,
-      2
-    )}\n\`\`\`\n`;
-  }
+  const finalContext = buildFinalContext({
+    agent,
+    context,
+    desiredOutputFormat,
+    runOutputFormat,
+  });
 
   args.push(finalContext);
 
@@ -397,44 +444,188 @@ async function spawnClaudeTask(agent, context) {
     return spawnClaudeTaskIsolated(agent, context);
   }
 
-  // NON-ISOLATION MODE: Use user's existing Claude config (preserves Keychain auth)
+  // NON-ISOLATION MODE: For Claude, use user's existing Claude config
   // AskUserQuestion blocking handled via:
-  // 1. Prompt injection (see agent-context-builder) - tells agent not to ask
+  // 1. Prompt injection (see agent-context-builder)
   // 2. PreToolUse hook (defense-in-depth) - activated by ZEROSHOT_BLOCK_ASK_USER env var
-  // DO NOT override CLAUDE_CONFIG_DIR - it breaks authentication on Claude CLI 2.x
+  ensureProviderHooks(agent, providerName);
+  const spawnEnv = buildSpawnEnv(agent, providerName, modelSpec);
+  const taskId = await spawnTaskProcess({
+    agent,
+    ctPath,
+    args,
+    cwd,
+    spawnEnv,
+  });
+
+  agent._log(`📋 Agent ${agent.id}: Following zeroshot logs for ${taskId}`);
+
+  // Wait for task to be registered in zeroshot storage (race condition fix)
+  await waitForTaskReady(agent, taskId);
+
+  // CRITICAL: Poll for REAL process PID from task store
+  // The watcher spawns the actual CLI and writes PID to SQLite asynchronously.
+  // We must poll because the watcher runs in a forked process.
+  const MAX_PID_POLLS = 30; // 3 seconds max
+  const PID_POLL_DELAY = 100;
+  let realPid = null;
+
+  for (let i = 0; i < MAX_PID_POLLS; i++) {
+    const taskInfo = getTask(taskId);
+    if (taskInfo?.pid) {
+      realPid = taskInfo.pid;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, PID_POLL_DELAY));
+  }
+
+  if (realPid) {
+    agent.processPid = realPid;
+    agent._publishLifecycle('PROCESS_SPAWNED', { pid: realPid });
+    agent._log(`📋 Agent ${agent.id}: Process PID: ${realPid}`);
+  } else {
+    agent._log(`⚠️ Agent ${agent.id}: PID not available (task may use non-standard watcher)`);
+  }
+
+  // Now follow the logs and stream output
+  return followClaudeTaskLogs(agent, taskId);
+}
+
+function resolveAgentModelSpec(agent) {
+  return agent._resolveModelSpec ? agent._resolveModelSpec() : { model: agent._selectModel() };
+}
+
+function resolveOutputFormatConfig(agent) {
+  // CRITICAL: Default to strict schema validation to prevent cluster crashes from parse failures
+  // strictSchema=true uses Claude CLI's native --json-schema enforcement (no streaming but guaranteed structure)
+  // strictSchema=false uses stream-json with post-run validation (live logs but fragile)
+  const desiredOutputFormat = agent.config.outputFormat || 'json';
+  const strictSchema = agent.config.strictSchema !== false; // DEFAULT TO TRUE
+  const runOutputFormat =
+    agent.config.jsonSchema && desiredOutputFormat === 'json' && !strictSchema
+      ? 'stream-json'
+      : desiredOutputFormat;
+
+  return { desiredOutputFormat, strictSchema, runOutputFormat };
+}
+
+function buildTaskRunArgs({ agent, providerName, modelSpec, runOutputFormat }) {
+  const args = ['task', 'run', '--output-format', runOutputFormat, '--provider', providerName];
+
+  if (modelSpec?.model) {
+    args.push('--model', modelSpec.model);
+  }
+
+  if (modelSpec?.reasoningEffort) {
+    args.push('--reasoning-effort', modelSpec.reasoningEffort);
+  }
+
+  // Add verification mode flag if configured
+  if (agent.config.verificationMode) {
+    args.push('-v');
+  }
+
+  // Add JSON schema if specified in agent config.
+  // If we are running stream-json for live logs (strictSchema=false), do NOT pass schema to CLI.
+  if (agent.config.jsonSchema && runOutputFormat === 'json') {
+    const schema = JSON.stringify(agent.config.jsonSchema);
+    args.push('--json-schema', schema);
+  }
+
+  return args;
+}
+
+function maybeLogStreamJsonNotice(agent, runOutputFormat) {
+  if (agent.config.jsonSchema && runOutputFormat !== 'json' && !agent.quiet) {
+    agent._log(
+      `[Agent ${agent.id}] jsonSchema configured; running stream-json for live logs (strictSchema=false). Schema will be validated after completion.`
+    );
+  }
+}
+
+function buildFinalContext({ agent, context, desiredOutputFormat, runOutputFormat }) {
+  if (
+    agent.config.jsonSchema &&
+    desiredOutputFormat === 'json' &&
+    runOutputFormat === 'stream-json'
+  ) {
+    return (
+      context +
+      `\n\n## Output Format (REQUIRED)\n\nReturn a JSON object that matches this schema exactly.\n\nSchema:\n\`\`\`json\n${JSON.stringify(
+        agent.config.jsonSchema,
+        null,
+        2
+      )}\n\`\`\`\n`
+    );
+  }
+
+  return context;
+}
+
+function ensureProviderHooks(agent, providerName) {
+  if (providerName !== 'claude') {
+    return;
+  }
+
   ensureAskUserQuestionHook();
 
   // WORKTREE MODE: Install git safety hook (blocks dangerous git commands)
   if (agent.worktree?.enabled) {
     ensureDangerousGitHook();
   }
+}
 
-  // Build environment for spawn
-  const spawnEnv = {
-    ...process.env,
-    ANTHROPIC_MODEL: agent._selectModel(),
-    // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
-    ZEROSHOT_BLOCK_ASK_USER: '1',
-  };
+function buildSpawnEnv(agent, providerName, modelSpec) {
+  const spawnEnv = { ...process.env };
 
-  // WORKTREE MODE: Activate git safety hook via environment variable
-  // The hook only activates when ZEROSHOT_WORKTREE=1 is set
-  if (agent.worktree?.enabled) {
-    spawnEnv.ZEROSHOT_WORKTREE = '1';
+  if (providerName === 'claude') {
+    Object.assign(spawnEnv, buildClaudeEnv(modelSpec));
+
+    // WORKTREE MODE: Activate git safety hook via environment variable
+    if (agent.worktree?.enabled) {
+      spawnEnv.ZEROSHOT_WORKTREE = '1';
+    }
   }
 
-  const taskId = await new Promise((resolve, reject) => {
+  return spawnEnv;
+}
+
+function parseTaskIdFromOutput(stdout) {
+  const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
+  return match ? match[1] : null;
+}
+
+function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
+  // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
+  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+
+  return new Promise((resolve, reject) => {
     const proc = spawn(ctPath, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: spawnEnv,
     });
-    // Track PID for resource monitoring
-    agent.processPid = proc.pid;
-    agent._publishLifecycle('PROCESS_SPAWNED', { pid: proc.pid });
+
+    // NOTE: Don't emit PROCESS_SPAWNED here - proc.pid is a wrapper that exits immediately.
+    // Real PID comes from task store after watcher spawns the actual CLI process.
+    // PROCESS_SPAWNED is emitted in spawnClaudeTask after waitForTaskReady + PID polling.
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    // CRITICAL: Timeout to prevent infinite hang if provider CLI hangs
+    const spawnTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      proc.kill('SIGKILL');
+      reject(
+        new Error(
+          `Spawn timeout after ${SPAWN_TIMEOUT_MS / 1000}s - provider CLI hung. ` +
+            `stdout: ${stdout.slice(-500)}, stderr: ${stderr.slice(-500)}`
+        )
+      );
+    }, SPAWN_TIMEOUT_MS);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -445,6 +636,9 @@ async function spawnClaudeTask(agent, context) {
     });
 
     proc.on('close', (code, signal) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       // Handle process killed by signal (e.g., SIGTERM, SIGKILL, SIGSTOP)
       if (signal) {
         reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
@@ -454,9 +648,8 @@ async function spawnClaudeTask(agent, context) {
       if (code === 0) {
         // Parse task ID from output: "✓ Task spawned: xxx-yyy-nn"
         // Format: <adjective>-<noun>-<digits> (may or may not have task- prefix)
-        const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
-        if (match) {
-          const spawnedTaskId = match[1];
+        const spawnedTaskId = parseTaskIdFromOutput(stdout);
+        if (spawnedTaskId) {
           agent.currentTaskId = spawnedTaskId; // Track for resume capability
           agent._publishLifecycle('TASK_ID_ASSIGNED', {
             pid: agent.processPid,
@@ -479,17 +672,12 @@ async function spawnClaudeTask(agent, context) {
     });
 
     proc.on('error', (error) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       reject(error);
     });
   });
-
-  agent._log(`📋 Agent ${agent.id}: Following zeroshot logs for ${taskId}`);
-
-  // Wait for task to be registered in zeroshot storage (race condition fix)
-  await waitForTaskReady(agent, taskId);
-
-  // Now follow the logs and stream output
-  return followClaudeTaskLogs(agent, taskId);
 }
 
 /**
@@ -501,16 +689,16 @@ async function spawnClaudeTask(agent, context) {
  * @returns {Promise<void>}
  */
 async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
-  const { exec } = require('child_process');
   const ctPath = getClaudeTasksPath();
 
   for (let i = 0; i < maxRetries; i++) {
-    const exists = await new Promise((resolve) => {
-      exec(`${ctPath} status ${taskId}`, (error, stdout) => {
-        // Task exists if status doesn't return "Task not found"
-        resolve(!error && !stdout.includes('Task not found'));
-      });
-    });
+    let exists = false;
+    try {
+      const { stdout } = await exec(`${ctPath} status ${taskId}`, { timeout: 5000 });
+      exists = !stdout.includes('Task not found');
+    } catch {
+      // Timeout or error - task not ready yet
+    }
 
     if (exists) return;
 
@@ -518,8 +706,355 @@ async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
     await new Promise((r) => setTimeout(r, delayMs));
   }
 
-  // Continue anyway after max retries - the task may still work
-  console.warn(`⚠️ Task ${taskId} not yet visible after ${maxRetries} retries, continuing anyway`);
+  // FAIL FAST: Task not found after retries = unrecoverable error
+  // Continuing with a non-existent task causes 30s of pointless polling then crash
+  throw new Error(
+    `Task ${taskId} not found after ${maxRetries} retries (${maxRetries * delayMs}ms). ` +
+      `Task spawn may have failed silently. Check zeroshot task run output.`
+  );
+}
+
+const MAX_STATUS_FAILURES = 30;
+
+function createLogFollowState() {
+  return {
+    output: '',
+    logFilePath: null,
+    lastSize: 0,
+    pollInterval: null,
+    statusCheckInterval: null,
+    resolved: false,
+    lineBuffer: '',
+    consecutiveExecFailures: 0,
+  };
+}
+
+function lookupLogFilePath(ctPath, taskId) {
+  try {
+    return execSync(`${ctPath} get-log-path ${taskId}`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function parseTimestampedLine(line) {
+  let timestamp = Date.now();
+  let content = line.replace(/\r$/, '');
+
+  const timestampMatch = content.match(/^\[(\d{13})\](.*)$/);
+  if (timestampMatch) {
+    timestamp = parseInt(timestampMatch[1], 10);
+    content = timestampMatch[2];
+  }
+
+  return { timestamp, content };
+}
+
+function shouldSkipLogLine(content) {
+  return (
+    content.startsWith('===') ||
+    content.startsWith('Finished:') ||
+    content.startsWith('Exit code:') ||
+    (content.includes('"type":"system"') && content.includes('"subtype":"init"'))
+  );
+}
+
+function isValidJsonLine(content) {
+  if (!content.trim().startsWith('{')) {
+    return false;
+  }
+
+  try {
+    JSON.parse(content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function broadcastAgentLine({ agent, providerName, state, line }) {
+  if (!line.trim()) return;
+
+  const { timestamp, content } = parseTimestampedLine(line);
+  if (shouldSkipLogLine(content)) {
+    return;
+  }
+
+  const isValidJson = isValidJsonLine(content);
+  state.output += content + '\n';
+
+  agent.lastOutputTime = Date.now();
+
+  agent._publish({
+    topic: 'AGENT_OUTPUT',
+    receiver: 'broadcast',
+    timestamp,
+    content: {
+      text: content,
+      data: {
+        type: isValidJson ? 'json' : 'text',
+        line: content,
+        agent: agent.id,
+        role: agent.role,
+        iteration: agent.iteration,
+        provider: providerName,
+      },
+    },
+  });
+}
+
+function appendContentToBuffer(state, content, onLine) {
+  state.lineBuffer += content;
+  const lines = state.lineBuffer.split('\n');
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    onLine(lines[i]);
+  }
+
+  state.lineBuffer = lines[lines.length - 1];
+}
+
+function pollLogFileForUpdates({ agent, fsModule, ctPath, taskId, state, onNewContent }) {
+  if (!state.logFilePath) {
+    const logFilePath = lookupLogFilePath(ctPath, taskId);
+    if (!logFilePath) {
+      return;
+    }
+    state.logFilePath = logFilePath;
+    agent._log(`📋 Agent ${agent.id}: Found log file: ${logFilePath}`);
+  }
+
+  if (!fsModule.existsSync(state.logFilePath)) {
+    return;
+  }
+
+  try {
+    const stats = fsModule.statSync(state.logFilePath);
+    const currentSize = stats.size;
+
+    if (currentSize > state.lastSize) {
+      const fd = fsModule.openSync(state.logFilePath, 'r');
+      const buffer = Buffer.alloc(currentSize - state.lastSize);
+      fsModule.readSync(fd, buffer, 0, buffer.length, state.lastSize);
+      fsModule.closeSync(fd);
+
+      onNewContent(buffer.toString('utf-8'));
+      state.lastSize = currentSize;
+    }
+  } catch (err) {
+    const error = /** @type {Error} */ (err);
+    console.warn(`⚠️ Agent ${agent.id}: Error reading log: ${error.message}`);
+  }
+}
+
+function stripAnsiCodes(value) {
+  const ansiPattern = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
+  return value.replace(ansiPattern, '');
+}
+
+function parseStatusFlags(cleanStdout) {
+  return {
+    isCompleted: /Status:\s+completed/i.test(cleanStdout),
+    isFailed: /Status:\s+failed/i.test(cleanStdout),
+    isStale: /Status:\s+stale/i.test(cleanStdout),
+  };
+}
+
+function determineStaleSuccess({ agent, output, providerName, taskId }) {
+  if (!output) {
+    return false;
+  }
+
+  const hasStructuredOutput = /"structured_output"\s*:/.test(output);
+  const hasSuccessResult = /"subtype"\s*:\s*"success"/.test(output);
+  let hasParsedOutput = false;
+
+  try {
+    const { extractJsonFromOutput } = require('./output-extraction');
+    hasParsedOutput = !!extractJsonFromOutput(output, providerName);
+  } catch {
+    // Ignore extraction errors - fallback to other signals
+  }
+
+  const success = hasStructuredOutput || hasSuccessResult || hasParsedOutput;
+  if (!agent.quiet) {
+    agent._log(
+      `[Agent ${agent.id}] Task ${taskId} is stale - recovered as ${success ? 'SUCCESS' : 'FAILURE'} based on output analysis`
+    );
+  }
+
+  return success;
+}
+
+function finalizeLogFollow(agent, state) {
+  if (state.pollInterval) {
+    clearInterval(state.pollInterval);
+  }
+  if (state.statusCheckInterval) {
+    clearInterval(state.statusCheckInterval);
+  }
+  agent.currentTask = null;
+}
+
+function handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve }) {
+  if (!error) {
+    return false;
+  }
+
+  state.consecutiveExecFailures++;
+  if (state.consecutiveExecFailures < MAX_STATUS_FAILURES) {
+    return true;
+  }
+
+  console.error(
+    `[Agent ${agent.id}] ⚠️ Status polling failed ${MAX_STATUS_FAILURES} times consecutively! STOPPING.`
+  );
+  console.error(`  Command: ${ctPath} status ${taskId}`);
+  console.error(`  Error: ${error.message}`);
+  console.error(`  Stderr: ${stderr || 'none'}`);
+  console.error(`  This may indicate zeroshot is not in PATH or task storage is corrupted.`);
+
+  if (!state.resolved) {
+    state.resolved = true;
+    finalizeLogFollow(agent, state);
+
+    agent._publish({
+      topic: 'AGENT_ERROR',
+      receiver: 'broadcast',
+      content: {
+        text: `Task ${taskId} polling failed after ${MAX_STATUS_FAILURES} consecutive failures`,
+        data: {
+          taskId,
+          error: 'polling_timeout',
+          attempts: state.consecutiveExecFailures,
+          role: agent.role,
+          iteration: agent.iteration,
+        },
+      },
+    });
+
+    resolve({
+      success: false,
+      output: state.output,
+      error: `Status polling failed ${MAX_STATUS_FAILURES} times - task may not exist`,
+    });
+  }
+
+  return true;
+}
+
+function handleStatusCompletion({
+  agent,
+  taskId,
+  providerName,
+  state,
+  stdout,
+  pollLogFile,
+  resolve,
+}) {
+  const cleanStdout = stripAnsiCodes(stdout);
+  const { isCompleted, isFailed, isStale } = parseStatusFlags(cleanStdout);
+
+  if (!isCompleted && !isFailed && !isStale) {
+    return false;
+  }
+
+  pollLogFile();
+
+  let success = isCompleted;
+  if (isStale) {
+    success = determineStaleSuccess({ agent, output: state.output, providerName, taskId });
+  }
+
+  setTimeout(() => {
+    if (state.resolved) return;
+    state.resolved = true;
+
+    finalizeLogFollow(agent, state);
+
+    const errorContext = !success
+      ? extractErrorContext({ output: state.output, statusOutput: stdout, taskId })
+      : null;
+
+    resolve({
+      success,
+      output: state.output,
+      error: errorContext,
+      tokenUsage: extractTokenUsage(state.output, providerName),
+    });
+  }, 500);
+
+  return true;
+}
+
+function buildKillHandler({ agent, state, providerName, resolve }) {
+  return {
+    kill: (reason = 'Task killed') => {
+      if (state.resolved) return;
+      state.resolved = true;
+      finalizeLogFollow(agent, state);
+      agent._stopLivenessCheck();
+      resolve({
+        success: false,
+        output: state.output,
+        error: reason,
+        tokenUsage: extractTokenUsage(state.output, providerName),
+      });
+    },
+  };
+}
+
+function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
+  return new Promise((resolve) => {
+    const state = createLogFollowState();
+
+    state.logFilePath = lookupLogFilePath(ctPath, taskId);
+    if (state.logFilePath) {
+      agent._log(`📋 Agent ${agent.id}: Following ct logs for ${taskId}`);
+    } else {
+      agent._log(`⏳ Agent ${agent.id}: Waiting for log file...`);
+    }
+
+    const broadcastLine = (line) => broadcastAgentLine({ agent, providerName, state, line });
+    const processNewContent = (content) => appendContentToBuffer(state, content, broadcastLine);
+    const pollLogFile = () =>
+      pollLogFileForUpdates({
+        agent,
+        fsModule,
+        ctPath,
+        taskId,
+        state,
+        onNewContent: processNewContent,
+      });
+
+    state.pollInterval = setInterval(pollLogFile, 300);
+
+    state.statusCheckInterval = setInterval(() => {
+      exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
+        if (state.resolved) return;
+
+        if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
+          return;
+        }
+
+        state.consecutiveExecFailures = 0;
+        handleStatusCompletion({
+          agent,
+          taskId,
+          providerName,
+          state,
+          stdout,
+          pollLogFile,
+          resolve,
+        });
+      });
+    }, 1000);
+
+    agent.currentTask = buildKillHandler({ agent, state, providerName, resolve });
+  });
 }
 
 /**
@@ -531,290 +1066,10 @@ async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
  */
 function followClaudeTaskLogs(agent, taskId) {
   const fsModule = require('fs');
-  const { execSync, exec } = require('child_process');
   const ctPath = getClaudeTasksPath();
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
 
-  return new Promise((resolve, _reject) => {
-    let output = '';
-    let logFilePath = null;
-    let lastSize = 0;
-    let pollInterval = null;
-    let statusCheckInterval = null;
-    let resolved = false;
-
-    // Get log file path from ct
-    try {
-      logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
-        encoding: 'utf-8',
-      }).trim();
-      agent._log(`📋 Agent ${agent.id}: Following ct logs for ${taskId}`);
-    } catch {
-      // Task might not have log file yet, wait and retry
-      agent._log(`⏳ Agent ${agent.id}: Waiting for log file...`);
-    }
-
-    // Buffer for incomplete lines across polls
-    let lineBuffer = '';
-
-    // Broadcast a complete JSON line as one message
-    // Lines are now prefixed with timestamps: [1733301234567]{json...}
-    const broadcastLine = (line) => {
-      if (!line.trim()) return;
-
-      // Parse timestamp prefix if present: [epochMs]content
-      // IMPORTANT: Trim \r from CRLF line endings before matching
-      let timestamp = Date.now();
-      let content = line.replace(/\r$/, '');
-
-      const timestampMatch = content.match(/^\[(\d{13})\](.*)$/);
-      if (timestampMatch) {
-        timestamp = parseInt(timestampMatch[1], 10);
-        content = timestampMatch[2];
-      }
-
-      // Skip known noise patterns (footer, separators, metadata)
-      if (
-        content.startsWith('===') ||
-        content.startsWith('Finished:') ||
-        content.startsWith('Exit code:') ||
-        (content.includes('"type":"system"') && content.includes('"subtype":"init"'))
-      ) {
-        return;
-      }
-
-      // Determine if this is JSON or plain text output
-      const isJson = content.trim().startsWith('{');
-      let isValidJson = false;
-
-      if (isJson) {
-        try {
-          JSON.parse(content);
-          isValidJson = true;
-        } catch {
-          // Looks like JSON but isn't valid - treat as text
-        }
-      }
-
-      // Accumulate output (JSON for parsing, text for human visibility)
-      output += content + '\n';
-
-      // Update liveness timestamp
-      agent.lastOutputTime = Date.now();
-
-      agent._publish({
-        topic: 'AGENT_OUTPUT',
-        receiver: 'broadcast',
-        timestamp, // Use the actual timestamp from when output was produced
-        content: {
-          text: content,
-          data: {
-            type: isValidJson ? 'json' : 'text',
-            line: content,
-            agent: agent.id,
-            role: agent.role,
-            iteration: agent.iteration,
-          },
-        },
-      });
-    };
-
-    // Process new content by splitting into complete lines
-    const processNewContent = (content) => {
-      // Add to buffer
-      lineBuffer += content;
-
-      // Split by newlines
-      const lines = lineBuffer.split('\n');
-
-      // Process all complete lines (all except last, which might be incomplete)
-      for (let i = 0; i < lines.length - 1; i++) {
-        broadcastLine(lines[i]);
-      }
-
-      // Keep last line in buffer (might be incomplete)
-      lineBuffer = lines[lines.length - 1];
-    };
-
-    // Poll the log file for new content
-    const pollLogFile = () => {
-      // If we don't have log path yet, try to get it
-      if (!logFilePath) {
-        try {
-          logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
-            encoding: 'utf-8',
-          }).trim();
-          agent._log(`📋 Agent ${agent.id}: Found log file: ${logFilePath}`);
-        } catch {
-          return; // Not ready yet
-        }
-      }
-
-      // Check if file exists
-      if (!fsModule.existsSync(logFilePath)) {
-        return; // File not created yet
-      }
-
-      try {
-        const stats = fsModule.statSync(logFilePath);
-        const currentSize = stats.size;
-
-        if (currentSize > lastSize) {
-          // Read new content
-          const fd = fsModule.openSync(logFilePath, 'r');
-          const buffer = Buffer.alloc(currentSize - lastSize);
-          fsModule.readSync(fd, buffer, 0, buffer.length, lastSize);
-          fsModule.closeSync(fd);
-
-          const newContent = buffer.toString('utf-8');
-          // Process new content line-by-line
-          processNewContent(newContent);
-          lastSize = currentSize;
-        }
-      } catch (err) {
-        // File might have been deleted or locked
-        console.warn(`⚠️ Agent ${agent.id}: Error reading log: ${err.message}`);
-      }
-    };
-
-    // Start polling log file (every 300ms for responsive streaming)
-    pollInterval = setInterval(pollLogFile, 300);
-
-    // Poll ct status to know when task is complete
-    // Track consecutive failures for debugging stuck clusters
-    let consecutiveExecFailures = 0;
-    const MAX_CONSECUTIVE_FAILURES = 30; // 30 seconds of failures = log warning
-
-    statusCheckInterval = setInterval(() => {
-      exec(`${ctPath} status ${taskId}`, (error, stdout, stderr) => {
-        if (resolved) return;
-
-        // Track exec failures - if status command keeps failing, something is wrong
-        if (error) {
-          consecutiveExecFailures++;
-          if (consecutiveExecFailures >= MAX_CONSECUTIVE_FAILURES) {
-            console.error(
-              `[Agent ${agent.id}] ⚠️ Status polling failed ${MAX_CONSECUTIVE_FAILURES} times consecutively! STOPPING.`
-            );
-            console.error(`  Command: ${ctPath} status ${taskId}`);
-            console.error(`  Error: ${error.message}`);
-            console.error(`  Stderr: ${stderr || 'none'}`);
-            console.error(`  This may indicate zeroshot is not in PATH or task storage is corrupted.`);
-
-            // Stop polling and resolve with failure
-            if (!resolved) {
-              resolved = true;
-              clearInterval(pollInterval);
-              clearInterval(statusCheckInterval);
-              agent.currentTask = null;
-
-              // Publish error for orchestrator/resume
-              agent._publish({
-                topic: 'AGENT_ERROR',
-                receiver: 'broadcast',
-                content: {
-                  text: `Task ${taskId} polling failed after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`,
-                  data: {
-                    taskId,
-                    error: 'polling_timeout',
-                    attempts: consecutiveExecFailures,
-                    role: agent.role,
-                    iteration: agent.iteration,
-                  },
-                },
-              });
-
-              resolve({
-                success: false,
-                output,
-                error: `Status polling failed ${MAX_CONSECUTIVE_FAILURES} times - task may not exist`,
-              });
-            }
-            return;
-          }
-          return; // Keep polling - might be transient
-        }
-
-        // Reset failure counter on success
-        consecutiveExecFailures = 0;
-
-        // Check for completion/failure status
-        // Strip ANSI codes in case chalk outputs them (shouldn't in non-TTY, but be safe)
-        // Use RegExp constructor to avoid ESLint no-control-regex false positive
-        const ansiPattern = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
-        const cleanStdout = stdout.replace(ansiPattern, '');
-        // Use flexible whitespace matching in case spacing changes
-        const isCompleted = /Status:\s+completed/i.test(cleanStdout);
-        const isFailed = /Status:\s+failed/i.test(cleanStdout);
-
-        if (isCompleted || isFailed) {
-          const success = isCompleted;
-
-          // Read any final content
-          pollLogFile();
-
-          // Clean up and resolve
-          setTimeout(() => {
-            if (resolved) return;
-            resolved = true;
-
-            clearInterval(pollInterval);
-            clearInterval(statusCheckInterval);
-            agent.currentTask = null;
-
-            // Extract error context using shared helper
-            const errorContext = !success
-              ? extractErrorContext({ output, statusOutput: stdout, taskId })
-              : null;
-
-            resolve({
-              success,
-              output,
-              error: errorContext,
-              tokenUsage: extractTokenUsage(output),
-            });
-          }, 500);
-        }
-      });
-    }, 1000);
-
-    // Store cleanup function for kill
-    // CRITICAL: Must reject promise to avoid orphaned promise that hangs forever
-    agent.currentTask = {
-      kill: (reason = 'Task killed') => {
-        if (resolved) return;
-        resolved = true;
-        clearInterval(pollInterval);
-        clearInterval(statusCheckInterval);
-        agent._stopLivenessCheck();
-        // BUGFIX: Resolve with failure instead of orphaning the promise
-        // This allows the caller to handle the kill gracefully
-        resolve({
-          success: false,
-          output,
-          error: reason,
-          tokenUsage: extractTokenUsage(output),
-        });
-      },
-    };
-
-    // REMOVED: Task timeout disabled - tasks run until completion or explicit kill
-    // Tasks should run until:
-    // - Completion
-    // - Explicit kill
-    // - External error (rate limit, API failure)
-    //
-    // setTimeout(() => {
-    //   if (resolved) return;
-    //   resolved = true;
-    //
-    //   clearInterval(pollInterval);
-    //   clearInterval(statusCheckInterval);
-    //   agent._stopLivenessCheck();
-    //   agent.currentTask = null;
-    //   const timeoutMinutes = Math.round(agent.timeout / 60000);
-    //   reject(new Error(`Task timed out after ${timeoutMinutes} minutes`));
-    // }, agent.timeout);
-  });
+  return createLogFollower({ agent, taskId, fsModule, ctPath, providerName });
 }
 
 /**
@@ -835,6 +1090,10 @@ function getClaudeTasksPath() {
  */
 async function spawnClaudeTaskIsolated(agent, context) {
   const { manager, clusterId } = agent.isolation;
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
+  const modelSpec = agent._resolveModelSpec
+    ? agent._resolveModelSpec()
+    : { model: agent._selectModel() };
 
   agent._log(`📦 Agent ${agent.id}: Running task in isolated container using zeroshot task run...`);
 
@@ -847,7 +1106,23 @@ async function spawnClaudeTaskIsolated(agent, context) {
       ? 'stream-json'
       : desiredOutputFormat;
 
-  const command = ['zeroshot', 'task', 'run', '--output-format', runOutputFormat];
+  const command = [
+    'zeroshot',
+    'task',
+    'run',
+    '--output-format',
+    runOutputFormat,
+    '--provider',
+    providerName,
+  ];
+
+  if (modelSpec?.model) {
+    command.push('--model', modelSpec.model);
+  }
+
+  if (modelSpec?.reasoningEffort) {
+    command.push('--reasoning-effort', modelSpec.reasoningEffort);
+  }
 
   // Add verification mode flag if configured
   if (agent.config.verificationMode) {
@@ -885,14 +1160,15 @@ async function spawnClaudeTaskIsolated(agent, context) {
   command.push(finalContext);
 
   // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
+  // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
+  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+  // Note: Auth env vars are injected by IsolationManager, we only need model mapping here
+  const isolatedEnv =
+    providerName === 'claude' ? buildClaudeEnv(modelSpec, { includeAuth: false }) : {};
+
   const taskId = await new Promise((resolve, reject) => {
-    const selectedModel = agent._selectModel();
     const proc = manager.spawnInContainer(clusterId, command, {
-      env: {
-        ANTHROPIC_MODEL: selectedModel,
-        // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
-        ZEROSHOT_BLOCK_ASK_USER: '1',
-      },
+      env: isolatedEnv,
     });
 
     // Track PID for resource monitoring
@@ -901,6 +1177,20 @@ async function spawnClaudeTaskIsolated(agent, context) {
 
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    // CRITICAL: Timeout to prevent infinite hang if provider CLI hangs
+    const spawnTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      proc.kill('SIGKILL');
+      reject(
+        new Error(
+          `Spawn timeout after ${SPAWN_TIMEOUT_MS / 1000}s - provider CLI hung. ` +
+            `stdout: ${stdout.slice(-500)}, stderr: ${stderr.slice(-500)}`
+        )
+      );
+    }, SPAWN_TIMEOUT_MS);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -911,6 +1201,9 @@ async function spawnClaudeTaskIsolated(agent, context) {
     });
 
     proc.on('close', (code, signal) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       // Handle process killed by signal
       if (signal) {
         reject(new Error(`Process killed by signal ${signal}${stderr ? `: ${stderr}` : ''}`));
@@ -944,6 +1237,9 @@ async function spawnClaudeTaskIsolated(agent, context) {
     });
 
     proc.on('error', (error) => {
+      clearTimeout(spawnTimeout);
+      if (resolved) return;
+      resolved = true;
       reject(error);
     });
   });
@@ -977,6 +1273,196 @@ async function spawnClaudeTaskIsolated(agent, context) {
  * - Status checks reduced to every 2 seconds (not every poll)
  * - Result: 10-20% overall latency reduction
  */
+function createIsolatedLogState() {
+  return {
+    taskExited: false,
+    fullOutput: '',
+    tailProcess: null,
+    statusCheckInterval: null,
+    lineBuffer: '',
+  };
+}
+
+function buildIsolatedCleanup(state) {
+  return () => {
+    if (state.tailProcess) {
+      try {
+        state.tailProcess.kill('SIGTERM');
+      } catch {
+        // Ignore - process may already be dead
+      }
+      state.tailProcess = null;
+    }
+    if (state.statusCheckInterval) {
+      clearInterval(state.statusCheckInterval);
+      state.statusCheckInterval = null;
+    }
+  };
+}
+
+function broadcastIsolatedLine({ agent, providerName, taskId, line }) {
+  const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*(.*)$/);
+  const timestamp = timestampMatch ? new Date(timestampMatch[1]).getTime() : Date.now();
+  const content = timestampMatch ? timestampMatch[2] : line;
+
+  agent.messageBus.publish({
+    cluster_id: agent.cluster.id,
+    topic: 'AGENT_OUTPUT',
+    sender: agent.id,
+    content: {
+      data: {
+        line: content,
+        taskId,
+        iteration: agent.iteration,
+        provider: providerName,
+      },
+    },
+    timestamp,
+  });
+
+  agent.lastOutputTime = Date.now();
+}
+
+function appendIsolatedContent(state, content, onLine) {
+  state.lineBuffer += content;
+  const lines = state.lineBuffer.split('\n');
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (lines[i].trim()) {
+      onLine(lines[i]);
+    }
+  }
+
+  state.lineBuffer = lines[lines.length - 1];
+}
+
+function startIsolatedTail({ agent, manager, clusterId, logFilePath, state, onLine }) {
+  state.tailProcess = manager.spawnInContainer(clusterId, [
+    'sh',
+    '-c',
+    `while [ ! -f "${logFilePath}" ]; do sleep 0.1; done; tail -F -n +1 "${logFilePath}"`,
+  ]);
+
+  state.tailProcess.stdout.on('data', (data) => {
+    const chunk = data.toString();
+    state.fullOutput += chunk;
+    appendIsolatedContent(state, chunk, onLine);
+  });
+
+  state.tailProcess.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg && !msg.includes('file truncated')) {
+      agent._log(`[${agent.id}] tail stderr: ${msg}`);
+    }
+  });
+
+  state.tailProcess.on('close', (exitCode) => {
+    if (!state.taskExited) {
+      agent._log(`[${agent.id}] tail process exited with code ${exitCode}`);
+    }
+  });
+
+  state.tailProcess.on('error', (err) => {
+    agent._log(`[${agent.id}] tail process error: ${err.message}`);
+  });
+}
+
+async function checkIsolatedStatus({
+  agent,
+  manager,
+  clusterId,
+  logFilePath,
+  taskId,
+  providerName,
+  state,
+  cleanup,
+  resolve,
+  onLine,
+}) {
+  if (state.taskExited) return;
+
+  const statusResult = await manager.execInContainer(clusterId, [
+    'sh',
+    '-c',
+    `zeroshot status ${taskId} 2>/dev/null || echo "not_found"`,
+  ]);
+
+  const statusOutput = statusResult.stdout;
+  const isSuccess = /Status:\s+completed/i.test(statusOutput);
+  const isError = /Status:\s+failed/i.test(statusOutput);
+  const isNotFound = statusOutput.includes('not_found');
+
+  if (!isSuccess && !isError && !isNotFound) {
+    return;
+  }
+
+  state.taskExited = true;
+  await new Promise((r) => setTimeout(r, 200));
+
+  const finalReadResult = await manager.execInContainer(clusterId, [
+    'sh',
+    '-c',
+    `cat "${logFilePath}" 2>/dev/null || echo ""`,
+  ]);
+
+  if (finalReadResult.code === 0 && finalReadResult.stdout) {
+    state.fullOutput = finalReadResult.stdout;
+    const remainingLines = state.fullOutput.split('\n');
+    for (const line of remainingLines) {
+      if (line.trim()) {
+        onLine(line);
+      }
+    }
+  }
+
+  cleanup();
+
+  const success = isSuccess && !isError;
+  const errorContext = !success
+    ? extractErrorContext({ output: state.fullOutput, taskId, isNotFound })
+    : null;
+  const parsedResult = await agent._parseResultOutput(state.fullOutput);
+
+  resolve({
+    success,
+    output: state.fullOutput,
+    taskId,
+    result: parsedResult,
+    error: errorContext,
+    tokenUsage: extractTokenUsage(state.fullOutput, providerName),
+  });
+}
+
+function startIsolatedStatusChecks({
+  agent,
+  manager,
+  clusterId,
+  logFilePath,
+  taskId,
+  providerName,
+  state,
+  cleanup,
+  resolve,
+  onLine,
+}) {
+  state.statusCheckInterval = setInterval(() => {
+    checkIsolatedStatus({
+      agent,
+      manager,
+      clusterId,
+      logFilePath,
+      taskId,
+      providerName,
+      state,
+      cleanup,
+      resolve,
+      onLine,
+    }).catch((statusErr) => {
+      agent._log(`[${agent.id}] Status check error (will retry): ${statusErr.message}`);
+    });
+  }, 2000);
+}
+
 function followClaudeTaskLogsIsolated(agent, taskId) {
   const { isolation } = agent;
   if (!isolation?.manager) {
@@ -985,82 +1471,20 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
 
   const manager = isolation.manager;
   const clusterId = isolation.clusterId;
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
 
   return new Promise((resolve, reject) => {
-    let taskExited = false;
-    let fullOutput = '';
-    let tailProcess = null;
-    let statusCheckInterval = null;
-    let lineBuffer = '';
+    const state = createIsolatedLogState();
+    const cleanup = buildIsolatedCleanup(state);
+    const onLine = (line) => broadcastIsolatedLine({ agent, providerName, taskId, line });
 
-    // Cleanup function - kill tail process and clear intervals
-    const cleanup = () => {
-      if (tailProcess) {
-        try {
-          tailProcess.kill('SIGTERM');
-        } catch {
-          // Ignore - process may already be dead
-        }
-        tailProcess = null;
-      }
-      if (statusCheckInterval) {
-        clearInterval(statusCheckInterval);
-        statusCheckInterval = null;
-      }
-    };
-
-    // Broadcast line helper (same as non-isolated mode)
-    const broadcastLine = (line) => {
-      const timestampMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*(.*)$/);
-      const timestamp = timestampMatch
-        ? new Date(timestampMatch[1]).getTime()
-        : Date.now();
-      const content = timestampMatch ? timestampMatch[2] : line;
-
-      agent.messageBus.publish({
-        cluster_id: agent.cluster.id,
-        topic: 'AGENT_OUTPUT',
-        sender: agent.id,
-        content: {
-          data: {
-            line: content,
-            taskId,
-            iteration: agent.iteration,
-          },
-        },
-        timestamp,
-      });
-
-      // Update last output time for liveness tracking
-      agent.lastOutputTime = Date.now();
-    };
-
-    // Process new content by splitting into complete lines
-    const processNewContent = (content) => {
-      lineBuffer += content;
-      const lines = lineBuffer.split('\n');
-
-      // Process all complete lines (all except last, which might be incomplete)
-      for (let i = 0; i < lines.length - 1; i++) {
-        if (lines[i].trim()) {
-          broadcastLine(lines[i]);
-        }
-      }
-
-      // Keep last line in buffer (might be incomplete)
-      lineBuffer = lines[lines.length - 1];
-    };
-
-    // Get log file path from zeroshot CLI inside container
     manager
       .execInContainer(clusterId, ['sh', '-c', `zeroshot get-log-path ${taskId}`])
       .then(({ stdout, stderr, code }) => {
         if (code !== 0) {
           cleanup();
           return reject(
-            new Error(
-              `Failed to get log path for ${taskId} inside container: ${stderr || stdout}`
-            )
+            new Error(`Failed to get log path for ${taskId} inside container: ${stderr || stdout}`)
           );
         }
 
@@ -1072,123 +1496,33 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
 
         agent._log(`[${agent.id}] Following isolated task logs (streaming): ${logFilePath}`);
 
-        // Start persistent tail -f stream
-        // Uses spawnInContainer() which creates a single docker exec process
-        // that streams output in real-time (no polling overhead)
-        tailProcess = manager.spawnInContainer(clusterId, [
-          'sh',
-          '-c',
-          // Wait for file to exist, then tail -f from beginning
-          // The -F flag handles file recreation (rotation)
-          `while [ ! -f "${logFilePath}" ]; do sleep 0.1; done; tail -F -n +1 "${logFilePath}"`,
-        ]);
-
-        // Stream stdout directly - lines arrive as they're written
-        tailProcess.stdout.on('data', (data) => {
-          const chunk = data.toString();
-          fullOutput += chunk;
-          processNewContent(chunk);
+        startIsolatedTail({
+          agent,
+          manager,
+          clusterId,
+          logFilePath,
+          state,
+          onLine,
         });
 
-        // Log stderr but don't fail (tail might emit warnings)
-        tailProcess.stderr.on('data', (data) => {
-          const msg = data.toString().trim();
-          if (msg && !msg.includes('file truncated')) {
-            agent._log(`[${agent.id}] tail stderr: ${msg}`);
-          }
+        startIsolatedStatusChecks({
+          agent,
+          manager,
+          clusterId,
+          logFilePath,
+          taskId,
+          providerName,
+          state,
+          cleanup,
+          resolve,
+          onLine,
         });
 
-        // Handle tail process exit (shouldn't happen unless killed)
-        tailProcess.on('close', (exitCode) => {
-          if (!taskExited) {
-            agent._log(`[${agent.id}] tail process exited with code ${exitCode}`);
-          }
-        });
-
-        tailProcess.on('error', (err) => {
-          agent._log(`[${agent.id}] tail process error: ${err.message}`);
-        });
-
-        // Check task status periodically (every 2 seconds - much less frequent than polling)
-        // This is the only remaining docker exec - but now at 2s intervals instead of 500ms
-        statusCheckInterval = setInterval(async () => {
-          if (taskExited) return;
-
-          try {
-            const statusResult = await manager.execInContainer(clusterId, [
-              'sh',
-              '-c',
-              `zeroshot status ${taskId} 2>/dev/null || echo "not_found"`,
-            ]);
-
-            const statusOutput = statusResult.stdout;
-            const isSuccess = /Status:\s+completed/i.test(statusOutput);
-            const isError = /Status:\s+failed/i.test(statusOutput);
-            const isNotFound = statusOutput.includes('not_found');
-
-            if (isSuccess || isError || isNotFound) {
-              taskExited = true;
-
-              // Give tail a moment to flush remaining output
-              await new Promise((r) => setTimeout(r, 200));
-
-              // Read final output to ensure we have everything
-              const finalReadResult = await manager.execInContainer(clusterId, [
-                'sh',
-                '-c',
-                `cat "${logFilePath}" 2>/dev/null || echo ""`,
-              ]);
-
-              if (finalReadResult.code === 0 && finalReadResult.stdout) {
-                fullOutput = finalReadResult.stdout;
-
-                // Process any remaining content
-                const remainingLines = fullOutput.split('\n');
-                for (const line of remainingLines) {
-                  if (line.trim()) {
-                    broadcastLine(line);
-                  }
-                }
-              }
-
-              cleanup();
-
-              // Determine success status
-              const success = isSuccess && !isError;
-
-              // Extract error context using shared helper
-              const errorContext = !success
-                ? extractErrorContext({ output: fullOutput, taskId, isNotFound })
-                : null;
-
-              // Parse result from output
-              const parsedResult = agent._parseResultOutput(fullOutput);
-
-              resolve({
-                success,
-                output: fullOutput,
-                taskId,
-                result: parsedResult,
-                error: errorContext,
-                tokenUsage: extractTokenUsage(fullOutput),
-              });
-            }
-          } catch (statusErr) {
-            // Log error but continue checking (transient failures are common)
-            agent._log(`[${agent.id}] Status check error (will retry): ${statusErr.message}`);
-          }
-        }, 2000); // Check every 2 seconds (was 500ms in polling mode)
-
-        // Safety timeout (0 = no timeout, task runs until completion)
         if (agent.timeout > 0) {
           setTimeout(() => {
-            if (!taskExited) {
+            if (!state.taskExited) {
               cleanup();
-              reject(
-                new Error(
-                  `Task ${taskId} timeout after ${agent.timeout}ms (isolated mode)`
-                )
-              );
+              reject(new Error(`Task ${taskId} timeout after ${agent.timeout}ms (isolated mode)`));
             }
           }, agent.timeout);
         }
@@ -1204,133 +1538,57 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
  * Parse agent output to extract structured result data
  * GENERIC - returns whatever structured output the agent provides
  * Works with any agent schema (planner, validator, worker, etc.)
+ *
+ * Uses clean extraction pipeline from output-extraction.js
+ * Falls back to reformatting if extraction fails and schema is available
+ *
  * @param {Object} agent - Agent instance
  * @param {String} output - Raw output from agent
- * @returns {Object} Parsed result data
+ * @returns {Promise<Object>} Parsed result data
  */
-function parseResultOutput(agent, output) {
+async function parseResultOutput(agent, output) {
   // Empty or error outputs = FAIL
   if (!output || output.includes('Task not found') || output.includes('Process terminated')) {
     throw new Error('Task execution failed - no output');
   }
 
-  let parsed;
-  let trimmedOutput = output.trim();
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
+  const { extractJsonFromOutput } = require('./output-extraction');
 
-  // IMPORTANT: Output is NDJSON (one JSON object per line) from streaming log
-  // Lines may have timestamp prefix: [epochMs]{json...}
-  // Find the line with "type":"result" which contains the actual result
-  const lines = trimmedOutput.split('\n');
-  const resultLine = lines.find((line) => {
+  // Use clean extraction pipeline
+  let parsed = extractJsonFromOutput(output, providerName);
+
+  // If extraction failed but we have a schema, attempt reformatting
+  if (!parsed && agent.config.jsonSchema) {
+    const { reformatOutput } = require('./output-reformatter');
+
     try {
-      const content = stripTimestampPrefix(line);
-      if (!content.startsWith('{')) return false;
-      const obj = JSON.parse(content);
-      return obj.type === 'result';
-    } catch {
-      return false;
-    }
-  });
-
-  // Use the result line if found, otherwise use last non-empty line
-  // CRITICAL: Strip timestamp prefix before assigning to trimmedOutput
-  if (resultLine) {
-    trimmedOutput = stripTimestampPrefix(resultLine);
-  } else if (lines.length > 1) {
-    // Fallback: use last non-empty line (also strip timestamp)
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const content = stripTimestampPrefix(lines[i]);
-      if (content) {
-        trimmedOutput = content;
-        break;
-      }
-    }
-  }
-
-  // Strategy 1: If agent uses JSON output format, try CLI JSON structure first
-  if (agent.config.outputFormat === 'json' && agent.config.jsonSchema) {
-    try {
-      const claudeOutput = JSON.parse(trimmedOutput);
-
-      // Try structured_output field first (standard CLI format)
-      if (claudeOutput.structured_output && typeof claudeOutput.structured_output === 'object') {
-        parsed = claudeOutput.structured_output;
-      }
-      // Check if it's a direct object (not a primitive)
-      else if (
-        typeof claudeOutput === 'object' &&
-        claudeOutput !== null &&
-        !Array.isArray(claudeOutput)
-      ) {
-        // Check for result wrapper
-        if (claudeOutput.result && typeof claudeOutput.result === 'object') {
-          parsed = claudeOutput.result;
-        }
-        // IMPORTANT: Handle case where result is a string containing markdown-wrapped JSON
-        // Claude CLI with --output-format json returns { result: "```json\n{...}\n```" }
-        else if (claudeOutput.result && typeof claudeOutput.result === 'string') {
-          const resultStr = claudeOutput.result;
-          // Try extracting JSON from markdown code block
-          const jsonMatch = resultStr.match(/```json\s*([\s\S]*?)```/);
-          if (jsonMatch) {
-            try {
-              parsed = JSON.parse(jsonMatch[1].trim());
-            } catch {
-              // Fall through to other strategies
-            }
+      parsed = await reformatOutput({
+        rawOutput: output,
+        schema: agent.config.jsonSchema,
+        providerName,
+        onAttempt: (attempt, lastError) => {
+          if (lastError) {
+            console.warn(`[Agent ${agent.id}] Reformat attempt ${attempt}: ${lastError}`);
+          } else {
+            console.warn(
+              `[Agent ${agent.id}] JSON extraction failed, reformatting (attempt ${attempt})...`
+            );
           }
-          // If no markdown block, try parsing result string directly as JSON
-          if (!parsed) {
-            try {
-              parsed = JSON.parse(resultStr);
-            } catch {
-              // Fall through to other strategies
-            }
-          }
-        }
-        // Use directly if it has meaningful keys (and we haven't found a better parse)
-        if (!parsed) {
-          const keys = Object.keys(claudeOutput);
-          if (keys.length > 0 && keys.some((k) => !['type', 'subtype', 'is_error'].includes(k))) {
-            parsed = claudeOutput;
-          }
-        }
-      }
-    } catch {
-      // JSON parse failed - fall through to markdown extraction
+        },
+      });
+    } catch (reformatError) {
+      // Reformatting failed - fall through to error below
+      console.error(`[Agent ${agent.id}] Reformatting failed: ${reformatError.message}`);
     }
   }
 
-  // Strategy 2: Extract JSON from markdown code block (legacy or fallback)
   if (!parsed) {
-    const jsonMatch = trimmedOutput.match(/```json\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        parsed = JSON.parse(jsonMatch[1].trim());
-      } catch (e) {
-        throw new Error(`JSON parse failed in markdown block: ${e.message}`);
-      }
-    }
-  }
-
-  // Strategy 3: Try parsing the whole output as JSON
-  if (!parsed) {
-    try {
-      const directParse = JSON.parse(trimmedOutput);
-      if (typeof directParse === 'object' && directParse !== null) {
-        parsed = directParse;
-      }
-    } catch {
-      // Not valid JSON, fall through to error
-    }
-  }
-
-  // No strategy worked
-  if (!parsed) {
+    const trimmedOutput = output.trim();
     console.error(`\n${'='.repeat(80)}`);
     console.error(`🔴 AGENT OUTPUT MISSING REQUIRED JSON BLOCK`);
     console.error(`${'='.repeat(80)}`);
-    console.error(`Agent: ${agent.id}, Role: ${agent.role}`);
+    console.error(`Agent: ${agent.id}, Role: ${agent.role}, Provider: ${providerName}`);
     console.error(`Output (last 500 chars): ${trimmedOutput.slice(-500)}`);
     console.error(`${'='.repeat(80)}\n`);
     throw new Error(`Agent ${agent.id} output missing required JSON block`);
@@ -1340,6 +1598,10 @@ function parseResultOutput(agent, output) {
   // This preserves schema enforcement even when we run stream-json for live logs.
   // IMPORTANT: For non-validator agents we warn but do not fail the cluster.
   if (agent.config.jsonSchema) {
+    // Normalize enum values BEFORE validation (handles case mismatches, common variations)
+    // This is provider-agnostic - works for Claude CLI, Gemini, Codex, etc.
+    normalizeEnumValues(parsed, agent.config.jsonSchema);
+
     const Ajv = require('ajv');
     const ajv = new Ajv({
       allErrors: true,
@@ -1403,9 +1665,8 @@ function killTask(agent) {
   // Also kill the underlying zeroshot task if we have a task ID
   // This ensures the task process is stopped, not just our polling intervals
   if (agent.currentTaskId) {
-    const { exec } = require('child_process');
     const ctPath = getClaudeTasksPath();
-    exec(`${ctPath} task kill ${agent.currentTaskId}`, (error) => {
+    exec(`${ctPath} task kill ${agent.currentTaskId}`, { timeout: 10000 }, (error) => {
       if (error) {
         // Task may have already completed or been killed, ignore errors
         agent._log(`Note: Could not kill task ${agent.currentTaskId}: ${error.message}`);

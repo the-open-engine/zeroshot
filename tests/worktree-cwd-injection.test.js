@@ -7,8 +7,6 @@
  *
  * Root cause: _opAddAgents() didn't inject cwd like startCluster() does.
  * Fix: Added cwd injection to _opAddAgents() in orchestrator.js
- *
- * @see https://github.com/covibes/covibes/issues/XXX
  */
 
 const assert = require('assert');
