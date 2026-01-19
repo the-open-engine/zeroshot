@@ -114,6 +114,7 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           }
@@ -194,21 +195,25 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "WORKER_PROGRESS",
+            "priority": "medium",
             "since": "last_task_end",
             "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
+            "priority": "high",
             "since": "last_task_end",
             "amount": 10
           }
@@ -328,16 +333,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -402,16 +410,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -475,16 +486,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -551,16 +565,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
