@@ -147,6 +147,11 @@ function checkClaudeAuth() {
     return authResult(true, null, 'bedrock_api_key');
   }
 
+  // Check for CLAUDE_CODE_OAUTH_TOKEN environment variable (highest priority after Bedrock)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    return authResult(true, null, 'env_oauth_token');
+  }
+
   // Check for ANTHROPIC_API_KEY environment variable
   const apiKeyEnv = process.env.ANTHROPIC_API_KEY;
   if (apiKeyEnv) {
