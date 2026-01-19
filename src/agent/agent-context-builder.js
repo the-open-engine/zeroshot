@@ -251,11 +251,14 @@ function resolveSourceMessages({
 }
 
 function resolveSourcePriority(source) {
-  if (source.topic === 'ISSUE_OPENED' || source.topic === 'PLAN_READY') {
-    return 'required';
-  }
   if (source.priority) {
     return source.priority;
+  }
+  if (source.topic === 'STATE_SNAPSHOT') {
+    return 'required';
+  }
+  if (source.topic === 'ISSUE_OPENED' || source.topic === 'PLAN_READY') {
+    return 'required';
   }
   if (source.topic === 'VALIDATION_RESULT' || source.topic === 'IMPLEMENTATION_READY') {
     return 'high';

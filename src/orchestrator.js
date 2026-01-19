@@ -45,6 +45,7 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const StateSnapshotter = require('./state-snapshotter');
 const crypto = require('crypto');
 
 function applyModelOverride(agentConfig, modelOverride) {
@@ -290,6 +291,7 @@ class Orchestrator {
     };
 
     this.clusters.set(clusterId, cluster);
+    this._startSnapshotter(cluster);
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
     return cluster;
@@ -397,6 +399,20 @@ class Orchestrator {
     }
 
     return agents;
+  }
+
+  _startSnapshotter(cluster) {
+    if (cluster.snapshotter) {
+      cluster.snapshotter.start();
+      return;
+    }
+
+    const snapshotter = new StateSnapshotter({
+      messageBus: cluster.messageBus,
+      clusterId: cluster.id,
+    });
+    snapshotter.start();
+    cluster.snapshotter = snapshotter;
   }
 
   /**
@@ -748,6 +764,7 @@ class Orchestrator {
     };
 
     this.clusters.set(clusterId, cluster);
+    this._startSnapshotter(cluster);
 
     try {
       // Fetch input (issue from provider, file, or text)
@@ -1409,6 +1426,10 @@ class Orchestrator {
       await agent.stop();
     }
 
+    if (cluster.snapshotter) {
+      cluster.snapshotter.stop();
+    }
+
     // Clean up isolation container if enabled
     // CRITICAL: Preserve workspace for resume capability - only delete on kill()
     if (cluster.isolation?.manager) {
@@ -1450,6 +1471,10 @@ class Orchestrator {
     // Force stop all agents
     for (const agent of cluster.agents) {
       await agent.stop();
+    }
+
+    if (cluster.snapshotter) {
+      cluster.snapshotter.stop();
     }
 
     // Force remove isolation container AND workspace (full cleanup, no resume)
@@ -1555,6 +1580,7 @@ class Orchestrator {
 
     await this._ensureIsolationForResume(clusterId, cluster);
     this._ensureWorktreeForResume(clusterId, cluster);
+    this._startSnapshotter(cluster);
     await this._restartClusterAgents(cluster);
 
     const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);

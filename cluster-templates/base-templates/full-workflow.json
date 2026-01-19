@@ -114,6 +114,12 @@
             "priority": "required",
             "strategy": "latest",
             "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "medium",
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -192,6 +198,12 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
             "priority": "required",
             "strategy": "latest",
             "amount": 1
@@ -335,6 +347,12 @@
             "amount": 1
           },
           {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
             "topic": "PLAN_READY",
             "priority": "required",
             "strategy": "latest",
@@ -407,6 +425,12 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
             "priority": "required",
             "strategy": "latest",
             "amount": 1
@@ -488,6 +512,12 @@
             "amount": 1
           },
           {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
             "topic": "PLAN_READY",
             "priority": "required",
             "strategy": "latest",
@@ -562,6 +592,12 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
             "priority": "required",
             "strategy": "latest",
             "amount": 1
