@@ -1459,7 +1459,9 @@ function validateJsonSchema(prefix, agent, errors) {
 
 function validateContextSource(prefix, source, topicProducers, errors, warnings) {
   const topic = source.topic;
-  if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') return;
+  if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED' || topic === 'STATE_SNAPSHOT') {
+    return;
+  }
   if (topic.endsWith('*')) return;
 
   const resolvedAmount = source.amount ?? source.limit;

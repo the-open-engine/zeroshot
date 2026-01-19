@@ -2298,6 +2298,37 @@ describe('Semantic Validation - Medium Gaps (8-9)', function () {
       const contextWarnings = result.warnings.filter((w) => w.includes('[Gap 9]'));
       assert.ok(contextWarnings.length > 0, 'Should have Gap 9 warning');
     });
+
+    it('should not warn for STATE_SNAPSHOT context source', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            contextStrategy: {
+              sources: [{ topic: 'STATE_SNAPSHOT', amount: 1 }],
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const snapshotWarnings = result.warnings.filter(
+        (warning) => warning.includes('[Gap 9]') && warning.includes('STATE_SNAPSHOT')
+      );
+      assert.strictEqual(snapshotWarnings.length, 0, 'STATE_SNAPSHOT should not trigger Gap 9');
+    });
   });
 });
 
