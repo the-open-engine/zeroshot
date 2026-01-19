@@ -7,6 +7,8 @@ const IssueProvider = require('./base-provider');
 const { execSync } = require('../lib/safe-exec');
 const { detectGitContext } = require('../../lib/git-remote-utils');
 
+const AUTH_CHECK_TIMEOUT_MS = 2000;
+
 class AzureDevOpsProvider extends IssueProvider {
   static id = 'azure-devops';
   static displayName = 'Azure DevOps';
@@ -76,9 +78,32 @@ class AzureDevOpsProvider extends IssueProvider {
   static checkAuth() {
     try {
       // First check Azure login
-      execSync('az account show', { encoding: 'utf8', stdio: 'pipe' });
+      execSync('az account show', {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: AUTH_CHECK_TIMEOUT_MS,
+      });
     } catch (err) {
       const stderr = err.stderr || err.message || '';
+
+      if (err.code === 'ENOENT' || stderr.includes('command not found')) {
+        return {
+          authenticated: false,
+          error: 'Azure CLI not installed',
+          recovery: [
+            'Install Azure CLI: https://docs.microsoft.com/cli/azure/',
+            'Then verify: az --version',
+          ],
+        };
+      }
+
+      if (stderr.includes('Command timed out')) {
+        return {
+          authenticated: false,
+          error: 'az account show timed out',
+          recovery: ['Retry: az account show', 'If it still hangs, run: az login'],
+        };
+      }
 
       if (stderr.includes('az login') || stderr.includes('not logged in')) {
         return {
@@ -104,6 +129,7 @@ class AzureDevOpsProvider extends IssueProvider {
       const output = execSync('az extension list --query "[?name==\'azure-devops\']" -o json', {
         encoding: 'utf8',
         stdio: 'pipe',
+        timeout: AUTH_CHECK_TIMEOUT_MS,
       });
       const extensions = JSON.parse(output);
       if (extensions.length === 0) {
@@ -116,7 +142,15 @@ class AzureDevOpsProvider extends IssueProvider {
           ],
         };
       }
-    } catch {
+    } catch (err) {
+      const stderr = err?.stderr || err?.message || '';
+      if (stderr.includes('Command timed out')) {
+        return {
+          authenticated: false,
+          error: 'az extension list timed out',
+          recovery: ['Retry: az extension list', 'Ensure az is configured and responsive'],
+        };
+      }
       return {
         authenticated: false,
         error: 'Could not verify Azure DevOps extension',

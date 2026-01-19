@@ -5,6 +5,8 @@
 const IssueProvider = require('./base-provider');
 const { execSync } = require('../lib/safe-exec');
 
+const AUTH_CHECK_TIMEOUT_MS = 2000;
+
 class GitHubProvider extends IssueProvider {
   static id = 'github';
   static displayName = 'GitHub';
@@ -69,10 +71,30 @@ class GitHubProvider extends IssueProvider {
    */
   static checkAuth() {
     try {
-      execSync('gh auth status', { encoding: 'utf8', stdio: 'pipe' });
+      execSync('gh auth status', {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: AUTH_CHECK_TIMEOUT_MS,
+      });
       return { authenticated: true, error: null, recovery: [] };
     } catch (err) {
       const stderr = err.stderr || err.message || '';
+
+      if (err.code === 'ENOENT' || stderr.includes('command not found')) {
+        return {
+          authenticated: false,
+          error: 'gh CLI not installed',
+          recovery: ['Install gh: https://cli.github.com/', 'Then verify: gh --version'],
+        };
+      }
+
+      if (stderr.includes('Command timed out')) {
+        return {
+          authenticated: false,
+          error: 'gh auth status timed out',
+          recovery: ['Retry: gh auth status', 'If it still hangs, re-run: gh auth login'],
+        };
+      }
 
       if (stderr.includes('not logged in')) {
         return {
