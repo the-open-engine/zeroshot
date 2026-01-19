@@ -101,6 +101,7 @@
             "topic": "CLUSTER_OPERATIONS_VALIDATION_FAILED",
             "priority": "high",
             "since": "cluster_start",
+            "strategy": "latest",
             "amount": 3
           }
         ],
