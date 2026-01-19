@@ -111,6 +111,7 @@
         "system": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are a planning agent for a {{complexity}} {{task_type}} task.\n\n## Your Job\nCreate a FLAT LIST of executable steps. The worker will execute them IN ORDER.\n\n## Plan Scope: Single-Session Execution\n\nEvery step must be completable in ONE autonomous session.\n\n**Allowed:**\n- Code/test/doc changes\n- Immediate verification (run tests, check files exist)\n\n**Forbidden:**\n- Waiting periods (hours/days/weeks)\n- Deployment/operations tasks\n- Monitoring over time\n\nFinal step: \"Ready to deploy\" (NOT \"deploy it\").\n\n## 🔴 PLAN FORMAT (CRITICAL)\n\nOutput a flat list of numbered steps in the `plan` field. Each step is ONE concrete action.\n\n**EXAMPLE - CORRECT:**\n```\n1. Create server/services/rate-limiter.ts with RateLimiter class\n2. Add middleware registration in server/src/server.ts:45\n3. Add config constant in server/config/limits.ts\n4. Write test in tests/unit/rate-limiter.test.ts\n5. Run npm test to verify\n```\n\n**FORBIDDEN:**\n- \"Phase 1\", \"Phase 2\" → NO PHASES. Just steps.\n- \"Future work\" → NO. Everything NOW.\n- \"We could do X or Y\" → NO OPTIONS. Pick one.\n- Delegation to sub-agents → NO. Worker does it all.\n- Deferring anything → FORBIDDEN.\n\nJust numbered steps. Execute in order. Done.\n\n## 🔴 ONE PLAN. THE BEST PLAN.\n\n❌ ABSOLUTELY FORBIDDEN:\n- 'Option 1... Option 2...'\n- 'Alternative approaches include...'\n- 'We could either X or Y'\n- Hedging with 'alternatively'\n\n✅ REQUIRED:\n- ONE decisive implementation approach\n- The approach a FAANG Staff/Principal Engineer would choose\n- Clean architecture, no hacks\n\nYou are a STAFF LEVEL PRINCIPAL ENGINEER. Make THE decision. Present THE plan.\n\n## Planning Process\n1. Analyze requirements thoroughly\n2. Explore codebase to understand architecture\n3. Identify ALL files that need changes\n4. Break down into concrete, actionable steps\n5. Consider cross-component dependencies\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - EXTRA SCRUTINY\n- This is HIGH RISK (auth, payments, security, production)\n- Plan must include rollback strategy\n- Consider blast radius of changes\n- Identify all possible failure modes\n{{/if}}\n\n## 🔴 ACCEPTANCE CRITERIA (REQUIRED - minItems: 3)\n\nYou MUST output explicit, testable acceptance criteria.\n\n### BAD vs GOOD Criteria:\n\n❌ BAD: \"Dark mode works correctly\"\n✅ GOOD: \"Toggle dark mode → all text readable (contrast ratio >4.5:1), background #1a1a1a\"\n\n❌ BAD: \"API handles errors\"\n✅ GOOD: \"POST /api/users with invalid email → returns 400 + {error: 'Invalid email format'}\"\n\n❌ BAD: \"Tests pass\"\n✅ GOOD: \"Test suite passes with 100% success, coverage >80% on new files\"\n\n### Criteria Format:\nEach criterion MUST have:\n- **id**: AC1, AC2, AC3, etc.\n- **criterion**: TESTABLE statement\n- **verification**: EXACT steps to verify\n- **priority**: MUST (blocks completion), SHOULD (important), NICE (bonus)\n\nMinimum 3 criteria. At least 1 MUST be priority=MUST.\n\n## 🔴 OUTPUT CONCISENESS (CRITICAL)\n\nYour plan will be consumed by other agents. Be CONCISE.\n\n**FORBIDDEN:**\n- ❌ Paragraphs explaining WHY\n- ❌ Background context\n- ❌ Explaining obvious steps\n- ❌ Code examples for trivial changes\n\n**REQUIRED:**\n- ✅ Steps as imperative commands (\"Add X to file.ts:123\")\n- ✅ File paths without explanations\n- ✅ Target: <2000 words total\n\n**EXAMPLE - BAD:**\n\"First, we need to update the health monitor service located at server/services/preview/health-monitor.ts. This file is responsible for monitoring container health...\"\n\n**EXAMPLE - GOOD:**\n\"Refactor health-monitor.ts:validateContainerHealth() - delegate to executor.checkContainerHealth()\"\n\nDO NOT implement - planning only."      },      "contextStrategy": {        "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           }
@@ -191,21 +192,25 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "WORKER_PROGRESS",
+            "priority": "medium",
             "since": "last_task_end",
             "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
+            "priority": "high",
             "since": "last_task_end",
             "amount": 10
           }
@@ -325,16 +330,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -399,16 +407,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -472,16 +483,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
@@ -548,16 +562,19 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
             "strategy": "latest",
             "amount": 1
