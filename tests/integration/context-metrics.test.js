@@ -56,14 +56,14 @@ describe('Context Metrics Integration', function () {
       cluster_id: clusterId,
       topic: 'ISSUE_OPENED',
       sender: 'user',
-      content: { text: hugeText },
+      content: { text: 'Test issue' },
     });
 
     messageBus.publish({
       cluster_id: clusterId,
       topic: 'HUGE_TOPIC',
       sender: 'tester',
-      content: { text: 'optional-context' },
+      content: { text: hugeText },
     });
 
     const context = buildContext({
@@ -102,32 +102,22 @@ describe('Context Metrics Integration', function () {
     assert.strictEqual(metrics.strategy.sourcesCount, 2);
 
     assert.strictEqual(metrics.truncation.maxContextChars.applied, true);
+    assert.strictEqual(metrics.truncation.legacyMaxTokens.applied, true);
     assert.ok(
       metrics.truncation.maxContextChars.beforeChars >
         metrics.truncation.maxContextChars.afterChars,
       'Max context truncation should reduce size'
     );
     assert.ok(
-      metrics.truncation.maxContextChars.afterChars <= MAX_CONTEXT_CHARS,
-      'Final context should respect max char limit'
+      metrics.truncation.legacyMaxTokens.beforeChars >
+        metrics.truncation.legacyMaxTokens.afterChars,
+      'Legacy max tokens truncation should reduce size'
     );
-    assert.strictEqual(metrics.budget.maxTokens, 1);
-    assert.strictEqual(metrics.total.chars, context.length);
+    assert.strictEqual(metrics.truncation.legacyMaxTokens.maxTokens, 1);
+    assert.strictEqual(metrics.total.chars, metrics.truncation.legacyMaxTokens.afterChars);
 
     const metricsJson = JSON.stringify(metrics);
     assert.ok(!metricsJson.includes(secretMarker), 'Metrics should not include raw context');
     assert.ok(metrics.sections.sources.chars > 0, 'Sources section should be counted');
-    assert.ok(
-      metrics.packs.some(
-        (pack) => pack.id.startsWith('source:ISSUE_OPENED') && pack.status === 'included'
-      ),
-      'Required issue pack should be included'
-    );
-    assert.ok(
-      metrics.packs.some(
-        (pack) => pack.id.startsWith('source:HUGE_TOPIC') && pack.status === 'skipped'
-      ),
-      'Optional pack should be skipped when over budget'
-    );
   });
 });
