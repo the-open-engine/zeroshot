@@ -102,6 +102,10 @@ zeroshot run 123 --ship           # PR + auto-merge on approval
 zeroshot run 123 -d
 zeroshot run 123 --ship -d
 
+# Pass extra flags to Claude CLI
+zeroshot task run "prompt" --cli-args "--chrome"     # browser control
+zeroshot task run "prompt" --cli-args "--verbose"    # verbose mode
+
 # Control
 zeroshot list
 zeroshot status <id>
@@ -291,6 +295,28 @@ zeroshot settings set dockerEnvPassthrough '["MY_API_KEY", "TF_VAR_*"]'
 - [Discord](https://discord.gg/PdZ3UEXB) - Support and community
 - `zeroshot export <id>` - Export conversation to markdown
 - `sqlite3 ~/.zeroshot/*.db` - Direct ledger access for debugging
+
+<details>
+<summary><strong>CLI Passthrough (--cli-args)</strong></summary>
+
+The `--cli-args` option passes extra flags directly to the underlying Claude CLI. This is useful for enabling features like browser control.
+
+```bash
+# Enable browser control with --chrome
+zeroshot task run "Check the Storybook for visual bugs" --cli-args "--chrome"
+
+# Multiple flags
+zeroshot task run "Debug the UI" --cli-args "--chrome --verbose"
+```
+
+**Common flags to pass:**
+- `--chrome` - Enable browser control for UI/Storybook tasks
+- `--verbose` - Increase Claude CLI verbosity
+- `--debug` - Enable debug mode
+
+Note: Flags are passed to Claude CLI, not to zeroshot itself.
+
+</details>
 
 <details>
 <summary><strong>Troubleshooting</strong></summary>
