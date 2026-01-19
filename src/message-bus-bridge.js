@@ -16,6 +16,11 @@ class MessageBusBridge {
     this.parentBus = parentBus;
     this.childBus = childBus;
     this.config = config;
+    this.parentTopicNames = new Set(
+      (config.parentTopics || [])
+        .map((entry) => (typeof entry === 'string' ? entry : entry?.topic))
+        .filter((topic) => typeof topic === 'string' && topic.length > 0)
+    );
 
     this.parentUnsubscribe = null;
     this.childUnsubscribe = null;
@@ -30,7 +35,7 @@ class MessageBusBridge {
    */
   _setupBridge() {
     // Forward specified parent topics to child
-    if (this.config.parentTopics && this.config.parentTopics.length > 0) {
+    if (this.parentTopicNames.size > 0) {
       this.parentUnsubscribe = this.parentBus.subscribe((message) => {
         this._forwardParentToChild(message);
       });
@@ -55,7 +60,7 @@ class MessageBusBridge {
     }
 
     // Only forward topics specified in config
-    if (!this.config.parentTopics.includes(message.topic)) {
+    if (!this.parentTopicNames.has(message.topic)) {
       return;
     }
 

@@ -132,12 +132,35 @@ function validateContextStrategy(agentConfig, errors) {
     return;
   }
 
-  // Validate each parent topic is a string
-  for (const topic of parentTopics) {
-    if (typeof topic !== 'string') {
+  // Validate each parent topic entry
+  for (const entry of parentTopics) {
+    if (typeof entry === 'string') {
+      continue;
+    }
+
+    if (!entry || typeof entry !== 'object') {
       errors.push(
-        `Sub-cluster '${agentConfig.id}' parentTopics must contain strings, got ${typeof topic}`
+        `Sub-cluster '${agentConfig.id}' parentTopics must contain strings or objects, got ${typeof entry}`
       );
+      continue;
+    }
+
+    if (typeof entry.topic !== 'string') {
+      errors.push(`Sub-cluster '${agentConfig.id}' parentTopics entry must include a string topic`);
+    }
+
+    if (entry.strategy && !['latest', 'all', 'oldest'].includes(entry.strategy)) {
+      errors.push(
+        `Sub-cluster '${agentConfig.id}' parentTopics entry has invalid strategy '${entry.strategy}'`
+      );
+    }
+
+    if (entry.amount !== undefined && !Number.isFinite(entry.amount)) {
+      errors.push(`Sub-cluster '${agentConfig.id}' parentTopics entry amount must be a number`);
+    }
+
+    if (entry.limit !== undefined && !Number.isFinite(entry.limit)) {
+      errors.push(`Sub-cluster '${agentConfig.id}' parentTopics entry limit must be a number`);
     }
   }
 }

@@ -251,6 +251,17 @@ function generateGitPusherAgent(platform) {
       },
     ],
     prompt: generatePrompt(config),
+    hooks: {
+      onComplete: {
+        action: 'publish_message',
+        config: {
+          topic: 'CLUSTER_COMPLETE',
+          content: {
+            data: { reason: 'git-pusher-complete' },
+          },
+        },
+      },
+    },
     output: {
       topic: 'PR_CREATED',
       publishAfter: 'CLUSTER_COMPLETE',

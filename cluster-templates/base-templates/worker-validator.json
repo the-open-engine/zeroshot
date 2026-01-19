@@ -80,17 +80,18 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "WORKER_PROGRESS",
             "since": "last_task_end",
-            "limit": 3
+            "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
             "since": "last_task_end",
-            "limit": 3
+            "amount": 3
           }
         ],
         "format": "chronological",
@@ -172,11 +173,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
