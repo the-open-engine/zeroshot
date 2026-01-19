@@ -227,6 +227,38 @@ class IssueProvider {
   fetchIssue(_identifier, _settings) {
     throw new Error(`${this.constructor.name}.fetchIssue() must be implemented by subclass`);
   }
+
+  /**
+   * Lifecycle hook: Called when cluster completes successfully.
+   * Override in subclass to perform post-completion actions (close issue, add comment, etc.)
+   *
+   * @param {Object} inputData - The original InputData from fetchIssue()
+   * @param {Object} result - Completion result
+   * @param {string} result.clusterId - The cluster ID
+   * @param {string|null} result.prUrl - PR/MR URL if created
+   * @param {string} result.reason - Completion reason
+   * @param {Object} _settings - User settings
+   * @returns {Promise<void>}
+   */
+  async onClusterComplete(_inputData, _result, _settings) {
+    // Default: no-op. Override in subclass.
+  }
+
+  /**
+   * Lifecycle hook: Called when cluster fails.
+   * Override in subclass to perform post-failure actions (add comment, update status, etc.)
+   *
+   * @param {Object} inputData - The original InputData from fetchIssue()
+   * @param {Object} result - Failure result
+   * @param {string} result.clusterId - The cluster ID
+   * @param {string} result.reason - Failure reason
+   * @param {string|null} result.error - Error details
+   * @param {Object} _settings - User settings
+   * @returns {Promise<void>}
+   */
+  async onClusterFailed(_inputData, _result, _settings) {
+    // Default: no-op. Override in subclass.
+  }
 }
 
 module.exports = IssueProvider;

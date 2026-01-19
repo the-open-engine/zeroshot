@@ -260,6 +260,15 @@ function generateGitPusherAgent(platform) {
         action: 'execute_task',
       },
     ],
+    contextStrategy: {
+      sources: [
+        { topic: 'ISSUE_OPENED', limit: 1 },
+        { topic: 'IMPLEMENTATION_READY', since: 'last_agent_start', limit: 1 },
+        { topic: 'VALIDATION_RESULT', since: 'last_agent_start', limit: 10 },
+      ],
+      format: 'chronological',
+      maxTokens: 100000,
+    },
     prompt: generatePrompt(config),
     output: {
       topic: 'PR_CREATED',
