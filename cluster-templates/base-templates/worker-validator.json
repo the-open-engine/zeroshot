@@ -94,12 +94,14 @@
             "topic": "WORKER_PROGRESS",
             "priority": "medium",
             "since": "last_task_end",
+            "strategy": "latest",
             "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
             "priority": "high",
             "since": "last_task_end",
+            "strategy": "latest",
             "amount": 3
           }
         ],

@@ -123,6 +123,12 @@
             "priority": "required",
             "strategy": "latest",
             "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -186,6 +192,7 @@
             "topic": "VALIDATION_RESULT",
             "priority": "high",
             "since": "last_task_end",
+            "strategy": "latest",
             "amount": 5
           }
         ],

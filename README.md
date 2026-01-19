@@ -439,6 +439,7 @@ zeroshot settings set dockerEnvPassthrough '["MY_API_KEY", "TF_VAR_*"]'
 
 - [CLAUDE.md](./CLAUDE.md) - Architecture, cluster config schema, agent primitives
 - `docs/providers.md` - Provider setup, model levels, and Docker mounts
+- `docs/context-management.md` - Context selection, context packs, and state snapshots
 - [Discord](https://discord.gg/PdZ3UEXB) - Support and community
 - `zeroshot export <id>` - Export conversation to markdown
 - `sqlite3 ~/.zeroshot/*.db` - Direct ledger access for debugging

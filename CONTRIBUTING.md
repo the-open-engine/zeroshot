@@ -574,21 +574,33 @@ See `src/logic-engine.js` for sandbox implementation.
 
 ### Context Building
 
-Agents build context from ledger messages before executing:
+Agents build context from ledger messages before executing. Use explicit selection semantics:
 
-```javascript
+```json
 {
   "contextStrategy": {
     "sources": [
-      { "topic": "ISSUE_OPENED", "limit": 1 },
-      { "topic": "VALIDATION_RESULT", "since": "last_task_end", "limit": 10 }
+      { "topic": "ISSUE_OPENED", "priority": "required", "strategy": "latest", "amount": 1 },
+      { "topic": "STATE_SNAPSHOT", "priority": "required", "strategy": "latest", "amount": 1 },
+      {
+        "topic": "VALIDATION_RESULT",
+        "priority": "high",
+        "since": "last_task_end",
+        "strategy": "latest",
+        "amount": 10,
+        "compactAmount": 3
+      }
     ],
     "maxTokens": 100000
   }
 }
 ```
 
-See `src/agent/agent-context-builder.js` for implementation.
+Notes: `limit` is a deprecated alias for `amount`. If `amount` is set and `strategy` is omitted,
+the default is `latest`; otherwise defaults to `all`.
+
+See `docs/context-management.md` for the full reference and diagrams. Implementation lives in
+`src/agent/agent-context-builder.js`.
 
 ### Template Resolution
 
