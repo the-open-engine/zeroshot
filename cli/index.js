@@ -218,6 +218,8 @@ function detectRunInput(inputArg) {
   const isIssueNumber = /^\d+$/.test(inputArg);
   const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
   const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
+  // Beads formats: beads:ready, beads:ready:P0, beads:AppKiln-5le, or direct beads IDs like AppKiln-5le
+  const isBeadsFormat = /^beads:/.test(inputArg);
 
   if (
     isGitHubUrl ||
@@ -226,7 +228,8 @@ function detectRunInput(inputArg) {
     isAzureUrl ||
     isJiraKey ||
     isIssueNumber ||
-    isRepoIssue
+    isRepoIssue ||
+    isBeadsFormat
   ) {
     input.issue = inputArg;
   } else if (isMarkdownFile) {

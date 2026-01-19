@@ -8,7 +8,7 @@
 const assert = require('assert');
 
 // Mock the CLI input detection logic
-// This mirrors the logic in cli/index.js lines 497-516
+// This mirrors the logic in cli/index.js detectRunInput()
 function detectInputType(inputArg) {
   const input = {};
 
@@ -22,6 +22,10 @@ function detectInputType(inputArg) {
   }
   // Check if it's org/repo#123 format
   else if (inputArg.match(/^[\w-]+\/[\w-]+#\d+$/)) {
+    input.issue = inputArg;
+  }
+  // Check if it's a beads format (beads:ready, beads:ready:P0, beads:issue-id)
+  else if (/^beads:/.test(inputArg)) {
     input.issue = inputArg;
   }
   // Check if it's a markdown file (.md or .markdown)
@@ -109,6 +113,48 @@ describe('CLI Input Detection', function () {
 
       assert.strictEqual(input.file, '../feature.markdown');
       assert.strictEqual(input.issue, undefined);
+      assert.strictEqual(input.text, undefined);
+    });
+  });
+
+  describe('Beads issue detection', function () {
+    it('should detect beads:ready as issue', function () {
+      const input = detectInputType('beads:ready');
+
+      assert.strictEqual(input.issue, 'beads:ready');
+      assert.strictEqual(input.file, undefined);
+      assert.strictEqual(input.text, undefined);
+    });
+
+    it('should detect beads:ready:P0 as issue', function () {
+      const input = detectInputType('beads:ready:P0');
+
+      assert.strictEqual(input.issue, 'beads:ready:P0');
+      assert.strictEqual(input.file, undefined);
+      assert.strictEqual(input.text, undefined);
+    });
+
+    it('should detect beads:ready:P1 as issue', function () {
+      const input = detectInputType('beads:ready:P1');
+
+      assert.strictEqual(input.issue, 'beads:ready:P1');
+      assert.strictEqual(input.file, undefined);
+      assert.strictEqual(input.text, undefined);
+    });
+
+    it('should detect beads:AppKiln-5le as issue', function () {
+      const input = detectInputType('beads:AppKiln-5le');
+
+      assert.strictEqual(input.issue, 'beads:AppKiln-5le');
+      assert.strictEqual(input.file, undefined);
+      assert.strictEqual(input.text, undefined);
+    });
+
+    it('should detect beads:bd-abc123 as issue', function () {
+      const input = detectInputType('beads:bd-abc123');
+
+      assert.strictEqual(input.issue, 'beads:bd-abc123');
+      assert.strictEqual(input.file, undefined);
       assert.strictEqual(input.text, undefined);
     });
   });
