@@ -209,95 +209,40 @@ function formatSourceMessagesSection(source, messages) {
   return context;
 }
 
-function resolveSourceSelection(source, { compact = false } = {}) {
-  const baseAmount = source.amount ?? source.limit;
-  const baseStrategy = source.strategy ?? (baseAmount !== undefined ? 'latest' : 'all');
-
-  if (!compact) {
-    return { amount: baseAmount, strategy: baseStrategy };
-  }
-
-  const compactAmount = source.compactAmount ?? (baseAmount !== undefined ? 1 : 1);
-  const compactStrategy =
-    source.compactStrategy ?? (baseStrategy === 'all' ? 'latest' : baseStrategy);
-
-  return { amount: compactAmount, strategy: compactStrategy };
+function resolveSourceSelection(source) {
+  const amount = source.amount ?? source.limit;
+  const strategy = source.strategy ?? (amount !== undefined ? 'latest' : 'all');
+  return { amount, strategy };
 }
 
-function resolveSourceMessages({
-  source,
-  messageBus,
-  cluster,
-  lastTaskEndTime,
-  lastAgentStartTime,
-  compact = false,
-}) {
-  const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
-  const { amount, strategy } = resolveSourceSelection(source, { compact });
-  const order = strategy === 'latest' ? 'desc' : 'asc';
-  const messages = messageBus.query({
-    cluster_id: cluster.id,
-    topic: source.topic,
-    sender: source.sender,
-    since: sinceTimestamp,
-    limit: amount,
-    order,
-  });
-
-  if (strategy !== 'latest' || messages.length <= 1) {
-    return messages;
-  }
-
-  return messages.slice().reverse();
-}
-
-function resolveSourcePriority(source) {
-  if (source.priority) {
-    return source.priority;
-  }
-  if (source.topic === 'STATE_SNAPSHOT') {
-    return 'required';
-  }
-  if (source.topic === 'ISSUE_OPENED' || source.topic === 'PLAN_READY') {
-    return 'required';
-  }
-  if (source.topic === 'VALIDATION_RESULT' || source.topic === 'IMPLEMENTATION_READY') {
-    return 'high';
-  }
-  return 'medium';
-}
-
-function buildSourcePack({
-  source,
-  index,
+function buildSourcesSection({
+  strategy,
   messageBus,
   cluster,
   lastTaskEndTime,
   lastAgentStartTime,
 }) {
-  const packId = `source:${source.topic}:${index}`;
-  const priority = resolveSourcePriority(source);
-
-  const render = (compact) => {
-    const messages = resolveSourceMessages({
-      source,
-      messageBus,
-      cluster,
-      lastTaskEndTime,
-      lastAgentStartTime,
-      compact,
+  let context = '';
+  for (const source of strategy.sources) {
+    const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
+    const { amount, strategy: selectionStrategy } = resolveSourceSelection(source);
+    const order = selectionStrategy === 'latest' ? 'desc' : 'asc';
+    const messages = messageBus.query({
+      cluster_id: cluster.id,
+      topic: source.topic,
+      sender: source.sender,
+      since: sinceTimestamp,
+      limit: amount,
+      order,
     });
-    if (messages.length === 0) return '';
-    return formatSourceMessagesSection(source, messages);
-  };
+    const orderedMessages =
+      selectionStrategy === 'latest' && messages.length > 1 ? messages.slice().reverse() : messages;
 
-  return {
-    id: packId,
-    section: 'sources',
-    priority,
-    render: () => render(false),
-    compact: () => render(true),
-  };
+    if (orderedMessages.length > 0) {
+      context += formatSourceMessagesSection(source, orderedMessages);
+    }
+  }
+  return context;
 }
 
 const { isPlatformMismatchReason } = require('./validation-platform');

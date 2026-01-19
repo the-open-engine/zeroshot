@@ -80,13 +80,6 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -94,14 +87,12 @@
             "topic": "WORKER_PROGRESS",
             "priority": "medium",
             "since": "last_task_end",
-            "strategy": "latest",
             "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
             "priority": "high",
             "since": "last_task_end",
-            "strategy": "latest",
             "amount": 3
           }
         ],
@@ -184,19 +175,11 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
-            "priority": "high",
             "strategy": "latest",
             "amount": 1
           }

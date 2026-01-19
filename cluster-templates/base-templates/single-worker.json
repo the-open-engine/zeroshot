@@ -35,13 +35,6 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           }

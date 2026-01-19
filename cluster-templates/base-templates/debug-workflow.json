@@ -120,13 +120,6 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           }
@@ -172,19 +165,11 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "INVESTIGATION_COMPLETE",
-            "priority": "high",
             "strategy": "latest",
             "amount": 1
           },
@@ -192,7 +177,6 @@
             "topic": "VALIDATION_RESULT",
             "priority": "high",
             "since": "last_task_end",
-            "strategy": "latest",
             "amount": 5
           }
         ],
@@ -353,19 +337,11 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "priority": "required",
-            "strategy": "latest",
-            "amount": 1
-          },
-          {
-            "topic": "STATE_SNAPSHOT",
-            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "INVESTIGATION_COMPLETE",
-            "priority": "high",
             "strategy": "latest",
             "amount": 1
           },
