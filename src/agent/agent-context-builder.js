@@ -18,6 +18,7 @@ const {
   resolveLegacyMaxTokens,
   updateTotalMetrics,
 } = require('./context-metrics');
+const { buildContextPacks } = require('./context-pack-builder');
 
 /**
  * Generate an example object from a JSON schema
@@ -209,40 +210,92 @@ function formatSourceMessagesSection(source, messages) {
   return context;
 }
 
-function resolveSourceSelection(source) {
-  const amount = source.amount ?? source.limit;
-  const strategy = source.strategy ?? (amount !== undefined ? 'latest' : 'all');
-  return { amount, strategy };
+function resolveSourceSelection(source, { compact = false } = {}) {
+  const baseAmount = source.amount ?? source.limit;
+  const baseStrategy = source.strategy ?? (baseAmount !== undefined ? 'latest' : 'all');
+
+  if (!compact) {
+    return { amount: baseAmount, strategy: baseStrategy };
+  }
+
+  const compactAmount = source.compactAmount ?? (baseAmount !== undefined ? 1 : 1);
+  const compactStrategy =
+    source.compactStrategy ?? (baseStrategy === 'all' ? 'latest' : baseStrategy);
+
+  return { amount: compactAmount, strategy: compactStrategy };
 }
 
-function buildSourcesSection({
-  strategy,
+function resolveSourceMessages({
+  source,
+  messageBus,
+  cluster,
+  lastTaskEndTime,
+  lastAgentStartTime,
+  compact = false,
+}) {
+  const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
+  const { amount, strategy } = resolveSourceSelection(source, { compact });
+  const order = strategy === 'latest' ? 'desc' : 'asc';
+  const messages = messageBus.query({
+    cluster_id: cluster.id,
+    topic: source.topic,
+    sender: source.sender,
+    since: sinceTimestamp,
+    limit: amount,
+    order,
+  });
+
+  if (strategy !== 'latest' || messages.length <= 1) {
+    return messages;
+  }
+
+  return messages.slice().reverse();
+}
+
+function resolveSourcePriority(source) {
+  if (source.topic === 'ISSUE_OPENED' || source.topic === 'PLAN_READY') {
+    return 'required';
+  }
+  if (source.priority) {
+    return source.priority;
+  }
+  if (source.topic === 'VALIDATION_RESULT' || source.topic === 'IMPLEMENTATION_READY') {
+    return 'high';
+  }
+  return 'medium';
+}
+
+function buildSourcePack({
+  source,
+  index,
   messageBus,
   cluster,
   lastTaskEndTime,
   lastAgentStartTime,
 }) {
-  let context = '';
-  for (const source of strategy.sources) {
-    const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
-    const { amount, strategy: selectionStrategy } = resolveSourceSelection(source);
-    const order = selectionStrategy === 'latest' ? 'desc' : 'asc';
-    const messages = messageBus.query({
-      cluster_id: cluster.id,
-      topic: source.topic,
-      sender: source.sender,
-      since: sinceTimestamp,
-      limit: amount,
-      order,
-    });
-    const orderedMessages =
-      selectionStrategy === 'latest' && messages.length > 1 ? messages.slice().reverse() : messages;
+  const packId = `source:${source.topic}:${index}`;
+  const priority = resolveSourcePriority(source);
 
-    if (orderedMessages.length > 0) {
-      context += formatSourceMessagesSection(source, orderedMessages);
-    }
-  }
-  return context;
+  const render = (compact) => {
+    const messages = resolveSourceMessages({
+      source,
+      messageBus,
+      cluster,
+      lastTaskEndTime,
+      lastAgentStartTime,
+      compact,
+    });
+    if (messages.length === 0) return '';
+    return formatSourceMessagesSection(source, messages);
+  };
+
+  return {
+    id: packId,
+    section: 'sources',
+    priority,
+    render: () => render(false),
+    compact: () => render(true),
+  };
 }
 
 const { isPlatformMismatchReason } = require('./validation-platform');
@@ -305,110 +358,6 @@ function buildTriggeringMessageSection(triggeringMessage) {
   return context;
 }
 
-function findContextSectionIndices(lines) {
-  let issueOpenedStart = -1;
-  let issueOpenedEnd = -1;
-  let triggeringStart = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('## Messages from topic: ISSUE_OPENED')) {
-      issueOpenedStart = i;
-    }
-    if (issueOpenedStart !== -1 && issueOpenedEnd === -1 && lines[i].startsWith('## ')) {
-      issueOpenedEnd = i;
-    }
-    if (lines[i].includes('## Triggering Message')) {
-      triggeringStart = i;
-      break;
-    }
-  }
-
-  return { issueOpenedStart, issueOpenedEnd, triggeringStart };
-}
-
-function collectRecentLines(middleLines, budgetForRecent) {
-  const recentLines = [];
-  let recentSize = 0;
-
-  for (let i = middleLines.length - 1; i >= 0; i--) {
-    const line = middleLines[i];
-    const lineSize = line.length + 1;
-
-    if (recentSize + lineSize > budgetForRecent) {
-      break;
-    }
-
-    recentLines.unshift(line);
-    recentSize += lineSize;
-  }
-
-  return recentLines;
-}
-
-function truncateContextIfNeeded(context) {
-  const originalLength = context.length;
-  if (originalLength <= MAX_CONTEXT_CHARS) {
-    return context;
-  }
-
-  console.log(
-    `[Context] Context too large (${originalLength} chars), truncating to prevent overflow...`
-  );
-
-  const lines = context.split('\n');
-  const { issueOpenedStart, issueOpenedEnd, triggeringStart } = findContextSectionIndices(lines);
-
-  const headerEnd = issueOpenedStart !== -1 ? issueOpenedStart : triggeringStart;
-  const header = lines.slice(0, headerEnd).join('\n');
-
-  const issueOpened =
-    issueOpenedStart !== -1 && issueOpenedEnd !== -1
-      ? lines.slice(issueOpenedStart, issueOpenedEnd).join('\n')
-      : '';
-
-  const triggeringMsg = lines.slice(triggeringStart).join('\n');
-
-  const fixedSize = header.length + issueOpened.length + triggeringMsg.length;
-  const budgetForRecent = MAX_CONTEXT_CHARS - fixedSize - 200;
-
-  const middleStart = issueOpenedEnd !== -1 ? issueOpenedEnd : headerEnd;
-  const middleEnd = triggeringStart;
-  const middleLines = lines.slice(middleStart, middleEnd);
-  const recentLines = collectRecentLines(middleLines, budgetForRecent);
-
-  const parts = [header];
-  if (issueOpened) {
-    parts.push(issueOpened);
-  }
-  if (recentLines.length < middleLines.length) {
-    const truncatedCount = middleLines.length - recentLines.length;
-    parts.push(
-      `\n[...${truncatedCount} earlier context messages truncated to prevent overflow...]\n`
-    );
-  }
-  if (recentLines.length > 0) {
-    parts.push(recentLines.join('\n'));
-  }
-  parts.push(triggeringMsg);
-
-  const truncatedContext = parts.join('\n');
-  const truncatedLength = truncatedContext.length;
-  console.log(
-    `[Context] Truncated from ${originalLength} to ${truncatedLength} chars (${Math.round((truncatedLength / originalLength) * 100)}% retained)`
-  );
-
-  return truncatedContext;
-}
-
-function applyLegacyMaxTokens(context, strategy) {
-  const maxTokens = resolveLegacyMaxTokens(strategy);
-  const maxChars = maxTokens * 4;
-  if (context.length > maxChars) {
-    return context.slice(0, maxChars) + '\n\n[Context truncated...]';
-  }
-  return context;
-}
-
 /**
  * Build execution context for an agent
  * @param {object} params - Context building parameters
@@ -448,68 +397,54 @@ function buildContext({
   const instructions = buildInstructionsSection({ config, selectedPrompt, id });
   const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
   const jsonSchema = buildJsonSchemaSection(config);
-  const sources = buildSourcesSection({
-    strategy,
-    messageBus,
-    cluster,
-    lastTaskEndTime,
-    lastAgentStartTime,
-  });
   const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster });
   const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
 
-  const sections = {
-    header,
-    instructions,
-    legacyOutputSchema,
-    jsonSchema,
-    sources,
-    validatorSkip,
-    triggeringMessage: triggeringMessageSection,
+  const packs = [];
+  let order = 0;
+
+  const pushStaticPack = (packId, section, text, options = {}) => {
+    if (!text) return;
+    packs.push({
+      id: packId,
+      section,
+      priority: 'required',
+      order: order++,
+      preserve: options.preserve || false,
+      render: () => text,
+    });
   };
 
-  let context =
-    header +
-    instructions +
-    legacyOutputSchema +
-    jsonSchema +
-    sources +
-    validatorSkip +
-    triggeringMessageSection;
+  pushStaticPack('header', 'header', header);
+  pushStaticPack('instructions', 'instructions', instructions);
+  pushStaticPack('legacyOutputSchema', 'legacyOutputSchema', legacyOutputSchema);
+  pushStaticPack('jsonSchema', 'jsonSchema', jsonSchema);
 
-  const metrics = buildContextMetrics({
-    clusterId: cluster.id,
-    agentId: id,
-    role,
-    iteration,
-    triggeringMessage,
-    strategy,
-    sections,
+  if (Array.isArray(strategy.sources)) {
+    strategy.sources.forEach((source, index) => {
+      const pack = buildSourcePack({
+        source,
+        index,
+        messageBus,
+        cluster,
+        lastTaskEndTime,
+        lastAgentStartTime,
+      });
+      packs.push({ ...pack, order: order++ });
+    });
+  }
+
+  pushStaticPack('validatorSkip', 'validatorSkip', validatorSkip);
+  pushStaticPack('triggeringMessage', 'triggeringMessage', triggeringMessageSection, {
+    preserve: true,
   });
 
-  const maxContextBeforeChars = context.length;
-  context = truncateContextIfNeeded(context);
-  const maxContextAfterChars = context.length;
-
-  const legacyMaxTokens = resolveLegacyMaxTokens(strategy);
-  const legacyMaxBeforeChars = context.length;
-  context = applyLegacyMaxTokens(context, strategy);
-  const legacyMaxAfterChars = context.length;
-
-  metrics.truncation.maxContextChars = {
-    applied: maxContextBeforeChars > MAX_CONTEXT_CHARS,
-    beforeChars: maxContextBeforeChars,
-    afterChars: maxContextAfterChars,
-  };
-  metrics.truncation.legacyMaxTokens = {
-    applied: legacyMaxBeforeChars > legacyMaxTokens * 4,
-    beforeChars: legacyMaxBeforeChars,
-    afterChars: legacyMaxAfterChars,
-    maxTokens: legacyMaxTokens,
-  };
-
-  updateTotalMetrics(metrics, legacyMaxAfterChars);
-  emitContextMetrics(metrics, { messageBus, clusterId: cluster.id, agentId: id });
+  const maxTokens = resolveLegacyMaxTokens(strategy);
+  const packResult = buildContextPacks({
+    packs,
+    maxTokens,
+    maxChars: MAX_CONTEXT_CHARS,
+  });
 
   const metrics = buildContextMetrics({
     clusterId: cluster.id,

@@ -114,6 +114,7 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           }
@@ -194,11 +195,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -402,11 +405,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -477,11 +482,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -551,11 +558,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -628,11 +637,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "PLAN_READY",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },

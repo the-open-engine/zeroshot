@@ -23,6 +23,28 @@ function buildSectionMetrics(sections) {
   return { sectionMetrics, totalChars };
 }
 
+function buildSectionMetricsFromPacks(packs) {
+  const sectionMetrics = {};
+  let totalChars = 0;
+
+  for (const pack of packs) {
+    if (pack.status !== 'included') continue;
+    const sectionName = pack.section || pack.id || 'unknown';
+    const chars = Number.isFinite(pack.chars) ? pack.chars : 0;
+    if (!sectionMetrics[sectionName]) {
+      sectionMetrics[sectionName] = { chars: 0, estimatedTokens: 0 };
+    }
+    sectionMetrics[sectionName].chars += chars;
+    totalChars += chars;
+  }
+
+  for (const section of Object.values(sectionMetrics)) {
+    section.estimatedTokens = estimateTokensFromChars(section.chars);
+  }
+
+  return { sectionMetrics, totalChars };
+}
+
 function resolveLegacyMaxTokens(strategy) {
   if (!strategy) {
     return 100000;
@@ -39,10 +61,25 @@ function buildContextMetrics({
   triggeringMessage,
   strategy,
   sections,
+  packs,
+  budget,
+  truncation,
 }) {
-  const { sectionMetrics, totalChars } = buildSectionMetrics(sections);
   const maxTokens = resolveLegacyMaxTokens(strategy);
   const sourcesCount = Array.isArray(strategy?.sources) ? strategy.sources.length : 0;
+  const packMetrics = Array.isArray(packs) ? packs : [];
+
+  let sectionMetrics = {};
+  let totalChars = 0;
+  if (packMetrics.length > 0) {
+    const packTotals = buildSectionMetricsFromPacks(packMetrics);
+    sectionMetrics = packTotals.sectionMetrics;
+    totalChars = packTotals.totalChars;
+  } else if (sections) {
+    const sectionTotals = buildSectionMetrics(sections);
+    sectionMetrics = sectionTotals.sectionMetrics;
+    totalChars = sectionTotals.totalChars;
+  }
 
   return {
     clusterId,
@@ -55,22 +92,23 @@ function buildContextMetrics({
       maxTokens,
       sourcesCount,
     },
+    budget: {
+      maxTokens: budget?.maxTokens ?? maxTokens,
+      remainingTokens: budget?.remainingTokens === undefined ? null : budget?.remainingTokens,
+      overBudgetTokens: budget?.overBudgetTokens ?? 0,
+      finalTokens: budget?.finalTokens ?? estimateTokensFromChars(totalChars),
+    },
+    packs: packMetrics,
     sections: sectionMetrics,
     total: {
       chars: totalChars,
       estimatedTokens: estimateTokensFromChars(totalChars),
     },
     truncation: {
-      maxContextChars: {
+      maxContextChars: truncation?.maxContextChars || {
         applied: false,
         beforeChars: totalChars,
         afterChars: totalChars,
-      },
-      legacyMaxTokens: {
-        applied: false,
-        beforeChars: totalChars,
-        afterChars: totalChars,
-        maxTokens,
       },
     },
   };
@@ -85,6 +123,14 @@ function updateTotalMetrics(metrics, chars) {
     chars,
     estimatedTokens: estimateTokensFromChars(chars),
   };
+
+  if (metrics.budget) {
+    metrics.budget.finalTokens = estimateTokensFromChars(chars);
+  }
+
+  if (metrics.truncation?.maxContextChars) {
+    metrics.truncation.maxContextChars.afterChars = chars;
+  }
 }
 
 function emitContextMetrics(metrics, { messageBus, clusterId, agentId }) {

@@ -80,6 +80,7 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
@@ -175,11 +176,13 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
             "strategy": "latest",
             "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "strategy": "latest",
             "amount": 1
           }
