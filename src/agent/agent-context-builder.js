@@ -12,6 +12,12 @@
 // Defensive limit: 500,000 chars ≈ 125k tokens (safe buffer below 200k limit)
 // Prevents "Prompt is too long" errors that kill tasks
 const MAX_CONTEXT_CHARS = 500000;
+const {
+  buildContextMetrics,
+  emitContextMetrics,
+  resolveLegacyMaxTokens,
+  updateTotalMetrics,
+} = require('./context-metrics');
 
 /**
  * Generate an example object from a JSON schema
@@ -377,7 +383,7 @@ function truncateContextIfNeeded(context) {
 }
 
 function applyLegacyMaxTokens(context, strategy) {
-  const maxTokens = strategy.maxTokens || 100000;
+  const maxTokens = resolveLegacyMaxTokens(strategy);
   const maxChars = maxTokens * 4;
   if (context.length > maxChars) {
     return context.slice(0, maxChars) + '\n\n[Context truncated...]';
@@ -419,22 +425,72 @@ function buildContext({
   const strategy = config.contextStrategy || { sources: [] };
   const isIsolated = !!(worktree?.enabled || isolation?.enabled);
 
-  let context = buildHeaderContext({ id, role, iteration, isIsolated });
-  context += buildInstructionsSection({ config, selectedPrompt, id });
-  context += buildLegacyOutputSchemaSection(config);
-  context += buildJsonSchemaSection(config);
-  context += buildSourcesSection({
+  const header = buildHeaderContext({ id, role, iteration, isIsolated });
+  const instructions = buildInstructionsSection({ config, selectedPrompt, id });
+  const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
+  const jsonSchema = buildJsonSchemaSection(config);
+  const sources = buildSourcesSection({
     strategy,
     messageBus,
     cluster,
     lastTaskEndTime,
     lastAgentStartTime,
   });
-  context += buildValidatorSkipSection({ role, messageBus, cluster });
-  context += buildTriggeringMessageSection(triggeringMessage);
+  const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster });
+  const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
 
+  const sections = {
+    header,
+    instructions,
+    legacyOutputSchema,
+    jsonSchema,
+    sources,
+    validatorSkip,
+    triggeringMessage: triggeringMessageSection,
+  };
+
+  let context =
+    header +
+    instructions +
+    legacyOutputSchema +
+    jsonSchema +
+    sources +
+    validatorSkip +
+    triggeringMessageSection;
+
+  const metrics = buildContextMetrics({
+    clusterId: cluster.id,
+    agentId: id,
+    role,
+    iteration,
+    triggeringMessage,
+    strategy,
+    sections,
+  });
+
+  const maxContextBeforeChars = context.length;
   context = truncateContextIfNeeded(context);
+  const maxContextAfterChars = context.length;
+
+  const legacyMaxTokens = resolveLegacyMaxTokens(strategy);
+  const legacyMaxBeforeChars = context.length;
   context = applyLegacyMaxTokens(context, strategy);
+  const legacyMaxAfterChars = context.length;
+
+  metrics.truncation.maxContextChars = {
+    applied: maxContextBeforeChars > MAX_CONTEXT_CHARS,
+    beforeChars: maxContextBeforeChars,
+    afterChars: maxContextAfterChars,
+  };
+  metrics.truncation.legacyMaxTokens = {
+    applied: legacyMaxBeforeChars > legacyMaxTokens * 4,
+    beforeChars: legacyMaxBeforeChars,
+    afterChars: legacyMaxAfterChars,
+    maxTokens: legacyMaxTokens,
+  };
+
+  updateTotalMetrics(metrics, legacyMaxAfterChars);
+  emitContextMetrics(metrics, { messageBus, clusterId: cluster.id, agentId: id });
 
   return context;
 }
