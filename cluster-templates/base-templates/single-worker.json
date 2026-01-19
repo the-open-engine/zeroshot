@@ -38,6 +38,12 @@
             "priority": "required",
             "strategy": "latest",
             "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",

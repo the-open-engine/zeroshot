@@ -85,6 +85,12 @@
             "amount": 1
           },
           {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
             "topic": "WORKER_PROGRESS",
             "priority": "medium",
             "since": "last_task_end",
@@ -176,6 +182,12 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
             "priority": "required",
             "strategy": "latest",
             "amount": 1
