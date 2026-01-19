@@ -6,6 +6,8 @@
 const IssueProvider = require('./base-provider');
 const { execSync } = require('../lib/safe-exec');
 
+const AUTH_CHECK_TIMEOUT_MS = 2000;
+
 class JiraProvider extends IssueProvider {
   static id = 'jira';
   static displayName = 'Jira';
@@ -71,10 +73,29 @@ class JiraProvider extends IssueProvider {
     try {
       // go-jira uses 'jira session' to verify authentication
       // If not configured, it fails with endpoint/login errors
-      execSync('jira session', { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
+      execSync('jira session', { encoding: 'utf8', stdio: 'pipe', timeout: AUTH_CHECK_TIMEOUT_MS });
       return { authenticated: true, error: null, recovery: [] };
     } catch (err) {
       const stderr = err.stderr || err.message || '';
+
+      if (err.code === 'ENOENT' || stderr.includes('command not found')) {
+        return {
+          authenticated: false,
+          error: 'Jira CLI not installed',
+          recovery: [
+            'Install jira CLI: https://github.com/go-jira/jira',
+            'Then verify: jira version',
+          ],
+        };
+      }
+
+      if (stderr.includes('Command timed out')) {
+        return {
+          authenticated: false,
+          error: 'jira session timed out',
+          recovery: ['Retry: jira session', 'Check ~/.jira.d/config.yml for endpoint/login'],
+        };
+      }
 
       // go-jira has various error patterns for auth issues
       if (

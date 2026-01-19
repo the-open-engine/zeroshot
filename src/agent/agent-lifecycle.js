@@ -604,8 +604,9 @@ async function executeTask(agent, triggeringMessage) {
 
   // Default: no retries (maxRetries=1 means 1 attempt only)
   // Set agent config `maxRetries: 3` to enable exponential backoff retries
-  const maxRetries = agent.config.maxRetries ?? 1;
+  let maxRetries = agent.config.maxRetries ?? 1;
   const baseDelay = 2000; // 2 seconds
+  let sigtermRetryGranted = false;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // Check if agent was stopped between retries
@@ -617,6 +618,11 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
+      const isSigterm = error.message && error.message.includes('SIGTERM');
+      if (isSigterm && !sigtermRetryGranted && attempt >= maxRetries) {
+        sigtermRetryGranted = true;
+        maxRetries += 1;
+      }
       const shouldStop = await handleTaskAttemptFailure({
         agent,
         triggeringMessage,

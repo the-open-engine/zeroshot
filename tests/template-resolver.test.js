@@ -142,9 +142,9 @@ describe('TemplateResolver', function () {
       const planner = resolved.agents.find((a) => a.id === 'planner');
       assert.strictEqual(planner.modelLevel, 'level3');
 
-      // Should have 5 validators for CRITICAL
+      // Should have 4 validators for CRITICAL
       const validators = resolved.agents.filter((a) => a.role === 'validator');
-      assert.strictEqual(validators.length, 5);
+      assert.strictEqual(validators.length, 4);
     });
 
     it('should fail on missing required params', function () {

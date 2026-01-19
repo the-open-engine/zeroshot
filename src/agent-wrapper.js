@@ -423,8 +423,12 @@ class AgentWrapper {
       isolation: this.isolation,
     });
 
-    // Record when this iteration started so future "since: last_agent_start" filters work
-    this.lastAgentStartTime = Date.now();
+    // Record when this iteration started so future "since: last_agent_start" filters work.
+    const latestMessage = this.messageBus.findLast({ cluster_id: this.cluster.id });
+    const latestTimestamp = latestMessage?.timestamp;
+    const now = Date.now();
+    this.lastAgentStartTime =
+      typeof latestTimestamp === 'number' ? Math.max(now, latestTimestamp + 1) : now;
 
     return context;
   }

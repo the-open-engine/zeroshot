@@ -295,6 +295,61 @@ function defineSubClusterWrapperTests() {
       assert.strictEqual(wrapper.role, 'orchestrator');
       assert.strictEqual(wrapper.state, 'idle');
     });
+
+    it('should select latest parent topic messages for child context', function () {
+      const dbPath = path.join(TEST_STORAGE, 'parent-context.db');
+      const ledger = new Ledger(dbPath);
+      const messageBus = new MessageBus(ledger);
+
+      const config = {
+        id: 'test-subcluster',
+        type: 'subcluster',
+        role: 'orchestrator',
+        config: {
+          agents: [
+            {
+              id: 'worker',
+              role: 'implementation',
+              modelLevel: 'level1',
+              triggers: [{ topic: 'START' }],
+            },
+          ],
+        },
+        triggers: [{ topic: 'BEGIN' }],
+        contextStrategy: {
+          parentTopics: [{ topic: 'PLAN_READY', strategy: 'latest', amount: 1 }],
+        },
+      };
+
+      const parentCluster = { id: 'parent-cluster' };
+      const wrapper = new SubClusterWrapper(config, messageBus, parentCluster, { quiet: true });
+
+      const baseTime = Date.now();
+      messageBus.publish({
+        cluster_id: parentCluster.id,
+        topic: 'PLAN_READY',
+        sender: 'planner',
+        content: { text: 'Old plan' },
+        timestamp: baseTime,
+      });
+      messageBus.publish({
+        cluster_id: parentCluster.id,
+        topic: 'PLAN_READY',
+        sender: 'planner',
+        content: { text: 'Newest plan' },
+        timestamp: baseTime + 10,
+      });
+
+      const context = wrapper._buildChildContext({
+        topic: 'BEGIN',
+        sender: 'system',
+        timestamp: baseTime + 20,
+        content: { text: 'Trigger' },
+      });
+
+      assert(context.includes('Newest plan'), 'Should include latest parent topic message');
+      assert(!context.includes('Old plan'), 'Should not include older parent topic message');
+    });
   });
 }
 

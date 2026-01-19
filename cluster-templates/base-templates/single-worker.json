@@ -35,7 +35,8 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
