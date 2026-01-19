@@ -17,14 +17,56 @@ describe('Context Metrics', function () {
       iteration: 2,
       triggeringMessage: { topic: 'TASK', sender: 'user' },
       strategy: { sources: [{ topic: 'A' }, { topic: 'B' }], maxTokens: 10 },
-      sections: {
-        header: 'abcd',
-        instructions: '12345',
-        legacyOutputSchema: '',
-        jsonSchema: 'xy',
-        sources: '',
-        validatorSkip: 'z',
-        triggeringMessage: 'q',
+      packs: [
+        { id: 'header', section: 'header', status: 'included', chars: 4, estimatedTokens: 1 },
+        {
+          id: 'instructions',
+          section: 'instructions',
+          status: 'included',
+          chars: 5,
+          estimatedTokens: 2,
+        },
+        {
+          id: 'jsonSchema',
+          section: 'jsonSchema',
+          status: 'included',
+          chars: 2,
+          estimatedTokens: 1,
+        },
+        {
+          id: 'validatorSkip',
+          section: 'validatorSkip',
+          status: 'included',
+          chars: 1,
+          estimatedTokens: 1,
+        },
+        {
+          id: 'triggeringMessage',
+          section: 'triggeringMessage',
+          status: 'included',
+          chars: 1,
+          estimatedTokens: 1,
+        },
+        {
+          id: 'sources-a',
+          section: 'sources',
+          status: 'included',
+          chars: 3,
+          estimatedTokens: 1,
+        },
+        {
+          id: 'sources-skipped',
+          section: 'sources',
+          status: 'skipped',
+          chars: 100,
+          estimatedTokens: 25,
+        },
+      ],
+      budget: {
+        maxTokens: 10,
+        remainingTokens: 2,
+        overBudgetTokens: 0,
+        finalTokens: 6,
       },
     });
 
@@ -35,15 +77,17 @@ describe('Context Metrics', function () {
     assert.strictEqual(metrics.sections.jsonSchema.chars, 2);
     assert.strictEqual(metrics.sections.validatorSkip.chars, 1);
     assert.strictEqual(metrics.sections.triggeringMessage.chars, 1);
-    assert.strictEqual(metrics.total.chars, 4 + 5 + 0 + 2 + 0 + 1 + 1);
+    assert.strictEqual(metrics.sections.sources.chars, 3);
+    assert.strictEqual(metrics.total.chars, 4 + 5 + 2 + 1 + 1 + 3);
     assert.strictEqual(metrics.total.estimatedTokens, Math.ceil(metrics.total.chars / 4));
 
     assert.strictEqual(metrics.strategy.maxTokens, 10);
     assert.strictEqual(metrics.strategy.sourcesCount, 2);
     assert.strictEqual(metrics.triggeredBy, 'TASK');
     assert.strictEqual(metrics.triggerFrom, 'user');
+    assert.strictEqual(metrics.budget.maxTokens, 10);
+    assert.strictEqual(metrics.budget.remainingTokens, 2);
     assert.strictEqual(metrics.truncation.maxContextChars.beforeChars, metrics.total.chars);
-    assert.strictEqual(metrics.truncation.legacyMaxTokens.maxTokens, 10);
   });
 
   it('defaults maxTokens when not provided', function () {
@@ -54,9 +98,10 @@ describe('Context Metrics', function () {
       iteration: 1,
       triggeringMessage: { topic: 'TASK', sender: 'user' },
       strategy: { sources: [] },
-      sections: { header: 'a' },
+      packs: [{ id: 'header', section: 'header', status: 'included', chars: 1 }],
     });
 
     assert.strictEqual(metrics.strategy.maxTokens, 100000);
+    assert.strictEqual(metrics.budget.maxTokens, 100000);
   });
 });

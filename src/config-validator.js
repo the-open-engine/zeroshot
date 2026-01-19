@@ -1486,6 +1486,29 @@ function validateContextSource(prefix, source, topicProducers, errors, warnings)
         `Fix: Use 'latest', 'all', or 'oldest'.`
     );
   }
+
+  if (source.priority && !['required', 'high', 'medium', 'low'].includes(source.priority)) {
+    errors.push(
+      `[Gap 14] ${prefix}: Context source priority '${source.priority}' is invalid. ` +
+        `Fix: Use 'required', 'high', 'medium', or 'low'.`
+    );
+  }
+
+  if (source.compactStrategy && !['latest', 'all', 'oldest'].includes(source.compactStrategy)) {
+    errors.push(
+      `[Gap 14] ${prefix}: Context source compactStrategy '${source.compactStrategy}' is invalid. ` +
+        `Fix: Use 'latest', 'all', or 'oldest'.`
+    );
+  }
+
+  if (source.compactAmount !== undefined) {
+    if (!Number.isFinite(source.compactAmount) || source.compactAmount <= 0) {
+      errors.push(
+        `[Gap 14] ${prefix}: Context source compactAmount must be a positive number, got ${source.compactAmount}. ` +
+          `Fix: Use a positive integer like 1 or 3.`
+      );
+    }
+  }
 }
 
 function validateContextSources(prefix, agent, topicProducers, errors, warnings) {
