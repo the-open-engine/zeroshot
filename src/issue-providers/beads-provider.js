@@ -32,13 +32,13 @@ class BeadsProvider extends IssueProvider {
    * Detect Beads issue identifiers
    * Matches:
    * - Standard beads IDs: bd-abc123, bd-a1b2c3d4
-   * - Project-prefixed IDs: AppKiln-abc, MyProject-xyz123 (PascalCase prefix)
+   * - Project-prefixed IDs: zs-t9w, AppKiln-abc, MyProject-xyz123
    * - Explicit beads: prefix: beads:bd-abc123, beads:AppKiln-xyz
    * - Auto-pick: beads:ready, beads:ready:P0, beads:ready:P1
    *
    * Does NOT match:
    * - Bare numbers (those go to GitHub/GitLab)
-   * - lowercase-hyphen-words like fix-typo, my-branch (likely git branches)
+   * - Multi-word branch names like fix-typo-bug, my-new-feature (multiple hyphens)
    *
    * @param {string} input - Issue identifier
    * @param {Object} settings - User settings
@@ -56,31 +56,27 @@ class BeadsProvider extends IssueProvider {
       return true;
     }
 
-    // Project-prefixed format: <PascalCaseProject>-<hash>
-    // Requires: Capital letter start, then letters/numbers, hyphen, then alphanumeric hash
-    // Examples: AppKiln-836, MyProject-abc123, JIRA-123
-    // This distinguishes from branch names like: fix-typo, my-feature, add-tests
-    if (/^[A-Z][a-z0-9]*-[a-z0-9]+$/i.test(input)) {
-      // Check if first part is PascalCase or ALLCAPS (not lowercase)
-      const prefix = input.split('-')[0];
-      if (prefix[0] === prefix[0].toUpperCase()) {
-        // Looks like a project prefix, check if beads can find it
-        // This runs in current directory, so it works when run from the project
-        try {
-          execSync(`bd show ${input} --json`, {
-            encoding: 'utf8',
-            stdio: 'pipe',
-            timeout: 5000,
-          });
+    // Project-prefixed format: <prefix>-<hash>
+    // Pattern: alphanumeric prefix, single hyphen, alphanumeric hash (2-8 chars typical)
+    // Examples: zs-t9w, AppKiln-836, JIRA-123, myproj-abc123
+    // This distinguishes from branch names like: fix-typo-bug, my-new-feature (multiple hyphens)
+    if (/^[a-z][a-z0-9]*-[a-z0-9]+$/i.test(input)) {
+      // Looks like a project-prefixed ID, verify with bd show
+      // This runs in current directory, so it works when run from the project
+      try {
+        execSync(`bd show ${input} --json`, {
+          encoding: 'utf8',
+          stdio: 'pipe',
+          timeout: 10000, // Increased timeout for daemon startup
+        });
+        return true;
+      } catch {
+        // bd couldn't find it - could be wrong directory or not a beads issue
+        // If defaultIssueSource is beads, still claim it
+        if (settings.defaultIssueSource === 'beads') {
           return true;
-        } catch {
-          // bd couldn't find it - could be wrong directory or not a beads issue
-          // If defaultIssueSource is beads, still claim it
-          if (settings.defaultIssueSource === 'beads') {
-            return true;
-          }
-          return false;
         }
+        return false;
       }
     }
 
@@ -186,10 +182,10 @@ class BeadsProvider extends IssueProvider {
       : `✅ ZeroShot completed successfully.\n\nCluster: ${result.clusterId}`;
 
     try {
-      execSync(`bd comments add ${issueId} --body "${this._escapeShellArg(comment)}"`, {
+      execSync(this._buildCommentCommand(issueId, comment), {
         encoding: 'utf8',
         stdio: 'pipe',
-        timeout: 5000,
+        timeout: 10000,
       });
     } catch {
       // Non-fatal: comment add might not be supported or fail
@@ -227,10 +223,10 @@ class BeadsProvider extends IssueProvider {
     const comment = `❌ ZeroShot failed.\n\nReason: ${result.reason}\nCluster: ${result.clusterId}${result.error ? `\n\nError: ${result.error}` : ''}`;
 
     try {
-      execSync(`bd comments add ${issueId} --body "${this._escapeShellArg(comment)}"`, {
+      execSync(this._buildCommentCommand(issueId, comment), {
         encoding: 'utf8',
         stdio: 'pipe',
-        timeout: 5000,
+        timeout: 10000,
       });
     } catch {
       // Non-fatal
@@ -307,11 +303,23 @@ class BeadsProvider extends IssueProvider {
   }
 
   /**
-   * Escape string for shell argument
+   * Escape string for shell argument using $'...' syntax
+   * This properly handles newlines and special characters
    * @private
    */
   _escapeShellArg(str) {
-    return str.replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    // Use $'...' syntax which interprets escape sequences
+    // Escape single quotes and backslashes
+    return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+  }
+
+  /**
+   * Build shell command with proper escaping for bd comments
+   * @private
+   */
+  _buildCommentCommand(issueId, comment) {
+    const escaped = this._escapeShellArg(comment);
+    return `bd comments add ${issueId} $'${escaped}'`;
   }
 
   /**
