@@ -1462,6 +1462,9 @@ function validateContextSource(prefix, source, topicProducers, errors, warnings)
   if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') return;
   if (topic.endsWith('*')) return;
 
+  const resolvedAmount = source.amount ?? source.limit;
+  const resolvedStrategy = source.strategy ?? (resolvedAmount !== undefined ? 'latest' : 'all');
+
   const producers = topicProducers.get(topic) || [];
   if (producers.length === 0) {
     warnings.push(
@@ -1470,7 +1473,7 @@ function validateContextSource(prefix, source, topicProducers, errors, warnings)
     );
   }
 
-  if (source.amount === undefined) {
+  if (resolvedAmount === undefined && resolvedStrategy !== 'all') {
     warnings.push(
       `[Gap 14] ${prefix}: Context source for topic '${topic}' missing 'amount' field. ` +
         `Defaults may not be what you expect.`

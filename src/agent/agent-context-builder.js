@@ -182,7 +182,7 @@ function resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime
     const parsed = Date.parse(sinceValue);
     if (Number.isNaN(parsed)) {
       throw new Error(
-        `Agent context source for topic ${source.topic} has invalid since value "${sinceValue}". ` +
+        `Unknown context source "since" value "${sinceValue}" for topic ${source.topic}. ` +
           'Use cluster_start, last_task_end, last_agent_start, or an ISO timestamp.'
       );
     }
@@ -207,6 +207,12 @@ function formatSourceMessagesSection(source, messages) {
   return context;
 }
 
+function resolveSourceSelection(source) {
+  const amount = source.amount ?? source.limit;
+  const strategy = source.strategy ?? (amount !== undefined ? 'latest' : 'all');
+  return { amount, strategy };
+}
+
 function buildSourcesSection({
   strategy,
   messageBus,
@@ -217,16 +223,21 @@ function buildSourcesSection({
   let context = '';
   for (const source of strategy.sources) {
     const sinceTimestamp = resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime);
+    const { amount, strategy: selectionStrategy } = resolveSourceSelection(source);
+    const order = selectionStrategy === 'latest' ? 'desc' : 'asc';
     const messages = messageBus.query({
       cluster_id: cluster.id,
       topic: source.topic,
       sender: source.sender,
       since: sinceTimestamp,
-      limit: source.limit,
+      limit: amount,
+      order,
     });
+    const orderedMessages =
+      selectionStrategy === 'latest' && messages.length > 1 ? messages.slice().reverse() : messages;
 
-    if (messages.length > 0) {
-      context += formatSourceMessagesSection(source, messages);
+    if (orderedMessages.length > 0) {
+      context += formatSourceMessagesSection(source, orderedMessages);
     }
   }
   return context;

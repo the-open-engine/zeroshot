@@ -6,6 +6,8 @@
 const IssueProvider = require('./base-provider');
 const { execSync } = require('../lib/safe-exec');
 
+const AUTH_CHECK_TIMEOUT_MS = 2000;
+
 class GitLabProvider extends IssueProvider {
   static id = 'gitlab';
   static displayName = 'GitLab';
@@ -89,10 +91,29 @@ class GitLabProvider extends IssueProvider {
     const cmd = hostname ? `glab auth status --hostname ${hostname}` : 'glab auth status';
 
     try {
-      execSync(cmd, { encoding: 'utf8', stdio: 'pipe' });
+      execSync(cmd, { encoding: 'utf8', stdio: 'pipe', timeout: AUTH_CHECK_TIMEOUT_MS });
       return { authenticated: true, error: null, recovery: [] };
     } catch (err) {
       const stderr = err.stderr || err.message || '';
+
+      if (err.code === 'ENOENT' || stderr.includes('command not found')) {
+        return {
+          authenticated: false,
+          error: 'glab CLI not installed',
+          recovery: [
+            'Install glab: https://gitlab.com/gitlab-org/cli',
+            'Then verify: glab --version',
+          ],
+        };
+      }
+
+      if (stderr.includes('Command timed out')) {
+        return {
+          authenticated: false,
+          error: 'glab auth status timed out',
+          recovery: ['Retry: glab auth status', 'If it still hangs, run: glab auth login'],
+        };
+      }
 
       const hostnameHint = hostname || 'your GitLab instance';
       if (

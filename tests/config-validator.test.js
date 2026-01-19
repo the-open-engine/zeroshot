@@ -2590,7 +2590,7 @@ describe('Semantic Validation - Medium Gap 14', function () {
             role: 'implementation',
             triggers: [{ topic: 'ISSUE_OPENED' }],
             contextStrategy: {
-              sources: [{ topic: 'TEST' }], // Missing amount
+              sources: [{ topic: 'TEST', strategy: 'latest' }], // Missing amount
             },
             hooks: {
               onComplete: {
@@ -2621,6 +2621,48 @@ describe('Semantic Validation - Medium Gap 14', function () {
       const amountWarnings = result.warnings.filter((w) => w.includes('[Gap 14]'));
       assert.ok(amountWarnings.length > 0, 'Should have Gap 14 warning');
       assert.ok(amountWarnings[0].includes('amount'));
+    });
+
+    it('should accept limit as amount alias without warning', function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            triggers: [{ topic: 'ISSUE_OPENED' }],
+            contextStrategy: {
+              sources: [{ topic: 'TEST', limit: 1 }],
+            },
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'DONE', content: {} },
+              },
+            },
+          },
+          {
+            id: 'tester',
+            role: 'validator',
+            triggers: [{ topic: 'X' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'TEST', content: {} },
+              },
+            },
+          },
+          {
+            id: 'completion',
+            role: 'orchestrator',
+            triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+          },
+        ],
+      };
+      const result = validateConfig(config);
+      const amountWarnings = result.warnings.filter(
+        (w) => w.includes('[Gap 14]') && w.includes('amount')
+      );
+      assert.strictEqual(amountWarnings.length, 0);
     });
   });
 });

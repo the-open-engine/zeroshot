@@ -9,7 +9,8 @@
  */
 
 import blessed from 'blessed';
-import contrib from 'blessed-contrib';
+import Grid from 'blessed-contrib/lib/layout/grid.js';
+import Log from 'blessed-contrib/lib/widget/log.js';
 
 /**
  * Create task logs TUI layout
@@ -19,7 +20,7 @@ import contrib from 'blessed-contrib';
  */
 function createLayout(screen, taskId) {
   // Create 20x12 grid for responsive layout
-  const grid = new contrib.grid({ rows: 20, cols: 12, screen });
+  const grid = new Grid({ rows: 20, cols: 12, screen });
 
   // ============================================================
   // TASK INFO BOX (3 rows x 12 cols)
@@ -46,7 +47,7 @@ function createLayout(screen, taskId) {
   // Scrollable log output with auto-scroll
   // ============================================================
 
-  const logsBox = grid.set(3, 0, 15, 12, contrib.log, {
+  const logsBox = grid.set(3, 0, 15, 12, Log, {
     fg: 'white',
     label: ' Live Logs ',
     border: { type: 'line', fg: 'cyan' },

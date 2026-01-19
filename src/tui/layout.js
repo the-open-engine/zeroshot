@@ -10,7 +10,12 @@
  */
 
 const blessed = require('blessed');
-const contrib = require('blessed-contrib');
+// Pull in only the widgets we use to avoid loading optional picture widget.
+const contrib = {
+  grid: require('blessed-contrib/lib/layout/grid'),
+  table: require('blessed-contrib/lib/widget/table'),
+  log: require('blessed-contrib/lib/widget/log'),
+};
 
 /**
  * Create main TUI layout with grid-based widget organization

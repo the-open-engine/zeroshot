@@ -404,6 +404,17 @@ class Orchestrator {
    * @private
    */
   _ensureClustersFile() {
+    if (!fs.existsSync(this.storageDir)) {
+      try {
+        fs.mkdirSync(this.storageDir, { recursive: true });
+      } catch (error) {
+        console.warn(
+          `[Orchestrator] Failed to create storage directory ${this.storageDir}: ${error.message}`
+        );
+        return null;
+      }
+    }
+
     const clustersFile = path.join(this.storageDir, 'clusters.json');
     if (!fs.existsSync(clustersFile)) {
       fs.writeFileSync(clustersFile, '{}');
@@ -423,6 +434,9 @@ class Orchestrator {
     }
 
     const clustersFile = this._ensureClustersFile();
+    if (!clustersFile) {
+      return;
+    }
     const lockfilePath = path.join(this.storageDir, 'clusters.json.lock');
     let release;
 
@@ -514,6 +528,14 @@ class Orchestrator {
       this._log(
         `[Orchestrator] Saved ${this.clusters.size} cluster(s), file now has ${Object.keys(existingClusters).length} total`
       );
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.warn(
+          `[Orchestrator] Skipping cluster save; storage directory missing: ${this.storageDir}`
+        );
+        return;
+      }
+      throw error;
     } finally {
       // Always release lock
       if (release) {
