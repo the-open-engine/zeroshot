@@ -860,6 +860,7 @@ function parseStatusFlags(cleanStdout) {
     isCompleted: /Status:\s+completed/i.test(cleanStdout),
     isFailed: /Status:\s+failed/i.test(cleanStdout),
     isStale: /Status:\s+stale/i.test(cleanStdout),
+    isRetryable: /Status:\s+retryable/i.test(cleanStdout),
   };
 }
 
@@ -956,9 +957,9 @@ function handleStatusCompletion({
   resolve,
 }) {
   const cleanStdout = stripAnsiCodes(stdout);
-  const { isCompleted, isFailed, isStale } = parseStatusFlags(cleanStdout);
+  const { isCompleted, isFailed, isStale, isRetryable } = parseStatusFlags(cleanStdout);
 
-  if (!isCompleted && !isFailed && !isStale) {
+  if (!isCompleted && !isFailed && !isStale && !isRetryable) {
     return false;
   }
 
@@ -968,6 +969,9 @@ function handleStatusCompletion({
   if (isStale) {
     success = determineStaleSuccess({ agent, output: state.output, providerName, taskId });
   }
+
+  // Handle retryable status - treat as a special failure that should trigger retry
+  const isTransientFailure = isRetryable;
 
   setTimeout(() => {
     if (state.resolved) return;
@@ -984,6 +988,7 @@ function handleStatusCompletion({
       output: state.output,
       error: errorContext,
       tokenUsage: extractTokenUsage(state.output, providerName),
+      retryable: isTransientFailure, // Signal to caller that this is a transient failure
     });
   }, 500);
 

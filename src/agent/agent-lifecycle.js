@@ -398,7 +398,13 @@ async function runTaskAttempt(agent, triggeringMessage) {
 
   // Check if task execution failed
   if (!result.success) {
-    throw new Error(result.error || 'Task execution failed');
+    const error = new Error(result.error || 'Task execution failed');
+    // Mark transient failures (e.g., "No messages returned" from API) as retryable
+    // This allows the retry loop to always retry these, regardless of maxRetries setting
+    if (result.retryable) {
+      error.retryable = true;
+    }
+    throw error;
   }
 
   // Set state to idle BEFORE publishing lifecycle event
@@ -592,22 +598,36 @@ async function handleTaskAttemptFailure({
   // This happens when multiple validators try to run Claude CLI in the same workspace
   const isLockError = error.message && error.message.includes('Lock file');
 
+  // TRANSIENT API FAILURES: Always retry these (e.g., "No messages returned")
+  // These are temporary API issues that almost always succeed on retry
+  const isTransientFailure = error.retryable === true;
+
   logTaskAttemptFailure(agent, attempt, maxRetries, error);
 
   if (isLockError) {
     await handleLockContention();
+  } else if (isTransientFailure) {
+    console.error(`🔄 Transient API failure detected - will retry automatically`);
+    console.error(`   Error marked as retryable: ${error.message}`);
   } else if (attempt < maxRetries) {
     console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
   }
   console.error(`${'='.repeat(80)}
 `);
 
-  if (attempt >= maxRetries) {
-    await handleFinalFailure(agent, triggeringMessage, error, maxRetries);
+  // For transient failures, always retry (up to 3 additional attempts beyond maxRetries)
+  // This ensures API hiccups don't cause permanent failures
+  const maxTransientRetries = 3;
+  const effectiveMaxRetries = isTransientFailure
+    ? Math.max(maxRetries, attempt + maxTransientRetries)
+    : maxRetries;
+
+  if (attempt >= effectiveMaxRetries) {
+    await handleFinalFailure(agent, triggeringMessage, error, effectiveMaxRetries);
     return true;
   }
 
-  await scheduleRetry(agent, error, attempt, maxRetries, baseDelay);
+  await scheduleRetry(agent, error, attempt, effectiveMaxRetries, baseDelay);
   return false;
 }
 
