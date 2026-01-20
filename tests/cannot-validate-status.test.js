@@ -48,6 +48,7 @@ const baseContextParams = (overrides = {}) => ({
   messageBus: { query: () => [] },
   cluster: { id: 'test-cluster', createdAt: Date.now() - 60000 },
   triggeringMessage: { topic: 'IMPLEMENTATION_READY', sender: 'worker' },
+  isolation: null,
   ...overrides,
 });
 
@@ -256,6 +257,28 @@ describe('CANNOT_VALIDATE Context Builder - Core Behavior', function () {
     assert.ok(!context.includes('**AC1**'), 'Should not include PASS criteria');
     assert.ok(!context.includes('**AC4**'), 'Should not include FAIL criteria');
     assert.ok(context.includes('Do NOT re-attempt'), 'Missing skip instruction');
+  });
+
+  it('should ignore platform mismatch reasons when running in docker isolation', function () {
+    const criteria = [
+      {
+        id: 'AC1',
+        status: 'CANNOT_VALIDATE',
+        reason: 'npm install fails on darwin-arm64 (EBADPLATFORM for @esbuild/linux-x64)',
+      },
+      { id: 'AC2', status: 'CANNOT_VALIDATE', reason: 'No SSH access to prod' },
+    ];
+
+    const context = buildContext(
+      baseContextParams({
+        messageBus: mockBusWithCriteria(criteria),
+        isolation: { enabled: true },
+      })
+    );
+
+    assert.ok(!context.includes('**AC1**'), 'Should skip platform mismatch criteria');
+    assert.ok(!context.includes('EBADPLATFORM'), 'Should remove platform mismatch reason');
+    assert.ok(context.includes('**AC2**'), 'Should keep non-platform criteria');
   });
 
   it('should NOT inject skip section for non-validator roles', function () {
