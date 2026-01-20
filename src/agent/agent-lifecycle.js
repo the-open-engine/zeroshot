@@ -411,6 +411,27 @@ async function runTaskAttempt(agent, triggeringMessage) {
   publishTaskCompleted(agent, result);
   publishTokenUsage(agent, result);
   await executeOnCompleteHookWithRetry(agent, triggeringMessage, result);
+
+  // Auto-stop cluster for completion-detector role agents after task completes
+  // This ensures git-pusher (which has role: 'completion-detector' and action: 'execute_task')
+  // stops the cluster after its PR creation/merge task finishes, matching the flow of
+  // the standard completion-detector (which uses action: 'stop_cluster' directly)
+  if (agent.role === 'completion-detector') {
+    agent._publish({
+      topic: 'CLUSTER_COMPLETE',
+      receiver: 'system',
+      content: {
+        text: 'Completion detector task finished. Cluster completing successfully.',
+        data: {
+          reason: 'completion_detector_task_done',
+          agentId: agent.id,
+          timestamp: Date.now(),
+        },
+      },
+    });
+    agent.state = 'completed';
+    agent._log(`Agent ${agent.id}: Cluster completion triggered after task`);
+  }
 }
 
 function logTaskAttemptFailure(agent, attempt, maxRetries, error) {
