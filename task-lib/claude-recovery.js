@@ -3,6 +3,17 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 export const STREAMING_MODE_ERROR = 'only prompt commands are supported in streaming mode';
+export const NO_MESSAGES_ERROR = 'No messages returned';
+
+/**
+ * Detects the "No messages returned" error from Claude Code CLI.
+ * This error occurs when the API returns an empty response (transient failure).
+ * It appears in stderr as an unhandled promise rejection.
+ */
+export function detectNoMessagesError(line) {
+  if (typeof line !== 'string') return false;
+  return line.includes(NO_MESSAGES_ERROR);
+}
 
 export function detectStreamingModeError(line) {
   const trimmed = typeof line === 'string' ? line.trim() : '';

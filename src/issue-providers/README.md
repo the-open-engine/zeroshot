@@ -1,6 +1,6 @@
 # Issue Providers
 
-Multi-platform issue support for Zeroshot. Fetch issues from GitHub, GitLab, Jira, and Azure DevOps.
+Multi-platform issue support for Zeroshot. Fetch issues from GitHub, GitLab, Gitea, Jira, and Azure DevOps.
 
 ## Supported Providers
 
@@ -8,6 +8,7 @@ Multi-platform issue support for Zeroshot. Fetch issues from GitHub, GitLab, Jir
 | ---------------- | -------- | -------------------------------------------- | --------------------- |
 | **GitHub**       | `gh`     | `github.com/org/repo/issues/123`             | `123`, `org/repo#123` |
 | **GitLab**       | `glab`   | `gitlab.com/org/repo/-/issues/123`           | `123`, `org/repo#123` |
+| **Gitea**        | `tea`    | `gitea.example.com/org/repo/issues/123`      | `123`, `org/repo#123` |
 | **Jira**         | `jira`   | `*.atlassian.net/browse/KEY-123`             | `KEY-123`             |
 | **Azure DevOps** | `az`     | `dev.azure.com/org/proj/_workitems/edit/123` | `123`                 |
 
@@ -22,6 +23,10 @@ zeroshot run org/repo#123
 # GitLab
 zeroshot run https://gitlab.com/org/repo/-/issues/123
 zeroshot run 123 --gitlab
+
+# Gitea
+zeroshot run https://gitea.company.com/repo/issues/123
+zeroshot run 123 --gitea
 
 # Jira
 zeroshot run PROJ-123
@@ -57,6 +62,7 @@ Override auto-detection with explicit provider flags:
 ```bash
 -G, --github    # Force GitHub as issue source
 -L, --gitlab    # Force GitLab as issue source
+-T, --gitea     # Force Gitea as issue source
 -J, --jira      # Force Jira as issue source
 -D, --devops    # Force Azure DevOps as issue source
 ```
@@ -108,6 +114,7 @@ zeroshot settings set azureProject myproject  # Default project for bare numbers
 | -------------------- | ------ | ------- | ------------------------------------------ |
 | `defaultIssueSource` | string | github  | Provider for bare numbers (123)            |
 | `gitlabInstance`     | string | null    | Self-hosted GitLab URL                     |
+| `giteaInstance`      | string | null    | Self-hosted Gitea URL                      |
 | `jiraInstance`       | string | null    | Self-hosted Jira URL                       |
 | `jiraProject`        | string | null    | Default Jira project key for bare numbers  |
 | `azureOrg`           | string | null    | Azure DevOps organization name             |
@@ -140,6 +147,18 @@ brew install glab            # macOS
 # Authenticate
 glab auth login
 glab auth status
+```
+
+### Gitea
+
+```bash
+# Install
+brew install gitea/tap/tea   # macOS
+# Or: https://gitea.com/gitea/tea
+
+# Authenticate
+tea login add --url https://gitea.example.com
+tea login ls
 ```
 
 ### Jira
@@ -177,6 +196,21 @@ zeroshot settings set gitlabInstance gitlab.company.com
 # Now these work
 zeroshot run https://gitlab.company.com/org/repo/-/issues/123
 zeroshot run 123 --gitlab  # Uses self-hosted instance
+```
+
+### Gitea Self-Hosted
+
+```bash
+# Configure self-hosted instance
+zeroshot settings set giteaInstance gitea.company.com
+zeroshot settings set defaultIssueSource gitea
+
+# Authenticate
+tea login add --url https://gitea.company.com
+
+# Now these work
+zeroshot run https://gitea.company.com/org/repo/issues/123
+zeroshot run 123 --gitea  # Uses self-hosted instance
 ```
 
 ### Jira Self-Hosted (Server/Data Center)

@@ -70,6 +70,16 @@ const PLATFORM_CONFIGS = {
     // Azure requires extracting PR ID from create output
     requiresPrIdExtraction: true,
   },
+  gitea: {
+    prName: 'PR',
+    prNameLower: 'pull request',
+    createCmd:
+      'tea pulls create --title "feat: {{issue_title}}" --description "Closes #{{issue_number}}"',
+    mergeCmd: 'tea pulls merge --style merge',
+    mergeFallbackCmd: 'tea pulls merge --style merge',
+    prUrlExample: 'https://gitea.example.com/owner/repo/pulls/123',
+    outputFields: { urlField: 'pr_url', numberField: 'pr_number', mergedField: 'merged' },
+  },
 };
 
 /**
@@ -250,6 +260,15 @@ function generateGitPusherAgent(platform) {
         action: 'execute_task',
       },
     ],
+    contextStrategy: {
+      sources: [
+        { topic: 'ISSUE_OPENED', limit: 1 },
+        { topic: 'IMPLEMENTATION_READY', since: 'last_agent_start', limit: 1 },
+        { topic: 'VALIDATION_RESULT', since: 'last_agent_start', limit: 10 },
+      ],
+      format: 'chronological',
+      maxTokens: 100000,
+    },
     prompt: generatePrompt(config),
     output: {
       topic: 'PR_CREATED',

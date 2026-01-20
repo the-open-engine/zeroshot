@@ -8,7 +8,11 @@
 import { spawn } from 'child_process';
 import { appendFileSync } from 'fs';
 import { updateTask } from './store.js';
-import { detectStreamingModeError, recoverStructuredOutput } from './claude-recovery.js';
+import {
+  detectStreamingModeError,
+  detectNoMessagesError,
+  recoverStructuredOutput,
+} from './claude-recovery.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -42,6 +46,7 @@ const silentJsonMode =
 
 let finalResultJson = null;
 let streamingModeError = null;
+let noMessagesError = false;
 
 let stdoutBuffer = '';
 let stderrBuffer = '';
@@ -183,7 +188,13 @@ child.stderr.on('data', (data) => {
   stderrBuffer = remaining;
 
   for (const line of lines) {
-    log(`[${timestamp}]${line}\n`);
+    // Detect "No messages returned" error (transient API failure)
+    if (enableRecovery && detectNoMessagesError(line)) {
+      noMessagesError = true;
+      log(`[${timestamp}][RETRYABLE] ${line}\n`);
+    } else {
+      log(`[${timestamp}]${line}\n`);
+    }
   }
 });
 
@@ -202,12 +213,27 @@ child.on('close', async (code, signal) => {
   writeCompletionFooter(code, signal);
 
   const resolvedCode = recovered?.payload ? 0 : code;
-  const status = resolvedCode === 0 ? 'completed' : 'failed';
+
+  // Determine status: if "No messages returned" error, mark as retryable
+  let status;
+  let errorMessage = null;
+  if (resolvedCode === 0) {
+    status = 'completed';
+  } else if (noMessagesError) {
+    // Transient API failure - mark as retryable so scheduler can retry
+    status = 'retryable';
+    errorMessage = 'No messages returned (transient API failure)';
+    log(`[${timestamp}][INFO] Task marked as retryable due to transient API failure\n`);
+  } else {
+    status = 'failed';
+    errorMessage = signal ? `Killed by ${signal}` : null;
+  }
+
   try {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
+      error: errorMessage,
     });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);

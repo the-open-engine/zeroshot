@@ -218,6 +218,8 @@ function detectRunInput(inputArg) {
   const isIssueNumber = /^\d+$/.test(inputArg);
   const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
   const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
+  // Beads formats: beads:ready, beads:ready:P0, beads:AppKiln-5le, or direct beads IDs like AppKiln-5le
+  const isBeadsFormat = /^beads:/.test(inputArg);
 
   if (
     isGitHubUrl ||
@@ -226,7 +228,8 @@ function detectRunInput(inputArg) {
     isAzureUrl ||
     isJiraKey ||
     isIssueNumber ||
-    isRepoIssue
+    isRepoIssue ||
+    isBeadsFormat
   ) {
     input.issue = inputArg;
   } else if (isMarkdownFile) {
@@ -2391,6 +2394,7 @@ program
   .option('-L, --gitlab', 'Force GitLab as issue source')
   .option('-J, --jira', 'Force Jira as issue source')
   .option('-D, --devops', 'Force Azure DevOps as issue source')
+  .option('-T, --gitea', 'Force Gitea as issue source')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
   .option('--no-mounts', 'Disable all Docker credential mounts')
@@ -2436,6 +2440,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       else if (options.gitlab) forceProvider = 'gitlab';
       else if (options.jira) forceProvider = 'jira';
       else if (options.devops) forceProvider = 'azure-devops';
+      else if (options.gitea) forceProvider = 'gitea';
 
       // Auto-detect input type
       const input = detectRunInput(inputArg);

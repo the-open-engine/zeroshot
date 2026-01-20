@@ -698,7 +698,11 @@ class Orchestrator {
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
       // Issue provider tracking (where issue was fetched from)
-      issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops)
+      issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops, beads)
+      // Original input data from provider (for lifecycle hooks)
+      inputData: null,
+      // Original issue identifier (for provider instantiation in hooks)
+      issueIdentifier: null,
       // Git platform tracking (where PR/MR will be created - independent of issue provider)
       gitPlatform: null, // Set when --pr mode is active
       // Isolation state (only if enabled)
@@ -744,8 +748,10 @@ class Orchestrator {
         const provider = new ProviderClass();
         inputData = await provider.fetchIssue(input.issue, options.settings || {});
 
-        // Store issue provider for logging/debugging and cross-provider workflows
+        // Store issue provider and data for logging/debugging and lifecycle hooks
         cluster.issueProvider = ProviderClass.id;
+        cluster.inputData = inputData;
+        cluster.issueIdentifier = input.issue;
 
         // Log clickable issue link
         if (inputData.url) {
@@ -946,7 +952,7 @@ class Orchestrator {
   }
 
   _registerClusterCompletionHandlers(messageBus, clusterId) {
-    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_COMPLETE', (message) => {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_COMPLETE', async (message) => {
       this._log(`\n${'='.repeat(80)}`);
       this._log(`✅ CLUSTER COMPLETED SUCCESSFULLY: ${clusterId}`);
       this._log(`${'='.repeat(80)}`);
@@ -954,12 +960,19 @@ class Orchestrator {
       this._log(`Initiated by: ${message.sender}`);
       this._log(`${'='.repeat(80)}\n`);
 
+      // Call provider lifecycle hook
+      await this._callProviderHook(clusterId, 'onClusterComplete', {
+        clusterId,
+        reason: message.content?.data?.reason || 'unknown',
+        prUrl: message.content?.data?.prUrl || null,
+      });
+
       this.stop(clusterId).catch((err) => {
         console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
       });
     });
 
-    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_FAILED', (message) => {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'CLUSTER_FAILED', async (message) => {
       this._log(`\n${'='.repeat(80)}`);
       this._log(`❌ CLUSTER FAILED: ${clusterId}`);
       this._log(`${'='.repeat(80)}`);
@@ -970,10 +983,61 @@ class Orchestrator {
       }
       this._log(`${'='.repeat(80)}\n`);
 
+      // Call provider lifecycle hook
+      await this._callProviderHook(clusterId, 'onClusterFailed', {
+        clusterId,
+        reason: message.content?.data?.reason || 'unknown',
+        error: message.content?.text || null,
+      });
+
       this.stop(clusterId).catch((err) => {
         console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
       });
     });
+  }
+
+  /**
+   * Call a provider lifecycle hook if the cluster has an issue provider
+   * @param {string} clusterId - Cluster ID
+   * @param {string} hookName - Hook method name ('onClusterComplete' or 'onClusterFailed')
+   * @param {Object} result - Result data to pass to hook
+   * @private
+   */
+  async _callProviderHook(clusterId, hookName, result) {
+    const cluster = this.clusters.get(clusterId);
+    if (!cluster?.issueProvider || !cluster?.inputData) {
+      return; // No issue provider or no input data, skip hook
+    }
+
+    try {
+      const { getProvider } = require('./issue-providers');
+      const ProviderClass = getProvider(cluster.issueProvider);
+      if (!ProviderClass) {
+        return;
+      }
+
+      const provider = new ProviderClass();
+      if (typeof provider[hookName] === 'function') {
+        this._log(`[Orchestrator] Calling ${cluster.issueProvider}.${hookName}()`);
+        await provider[hookName](cluster.inputData, result, this._getSettings());
+      }
+    } catch (err) {
+      // Log but don't fail - hooks are best-effort
+      this._log(`[Orchestrator] Provider hook ${hookName} failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * Get current settings (for provider hooks)
+   * @private
+   */
+  _getSettings() {
+    try {
+      const { getSettings } = require('../lib/settings');
+      return getSettings();
+    } catch {
+      return {};
+    }
   }
 
   _registerAgentErrorHandler(messageBus, clusterId) {

@@ -56,3 +56,6 @@ report/
 # Generated/temp files
 test-metadata-manual.sh
 test-isolated-fix.js
+
+# Beads working directory
+.beads/

@@ -398,7 +398,13 @@ async function runTaskAttempt(agent, triggeringMessage) {
 
   // Check if task execution failed
   if (!result.success) {
-    throw new Error(result.error || 'Task execution failed');
+    const error = new Error(result.error || 'Task execution failed');
+    // Mark transient failures (e.g., "No messages returned" from API) as retryable
+    // This allows the retry loop to always retry these, regardless of maxRetries setting
+    if (result.retryable) {
+      error.retryable = true;
+    }
+    throw error;
   }
 
   // Set state to idle BEFORE publishing lifecycle event
@@ -411,6 +417,27 @@ async function runTaskAttempt(agent, triggeringMessage) {
   publishTaskCompleted(agent, result);
   publishTokenUsage(agent, result);
   await executeOnCompleteHookWithRetry(agent, triggeringMessage, result);
+
+  // Auto-stop cluster for completion-detector role agents after task completes
+  // This ensures git-pusher (which has role: 'completion-detector' and action: 'execute_task')
+  // stops the cluster after its PR creation/merge task finishes, matching the flow of
+  // the standard completion-detector (which uses action: 'stop_cluster' directly)
+  if (agent.role === 'completion-detector') {
+    agent._publish({
+      topic: 'CLUSTER_COMPLETE',
+      receiver: 'system',
+      content: {
+        text: 'Completion detector task finished. Cluster completing successfully.',
+        data: {
+          reason: 'completion_detector_task_done',
+          agentId: agent.id,
+          timestamp: Date.now(),
+        },
+      },
+    });
+    agent.state = 'completed';
+    agent._log(`Agent ${agent.id}: Cluster completion triggered after task`);
+  }
 }
 
 function logTaskAttemptFailure(agent, attempt, maxRetries, error) {
@@ -571,22 +598,36 @@ async function handleTaskAttemptFailure({
   // This happens when multiple validators try to run Claude CLI in the same workspace
   const isLockError = error.message && error.message.includes('Lock file');
 
+  // TRANSIENT API FAILURES: Always retry these (e.g., "No messages returned")
+  // These are temporary API issues that almost always succeed on retry
+  const isTransientFailure = error.retryable === true;
+
   logTaskAttemptFailure(agent, attempt, maxRetries, error);
 
   if (isLockError) {
     await handleLockContention();
+  } else if (isTransientFailure) {
+    console.error(`🔄 Transient API failure detected - will retry automatically`);
+    console.error(`   Error marked as retryable: ${error.message}`);
   } else if (attempt < maxRetries) {
     console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
   }
   console.error(`${'='.repeat(80)}
 `);
 
-  if (attempt >= maxRetries) {
-    await handleFinalFailure(agent, triggeringMessage, error, maxRetries);
+  // For transient failures, always retry (up to 3 additional attempts beyond maxRetries)
+  // This ensures API hiccups don't cause permanent failures
+  const maxTransientRetries = 3;
+  const effectiveMaxRetries = isTransientFailure
+    ? Math.max(maxRetries, attempt + maxTransientRetries)
+    : maxRetries;
+
+  if (attempt >= effectiveMaxRetries) {
+    await handleFinalFailure(agent, triggeringMessage, error, effectiveMaxRetries);
     return true;
   }
 
-  await scheduleRetry(agent, error, attempt, maxRetries, baseDelay);
+  await scheduleRetry(agent, error, attempt, effectiveMaxRetries, baseDelay);
   return false;
 }
 
