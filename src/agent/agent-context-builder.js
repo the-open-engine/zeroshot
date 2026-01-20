@@ -299,13 +299,17 @@ function buildSourcePack({
   };
 }
 
-function collectCannotValidateCriteria(prevValidations) {
+const { isPlatformMismatchReason } = require('./validation-platform');
+
+function collectCannotValidateCriteria(prevValidations, options = {}) {
   const cannotValidateCriteria = [];
+  const ignoreReason = options.ignoreReason;
   for (const msg of prevValidations) {
     const criteriaResults = msg.content?.data?.criteriaResults;
     if (!Array.isArray(criteriaResults)) continue;
     for (const cr of criteriaResults) {
       if (cr.status !== 'CANNOT_VALIDATE' || !cr.id) continue;
+      if (ignoreReason && ignoreReason(cr.reason)) continue;
       if (cannotValidateCriteria.find((c) => c.id === cr.id)) continue;
       cannotValidateCriteria.push({
         id: cr.id,
@@ -330,7 +334,7 @@ function buildCannotValidateSection(cannotValidateCriteria) {
   return context;
 }
 
-function buildValidatorSkipSection({ role, messageBus, cluster }) {
+function buildValidatorSkipSection({ role, messageBus, cluster, isolation }) {
   if (role !== 'validator') return '';
 
   const prevValidations = messageBus.query({
@@ -340,7 +344,8 @@ function buildValidatorSkipSection({ role, messageBus, cluster }) {
     limit: 50,
   });
 
-  const cannotValidateCriteria = collectCannotValidateCriteria(prevValidations);
+  const ignoreReason = isolation?.enabled ? isPlatformMismatchReason : null;
+  const cannotValidateCriteria = collectCannotValidateCriteria(prevValidations, { ignoreReason });
   return buildCannotValidateSection(cannotValidateCriteria);
 }
 
@@ -392,7 +397,7 @@ function buildContext({
   const instructions = buildInstructionsSection({ config, selectedPrompt, id });
   const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
   const jsonSchema = buildJsonSchemaSection(config);
-  const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster });
+  const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster, isolation });
   const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
 
   const packs = [];

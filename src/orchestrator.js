@@ -1440,6 +1440,14 @@ class Orchestrator {
       this._log(`[Orchestrator] Container stopped, workspace preserved`);
     }
 
+    if (cluster.validatorIsolation?.manager) {
+      this._log(`[Orchestrator] Cleaning up validator isolation container for ${clusterId}...`);
+      await cluster.validatorIsolation.manager.cleanup(cluster.validatorIsolation.clusterId, {
+        preserveWorkspace: false,
+      });
+      cluster.validatorIsolation = null;
+    }
+
     // Worktree cleanup on stop: preserve for resume capability
     // Branch stays, worktree stays - can resume work later
     if (cluster.worktree?.manager) {
@@ -1484,6 +1492,14 @@ class Orchestrator {
       );
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: false });
       this._log(`[Orchestrator] Container and workspace removed`);
+    }
+
+    if (cluster.validatorIsolation?.manager) {
+      this._log(`[Orchestrator] Force removing validator isolation container for ${clusterId}...`);
+      await cluster.validatorIsolation.manager.cleanup(cluster.validatorIsolation.clusterId, {
+        preserveWorkspace: false,
+      });
+      cluster.validatorIsolation = null;
     }
 
     // Force remove worktree (full cleanup, no resume)

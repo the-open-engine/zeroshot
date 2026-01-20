@@ -14,11 +14,135 @@
 
 const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
 const { executeHook } = require('./agent-hook-executor');
+const IsolationManager = require('../isolation-manager');
 const {
   analyzeProcessHealth,
   isPlatformSupported,
   STUCK_THRESHOLD,
 } = require('./agent-stuck-detector');
+const { normalizeProviderName } = require('../../lib/provider-names');
+const { loadSettings } = require('../../lib/settings');
+const { findPlatformMismatchReason } = require('./validation-platform');
+
+const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
+
+function resolveValidatorIsolationConfig(agent) {
+  const config = agent.config?.isolation || {};
+  if (config.type && config.type !== 'docker') {
+    return null;
+  }
+
+  return {
+    image: config.image || DEFAULT_VALIDATOR_IMAGE,
+    mounts: config.mounts,
+    noMounts: config.noMounts,
+    containerHome: config.containerHome,
+  };
+}
+
+async function createValidatorIsolation(agent, isolationConfig) {
+  if (!IsolationManager.isDockerAvailable()) {
+    agent._log(`[${agent.id}] Docker not available - cannot retry validator in isolation`);
+    return null;
+  }
+
+  const cluster = agent.cluster || {};
+  const workDir = agent.config?.cwd || cluster.worktree?.path || cluster.cwd || process.cwd();
+  const image = isolationConfig.image;
+  await IsolationManager.ensureImage(image);
+
+  const manager = new IsolationManager({ image });
+  const providerName = normalizeProviderName(
+    (agent._resolveProvider && agent._resolveProvider()) ||
+      cluster.config?.forceProvider ||
+      cluster.config?.defaultProvider ||
+      loadSettings().defaultProvider ||
+      'claude'
+  );
+
+  const isolationClusterId = `${cluster.id}-validators`;
+  const containerId = await manager.createContainer(isolationClusterId, {
+    workDir,
+    image,
+    noMounts: isolationConfig.noMounts,
+    mounts: isolationConfig.mounts,
+    containerHome: isolationConfig.containerHome,
+    provider: providerName,
+    reuseExistingWorkspace: true,
+  });
+
+  const validatorIsolation = {
+    enabled: true,
+    manager,
+    clusterId: isolationClusterId,
+    containerId,
+    image,
+    workDir,
+  };
+
+  cluster.validatorIsolation = validatorIsolation;
+  return validatorIsolation;
+}
+
+async function ensureValidatorIsolation(agent) {
+  const cluster = agent.cluster || {};
+
+  if (agent.isolation?.enabled) {
+    return agent.isolation;
+  }
+
+  if (cluster.validatorIsolation?.enabled) {
+    agent.isolation = cluster.validatorIsolation;
+    return agent.isolation;
+  }
+
+  if (cluster.validatorIsolationPromise) {
+    const isolation = await cluster.validatorIsolationPromise;
+    if (isolation?.enabled) {
+      agent.isolation = isolation;
+    }
+    return agent.isolation || null;
+  }
+
+  const isolationConfig = resolveValidatorIsolationConfig(agent);
+  if (!isolationConfig) {
+    agent._log(`[${agent.id}] Validator isolation config is not docker - skipping fallback`);
+    return null;
+  }
+
+  cluster.validatorIsolationPromise = createValidatorIsolation(agent, isolationConfig);
+
+  try {
+    const isolation = await cluster.validatorIsolationPromise;
+    if (isolation?.enabled) {
+      agent.isolation = isolation;
+      return agent.isolation;
+    }
+    return null;
+  } finally {
+    cluster.validatorIsolationPromise = null;
+  }
+}
+
+async function maybeRetryValidatorInDocker(agent, result) {
+  if (agent.role !== 'validator') return null;
+  if (agent.isolation?.enabled) return null;
+  if (agent._validatorIsolationAttemptedIteration === agent.iteration) {
+    return null;
+  }
+
+  const reason = findPlatformMismatchReason(result?.result || {});
+  if (!reason) return null;
+
+  const isolation = await ensureValidatorIsolation(agent);
+  if (!isolation) {
+    return null;
+  }
+
+  agent._validatorIsolationAttemptedIteration = agent.iteration;
+  agent._log(`[${agent.id}] Platform mismatch detected - retrying validator in Docker isolation`);
+  return reason;
+}
 
 /**
  * Start the agent (begin listening for triggers)
@@ -399,6 +523,13 @@ async function runTaskAttempt(agent, triggeringMessage) {
   // Check if task execution failed
   if (!result.success) {
     throw new Error(result.error || 'Task execution failed');
+  }
+
+  const fallbackReason = await maybeRetryValidatorInDocker(agent, result);
+  if (fallbackReason) {
+    throw new Error(
+      `Validator platform mismatch detected (${fallbackReason}). Retrying in Docker isolation.`
+    );
   }
 
   // Set state to idle BEFORE publishing lifecycle event
