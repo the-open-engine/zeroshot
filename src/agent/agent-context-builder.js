@@ -400,7 +400,7 @@ function buildContext({
   const instructions = buildInstructionsSection({ config, selectedPrompt, id });
   const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
   const jsonSchema = buildJsonSchemaSection(config);
-  const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster });
+  const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster, isolation });
   const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
 
   const packs = [];
