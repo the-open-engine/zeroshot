@@ -3008,7 +3008,7 @@ program
     try {
       // Try cluster first, then task (both use same ID format: "adjective-noun-number")
       const OrchestratorModule = require('../src/orchestrator');
-      const orchestrator = new OrchestratorModule();
+      const orchestrator = await OrchestratorModule.create();
 
       // Check if cluster exists
       const cluster = orchestrator.getCluster(id);
