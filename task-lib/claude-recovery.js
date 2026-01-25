@@ -36,6 +36,15 @@ export function detectFatalClaudeError(line) {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
+  if (trimmed.startsWith('{')) {
+    try {
+      JSON.parse(trimmed);
+      return null;
+    } catch {
+      // Not valid JSON, continue detection
+    }
+  }
+
   if (trimmed.toLowerCase().includes(NO_MESSAGES_RETURNED.toLowerCase())) {
     return `Claude CLI error: ${NO_MESSAGES_RETURNED}`;
   }
