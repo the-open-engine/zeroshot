@@ -82,7 +82,7 @@ function maybeHandleFatalError(line, timestamp) {
   }
 
   setTimeout(() => {
-    if (child.exitCode == null) {
+    if (child.exitCode === null) {
       try {
         child.kill('SIGKILL');
       } catch {

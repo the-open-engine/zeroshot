@@ -74,6 +74,7 @@ const cwd = cwdArg;
 const logFile = logFileArg;
 const args = JSON.parse(argsJsonArg);
 const config = configJsonArg ? JSON.parse(configJsonArg) : {};
+let server = null;
 
 const SOCKET_DIR = join(homedir(), '.zeroshot', 'sockets');
 const socketPath = join(SOCKET_DIR, `${taskId}.sock`);
@@ -125,7 +126,9 @@ function maybeHandleFatalError(line, timestamp) {
   }
   log(`[${timestamp}][FATAL] ${detected}\n`);
 
-  server.stop('SIGTERM').catch(() => {});
+  if (server) {
+    server.stop('SIGTERM').catch(() => {});
+  }
   return true;
 }
 
@@ -234,7 +237,7 @@ function writeCompletionFooter(code, signal) {
   log(`Exit code: ${code}, Signal: ${signal}\n`);
 }
 
-const server = new AttachServer({
+server = new AttachServer({
   id: taskId,
   socketPath,
   command,
