@@ -9,7 +9,11 @@ import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { updateTask } from './store.js';
-import { detectStreamingModeError, recoverStructuredOutput } from './claude-recovery.js';
+import {
+  detectFatalClaudeError,
+  detectStreamingModeError,
+  recoverStructuredOutput,
+} from './claude-recovery.js';
 import { createRequire } from 'module';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -95,12 +99,34 @@ const silentJsonMode =
 let finalResultJson = null;
 let outputBuffer = '';
 let streamingModeError = null;
+let fatalError = null;
 
 function splitBufferLines(buffer, chunk) {
   const nextBuffer = buffer + chunk;
   const lines = nextBuffer.split('\n');
   const remaining = lines.pop() || '';
   return { lines, remaining };
+}
+
+function maybeHandleFatalError(line, timestamp) {
+  if (!enableRecovery || fatalError) {
+    return false;
+  }
+
+  const detected = detectFatalClaudeError(line);
+  if (!detected) {
+    return false;
+  }
+
+  fatalError = detected;
+
+  if (silentJsonMode) {
+    log(`[${timestamp}]${line}\n`);
+  }
+  log(`[${timestamp}][FATAL] ${detected}\n`);
+
+  server.stop('SIGTERM').catch(() => {});
+  return true;
 }
 
 function captureStreamingError(line, timestamp) {
@@ -131,6 +157,7 @@ function maybeCaptureStructuredOutput(line) {
 function handleSilentJsonLines(lines, timestamp) {
   for (const line of lines) {
     if (!line.trim()) continue;
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -140,6 +167,7 @@ function handleSilentJsonLines(lines, timestamp) {
 
 function handleStreamingLines(lines, timestamp) {
   for (const line of lines) {
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -159,6 +187,7 @@ function flushOutputBuffer(timestamp) {
     return;
   }
 
+  maybeHandleFatalError(outputBuffer, timestamp);
   if (captureStreamingError(outputBuffer, timestamp)) {
     return;
   }
@@ -244,13 +273,13 @@ server.on('exit', async ({ exitCode, signal }) => {
 
   writeCompletionFooter(code, signal);
 
-  const resolvedCode = recovered?.payload ? 0 : code;
+  const resolvedCode = fatalError ? 1 : recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
   try {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
+      error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
       socketPath: null,
     });
   } catch (updateError) {
