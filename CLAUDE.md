@@ -52,6 +52,14 @@ IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
 | Git remote detection     | `lib/git-remote-utils.js`           |
 | Input helpers            | `src/input-helpers.js`              |
 | Settings                 | `lib/settings.js`                   |
+| AI providers             | `src/providers/`                    |
+| Config validator         | `src/config-validator.js`           |
+| Template resolver        | `src/template-resolver.js`          |
+| Preflight checks         | `src/preflight.js`                  |
+| Status footer            | `src/status-footer.js`              |
+| Task library             | `task-lib/`                         |
+| Cluster hooks (safety)   | `cluster-hooks/`                    |
+| CLI entry point          | `cli/index.js`                      |
 
 ## CLI Quick Reference
 
@@ -85,7 +93,45 @@ zeroshot settings                 # View/modify settings
 - Daemon (`-d`): Background, Ctrl+C detaches
 - Attach (`zeroshot attach`): Connect to daemon, Ctrl+C **detaches** only
 
-**Settings:** `maxModel` (opus/sonnet/haiku cost ceiling), `defaultConfig`, `logLevel`
+**Settings:** `maxModel` (opus/sonnet/haiku cost ceiling), `minModel` (cost floor), `defaultProvider`, `logLevel`
+
+## AI Providers
+
+| Provider  | CLI Name   | Models                   | Auth                            |
+| --------- | ---------- | ------------------------ | ------------------------------- |
+| Anthropic | `claude`   | opus, sonnet, haiku      | `claude` CLI authenticated      |
+| OpenAI    | `codex`    | o3-mini, gpt-4, gpt-4o   | `OPENAI_API_KEY` env var        |
+| Google    | `gemini`   | pro, flash, thinking     | `GOOGLE_API_KEY` or gcloud auth |
+| Opencode  | `opencode` | (Opencode-specific)      | `opencode` CLI configured       |
+
+```bash
+# Specify provider per-run
+zeroshot run 123 --provider codex
+zeroshot run 123 --provider gemini
+
+# Set default provider
+zeroshot settings set defaultProvider codex
+```
+
+**Model hierarchy (cost ceiling):** opus > sonnet > haiku. Agents cannot use models above `maxModel`.
+
+## Issue Providers
+
+| Provider    | Flag        | Auto-detect                         |
+| ----------- | ----------- | ----------------------------------- |
+| GitHub      | `--github`  | `github.com` in git remote          |
+| GitLab      | `--gitlab`  | `gitlab.com` or GitLab self-hosted  |
+| Azure DevOps| `--devops`  | `dev.azure.com` in git remote       |
+| Jira        | `--jira`    | Requires explicit `--jira` flag     |
+
+```bash
+# Auto-detect from git remote (recommended)
+zeroshot run 123
+
+# Force specific provider
+zeroshot run 123 --github
+zeroshot run PROJ-456 --jira
+```
 
 **Git Auto-Detection:** Bare numbers (e.g., `123`) automatically detect provider from git remote URL. No configuration needed when working in a git repository.
 
@@ -208,6 +254,36 @@ zeroshot run 123 --docker --mount ~/.custom:/root/.custom:ro
 
 # Disable all mounts
 zeroshot run 123 --docker --no-mounts
+```
+
+## All Settings Reference
+
+| Setting                | Type        | Default               | Description                                    |
+| ---------------------- | ----------- | --------------------- | ---------------------------------------------- |
+| `maxModel`             | string      | `opus`                | Cost ceiling - agents cannot exceed            |
+| `minModel`             | string/null | `null`                | Cost floor - agents cannot go below            |
+| `defaultProvider`      | string      | `claude`              | AI provider: claude/codex/gemini/opencode      |
+| `defaultConfig`        | string      | `conductor-bootstrap` | Template to use when none specified            |
+| `defaultDocker`        | boolean     | `false`               | Use Docker isolation by default                |
+| `strictSchema`         | boolean     | `true`                | true=reliable JSON, false=live streaming       |
+| `logLevel`             | string      | `normal`              | Verbosity: quiet/normal/verbose                |
+| `claudeCommand`        | string      | `claude`              | Custom Claude CLI command                      |
+| `dockerMounts`         | array       | `['gh','git','ssh']`  | Mount presets for Docker mode                  |
+| `dockerEnvPassthrough` | array       | `[]`                  | Extra env vars for Docker                      |
+| `dockerContainerHome`  | string      | `/home/node`          | Container home directory                       |
+| `defaultIssueSource`   | string      | `github`              | Issue provider: github/gitlab/jira/azure-devops|
+| `autoCheckUpdates`     | boolean     | `true`                | Check for newer versions                       |
+
+```bash
+# View all settings
+zeroshot settings
+
+# Set a value
+zeroshot settings set maxModel sonnet
+zeroshot settings set defaultProvider codex
+
+# Reset to defaults
+zeroshot settings reset
 ```
 
 ## Adversarial Tester (STANDARD+ only)
@@ -523,6 +599,17 @@ npm run typecheck         # TypeScript (if applicable)
 - `ALWAYS`/`NEVER`/`CRITICAL` for rules (caps + context)
 - Code examples: ❌ wrong + ✅ correct + WHY
 
+## Safety Hooks (Cluster Hooks)
+
+Python hooks in `cluster-hooks/` that block dangerous operations when agents run in worktree mode.
+
+| Hook                         | Blocks                                          |
+| ---------------------------- | ----------------------------------------------- |
+| `block-dangerous-git.py`     | git stash, checkout --, reset --hard, push -f   |
+| `block-ask-user-question.py` | AskUserQuestion (agents run non-interactively)  |
+
+**Activated only when:** `ZEROSHOT_WORKTREE=1` env var is set (auto-set in worktree mode).
+
 ## Mechanical Enforcement
 
 | Antipattern               | Enforcement                              |
@@ -533,7 +620,8 @@ npm run typecheck         # TypeScript (if applicable)
 | Git in validator prompts  | Config validator                         |
 | Multiple impl files (-v2) | Pre-commit hook                          |
 | Spawn without permission  | Runtime check (CLI)                      |
-| Git stash usage           | Pre-commit hook (planned)                |
+| Git stash in worktree     | Cluster hook (block-dangerous-git.py)    |
+| AskUserQuestion           | Cluster hook (block-ask-user-question.py)|
 | Merge without CI rebase   | GitHub merge queue                       |
 
 ## 🔴 NODE.JS PATTERNS (Zeroshot-Specific)
