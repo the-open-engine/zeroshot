@@ -79,7 +79,7 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 
 ## Install and Requirements
 
-**Platforms**: Linux, macOS (Windows WSL not yet supported)
+**Platforms**: Linux, macOS. Windows (native/WSL) is deferred while we harden reliability and multi-provider correctness.
 
 ```bash
 npm install -g @covibes/zeroshot
