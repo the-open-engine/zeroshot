@@ -9,7 +9,11 @@ import { appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { updateTask } from './store.js';
-import { detectStreamingModeError, recoverStructuredOutput } from './claude-recovery.js';
+import {
+  detectFatalClaudeError,
+  detectStreamingModeError,
+  recoverStructuredOutput,
+} from './claude-recovery.js';
 import { createRequire } from 'module';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -70,6 +74,7 @@ const cwd = cwdArg;
 const logFile = logFileArg;
 const args = JSON.parse(argsJsonArg);
 const config = configJsonArg ? JSON.parse(configJsonArg) : {};
+let server = null;
 
 const SOCKET_DIR = join(homedir(), '.zeroshot', 'sockets');
 const socketPath = join(SOCKET_DIR, `${taskId}.sock`);
@@ -95,12 +100,36 @@ const silentJsonMode =
 let finalResultJson = null;
 let outputBuffer = '';
 let streamingModeError = null;
+let fatalError = null;
 
 function splitBufferLines(buffer, chunk) {
   const nextBuffer = buffer + chunk;
   const lines = nextBuffer.split('\n');
   const remaining = lines.pop() || '';
   return { lines, remaining };
+}
+
+function maybeHandleFatalError(line, timestamp) {
+  if (!enableRecovery || fatalError) {
+    return false;
+  }
+
+  const detected = detectFatalClaudeError(line);
+  if (!detected) {
+    return false;
+  }
+
+  fatalError = detected;
+
+  if (silentJsonMode) {
+    log(`[${timestamp}]${line}\n`);
+  }
+  log(`[${timestamp}][FATAL] ${detected}\n`);
+
+  if (server) {
+    server.stop('SIGTERM').catch(() => {});
+  }
+  return true;
 }
 
 function captureStreamingError(line, timestamp) {
@@ -131,6 +160,7 @@ function maybeCaptureStructuredOutput(line) {
 function handleSilentJsonLines(lines, timestamp) {
   for (const line of lines) {
     if (!line.trim()) continue;
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -140,6 +170,7 @@ function handleSilentJsonLines(lines, timestamp) {
 
 function handleStreamingLines(lines, timestamp) {
   for (const line of lines) {
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -159,6 +190,7 @@ function flushOutputBuffer(timestamp) {
     return;
   }
 
+  maybeHandleFatalError(outputBuffer, timestamp);
   if (captureStreamingError(outputBuffer, timestamp)) {
     return;
   }
@@ -205,7 +237,7 @@ function writeCompletionFooter(code, signal) {
   log(`Exit code: ${code}, Signal: ${signal}\n`);
 }
 
-const server = new AttachServer({
+server = new AttachServer({
   id: taskId,
   socketPath,
   command,
@@ -244,13 +276,13 @@ server.on('exit', async ({ exitCode, signal }) => {
 
   writeCompletionFooter(code, signal);
 
-  const resolvedCode = recovered?.payload ? 0 : code;
+  const resolvedCode = fatalError ? 1 : recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
   try {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
+      error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
       socketPath: null,
     });
   } catch (updateError) {

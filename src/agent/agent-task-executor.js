@@ -138,6 +138,13 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false 
     );
   }
 
+  // Claude CLI transient failure: no messages returned
+  if (fullOutput.includes('No messages returned')) {
+    return sanitizeErrorMessage(
+      `Claude CLI returned no messages. This is usually transient; retry the task or resume the cluster.`
+    );
+  }
+
   // NEVER TRUNCATE OUTPUT - truncation corrupts structured JSON and causes false "crash" status
   // If output is too verbose, that's a prompt problem - fix the prompts, not the data
   const trimmedOutput = (output || '').trim();

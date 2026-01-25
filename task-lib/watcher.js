@@ -8,7 +8,11 @@
 import { spawn } from 'child_process';
 import { appendFileSync } from 'fs';
 import { updateTask } from './store.js';
-import { detectStreamingModeError, recoverStructuredOutput } from './claude-recovery.js';
+import {
+  detectFatalClaudeError,
+  detectStreamingModeError,
+  recoverStructuredOutput,
+} from './claude-recovery.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -42,6 +46,7 @@ const silentJsonMode =
 
 let finalResultJson = null;
 let streamingModeError = null;
+let fatalError = null;
 
 let stdoutBuffer = '';
 let stderrBuffer = '';
@@ -51,6 +56,42 @@ function splitBufferLines(buffer, chunk) {
   const lines = nextBuffer.split('\n');
   const remaining = lines.pop() || '';
   return { lines, remaining };
+}
+
+function maybeHandleFatalError(line, timestamp) {
+  if (!enableRecovery || fatalError) {
+    return false;
+  }
+
+  const detected = detectFatalClaudeError(line);
+  if (!detected) {
+    return false;
+  }
+
+  fatalError = detected;
+
+  if (silentJsonMode) {
+    log(`[${timestamp}]${line}\n`);
+  }
+  log(`[${timestamp}][FATAL] ${detected}\n`);
+
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // Ignore - process may already be dead
+  }
+
+  setTimeout(() => {
+    if (child.exitCode === null) {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Ignore - process may already be dead
+      }
+    }
+  }, 5000);
+
+  return true;
 }
 
 function captureStreamingError(line, timestamp) {
@@ -81,6 +122,7 @@ function maybeCaptureStructuredOutput(line) {
 function handleSilentJsonLines(lines, timestamp) {
   for (const line of lines) {
     if (!line.trim()) continue;
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -90,6 +132,7 @@ function handleSilentJsonLines(lines, timestamp) {
 
 function handleStreamingLines(lines, timestamp) {
   for (const line of lines) {
+    maybeHandleFatalError(line, timestamp);
     if (captureStreamingError(line, timestamp)) {
       continue;
     }
@@ -109,6 +152,7 @@ function flushStdoutBuffer(timestamp) {
     return;
   }
 
+  maybeHandleFatalError(stdoutBuffer, timestamp);
   if (captureStreamingError(stdoutBuffer, timestamp)) {
     return;
   }
@@ -123,6 +167,7 @@ function flushStdoutBuffer(timestamp) {
 
 function flushStderrBuffer(timestamp) {
   if (stderrBuffer.trim()) {
+    maybeHandleFatalError(stderrBuffer, timestamp);
     log(`[${timestamp}]${stderrBuffer}\n`);
   }
 }
@@ -201,13 +246,13 @@ child.on('close', async (code, signal) => {
 
   writeCompletionFooter(code, signal);
 
-  const resolvedCode = recovered?.payload ? 0 : code;
+  const resolvedCode = fatalError ? 1 : recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
   try {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
+      error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
     });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);
