@@ -230,7 +230,6 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false,
 
   // Claude CLI transient failure: no messages returned
   if (fullOutput.includes('No messages returned')) {
-    logNoMessagesReturned({ taskId, output: fullOutput, statusOutput, debug });
     return sanitizeErrorMessage(
       `Claude CLI returned no messages. This is usually transient; retry the task or resume the cluster.`
     );

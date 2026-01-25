@@ -748,6 +748,7 @@ async function executeTask(agent, triggeringMessage) {
   let maxRetries = agent.config.maxRetries ?? 1;
   const baseDelay = 2000; // 2 seconds
   let sigtermRetryGranted = false;
+  let noMessagesRetryGranted = false;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // Check if agent was stopped between retries
@@ -760,8 +761,14 @@ async function executeTask(agent, triggeringMessage) {
       return;
     } catch (error) {
       const isSigterm = error.message && error.message.includes('SIGTERM');
+      const isNoMessages =
+        error.message && error.message.toLowerCase().includes('no messages returned');
       if (isSigterm && !sigtermRetryGranted && attempt >= maxRetries) {
         sigtermRetryGranted = true;
+        maxRetries += 1;
+      }
+      if (isNoMessages && !noMessagesRetryGranted && attempt >= maxRetries) {
+        noMessagesRetryGranted = true;
         maxRetries += 1;
       }
       const shouldStop = await handleTaskAttemptFailure({

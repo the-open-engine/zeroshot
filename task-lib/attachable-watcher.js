@@ -282,7 +282,7 @@ server.on('exit', async ({ exitCode, signal }) => {
     await updateTask(taskId, {
       status,
       exitCode: resolvedCode,
-      error: resolvedCode !== 0 && signal ? `Killed by ${signal}` : null,
+      error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
       socketPath: null,
     });
   } catch (updateError) {
