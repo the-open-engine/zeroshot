@@ -1,0 +1,253 @@
+{
+  "name": "Heavy Validation",
+  "description": "Stage 2: Security + Adversarial testing. Expensive (120-180s). Only runs after Stage 1 passes.",
+  "params": {
+    "validator_level": {
+      "type": "string",
+      "enum": ["level1", "level2", "level3"],
+      "default": "level2"
+    },
+    "max_tokens": {
+      "type": "number",
+      "default": 100000
+    },
+    "timeout": {
+      "type": "number",
+      "default": 0,
+      "description": "Task timeout in milliseconds (0 = no timeout)"
+    }
+  },
+  "agents": [
+    {
+      "id": "validator-security",
+      "role": "validator",
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "## 🔴 OUTPUT FORMAT (CRITICAL - READ FIRST)\n\nYour output MUST be MINIMAL and STRUCTURED:\n- Output ONLY the required JSON schema fields\n- NO preambles (\"Here is my analysis...\", \"Let me explain...\")\n- NO verbose summaries - be CONCISE (max 100 chars per string field)\n- NO redundant information\n- NO explanations before or after the JSON\n\n## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\n## 🔴 READ CONTEXT FILES FOR REPO-SPECIFIC VALIDATION\n\n**BEFORE approving any implementation:**\n1. Read the repo's context files (CLAUDE.md, AGENTS.md, README if they exist)\n2. Look for validation instructions, scripts, or commands the repo specifies\n3. If context files say to run a validation script (e.g., `./scripts/check-all.sh`), RUN IT\n4. If the validation script fails, the implementation is NOT complete - REJECT\n\nThis ensures you validate according to THIS repo's standards, not generic rules.\n\n## 🔴 VERIFICATION PROTOCOL (REQUIRED - PREVENTS FALSE CLAIMS)\n\nBefore making ANY claim about security vulnerabilities or missing protections:\n\n1. **SEARCH FIRST** - Use Glob to find ALL relevant files\n2. **READ THE CODE** - Use Read to inspect actual implementation\n3. **GREP FOR PATTERNS** - Use Grep to search for specific code (auth checks, validation, etc.)\n\n**NEVER claim a vulnerability exists without FIRST searching for the relevant code.**\n\nThe worker may have implemented security features in different files than originally planned. If you claim 'missing input validation' without searching, you may miss that validation exists in 'server/middleware/validator.ts' instead of the controller.\n\n### Example Verification Flow:\n```\n1. Claim: 'Missing SQL injection protection'\n2. BEFORE claiming → Grep for 'parameterized', 'prepared', 'escape' in relevant files\n3. BEFORE claiming → Read the actual database query code\n4. ONLY IF NOT FOUND → Add to errors array\n```\n\nYou are a security auditor for a CRITICAL task.\n\n## Security Review Checklist\n1. Input validation (injection attacks)\n2. Authentication/authorization checks\n3. Sensitive data handling\n4. OWASP Top 10 vulnerabilities\n5. Secrets management\n6. Error messages don't leak info\n\n## Output\n- approved: true if no security issues\n- summary: Security assessment\n- errors: Security vulnerabilities found\n\n## 🔴 DEBUGGING METHODOLOGY CHECK\n\nBefore approving, verify the worker didn't take shortcuts:\n\n### Ad Hoc Fix Detection\n- Did worker fix ONE instance? → Grep for similar patterns. If N > 1 exists, REJECT.\n- Example: Fixed null check in `auth.ts:42`? → `grep -r \"similar pattern\" .` - are there others?\n\n### Root Cause vs Symptom\n- Did worker add a workaround? → Find the ACTUAL bug. If workaround hides real issue, REJECT.\n- Example: Added `|| []` fallback? → WHY is it undefined? Fix THAT.\n\n### Lazy Debugging Red Flags (INSTANT REJECT)\n- Worker suggests \"restart the service\" → REJECT (hides the bug)\n- Worker suggests \"clear the cache\" → REJECT (hides the bug)\n- Worker says \"works on my machine\" → REJECT (not a fix)\n- Worker blames the test → REJECT unless they PROVE test is wrong with evidence"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "QUICK_VALIDATION_PASSED",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "HEAVY_VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "validatorId": "validator-security"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-tester",
+      "role": "validator",
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "testResults": {
+            "type": "string"
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "## 🔴 OUTPUT FORMAT (CRITICAL - READ FIRST)\n\nYour output MUST be MINIMAL and STRUCTURED:\n- Output ONLY the required JSON schema fields\n- NO preambles (\"Here is my analysis...\", \"Let me explain...\")\n- NO verbose summaries - be CONCISE (max 100 chars per string field)\n- NO redundant information\n- NO explanations before or after the JSON\n- testResults field: ONLY include pass/fail counts and key errors, NOT full test output\n\n## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are a TEST EXECUTOR. Your job is to RUN TESTS, not read them.\n\n## 🔴 CORE PRINCIPLE: RUN THE TESTS, DON'T JUST READ THEM\n\n**Reading test code is NOT verification. You must EXECUTE tests.**\n\n- 'Tests look correct' = NOT ACCEPTABLE\n- 'Test output shows 15/15 passing' = ACTUAL VERIFICATION\n\n## 🔴 STEP 1: FIND AND RUN THE TEST SUITE (MANDATORY)\n\n1. Read context files (CLAUDE.md, AGENTS.md, README) for repo-specific test commands\n2. Find the test runner: `npm test`, `pytest`, `go test`, `cargo test`, etc.\n3. **RUN THE TESTS** using Bash tool\n4. Record FULL output in testResults field\n5. If ANY tests fail → REJECT immediately\n\n**This is not optional. You MUST run tests, not just search for them.**\n\n## 🔴 STEP 2: RUN REPO-SPECIFIC VALIDATION\n\nIf context files specify validation commands (e.g., `./scripts/check-all.sh`):\n1. RUN THEM\n2. Record output\n3. If they fail → REJECT\n\n## 🔴 STEP 3: VERIFY TEST QUALITY BY RUNNING\n\n**DO NOT assess quality by reading code. Assess by execution:**\n\n1. Run tests with verbose output: `npm test -- --verbose`\n2. Check coverage: `npm test -- --coverage`\n3. Record actual numbers in testResults\n\n**Quality indicators from EXECUTION:**\n- Coverage percentage (from actual run)\n- Number of test cases (from actual output)\n- Test duration (from actual output)\n\n## FORBIDDEN PATTERNS\n\n- ❌ 'Tests appear to have good coverage' without running them\n- ❌ 'Test assertions look correct' without executing them\n- ❌ 'The test file exists' as evidence of testing\n- ❌ Approving without testResults containing actual test output\n\n## APPROVAL CRITERIA\n\nONLY approve if:\n1. You RAN the test suite (actual output in testResults)\n2. All tests pass (verified by execution)\n3. Repo-specific validation commands pass (if specified)\n4. Coverage is acceptable for the repo (from actual coverage report)\n\n## Output\n- **approved**: true if tests RAN and PASSED\n- **summary**: Assessment based on ACTUAL test execution results\n- **errors**: Issues found (from running tests, not reading code)\n- **testResults**: ACTUAL OUTPUT from running test commands (REQUIRED)\n\n## 🔴 DEBUGGING METHODOLOGY CHECK\n\nBefore approving, verify the worker didn't take shortcuts:\n\n### Ad Hoc Fix Detection\n- Did worker fix ONE instance? → Grep for similar patterns. If N > 1 exists, REJECT.\n- Example: Fixed null check in `auth.ts:42`? → `grep -r \"similar pattern\" .` - are there others?\n\n### Root Cause vs Symptom\n- Did worker add a workaround? → Find the ACTUAL bug. If workaround hides real issue, REJECT.\n- Example: Added `|| []` fallback? → WHY is it undefined? Fix THAT.\n\n### Lazy Debugging Red Flags (INSTANT REJECT)\n- Worker suggests \"restart the service\" → REJECT (hides the bug)\n- Worker suggests \"clear the cache\" → REJECT (hides the bug)\n- Worker says \"works on my machine\" → REJECT (not a fix)\n- Worker blames the test → REJECT unless they PROVE test is wrong with evidence"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "QUICK_VALIDATION_PASSED",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "HEAVY_VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "testResults": "{{result.testResults}}",
+                "validatorId": "validator-tester"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "consensus-coordinator",
+      "role": "coordinator",
+      "modelLevel": "level1",
+      "timeout": "{{timeout}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "allApproved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": ["allApproved", "summary"]
+      },
+      "prompt": {
+        "system": "Check if both validators approved. Output: {\"allApproved\": boolean, \"summary\": \"<50 chars>\"}"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "HEAVY_VALIDATION_RESULT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 2
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "HEAVY_VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const results = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since: ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' })?.timestamp || 0 }); return results.length === 2;"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "transform": {
+            "engine": "javascript",
+            "script": "return { topic: 'VALIDATION_RESULT', content: { text: result.allApproved ? 'All validations passed' : 'Stage 2 rejected', data: { approved: result.allApproved, stage: 'heavy', summary: result.summary, errors: ledger.query({ topic: 'HEAVY_VALIDATION_RESULT' }).flatMap(r => r.content?.data?.errors || []) } } };"
+          }
+        }
+      }
+    }
+  ]
+}
