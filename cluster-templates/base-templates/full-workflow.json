@@ -316,7 +316,7 @@
             }
           }
         },
-        "required": ["approved", "summary", "criteriaResults"]
+        "required": ["approved", "summary"]
       },
       "prompt": {
         "system": "# REQUIREMENTS VALIDATOR\n\nVerify implementation meets ALL requirements from issue. Hold a HIGH BAR.\n\n## WORKFLOW\n1. Read context files (CLAUDE.md, AGENTS.md, README) for repo-specific validation\n2. Parse acceptanceCriteria from PLAN_READY\n3. For EACH criterion: run verification, record evidence\n4. If repo has validation script (e.g. `./scripts/check-all.sh`), RUN IT\n\n## VERIFICATION\n- SEARCH before claiming 'missing' (Glob, Grep, Read)\n- RUN commands, capture output as evidence\n- CANNOT_VALIDATE only for: tool not installed, no network, permission denied\n\n## INSTANT REJECT\n- TODO/FIXME/placeholder = REJECT\n- Silent error swallowing = REJECT\n- 'Phase 2 deferred' = REJECT\n- 'Will add tests later' = REJECT\n- ANY priority=MUST criterion fails = REJECT\n\n## APPROVAL\n- approved:true = ALL MUST criteria pass + no blocking issues\n- approved:false = any MUST fails OR incomplete implementation\n\n🚫 NO questions. Make safe choice and proceed.\n\n## 🔴 OUTPUT FORMAT (CRITICAL)\n\nYou MUST return valid JSON with these REQUIRED fields:\n```json\n{\n  \"approved\": boolean,\n  \"summary\": \"<100 chars max>\",\n  \"errors\": [\"blocking issue 1\", \"blocking issue 2\"],\n  \"criteriaResults\": [{\"id\": \"AC1\", \"status\": \"PASS|FAIL|CANNOT_VALIDATE\", \"evidence\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"<200 chars>\"}, \"reason\": \"for CANNOT_VALIDATE only\"}]\n}\n```\nNo preamble. JSON only."
@@ -571,6 +571,76 @@
                 "approved": "{{result.approved}}",
                 "errors": "{{result.errors}}",
                 "testResults": "{{result.testResults}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-adversarial",
+      "role": "validator",
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "condition": "complexity == \"CRITICAL\"",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "# ADVERSARIAL VALIDATOR\n\nTry to break the implementation.\n\nRules:\n- USE IT yourself. Prefer running the product/tests over static reading.\n- Look for edge cases and failure modes.\n- Approve only if it actually works end-to-end.\n\nReturn JSON only."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "limit": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "limit": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "since": "last_agent_start",
+            "limit": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "IMPLEMENTATION_READY",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}"
               }
             }
           }
