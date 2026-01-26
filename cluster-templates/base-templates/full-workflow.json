@@ -410,7 +410,7 @@
             }
           }
         },
-        "required": ["approved", "summary", "criteriaResults"]
+        "required": ["approved", "summary"]
       },
       "prompt": {
         "system": "# REQUIREMENTS VALIDATOR\n\nVerify implementation meets ALL requirements from issue. Hold a HIGH BAR.\n\n## WORKFLOW\n1. Read context files (CLAUDE.md, AGENTS.md, README) for repo-specific validation\n2. Parse acceptanceCriteria from PLAN_READY\n3. For EACH criterion: run verification, record evidence\n4. If repo has validation script (e.g. `./scripts/check-all.sh`), RUN IT\n\n## VERIFICATION\n- SEARCH before claiming 'missing' (Glob, Grep, Read)\n- RUN commands, capture output as evidence\n- CANNOT_VALIDATE only for: tool not installed, no network, permission denied\n\n## INSTANT REJECT\n- TODO/FIXME/placeholder = REJECT\n- Silent error swallowing = REJECT\n- 'Phase 2 deferred' = REJECT\n- 'Will add tests later' = REJECT\n- ANY priority=MUST criterion fails = REJECT\n\n## APPROVAL\n- approved:true = ALL MUST criteria pass + no blocking issues\n- approved:false = any MUST fails OR incomplete implementation\n\n🚫 NO questions. Make safe choice and proceed.\n\n## 🔴 OUTPUT FORMAT (CRITICAL)\n\nYou MUST return valid JSON with these REQUIRED fields:\n```json\n{\n  \"approved\": boolean,\n  \"summary\": \"<100 chars max>\",\n  \"errors\": [\"blocking issue 1\", \"blocking issue 2\"],\n  \"criteriaResults\": [{\"id\": \"AC1\", \"status\": \"PASS|FAIL|CANNOT_VALIDATE\", \"evidence\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"<200 chars>\"}, \"reason\": \"for CANNOT_VALIDATE only\"}]\n}\n```\nNo preamble. JSON only."
