@@ -1673,13 +1673,13 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
  * @returns {Promise<Object>} Parsed result data
  */
 async function parseResultOutput(agent, output) {
-  // Empty or error outputs = FAIL
-  if (!output || output.includes('Task not found') || output.includes('Process terminated')) {
+  // Empty outputs = FAIL
+  if (!output || !output.trim()) {
     throw new Error('Task execution failed - no output');
   }
 
   const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
-  const { extractJsonFromOutput } = require('./output-extraction');
+  const { extractJsonFromOutput, hasFatalStandaloneOutput } = require('./output-extraction');
 
   // Use clean extraction pipeline
   let parsed = extractJsonFromOutput(output, providerName);
@@ -1710,6 +1710,9 @@ async function parseResultOutput(agent, output) {
   }
 
   if (!parsed) {
+    if (hasFatalStandaloneOutput(output)) {
+      throw new Error('Task execution failed - no output');
+    }
     const trimmedOutput = output.trim();
     console.error(`\n${'='.repeat(80)}`);
     console.error(`🔴 AGENT OUTPUT MISSING REQUIRED JSON BLOCK`);
