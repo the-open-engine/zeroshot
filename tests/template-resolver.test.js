@@ -142,9 +142,13 @@ describe('TemplateResolver', function () {
       const planner = resolved.agents.find((a) => a.id === 'planner');
       assert.strictEqual(planner.modelLevel, 'level3');
 
-      // Should have 4 validators for CRITICAL
+      // CRITICAL tasks use two-stage validation: meta-coordinator loads validators dynamically
+      // So inline validators should be filtered out, meta-coordinator should be present
       const validators = resolved.agents.filter((a) => a.role === 'validator');
-      assert.strictEqual(validators.length, 4);
+      assert.strictEqual(validators.length, 0);
+
+      const metaCoordinator = resolved.agents.find((a) => a.id === 'meta-coordinator');
+      assert.ok(metaCoordinator, 'meta-coordinator should be present for CRITICAL tasks');
     });
 
     it('should fail on missing required params', function () {
