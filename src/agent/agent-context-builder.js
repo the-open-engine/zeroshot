@@ -169,14 +169,16 @@ function resolveSourceSince(source, cluster, lastTaskEndTime, lastAgentStartTime
     return lastTaskEndTime || cluster.createdAt;
   }
   if (sinceValue === 'last_agent_start') {
-    return lastAgentStartTime || cluster.createdAt;
+    // Use strict "after" semantics to avoid timestamp collisions in the same millisecond
+    // (prevents stale context from leaking across agent restarts).
+    return lastAgentStartTime ? lastAgentStartTime + 1 : cluster.createdAt;
   }
 
   if (typeof sinceValue === 'string') {
     const parsed = Date.parse(sinceValue);
     if (Number.isNaN(parsed)) {
       throw new Error(
-        `Agent context source for topic ${source.topic} has invalid since value "${sinceValue}". ` +
+        `Unknown context source "since" value "${sinceValue}" for topic ${source.topic}. ` +
           'Use cluster_start, last_task_end, last_agent_start, or an ISO timestamp.'
       );
     }

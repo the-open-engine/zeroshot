@@ -35,12 +35,13 @@ class Renderer {
   /**
    * Render clusters table with state icons and uptime
    * @param {Array} clusters - Array of cluster objects
+   * @param {number} [selectedIndex] - Currently selected row (optional)
    */
-  renderClustersTable(clusters) {
+  renderClustersTable(clusters, selectedIndex = 0) {
     const clusterList = !clusters || !Array.isArray(clusters) ? [] : clusters;
 
     const data = clusterList.map((c) => {
-      if (!c) return ['', '', '', ''];
+      if (!c) return ['', '', '', '', ''];
 
       const icon = stateIcon(c.state || 'unknown');
       const uptime =
@@ -48,13 +49,17 @@ class Renderer {
       const clusterId = truncate(c.id || '', 18);
       const state = (c.state || 'unknown').toUpperCase();
       const agentCount = `${c.agentCount || 0} agents`;
+      const configName = truncate(c.configName || '-', 14);
 
-      return [`${icon} ${clusterId}`, state, agentCount, uptime];
+      const rowPrefix =
+        typeof selectedIndex === 'number' && c === clusterList[selectedIndex] ? '▶ ' : '  ';
+
+      return [`${rowPrefix}${icon} ${clusterId}`, state, agentCount, configName, uptime];
     });
 
     if (this.widgets.clustersTable && this.widgets.clustersTable.setData) {
       this.widgets.clustersTable.setData({
-        headers: ['ID', 'State', 'Agents', 'Uptime'],
+        headers: ['ID', 'Status', 'Agents', 'Config', 'Uptime'],
         data,
       });
     }
@@ -67,7 +72,7 @@ class Renderer {
    */
   renderSystemStats(clusters, resourceStats) {
     const clusterList = !clusters || !Array.isArray(clusters) ? [] : clusters;
-    const statsMap = !resourceStats || !(resourceStats instanceof Map) ? new Map() : resourceStats;
+    const statsMap = this._normalizeResourceStats(resourceStats);
 
     // Calculate aggregate stats
     const activeClusters = clusterList.filter((c) => c && c.state === 'running').length;
@@ -112,7 +117,7 @@ class Renderer {
       // No cluster selected, show empty table
       if (this.widgets.agentTable && this.widgets.agentTable.setData) {
         this.widgets.agentTable.setData({
-          headers: ['Agent', 'Role', 'State', 'Iter', 'CPU%', 'Mem'],
+          headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory', 'Health'],
           data: [],
         });
       }
@@ -120,30 +125,75 @@ class Renderer {
     }
 
     const agentList = !agents || !Array.isArray(agents) ? [] : agents;
-    const statsMap = !resourceStats || !(resourceStats instanceof Map) ? new Map() : resourceStats;
+    const statsMap = this._normalizeResourceStats(resourceStats);
 
     const data = agentList.map((a) => {
-      if (!a) return ['', '', '', '', '', ''];
+      if (!a) return ['', '', '', '', '', '', '', ''];
 
       const pid = a.pid;
       const stats = statsMap.get(pid) || { cpu: 0, memory: 0 };
 
-      const agentId = truncate(a.id || '', 12);
+      const clusterId = truncate(a.clusterId || this.selectedClusterId || '', 12);
+      const agentId = truncate(a.id || '', 15);
       const role = truncate(a.role || '', 12);
       const state = a.state || 'unknown';
       const iteration = `${a.iteration || 0}/${a.maxIterations || 0}`;
       const cpu = formatCPU(stats.cpu);
       const memory = formatBytes(stats.memory);
 
-      return [agentId, role, state, iteration, cpu, memory];
+      const health = this._formatAgentHealth(a.health);
+
+      return [clusterId, agentId, role, state, iteration, cpu, memory, health];
     });
 
     if (this.widgets.agentTable && this.widgets.agentTable.setData) {
       this.widgets.agentTable.setData({
-        headers: ['Agent', 'Role', 'State', 'Iter', 'CPU%', 'Mem'],
+        headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory', 'Health'],
         data,
       });
     }
+  }
+
+  _formatAgentHealth(health) {
+    if (!health || typeof health !== 'object') {
+      return '-';
+    }
+
+    const parts = [];
+
+    if (health.retry && health.retry.maxRetries) {
+      const nextAttempt = (health.retry.attempt || 0) + 1;
+      const delaySec = health.retry.delayMs ? Math.round(health.retry.delayMs / 1000) : null;
+      parts.push(
+        `retry ${nextAttempt}/${health.retry.maxRetries}${delaySec ? ` ${delaySec}s` : ''}`
+      );
+    }
+
+    if (health.restarts) {
+      parts.push(
+        `r ${health.restarts.restartsSinceSuccess}/${health.restarts.maxRestartAttempts} ` +
+          `t ${health.restarts.totalRestarts}/${health.restarts.maxTotalRestarts}`
+      );
+    }
+
+    if (health.staleWarnings) {
+      parts.push(`stale ${health.staleWarnings}`);
+    }
+
+    return parts.length ? truncate(parts.join(' | '), 18) : '-';
+  }
+
+  _normalizeResourceStats(resourceStats) {
+    if (resourceStats instanceof Map) {
+      return resourceStats;
+    }
+    const map = new Map();
+    if (resourceStats && typeof resourceStats === 'object') {
+      for (const [pid, stat] of Object.entries(resourceStats)) {
+        map.set(Number(pid), stat);
+      }
+    }
+    return map;
   }
 
   /**

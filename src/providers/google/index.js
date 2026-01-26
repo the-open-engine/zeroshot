@@ -20,6 +20,24 @@ class GoogleProvider extends BaseProvider {
     this._parserState = { lastToolId: null };
   }
 
+  getRetryableErrorPatterns() {
+    return [
+      ...super.getRetryableErrorPatterns(),
+      /\bRESOURCE_EXHAUSTED\b/i,
+      /\bUNAVAILABLE\b/i,
+      /\bDEADLINE_EXCEEDED\b/i,
+    ];
+  }
+
+  getPermanentErrorPatterns() {
+    return [
+      ...super.getPermanentErrorPatterns(),
+      /\bINVALID_ARGUMENT\b/i,
+      /\bPERMISSION_DENIED\b/i,
+      /\bNOT_FOUND\b/i,
+    ];
+  }
+
   // SDK not implemented - uses CLI only
   // See BaseProvider for SDK extension point documentation
 

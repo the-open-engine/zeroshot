@@ -19,6 +19,8 @@ const {
   isPlatformSupported,
   STUCK_THRESHOLD,
 } = require('./agent-stuck-detector');
+const { loadSettings } = require('../../lib/settings');
+const { getProvider } = require('../providers');
 
 /**
  * Start the agent (begin listening for triggers)
@@ -422,7 +424,10 @@ ${'='.repeat(80)}`);
   console.error(`Error: ${error.message}`);
 }
 
-async function handleLockContention() {
+async function handleLockContention(agent) {
+  if (agent.testMode) {
+    return;
+  }
   // Lock contention - add significant jittered delay
   const lockDelay = 10000 + Math.floor(Math.random() * 20000); // 10-30 seconds
   console.error(
@@ -431,12 +436,12 @@ async function handleLockContention() {
   await new Promise((resolve) => setTimeout(resolve, lockDelay));
 }
 
-async function handleFinalFailure(agent, triggeringMessage, error, maxRetries) {
+async function handleFinalFailure(agent, triggeringMessage, error, attempts) {
   console.error(`
 ${'='.repeat(80)}`);
   console.error(`🔴🔴🔴 MAX RETRIES EXHAUSTED - AGENT: ${agent.id} 🔴🔴🔴`);
   console.error(`${'='.repeat(80)}`);
-  console.error(`All ${maxRetries} attempts failed`);
+  console.error(`All ${attempts} attempts failed`);
   console.error(`Final error: ${error.message}`);
   console.error(`Stack: ${error.stack}`);
   console.error(`${'='.repeat(80)}
@@ -450,7 +455,7 @@ ${'='.repeat(80)}`);
 ${'='.repeat(80)}`);
     console.error(`❌ VALIDATOR CRASHED - REJECTING (NOT AUTO-APPROVING)`);
     console.error(`${'='.repeat(80)}`);
-    console.error(`Validator ${agent.id} crashed ${maxRetries} times`);
+    console.error(`Validator ${agent.id} crashed ${attempts} times`);
     console.error(`Error: ${error.message}`);
     console.error(`REJECTING validation - broken code will NOT be merged`);
     console.error(`Investigation required before retry`);
@@ -464,16 +469,16 @@ ${'='.repeat(80)}`);
         topic: hook.config.topic,
         receiver: hook.config.receiver || 'broadcast',
         content: {
-          text: `REJECTED: Validator crashed ${maxRetries} times - ${error.message}`,
+          text: `REJECTED: Validator crashed ${attempts} times - ${error.message}`,
           data: {
             approved: false, // REJECT!
             crashedAfterRetries: true,
             errors: JSON.stringify([
-              `VALIDATOR CRASHED ${maxRetries}x: ${error.message}`,
+              `VALIDATOR CRASHED ${attempts}x: ${error.message}`,
               `Validation could not be performed - REJECTING to prevent broken code merge`,
               `Investigation required before retry`,
             ]),
-            attempts: maxRetries,
+            attempts,
             requiresInvestigation: true,
           },
         },
@@ -494,7 +499,7 @@ ${'='.repeat(80)}`);
     taskId: agent.currentTaskId,
     iteration: agent.iteration,
     error: error.message,
-    attempts: maxRetries,
+    attempts,
     timestamp: Date.now(),
   };
 
@@ -503,7 +508,7 @@ ${'='.repeat(80)}`);
     topic: 'AGENT_ERROR',
     receiver: 'broadcast',
     content: {
-      text: `Task execution failed after ${maxRetries} attempts: ${error.message}`,
+      text: `Task execution failed after ${attempts} attempts: ${error.message}`,
       data: {
         error: error.message,
         stack: error.stack,
@@ -511,7 +516,7 @@ ${'='.repeat(80)}`);
         role: agent.role,
         iteration: agent.iteration,
         taskId: agent.currentTaskId,
-        attempts: maxRetries,
+        attempts,
         hookFailureContext: error.message.includes('Hook uses result')
           ? {
               taskId: agent.currentTaskId || 'UNKNOWN',
@@ -541,14 +546,29 @@ ${'='.repeat(80)}`);
   agent.state = 'idle';
 }
 
-async function scheduleRetry(agent, error, attempt, maxRetries, baseDelay) {
-  const delay = baseDelay * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+function computeBackoffDelayMs({ attempt, baseMs, maxMs, jitterFactor }) {
+  const exponential = Math.min(baseMs * Math.pow(2, attempt - 1), maxMs);
+  const jitter = Math.max(0, Math.min(1, jitterFactor || 0));
+  const delta = exponential * jitter * (Math.random() * 2 - 1);
+  return Math.max(0, Math.round(exponential + delta));
+}
+
+async function scheduleRetry(agent, error, attempt, maxRetries, retryConfig) {
+  const delay = agent.testMode
+    ? 0
+    : computeBackoffDelayMs({
+        attempt,
+        baseMs: retryConfig.baseMs,
+        maxMs: retryConfig.maxMs,
+        jitterFactor: retryConfig.jitterFactor,
+      });
 
   agent._publishLifecycle('RETRY_SCHEDULED', {
     attempt,
     maxRetries,
     delayMs: delay,
     error: error.message,
+    retryable: true,
   });
 
   agent._log(`[${agent.id}] ⚠️  Retrying in ${delay}ms... (${attempt + 1}/${maxRetries})`);
@@ -565,7 +585,8 @@ async function handleTaskAttemptFailure({
   error,
   attempt,
   maxRetries,
-  baseDelay,
+  retryConfig,
+  provider,
 }) {
   // LOCK CONTENTION: Add extra jittered delay for lock file errors
   // This happens when multiple validators try to run Claude CLI in the same workspace
@@ -573,20 +594,30 @@ async function handleTaskAttemptFailure({
 
   logTaskAttemptFailure(agent, attempt, maxRetries, error);
 
+  const retryable =
+    typeof provider?.isRetryableError === 'function' ? provider.isRetryableError(error) : true;
+
+  if (!retryable) {
+    agent._publishLifecycle('RETRY_SKIPPED', {
+      attempt,
+      maxRetries,
+      error: error.message,
+      retryable: false,
+    });
+  }
+
   if (isLockError) {
-    await handleLockContention();
-  } else if (attempt < maxRetries) {
-    console.error(`Will retry in ${baseDelay * Math.pow(2, attempt - 1)}ms...`);
+    await handleLockContention(agent);
   }
   console.error(`${'='.repeat(80)}
 `);
 
-  if (attempt >= maxRetries) {
-    await handleFinalFailure(agent, triggeringMessage, error, maxRetries);
+  if (!retryable || attempt >= maxRetries) {
+    await handleFinalFailure(agent, triggeringMessage, error, attempt);
     return true;
   }
 
-  await scheduleRetry(agent, error, attempt, maxRetries, baseDelay);
+  await scheduleRetry(agent, error, attempt, maxRetries, retryConfig);
   return false;
 }
 
@@ -602,10 +633,26 @@ async function executeTask(agent, triggeringMessage) {
     return;
   }
 
-  // Default: no retries (maxRetries=1 means 1 attempt only)
-  // Set agent config `maxRetries: 3` to enable exponential backoff retries
-  const maxRetries = agent.config.maxRetries ?? 1;
-  const baseDelay = 2000; // 2 seconds
+  const settings = loadSettings();
+
+  // Default retries: prefer per-agent config, fallback to user settings, then 1 attempt.
+  // NOTE: Some terminations (SIGTERM) are treated as transient even when maxRetries=1.
+  let maxRetries = agent.config.maxRetries ?? settings.maxRetries ?? 1;
+  const retryConfig = {
+    baseMs: settings.backoffBaseMs ?? 2000,
+    maxMs: settings.backoffMaxMs ?? 30000,
+    jitterFactor: settings.jitterFactor ?? 0.2,
+  };
+
+  const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
+  const provider = getProvider(providerName);
+
+  let sigtermExtraRetryGranted = false;
+
+  const isSigtermError = (error) => {
+    const msg = (error?.message || String(error) || '').toLowerCase();
+    return msg.includes('sigterm') || msg.includes('killed by sigterm');
+  };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // Check if agent was stopped between retries
@@ -617,13 +664,20 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
+      // Special-case: allow one extra retry for SIGTERM even if maxRetries=1 (test + safety).
+      if (!sigtermExtraRetryGranted && maxRetries === 1 && isSigtermError(error)) {
+        maxRetries = 2;
+        sigtermExtraRetryGranted = true;
+      }
+
       const shouldStop = await handleTaskAttemptFailure({
         agent,
         triggeringMessage,
         error,
         attempt,
         maxRetries,
-        baseDelay,
+        retryConfig,
+        provider,
       });
       if (shouldStop) {
         return;

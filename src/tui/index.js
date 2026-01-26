@@ -23,6 +23,7 @@ class TUI {
 
     // State
     this.clusters = [];
+    this.filteredClusters = [];
     this.resourceStats = new Map();
     this.messages = [];
     this.selectedIndex = 0;
@@ -102,8 +103,10 @@ class TUI {
           this.selectedIndex = Math.max(0, filteredClusters.length - 1);
         }
 
+        this.filteredClusters = filteredClusters;
+
         // Render clusters table
-        this.renderer.renderClustersTable(filteredClusters, this.selectedIndex);
+        this.renderer.renderClustersTable(this.filteredClusters, this.selectedIndex);
 
         // Render system stats
         this.renderer.renderSystemStats(this.clusters, this.resourceStats);

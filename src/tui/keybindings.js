@@ -18,11 +18,13 @@ const HELP_TEXT_OVERVIEW =
   '{cyan-fg}[Enter]{/} View  {cyan-fg}[↑/↓]{/} Navigate  {cyan-fg}[k]{/} Kill  {cyan-fg}[s]{/} Stop  {cyan-fg}[l]{/} Logs  {cyan-fg}[r]{/} Refresh  {cyan-fg}[q]{/} Quit';
 
 function getSelectedCluster(tui) {
-  if (tui.clusters.length === 0) {
+  const list =
+    tui.filteredClusters && tui.filteredClusters.length ? tui.filteredClusters : tui.clusters;
+  if (list.length === 0) {
     return null;
   }
 
-  return tui.clusters[tui.selectedIndex] || null;
+  return list[tui.selectedIndex] || null;
 }
 
 function pushLogMessage(tui, text, level) {
@@ -76,14 +78,16 @@ function exitDetailView(screen, widgets, tui) {
 }
 
 function moveSelection(screen, tui, orchestrator, delta) {
-  if (tui.clusters.length === 0) {
+  const list =
+    tui.filteredClusters && tui.filteredClusters.length ? tui.filteredClusters : tui.clusters;
+  if (list.length === 0) {
     return;
   }
 
-  tui.selectedIndex = Math.min(tui.clusters.length - 1, Math.max(0, tui.selectedIndex + delta));
-  tui.renderer.renderClustersTable(tui.clusters, tui.selectedIndex);
+  tui.selectedIndex = Math.min(list.length - 1, Math.max(0, tui.selectedIndex + delta));
+  tui.renderer.renderClustersTable(list, tui.selectedIndex);
 
-  const selectedCluster = tui.clusters[tui.selectedIndex];
+  const selectedCluster = list[tui.selectedIndex];
   if (selectedCluster) {
     tui.renderer.setSelectedCluster(selectedCluster.id);
     tui.messages = [];

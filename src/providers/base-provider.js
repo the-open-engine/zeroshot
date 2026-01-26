@@ -15,6 +15,103 @@ class BaseProvider {
   }
 
   // ============================================================================
+  // ERROR CLASSIFICATION (Retry vs Permanent)
+  // ============================================================================
+  //
+  // Providers currently execute via CLI, so errors are often unstructured strings.
+  // These helpers are used by the agent retry loop to decide whether to retry.
+  //
+
+  /**
+   * Patterns that indicate the error is retryable/transient.
+   * Override in provider implementations to add provider-specific patterns.
+   * @returns {Array<RegExp>} Retryable error patterns
+   */
+  getRetryableErrorPatterns() {
+    return [
+      /rate.?limit/i,
+      /\b429\b/i,
+      /too many requests/i,
+      /overloaded/i,
+      /temporar(?:y|ily)/i,
+      /unavailable/i,
+      /try again/i,
+      /timeout/i,
+      /timed out/i,
+      /deadline exceeded/i,
+      /connection (?:reset|refused)/i,
+      /\b(econnreset|econnrefused|etimedout|eai_again)\b/i,
+      /network/i,
+    ];
+  }
+
+  /**
+   * Patterns that indicate the error is permanent and should not be retried.
+   * Override in provider implementations to add provider-specific patterns.
+   * @returns {Array<RegExp>} Permanent error patterns
+   */
+  getPermanentErrorPatterns() {
+    return [
+      /invalid[_ -]?api[_ -]?key/i,
+      /api[_ -]?key.*invalid/i,
+      /unauthorized/i,
+      /forbidden/i,
+      /authentication/i,
+      /permission denied/i,
+      /invalid argument/i,
+      /unknown option/i,
+      /\busage:\b/i,
+      /command not found/i,
+      /not recognized as an internal or external command/i,
+      /model not found/i,
+      /context length exceeded/i,
+      /insufficient quota/i,
+    ];
+  }
+
+  /**
+   * Classify whether an error is retryable.
+   * Default behavior is conservative: unknown errors are treated as retryable
+   * to prevent stuck clusters from single transient failures.
+   * @param {any} err - Error object (often Error with message)
+   * @returns {boolean} True if retryable
+   */
+  isRetryableError(err) {
+    const status =
+      err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.response?.statusCode ?? null;
+
+    if (typeof status === 'number') {
+      if (status === 429 || status >= 500) return true;
+      if (status >= 400 && status < 500) return false;
+    }
+
+    const code = err?.code || null;
+    if (
+      typeof code === 'string' &&
+      /\b(econnreset|econnrefused|etimedout|eai_again)\b/i.test(code)
+    ) {
+      return true;
+    }
+
+    const message = (err?.message || String(err) || '').trim();
+    if (!message) {
+      return true;
+    }
+
+    const permanent = this.getPermanentErrorPatterns();
+    if (Array.isArray(permanent) && permanent.some((p) => p.test(message))) {
+      return false;
+    }
+
+    const retryable = this.getRetryableErrorPatterns();
+    if (Array.isArray(retryable) && retryable.some((p) => p.test(message))) {
+      return true;
+    }
+
+    return true;
+  }
+
+  // ============================================================================
   // SDK SUPPORT (Future Extension Point)
   // ============================================================================
   //

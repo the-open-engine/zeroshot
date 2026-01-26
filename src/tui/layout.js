@@ -91,7 +91,7 @@ function createLayout(screen) {
     label: ' Agents ',
     border: { type: 'line', fg: 'cyan' },
     columnSpacing: 1,
-    columnWidth: [12, 15, 12, 8, 8, 10, 10],
+    columnWidth: [12, 15, 12, 12, 8, 8, 10, 18],
     style: {
       header: {
         fg: 'cyan',
@@ -108,7 +108,7 @@ function createLayout(screen) {
 
   // Set initial columns for agents table
   agentTable.setData({
-    headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory'],
+    headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory', 'Health'],
     data: [],
   });
 
@@ -263,10 +263,11 @@ function updateAgentsTable(agentTable, agents) {
     String(agent.iteration || 0),
     agent.cpu || '0.0%',
     agent.memory || '0 MB',
+    agent.health || '-',
   ]);
 
   agentTable.setData({
-    headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory'],
+    headers: ['Cluster ID', 'Agent ID', 'Role', 'Status', 'Iter', 'CPU', 'Memory', 'Health'],
     data,
   });
 }

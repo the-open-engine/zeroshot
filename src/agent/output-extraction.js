@@ -105,7 +105,22 @@ function extractResultContent(obj) {
  */
 function extractFromTextEvents(output, providerName) {
   const provider = getProvider(providerName);
-  const events = parseChunkWithProvider(provider, output);
+  const normalized = output
+    .split('\n')
+    .map((line) => stripTimestamp(line))
+    .filter(Boolean)
+    .join('\n');
+  const events = parseChunkWithProvider(provider, normalized);
+
+  // Fast-path: many providers eventually emit the full JSON as a single text event.
+  // Scan from the end to find the last parseable JSON snippet without requiring
+  // the entire concatenated stream to be valid JSON.
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type !== 'text' || typeof e.text !== 'string') continue;
+    const direct = extractDirectJson(e.text) || extractFromMarkdown(e.text);
+    if (direct) return direct;
+  }
 
   // Accumulate all text events
   const textContent = events

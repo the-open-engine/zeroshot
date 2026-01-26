@@ -20,6 +20,19 @@ class AnthropicProvider extends BaseProvider {
     this._cliFeatures = null;
   }
 
+  getRetryableErrorPatterns() {
+    return [
+      ...super.getRetryableErrorPatterns(),
+      /no messages returned/i,
+      /\boverloaded\b/i,
+      /\brate[_ -]?limit\b/i,
+    ];
+  }
+
+  getPermanentErrorPatterns() {
+    return [...super.getPermanentErrorPatterns(), /invalid_request_error/i, /model_not_available/i];
+  }
+
   // SDK not implemented - uses CLI only
   // See BaseProvider for SDK extension point documentation
 

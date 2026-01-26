@@ -245,6 +245,49 @@ function defineLifecycleStartTests() {
       assert.strictEqual(callCount, 2, 'Expected SIGTERM failure to trigger one retry');
     });
 
+    it('should restart implementation agent after retries exhausted', async function () {
+      const config = {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            modelLevel: 'level2',
+            outputFormat: 'text',
+            triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: {
+                  topic: 'CLUSTER_COMPLETE',
+                  content: {
+                    data: { reason: 'restart-after-exhausted-retries-test' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      };
+
+      let callCount = 0;
+      lifecycleMockRunner.when('worker').calls(() => {
+        callCount += 1;
+        if (callCount <= 3) {
+          return { success: false, output: '', error: 'Request timed out' };
+        }
+        return { success: true, output: 'ok' };
+      });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Fix bug' });
+      await waitForClusterState(lifecycleOrchestrator, result.id, 'stopped', 10000);
+
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      const ledger = new LedgerAssertions(cluster.ledger, result.id);
+      ledger.assertCount('AGENT_RESTART_ATTEMPT', 1);
+
+      assert.ok(callCount >= 4, `Expected worker to be invoked at least 4 times, got ${callCount}`);
+    });
+
     it('should inject worktree cwd when worktree enabled', function () {
       // This test requires a real git repo - skip in test environment
       // The functionality is tested in integration/worktree tests

@@ -19,6 +19,24 @@ class OpenAIProvider extends BaseProvider {
     this._unknownEventCounts = new Map();
   }
 
+  getRetryableErrorPatterns() {
+    return [
+      ...super.getRetryableErrorPatterns(),
+      /rate_limit_exceeded/i,
+      /\bserver_error\b/i,
+      /\bservice_unavailable\b/i,
+    ];
+  }
+
+  getPermanentErrorPatterns() {
+    return [
+      ...super.getPermanentErrorPatterns(),
+      /\binsufficient_quota\b/i,
+      /\bmodel_not_found\b/i,
+      /\bcontext_length_exceeded\b/i,
+    ];
+  }
+
   // SDK not implemented - uses CLI only
   // See BaseProvider for SDK extension point documentation
 
