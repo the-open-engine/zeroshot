@@ -130,12 +130,13 @@ function findLatestClaudeDebugFile(configDir) {
 
 function readFileTail(filePath, maxBytes) {
   try {
+    const stats = fs.statSync(filePath);
+    const size = stats.size;
+    const start = Math.max(0, size - maxBytes);
+    const length = size - start;
+    if (length <= 0) return '';
     const fd = fs.openSync(filePath, 'r');
     try {
-      const size = fs.fstatSync(fd).size;
-      const start = Math.max(0, size - maxBytes);
-      const length = size - start;
-      if (length <= 0) return '';
       const buffer = Buffer.alloc(length);
       fs.readSync(fd, buffer, 0, length, start);
       return buffer.toString('utf8');
@@ -230,6 +231,7 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false,
 
   // Claude CLI transient failure: no messages returned
   if (fullOutput.includes('No messages returned')) {
+    logNoMessagesReturned({ taskId, output: fullOutput, statusOutput, debug });
     return sanitizeErrorMessage(
       `Claude CLI returned no messages. This is usually transient; retry the task or resume the cluster.`
     );
