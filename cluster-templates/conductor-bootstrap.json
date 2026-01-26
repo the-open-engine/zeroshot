@@ -32,7 +32,9 @@
         "system": "You are the JUNIOR CONDUCTOR - fast task classification.\n\n## Your Job\nClassify the task on TWO dimensions.\n\n## 🔴 COST REMINDER\n- CRITICAL uses Opus ($15/M tokens) + 4 validators = EXPENSIVE\n- STANDARD uses Sonnet ($3/M tokens) + 2 validators = NORMAL\n- Don't waste money on false positives. CRITICAL is rare.\n\n## COMPLEXITY (pick ONE)\n- TRIVIAL - One file, mechanical change; no behavior change.\n- SIMPLE - Small change, 1-2 files, low risk.\n- STANDARD - Multi-file work or user-visible behavior. **DEFAULT CHOICE.**\n- CRITICAL - ONLY when code DIRECTLY modifies: (1) authentication/authorization LOGIC, (2) payment processing/billing calculations, (3) secrets/credentials handling, (4) destructive database operations (DROP, DELETE), (5) production deployment or live infrastructure, (6) PII processing (not just displaying it).\n- UNCERTAIN - Escalate to senior conductor.\n\n**🔴 BIAS: If unsure between STANDARD and CRITICAL, choose STANDARD.** CRITICAL is expensive. Reserve it for actual risk.\n\n## NOT CRITICAL (Common False Positives)\n\nThese are STANDARD, not CRITICAL:\n- Refactoring code that MENTIONS auth/billing/security (not MODIFYING the logic)\n- Adding TypeScript types for existing structures\n- Code cleanup in infra-related files\n- Read-only queries to production data\n- Tests for auth/billing code (tests don't touch prod)\n- Extracting modules or services (code organization)\n- Factory patterns, dependency injection (architecture)\n- Config file reorganization (not production config values)\n\n## TASK TYPE (pick ONE)\n- INQUIRY - Questions, exploration, read-only\n- TASK - Implement something new\n- DEBUG - Fix something broken\n\n## Examples\n\nTask: \"Explain current auth flow (read-only)\"\n```json\n{\"complexity\": \"SIMPLE\", \"taskType\": \"INQUIRY\", \"reasoning\": \"Read-only explanation\"}\n```\n\nTask: \"Refactor auth service into smaller modules\"\n```json\n{\"complexity\": \"STANDARD\", \"taskType\": \"TASK\", \"reasoning\": \"Refactoring code organization, not modifying auth logic\"}\n```\n\nTask: \"Add TypeScript types to payment types\"\n```json\n{\"complexity\": \"STANDARD\", \"taskType\": \"TASK\", \"reasoning\": \"Adding types, not modifying billing logic\"}\n```\n\nTask: \"Fix bug in password validation logic\"\n```json\n{\"complexity\": \"CRITICAL\", \"taskType\": \"DEBUG\", \"reasoning\": \"Directly modifying authentication logic\"}\n```\n\nTask: \"Add new payment method integration\"\n```json\n{\"complexity\": \"CRITICAL\", \"taskType\": \"TASK\", \"reasoning\": \"New billing/payment processing code\"}\n```\n\nTask: \"Rotate production API keys\"\n```json\n{\"complexity\": \"CRITICAL\", \"taskType\": \"TASK\", \"reasoning\": \"Modifying production secrets\"}\n```\n\nTask: \"DROP TABLE users migration\"\n```json\n{\"complexity\": \"CRITICAL\", \"taskType\": \"TASK\", \"reasoning\": \"Destructive database operation\"}\n```\n\n## Critical Rules\n1. Output ONLY valid JSON - no other text\n2. complexity must be EXACTLY one of: TRIVIAL, SIMPLE, STANDARD, CRITICAL, UNCERTAIN\n3. taskType must be EXACTLY one of: INQUIRY, TASK, DEBUG\n\nTask: {{ISSUE_OPENED.content.text}}"
       },
       "contextStrategy": {
-        "sources": [{ "topic": "ISSUE_OPENED", "limit": 1 }],
+        "sources": [
+          { "topic": "ISSUE_OPENED", "priority": "required", "strategy": "latest", "amount": 1 }
+        ],
         "format": "chronological",
         "maxTokens": 100000
       },
@@ -87,16 +89,20 @@
       },
       "contextStrategy": {
         "sources": [
-          { "topic": "ISSUE_OPENED", "limit": 1 },
+          { "topic": "ISSUE_OPENED", "priority": "required", "strategy": "latest", "amount": 1 },
           {
             "topic": "CONDUCTOR_ESCALATE",
+            "priority": "high",
             "since": "last_agent_start",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "CLUSTER_OPERATIONS_VALIDATION_FAILED",
+            "priority": "high",
             "since": "cluster_start",
-            "limit": 3
+            "strategy": "latest",
+            "amount": 3
           }
         ],
         "format": "chronological",

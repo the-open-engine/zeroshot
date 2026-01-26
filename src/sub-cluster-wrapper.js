@@ -16,6 +16,38 @@ const LogicEngine = require('./logic-engine');
 const MessageBusBridge = require('./message-bus-bridge');
 const { DEFAULT_MAX_ITERATIONS } = require('./agent/agent-config');
 
+function normalizeParentTopicConfig(entry) {
+  if (typeof entry === 'string') {
+    return { topic: entry, amount: 10, strategy: 'latest' };
+  }
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+  const amount = entry.amount ?? entry.limit;
+  const strategy = entry.strategy ?? (amount !== undefined ? 'latest' : 'all');
+  return { ...entry, amount, strategy };
+}
+
+function selectParentTopicMessages(messageBus, clusterId, topicConfig) {
+  const { topic, sender, since, until, amount, strategy } = topicConfig;
+  const order = strategy === 'latest' ? 'desc' : 'asc';
+  const messages = messageBus.query({
+    cluster_id: clusterId,
+    topic,
+    sender,
+    since,
+    until,
+    limit: amount,
+    order,
+  });
+
+  if (strategy === 'latest' && messages.length > 1) {
+    return messages.slice().reverse();
+  }
+
+  return messages;
+}
+
 class SubClusterWrapper {
   constructor(config, messageBus, parentCluster, options = {}) {
     this.id = config.id;
@@ -308,8 +340,12 @@ class SubClusterWrapper {
 
     lines.push('## Parent Cluster Messages', '');
 
-    for (const topic of parentTopics) {
-      const topicLines = this._buildTopicContextLines(topic);
+    for (const entry of parentTopics) {
+      const topicConfig = normalizeParentTopicConfig(entry);
+      if (!topicConfig?.topic) {
+        continue;
+      }
+      const topicLines = this._buildTopicContextLines(topicConfig);
       if (topicLines.length === 0) {
         continue;
       }
@@ -318,18 +354,14 @@ class SubClusterWrapper {
     }
   }
 
-  _buildTopicContextLines(topic) {
-    const messages = this.messageBus.query({
-      cluster_id: this.parentCluster.id,
-      topic,
-      limit: 10,
-    });
+  _buildTopicContextLines(topicConfig) {
+    const messages = selectParentTopicMessages(this.messageBus, this.parentCluster.id, topicConfig);
 
     if (messages.length === 0) {
       return [];
     }
 
-    const lines = [`### Topic: ${topic}`, ''];
+    const lines = [`### Topic: ${topicConfig.topic}`, ''];
 
     for (const message of messages) {
       lines.push(...this._buildMessageContextLines(message));

@@ -330,9 +330,11 @@ function buildMessageFlowGraph(config) {
   };
 }
 
-function reportMissingBootstrap(topicConsumers, errors) {
+function reportMissingBootstrap(topicConsumers, errors, config) {
   const issueOpenedConsumers = topicConsumers.get('ISSUE_OPENED') || [];
-  if (issueOpenedConsumers.length === 0) {
+  const isSubTemplate = config.params && Object.keys(config.params).length > 0;
+
+  if (issueOpenedConsumers.length === 0 && !isSubTemplate) {
     errors.push(
       'No agent triggers on ISSUE_OPENED. Cluster will never start. ' +
         'Add a trigger: { "topic": "ISSUE_OPENED", "action": "execute_task" }'
@@ -382,9 +384,17 @@ function reportOrphanTopics(topicProducers, topicConsumers, warnings) {
   }
 }
 
-function reportUnproducedTopics(topicConsumers, topicProducers, errors) {
+function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) {
+  const EXTERNAL_TOPICS = [
+    'ISSUE_OPENED',
+    'CLUSTER_RESUMED',
+    'QUICK_VALIDATION_PASSED',
+    'IMPLEMENTATION_READY',
+  ];
+  const isSubTemplate = config.params && Object.keys(config.params).length > 0;
+
   for (const [topic, consumers] of topicConsumers) {
-    if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') {
+    if (EXTERNAL_TOPICS.includes(topic)) {
       continue;
     }
     if (topic.endsWith('*')) {
@@ -393,6 +403,9 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors) {
 
     const producers = topicProducers.get(topic) || [];
     if (producers.length === 0) {
+      if (isSubTemplate) {
+        continue;
+      }
       errors.push(
         `Topic '${topic}' consumed by [${consumers.join(', ')}] but never produced. ` +
           'These agents will never trigger.'
@@ -506,10 +519,10 @@ function analyzeMessageFlow(config) {
   const { topicProducers, topicConsumers, agentOutputTopics, agentInputTopics } =
     buildMessageFlowGraph(config);
 
-  reportMissingBootstrap(topicConsumers, errors);
+  reportMissingBootstrap(topicConsumers, errors, config);
   reportCompletionHandlers(config, errors, warnings);
   reportOrphanTopics(topicProducers, topicConsumers, warnings);
-  reportUnproducedTopics(topicConsumers, topicProducers, errors);
+  reportUnproducedTopics(topicConsumers, topicProducers, errors, config);
   reportSelfTriggeringAgents(config, agentInputTopics, agentOutputTopics, errors);
   reportTwoAgentCycles(config, agentInputTopics, agentOutputTopics, warnings);
   reportMissingValidationTriggers(config, errors);
@@ -1459,8 +1472,13 @@ function validateJsonSchema(prefix, agent, errors) {
 
 function validateContextSource(prefix, source, topicProducers, errors, warnings) {
   const topic = source.topic;
-  if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED') return;
+  if (topic === 'ISSUE_OPENED' || topic === 'CLUSTER_RESUMED' || topic === 'STATE_SNAPSHOT') {
+    return;
+  }
   if (topic.endsWith('*')) return;
+
+  const resolvedAmount = source.amount ?? source.limit;
+  const resolvedStrategy = source.strategy ?? (resolvedAmount !== undefined ? 'latest' : 'all');
 
   const producers = topicProducers.get(topic) || [];
   if (producers.length === 0) {
@@ -1470,7 +1488,7 @@ function validateContextSource(prefix, source, topicProducers, errors, warnings)
     );
   }
 
-  if (source.amount === undefined) {
+  if (resolvedAmount === undefined && resolvedStrategy !== 'all') {
     warnings.push(
       `[Gap 14] ${prefix}: Context source for topic '${topic}' missing 'amount' field. ` +
         `Defaults may not be what you expect.`
@@ -1482,6 +1500,29 @@ function validateContextSource(prefix, source, topicProducers, errors, warnings)
       `[Gap 14] ${prefix}: Context source strategy '${source.strategy}' is invalid. ` +
         `Fix: Use 'latest', 'all', or 'oldest'.`
     );
+  }
+
+  if (source.priority && !['required', 'high', 'medium', 'low'].includes(source.priority)) {
+    errors.push(
+      `[Gap 14] ${prefix}: Context source priority '${source.priority}' is invalid. ` +
+        `Fix: Use 'required', 'high', 'medium', or 'low'.`
+    );
+  }
+
+  if (source.compactStrategy && !['latest', 'all', 'oldest'].includes(source.compactStrategy)) {
+    errors.push(
+      `[Gap 14] ${prefix}: Context source compactStrategy '${source.compactStrategy}' is invalid. ` +
+        `Fix: Use 'latest', 'all', or 'oldest'.`
+    );
+  }
+
+  if (source.compactAmount !== undefined) {
+    if (!Number.isFinite(source.compactAmount) || source.compactAmount <= 0) {
+      errors.push(
+        `[Gap 14] ${prefix}: Context source compactAmount must be a positive number, got ${source.compactAmount}. ` +
+          `Fix: Use a positive integer like 1 or 3.`
+      );
+    }
   }
 }
 

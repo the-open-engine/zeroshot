@@ -37,7 +37,9 @@ function getConfig(complexity, taskType) {
     if (complexity === 'TRIVIAL') return 0;
     if (complexity === 'SIMPLE') return 1;
     if (complexity === 'STANDARD') return 2;
-    if (complexity === 'CRITICAL') return 4;
+    // CRITICAL uses two-stage validation pipeline (validators loaded dynamically via meta-coordinator)
+    // Setting validator_count=0 signals that inline validators should be skipped
+    if (complexity === 'CRITICAL') return 0;
     return 1;
   };
 

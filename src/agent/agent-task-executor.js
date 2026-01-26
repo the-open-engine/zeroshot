@@ -92,6 +92,96 @@ function sanitizeErrorMessage(error) {
   return error;
 }
 
+function safeTail(text, maxChars) {
+  if (!text) return '';
+  if (text.length <= maxChars) return text;
+  return text.slice(-maxChars);
+}
+
+function getClaudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+}
+
+function findLatestClaudeDebugFile(configDir) {
+  try {
+    const debugDir = path.join(configDir, 'debug');
+    const latestLink = path.join(debugDir, 'latest');
+    if (fs.existsSync(latestLink)) {
+      const resolved = fs.realpathSync(latestLink);
+      const stats = fs.statSync(resolved);
+      return { path: resolved, mtimeMs: stats.mtimeMs };
+    }
+
+    const entries = fs.readdirSync(debugDir);
+    let newest = null;
+    for (const entry of entries) {
+      const fullPath = path.join(debugDir, entry);
+      const stats = fs.statSync(fullPath);
+      if (!stats.isFile()) continue;
+      if (!newest || stats.mtimeMs > newest.mtimeMs) {
+        newest = { path: fullPath, mtimeMs: stats.mtimeMs };
+      }
+    }
+    return newest;
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+function readFileTail(filePath, maxBytes) {
+  try {
+    const stats = fs.statSync(filePath);
+    const size = stats.size;
+    const start = Math.max(0, size - maxBytes);
+    const length = size - start;
+    if (length <= 0) return '';
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, start);
+      return buffer.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
+function logNoMessagesReturned({ taskId, output, statusOutput, debug }) {
+  const claudeConfigDir = getClaudeConfigDir();
+  const latestDebug = findLatestClaudeDebugFile(claudeConfigDir);
+  const latestDebugPath = latestDebug?.path || null;
+  const latestDebugTail =
+    latestDebugPath && typeof latestDebugPath === 'string'
+      ? safeTail(readFileTail(latestDebugPath, 4000), 4000)
+      : '';
+
+  const payload = {
+    event: 'NO_MESSAGES_RETURNED',
+    timestamp: new Date().toISOString(),
+    taskId,
+    agentId: debug?.agentId || null,
+    provider: debug?.providerName || null,
+    pid: debug?.pid || null,
+    cwd: debug?.cwd || null,
+    worktreePath: debug?.worktreePath || null,
+    isolation: debug?.isolation || false,
+    clusterId: debug?.clusterId || null,
+    logFilePath: debug?.logFilePath || null,
+    outputLen: output ? output.length : 0,
+    outputTail: safeTail(output || '', 1000),
+    statusOutputLen: statusOutput ? statusOutput.length : 0,
+    statusOutputTail: safeTail(statusOutput || '', 1000),
+    claudeConfigDir,
+    claudeDebugLatest: latestDebugPath,
+    claudeDebugLatestMtimeMs: latestDebug?.mtimeMs || null,
+    claudeDebugLatestTail: latestDebugTail,
+  };
+
+  console.error('[AgentTaskExecutor] Claude CLI returned no messages', payload);
+}
+
 /**
  * Extract error context from task output.
  * Shared by both isolated and non-isolated modes.
@@ -101,9 +191,10 @@ function sanitizeErrorMessage(error) {
  * @param {string} [params.statusOutput] - Status command output (non-isolated only)
  * @param {string} params.taskId - Task ID for error messages
  * @param {boolean} [params.isNotFound=false] - True if task was not found
+ * @param {Object} [params.debug] - Additional debug context for logging
  * @returns {string|null} Sanitized error context or null if extraction failed
  */
-function extractErrorContext({ output, statusOutput, taskId, isNotFound = false }) {
+function extractErrorContext({ output, statusOutput, taskId, isNotFound = false, debug }) {
   // Task not found - explicit error
   if (isNotFound) {
     return sanitizeErrorMessage(`Task ${taskId} not found (may have crashed or been killed)`);
@@ -135,6 +226,14 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false 
       `STREAMING MODE ERROR: Agent tried to use interactive tools in streaming mode. ` +
         `This usually happens with AskUserQuestion or interactive prompts. ` +
         `Zeroshot agents must run non-interactively.`
+    );
+  }
+
+  // Claude CLI transient failure: no messages returned
+  if (fullOutput.includes('No messages returned')) {
+    logNoMessagesReturned({ taskId, output: fullOutput, statusOutput, debug });
+    return sanitizeErrorMessage(
+      `Claude CLI returned no messages. This is usually transient; retry the task or resume the cluster.`
     );
   }
 
@@ -976,7 +1075,20 @@ function handleStatusCompletion({
     finalizeLogFollow(agent, state);
 
     const errorContext = !success
-      ? extractErrorContext({ output: state.output, statusOutput: stdout, taskId })
+      ? extractErrorContext({
+          output: state.output,
+          statusOutput: stdout,
+          taskId,
+          debug: {
+            agentId: agent.id,
+            providerName,
+            pid: agent.processPid,
+            cwd: agent.config.cwd || process.cwd(),
+            worktreePath: agent.worktree?.path || null,
+            isolation: !!agent.isolation?.enabled,
+            logFilePath: state.logFilePath || null,
+          },
+        })
       : null;
 
     resolve({
@@ -1419,7 +1531,21 @@ async function checkIsolatedStatus({
 
   const success = isSuccess && !isError;
   const errorContext = !success
-    ? extractErrorContext({ output: state.fullOutput, taskId, isNotFound })
+    ? extractErrorContext({
+        output: state.fullOutput,
+        taskId,
+        isNotFound,
+        debug: {
+          agentId: agent.id,
+          providerName,
+          pid: agent.processPid,
+          cwd: agent.config.cwd || process.cwd(),
+          worktreePath: agent.worktree?.path || null,
+          isolation: true,
+          clusterId,
+          logFilePath,
+        },
+      })
     : null;
   const parsedResult = await agent._parseResultOutput(state.fullOutput);
 

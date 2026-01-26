@@ -114,7 +114,15 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "medium",
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -193,21 +201,35 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "PLAN_READY",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "WORKER_PROGRESS",
+            "priority": "medium",
             "since": "last_task_end",
-            "limit": 3
+            "strategy": "latest",
+            "amount": 3
           },
           {
             "topic": "VALIDATION_RESULT",
+            "priority": "high",
             "since": "last_task_end",
-            "limit": 10
+            "strategy": "latest",
+            "amount": 10
           }
         ],
         "format": "chronological",
@@ -256,11 +278,83 @@
       "maxIterations": "{{max_iterations}}"
     },
     {
+      "id": "meta-coordinator",
+      "role": "coordinator",
+      "modelLevel": "level1",
+      "timeout": "{{timeout}}",
+      "condition": "{{complexity}} == 'CRITICAL' && {{validator_count}} == 0",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["load_quick", "load_heavy", "skip"]
+          }
+        },
+        "required": ["action"]
+      },
+      "prompt": {
+        "system": "Coordinate two-stage validation. On IMPLEMENTATION_READY: output {\"action\":\"load_quick\"}. On QUICK_VALIDATION_PASSED: output {\"action\":\"load_heavy\"}. On VALIDATION_RESULT from Stage 1 (rejection): output {\"action\":\"skip\"}"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "priority": "medium",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "VALIDATION_RESULT",
+            "priority": "medium",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "IMPLEMENTATION_READY",
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUICK_VALIDATION_PASSED",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_OPERATIONS"
+          },
+          "transform": {
+            "engine": "javascript",
+            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ operation: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
+          },
+          "logic": {
+            "engine": "javascript",
+            "script": "return result.action !== 'skip';"
+          }
+        }
+      }
+    },
+    {
       "id": "validator-requirements",
       "role": "validator",
       "modelLevel": "{{validator_level}}",
       "timeout": "{{timeout}}",
       "maxRetries": 3,
+      "condition": "{{validator_count}} >= 1 && {{validator_count}} < 4",
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -325,16 +419,28 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "PLAN_READY",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -369,7 +475,7 @@
       "modelLevel": "{{validator_level}}",
       "timeout": "{{timeout}}",
       "maxRetries": 3,
-      "condition": "{{validator_count}} >= 2",
+      "condition": "{{validator_count}} >= 2 && {{validator_count}} < 4",
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -396,16 +502,28 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "PLAN_READY",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -439,7 +557,7 @@
       "modelLevel": "{{validator_level}}",
       "timeout": "{{timeout}}",
       "maxRetries": 3,
-      "condition": "{{validator_count}} >= 3",
+      "condition": "{{validator_count}} == 3",
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -466,16 +584,28 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "PLAN_READY",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -509,7 +639,7 @@
       "modelLevel": "{{validator_level}}",
       "timeout": "{{timeout}}",
       "maxRetries": 3,
-      "condition": "{{validator_count}} >= 4",
+      "condition": "{{validator_count}} == 3",
       "outputFormat": "json",
       "jsonSchema": {
         "type": "object",
@@ -539,16 +669,28 @@
         "sources": [
           {
             "topic": "ISSUE_OPENED",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "PLAN_READY",
-            "limit": 1
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
           },
           {
             "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
             "since": "last_agent_start",
-            "limit": 1
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",

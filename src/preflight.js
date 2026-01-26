@@ -473,6 +473,24 @@ function runPreflight(options = {}) {
   const warnings = [];
 
   const settings = loadSettings();
+
+  if (process.platform === 'win32') {
+    return {
+      valid: false,
+      errors: [
+        formatError(
+          'Windows not supported',
+          'Zeroshot currently supports Linux and macOS only; Windows (native or WSL) is deferred.',
+          [
+            'Use Linux or macOS to run Zeroshot',
+            'Or run inside a Linux VM/container on Windows',
+            'Check README for supported platforms and updates',
+          ]
+        ),
+      ],
+      warnings: [],
+    };
+  }
   const providerName = normalizeProviderName(
     options.provider || settings.defaultProvider || 'claude'
   );

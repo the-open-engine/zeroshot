@@ -257,10 +257,14 @@ function generateGitPusherAgent(platform) {
         config: {
           topic: 'CLUSTER_COMPLETE',
           content: {
-            data: { reason: 'pr_mode_complete' },
+            data: { reason: 'git-pusher-complete' },
           },
         },
       },
+    },
+    output: {
+      topic: 'PR_CREATED',
+      publishAfter: 'CLUSTER_COMPLETE',
     },
   };
 }

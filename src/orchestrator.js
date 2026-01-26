@@ -45,6 +45,7 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const StateSnapshotter = require('./state-snapshotter');
 const crypto = require('crypto');
 
 function applyModelOverride(agentConfig, modelOverride) {
@@ -104,10 +105,6 @@ class Orchestrator {
 
     // Track if clusters are loaded (for lazy loading pattern)
     this._clustersLoaded = options.skipLoad === true;
-
-    // Restart coordination (prevents concurrent restarts per agent)
-    this._agentRestartLocks = new Set(); // `${clusterId}:${agentId}`
-    this._staleWarningCounts = new Map(); // `${clusterId}:${agentId}` -> count
   }
 
   /**
@@ -294,6 +291,7 @@ class Orchestrator {
     };
 
     this.clusters.set(clusterId, cluster);
+    this._startSnapshotter(cluster);
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
     return cluster;
@@ -403,14 +401,36 @@ class Orchestrator {
     return agents;
   }
 
+  _startSnapshotter(cluster) {
+    if (cluster.snapshotter) {
+      cluster.snapshotter.start();
+      return;
+    }
+
+    const snapshotter = new StateSnapshotter({
+      messageBus: cluster.messageBus,
+      clusterId: cluster.id,
+    });
+    snapshotter.start();
+    cluster.snapshotter = snapshotter;
+  }
+
   /**
    * Ensure clusters file exists (required for file locking)
    * @private
    */
   _ensureClustersFile() {
     if (!fs.existsSync(this.storageDir)) {
-      fs.mkdirSync(this.storageDir, { recursive: true });
+      try {
+        fs.mkdirSync(this.storageDir, { recursive: true });
+      } catch (error) {
+        console.warn(
+          `[Orchestrator] Failed to create storage directory ${this.storageDir}: ${error.message}`
+        );
+        return null;
+      }
     }
+
     const clustersFile = path.join(this.storageDir, 'clusters.json');
     if (!fs.existsSync(clustersFile)) {
       fs.writeFileSync(clustersFile, '{}');
@@ -430,6 +450,9 @@ class Orchestrator {
     }
 
     const clustersFile = this._ensureClustersFile();
+    if (!clustersFile) {
+      return;
+    }
     const lockfilePath = path.join(this.storageDir, 'clusters.json.lock');
     let release;
 
@@ -522,12 +545,13 @@ class Orchestrator {
         `[Orchestrator] Saved ${this.clusters.size} cluster(s), file now has ${Object.keys(existingClusters).length} total`
       );
     } catch (error) {
-      // Never crash the process from a best-effort persistence failure.
-      // This can happen during shutdown/cleanup when storageDir is removed.
-      if (error && error.code === 'ENOENT') {
+      if (error.code === 'ENOENT') {
+        console.warn(
+          `[Orchestrator] Skipping cluster save; storage directory missing: ${this.storageDir}`
+        );
         return;
       }
-      console.error('[Orchestrator] Failed to save clusters:', error.message);
+      throw error;
     } finally {
       // Always release lock
       if (release) {
@@ -740,6 +764,7 @@ class Orchestrator {
     };
 
     this.clusters.set(clusterId, cluster);
+    this._startSnapshotter(cluster);
 
     try {
       // Fetch input (issue from provider, file, or text)
@@ -997,21 +1022,19 @@ class Orchestrator {
 
       await this._saveClusters();
 
-      if (agentRole !== 'implementation') {
-        return;
-      }
+      if (agentRole === 'implementation' && attempts >= 3) {
+        this._log(`\n${'='.repeat(80)}`);
+        this._log(`❌ WORKER AGENT FAILED: ${clusterId}`);
+        this._log(`${'='.repeat(80)}`);
+        this._log(`Worker agent ${message.sender} failed after ${attempts} attempts`);
+        this._log(`Error: ${message.content?.data?.error || 'unknown'}`);
+        this._log(`Stopping cluster - worker cannot continue`);
+        this._log(`${'='.repeat(80)}\n`);
 
-      const errorText = message.content?.data?.error || message.content?.text || 'unknown';
-      this._handleImplementationAgentFailure(clusterId, message.sender, {
-        attempts,
-        error: errorText,
-        sourceTopic: message.topic,
-      }).catch((err) => {
-        console.error(
-          `[Orchestrator] Failed handling implementation agent failure for ${clusterId}:`,
-          err.message
-        );
-      });
+        this.stop(clusterId).catch((err) => {
+          console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
+        });
+      }
     });
   }
 
@@ -1031,13 +1054,6 @@ class Orchestrator {
       }
     });
 
-    // Any output is progress: clear stale warning counters for that agent.
-    messageBus.on('topic:AGENT_OUTPUT', (message) => {
-      const agentId = message.content?.data?.agent;
-      if (!agentId) return;
-      this._staleWarningCounts.delete(`${clusterId}:${agentId}`);
-    });
-
     messageBus.on('topic:AGENT_LIFECYCLE', (message) => {
       if (message.content?.data?.event !== 'AGENT_STALE_WARNING') return;
 
@@ -1045,42 +1061,13 @@ class Orchestrator {
       const timeSinceLastOutput = message.content?.data?.timeSinceLastOutput;
       const analysis = message.content?.data?.analysis || 'No analysis available';
 
-      const key = `${clusterId}:${agentId}`;
-      const currentCount = this._staleWarningCounts.get(key) || 0;
-      const nextCount = currentCount + 1;
-      this._staleWarningCounts.set(key, nextCount);
-
-      const settings = loadSettings();
-      const threshold = settings.staleWarningsBeforeKill ?? 2;
-
       this._log(
-        `⚠️  Orchestrator: Agent ${agentId} stale warning ${nextCount}/${threshold} ` +
-          `(${Math.round(timeSinceLastOutput / 1000)}s no output)`
+        `⚠️  Orchestrator: Agent ${agentId} appears stale (${Math.round(timeSinceLastOutput / 1000)}s no output) but will NOT be killed`
       );
       this._log(`    Analysis: ${analysis}`);
-
-      if (nextCount < threshold) {
-        return;
-      }
-
-      // Only auto-restart implementation agent (worker) to avoid validator loops.
-      const cluster = this.clusters.get(clusterId);
-      const agent = cluster?.agents?.find((a) => a.id === agentId);
-      if (!agent || agent.role !== 'implementation') {
-        return;
-      }
-
-      this._handleImplementationAgentFailure(clusterId, agentId, {
-        attempts: null,
-        error: `agent_stale:${Math.round(timeSinceLastOutput / 1000)}s`,
-        staleDuration: timeSinceLastOutput,
-        sourceTopic: 'AGENT_STALE_WARNING',
-      }).catch((err) => {
-        console.error(
-          `[Orchestrator] Failed handling stale implementation agent for ${clusterId}:`,
-          err.message
-        );
-      });
+      this._log(
+        `    Manual intervention may be needed - use 'zeroshot resume ${clusterId}' if stuck`
+      );
     });
   }
 
@@ -1256,9 +1243,6 @@ class Orchestrator {
         mounts: options.mounts,
         containerHome: options.containerHome,
         provider: providerName,
-        onExit: ({ containerId: exitedContainerId, exitCode }) => {
-          this._handleIsolationContainerExit(clusterId, exitedContainerId, exitCode);
-        },
       });
       this._log(`[Orchestrator] Container created: ${containerId} (workDir: ${workDir})`);
     } else if (options.worktree) {
@@ -1273,41 +1257,6 @@ class Orchestrator {
     }
 
     return { isolationManager, containerId, worktreeInfo };
-  }
-
-  _handleIsolationContainerExit(clusterId, containerId, exitCode) {
-    if (this.closed) return;
-
-    const cluster = this.clusters.get(clusterId);
-    if (!cluster) return;
-
-    // Ignore exits for clusters that are not running anymore (intentional stop/kill).
-    if (cluster.state !== 'running') {
-      return;
-    }
-
-    // Ignore if cluster's current container doesn't match (e.g., recreated on resume).
-    if (cluster.isolation?.containerId && cluster.isolation.containerId !== containerId) {
-      return;
-    }
-
-    const reason = 'DOCKER_CONTAINER_EXITED';
-    const text = `Docker container exited (id=${containerId}, exitCode=${exitCode ?? 'unknown'})`;
-
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: 'CLUSTER_FAILED',
-      sender: 'orchestrator',
-      receiver: 'system',
-      content: {
-        text,
-        data: { reason, containerId, exitCode },
-      },
-    });
-
-    this.stop(clusterId).catch((err) => {
-      console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
-    });
   }
 
   _applyAutoPrConfig(config, inputData, options) {
@@ -1477,6 +1426,10 @@ class Orchestrator {
       await agent.stop();
     }
 
+    if (cluster.snapshotter) {
+      cluster.snapshotter.stop();
+    }
+
     // Clean up isolation container if enabled
     // CRITICAL: Preserve workspace for resume capability - only delete on kill()
     if (cluster.isolation?.manager) {
@@ -1485,6 +1438,14 @@ class Orchestrator {
       );
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
       this._log(`[Orchestrator] Container stopped, workspace preserved`);
+    }
+
+    if (cluster.validatorIsolation?.manager) {
+      this._log(`[Orchestrator] Cleaning up validator isolation container for ${clusterId}...`);
+      await cluster.validatorIsolation.manager.cleanup(cluster.validatorIsolation.clusterId, {
+        preserveWorkspace: false,
+      });
+      cluster.validatorIsolation = null;
     }
 
     // Worktree cleanup on stop: preserve for resume capability
@@ -1520,6 +1481,10 @@ class Orchestrator {
       await agent.stop();
     }
 
+    if (cluster.snapshotter) {
+      cluster.snapshotter.stop();
+    }
+
     // Force remove isolation container AND workspace (full cleanup, no resume)
     if (cluster.isolation?.manager) {
       this._log(
@@ -1527,6 +1492,14 @@ class Orchestrator {
       );
       await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: false });
       this._log(`[Orchestrator] Container and workspace removed`);
+    }
+
+    if (cluster.validatorIsolation?.manager) {
+      this._log(`[Orchestrator] Force removing validator isolation container for ${clusterId}...`);
+      await cluster.validatorIsolation.manager.cleanup(cluster.validatorIsolation.clusterId, {
+        preserveWorkspace: false,
+      });
+      cluster.validatorIsolation = null;
     }
 
     // Force remove worktree (full cleanup, no resume)
@@ -1623,6 +1596,7 @@ class Orchestrator {
 
     await this._ensureIsolationForResume(clusterId, cluster);
     this._ensureWorktreeForResume(clusterId, cluster);
+    this._startSnapshotter(cluster);
     await this._restartClusterAgents(cluster);
 
     const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);
@@ -1708,9 +1682,6 @@ class Orchestrator {
       image: cluster.isolation.image,
       reuseExistingWorkspace: true,
       provider: providerName,
-      onExit: ({ containerId: exitedContainerId, exitCode }) => {
-        this._handleIsolationContainerExit(clusterId, exitedContainerId, exitCode);
-      },
     });
 
     this._log(`[Orchestrator] New container created: ${newContainerId}`);
@@ -1929,153 +1900,14 @@ class Orchestrator {
     };
   }
 
-  _getRestartPolicy() {
-    const settings = loadSettings();
-    return {
-      maxRestartAttempts: settings.maxRestartAttempts ?? 3,
-      maxTotalRestarts: settings.maxTotalRestarts ?? 10,
-    };
-  }
-
-  _getLastTaskCompletedTimestamp(cluster, agentId) {
-    const lifecycle = cluster.messageBus.query({
-      cluster_id: cluster.id,
-      topic: 'AGENT_LIFECYCLE',
-      sender: agentId,
-      order: 'desc',
-      limit: 200,
-    });
-
-    const completed = lifecycle.find((m) => m.content?.data?.event === 'TASK_COMPLETED');
-    return completed?.timestamp || cluster.createdAt || 0;
-  }
-
-  _countAgentRestartAttempts(cluster, agentId, sinceTs) {
-    const attempts = cluster.messageBus.query({
-      cluster_id: cluster.id,
-      topic: 'AGENT_RESTART_ATTEMPT',
-      since: sinceTs,
-      order: 'asc',
-      limit: 1000,
-    });
-
-    return attempts.filter((m) => m.content?.data?.agentId === agentId).length;
-  }
-
-  _countTotalRestarts(cluster) {
-    const attempts = cluster.messageBus.query({
-      cluster_id: cluster.id,
-      topic: 'AGENT_RESTART_ATTEMPT',
-      order: 'asc',
-      limit: 1000,
-    });
-    return attempts.length;
-  }
-
-  _publishRestartAttempt(cluster, agentId, data) {
-    cluster.messageBus.publish({
-      cluster_id: cluster.id,
-      topic: 'AGENT_RESTART_ATTEMPT',
-      sender: 'orchestrator',
-      receiver: 'broadcast',
-      content: {
-        text: `Restarting ${agentId}: ${data.reason}`,
-        data: {
-          agentId,
-          ...data,
-        },
-      },
-    });
-  }
-
-  _publishFailureAndStop(clusterId, reason, details) {
-    const cluster = this.clusters.get(clusterId);
-    if (!cluster) return;
-
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: 'CLUSTER_FAILED',
-      sender: 'orchestrator',
-      receiver: 'system',
-      content: {
-        text: details?.text || reason,
-        data: {
-          reason,
-          ...details,
-        },
-      },
-    });
-
-    this.stop(clusterId).catch((err) => {
-      console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
-    });
-  }
-
-  async _handleImplementationAgentFailure(clusterId, agentId, details = {}) {
-    const cluster = this.clusters.get(clusterId);
-    if (!cluster) return;
-
-    const lockKey = `${clusterId}:${agentId}`;
-    if (this._agentRestartLocks.has(lockKey)) {
-      this._log(`⏳ Restart already in progress for ${agentId} (${clusterId})`);
-      return;
-    }
-
-    this._agentRestartLocks.add(lockKey);
-    try {
-      const policy = this._getRestartPolicy();
-      const lastSuccessAt = this._getLastTaskCompletedTimestamp(cluster, agentId);
-      const restartsSinceSuccess = this._countAgentRestartAttempts(cluster, agentId, lastSuccessAt);
-      const totalRestarts = this._countTotalRestarts(cluster);
-
-      if (totalRestarts >= policy.maxTotalRestarts) {
-        this._publishFailureAndStop(clusterId, 'SAFETY_RESTART_LIMIT', {
-          text: `Safety limit reached: ${totalRestarts}/${policy.maxTotalRestarts} restarts`,
-          agentId,
-          totalRestarts,
-          maxTotalRestarts: policy.maxTotalRestarts,
-        });
-        return;
-      }
-
-      if (restartsSinceSuccess >= policy.maxRestartAttempts) {
-        this._publishFailureAndStop(clusterId, 'MAX_RESTART_ATTEMPTS', {
-          text: `Agent failed ${restartsSinceSuccess}/${policy.maxRestartAttempts} times without progress`,
-          agentId,
-          restartsSinceSuccess,
-          maxRestartAttempts: policy.maxRestartAttempts,
-        });
-        return;
-      }
-
-      const nextAttempt = restartsSinceSuccess + 1;
-      this._publishRestartAttempt(cluster, agentId, {
-        reason: details.sourceTopic || 'AGENT_ERROR',
-        error: details.error,
-        attempts: details.attempts,
-        staleDurationMs: details.staleDuration || null,
-        attempt: nextAttempt,
-        maxRestartAttempts: policy.maxRestartAttempts,
-        totalRestarts: totalRestarts + 1,
-        maxTotalRestarts: policy.maxTotalRestarts,
-      });
-
-      await this._restartAgentWithContext(clusterId, agentId, {
-        reason: details.sourceTopic || 'AGENT_ERROR',
-        error: details.error,
-        attempt: nextAttempt,
-        maxRestartAttempts: policy.maxRestartAttempts,
-        totalRestarts: totalRestarts + 1,
-        maxTotalRestarts: policy.maxTotalRestarts,
-        staleDurationMs: details.staleDuration || null,
-      });
-    } finally {
-      this._agentRestartLocks.delete(lockKey);
-      this._staleWarningCounts.delete(lockKey);
-    }
-  }
-
-  async _restartAgentWithContext(clusterId, agentId, restartInfo) {
+  /**
+   * Force restart a stale agent with imperative prompt injection
+   * @param {string} clusterId - Cluster ID
+   * @param {string} agentId - Agent to restart
+   * @param {number} staleDuration - How long agent was stale (ms)
+   * @private
+   */
+  async _forceRestartAgent(clusterId, agentId, staleDuration) {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
@@ -2086,34 +1918,47 @@ class Orchestrator {
       throw new Error(`Agent ${agentId} not found in cluster ${clusterId}`);
     }
 
-    const staleMinutes = restartInfo.staleDurationMs
-      ? Math.max(1, Math.round(restartInfo.staleDurationMs / 60000))
-      : null;
+    // Kill current task
+    try {
+      agent._killTask();
+    } catch (err) {
+      this._log(`⚠️  Failed to kill agent ${agentId} task:`, err.message);
+    }
 
-    const header =
-      restartInfo.reason === 'AGENT_STALE_WARNING'
-        ? `🔴 RECOVERY: Agent was detected as STUCK`
-        : `🔴 RECOVERY: Agent execution FAILED`;
-
+    // Build imperative restart context
+    const staleMinutes = Math.round(staleDuration / 60000);
     const imperativePrompt = `
-${header}
+🔴 CRITICAL: Your previous session STOPPED PRODUCING OUTPUT for ${staleMinutes} minutes and was detected as STUCK.
 
-## Recovery Attempt
-- Attempt: ${restartInfo.attempt}/${restartInfo.maxRestartAttempts}
-- Total restarts (cluster): ${restartInfo.totalRestarts}/${restartInfo.maxTotalRestarts}
-- Reason: ${restartInfo.reason}
-${restartInfo.error ? `- Error: ${restartInfo.error}` : ''}
-${staleMinutes ? `- No output for ~${staleMinutes} minutes` : ''}
+## What Happened
+- Last output timestamp: ${new Date(Date.now() - staleDuration).toISOString()}
+- Detected as stale after ${staleMinutes} minutes of silence
+- Process was forcefully restarted
 
 ## Your Instructions
-You MUST continue the task from where you left off and finish it.
-If completion is impossible, explicitly explain why (missing files, impossible requirements, etc.).
+You MUST complete your current task. DO NOT STOP until you either:
+1. Successfully complete the task and publish your completion message, OR
+2. Explicitly state WHY you cannot complete the task (missing files, impossible requirements, etc.)
+
+If you discovered that files you need to modify don't exist:
+- CREATE them from scratch with the expected implementation
+- DO NOT silently give up
+- DO NOT stop working without explicit explanation
+
+If you are stuck in an impossible situation:
+- EXPLAIN the problem clearly
+- PROPOSE alternative solutions
+- WAIT for guidance - do not exit
+
+## Resume Your Work
+Continue from where you left off. Review your previous output to understand what you were working on.
 `.trim();
 
+    // Get recent context from ledger
     const recentMessages = cluster.messageBus
       .query({
         cluster_id: cluster.id,
-        limit: 20,
+        limit: 10,
         order: 'desc',
       })
       .reverse();
@@ -2124,29 +1969,18 @@ If completion is impossible, explicitly explain why (missing files, impossible r
 
     const fullContext = `${imperativePrompt}\n\n## Recent Context\n${contextText}`;
 
-    this._log(`🔄 Restarting agent ${agentId} (${clusterId})`);
+    // Resume agent with imperative prompt
+    this._log(
+      `🔄 Restarting agent ${agentId} with imperative prompt (${imperativePrompt.length} chars)`
+    );
 
-    await agent.stop();
-    await agent.start();
-    await agent.resume(fullContext);
-
-    this._log(`✅ Agent ${agentId} restart initiated`);
-  }
-
-  /**
-   * Force restart a stale agent with imperative prompt injection
-   * @param {string} clusterId - Cluster ID
-   * @param {string} agentId - Agent to restart
-   * @param {number} staleDuration - How long agent was stale (ms)
-   * @private
-   */
-  async _forceRestartAgent(clusterId, agentId, staleDuration) {
-    await this._handleImplementationAgentFailure(clusterId, agentId, {
-      attempts: null,
-      error: `agent_stale:${Math.round(staleDuration / 1000)}s`,
-      staleDuration,
-      sourceTopic: 'AGENT_STALE_WARNING',
-    });
+    try {
+      await agent.resume(fullContext);
+      this._log(`✅ Agent ${agentId} successfully restarted`);
+    } catch (err) {
+      this._log(`❌ Failed to resume agent ${agentId}:`, err.message);
+      throw err;
+    }
   }
 
   /**
@@ -2717,65 +2551,15 @@ return true;`,
       }
     }
 
-    const agents = cluster.agents.map((agent) => {
-      const agentState = agent.getState();
-      return {
-        ...agentState,
-        clusterId,
-        health: this._getAgentHealth(cluster, agentState),
-      };
-    });
-
     return {
       id: clusterId,
       state: state,
       isZombie: isZombie,
       pid: cluster.pid || null,
       createdAt: cluster.createdAt,
-      configName: cluster.config?.name || cluster.config?.id || cluster.config?.template || null,
-      agents,
+      agents: cluster.agents.map((a) => a.getState()),
       messageCount: cluster.messageBus.count({ cluster_id: clusterId }),
     };
-  }
-
-  _getAgentHealth(cluster, agentState) {
-    const lastLifecycle = cluster.messageBus.findLast({
-      cluster_id: cluster.id,
-      topic: 'AGENT_LIFECYCLE',
-      sender: agentState.id,
-    });
-
-    const event = lastLifecycle?.content?.data?.event || null;
-    const retry =
-      event === 'RETRY_SCHEDULED'
-        ? {
-            attempt: lastLifecycle.content?.data?.attempt,
-            maxRetries: lastLifecycle.content?.data?.maxRetries,
-            delayMs: lastLifecycle.content?.data?.delayMs,
-          }
-        : null;
-
-    const staleWarnings = this._staleWarningCounts.get(`${cluster.id}:${agentState.id}`) || 0;
-
-    let restarts = null;
-    if (agentState.role === 'implementation') {
-      const policy = this._getRestartPolicy();
-      const lastSuccessAt = this._getLastTaskCompletedTimestamp(cluster, agentState.id);
-      const restartsSinceSuccess = this._countAgentRestartAttempts(
-        cluster,
-        agentState.id,
-        lastSuccessAt
-      );
-      const totalRestarts = this._countTotalRestarts(cluster);
-      restarts = {
-        restartsSinceSuccess,
-        maxRestartAttempts: policy.maxRestartAttempts,
-        totalRestarts,
-        maxTotalRestarts: policy.maxTotalRestarts,
-      };
-    }
-
-    return { event, retry, restarts, staleWarnings };
   }
 
   /**

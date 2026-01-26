@@ -123,15 +123,22 @@ function extractFromTextEvents(output, providerName) {
   }
 
   // Accumulate all text events
-  const textContent = events
-    .filter((e) => e.type === 'text')
-    .map((e) => e.text)
-    .join('');
+  const textEvents = events.filter((e) => e.type === 'text').map((e) => e.text);
+  const textContent = textEvents.join('');
 
   if (!textContent.trim()) return null;
 
   // Try parsing accumulated text as JSON
-  return extractDirectJson(textContent) || extractFromMarkdown(textContent);
+  const combined = extractDirectJson(textContent) || extractFromMarkdown(textContent);
+  if (combined) return combined;
+
+  for (let i = textEvents.length - 1; i >= 0; i--) {
+    const candidate = textEvents[i];
+    const parsed = extractDirectJson(candidate) || extractFromMarkdown(candidate);
+    if (parsed) return parsed;
+  }
+
+  return null;
 }
 
 /**

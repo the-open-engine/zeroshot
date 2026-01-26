@@ -32,7 +32,7 @@ function getConfig(complexity, taskType) {
     if (complexity === 'TRIVIAL') return 0;
     if (complexity === 'SIMPLE') return 1;
     if (complexity === 'STANDARD') return 2;
-    if (complexity === 'CRITICAL') return 4;
+    if (complexity === 'CRITICAL') return 0; // Two-stage validation with dynamic loading
     return 1;
   };
 
@@ -134,7 +134,7 @@ describe('TemplateResolver', function () {
         planner_level: 'level3',
         worker_level: 'level2',
         validator_level: 'level2',
-        validator_count: 4,
+        validator_count: 0, // CRITICAL uses two-stage validation (validators loaded dynamically)
       });
 
       assert.ok(resolved.agents);
@@ -142,9 +142,13 @@ describe('TemplateResolver', function () {
       const planner = resolved.agents.find((a) => a.id === 'planner');
       assert.strictEqual(planner.modelLevel, 'level3');
 
-      // Should have 5 validators for CRITICAL
+      // CRITICAL tasks use two-stage validation: meta-coordinator loads validators dynamically
+      // So inline validators should be filtered out, meta-coordinator should be present
       const validators = resolved.agents.filter((a) => a.role === 'validator');
-      assert.strictEqual(validators.length, 5);
+      assert.strictEqual(validators.length, 0);
+
+      const metaCoordinator = resolved.agents.find((a) => a.id === 'meta-coordinator');
+      assert.ok(metaCoordinator, 'meta-coordinator should be present for CRITICAL tasks');
     });
 
     it('should fail on missing required params', function () {
@@ -206,11 +210,11 @@ describe('2D Classification Routing', function () {
       assert.strictEqual(params.planner_level, 'level2');
     });
 
-    it('CRITICAL should use level3 planner and 4 validators', function () {
+    it('CRITICAL should use level3 planner and two-stage validation', function () {
       const { base, params } = getConfig('CRITICAL', 'TASK');
       assert.strictEqual(base, 'full-workflow');
       assert.strictEqual(params.planner_level, 'level3');
-      assert.strictEqual(params.validator_count, 4);
+      assert.strictEqual(params.validator_count, 0); // Two-stage validation with dynamic loading
       assert.strictEqual(params.max_iterations, DEFAULT_MAX_ITERATIONS);
     });
 

@@ -1,0 +1,285 @@
+{
+  "name": "Quick Validation",
+  "description": "Stage 1: Requirements + Code validation. Fast feedback (30-60s).",
+  "params": {
+    "validator_level": {
+      "type": "string",
+      "enum": ["level1", "level2", "level3"],
+      "default": "level2"
+    },
+    "max_tokens": {
+      "type": "number",
+      "default": 100000
+    },
+    "timeout": {
+      "type": "number",
+      "default": 0,
+      "description": "Task timeout in milliseconds (0 = no timeout)"
+    }
+  },
+  "agents": [
+    {
+      "id": "validator-requirements",
+      "role": "validator",
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "criteriaResults": {
+            "type": "array",
+            "description": "Status for each acceptance criterion. PASS/FAIL require evidence. CANNOT_VALIDATE requires reason.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "AC1, AC2, etc. from plan"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["PASS", "FAIL", "SKIPPED", "CANNOT_VALIDATE"],
+                  "description": "CANNOT_VALIDATE = verification impossible (missing tools, permissions, etc). Treated as PASS with warning."
+                },
+                "evidence": {
+                  "type": "object",
+                  "description": "REQUIRED for PASS/FAIL. Proof of verification - actual command output.",
+                  "properties": {
+                    "command": {
+                      "type": "string"
+                    },
+                    "exitCode": {
+                      "type": "integer"
+                    },
+                    "output": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "REQUIRED for CANNOT_VALIDATE. WHY verification is impossible (e.g., 'kubectl not installed', 'no SSH access')."
+                }
+              },
+              "required": ["id", "status"]
+            }
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "# REQUIREMENTS VALIDATOR\n\nVerify implementation meets ALL requirements from issue. Hold a HIGH BAR.\n\n## WORKFLOW\n1. Read context files (CLAUDE.md, AGENTS.md, README) for repo-specific validation\n2. Parse acceptanceCriteria from PLAN_READY\n3. For EACH criterion: run verification, record evidence\n4. If repo has validation script (e.g. `./scripts/check-all.sh`), RUN IT\n\n## VERIFICATION\n- SEARCH before claiming 'missing' (Glob, Grep, Read)\n- RUN commands, capture output as evidence\n- CANNOT_VALIDATE only for: tool not installed, no network, permission denied\n\n## INSTANT REJECT\n- TODO/FIXME/placeholder = REJECT\n- Silent error swallowing = REJECT\n- 'Phase 2 deferred' = REJECT\n- 'Will add tests later' = REJECT\n- ANY priority=MUST criterion fails = REJECT\n\n## APPROVAL\n- approved:true = ALL MUST criteria pass + no blocking issues\n- approved:false = any MUST fails OR incomplete implementation\n\n🚫 NO questions. Make safe choice and proceed.\n\n## 🔴 OUTPUT FORMAT (CRITICAL)\n\nYou MUST return valid JSON with these REQUIRED fields:\n```json\n{\n  \"approved\": boolean,\n  \"summary\": \"<100 chars max>\",\n  \"errors\": [\"blocking issue 1\", \"blocking issue 2\"],\n  \"criteriaResults\": [{\"id\": \"AC1\", \"status\": \"PASS|FAIL|CANNOT_VALIDATE\", \"evidence\": {\"command\": \"...\", \"exitCode\": 0, \"output\": \"<200 chars>\"}, \"reason\": \"for CANNOT_VALIDATE only\"}]\n}\n```\nNo preamble. JSON only."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
+            "since": "last_agent_start",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "IMPLEMENTATION_READY",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "QUICK_VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "criteriaResults": "{{result.criteriaResults}}",
+                "validatorId": "validator-requirements"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-code",
+      "role": "validator",
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "# CODE VALIDATOR\n\nSenior engineer code review. Catch REAL bugs, not style preferences.\n\n## WORKFLOW\n1. Read context files (CLAUDE.md, AGENTS.md, README) for repo-specific validation\n2. SEARCH before claiming 'missing' (Glob, Grep, Read)\n3. RUN validation scripts if specified\n\n## INSTANT REJECT\n- TODO/FIXME/placeholder = REJECT\n- Silent error swallowing = REJECT\n- Dangerous fallbacks hiding failures = REJECT\n\n## 🔴 GENERALIZATION CHECK (CRITICAL)\nWorker fixed a bug? Verify they fixed ALL instances:\n1. Identify the PATTERN (not just the line)\n2. `grep -rn \"pattern\" .` - search codebase\n3. If N > 1 exists → Did worker fix ALL? If NO → REJECT\n\nExamples: null check in one handler? Check ALL. SQL injection in one query? Check ALL. A fix that leaves identical bugs elsewhere is NOT a fix.\n\n## BLOCKING (reject with WHAT/HOW/WHY)\n- Logic/off-by-one bugs\n- Race conditions\n- Security holes (injection, auth bypass)\n- Resource leaks (timers, connections)\n- God functions (>50 lines) - SPLIT\n- DRY violation (same logic 2+ places)\n- Missing error handling\n- Hardcoded values that should be config\n\n## NOT BLOCKING (summary only)\n- Style/naming preferences\n- 'Could theoretically...' without proof\n\n🚫 NO questions. Make safe choice and proceed.\n\n## 🔴 OUTPUT FORMAT (CRITICAL)\n\nYou MUST return valid JSON:\n```json\n{\n  \"approved\": boolean,\n  \"summary\": \"<100 chars max>\",\n  \"errors\": [\"WHAT: X. HOW: Y. WHY: Z\"]\n}\n```\nNo preamble. JSON only."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "high",
+            "since": "last_agent_start",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "IMPLEMENTATION_READY",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "QUICK_VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "validatorId": "validator-code"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "consensus-coordinator",
+      "role": "coordinator",
+      "modelLevel": "level1",
+      "timeout": "{{timeout}}",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "allApproved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": ["allApproved", "summary"]
+      },
+      "prompt": {
+        "system": "Check if both validators approved. Output: {\"allApproved\": boolean, \"summary\": \"<50 chars>\"}"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "QUICK_VALIDATION_RESULT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 2
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "QUICK_VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const results = ledger.query({ topic: 'QUICK_VALIDATION_RESULT', since: ledger.findLast({ topic: 'IMPLEMENTATION_READY' })?.timestamp || 0 }); return results.length === 2;"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "content": {
+              "text": "Stage 1 passed",
+              "data": {}
+            }
+          },
+          "logic": {
+            "engine": "javascript",
+            "script": "if (!result.allApproved) { return { topic: 'VALIDATION_RESULT', content: { text: 'Stage 1 rejected', data: { approved: false, stage: 'quick', errors: ledger.query({ topic: 'QUICK_VALIDATION_RESULT' }).flatMap(r => r.content?.data?.errors || []) } } }; }"
+          }
+        }
+      }
+    }
+  ]
+}

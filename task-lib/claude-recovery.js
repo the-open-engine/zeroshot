@@ -3,6 +3,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 export const STREAMING_MODE_ERROR = 'only prompt commands are supported in streaming mode';
+export const NO_MESSAGES_RETURNED = 'No messages returned';
 
 export function detectStreamingModeError(line) {
   const trimmed = typeof line === 'string' ? line.trim() : '';
@@ -25,6 +26,27 @@ export function detectStreamingModeError(line) {
     }
   } catch {
     // Ignore parse errors - not JSON
+  }
+
+  return null;
+}
+
+export function detectFatalClaudeError(line) {
+  if (typeof line !== 'string') return null;
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('{')) {
+    try {
+      JSON.parse(trimmed);
+      return null;
+    } catch {
+      // Not valid JSON, continue detection
+    }
+  }
+
+  if (trimmed.toLowerCase().includes(NO_MESSAGES_RETURNED.toLowerCase())) {
+    return `Claude CLI error: ${NO_MESSAGES_RETURNED}`;
   }
 
   return null;
