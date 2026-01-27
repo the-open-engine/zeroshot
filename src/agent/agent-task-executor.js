@@ -1183,13 +1183,34 @@ function followClaudeTaskLogs(agent, taskId) {
   return createLogFollower({ agent, taskId, fsModule, ctPath, providerName });
 }
 
+// Cache zeroshot path at module load time (when PATH is correct)
+let _cachedZeroshotPath = null;
+function _resolveZeroshotPath() {
+  if (_cachedZeroshotPath) return _cachedZeroshotPath;
+
+  try {
+    // Use safe execSync (already imported at top) with explicit PATH
+    const fullPath = execSync('which zeroshot', {
+      encoding: 'utf8',
+      env: { ...process.env }, // Pass current process's PATH
+    }).trim();
+    if (fullPath) {
+      _cachedZeroshotPath = fullPath;
+      return fullPath;
+    }
+  } catch {
+    // which failed, fall back to bare command
+  }
+  _cachedZeroshotPath = 'zeroshot';
+  return 'zeroshot';
+}
+
 /**
  * Get path to claude-zeroshots executable
  * @returns {String} Path to zeroshot command
  */
 function getClaudeTasksPath() {
-  // Use zeroshot command (unified CLI)
-  return 'zeroshot'; // Assumes zeroshot is installed globally
+  return _resolveZeroshotPath();
 }
 
 /**
