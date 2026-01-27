@@ -76,6 +76,8 @@ export default function App({
         navigate: (view) =>
           setViewStack((stack) => pushIfDifferent(stack, view)),
         setProvider: (next) => setProvider(next),
+        setClusterId: (clusterId) => setActiveClusterId(clusterId),
+        provider,
         exit,
       });
       setStatus(result);
