@@ -670,13 +670,15 @@ class Orchestrator {
    * @returns {Object} Cluster object
    */
   start(config, input = {}, options = {}) {
+    const testMode = options.testMode || !!this.taskRunner;
+    const autoPr = options.autoPr ?? (testMode ? false : process.env.ZEROSHOT_PR === '1');
     return this._startInternal(config, input, {
-      testMode: false,
+      testMode,
       cwd: options.cwd || process.cwd(), // Target working directory for agents
       isolation: options.isolation || false,
       isolationImage: options.isolationImage,
       worktree: options.worktree || false,
-      autoPr: options.autoPr || process.env.ZEROSHOT_PR === '1',
+      autoPr,
       modelOverride: options.modelOverride, // Model override for all agents
       clusterId: options.clusterId, // Explicit ID from CLI/daemon parent
       settings: options.settings, // User settings for issue provider detection
@@ -2410,7 +2412,7 @@ Continue from where you left off. Review your previous output to understand what
       return;
     }
 
-    const isPrMode = cluster.autoPr || process.env.ZEROSHOT_PR === '1';
+    const isPrMode = cluster.autoPr ?? process.env.ZEROSHOT_PR === '1';
 
     if (isPrMode) {
       // Detect platform from stored cluster metadata OR git context
