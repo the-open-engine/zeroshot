@@ -33,10 +33,16 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Provider detection       | `lib/provider-detection.js`         |
 | Provider capabilities    | `src/providers/capabilities.js`     |
 | Ink TUI entrypoint       | `src/tui/index.tsx`                 |
+| Ink TUI app              | `src/tui/app.tsx`                   |
+| Ink TUI router           | `src/tui/router.tsx`                |
+| Ink TUI view stack       | `src/tui/view-stack.ts`             |
+| Ink TUI views            | `src/tui/views/`                    |
 | Ink TUI build output     | `lib/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Settings                 | `lib/settings.js`                   |
+
+TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view.
 
 ## CLI Quick Reference
 

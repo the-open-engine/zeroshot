@@ -79,7 +79,12 @@ function getClaudeVersion(claudeCommand = 'claude') {
   try {
     const versionArgs = [...extraArgs, '--version'];
     const versionCmd = [command, ...versionArgs].join(' ');
-    const output = execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe' });
+    const safeEnv = {
+      ...process.env,
+      // Avoid failures when CLAUDE_CONFIG_DIR points to an unwritable path.
+      CLAUDE_CONFIG_DIR: path.join(os.tmpdir(), 'claude-config'),
+    };
+    const output = execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe', env: safeEnv });
     const match = output.match(/(\d+\.\d+\.\d+)/);
     return {
       installed: true,
