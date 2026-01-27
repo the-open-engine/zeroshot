@@ -128,7 +128,7 @@ function registerWorktreePathTest() {
       `Worktree path should exist: ${cluster.worktree.path}`
     );
 
-    const expectedRoot = fs.realpathSync(path.join(os.tmpdir(), 'zeroshot-worktrees'));
+    const expectedRoot = fs.realpathSync(path.join(os.homedir(), '.zeroshot', 'worktrees'));
     const worktreePath = fs.realpathSync(cluster.worktree.path);
     assert(
       worktreePath.startsWith(expectedRoot + path.sep),

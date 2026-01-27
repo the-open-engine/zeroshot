@@ -2,7 +2,7 @@
  * Test: Worktree Isolation - Lightweight git-based isolation
  *
  * Tests the worktree isolation mode that provides:
- * - Git worktree creation at {os.tmpdir()}/zeroshot-worktrees/{clusterId}
+ * - Git worktree creation at ~/.zeroshot/worktrees/{clusterId}
  * - Separate branch (zeroshot/{clusterId}) without copying files
  * - Fast setup (<1s vs 30-60s for Docker)
  * - No Docker dependency
@@ -73,7 +73,7 @@ function registerWorktreePathTest() {
     const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
 
     assert(info.path, 'Should return worktree path');
-    const expectedRoot = fs.realpathSync(path.join(os.tmpdir(), 'zeroshot-worktrees'));
+    const expectedRoot = fs.realpathSync(path.join(os.homedir(), '.zeroshot', 'worktrees'));
     const worktreePath = fs.realpathSync(info.path);
     assert(
       worktreePath.startsWith(expectedRoot + path.sep),
