@@ -26,6 +26,8 @@ class GoogleProvider extends BaseProvider {
       /\bRESOURCE_EXHAUSTED\b/i,
       /\bUNAVAILABLE\b/i,
       /\bDEADLINE_EXCEEDED\b/i,
+      /No capacity available/i, // Gemini rate limit
+      /quota.?exceeded/i, // Quota exhaustion
     ];
   }
 

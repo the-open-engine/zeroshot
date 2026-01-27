@@ -23,6 +23,7 @@ const {
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
+const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-backoff');
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
 
@@ -318,8 +319,10 @@ async function executeTriggerAction(agent, trigger, message) {
 }
 
 /**
- * Execute claude-zeroshots with built context
- * Retries disabled by default. Set agent config `maxRetries` to enable (e.g., 3).
+ * Execute task with built context
+ * Default: uses settings.maxRetries (default 3) for exponential backoff retries.
+ * Rate limit errors (429, capacity exhausted) use longer delays (30s base).
+ * Override via agent config `maxRetries` to change retry behavior.
  * @param {AgentWrapper} agent - Agent instance
  * @param {Object} triggeringMessage - Message that triggered execution
  */
@@ -672,19 +675,26 @@ ${'='.repeat(80)}`);
   agent.state = 'idle';
 }
 
-async function scheduleRetry(agent, error, attempt, maxRetries, baseDelay) {
-  const delay = baseDelay * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+async function scheduleRetry(agent, error, attempt, maxRetries, _baseDelay) {
+  // Use rate-limit-aware backoff (30s+ for 429s, 2s for others)
+  const settings = loadSettings();
+  const delay = calculateRateLimitDelay(error, attempt, settings);
+  const isRateLimit = isRateLimitError(error);
 
   agent._publishLifecycle('RETRY_SCHEDULED', {
     attempt,
     maxRetries,
     delayMs: delay,
     error: error.message,
+    isRateLimitError: isRateLimit,
   });
 
-  agent._log(`[${agent.id}] ⚠️  Retrying in ${delay}ms... (${attempt + 1}/${maxRetries})`);
+  const prefix = isRateLimit ? '🔄 Rate limit - ' : '⚠️  ';
+  agent._log(
+    `[${agent.id}] ${prefix}Retrying in ${Math.round(delay / 1000)}s... (${attempt + 1}/${maxRetries})`
+  );
 
-  // Exponential backoff
+  // Rate-limit-aware backoff
   await new Promise((resolve) => setTimeout(resolve, delay));
 
   agent._log(`[${agent.id}] 🔄 Starting retry attempt ${attempt + 1}/${maxRetries}`);
@@ -723,7 +733,8 @@ async function handleTaskAttemptFailure({
 
 /**
  * Execute claude-zeroshots with built context
- * Retries disabled by default. Set agent config `maxRetries` to enable (e.g., 3).
+ * Default: uses settings.maxRetries (default 3) for exponential backoff retries.
+ * Override via agent config `maxRetries` to change retry behavior.
  * @param {AgentWrapper} agent - Agent instance
  * @param {Object} triggeringMessage - Message that triggered execution
  */
@@ -733,10 +744,11 @@ async function executeTask(agent, triggeringMessage) {
     return;
   }
 
-  // Default: no retries (maxRetries=1 means 1 attempt only)
-  // Set agent config `maxRetries: 3` to enable exponential backoff retries
-  let maxRetries = agent.config.maxRetries ?? 1;
-  const baseDelay = 2000; // 2 seconds
+  // Default: uses settings.maxRetries (default 3)
+  // Override via agent config `maxRetries` to change retry behavior
+  const settings = loadSettings();
+  let maxRetries = agent.config.maxRetries ?? settings.maxRetries ?? 3;
+  const baseDelay = settings.backoffBaseMs ?? 2000;
   let sigtermRetryGranted = false;
   let noMessagesRetryGranted = false;
 
