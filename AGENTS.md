@@ -36,13 +36,14 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Ink TUI app              | `src/tui/app.tsx`                   |
 | Ink TUI router           | `src/tui/router.tsx`                |
 | Ink TUI view stack       | `src/tui/view-stack.ts`             |
+| Ink TUI commands         | `src/tui/commands/`                 |
 | Ink TUI views            | `src/tui/views/`                    |
 | Ink TUI build output     | `lib/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Settings                 | `lib/settings.js`                   |
 
-TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view.
+TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
 
 ## CLI Quick Reference
 

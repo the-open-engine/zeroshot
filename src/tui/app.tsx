@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, useApp, useInput } from "ink";
 import Router from "./router";
+import CommandInput from "./components/CommandInput";
+import StatusBar from "./components/StatusBar";
+import { dispatchCommand } from "./commands/dispatcher";
+import { parseInput } from "./commands/parser";
+import { CommandResult } from "./commands/types";
 import {
   activeView,
   createViewStack,
@@ -14,13 +19,6 @@ type AppProps = {
   exitDelayMs: number;
   providerOverride?: string | null;
   initialView?: ViewId;
-};
-
-const VIEW_SHORTCUTS: Record<string, ViewId> = {
-  "1": "launcher",
-  "2": "monitor",
-  "3": "cluster",
-  "4": "agent",
 };
 
 function pushIfDifferent(stack: ViewId[], view: ViewId): ViewId[] {
@@ -37,8 +35,39 @@ export default function App({
   const [viewStack, setViewStack] = useState<ViewId[]>(() =>
     createViewStack(initialView)
   );
+  const [inputValue, setInputValue] = useState("");
+  const [status, setStatus] = useState<CommandResult | null>(null);
+  const [provider, setProvider] = useState<string | null>(
+    providerOverride ?? null
+  );
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
+
+  function handleSubmit() {
+    const parsed = parseInput(inputValue);
+    if (parsed.type === "empty") {
+      setInputValue("");
+      return;
+    }
+
+    if (parsed.type === "text") {
+      setStatus({
+        tone: "info",
+        message: "Plain-text tasks are not wired up yet.",
+      });
+      setInputValue("");
+      return;
+    }
+
+    const result = dispatchCommand(parsed, {
+      navigate: (view) =>
+        setViewStack((stack) => pushIfDifferent(stack, view)),
+      setProvider: (next) => setProvider(next),
+      exit,
+    });
+    setStatus(result);
+    setInputValue("");
+  }
 
   useInput(
     (input, key) => {
@@ -50,9 +79,19 @@ export default function App({
         setViewStack((stack) => popView(stack));
         return;
       }
-      const shortcut = VIEW_SHORTCUTS[input];
-      if (shortcut) {
-        setViewStack((stack) => pushIfDifferent(stack, shortcut));
+      if (key.return) {
+        handleSubmit();
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setInputValue((value) => value.slice(0, -1));
+        return;
+      }
+      if (key.ctrl || key.meta) {
+        return;
+      }
+      if (input) {
+        setInputValue((value) => value + input);
       }
     },
     { isActive: isInputActive }
@@ -68,7 +107,11 @@ export default function App({
 
   return (
     <Box flexDirection="column">
-      <Router view={active} providerOverride={providerOverride} />
+      <Box flexGrow={1} flexDirection="column">
+        <Router view={active} provider={provider} />
+      </Box>
+      <StatusBar status={status} provider={provider} />
+      <CommandInput value={inputValue} />
     </Box>
   );
 }

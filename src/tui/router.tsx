@@ -7,20 +7,20 @@ import AgentView from "./views/AgentView";
 
 type RouterProps = {
   view: ViewId;
-  providerOverride?: string | null;
+  provider: string | null;
 };
 
-export default function Router({ view, providerOverride }: RouterProps) {
+export default function Router({ view, provider }: RouterProps) {
   switch (view) {
     case "launcher":
-      return <LauncherView providerOverride={providerOverride} />;
+      return <LauncherView provider={provider} />;
     case "monitor":
-      return <MonitorView />;
+      return <MonitorView provider={provider} />;
     case "cluster":
-      return <ClusterView />;
+      return <ClusterView provider={provider} />;
     case "agent":
-      return <AgentView />;
+      return <AgentView provider={provider} />;
     default:
-      return <LauncherView providerOverride={providerOverride} />;
+      return <LauncherView provider={provider} />;
   }
 }
