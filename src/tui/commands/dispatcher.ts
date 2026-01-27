@@ -6,11 +6,16 @@ import {
 } from "./registry";
 import { runListTasks, runShowStatus } from "./cli-compat";
 import {
+  generateClusterId,
+  launchClusterFromIssue,
+} from "../services/cluster-launcher";
+import {
   normalizeProviderName,
   VALID_PROVIDERS,
 } from "../../../lib/provider-names";
 
 const { detectIdType } = require("../../../lib/id-detector");
+const { detectRunInput } = require("../../../lib/start-cluster");
 
 type ListOptions = {
   status?: string;
@@ -20,6 +25,7 @@ type ListOptions = {
 
 const LIST_USAGE =
   "Usage: /list [--status <status>] [--limit <n>] [--verbose]";
+const ISSUE_USAGE = "Usage: /issue <ref>";
 
 function formatHelp(definitions: CommandDefinition[]): string {
   const lines = definitions.map((definition) => {
@@ -148,6 +154,56 @@ async function handleStatus(args: string[]): Promise<CommandResult> {
   }
 }
 
+async function handleIssue(
+  args: string[],
+  context: CommandContext
+): Promise<CommandResult> {
+  if (args.length === 0) {
+    return { tone: "error", message: ISSUE_USAGE };
+  }
+
+  const ref = args.join(" ").trim();
+  if (!ref) {
+    return { tone: "error", message: ISSUE_USAGE };
+  }
+
+  const issueDeps = context.issueLaunchDeps ?? {};
+  const detectRunInputImpl = issueDeps.detectRunInput ?? detectRunInput;
+
+  let parsed: { issue?: string } | null = null;
+  try {
+    parsed = detectRunInputImpl(ref);
+  } catch {
+    return { tone: "error", message: `Invalid issue reference: ${ref}.` };
+  }
+
+  if (!parsed || typeof parsed !== "object" || !("issue" in parsed)) {
+    return { tone: "error", message: `Invalid issue reference: ${ref}.` };
+  }
+
+  const generateClusterIdImpl =
+    issueDeps.generateClusterId ?? generateClusterId;
+  const launchClusterFromIssueImpl =
+    issueDeps.launchClusterFromIssue ?? launchClusterFromIssue;
+  const clusterId = generateClusterIdImpl();
+
+  try {
+    await launchClusterFromIssueImpl({
+      ref,
+      providerOverride: context.provider ?? null,
+      clusterId,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Issue launch failed.";
+    return { tone: "error", message: `Error starting issue: ${message}` };
+  }
+
+  context.setClusterId(clusterId);
+  context.navigate("cluster");
+  return { tone: "success", message: `Cluster ${clusterId} started.` };
+}
+
 function createBuiltInRegistry(): CommandRegistry {
   const registry = createCommandRegistry();
 
@@ -171,19 +227,9 @@ function createBuiltInRegistry(): CommandRegistry {
 
   registry.register({
     name: "issue",
-    description: "start from issue (stub)",
+    description: "start from issue",
     usage: "<ref>",
-    handler: (args) => {
-      if (args.length === 0) {
-        return { tone: "error", message: "Usage: /issue <ref>" };
-      }
-      return {
-        tone: "info",
-        message: `Issue launch is not implemented yet. Placeholder for: ${args.join(
-          " "
-        )}.`,
-      };
-    },
+    handler: (args, context) => handleIssue(args, context),
   });
 
   registry.register({

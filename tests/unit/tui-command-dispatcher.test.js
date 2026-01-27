@@ -52,11 +52,12 @@ async function seedTasks() {
   seeded = true;
 }
 
-function createContext() {
+function createContext(options = {}) {
   const calls = {
     navigate: [],
     provider: null,
     exit: 0,
+    clusterIds: [],
   };
 
   return {
@@ -66,6 +67,11 @@ function createContext() {
       setProvider: (provider) => {
         calls.provider = provider;
       },
+      setClusterId: (clusterId) => {
+        calls.clusterIds.push(clusterId);
+      },
+      provider: options.provider ?? null,
+      issueLaunchDeps: options.issueLaunchDeps,
       exit: () => {
         calls.exit += 1;
       },
@@ -94,13 +100,72 @@ describe('TUI command dispatcher', function () {
     assert.deepStrictEqual(calls.navigate, ['monitor']);
   });
 
-  it('stubs /issue', async function () {
-    const { context } = createContext();
+  it('starts cluster on /issue', async function () {
+    const launchCalls = [];
+    const { context, calls } = createContext({
+      provider: 'codex',
+      issueLaunchDeps: {
+        generateClusterId: () => 'cluster-issue-1',
+        detectRunInput: (input) => ({ issue: input }),
+        launchClusterFromIssue: (args) => {
+          launchCalls.push(args);
+          return { clusterId: args.clusterId };
+        },
+      },
+    });
     const result = await dispatchCommand(
       { type: 'command', name: 'issue', args: ['123'], raw: '/issue 123' },
       context
     );
-    assert.ok(result.message.toLowerCase().includes('not implemented'));
+    assert.strictEqual(result.tone, 'success');
+    assert.ok(result.message.includes('cluster-issue-1'));
+    assert.deepStrictEqual(calls.navigate, ['cluster']);
+    assert.deepStrictEqual(calls.clusterIds, ['cluster-issue-1']);
+    assert.strictEqual(launchCalls.length, 1);
+  });
+
+  it('rejects invalid /issue refs', async function () {
+    const launchCalls = [];
+    const { context, calls } = createContext({
+      issueLaunchDeps: {
+        detectRunInput: () => ({ text: 'nope' }),
+        launchClusterFromIssue: (args) => {
+          launchCalls.push(args);
+          return { clusterId: args.clusterId };
+        },
+      },
+    });
+    const result = await dispatchCommand(
+      { type: 'command', name: 'issue', args: ['nope'], raw: '/issue nope' },
+      context
+    );
+    assert.strictEqual(result.tone, 'error');
+    assert.ok(result.message.toLowerCase().includes('invalid issue reference'));
+    assert.deepStrictEqual(calls.navigate, []);
+    assert.deepStrictEqual(calls.clusterIds, []);
+    assert.strictEqual(launchCalls.length, 0);
+  });
+
+  it('forwards provider override on /issue', async function () {
+    let seenArgs = null;
+    const { context } = createContext({
+      provider: 'gemini',
+      issueLaunchDeps: {
+        generateClusterId: () => 'cluster-issue-2',
+        detectRunInput: (input) => ({ issue: input }),
+        launchClusterFromIssue: (args) => {
+          seenArgs = args;
+          return { clusterId: args.clusterId };
+        },
+      },
+    });
+    const result = await dispatchCommand(
+      { type: 'command', name: 'issue', args: ['123'], raw: '/issue 123' },
+      context
+    );
+    assert.strictEqual(result.tone, 'success');
+    assert.ok(seenArgs);
+    assert.strictEqual(seenArgs.providerOverride, 'gemini');
   });
 
   it('sets provider on /provider', async function () {
