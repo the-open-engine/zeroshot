@@ -20,30 +20,32 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                  | File                                |
-| ------------------------ | ----------------------------------- |
-| Conductor classification | `src/conductor-bootstrap.js`        |
-| Base templates           | `cluster-templates/base-templates/` |
-| Message bus              | `src/message-bus.js`                |
-| Ledger (SQLite)          | `src/ledger.js`                     |
-| Trigger evaluation       | `src/logic-engine.js`               |
-| Agent wrapper            | `src/agent-wrapper.js`              |
-| Providers registry       | `src/providers/index.js`            |
-| Provider implementations | `src/providers/`                    |
-| Provider detection       | `lib/provider-detection.js`         |
-| Provider capabilities    | `src/providers/capabilities.js`     |
-| Ink TUI entrypoint       | `src/tui/index.tsx`                 |
-| Ink TUI app              | `src/tui/app.tsx`                   |
-| Ink TUI router           | `src/tui/router.tsx`                |
-| Ink TUI view stack       | `src/tui/view-stack.ts`             |
-| Ink TUI commands         | `src/tui/commands/`                 |
-| TUI command registry     | `src/tui/commands/registry.ts`      |
-| TUI CLI compat wrapper   | `src/tui/commands/cli-compat.ts`    |
-| Ink TUI views            | `src/tui/views/`                    |
-| Ink TUI build output     | `lib/tui/`                          |
-| Docker mounts/env        | `lib/docker-config.js`              |
-| Container lifecycle      | `src/isolation-manager.js`          |
-| Settings                 | `lib/settings.js`                   |
+| Concept                   | File                                |
+| ------------------------- | ----------------------------------- |
+| Conductor classification  | `src/conductor-bootstrap.js`        |
+| Base templates            | `cluster-templates/base-templates/` |
+| Message bus               | `src/message-bus.js`                |
+| Ledger (SQLite)           | `src/ledger.js`                     |
+| Trigger evaluation        | `src/logic-engine.js`               |
+| Agent wrapper             | `src/agent-wrapper.js`              |
+| Providers registry        | `src/providers/index.js`            |
+| Provider implementations  | `src/providers/`                    |
+| Provider detection        | `lib/provider-detection.js`         |
+| Provider capabilities     | `src/providers/capabilities.js`     |
+| Ink TUI entrypoint        | `src/tui/index.tsx`                 |
+| Ink TUI app               | `src/tui/app.tsx`                   |
+| Ink TUI router            | `src/tui/router.tsx`                |
+| Ink TUI view stack        | `src/tui/view-stack.ts`             |
+| Ink TUI commands          | `src/tui/commands/`                 |
+| TUI command registry      | `src/tui/commands/registry.ts`      |
+| TUI CLI compat wrapper    | `src/tui/commands/cli-compat.ts`    |
+| Ink TUI views             | `src/tui/views/`                    |
+| Ink TUI build output      | `lib/tui/`                          |
+| TUI start-cluster helper  | `lib/start-cluster.js`              |
+| TUI start-cluster service | `src/tui/services/start-cluster.ts` |
+| Docker mounts/env         | `lib/docker-config.js`              |
+| Container lifecycle       | `src/isolation-manager.js`          |
+| Settings                  | `lib/settings.js`                   |
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.

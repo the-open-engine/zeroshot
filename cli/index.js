@@ -49,6 +49,16 @@ const {
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider, parseProviderChunk } = require('../src/providers');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
+const {
+  detectGitRepoRoot,
+  detectRunInput,
+  loadClusterConfig,
+  resolveConfigPath,
+  resolveProviderOverride,
+  startClusterFromFile,
+  startClusterFromIssue,
+  startClusterFromText,
+} = require('../lib/start-cluster');
 const { requirePreflight } = require('../src/preflight');
 const { providersCommand, setDefaultCommand, setupCommand } = require('./commands/providers');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
@@ -152,43 +162,6 @@ process.on('unhandledRejection', (reason) => {
 // Package root directory (for resolving default config paths)
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 
-/**
- * Detect git repository root from current directory
- * Critical for CWD propagation - agents must work in the target repo, not where CLI was invoked
- * @returns {string} Git repo root, or process.cwd() if not in a git repo
- */
-function detectGitRepoRoot() {
-  const { execSync } = require('child_process');
-  try {
-    const root = execSync('git rev-parse --show-toplevel', {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    return root;
-  } catch {
-    // Not in a git repo - use current directory
-    return process.cwd();
-  }
-}
-
-/**
- * Parse CLI mount specs (host:container[:ro]) into mount config objects
- * @param {string[]} specs - Array of mount specs from CLI
- * @returns {Array<{host: string, container: string, readonly: boolean}>}
- */
-function parseMountSpecs(specs) {
-  return specs.map((spec) => {
-    const parts = spec.split(':');
-    if (parts.length < 2) {
-      throw new Error(`Invalid mount spec: "${spec}". Format: host:container[:ro]`);
-    }
-    const host = parts[0];
-    const container = parts[1];
-    const readonly = parts[2] === 'ro';
-    return { host, container, readonly };
-  });
-}
-
 function normalizeRunOptions(options) {
   if (options.ship) {
     options.pr = true;
@@ -202,47 +175,6 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
-}
-
-function detectRunInput(inputArg) {
-  const input = {};
-
-  // Check if it looks like an issue URL or key
-  const isGitHubUrl = /^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/.test(inputArg);
-  const isGitLabUrl = /gitlab\.(com|[\w.-]+)\/[\w-]+\/[\w-]+\/-\/issues\/\d+/.test(inputArg);
-  const isJiraUrl = /(atlassian\.net|jira\.[\w.-]+)\/browse\/[A-Z][A-Z0-9]+-\d+/.test(inputArg);
-  const isAzureUrl =
-    /dev\.azure\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg) ||
-    /visualstudio\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg);
-  const isJiraKey = /^[A-Z][A-Z0-9]+-\d+$/.test(inputArg);
-  const isIssueNumber = /^\d+$/.test(inputArg);
-  const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
-  const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
-
-  if (
-    isGitHubUrl ||
-    isGitLabUrl ||
-    isJiraUrl ||
-    isAzureUrl ||
-    isJiraKey ||
-    isIssueNumber ||
-    isRepoIssue
-  ) {
-    input.issue = inputArg;
-  } else if (isMarkdownFile) {
-    input.file = inputArg;
-  } else {
-    input.text = inputArg;
-  }
-  return input;
-}
-
-function resolveProviderOverride(options) {
-  const override = options.provider || process.env.ZEROSHOT_PROVIDER;
-  if (!override || (typeof override === 'string' && !override.trim())) {
-    return null;
-  }
-  return normalizeProviderName(override);
 }
 
 function resolveTuiProviderOverride(options = {}) {
@@ -360,42 +292,6 @@ function resolveConfigName(options, settings) {
   return options.config || settings.defaultConfig;
 }
 
-function resolveConfigPath(configName) {
-  if (path.isAbsolute(configName) || configName.startsWith('./') || configName.startsWith('../')) {
-    return path.resolve(process.cwd(), configName);
-  }
-  if (configName.endsWith('.json')) {
-    return path.join(PACKAGE_ROOT, 'cluster-templates', configName);
-  }
-  return path.join(PACKAGE_ROOT, 'cluster-templates', `${configName}.json`);
-}
-
-function ensureConfigProviderDefaults(config, settings) {
-  if (!config.defaultProvider) {
-    config.defaultProvider = settings.defaultProvider || 'claude';
-  }
-  config.defaultProvider = normalizeProviderName(config.defaultProvider) || 'claude';
-}
-
-function applyProviderOverrideToConfig(config, providerOverride, settings) {
-  const provider = getProvider(providerOverride);
-  const providerSettings = settings.providerSettings?.[providerOverride] || {};
-  config.forceProvider = providerOverride;
-  config.defaultProvider = providerOverride;
-  config.forceLevel = providerSettings.defaultLevel || provider.getDefaultLevel();
-  config.defaultLevel = config.forceLevel;
-  console.log(chalk.dim(`Provider override: ${providerOverride} (all agents)`));
-}
-
-function loadClusterConfig(orchestrator, configPath, settings, providerOverride) {
-  const config = orchestrator.loadConfig(configPath);
-  ensureConfigProviderDefaults(config, settings);
-  if (providerOverride) {
-    applyProviderOverrideToConfig(config, providerOverride, settings);
-  }
-  return config;
-}
-
 function trackActiveCluster(clusterId, orchestrator) {
   activeClusterId = clusterId;
   orchestratorInstance = orchestrator;
@@ -471,34 +367,6 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
     }
   }
   console.log(chalk.dim(`Model override: ${modelOverride} (all agents)`));
-}
-
-function buildStartOptions({
-  clusterId,
-  options,
-  settings,
-  providerOverride,
-  modelOverride,
-  forceProvider,
-}) {
-  const targetCwd = process.env.ZEROSHOT_CWD || detectGitRepoRoot();
-  return {
-    clusterId,
-    cwd: targetCwd,
-    isolation: options.docker || process.env.ZEROSHOT_DOCKER === '1' || settings.defaultDocker,
-    isolationImage: options.dockerImage || process.env.ZEROSHOT_DOCKER_IMAGE || undefined,
-    worktree: options.worktree || process.env.ZEROSHOT_WORKTREE === '1',
-    autoPr: options.pr || process.env.ZEROSHOT_PR === '1',
-    autoMerge: process.env.ZEROSHOT_MERGE === '1',
-    autoPush: process.env.ZEROSHOT_PUSH === '1',
-    modelOverride: modelOverride || undefined,
-    providerOverride: providerOverride || undefined,
-    noMounts: options.noMounts || false,
-    mounts: options.mount ? parseMountSpecs(options.mount) : undefined,
-    containerHome: options.containerHome || undefined,
-    forceProvider: forceProvider || undefined,
-    settings, // Pass settings for provider detection
-  };
 }
 
 function createStatusFooter(clusterId, messageBus) {
@@ -2488,17 +2356,46 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       const modelOverride = resolveModelOverride(options);
       applyModelOverrideToConfig(config, modelOverride, providerOverride, settings);
 
-      const startOptions = buildStartOptions({
-        clusterId,
-        options,
-        settings,
-        providerOverride,
-        modelOverride,
-        forceProvider,
-      });
-
-      // Start cluster
-      const cluster = await orchestrator.start(config, input, startOptions);
+      let cluster = null;
+      if (input.text) {
+        cluster = await startClusterFromText({
+          orchestrator,
+          text: input.text,
+          config,
+          settings,
+          providerOverride,
+          modelOverride,
+          forceProvider,
+          clusterId,
+          options,
+        });
+      } else if (input.issue) {
+        cluster = await startClusterFromIssue({
+          orchestrator,
+          issue: input.issue,
+          config,
+          settings,
+          providerOverride,
+          modelOverride,
+          forceProvider,
+          clusterId,
+          options,
+        });
+      } else if (input.file) {
+        cluster = await startClusterFromFile({
+          orchestrator,
+          file: input.file,
+          config,
+          settings,
+          providerOverride,
+          modelOverride,
+          forceProvider,
+          clusterId,
+          options,
+        });
+      } else {
+        throw new Error('Invalid run input: expected text, issue, or file');
+      }
 
       if (!process.env.ZEROSHOT_DAEMON) {
         await streamClusterInForeground(cluster, orchestrator, clusterId);
