@@ -264,7 +264,14 @@ export default [
     },
   },
   {
-    ignores: ['node_modules/**', 'dist/**', 'coverage/**', 'cluster-hooks/**', 'hooks/**'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'coverage/**',
+      'cluster-hooks/**',
+      'hooks/**',
+      'lib/tui/**',
+    ],
   },
   prettierConfig,
 ];
