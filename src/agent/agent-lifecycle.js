@@ -15,8 +15,6 @@
 const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
 const { executeHook } = require('./agent-hook-executor');
 const IsolationManager = require('../isolation-manager');
-const crypto = require('crypto');
-const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('../message-buffer');
 const {
   analyzeProcessHealth,
   isPlatformSupported,
@@ -25,19 +23,8 @@ const {
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
-const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-backoff');
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
-
-class HookExecutionError extends Error {
-  constructor(message, options) {
-    super(message);
-    this.name = 'HookExecutionError';
-    this.hookFailure = true;
-    this.hookRetries = options?.hookRetries;
-    this.originalHookError = options?.originalHookError;
-  }
-}
 
 function resolveValidatorIsolationConfig(agent) {
   const config = agent.config?.isolation || {};
@@ -815,11 +802,10 @@ async function executeTask(agent, triggeringMessage) {
     return;
   }
 
-  // Default: uses settings.maxRetries (default 3)
-  // Override via agent config `maxRetries` to change retry behavior
-  const settings = loadSettings();
-  let maxRetries = agent.config.maxRetries ?? settings.maxRetries ?? 3;
-  const baseDelay = settings.backoffBaseMs ?? 2000;
+  // Default: no retries (maxRetries=1 means 1 attempt only)
+  // Set agent config `maxRetries: 3` to enable exponential backoff retries
+  let maxRetries = agent.config.maxRetries ?? 1;
+  const baseDelay = 2000; // 2 seconds
   let sigtermRetryGranted = false;
   let noMessagesRetryGranted = false;
 
@@ -833,21 +819,17 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
-      if (error instanceof HookExecutionError) {
-        // Hook failures are deterministic; do not waste tokens retrying the provider task.
-        await handleFinalFailure(agent, triggeringMessage, error, 1);
-        return;
+      const isSigterm = error.message && error.message.includes('SIGTERM');
+      const isNoMessages =
+        error.message && error.message.toLowerCase().includes('no messages returned');
+      if (isSigterm && !sigtermRetryGranted && attempt >= maxRetries) {
+        sigtermRetryGranted = true;
+        maxRetries += 1;
       }
-      const updated = maybeExtendMaxRetries({
-        error,
-        attempt,
-        maxRetries,
-        sigtermRetryGranted,
-        noMessagesRetryGranted,
-      });
-      maxRetries = updated.maxRetries;
-      sigtermRetryGranted = updated.sigtermRetryGranted;
-      noMessagesRetryGranted = updated.noMessagesRetryGranted;
+      if (isNoMessages && !noMessagesRetryGranted && attempt >= maxRetries) {
+        noMessagesRetryGranted = true;
+        maxRetries += 1;
+      }
       const shouldStop = await handleTaskAttemptFailure({
         agent,
         triggeringMessage,

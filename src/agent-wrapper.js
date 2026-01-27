@@ -441,10 +441,6 @@ class AgentWrapper {
     this.lastAgentStartTime =
       typeof latestTimestamp === 'number' ? Math.max(now, latestTimestamp + 1) : now;
 
-    if (queuedGuidance.latestTimestamp !== null) {
-      this.lastGuidanceAppliedAt = queuedGuidance.latestTimestamp;
-    }
-
     return context;
   }
 

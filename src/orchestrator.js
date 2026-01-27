@@ -46,7 +46,6 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
-const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const crypto = require('crypto');
 
@@ -332,10 +331,8 @@ class Orchestrator {
       issue: clusterData.issue || null,
     };
 
-    Object.assign(clusterContext, cluster);
-
-    this.clusters.set(clusterId, clusterContext);
-    this._startSnapshotter(clusterContext);
+    this.clusters.set(clusterId, cluster);
+    this._startSnapshotter(cluster);
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
     return clusterContext;
@@ -872,13 +869,6 @@ class Orchestrator {
 
     this.clusters.set(clusterId, cluster);
     this._startSnapshotter(cluster);
-
-    // Persist the cluster immediately so detached runs can't create "invisible" initializing clusters.
-    // Without this, an early startup failure (before ISSUE_OPENED / TASK_STARTED) may never be saved,
-    // and external supervisors (e.g., heroshot) can't detect/cleanup the stuck state.
-    await this._saveClusters().catch((err) => {
-      console.warn(`[Orchestrator] Failed to persist initial cluster state for ${clusterId}:`, err);
-    });
 
     try {
       // Fetch input (issue from provider, file, or text)
