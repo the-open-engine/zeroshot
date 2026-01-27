@@ -576,6 +576,7 @@ function defineErrorHandlingTests() {
           role: 'implementation',
           timeout: 0,
           maxIterations: 2,
+          maxRetries: 1, // Fast failure for error handling test (default is now 3)
           triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
           hooks: {
             onError: {
