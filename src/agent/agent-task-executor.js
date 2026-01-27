@@ -1747,17 +1747,7 @@ async function parseResultOutput(agent, output) {
   }
 
   const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
-  const {
-    extractJsonFromOutput,
-    extractCliError,
-    hasFatalStandaloneOutput,
-  } = require('./output-extraction');
-
-  // Check for CLI errors FIRST - surface the actual error message
-  const cliError = extractCliError(output);
-  if (cliError) {
-    throw new Error(`CLI error (${cliError.provider}): ${cliError.error}`);
-  }
+  const { extractJsonFromOutput, hasFatalStandaloneOutput } = require('./output-extraction');
 
   // Use clean extraction pipeline
   let parsed = extractJsonFromOutput(output, providerName);

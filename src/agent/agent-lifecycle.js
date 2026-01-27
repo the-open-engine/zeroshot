@@ -23,7 +23,6 @@ const {
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
-const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-backoff');
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
 
@@ -744,11 +743,10 @@ async function executeTask(agent, triggeringMessage) {
     return;
   }
 
-  // Default: uses settings.maxRetries (default 3)
-  // Override via agent config `maxRetries` to change retry behavior
-  const settings = loadSettings();
-  let maxRetries = agent.config.maxRetries ?? settings.maxRetries ?? 3;
-  const baseDelay = settings.backoffBaseMs ?? 2000;
+  // Default: no retries (maxRetries=1 means 1 attempt only)
+  // Set agent config `maxRetries: 3` to enable exponential backoff retries
+  let maxRetries = agent.config.maxRetries ?? 1;
+  const baseDelay = 2000; // 2 seconds
   let sigtermRetryGranted = false;
   let noMessagesRetryGranted = false;
 

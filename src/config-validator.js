@@ -391,7 +391,6 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) 
     'CLUSTER_RESUMED',
     'QUICK_VALIDATION_PASSED',
     'IMPLEMENTATION_READY',
-    ...GUIDANCE_TOPICS,
   ];
   const isSubTemplate = config.params && Object.keys(config.params).length > 0;
 

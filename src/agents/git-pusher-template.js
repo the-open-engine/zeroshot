@@ -407,7 +407,7 @@ function generateGitPusherAgent(platform, options = {}) {
         action: 'execute_task',
       },
     ],
-    prompt: generatePrompt(platformConfig),
+    prompt: generatePrompt(config),
     hooks: {
       onComplete: {
         action: 'publish_message',

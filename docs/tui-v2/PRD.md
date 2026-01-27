@@ -1,4 +1,4 @@
-# Zeroshot TUI v2 (Ratatui) - PRD
+# Zeroshot TUI v2 (Ink) - PRD
 
 Date: 2026-01-25
 Owner: Zeroshot CLI
@@ -6,7 +6,7 @@ Status: Draft
 
 ## Summary
 
-Build a new terminal UI (TUI) for Zeroshot with **Ratatui (Rust)** as the UI renderer/input layer, backed by the existing Zeroshot Node runtime (TypeScript/JavaScript orchestration). This fully replaces the legacy `zeroshot watch` TUI with a single interactive experience launched by running `zeroshot` (no args).
+Build a new terminal UI (TUI) for Zeroshot using Ink + TypeScript. This fully replaces the current `zeroshot watch` dashboard (blessed-based) with a single interactive experience launched by running `zeroshot` (no args).
 
 Core workflow:
 
@@ -14,14 +14,14 @@ Core workflow:
 - Type a task description into a central input box
 - Press Enter to launch a cluster
 - Immediately switch to the focused cluster view (topology + logs + progress)
-- Use `/monitor` to see a high-level monitor view of all clusters, then drill down via Enter
+- Use `/monitor` to see a high-level dashboard of all clusters, then drill down via Enter
 - Navigate back with Esc (Esc always steps back until the launcher view)
 
 Provider selection is session-scoped and can be chosen at launch (`zeroshot codex|claude|gemini|opencode`) or switched in-TUI.
 
 ## Goals
 
-1. Replace the legacy `zeroshot watch` TUI with a Ratatui-based experience.
+1. Replace the current dashboard feature with an Ink-based TUI.
 2. Make `zeroshot` (no args) a first-class interactive mode for:
    - launching clusters from free-form text
    - monitoring all running clusters
@@ -29,7 +29,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 3. Add a command palette/input model:
    - plain text launches a cluster
    - `/`-prefixed commands run zeroshot operations without re-typing `zeroshot`
-4. Establish a stable, typed boundary between the Rust UI and the Zeroshot Node runtime (backend adapters + protocol), without refactoring unrelated JS.
+4. Establish the first production TypeScript surface in the Zeroshot codebase (TUI + required adapters), without refactoring unrelated JS.
 
 ## Non-Goals (for v2 MVP)
 
@@ -38,7 +38,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 - No remote multi-user UI; TUI is local-only.
 - No promise of message delivery for providers/modes that do not support interactive stdin injection.
   - In those cases, guidance is queued and applied at the next safe point.
-- No replacement of non-TUI CLI commands; existing subcommands remain supported.
+- No replacement of non-dashboard CLI commands; existing subcommands remain supported.
 
 ## Users / Personas
 
@@ -78,9 +78,9 @@ Notes:
 
 ### `zeroshot watch`
 
-`zeroshot watch` remains as a convenience alias that opens the new TUI directly in Monitor view.
+`zeroshot watch` remains as a convenience alias that opens the new Ink TUI directly in Monitor view.
 
-The legacy watch TUI implementation is removed (no parallel legacy UI).
+The existing blessed-based TUI implementation is removed (no parallel legacy dashboard).
 
 ## Core Navigation / Views
 
@@ -105,7 +105,7 @@ On Enter with non-command input:
 - Start cluster
 - Transition to Cluster Focused View for that cluster
 
-### 2) Monitor View
+### 2) Monitor View (Dashboard)
 
 Opened by `/monitor` from anywhere.
 

@@ -1,789 +1,583 @@
-# Zeroshot TUI v2 (Ratatui) - Architecture + Migration Plan
+# Zeroshot TUI v2 (Ink) - Multi-Stage Implementation Plan
 
-Date: 2026-01-30
-Status: Proposed (supersedes the Ink-only plan)
-
-## Summary
-
-We already implemented an Ink/TypeScript UI under `src/tui/`. We are pivoting to:
-
-- **Frontend:** Rust + Ratatui (rendering + input + layout)
-- **Backend:** existing Node/TypeScript code (orchestrator/ledger/providers/etc) exposed via a small local RPC protocol
-
-This keeps the **domain logic** (cluster lifecycle, ledger parsing, guidance delivery) in the existing JS runtime, while making the **UI layer** fast, predictable, and easy to iterate on.
-
-The goal is to make UI changes cheap: a layout tweak should generally touch only Rust `ui/*` code, not orchestration logic.
+Date: 2026-01-25
+Status: Draft plan (intended to become a chain of GitHub issues)
 
 ## Guiding Constraints
 
-- Ratatui is the only renderer/input system for the new TUI UI (no Ink in the hot path).
-- Avoid rewriting core orchestration in Rust; treat Node as the source of truth for clusters.
-- Keep the UI architecture **screen/component-oriented** with a pure render layer.
-- Backend ↔ frontend boundary must be **versioned**, **typed**, and testable.
-- Allow an incremental cutover (Ink TUI can remain as a fallback during migration).
+- Ink + TypeScript for all new TUI code.
+- Do not refactor unrelated JS during the TUI project.
+  - Small, targeted extraction is allowed only when it reduces duplication for TUI integration (e.g. shared `run` helpers).
+- Replace the current dashboard feature (`zeroshot watch` / `src/tui/*`) with a new TUI experience launched by `zeroshot` (no args).
+- Design/visual polish is explicitly deferred; prioritize UX flows and correctness.
 
-## Reuse vs Replace (Final Call)
+## Proposed Technical Approach (Replace Existing `src/tui`)
 
-### Reuse (keep, possibly relocate)
+### Code organization (proposed)
 
-- **All orchestration/runtime code**:
-  - `src/orchestrator.js`, `src/ledger.js`, `src/message-bus.js`, providers, settings, id detection, etc.
-- **Most of the existing Ink TUI “backend-ish” services** (these are already UI-agnostic and should become the TUI backend implementation):
-  - `src/tui/services/cluster-launcher.ts`
-  - `src/tui/services/cluster-registry.ts`
-  - `src/tui/services/cluster-logs.ts`
-  - `src/tui/services/cluster-timeline.ts`
-  - `src/tui/services/cluster-topology.ts`
-  - `src/tui/services/guidance-delivery.ts`
-- Any existing helpers under `lib/` that the services rely on (e.g. `lib/start-cluster.js`).
+- `src/tui/` (TypeScript source, Ink components) - replaces the existing blessed dashboard implementation
+  - `src/tui/app.tsx` - top-level Ink app, router, global keybindings
+  - `src/tui/views/*` - launcher/monitor/cluster/agent views
+  - `src/tui/commands/*` - slash command parser + dispatch
+  - `src/tui/services/*` - adapters around existing JS orchestrator/ledger
+  - `src/tui/domain/*` - typed models (ClusterRow, AgentRow, TimelineEvent, etc)
+- `lib/tui/` (compiled JS output shipped in npm package)
 
-Net: we keep essentially **all non-UI business logic**.
+Rationale:
 
-### Replace (rewrite)
+- Keeps the existing JS runtime intact.
+- Allows incremental TS adoption with minimal surface area.
+- Avoids a repo-wide build migration.
 
-- All Ink rendering and React component code:
-  - `src/tui/app.tsx`, `src/tui/views/*`, `src/tui/components/*`, `src/tui/router.tsx`
-- Ink-specific navigation plumbing:
-  - `src/tui/view-stack.ts`, Ink `useInput` handling, etc.
-- Any “UI state helpers” that only exist because of Ink component structure (e.g. pending message UI state).
+### Build strategy (minimal TS emission)
 
-Net: we replace essentially **all presentation + input plumbing**.
+Add a dedicated `tsconfig.tui.json` that:
 
-## Proposed Architecture
+- includes only `src/tui/**/*.ts(x)`
+- emits CJS output to `lib/tui/`
+- keeps the existing `tsconfig.json` as "check JS, no emit"
 
-### High-level diagram
+Wire `npm run build:tui` into `prepublishOnly` so `npm pack`/publish contains the compiled Ink app.
 
-```
-zeroshot (Node CLI)
-  └─ TTY + no args / `zeroshot tui`:
-       exec → zeroshot-tui (Rust, Ratatui)
-                ├─ spawns → zeroshot-tui-backend (Node, internal)
-                └─ renders → terminal (Ratatui + Crossterm)
+### CLI integration strategy
 
-zeroshot-tui-backend (Node)
-  ├─ orchestrator.create({ quiet: true })
-  ├─ reads → ~/.zeroshot/*.db (SQLite ledger)
-  ├─ reads → clusters.json (best-effort)
-  └─ uses → pidusage (best-effort metrics)
-```
+Update `cli/index.js` to:
 
-### Why this split
+- open the TUI when `zeroshot` is run with no args in an interactive TTY
+- add explicit commands:
+  - `zeroshot tui` (always open TUI)
+  - `zeroshot codex|claude|gemini|opencode` (open TUI with session provider override)
+- keep `zeroshot watch` as an alias (expected to start in Monitor view once implemented).
 
-- Keeps the orchestrator in a single runtime (Node) to avoid duplicating logic and creating edge-case drift.
-- Allows Rust UI to stay “pure”: render from state; run effects to fetch/stream data.
-- Makes UI iteration cheap: rework the layout without touching orchestration internals.
+Important:
 
-## Backend ↔ Frontend Protocol
+- We do not keep the old blessed dashboard in parallel. As soon as the Ink entrypoint exists,
+  the old `src/tui/*` implementation is replaced/removed.
 
-### Transport
+## Workstreams
 
-Use a **stdio** connection (Rust spawns Node backend as a child process):
+This plan is split into chainable milestones, with parallelizable work inside each milestone.
 
-- No ports.
-- No firewall concerns.
-- Easy to lifecycle-manage (kill backend when UI exits).
+- Workstream A: CLI + packaging + TypeScript build
+- Workstream B: Ink app shell + navigation + command model
+- Workstream C: Data adapters (orchestrator, ledger logs, metrics, topology)
+- Workstream D: UI views (launcher, monitor, cluster, agent)
+- Workstream E: Guidance messaging backend (new capability) + UI wiring
+- Workstream F: Tests + reliability hardening
 
-Frame messages with a simple length-prefix (LSP-style) to avoid partial reads:
+## Milestones and Issues
 
-```
-Content-Length: <N>\r\n
-\r\n
-<N bytes of JSON>
-```
+Below, each "Issue" is intended to become a standalone PR with tight boundaries.
 
-### Message model
+### Milestone 1: Foundations (TS + Ink skeleton)
 
-Use JSON-RPC 2.0 semantics:
+#### Issue 1.1 - Add Ink + React dependencies (no runtime behavior change)
 
-- Request/response: `{ id, method, params }` → `{ id, result } | { id, error }`
-- Backend-to-UI notifications: `{ method, params }` (no id)
+Scope:
 
-### Versioning
+- Add runtime deps needed for Ink TUI (e.g. `ink`, `react`).
+- Add dev deps for TS typing/testing (e.g. `@types/react`, `ink-testing-library`), if needed.
 
-- `initialize` request includes `protocolVersion` and client metadata.
-- Backend replies with `protocolVersion` and a `capabilities` object.
-- Breaking changes require a protocol major bump.
+Non-scope:
 
-### Core methods (MVP)
+- No CLI behavior changes.
+- No new commands.
 
-Backend methods are intentionally **domain-level** (not layout-level):
+Acceptance:
 
-- `initialize`
-- `listClusters`
-- `getClusterSummary` (agents, state, provider, createdAt, messageCount, cwd)
-- `listClusterMetrics` (best-effort CPU/mem; `supported=false` if unavailable)
-- `startClusterFromText`
-- `startClusterFromIssue`
-- `sendGuidanceToAgent`
-- `sendGuidanceToCluster`
-- `subscribeClusterLogs` → notifications `clusterLogLines`
-- `subscribeClusterTimeline` → notifications `clusterTimelineEvents`
-- `getClusterTopology`
+- `npm test` still passes.
+- Existing CLI commands behave identically.
 
-Nice-to-haves (follow-up):
+#### Issue 1.2 - Replace `src/tui/` with "Hello Ink TUI" + build pipeline
 
-- `stopCluster`, `killCluster`
-- `listAgents` / `getAgentSummary`
-- `subscribeAgentLogs` (if we want separate stream vs filter in UI)
+Scope:
 
-### Backpressure and bounded memory
+- Replace the existing blessed dashboard implementation under `src/tui/` with a minimal Ink app
+  (start with a single screen that renders and exits cleanly).
+- Create `src/tui/index.tsx` (or equivalent entry) that renders a minimal Ink screen.
+- Add `tsconfig.tui.json` emitting to `lib/tui/`.
+- Add `npm run build:tui` and ensure it runs in `prepublishOnly`.
+- Repoint the `zeroshot watch` implementation to the Ink entrypoint (old dashboard is removed immediately).
+- Remove/replace any legacy dashboard tests that depend on blessed-contrib layout behavior.
 
-- UI keeps a ring buffer per log view (e.g. last 400–2000 lines).
-- Backend batches notifications (e.g. up to 50 lines / 250ms) to reduce overhead.
-- Backend may send `droppedCount` when UI can’t keep up.
+Acceptance:
 
-## Rust Ratatui Frontend Architecture
+- `npm run build:tui` produces `lib/tui/index.js`.
+- Running a temporary dev entry (e.g. `node -e "require('./lib/tui').start()"`) renders in terminal.
+- `npm pack` includes `lib/tui/*`.
+- `zeroshot watch` opens the Ink app (even if it is still a minimal stub).
 
-### Key design goal: UI iteration should not rewrite core logic
+Parallelizable with:
 
-Adopt a Model-View-Update style with explicit effects:
+- Issue 1.1
 
-- `AppState` is pure data.
-- `Action` represents inputs/events.
-- `update(state, action) -> (state, effects)` is pure.
-- `render(frame, state)` is pure (no IO).
-- Effects perform backend calls and feed results back as actions.
+#### Issue 1.3 - Add `zeroshot tui` command (explicit entrypoint) + provider session override
 
-This keeps UI changes localized to `ui/*` (render) and `screens/*` (state + reducers).
+Scope:
 
-### Proposed crate layout
+- Add `zeroshot tui` command to `cli/index.js` that invokes the compiled Ink app.
+- Ensure `--provider <name>` is accepted for `zeroshot tui` (session override only).
+- Keep `zeroshot watch` as an alias (expected to start in Monitor view once implemented).
 
-- `tui-rs/` (Rust workspace)
-  - `crates/zeroshot-tui/`
-    - `src/main.rs` (terminal init/restore guard, bootstrap)
-    - `src/app/mod.rs` (`AppState`, `Action`, `Effect`, `update`)
-    - `src/screens/launcher.rs`
-    - `src/screens/monitor.rs`
-    - `src/screens/cluster.rs`
-    - `src/screens/agent.rs`
-    - `src/ui/mod.rs` (screen rendering entry)
-    - `src/ui/widgets/*` (log viewer, list, status bar, input, toast)
-    - `src/input.rs` (keymaps → actions; single source of truth)
-    - `src/backend/mod.rs` (`BackendClient` trait)
-    - `src/backend/stdio.rs` (Node backend child-process client)
-    - `src/protocol/*` (serde types for requests/responses/notifications)
+Acceptance:
 
-### Navigation model
+- `zeroshot tui` opens the Ink app.
+- `zeroshot tui --provider codex` passes provider override into the app (visible in UI state).
 
-Keep the “Esc pops stack” behavior, but make it UI-agnostic:
+Depends on:
 
-- `ScreenId` enum (`Launcher`, `Monitor`, `Cluster { id }`, `Agent { id }`)
-- `Vec<ScreenId>` stack owned by `AppState`
-- Navigation actions: `Push(screen)`, `Pop`, `ReplaceTop(screen)`
+- Issue 1.2
 
-### Concurrency model
+### Milestone 2: Navigation + Command Model (no cluster execution yet)
 
-- One UI thread (render loop) driven by:
-  - terminal events (key/resize)
-  - tick events (e.g. 100–250ms)
-  - backend notifications (logs/timeline)
-- Use channels (`tokio::mpsc` or std) to merge event sources into `Action`.
+#### Issue 2.1 - Implement view router + "Esc back" navigation
 
-### Terminal safety
+Scope:
 
-- Always restore terminal state on exit:
-  - raw mode off
-  - alternate screen off (if used)
-  - cursor restored
-- Use a guard object (`Drop`) so panics still restore the terminal.
+- Implement 4 view states (even if stubbed):
+  - Launcher
+  - Monitor
+  - Cluster
+  - Agent
+- Global navigation rule: Esc pops view stack until Launcher.
 
-## TypeScript Backend Architecture
+Acceptance:
 
-### Proposed code organization
+- Esc navigation is consistent from every view.
+- Ctrl+C exits cleanly (no terminal corruption).
 
-Introduce a backend module that is explicitly _not_ a UI:
+Depends on:
 
-- `src/tui-backend/`
-  - `server.ts` (stdio JSON-RPC server)
-  - `protocol/*` (TS runtime validation + types)
-  - `services/*` (moved from `src/tui/services/*` with minimal changes)
-  - `subscriptions/*` (log/timeline stream management)
-- `lib/tui-backend/` (compiled output shipped in npm package)
+- Issue 1.3
 
-During migration, keep the existing Ink UI in place (or moved to `src/tui-ink/`) so we can cut over safely.
+#### Issue 2.2 - Implement command box + slash-command parser (MVP set)
 
-### Backend implementation notes
+Scope:
 
-- Cache a single orchestrator instance per backend process (current TUI services already do this).
-- Implement subscriptions by wrapping existing `createClusterLogStream` / `createClusterTimelineStream`:
-  - each subscription owns the timer + ledger handle
-  - on stop/unsubscribe, close ledger + clear interval
-- Validate all incoming params (fail fast with structured RPC errors).
+- Global input component.
+- Parse rules:
+  - `/...` => command
+  - otherwise => plain-text task description (stubbed for now)
+- Implement MVP commands:
+  - `/help`, `/monitor`, `/issue <ref>`, `/provider <name>`, `/quit`
+- Display command output (toast/status area).
 
-## Build, Packaging, and Distribution
+Acceptance:
 
-### Development workflow (source)
+- Commands work from any view.
+- Provider switches update a session state indicator.
+- Commands that require orchestration (e.g. `/issue`) can be stubbed here and fully implemented in Milestone 3.
 
-- `cargo run` from `tui-rs/` should “just work”.
-- Rust TUI spawns Node backend via `node <path-to-lib/tui-backend/server.js>`.
-- For local iteration, we should not require an npm publish; `npm link` remains fine.
+Parallelizable with:
 
-### NPM publish strategy (recommended)
+- Issue 2.1
 
-We want `npm i -g @covibes/zeroshot` to work without requiring `cargo` on user machines.
+#### Issue 2.3 - Command dispatch scaffolding for "full CLI parity" over time
 
-Preferred approach:
+Scope:
 
-1. CI builds `zeroshot-tui` binaries for macOS + Linux (x64 + arm64 as needed).
-2. Publish binaries as release artifacts.
-3. NPM package includes an install script that downloads the correct binary (esbuild-style).
+- Introduce a typed command registry that maps `/...` commands to handlers.
+- Start with a small compatibility layer so new commands can reuse existing CLI helper functions
+  (without requiring users to type `zeroshot ...`).
+- Implement 1-2 additional commands as proof (e.g. `/status <id>`, `/list`).
 
-Fallback approach (acceptable if we accept the tradeoff):
+Non-scope:
 
-- Require `cargo` on install and build from source in `postinstall`.
+- Do not implement every command in one PR.
+- Avoid large refactors of `cli/index.js`; prefer extracting tiny shared helpers.
 
-## Migration Plan (Milestones)
+Acceptance:
 
-Each milestone should be a tight PR with clear rollback.
+- Adding a new slash command is a small, isolated change (new handler + tests).
+- `/status <id>` works end-to-end and renders output in the TUI.
 
-### Milestone 0: Stabilize the boundary (TS backend first)
+### Milestone 3: Launch Cluster From Text (end-to-end MVP loop)
 
-Goal: get a testable backend API without changing user-facing behavior.
+#### Issue 3.1 - Extract minimal reusable "start cluster" helper for TUI (avoid copying CLI)
 
-- Create `src/tui-backend/*` and move/rewire the reusable services.
-- Implement stdio JSON-RPC server with `initialize` + a couple methods (`listClusters`, `startClusterFromText`).
-- Add integration tests that spawn the backend and exercise the protocol.
-- Keep Ink TUI unchanged for now.
+Scope:
 
-### Milestone 1: Rust “Hello UI” + backend handshake
+- Create a small adapter module (prefer `lib/` or `src/` JS) that encapsulates:
+  - explicit input construction:
+    - plain text (default launcher behavior)
+    - issue refs for `/issue ...` (use existing parsing logic, but only for the `/issue` path)
+  - provider override resolution
+  - loading config (`resolveConfigPath`, `loadClusterConfig`)
+  - calling `orchestrator.start(...)`
+- TUI calls this helper rather than duplicating CLI logic.
 
-Goal: prove terminal handling + IPC lifecycle is solid.
+Constraints:
 
-- Add Rust crate skeleton with ratatui + crossterm init/restore guard.
-- Implement backend child-process client:
-  - spawn Node backend
-  - send `initialize`
-  - render a minimal screen with backend status
+- Keep refactor minimal; do not restructure the CLI wholesale.
 
-### Milestone 2: Rebuild core flows in Rust (minimal layout)
+Acceptance:
 
-Goal: feature parity with the _flows_, not visuals.
+- Existing CLI `zeroshot run` remains unchanged in behavior.
+- New helper can be unit-tested independently.
 
-- Launcher: input box, start cluster from text, open Cluster screen.
-- Monitor: list clusters + selection + open Cluster screen.
-- Cluster: log tail + agent list + timeline (no fancy topology layout yet).
-- Agent: agent log tail + send guidance.
+#### Issue 3.2 - Launcher view: Enter launches cluster and transitions to Cluster view
 
-### Milestone 3: Fill in “v2” features
+Scope:
 
-- Topology (render from `getClusterTopology`).
-- Metrics (poll `listClusterMetrics`).
-- Guidance delivery UX (queued vs injected feedback).
-- Slash command parity incrementally (either:
-  - parse commands in Rust; OR
-  - forward raw `/...` to backend `executeCommand` method and return a domain “intent”).
+- In Launcher view, non-`/` input starts a cluster from plain text with current provider override.
+- Ambiguity rule: numeric input like `123` is treated as plain text (never an issue).
+- Show cluster id immediately (optimistic UI).
+- Transition to Cluster view after start begins.
 
-### Milestone 4: Cutover + cleanup
+Acceptance:
 
-- Switch `zeroshot` (TTY + no args) and `zeroshot tui` to launch the Rust TUI by default.
-- Keep `ZEROSHOT_TUI=ink` fallback for one release.
-- Remove Ink UI and dependencies once stable:
-  - `ink`, `react`, `@types/react`, `tsconfig.tui.json` (or repurpose for backend build)
-- Update docs + help text (`zeroshot watch` behavior, etc).
+- Typing `Implement X` and pressing Enter starts a cluster and switches to Cluster view.
+- Failures are shown as a clear error message and user remains in Launcher view.
 
-## Detailed Issue Plan (Issue-by-Issue)
+Depends on:
 
-These issues are ordered for implementation. Each issue is intended to be a tight PR with a clear rollback point.
+- Issue 3.1
 
-### Issue Template (for TUI v2 plan work)
+#### Issue 3.3 - `/issue <ref>` command: run an issue and transition to Cluster view
 
-Use this template when creating GitHub issues from this plan. Keep each issue exhaustive and self-contained.
+Scope:
 
-- Title format: `[FEATURE] TUI v2: <short description>` (use `[BUG]` or `[DOC]` when applicable)
-- Labels: pick one primary label (`enhancement`, `bug`, `documentation`) and add others only if needed
-- Include file paths, method names, and explicit acceptance criteria
+- Implement `/issue <ref>`:
+  - `ref` can be: `123`, `org/repo#123`, full issue URL, Jira key, etc (same accepted formats as CLI `zeroshot run <input>`).
+  - Start a cluster using that issue ref and current provider override.
+  - Transition to Cluster view for that cluster id.
 
-<details><summary>Issue template (copy/paste)</summary>
+Acceptance:
 
-```markdown
-Goal: <single sentence describing the outcome>
+- `/issue 123` starts a cluster from the issue (no ambiguity with plain text `123`).
+- Errors are clearly rendered in the TUI (e.g. missing `gh`, auth failures, invalid ref).
 
-<details><summary>Problem</summary>
-- <why this is needed / what is missing today>
-</details>
+Depends on:
 
-<details><summary>Spec (if applicable)</summary>
-- <protocol or behavior spec details>
-</details>
+- Issue 3.1
 
-<details><summary>Scope</summary>
-- In scope: <bulleted list>
-- Out of scope: <bulleted list>
-</details>
+#### Issue 3.4 - Live log streaming in Cluster view (baseline)
 
-<details><summary>Implementation Plan</summary>
-1. <concrete step with file paths>
-2. <concrete step with file paths>
-3. <concrete step with file paths>
-</details>
+Scope:
 
-<details><summary>Testing</summary>
-- <unit/integration/manual checks>
-</details>
+- Subscribe to the cluster ledger via `messageBus.subscribe(...)` or `ledger.since(...)` polling.
+- Render a scrolling log viewport (Ink list/text).
+- Provide basic filtering by agent id (optional toggle; can be later).
 
-<details><summary>Acceptance Criteria</summary>
-- <verifiable, binary outcomes>
-</details>
+Acceptance:
 
-<details><summary>Alternatives</summary>
-- <option A> (pros/cons)
-- <option B> (pros/cons)
-</details>
+- Cluster view shows new log lines within 0.5s of being written.
+- No unbounded memory growth (keep only last N lines in view state).
 
-<details><summary>Dependencies</summary>
-- <issue numbers or prerequisite work>
-</details>
-```
+Parallelizable with:
 
-</details>
+- Issue 3.2 (once cluster id is known)
 
-### Issue 1 — Protocol Spec + Shared Types (v0)
+### Milestone 4: Monitor View (replacement for old dashboard)
 
-Status: Completed (Issue #240, closed 2026-01-31)
+#### Issue 4.1 - Monitor view: list clusters from orchestrator registry
 
-**Goal:** Define the stable, versioned boundary between the Ratatui UI and Node backend.
+Scope:
 
-**Scope**
+- Implement `/monitor` view:
+  - fetch cluster list from orchestrator
+  - display a selectable list (arrow keys + enter)
+- Enter opens Cluster view for selected id.
 
-- Define JSON-RPC framing (`Content-Length`) and message shapes.
-- Specify protocol version negotiation (`initialize`).
-- Define MVP request/response/notification types in a canonical spec section.
-- Implement TS runtime validation schemas (zod or existing validation style).
-- Implement Rust `serde` types mirroring the spec.
+Acceptance:
 
-**Acceptance Criteria**
+- Monitor list matches `zeroshot list` cluster table order/contents (within reason).
+- Can open any existing cluster (including completed) into Cluster view.
 
-- Spec section exists in this doc (or sibling protocol doc) and is versioned.
-- TS validation rejects malformed params with structured RPC errors.
-- Rust types compile and round-trip serialize/deserialize in tests.
+Depends on:
 
-**Dependencies:** none.
+- Milestone 3 (Cluster view exists)
 
----
+#### Issue 4.2 - Add resource metrics to Monitor view (best effort)
 
-### Issue 2 — TUI Backend Skeleton + Service Migration
+Scope:
 
-Status: Completed (Issue #241, closed 2026-01-31)
+- Gather per-agent pid/CPU/memory using existing `pidusage` patterns.
+- Aggregate per cluster and show in the list.
+- Degrade gracefully on unsupported platforms.
 
-**Goal:** Create the Node backend process and relocate reusable services.
+Acceptance:
 
-**Scope**
+- On macOS/Linux, CPU/mem fields are populated for running clusters when possible.
+- UI remains responsive with 10+ clusters; metrics refresh is throttled (e.g. every 2s).
 
-- Add `src/tui-backend/` with `server.ts`, `protocol/*`, `services/*`, `subscriptions/*`.
-- Move or re-export existing services from `src/tui/services/*` into backend services.
-- Ensure backend starts a single orchestrator instance (quiet mode).
-- Build output to `lib/tui-backend/`.
+Parallelizable with:
 
-**Acceptance Criteria**
+- Issue 4.1
 
-- Backend process boots and stays alive with no UI.
-- Services compile and are importable from `src/tui-backend/services/*`.
-- No behavior changes to existing CLI flows.
+#### Issue 4.3 - `zeroshot watch` starts directly in Monitor view
 
-**Dependencies:** Issue 1.
+Scope:
 
----
+- Ensure `zeroshot watch` starts the Ink TUI directly in Monitor view (not Launcher).
+- Keep `zeroshot tui` defaulting to Launcher view.
 
-### Issue 3 — JSON-RPC Server + Initialize Handshake
+Acceptance:
 
-Status: Completed (Issue #242, closed 2026-01-31)
+- `zeroshot watch` opens Monitor view as the initial screen.
+- No user-facing regression for "monitor clusters" workflow.
 
-**Goal:** Implement the stdio JSON-RPC server with version negotiation.
+Depends on:
 
-**Scope**
+- Issue 4.1
 
-- Implement stdio framing, request parsing, response writing.
-- Implement `initialize` method with client metadata and protocol/capabilities response.
-- Structured error handling for unknown methods and bad params.
-- Add a simple `ping` or `health` method for diagnostics.
+### Milestone 5: Cluster Focused View Enhancements (topology, steps)
 
-**Acceptance Criteria**
+#### Issue 5.1 - Topology rendering from cluster config
 
-- Backend can be spawned and responds to `initialize`.
-- Invalid frames and malformed JSON produce clean RPC errors.
-- Protocol version mismatch returns actionable error.
+Scope:
 
-**Dependencies:** Issues 1–2.
+- Build a topology model from the running cluster config:
+  - agents (id, role)
+  - triggers/edges (topic wiring)
+- Render as:
+  - MVP: adjacency list / ASCII tree / simple box diagram
+  - keep layout engine out-of-scope for now
 
----
+Acceptance:
 
-### Issue 4 — Cluster Listing + Summary APIs
+- For built-in templates, topology view shows all agents and their relationships.
+- Works for dynamically added agents (best effort; show as appended nodes).
 
-Status: Open (Issue #249)
+#### Issue 5.2 - Step timeline derived from workflow triggers (MVP)
 
-**Goal:** Expose baseline cluster discovery for Launcher/Monitor.
+Scope:
 
-**Scope**
+- Define a minimal "timeline event" schema for the TUI.
+- Populate it from `WORKFLOW_TRIGGERS` messages (PLAN_READY, IMPLEMENTATION_READY, VALIDATION_RESULT, etc).
+- Render a compact history list in Cluster view.
 
-- Implement `listClusters` and `getClusterSummary`.
-- Include: id, status, provider, createdAt, cwd, agents count, messageCount.
-- Best-effort read from orchestrator registry + clusters.json.
+Acceptance:
 
-**Acceptance Criteria**
+- Timeline shows the major phases for a typical run.
+- Timeline persists on resume (derived from ledger, not in-memory only).
 
-- TUI backend returns a stable list for empty/non-empty registries.
-- Summaries are consistent with existing `zeroshot status`.
+Parallelizable with:
 
-**Dependencies:** Issue 3.
+- Issue 5.1
 
----
+Pin:
 
-### Issue 5 — Start Cluster from Text / Issue
+- Later we can enrich the timeline with additional lifecycle events/state transitions for better fidelity.
 
-Status: Open (Issue #250)
+### Milestone 6: Agent View (drill-down + messaging UI)
 
-**Goal:** Enable TUI to launch clusters using existing CLI paths.
+#### Issue 6.1 - Agent selection + Agent view log tail
 
-**Scope**
+Scope:
 
-- Implement `startClusterFromText` (free-form input).
-- Implement `startClusterFromIssue` (supports issue ref parsing).
-- Ensure provider override can be supplied per request (session-scoped).
+- In Cluster view, allow selecting an agent (arrow keys) and opening Agent view (Enter).
+- Agent view tails logs for that agent only.
 
-**Acceptance Criteria**
+Acceptance:
 
-- Launching via API is equivalent to CLI `zeroshot run` input.
-- Provider override does not persist to settings.
-- Errors bubble to RPC responses with actionable messages.
+- Agent view shows live agent logs and updates in near real time.
+- Esc returns to Cluster view preserving selection.
 
-**Dependencies:** Issue 4.
+Depends on:
 
----
+- Issue 3.4
 
-### Issue 6 — Log + Timeline Subscriptions
+#### Issue 6.2 - Agent messaging UI (stubbed backend)
 
-Status: Open (Issue #251)
+Scope:
 
-**Goal:** Stream live logs and timeline events to the UI.
+- Add an input box in Agent view for sending messages.
+- For now, messages can be recorded as "pending" without delivery (backend not yet wired).
 
-**Scope**
+Acceptance:
 
-- Implement `subscribeClusterLogs` (notifications: `clusterLogLines`).
-- Implement `subscribeClusterTimeline` (notifications: `clusterTimelineEvents`).
-- Batch notifications (e.g., 50 lines / 250ms) with `droppedCount`.
-- Implement unsubscribe/cleanup to avoid leaks.
+- User can type and submit a message; UI shows it as queued.
+- No crashes if backend is missing.
 
-**Acceptance Criteria**
+Parallelizable with:
 
-- Log stream tails without unbounded memory.
-- Timeline events appear in order and dedupe correctly.
-- Unsubscribe stops ledger polling and releases resources.
+- Milestone 7 backend work
 
-**Dependencies:** Issue 4.
+### Milestone 7: Guidance Messaging (new backend capability)
 
----
+This milestone is required to meet the PRD's "steer agents/cluster live" vision. It is intentionally separated because it touches core orchestration behavior.
 
-### Issue 7 — Guidance Delivery APIs
+#### Issue 7.1 - Ledger topic + mailbox schema for guidance
 
-**Goal:** Allow cluster/agent guidance from the TUI with status feedback.
+Scope:
 
-**Scope**
+- Define new message topics (example):
+  - `USER_GUIDANCE_CLUSTER`
+  - `USER_GUIDANCE_AGENT`
+- Each message includes:
+  - `cluster_id`, `sender: "user"`, `topic`, `content.text`
+  - optional `target_agent_id`
+  - delivery state fields (optional, can be derived)
+- Implement a mailbox query helper for "guidance since last delivered".
 
-- Implement `sendGuidanceToCluster` and `sendGuidanceToAgent`.
-- Return delivery status (injected vs queued) plus reason when queued.
-- Wire into existing guidance-delivery service and mailbox logic.
+Acceptance:
 
-**Acceptance Criteria**
+- Guidance messages are persisted in the ledger.
+- Queries for "undelivered guidance" are deterministic and testable.
 
-- Guidance is delivered or queued with status surfaced to caller.
-- Provider limitations are represented in structured response fields.
+#### Issue 7.2 - Live injection plumbing (provider stdin/PTY) with graceful detection
 
-**Dependencies:** Issue 2.
+Scope:
 
----
+- Implement a provider-agnostic "send input" path that writes directly to the underlying provider CLI session stdin/PTY when available.
+  - This should reuse the same mechanism the provider uses for interactive input (e.g. node-pty stdin write).
+- Persist the guidance message in the ledger regardless (for audit/history), but mark whether it was injected live.
+- If a given agent/provider session does not expose an interactive stdin handle, return "unsupported" so callers can fallback to queue semantics (Issue 7.3).
 
-### Issue 8 — Topology + Metrics APIs
+Acceptance:
 
-**Goal:** Expose topology and resource metrics for Monitor/Cluster views.
+- For at least one provider with interactive sessions, sending guidance while the agent is working injects into the live session.
+- If injection is not possible, the API signals that it was not injected (so UI can show "queued").
 
-**Scope**
+Depends on:
 
-- Implement `getClusterTopology` (MVP adjacency/agent list).
-- Implement `listClusterMetrics` (CPU/mem best-effort; supported flag).
-- Graceful degradation when metrics unsupported.
+- Issue 7.1
 
-**Acceptance Criteria**
+#### Issue 7.3 - Queue fallback: apply guidance at safe points
 
-- Topology output is stable enough to render.
-- Metrics calls never crash the backend; `supported=false` when unavailable.
+Scope:
 
-**Dependencies:** Issue 4.
+- Implement a safe-point mailbox consumer in the agent execution loop:
+  - fetch queued guidance for (cluster, agent)
+  - append to the next provider prompt in a controlled way (clearly delimited)
+- Ensure guidance does not break JSON-schema modes or structured output.
 
----
+Acceptance:
 
-### Issue 9 — Rust TUI Crate Skeleton + Terminal Safety
+- In a test cluster for a non-injectable mode/provider, guidance sent mid-run appears in the next agent prompt.
+- No regressions for existing runs (no guidance => behavior unchanged).
 
-**Goal:** Bootstrap the Ratatui app with safe terminal lifecycle handling.
+Depends on:
 
-**Scope**
+- Issue 7.2
 
-- Add `tui-rs/` workspace with `crates/zeroshot-tui`.
-- Implement terminal init/restore guard (raw mode, alt screen, cursor).
-- Add event loop with tick + resize + input events.
+#### Issue 7.4 - Cluster-wide guidance broadcast (injection-first, fallback-queue)
 
-**Acceptance Criteria**
+Scope:
 
-- `cargo run` opens a blank UI and exits without corrupting terminal.
-- Panics still restore terminal state.
+- Implement cluster-level guidance delivery:
+  - write a single cluster-scoped message
+  - each agent attempts live injection when possible (Issue 7.2)
+  - otherwise the message is applied at that agent's next safe point (Issue 7.3)
 
-**Dependencies:** Issue 1.
+Acceptance:
 
----
+- Cluster-level guidance reaches all agents:
+  - injected live when supported
+  - queued otherwise
 
-### Issue 10 — Backend Client (stdio) + Handshake
+Depends on:
 
-**Goal:** Connect Rust UI to the Node backend over stdio.
+- Issue 7.3
 
-**Scope**
+#### Issue 7.5 - Wire TUI messaging UI to backend guidance mechanism
 
-- Spawn backend child process from Rust.
-- Implement framing, request/response, and notification handling.
-- Perform `initialize` handshake and display status.
+Scope:
 
-**Acceptance Criteria**
+- Cluster view: guidance box sends `USER_GUIDANCE_CLUSTER`.
+- Agent view: guidance box sends `USER_GUIDANCE_AGENT`.
+- Display delivery feedback (injected/queued/applied if detectable).
 
-- Rust UI connects to backend and prints/reflects protocol capabilities.
-- Backend process is terminated when UI exits.
+Acceptance:
 
-**Dependencies:** Issues 3, 9.
+- Messages typed in the TUI are persisted and delivered to agents (per Issues 7.1-7.4).
 
----
+Depends on:
 
-### Issue 11 — Core App Architecture (State/Action/Effects)
+- Issues 6.2, 7.4
 
-**Goal:** Implement the MVU-style core with navigation stack.
+### Milestone 8: Default Entry + Cleanup + Hardening
 
-**Scope**
+#### Issue 8.1 - `zeroshot` (no args) launches TUI (TTY only)
 
-- Define `AppState`, `Action`, `Effect`, `update`, `render`.
-- Implement screen stack (`Launcher`, `Monitor`, `Cluster`, `Agent`).
-- Implement global input handling and keymap routing.
+Scope:
 
-**Acceptance Criteria**
+- Modify `cli/index.js` default behavior:
+  - if interactive TTY and no subcommand: open TUI launcher
+  - else: keep existing help output behavior
 
-- Esc consistently pops screen stack.
-- Inputs route to current screen without leaking state across screens.
+Acceptance:
 
-**Dependencies:** Issue 9.
+- `zeroshot` opens TUI in a normal terminal.
+- `echo foo | zeroshot` does not hang (prints help and exits).
 
----
+Depends on:
 
-### Issue 12 — Launcher Screen (Text + Commands)
+- Milestone 3 (minimum viable launcher exists)
 
-**Goal:** Make the primary launcher flow functional.
+#### Issue 8.2 - Add `zeroshot codex|claude|gemini|opencode` convenience entrypoints
 
-**Scope**
+Scope:
 
-- Central input box + hint text.
-- Non-`/` input launches `startClusterFromText`.
-- `/` input routes to command parser (MVP commands wired).
-- On launch success, transition to Cluster screen.
+- Add CLI commands that invoke `zeroshot tui --provider <name>`.
 
-**Acceptance Criteria**
+Acceptance:
 
-- Free-text launch works end-to-end.
-- Numeric input (`123`) is treated as text (per decision).
+- `zeroshot codex` opens TUI with codex selected for the session.
 
-**Dependencies:** Issues 5, 11.
+Depends on:
 
----
+- Issue 8.1 (or earlier if `zeroshot tui --provider` is already done)
 
-### Issue 13 — Monitor Screen (Cluster List)
+#### Issue 8.3 - Cleanup: remove legacy dashboard docs/tests and stale references
 
-**Goal:** Provide high-level view of all clusters.
+Scope:
 
-**Scope**
+- Remove any remaining blessed-dashboard-specific docs, demos, and tests (after the Ink TUI replacement).
+- Ensure CLI help text and docs point to the Ink TUI entrypoints (`zeroshot`, `zeroshot tui`, `zeroshot watch`).
 
-- List clusters with key fields (status, provider, duration, last activity).
-- Poll `listClusters` on interval.
-- Up/Down selection + Enter opens Cluster screen.
-- Esc returns to previous screen.
+Acceptance:
 
-**Acceptance Criteria**
+- No references remain to the old blessed dashboard behavior.
 
-- Monitor list renders and updates without jitter.
-- Enter opens selected cluster reliably.
+Depends on:
 
-**Dependencies:** Issues 4, 11.
+- Issue 1.2
 
----
+#### Issue 8.4 - Reliability/Perf pass + tests
 
-### Issue 14 — Cluster Screen (Logs + Agents + Timeline)
+Scope:
 
-**Goal:** Provide focused cluster monitoring.
+- Add tests:
+  - slash command parsing
+  - router "Esc back" behavior
+  - monitor list rendering
+  - guidance mailbox behavior (if Milestone 7 done)
+- Manual checklist:
+  - resize behavior
+  - exit behavior (terminal reset)
+  - running multiple clusters
+  - resume existing cluster into Cluster view
 
-**Scope**
+Acceptance:
 
-- Multi-pane layout: logs, agents list, timeline (topology placeholder).
-- Log ring buffer, per-agent attribution.
-- Tab/Left/Right to cycle focus across panes.
-- Enter on agent opens Agent screen.
+- CI is green.
+- No known terminal corruption issues on exit.
 
-**Acceptance Criteria**
+## Parallelization Map (Suggested)
 
-- Logs stream live and maintain bounded memory.
-- Focus and selection behave consistently.
+- Team 1:
+  - Milestone 1 (deps/build) + Milestone 2 (router/commands)
+- Team 2:
+  - Milestone 3 (cluster start + logs) once helper exists
+- Team 3:
+  - Milestone 4 (monitor view + metrics)
+- Team 4:
+  - Milestone 7 (guidance backend) can start as soon as requirements are agreed
+- Team 5:
+  - Milestone 5 (topology + timeline) can start once cluster config/state access is finalized
 
-**Dependencies:** Issues 6, 11.
+## Definition of Done (Project-level)
 
----
+The project is considered "v2 shipped" when:
 
-### Issue 15 — Agent Screen (Focused Logs + Guidance Input)
+- `zeroshot` launches the Ink TUI (TTY only) and can start a cluster from text.
+- `/monitor` provides a stable cluster dashboard and drill-down.
+- Cluster view supports logs + topology + timeline.
+- The blessed-based dashboard is removed; `zeroshot watch` is an alias that opens the Ink TUI Monitor view.
 
-**Goal:** Drill into a single agent and send guidance.
+## Deferred / Post-v2 Candidates
 
-**Scope**
-
-- Filtered log view for agent.
-- Agent identity + status display.
-- Guidance input box wired to `sendGuidanceToAgent`.
-
-**Acceptance Criteria**
-
-- Guidance delivery status is shown (queued vs injected).
-- Esc returns to Cluster screen.
-
-**Dependencies:** Issues 7, 14.
-
----
-
-### Issue 16 — Slash Command MVP
-
-**Goal:** Implement MVP command set and global command bar.
-
-**Scope**
-
-- Commands: `/help`, `/monitor`, `/issue <ref>`, `/provider <name>`, `/quit` (`/exit`).
-- Shared parsing + dispatch (single source of truth).
-- Lightweight toast/output area for command results.
-
-**Acceptance Criteria**
-
-- Commands work consistently across screens.
-- Invalid commands produce readable errors without crashing UI.
-
-**Dependencies:** Issues 5, 11–13.
-
----
-
-### Issue 17 — Topology Rendering (MVP)
-
-**Goal:** Render the cluster topology in the Cluster screen.
-
-**Scope**
-
-- Use `getClusterTopology` data.
-- MVP ASCII/adjacency layout with stable ordering.
-- Integrate into existing pane layout.
-
-**Acceptance Criteria**
-
-- Topology renders for existing templates without overlaps or crashes.
-- Missing topology data degrades to a friendly placeholder.
-
-**Dependencies:** Issues 8, 14.
-
----
-
-### Issue 18 — Metrics Display (Monitor + Cluster)
-
-**Goal:** Surface CPU/memory where available.
-
-**Scope**
-
-- Poll `listClusterMetrics` on a slower cadence (e.g., 2s).
-- Display per-cluster aggregate metrics in Monitor.
-- Display per-agent metrics or aggregate in Cluster.
-
-**Acceptance Criteria**
-
-- When `supported=false`, UI shows “—” and remains stable.
-- Metrics refresh does not cause UI stutter.
-
-**Dependencies:** Issue 8.
-
----
-
-### Issue 19 — CLI Wiring + Entry Points
-
-**Goal:** Make new TUI accessible from existing commands.
-
-**Scope**
-
-- `zeroshot` (no args) launches Rust TUI when TTY.
-- `zeroshot tui` always launches TUI.
-- `zeroshot watch` opens Monitor screen.
-- `zeroshot codex|claude|gemini|opencode` sets session provider override.
-- `ZEROSHOT_TUI=ink` fallback retained for one release.
-
-**Acceptance Criteria**
-
-- CLI behavior matches PRD in TTY and non-TTY contexts.
-- Provider override applies only to the TUI session.
-
-**Dependencies:** Issues 9–16.
-
----
-
-### Issue 20 — Packaging + Distribution
-
-**Goal:** Ship Rust TUI without requiring cargo on user machines.
-
-**Scope**
-
-- CI build for macOS/Linux (x64 + arm64 as needed).
-- Add install script in npm package to download correct binary.
-- Ensure `zeroshot` wrapper locates and launches bundled binary.
-
-**Acceptance Criteria**
-
-- `npm i -g @covibes/zeroshot` installs and runs TUI without cargo.
-- Manual override for local dev (`cargo run`) still works.
-
-**Dependencies:** Issue 19.
-
----
-
-### Issue 21 — Cutover + Cleanup
-
-**Goal:** Fully replace Ink UI and remove legacy dependencies.
-
-**Scope**
-
-- Switch default entrypoints to Rust TUI.
-- Remove Ink UI code and deps after stabilization.
-- Update docs, help text, and `zeroshot watch` description.
-
-**Acceptance Criteria**
-
-- No Ink deps remain in package graph.
-- All docs refer to Ratatui TUI as default.
-
-**Dependencies:** Issues 19–20.
-
----
-
-### Issue 22 — Final Design Touch-Up (Iterative with Product)
-
-**Goal:** Refine layout, spacing, typography, and interaction polish based on user feedback.
-
-**Scope (lightweight by design)**
-
-- Iterate on UI layout in `ui/*` and `screens/*`.
-- Tune keybindings and command bar ergonomics.
-- Adjust visual hierarchy and spacing for readability.
-
-**Acceptance Criteria**
-
-- Agreed-upon polish pass is shipped.
-- No architecture changes required; purely UI-level iteration.
-
-**Dependencies:** Issues 14–21.
-
-## Deferred: UI Layout Reflection (When We’re Ready)
-
-We will iterate on layout after the architecture is stable. The design constraints to keep in mind:
-
-- Prefer a **stable global command/input bar** across screens (muscle memory).
-- Treat panes as **widgets** with independent state (log viewer, list, topology view).
-- Keep all layout in `ui/*` so we can redesign without touching reducers/backend calls.
+- AI summary panel (`/summary` or periodic): provider/model choice and cost controls TBD.
+- Enrich the step timeline with additional lifecycle events beyond `WORKFLOW_TRIGGERS`.
