@@ -32,7 +32,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Provider implementations | `src/providers/`                    |
 | Provider detection       | `lib/provider-detection.js`         |
 | Provider capabilities    | `src/providers/capabilities.js`     |
-| TUI dashboard            | `src/tui/`                          |
+| Ink TUI entrypoint       | `src/tui/index.tsx`                 |
+| Ink TUI build output     | `lib/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Settings                 | `lib/settings.js`                   |
