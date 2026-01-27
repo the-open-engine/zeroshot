@@ -17,7 +17,7 @@ describe('Worktree CWD Injection', function () {
   describe('_opAddAgents cwd injection', function () {
     it('should inject worktree path into dynamically added agents', function () {
       // Simulate a cluster with worktree enabled
-      const worktreePath = '/tmp/zeroshot-worktrees/test-cluster-123';
+      const worktreePath = '/home/eivind/.zeroshot/worktrees/test-cluster-123';
       const cluster = {
         id: 'test-cluster-123',
         worktree: {
@@ -63,7 +63,7 @@ describe('Worktree CWD Injection', function () {
     });
 
     it('should not override agent cwd if already set', function () {
-      const worktreePath = '/tmp/zeroshot-worktrees/test-cluster-456';
+      const worktreePath = '/home/eivind/.zeroshot/worktrees/test-cluster-456';
       const customCwd = '/custom/path/for/agent';
 
       const cluster = {
@@ -136,7 +136,7 @@ describe('Worktree CWD Injection', function () {
 
   describe('resume path cwd fix', function () {
     it('should fix agents saved without cwd on resume', function () {
-      const worktreePath = '/tmp/zeroshot-worktrees/old-cluster';
+      const worktreePath = '/home/eivind/.zeroshot/worktrees/old-cluster';
 
       // Simulate cluster data saved BEFORE the bugfix (agents have cwd: null)
       const clusterData = {

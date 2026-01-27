@@ -1294,7 +1294,7 @@ class IsolationManager {
 
   /**
    * Create worktree-based isolation for a cluster (lightweight alternative to Docker)
-   * Creates a git worktree at {os.tmpdir()}/zeroshot-worktrees/{clusterId}
+   * Creates a git worktree at ~/.zeroshot/worktrees/{clusterId}
    * @param {string} clusterId - Cluster ID
    * @param {string} workDir - Original working directory (must be a git repo)
    * @returns {{ path: string, branch: string, repoRoot: string }}
@@ -1349,8 +1349,8 @@ class IsolationManager {
     const baseBranchName = `zeroshot/${clusterId.replace(/^cluster-/, '')}`;
     let branchName = baseBranchName;
 
-    // Worktree path in tmp
-    const worktreePath = path.join(os.tmpdir(), 'zeroshot-worktrees', clusterId);
+    // Worktree path in persistent location (survives reboots)
+    const worktreePath = path.join(os.homedir(), '.zeroshot', 'worktrees', clusterId);
 
     // Ensure parent directory exists
     const parentDir = path.dirname(worktreePath);
