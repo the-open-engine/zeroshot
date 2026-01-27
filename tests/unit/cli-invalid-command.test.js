@@ -37,6 +37,7 @@ describe('CLI Invalid Command Handling', function () {
       'purge',
       'export',
       'watch',
+      'tui',
       'attach',
       'agents',
       'config',

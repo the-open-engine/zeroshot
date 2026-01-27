@@ -245,6 +245,22 @@ function resolveProviderOverride(options) {
   return normalizeProviderName(override);
 }
 
+function resolveTuiProviderOverride(options = {}) {
+  const override = options.provider;
+  if (!override || (typeof override === 'string' && !override.trim())) {
+    return null;
+  }
+  const normalized = normalizeProviderName(override);
+  getProvider(normalized);
+  return normalized;
+}
+
+function startTuiSession(options = {}) {
+  const providerOverride = resolveTuiProviderOverride(options);
+  const { start } = require('../lib/tui');
+  start({ autoExit: false, providerOverride });
+}
+
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
   // Detect which issue provider tool is needed
   let issueProvider = null;
@@ -3345,8 +3361,26 @@ program
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
   .action((_options) => {
     try {
-      const { start } = require('../lib/tui');
-      start({ autoExit: false });
+      startTuiSession();
+    } catch (error) {
+      console.error('Error starting TUI:', error.message);
+      process.exit(1);
+    }
+  });
+
+// TUI command - interactive TUI dashboard
+program
+  .command('tui')
+  .description('Interactive TUI to monitor clusters')
+  .option(
+    '--provider <provider>',
+    'Override provider for this TUI session (claude, codex, gemini, opencode)'
+  )
+  .allowExcessArguments(true)
+  .allowUnknownOption(true)
+  .action((options) => {
+    try {
+      startTuiSession(options);
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);

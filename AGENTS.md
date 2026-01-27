@@ -378,6 +378,8 @@ npm run lint
 npm run test
 ```
 
+Mocha config: `.mocharc.cjs` applies defaults; passing explicit `*.test.js` files on the CLI skips the default `tests/**/*.test.js` spec.
+
 Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as non-negotiable law before typing again. Failing to read and address each validator complaint before claiming completion will be rejected automatically.
 
 ## CI Failure Diagnosis
