@@ -5,7 +5,7 @@
     {
       "id": "junior-conductor",
       "role": "conductor",
-      "modelLevel": "level1",
+      "modelLevel": "level2",
       "useDirectApi": true,
       "outputFormat": "json",
       "jsonSchema": {
@@ -61,7 +61,7 @@
     {
       "id": "senior-conductor",
       "role": "conductor",
-      "modelLevel": "level2",
+      "modelLevel": "level3",
       "useDirectApi": true,
       "outputFormat": "json",
       "jsonSchema": {
