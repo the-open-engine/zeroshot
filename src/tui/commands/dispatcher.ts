@@ -132,6 +132,25 @@ async function handleStatus(args: string[]): Promise<CommandResult> {
   }
 
   if (!type) {
+    try {
+      const taskResult = await runShowStatus(id);
+      const message = taskResult.output || `No status output for ${id}.`;
+      if (taskResult.exitCode === 0) {
+        return { tone: "info", message };
+      }
+    } catch {
+      // fall through to cluster check
+    }
+
+    try {
+      const clusterResult = await handleClusterStatus(id);
+      if (clusterResult.tone === "info") {
+        return clusterResult;
+      }
+    } catch {
+      // ignore cluster errors, report unknown id below
+    }
+
     return { tone: "error", message: `Unknown id: ${id}.` };
   }
 
