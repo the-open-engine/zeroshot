@@ -6,6 +6,7 @@ import StatusBar from "./components/StatusBar";
 import { dispatchCommand } from "./commands/dispatcher";
 import { parseInput } from "./commands/parser";
 import { CommandResult } from "./commands/types";
+import { submitLauncherText } from "./launcher-actions";
 import {
   activeView,
   createViewStack,
@@ -40,6 +41,7 @@ export default function App({
   const [provider, setProvider] = useState<string | null>(
     providerOverride ?? null
   );
+  const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
@@ -55,17 +57,21 @@ export default function App({
       return;
     }
 
-    if (parsed.type === "text") {
-      setStatus({
-        tone: "info",
-        message: "Plain-text tasks are not wired up yet.",
-      });
-      setInputValue("");
-      return;
-    }
-
     setIsDispatching(true);
     try {
+      if (parsed.type === "text") {
+        await submitLauncherText({
+          text: parsed.text,
+          providerOverride: provider,
+          activeView: active,
+          setStatus,
+          setClusterId: setActiveClusterId,
+          navigate: (view) =>
+            setViewStack((stack) => pushIfDifferent(stack, view)),
+        });
+        return;
+      }
+
       const result = await dispatchCommand(parsed, {
         navigate: (view) =>
           setViewStack((stack) => pushIfDifferent(stack, view)),
@@ -121,7 +127,7 @@ export default function App({
   return (
     <Box flexDirection="column">
       <Box flexGrow={1} flexDirection="column">
-        <Router view={active} provider={provider} />
+        <Router view={active} provider={provider} clusterId={activeClusterId} />
       </Box>
       <StatusBar status={status} provider={provider} />
       <CommandInput value={inputValue} />

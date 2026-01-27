@@ -8,16 +8,17 @@ import AgentView from "./views/AgentView";
 type RouterProps = {
   view: ViewId;
   provider: string | null;
+  clusterId?: string | null;
 };
 
-export default function Router({ view, provider }: RouterProps) {
+export default function Router({ view, provider, clusterId }: RouterProps) {
   switch (view) {
     case "launcher":
       return <LauncherView provider={provider} />;
     case "monitor":
       return <MonitorView provider={provider} />;
     case "cluster":
-      return <ClusterView provider={provider} />;
+      return <ClusterView provider={provider} clusterId={clusterId} />;
     case "agent":
       return <AgentView provider={provider} />;
     default:

@@ -1,10 +1,16 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-export default function ClusterView({ provider }: { provider: string | null }) {
+type ClusterViewProps = {
+  provider: string | null;
+  clusterId?: string | null;
+};
+
+export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
   return (
     <Box flexDirection="column">
       <Text color="cyan">Cluster</Text>
+      <Text color="gray">Id: {clusterId || "pending"}</Text>
       <Text color="gray">Provider: {provider || "auto"}</Text>
       <Text color="gray">Stub view</Text>
       <Text color="gray">Type /help for commands</Text>
