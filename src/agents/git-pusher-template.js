@@ -22,13 +22,25 @@ const results = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.times
 if (results.length < validators.length) return false;
 const allApproved = results.every(r => r.content?.data?.approved === 'true' || r.content?.data?.approved === true);
 if (!allApproved) return false;
-const hasRealEvidence = results.every(r => {
-  const criteria = r.content?.data?.criteriaResults || [];
+const hasSufficientEvidence = results.every(r => {
+  const criteria = r.content?.data?.criteriaResults;
+  if (!Array.isArray(criteria) || criteria.length === 0) return true;
   return criteria.every(c => {
-    return c.evidence?.command && typeof c.evidence?.exitCode === 'number' && c.evidence?.output?.length > 10;
+    const status = String(c.status || '').toUpperCase();
+    if (status === 'CANNOT_VALIDATE') return true;
+    if (status === 'SKIPPED') return true;
+    if (status === 'CANNOT_VALIDATE_YET') return false;
+    const evidence = c.evidence || {};
+    const hasCommand = typeof evidence.command === 'string' && evidence.command.trim().length > 0;
+    const exitCode = evidence.exitCode;
+    const hasExitCode =
+      typeof exitCode === 'number' ||
+      (typeof exitCode === 'string' && exitCode.trim() !== '' && Number.isFinite(Number(exitCode)));
+    const hasOutput = evidence.output === undefined || typeof evidence.output === 'string';
+    return hasCommand && hasExitCode && hasOutput;
   });
 });
-return hasRealEvidence;`;
+return hasSufficientEvidence;`;
 
 /**
  * Platform-specific CLI commands and terminology

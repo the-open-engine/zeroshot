@@ -13,6 +13,7 @@ const os = require('os');
 const LogicEngine = require('../../src/logic-engine');
 const MessageBus = require('../../src/message-bus');
 const Ledger = require('../../src/ledger');
+const { SHARED_TRIGGER_SCRIPT } = require('../../src/agents/git-pusher-template');
 
 let tempDir;
 let ledger;
@@ -61,6 +62,7 @@ describe('Trigger Evaluation Integration', function () {
   defineErrorHandlingTests();
   defineScriptValidationTests();
   defineComplexConsensusTests();
+  defineGitPusherTriggerTests();
 });
 
 function defineBasicLedgerQueryTests() {
@@ -469,6 +471,61 @@ function defineComplexConsensusTests() {
           id: 'completion-detector',
           cluster_id: cluster.id,
         },
+        { topic: 'VALIDATION_RESULT' }
+      );
+
+      assert.strictEqual(result, true);
+    });
+  });
+}
+
+function defineGitPusherTriggerTests() {
+  describe('Git-pusher Trigger Evidence', () => {
+    it('should allow approvals with CANNOT_VALIDATE and empty output evidence', () => {
+      messageBus.publish({
+        cluster_id: cluster.id,
+        topic: 'IMPLEMENTATION_READY',
+        sender: 'worker',
+        timestamp: Date.now(),
+      });
+
+      const implTime = Date.now();
+
+      messageBus.publish({
+        cluster_id: cluster.id,
+        topic: 'VALIDATION_RESULT',
+        sender: 'validator-1',
+        timestamp: implTime + 100,
+        content: {
+          data: {
+            approved: true,
+            criteriaResults: [
+              {
+                id: 'AC1',
+                status: 'PASS',
+                evidence: { command: 'npm test', exitCode: 0, output: '' },
+              },
+              {
+                id: 'AC2',
+                status: 'CANNOT_VALIDATE',
+                reason: 'Docker not available',
+              },
+            ],
+          },
+        },
+      });
+
+      messageBus.publish({
+        cluster_id: cluster.id,
+        topic: 'VALIDATION_RESULT',
+        sender: 'validator-2',
+        timestamp: implTime + 200,
+        content: { data: { approved: true } },
+      });
+
+      const result = logicEngine.evaluate(
+        SHARED_TRIGGER_SCRIPT,
+        { id: 'git-pusher', cluster_id: cluster.id },
         { topic: 'VALIDATION_RESULT' }
       );
 
