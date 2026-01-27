@@ -3343,14 +3343,10 @@ program
   .command('watch')
   .description('Interactive TUI to monitor clusters')
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
-  .action(async (options) => {
+  .action((_options) => {
     try {
-      const TUI = require('../src/tui');
-      const tui = new TUI({
-        orchestrator: await getOrchestrator(),
-        refreshRate: parseInt(options.refreshRate, 10),
-      });
-      await tui.start();
+      const { start } = require('../lib/tui');
+      start({ autoExit: false });
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);

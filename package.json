@@ -30,10 +30,11 @@
     "deadcode:deps": "depcheck",
     "deadcode:all": "npm run deadcode && npm run deadcode:files && npm run deadcode:deps",
     "dupcheck": "jscpd src/ --min-lines 5 --min-tokens 50 --threshold 5",
+    "build:tui": "tsc -p tsconfig.tui.json",
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",
-    "prepublishOnly": "npm run lint && npm run typecheck",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build:tui",
     "prepare": "husky"
   },
   "c8": {
@@ -101,13 +102,13 @@
     "blessed-contrib": "^4.11.0",
     "chalk": "^4.1.2",
     "commander": "^14.0.2",
-    "ink": "^6.6.0",
+    "ink": "^3.2.0",
     "md-to-pdf": "^5.2.5",
     "node-pty": "^1.1.0",
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
     "proper-lockfile": "^4.1.2",
-    "react": "^19.2.4"
+    "react": "^17.0.2"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
@@ -115,8 +116,7 @@
     "@semantic-release/github": "^11.0.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.3",
-    "@types/react": "^19.2.9",
-    "@types/react-reconciler": "^0.33.0",
+    "@types/react": "^17.0.90",
     "c8": "^10.1.3",
     "chai": "^6.2.1",
     "depcheck": "^1.4.7",
