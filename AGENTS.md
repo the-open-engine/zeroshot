@@ -37,6 +37,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Ink TUI router           | `src/tui/router.tsx`                |
 | Ink TUI view stack       | `src/tui/view-stack.ts`             |
 | Ink TUI commands         | `src/tui/commands/`                 |
+| TUI command registry     | `src/tui/commands/registry.ts`      |
+| TUI CLI compat wrapper   | `src/tui/commands/cli-compat.ts`    |
 | Ink TUI views            | `src/tui/views/`                    |
 | Ink TUI build output     | `lib/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
@@ -44,6 +46,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Settings                 | `lib/settings.js`                   |
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
+TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 
 ## CLI Quick Reference
 

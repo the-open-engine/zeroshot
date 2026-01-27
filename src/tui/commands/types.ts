@@ -27,6 +27,16 @@ export type CommandResult = {
   message: string;
 };
 
+export type CommandHandler = (
+  args: string[],
+  context: CommandContext
+) => Promise<CommandResult> | CommandResult;
+
+export type CommandDispatcher = (
+  command: ParsedCommand,
+  context: CommandContext
+) => Promise<CommandResult>;
+
 export type CommandContext = {
   navigate: (view: ViewId) => void;
   setProvider: (provider: string | null) => void;
