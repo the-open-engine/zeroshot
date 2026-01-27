@@ -40,10 +40,15 @@ export default function App({
   const [provider, setProvider] = useState<string | null>(
     providerOverride ?? null
   );
+  const [isDispatching, setIsDispatching] = useState(false);
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (isDispatching) {
+      return;
+    }
+
     const parsed = parseInput(inputValue);
     if (parsed.type === "empty") {
       setInputValue("");
@@ -59,14 +64,22 @@ export default function App({
       return;
     }
 
-    const result = dispatchCommand(parsed, {
-      navigate: (view) =>
-        setViewStack((stack) => pushIfDifferent(stack, view)),
-      setProvider: (next) => setProvider(next),
-      exit,
-    });
-    setStatus(result);
-    setInputValue("");
+    setIsDispatching(true);
+    try {
+      const result = await dispatchCommand(parsed, {
+        navigate: (view) =>
+          setViewStack((stack) => pushIfDifferent(stack, view)),
+        setProvider: (next) => setProvider(next),
+        exit,
+      });
+      setStatus(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Command failed.";
+      setStatus({ tone: "error", message });
+    } finally {
+      setInputValue("");
+      setIsDispatching(false);
+    }
   }
 
   useInput(
@@ -80,7 +93,7 @@ export default function App({
         return;
       }
       if (key.return) {
-        handleSubmit();
+        void handleSubmit();
         return;
       }
       if (key.backspace || key.delete) {
