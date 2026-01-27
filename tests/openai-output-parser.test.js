@@ -58,6 +58,11 @@ describe('Codex output parser', () => {
       assert.strictEqual(result, null);
     });
 
+    it('ignores item.started events', () => {
+      const result = parseEvent('{"type":"item.started","item_id":"item_123"}');
+      assert.strictEqual(result, null);
+    });
+
     it('parses item.created events', () => {
       const line = JSON.stringify({
         type: 'item.created',

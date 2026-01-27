@@ -84,6 +84,7 @@ function parseEvent(line, options = {}) {
   switch (event.type) {
     case 'thread.started':
     case 'turn.started':
+    case 'item.started':
       return null;
 
     case 'item.created':
