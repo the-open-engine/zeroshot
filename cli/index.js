@@ -5204,9 +5204,21 @@ async function main() {
   // Check for updates (non-blocking if offline)
   await checkForUpdates({ quiet: isQuiet });
 
+  let args = process.argv.slice(2);
+
+  if (args.length === 0) {
+    const isInteractiveTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+    if (isInteractiveTty) {
+      process.argv.splice(2, 0, 'tui');
+    } else {
+      program.outputHelp();
+      return;
+    }
+  }
+
   // Default command handling: if first arg doesn't match a known command, treat it as 'run'
   // This allows `zeroshot "task"` to work the same as `zeroshot run "task"`
-  const args = process.argv.slice(2);
+  args = process.argv.slice(2);
   if (args.length > 0) {
     const firstArg = args[0];
 
