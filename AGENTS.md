@@ -26,6 +26,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Base templates            | `cluster-templates/base-templates/`    |
 | Message bus               | `src/message-bus.js`                   |
 | Ledger (SQLite)           | `src/ledger.js`                        |
+| Guidance topics           | `src/guidance-topics.js`               |
+| Guidance mailbox helper   | `src/ledger.js`                        |
 | Trigger evaluation        | `src/logic-engine.js`                  |
 | Agent wrapper             | `src/agent-wrapper.js`                 |
 | Providers registry        | `src/providers/index.js`               |
@@ -105,6 +107,11 @@ Agent A -> publish() -> SQLite Ledger -> LogicEngine -> trigger match -> Agent B
 | Hook         | Post-task action (publish message, execute command)         |
 
 Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledger so restart limits survive orchestrator restarts.
+
+### Guidance Messaging
+
+- Topics: `USER_GUIDANCE_CLUSTER`, `USER_GUIDANCE_AGENT` (see `src/guidance-topics.js`).
+- Mailbox helper: `ledger.queryGuidanceMailbox()` with `messageBus.queryGuidanceMailbox()` passthrough.
 
 ### Agent Configuration (Minimal)
 

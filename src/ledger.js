@@ -11,6 +11,11 @@
 const Database = require('better-sqlite3');
 const EventEmitter = require('events');
 const crypto = require('crypto');
+const {
+  GUIDANCE_TOPICS,
+  USER_GUIDANCE_AGENT,
+  USER_GUIDANCE_CLUSTER,
+} = require('./guidance-topics');
 
 class Ledger extends EventEmitter {
   constructor(dbPath = ':memory:') {
@@ -114,12 +119,13 @@ class Ledger extends EventEmitter {
     const timestamp =
       requestedTimestamp !== null ? Math.max(requestedTimestamp, baseTimestamp) : baseTimestamp;
 
+    const receiver = message.receiver || message.target_agent_id || 'broadcast';
     const record = {
       id,
       timestamp,
       topic: message.topic,
       sender: message.sender,
-      receiver: message.receiver || 'broadcast',
+      receiver,
       content_text: message.content?.text || null,
       content_data: message.content?.data ? JSON.stringify(message.content.data) : null,
       metadata: message.metadata ? JSON.stringify(message.metadata) : null,
@@ -188,12 +194,13 @@ class Ledger extends EventEmitter {
         // Use incrementing timestamps to preserve order within batch
         const timestamp = baseTimestamp + i;
 
+        const receiver = message.receiver || message.target_agent_id || 'broadcast';
         const record = {
           id,
           timestamp,
           topic: message.topic,
           sender: message.sender,
-          receiver: message.receiver || 'broadcast',
+          receiver,
           content_text: message.content?.text || null,
           content_data: message.content?.data ? JSON.stringify(message.content.data) : null,
           metadata: message.metadata ? JSON.stringify(message.metadata) : null,
@@ -297,6 +304,60 @@ class Ledger extends EventEmitter {
     if (offset) {
       sql += ` OFFSET ?`;
       params.push(offset);
+    }
+
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params);
+    return rows.map((row) => this._deserializeMessage(row));
+  }
+
+  /**
+   * Query guidance mailbox for cluster-wide + agent-specific guidance
+   * @param {Object} criteria - { cluster_id, target_agent_id, lastDeliveredAt, limit }
+   * @returns {Array} Guidance messages ordered by timestamp ASC
+   */
+  queryGuidanceMailbox(criteria) {
+    const { cluster_id, target_agent_id, lastDeliveredAt, limit } = criteria || {};
+
+    if (!cluster_id) {
+      throw new Error('cluster_id is required for guidance mailbox queries');
+    }
+
+    const guidanceTopics = new Set(GUIDANCE_TOPICS);
+    if (!guidanceTopics.has(USER_GUIDANCE_CLUSTER) || !guidanceTopics.has(USER_GUIDANCE_AGENT)) {
+      throw new Error('GUIDANCE_TOPICS must include USER_GUIDANCE_CLUSTER and USER_GUIDANCE_AGENT');
+    }
+
+    let sinceTimestamp = null;
+    if (lastDeliveredAt !== undefined && lastDeliveredAt !== null) {
+      const candidate =
+        typeof lastDeliveredAt === 'number' ? lastDeliveredAt : new Date(lastDeliveredAt).getTime();
+      if (!Number.isFinite(candidate)) {
+        throw new Error('lastDeliveredAt must be a number or valid date');
+      }
+      sinceTimestamp = candidate;
+    }
+
+    const params = [cluster_id, USER_GUIDANCE_CLUSTER];
+    let sql = 'SELECT * FROM messages WHERE cluster_id = ? AND (topic = ?';
+
+    if (target_agent_id) {
+      params.push(USER_GUIDANCE_AGENT, target_agent_id);
+      sql += ' OR (topic = ? AND receiver = ?)';
+    }
+
+    sql += ')';
+
+    if (sinceTimestamp !== null) {
+      params.push(sinceTimestamp);
+      sql += ' AND timestamp > ?';
+    }
+
+    sql += ' ORDER BY timestamp ASC';
+
+    if (limit) {
+      params.push(limit);
+      sql += ' LIMIT ?';
     }
 
     const stmt = this.db.prepare(sql);

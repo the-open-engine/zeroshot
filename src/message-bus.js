@@ -104,6 +104,13 @@ class MessageBus extends EventEmitter {
   }
 
   /**
+   * Query guidance mailbox (passthrough to ledger)
+   */
+  queryGuidanceMailbox(criteria) {
+    return this.ledger.queryGuidanceMailbox(criteria);
+  }
+
+  /**
    * Find last message (passthrough to ledger)
    */
   findLast(criteria) {
