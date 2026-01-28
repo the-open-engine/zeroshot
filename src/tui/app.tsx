@@ -45,6 +45,12 @@ export default function App({
   const [isDispatching, setIsDispatching] = useState(false);
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
+  const isCommandInputEmpty = inputValue.length === 0;
+
+  const handleOpenCluster = (clusterId: string) => {
+    setActiveClusterId(clusterId);
+    setViewStack((stack) => pushIfDifferent(stack, "cluster"));
+  };
 
   async function handleSubmit() {
     if (isDispatching) {
@@ -129,7 +135,13 @@ export default function App({
   return (
     <Box flexDirection="column">
       <Box flexGrow={1} flexDirection="column">
-        <Router view={active} provider={provider} clusterId={activeClusterId} />
+        <Router
+          view={active}
+          provider={provider}
+          clusterId={activeClusterId}
+          onOpenCluster={handleOpenCluster}
+          isCommandInputEmpty={isCommandInputEmpty}
+        />
       </Box>
       <StatusBar status={status} provider={provider} />
       <CommandInput value={inputValue} />
