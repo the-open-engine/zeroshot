@@ -15,6 +15,22 @@ type MonitorViewProps = {
 
 const REFRESH_INTERVAL_MS = 3000;
 const METRICS_REFRESH_INTERVAL_MS = 2000;
+const CWD_MAX_WIDTH = 80;
+
+export type MonitorRow = ClusterSummary & {
+  age: string;
+  cwdDisplay: string;
+  cpuDisplay: string;
+  memoryDisplay: string;
+};
+
+export type MonitorColumnWidths = {
+  idWidth: number;
+  statusWidth: number;
+  ageWidth: number;
+  cpuWidth: number;
+  memWidth: number;
+};
 
 function formatAge(createdAt: number, now: number): string {
   const diffSeconds = Math.max(0, Math.floor((now - createdAt) / 1000));
@@ -66,6 +82,66 @@ function formatMemory(memoryMB: number | null | undefined): string {
     return "-";
   }
   return `${Math.round(Number(memoryMB))}MB`;
+}
+
+export function buildMonitorRows(
+  clusters: ClusterSummary[],
+  metricsById: Record<string, ClusterMetrics>,
+  now: number = Date.now()
+): MonitorRow[] {
+  return clusters.map((cluster) => ({
+    ...cluster,
+    age: formatAge(cluster.createdAt, now),
+    cwdDisplay: cluster.cwd ?? "-",
+    cpuDisplay: formatCpu(metricsById[cluster.id]?.cpuPercent),
+    memoryDisplay: formatMemory(metricsById[cluster.id]?.memoryMB),
+  }));
+}
+
+export function computeMonitorColumnWidths(
+  rows: MonitorRow[]
+): MonitorColumnWidths {
+  const idWidth = clamp(
+    rows.reduce((max, row) => Math.max(max, row.id.length), 2),
+    8,
+    24
+  );
+  const statusWidth = clamp(
+    rows.reduce((max, row) => Math.max(max, row.state.length), 6),
+    6,
+    14
+  );
+  const ageWidth = clamp(
+    rows.reduce((max, row) => Math.max(max, row.age.length), 3),
+    3,
+    6
+  );
+  const cpuWidth = clamp(
+    rows.reduce((max, row) => Math.max(max, row.cpuDisplay.length), 4),
+    4,
+    8
+  );
+  const memWidth = clamp(
+    rows.reduce((max, row) => Math.max(max, row.memoryDisplay.length), 3),
+    3,
+    10
+  );
+  return { idWidth, statusWidth, ageWidth, cpuWidth, memWidth };
+}
+
+export function formatMonitorRowLine(
+  row: MonitorRow,
+  columnWidths: MonitorColumnWidths,
+  cwdMaxWidth: number = CWD_MAX_WIDTH
+): string {
+  return [
+    padRight(row.id, columnWidths.idWidth),
+    padRight(row.state, columnWidths.statusWidth),
+    padRight(row.age, columnWidths.ageWidth),
+    padRight(row.cpuDisplay, columnWidths.cpuWidth),
+    padRight(row.memoryDisplay, columnWidths.memWidth),
+    truncate(row.cwdDisplay, cwdMaxWidth),
+  ].join(" ");
 }
 
 export default function MonitorView({
@@ -155,43 +231,11 @@ export default function MonitorView({
   }, []);
 
   const rows = useMemo(() => {
-    const now = Date.now();
-    return clusters.map((cluster) => ({
-      ...cluster,
-      age: formatAge(cluster.createdAt, now),
-      cwdDisplay: cluster.cwd ?? "-",
-      cpuDisplay: formatCpu(metricsById[cluster.id]?.cpuPercent),
-      memoryDisplay: formatMemory(metricsById[cluster.id]?.memoryMB),
-    }));
+    return buildMonitorRows(clusters, metricsById);
   }, [clusters, metricsById]);
 
   const columnWidths = useMemo(() => {
-    const idWidth = clamp(
-      rows.reduce((max, row) => Math.max(max, row.id.length), 2),
-      8,
-      24
-    );
-    const statusWidth = clamp(
-      rows.reduce((max, row) => Math.max(max, row.state.length), 6),
-      6,
-      14
-    );
-    const ageWidth = clamp(
-      rows.reduce((max, row) => Math.max(max, row.age.length), 3),
-      3,
-      6
-    );
-    const cpuWidth = clamp(
-      rows.reduce((max, row) => Math.max(max, row.cpuDisplay.length), 4),
-      4,
-      8
-    );
-    const memWidth = clamp(
-      rows.reduce((max, row) => Math.max(max, row.memoryDisplay.length), 3),
-      3,
-      10
-    );
-    return { idWidth, statusWidth, ageWidth, cpuWidth, memWidth };
+    return computeMonitorColumnWidths(rows);
   }, [rows]);
 
   useInput((_input, key) => {
@@ -245,14 +289,7 @@ export default function MonitorView({
           </Text>
           {rows.map((row) => {
             const isSelected = row.id === selectedId;
-            const line = [
-              padRight(row.id, columnWidths.idWidth),
-              padRight(row.state, columnWidths.statusWidth),
-              padRight(row.age, columnWidths.ageWidth),
-              padRight(row.cpuDisplay, columnWidths.cpuWidth),
-              padRight(row.memoryDisplay, columnWidths.memWidth),
-              truncate(row.cwdDisplay, 80),
-            ].join(" ");
+            const line = formatMonitorRowLine(row, columnWidths);
             return (
               <Text key={row.id} inverse={isSelected}>
                 {line}

@@ -27,6 +27,52 @@ type AppProps = {
   initialView?: ViewId;
 };
 
+export type AppInputHandlers = {
+  exit: () => void;
+  popView: () => void;
+  submit: () => void;
+  deleteChar: () => void;
+  appendText: (text: string) => void;
+};
+
+export type AppInputKey = {
+  ctrl?: boolean;
+  meta?: boolean;
+  escape?: boolean;
+  return?: boolean;
+  backspace?: boolean;
+  delete?: boolean;
+};
+
+export function handleAppInput(
+  input: string,
+  key: AppInputKey,
+  handlers: AppInputHandlers
+): void {
+  if (key.ctrl && input === "c") {
+    handlers.exit();
+    return;
+  }
+  if (key.escape) {
+    handlers.popView();
+    return;
+  }
+  if (key.return) {
+    handlers.submit();
+    return;
+  }
+  if (key.backspace || key.delete) {
+    handlers.deleteChar();
+    return;
+  }
+  if (key.ctrl || key.meta) {
+    return;
+  }
+  if (input) {
+    handlers.appendText(input);
+  }
+}
+
 function pushIfDifferent(stack: ViewId[], view: ViewId): ViewId[] {
   return activeView(stack) === view ? stack : pushView(stack, view);
 }
@@ -144,28 +190,13 @@ export default function App({
 
   useInput(
     (input, key) => {
-      if (key.ctrl && input === "c") {
-        exit();
-        return;
-      }
-      if (key.escape) {
-        setViewStack((stack) => popView(stack));
-        return;
-      }
-      if (key.return) {
-        void handleSubmit();
-        return;
-      }
-      if (key.backspace || key.delete) {
-        setInputValue((value) => value.slice(0, -1));
-        return;
-      }
-      if (key.ctrl || key.meta) {
-        return;
-      }
-      if (input) {
-        setInputValue((value) => value + input);
-      }
+      handleAppInput(input, key, {
+        exit,
+        popView: () => setViewStack((stack) => popView(stack)),
+        submit: () => void handleSubmit(),
+        deleteChar: () => setInputValue((value) => value.slice(0, -1)),
+        appendText: (text) => setInputValue((value) => value + text),
+      });
     },
     { isActive: isInputActive }
   );

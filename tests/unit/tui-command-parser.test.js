@@ -30,6 +30,20 @@ describe('TUI command parser', function () {
     assert.deepStrictEqual(parsed.args, ['123']);
   });
 
+  it('normalizes whitespace and casing for commands', function () {
+    const parsed = parseInput('  /HeLp   arg1   arg2 ');
+    assert.strictEqual(parsed.type, 'command');
+    assert.strictEqual(parsed.name, 'help');
+    assert.deepStrictEqual(parsed.args, ['arg1', 'arg2']);
+  });
+
+  it('parses slash-only input as an empty command', function () {
+    const parsed = parseInput(' /   ');
+    assert.strictEqual(parsed.type, 'command');
+    assert.strictEqual(parsed.name, '');
+    assert.deepStrictEqual(parsed.args, []);
+  });
+
   it('parses plain text input', function () {
     const parsed = parseInput('hello world');
     assert.strictEqual(parsed.type, 'text');

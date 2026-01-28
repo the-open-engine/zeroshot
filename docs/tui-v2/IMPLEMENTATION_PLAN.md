@@ -555,6 +555,17 @@ Acceptance:
 - CI is green.
 - No known terminal corruption issues on exit.
 
+Notes (2026-01-28):
+
+- Guidance mailbox is not wired into the Ink TUI yet (Milestone 7); TUI mailbox test deferred.
+
+Manual checklist results (2026-01-28):
+
+- Resize behavior: Not validated (non-interactive run).
+- Exit behavior (terminal reset): Not validated (manual verification required).
+- Running multiple clusters: Not validated (manual verification required).
+- Resume existing cluster into Cluster view: Not validated (manual verification required).
+
 ## Parallelization Map (Suggested)
 
 - Team 1:
