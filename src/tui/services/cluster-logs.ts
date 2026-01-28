@@ -25,6 +25,7 @@ export type ClusterLogLine = {
 
 type ClusterLogStreamOptions = {
   clusterId?: string | null;
+  agentId?: string | null;
   onLines: (lines: ClusterLogLine[]) => void;
   onStatus?: (status: ClusterLogStatus) => void;
   pollIntervalMs?: number;
@@ -94,6 +95,7 @@ export function normalizeAgentOutput(message: any): ClusterLogLine | null {
 
 export function createClusterLogStream({
   clusterId,
+  agentId,
   onLines,
   onStatus,
   pollIntervalMs = LOG_POLL_INTERVAL_MS,
@@ -105,6 +107,18 @@ export function createClusterLogStream({
   let initialized = false;
   let closed = false;
   let lastStatus: ClusterLogStatus | null = null;
+  const normalizedAgentId =
+    typeof agentId === "string" && agentId.trim() ? agentId.trim() : null;
+
+  const filterLines = (lines: ClusterLogLine[]) => {
+    if (!normalizedAgentId) {
+      return lines;
+    }
+    return lines.filter(
+      (line) =>
+        line.agent === normalizedAgentId || line.sender === normalizedAgentId
+    );
+  };
 
   const emitStatus = (status: ClusterLogStatus) => {
     if (!onStatus) return;
@@ -192,9 +206,11 @@ export function createClusterLogStream({
     }
 
     const messages = rows.slice().reverse();
-    const lines = messages
-      .map((message: any) => normalizeAgentOutput(message))
-      .filter(Boolean) as ClusterLogLine[];
+    const lines = filterLines(
+      messages
+        .map((message: any) => normalizeAgentOutput(message))
+        .filter(Boolean) as ClusterLogLine[]
+    );
 
     if (lines.length > 0) {
       onLines(lines);
@@ -243,9 +259,11 @@ export function createClusterLogStream({
       return;
     }
 
-    const lines = rows
-      .map((message: any) => normalizeAgentOutput(message))
-      .filter(Boolean) as ClusterLogLine[];
+    const lines = filterLines(
+      rows
+        .map((message: any) => normalizeAgentOutput(message))
+        .filter(Boolean) as ClusterLogLine[]
+    );
 
     if (lines.length > 0) {
       onLines(lines);

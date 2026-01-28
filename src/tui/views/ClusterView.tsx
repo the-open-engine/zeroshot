@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import {
   ClusterLogLine,
   ClusterLogStatus,
@@ -21,6 +21,10 @@ import {
 type ClusterViewProps = {
   provider: string | null;
   clusterId?: string | null;
+  selectedAgentId?: string | null;
+  onSelectAgent?: (agentId: string | null) => void;
+  onOpenAgent?: (agentId: string) => void;
+  isCommandInputEmpty?: boolean;
 };
 
 type ClusterLogStreamHandle = ReturnType<typeof createClusterLogStream>;
@@ -51,7 +55,14 @@ function formatTimelineEvent(event: TimelineEvent): string {
   return `[${formatTimestamp(event.timestamp)}] ${event.label}`;
 }
 
-export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
+export default function ClusterView({
+  provider,
+  clusterId,
+  selectedAgentId,
+  onSelectAgent,
+  onOpenAgent,
+  isCommandInputEmpty = false,
+}: ClusterViewProps) {
   const [logLines, setLogLines] = useState<ClusterLogLine[]>([]);
   const [logStatus, setLogStatus] = useState<ClusterLogStatus>(EMPTY_STATUS);
   const streamRef = useRef<ClusterLogStreamHandle | null>(null);
@@ -62,6 +73,33 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
   const [topology, setTopology] = useState<ClusterTopology | null>(null);
   const [topologyError, setTopologyError] = useState<string | null>(null);
   const [topologyLoading, setTopologyLoading] = useState(false);
+  const agents = topology?.agents ?? [];
+
+  useEffect(() => {
+    if (!onSelectAgent) {
+      return;
+    }
+    if (!agents.length) {
+      if (selectedAgentId) {
+        onSelectAgent(null);
+      }
+      return;
+    }
+    const hasSelection = Boolean(
+      selectedAgentId && agents.some((agent) => agent.id === selectedAgentId)
+    );
+    if (!hasSelection) {
+      onSelectAgent(agents[0].id);
+    }
+  }, [agents, onSelectAgent, selectedAgentId]);
+
+  const selectedIndex = useMemo(() => {
+    if (agents.length === 0) {
+      return -1;
+    }
+    const index = agents.findIndex((agent) => agent.id === selectedAgentId);
+    return index >= 0 ? index : 0;
+  }, [agents, selectedAgentId]);
 
   useEffect(() => {
     setLogLines([]);
@@ -251,6 +289,36 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
     return null;
   }, [clusterId, topologyError, topologyLoading, topology]);
 
+  useInput((_input, key) => {
+    if (!agents.length) {
+      return;
+    }
+    const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
+
+    if (key.upArrow) {
+      const nextIndex = Math.max(0, currentIndex - 1);
+      const nextAgent = agents[nextIndex];
+      if (nextAgent && nextAgent.id !== selectedAgentId) {
+        onSelectAgent?.(nextAgent.id);
+      }
+      return;
+    }
+    if (key.downArrow) {
+      const nextIndex = Math.min(agents.length - 1, currentIndex + 1);
+      const nextAgent = agents[nextIndex];
+      if (nextAgent && nextAgent.id !== selectedAgentId) {
+        onSelectAgent?.(nextAgent.id);
+      }
+      return;
+    }
+    if (key.return && isCommandInputEmpty) {
+      const agent = agents[currentIndex];
+      if (agent && onOpenAgent) {
+        onOpenAgent(agent.id);
+      }
+    }
+  });
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" marginBottom={1}>
@@ -266,11 +334,13 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
         ) : (
           <Box flexDirection="column">
             <Text color="gray">Agents</Text>
-            {topology?.agents.map((agent) => {
+            {agents.map((agent, index) => {
               const suffix = agent.role ? ` (${agent.role})` : "";
+              const isSelected = index === selectedIndex;
+              const prefix = isSelected ? "›" : " ";
               return (
-                <Text key={agent.id}>
-                  - {agent.id}
+                <Text key={agent.id} inverse={isSelected}>
+                  {prefix} {agent.id}
                   {suffix}
                 </Text>
               );
@@ -309,7 +379,9 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
 
       <Box flexDirection="column" marginTop={1}>
         <Text color="gray">Type /help for commands</Text>
-        <Text color="gray">Esc back, Ctrl+C exit</Text>
+        <Text color="gray">
+          Keys: Up/Down select, Enter open (empty input), Esc back
+        </Text>
       </Box>
     </Box>
   );

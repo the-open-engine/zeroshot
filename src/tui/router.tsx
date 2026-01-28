@@ -9,7 +9,10 @@ type RouterProps = {
   view: ViewId;
   provider: string | null;
   clusterId?: string | null;
+  agentId?: string | null;
   onOpenCluster?: (clusterId: string) => void;
+  onSelectAgent?: (agentId: string | null) => void;
+  onOpenAgent?: (agentId: string) => void;
   isCommandInputEmpty?: boolean;
 };
 
@@ -17,7 +20,10 @@ export default function Router({
   view,
   provider,
   clusterId,
+  agentId,
   onOpenCluster,
+  onSelectAgent,
+  onOpenAgent,
   isCommandInputEmpty,
 }: RouterProps) {
   switch (view) {
@@ -32,9 +38,20 @@ export default function Router({
         />
       );
     case "cluster":
-      return <ClusterView provider={provider} clusterId={clusterId} />;
+      return (
+        <ClusterView
+          provider={provider}
+          clusterId={clusterId}
+          selectedAgentId={agentId}
+          onSelectAgent={onSelectAgent}
+          onOpenAgent={onOpenAgent}
+          isCommandInputEmpty={isCommandInputEmpty}
+        />
+      );
     case "agent":
-      return <AgentView provider={provider} />;
+      return (
+        <AgentView provider={provider} clusterId={clusterId} agentId={agentId} />
+      );
     default:
       return <LauncherView provider={provider} />;
   }

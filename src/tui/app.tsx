@@ -42,10 +42,16 @@ export default function App({
     providerOverride ?? null
   );
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
   const isCommandInputEmpty = inputValue.length === 0;
+
+  const setClusterId = (clusterId: string | null) => {
+    setActiveClusterId(clusterId);
+    setSelectedAgentId(null);
+  };
 
   async function handleSubmit() {
     if (isDispatching) {
@@ -66,7 +72,7 @@ export default function App({
           providerOverride: provider,
           activeView: active,
           setStatus,
-          setClusterId: setActiveClusterId,
+          setClusterId,
           navigate: (view) =>
             setViewStack((stack) => pushIfDifferent(stack, view)),
         });
@@ -77,7 +83,7 @@ export default function App({
         navigate: (view) =>
           setViewStack((stack) => pushIfDifferent(stack, view)),
         setProvider: (next) => setProvider(next),
-        setClusterId: (clusterId) => setActiveClusterId(clusterId),
+        setClusterId,
         provider,
         exit,
       });
@@ -128,8 +134,13 @@ export default function App({
   }, [autoExit, exit, exitDelayMs]);
 
   function handleOpenCluster(clusterId: string) {
-    setActiveClusterId(clusterId);
+    setClusterId(clusterId);
     setViewStack((stack) => pushIfDifferent(stack, "cluster"));
+  }
+
+  function handleOpenAgent(agentId: string) {
+    setSelectedAgentId(agentId);
+    setViewStack((stack) => pushIfDifferent(stack, "agent"));
   }
 
   return (
@@ -139,7 +150,10 @@ export default function App({
           view={active}
           provider={provider}
           clusterId={activeClusterId}
+          agentId={selectedAgentId}
           onOpenCluster={handleOpenCluster}
+          onSelectAgent={setSelectedAgentId}
+          onOpenAgent={handleOpenAgent}
           isCommandInputEmpty={isCommandInputEmpty}
         />
       </Box>
