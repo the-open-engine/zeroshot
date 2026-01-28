@@ -11,7 +11,7 @@ const Orchestrator = require('../../src/orchestrator');
 const AgentWrapper = require('../../src/agent-wrapper');
 const MessageBus = require('../../src/message-bus');
 const Ledger = require('../../src/ledger');
-const { USER_GUIDANCE_AGENT } = require('../../src/guidance-topics');
+const { USER_GUIDANCE_AGENT, USER_GUIDANCE_CLUSTER } = require('../../src/guidance-topics');
 const { AttachServer } = require('../../src/attach');
 
 describe('Guidance delivery', function () {
@@ -143,6 +143,116 @@ describe('Guidance delivery', function () {
       assert.strictEqual(messages[0].metadata.delivery.status, 'injected');
       assert.strictEqual(messages[0].metadata.delivery.method, 'pty');
       assert.strictEqual(messages[0].metadata.delivery.taskId, taskId);
+    } catch (error) {
+      testError = error;
+    } finally {
+      removeTask(taskId);
+      try {
+        await server.stop('SIGTERM');
+      } catch (error) {
+        console.warn('AttachServer.stop failed in guidance-delivery test', error);
+        stopError = error;
+      }
+      fs.rmSync(socketDir, { recursive: true, force: true });
+    }
+
+    if (stopError && !testError) {
+      throw stopError;
+    }
+    if (testError) {
+      throw testError;
+    }
+  });
+
+  it('broadcasts cluster guidance with per-agent delivery results', async () => {
+    const { addTask, ensureDirs, removeTask } = await import('../../task-lib/store.js');
+    ensureDirs();
+
+    const taskId = 'task-guidance-cluster-1';
+    const socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-guidance-cluster-sock-'));
+    const socketPath = path.join(socketDir, 'attach.sock');
+
+    const server = new AttachServer({
+      id: taskId,
+      socketPath,
+      command: 'cat',
+      args: [],
+      cwd: process.cwd(),
+      env: process.env,
+      cols: 80,
+      rows: 24,
+    });
+
+    const agentTwo = new AgentWrapper(
+      {
+        id: 'agent-2',
+        role: 'implementation',
+        modelLevel: 'level1',
+        prompt: 'noop',
+        triggers: [],
+      },
+      cluster.messageBus,
+      cluster,
+      { testMode: true }
+    );
+
+    cluster.agents.push(agentTwo);
+
+    let testError;
+    let stopError;
+    try {
+      await server.start();
+
+      addTask({
+        id: taskId,
+        prompt: 'test',
+        fullPrompt: 'test',
+        cwd: process.cwd(),
+        status: 'running',
+        pid: server.pid,
+        sessionId: null,
+        logFile: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        exitCode: null,
+        error: null,
+        provider: 'claude',
+        model: null,
+        scheduleId: null,
+        socketPath,
+        attachable: true,
+      });
+
+      agent.currentTaskId = taskId;
+
+      const result = await orchestrator.sendGuidanceToCluster(
+        cluster.id,
+        'Cluster guidance message'
+      );
+
+      assert.deepStrictEqual(result.summary, { injected: 1, queued: 1, total: 2 });
+      assert.strictEqual(result.agents[agent.id].status, 'injected');
+      assert.strictEqual(result.agents[agent.id].method, 'pty');
+      assert.strictEqual(result.agents[agent.id].taskId, taskId);
+      assert.strictEqual(result.agents[agentTwo.id].status, 'unsupported');
+      assert.ok(result.agents[agentTwo.id].reason);
+
+      const clusterMessages = cluster.messageBus.query({
+        cluster_id: cluster.id,
+        topic: USER_GUIDANCE_CLUSTER,
+      });
+      const agentMessages = cluster.messageBus.query({
+        cluster_id: cluster.id,
+        topic: USER_GUIDANCE_AGENT,
+      });
+
+      assert.strictEqual(clusterMessages.length, 1);
+      assert.strictEqual(agentMessages.length, 0);
+
+      const deliveryMeta = clusterMessages[0].metadata.delivery;
+      assert.deepStrictEqual(deliveryMeta.summary, { injected: 1, queued: 1, total: 2 });
+      assert.strictEqual(deliveryMeta.agents[agent.id].status, 'injected');
+      assert.strictEqual(deliveryMeta.agents[agentTwo.id].status, 'unsupported');
     } catch (error) {
       testError = error;
     } finally {

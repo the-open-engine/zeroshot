@@ -38,7 +38,7 @@ const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
 const Ledger = require('./ledger');
 const InputHelpers = require('./input-helpers');
-const { USER_GUIDANCE_AGENT } = require('./guidance-topics');
+const { USER_GUIDANCE_AGENT, USER_GUIDANCE_CLUSTER } = require('./guidance-topics');
 const { detectProvider } = require('./issue-providers');
 const IsolationManager = require('./isolation-manager');
 const { generateName } = require('./name-generator');
@@ -1611,7 +1611,7 @@ class Orchestrator {
     return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt);
   }
 
-  _validateGuidanceArgs(clusterId, agentId, text) {
+  _validateGuidanceAgentArgs(clusterId, agentId, text) {
     if (!clusterId) {
       throw new Error('sendGuidanceToAgent: clusterId is required');
     }
@@ -1623,10 +1623,19 @@ class Orchestrator {
     }
   }
 
-  _getClusterOrThrow(clusterId) {
+  _validateGuidanceClusterArgs(clusterId, text) {
+    if (!clusterId) {
+      throw new Error('sendGuidanceToCluster: clusterId is required');
+    }
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new Error('sendGuidanceToCluster: text must be a non-empty string');
+    }
+  }
+
+  _getClusterOrThrow(clusterId, caller = 'sendGuidanceToAgent') {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
-      throw new Error(`sendGuidanceToAgent: cluster not found: ${clusterId}`);
+      throw new Error(`${caller}: cluster not found: ${clusterId}`);
     }
     return cluster;
   }
@@ -1680,12 +1689,53 @@ class Orchestrator {
     };
   }
 
+  _summarizeGuidanceDeliveries(deliveries) {
+    const agentIds = Object.keys(deliveries);
+    const summary = {
+      injected: 0,
+      queued: 0,
+      total: agentIds.length,
+    };
+
+    for (const agentId of agentIds) {
+      const delivery = deliveries[agentId];
+      if (delivery?.status === 'injected') {
+        summary.injected += 1;
+      } else {
+        summary.queued += 1;
+      }
+    }
+
+    return summary;
+  }
+
+  _buildClusterGuidanceMetadata(options, deliveries) {
+    return {
+      ...(options.metadata || {}),
+      delivery: {
+        summary: this._summarizeGuidanceDeliveries(deliveries),
+        agents: deliveries,
+        timestamp: Date.now(),
+      },
+    };
+  }
+
   _publishGuidance(cluster, clusterId, agentId, text, metadata, sender) {
     cluster.messageBus.publish({
       cluster_id: clusterId,
       topic: USER_GUIDANCE_AGENT,
       sender,
       target_agent_id: agentId,
+      content: { text },
+      metadata,
+    });
+  }
+
+  _publishClusterGuidance(cluster, clusterId, text, metadata, sender) {
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: USER_GUIDANCE_CLUSTER,
+      sender,
       content: { text },
       metadata,
     });
@@ -1704,9 +1754,9 @@ class Orchestrator {
    * @returns {Promise<{status: string, reason: string|null, method: string|null, taskId: string|null}>}
    */
   async sendGuidanceToAgent(clusterId, agentId, text, options = {}) {
-    this._validateGuidanceArgs(clusterId, agentId, text);
+    this._validateGuidanceAgentArgs(clusterId, agentId, text);
 
-    const cluster = this._getClusterOrThrow(clusterId);
+    const cluster = this._getClusterOrThrow(clusterId, 'sendGuidanceToAgent');
     const agent = this._getAgentOrThrow(cluster, agentId);
     const defaultDelivery = this._buildDefaultDelivery(agent);
     const delivery =
@@ -1716,6 +1766,40 @@ class Orchestrator {
     this._publishGuidance(cluster, clusterId, agentId, text, metadata, options.sender || 'user');
 
     return delivery;
+  }
+
+  /**
+   * Send guidance to every agent in a cluster with optional live injection.
+   * Always persists a single USER_GUIDANCE_CLUSTER in the ledger with delivery metadata.
+   * @param {string} clusterId
+   * @param {string} text
+   * @param {object} [options]
+   * @param {string} [options.sender='user']
+   * @param {object} [options.metadata]
+   * @param {number} [options.timeoutMs]
+   * @returns {Promise<{summary: {injected: number, queued: number, total: number}, agents: Record<string, {status: string, reason: string|null, method: string|null, taskId: string|null}>, timestamp: number}>}
+   */
+  async sendGuidanceToCluster(clusterId, text, options = {}) {
+    this._validateGuidanceClusterArgs(clusterId, text);
+
+    const cluster = this._getClusterOrThrow(clusterId, 'sendGuidanceToCluster');
+    const agents = Array.isArray(cluster.agents) ? cluster.agents : [];
+    const deliveries = {};
+
+    await Promise.all(
+      agents.map(async (agent) => {
+        const defaultDelivery = this._buildDefaultDelivery(agent);
+        const delivery =
+          (await this._attemptGuidanceInjection(agent, text, options.timeoutMs)) || defaultDelivery;
+        deliveries[agent.id] = delivery;
+      })
+    );
+
+    const metadata = this._buildClusterGuidanceMetadata(options, deliveries);
+
+    this._publishClusterGuidance(cluster, clusterId, text, metadata, options.sender || 'user');
+
+    return metadata.delivery;
   }
 
   _resolveFailureInfo(cluster, clusterId) {
