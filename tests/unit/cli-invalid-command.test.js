@@ -38,6 +38,10 @@ describe('CLI Invalid Command Handling', function () {
       'export',
       'watch',
       'tui',
+      'codex',
+      'claude',
+      'gemini',
+      'opencode',
       'attach',
       'agents',
       'config',
@@ -101,6 +105,22 @@ describe('CLI Invalid Command Handling', function () {
 
     it('should not prepend run for "settings" command', function () {
       assert.strictEqual(shouldPrependRun(['settings']), false);
+    });
+
+    it('should not prepend run for "codex" command', function () {
+      assert.strictEqual(shouldPrependRun(['codex']), false);
+    });
+
+    it('should not prepend run for "claude" command', function () {
+      assert.strictEqual(shouldPrependRun(['claude']), false);
+    });
+
+    it('should not prepend run for "gemini" command', function () {
+      assert.strictEqual(shouldPrependRun(['gemini']), false);
+    });
+
+    it('should not prepend run for "opencode" command', function () {
+      assert.strictEqual(shouldPrependRun(['opencode']), false);
     });
   });
 
