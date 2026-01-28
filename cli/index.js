@@ -190,7 +190,11 @@ function resolveTuiProviderOverride(options = {}) {
 function startTuiSession(options = {}) {
   const providerOverride = resolveTuiProviderOverride(options);
   const { start } = require('../lib/tui');
-  start({ autoExit: false, providerOverride });
+  start({
+    autoExit: false,
+    providerOverride,
+    initialView: options.initialView,
+  });
 }
 
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
@@ -3258,7 +3262,7 @@ program
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
   .action((_options) => {
     try {
-      startTuiSession();
+      startTuiSession({ initialView: 'monitor' });
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);
