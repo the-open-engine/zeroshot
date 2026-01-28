@@ -6,11 +6,15 @@ import {
   createClusterLogStream,
   MAX_LOG_LINES,
 } from "../services/cluster-logs";
+import { PendingAgentMessage } from "../services/agent-messages";
 
 type AgentViewProps = {
   provider: string | null;
   clusterId?: string | null;
   agentId?: string | null;
+  pendingMessages?: PendingAgentMessage[];
+  messageDraft?: string;
+  inputMode?: "command" | "message";
 };
 
 type ClusterLogStreamHandle = ReturnType<typeof createClusterLogStream>;
@@ -33,14 +37,29 @@ function formatLogLine(line: ClusterLogLine): string {
   return `[${formatTimestamp(line.timestamp)}] ${agent}${roleSuffix}: ${line.text}`;
 }
 
+function formatPendingMessage(message: PendingAgentMessage): string {
+  return `[${formatTimestamp(message.createdAt)}] pending: ${message.text}`;
+}
+
 export default function AgentView({
   provider,
   clusterId,
   agentId,
+  pendingMessages,
+  messageDraft,
+  inputMode = "message",
 }: AgentViewProps) {
   const [logLines, setLogLines] = useState<ClusterLogLine[]>([]);
   const [logStatus, setLogStatus] = useState<ClusterLogStatus>(EMPTY_STATUS);
   const streamRef = useRef<ClusterLogStreamHandle | null>(null);
+  const pending = pendingMessages ?? [];
+  const draft = messageDraft ?? "";
+  const messagePlaceholder =
+    inputMode === "command" ? "Type a command (/help)" : "Type a message";
+  const modeLabel =
+    inputMode === "command"
+      ? "Command mode (starts with /)"
+      : "Message mode (Enter queues)";
 
   useEffect(() => {
     setLogLines([]);
@@ -107,6 +126,31 @@ export default function AgentView({
       <Text color="gray">Cluster: {clusterId || "pending"}</Text>
       <Text color="gray">Agent: {agentId || "pending"}</Text>
       <Text color="gray">Provider: {provider || "auto"}</Text>
+
+      <Box flexDirection="column" marginTop={1}>
+        <Text color="yellow">Message</Text>
+        <Box>
+          <Text color="cyan">{"> "}</Text>
+          {draft ? (
+            <Text>{draft}</Text>
+          ) : (
+            <Text color="gray">{messagePlaceholder}</Text>
+          )}
+        </Box>
+        <Text color="gray">{modeLabel}</Text>
+      </Box>
+
+      <Box flexDirection="column" marginTop={1}>
+        <Text color="yellow">Queued messages</Text>
+        {pending.length === 0 ? (
+          <Text color="gray">No queued messages.</Text>
+        ) : (
+          pending.map((message) => (
+            <Text key={message.id}>{formatPendingMessage(message)}</Text>
+          ))
+        )}
+      </Box>
+
       <Box flexDirection="column" marginTop={1} flexGrow={1}>
         <Text color="yellow">Live logs</Text>
         {logLines.length === 0 ? (

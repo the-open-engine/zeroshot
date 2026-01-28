@@ -8,6 +8,11 @@ import { parseInput } from "./commands/parser";
 import { CommandResult } from "./commands/types";
 import { submitLauncherText } from "./launcher-actions";
 import {
+  PendingAgentMessage,
+  agentMessageKey,
+  createPendingAgentMessage,
+} from "./services/agent-messages";
+import {
   activeView,
   createViewStack,
   popView,
@@ -44,9 +49,23 @@ export default function App({
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<
+    Record<string, PendingAgentMessage[]>
+  >({});
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
   const isCommandInputEmpty = inputValue.length === 0;
+  const trimmedInput = inputValue.trim();
+  const isAgentView = active === "agent";
+  const isAgentCommand = isAgentView && trimmedInput.startsWith("/");
+  const agentInputMode = isAgentView
+    ? isAgentCommand
+      ? "command"
+      : "message"
+    : "command";
+  const commandPlaceholder = isAgentView
+    ? "Type a message or /command"
+    : "Type /help for commands";
 
   const setClusterId = (clusterId: string | null) => {
     setActiveClusterId(clusterId);
@@ -67,6 +86,32 @@ export default function App({
     setIsDispatching(true);
     try {
       if (parsed.type === "text") {
+        if (active === "agent") {
+          if (!activeClusterId || !selectedAgentId) {
+            setStatus({
+              tone: "info",
+              message: "Select an agent to queue messages.",
+            });
+            return;
+          }
+          const message = createPendingAgentMessage({
+            clusterId: activeClusterId,
+            agentId: selectedAgentId,
+            text: parsed.text,
+          });
+          const key = agentMessageKey(activeClusterId, selectedAgentId);
+          setPendingMessages((prev) => {
+            const nextForAgent = prev[key]
+              ? [...prev[key], message]
+              : [message];
+            return { ...prev, [key]: nextForAgent };
+          });
+          setStatus({
+            tone: "success",
+            message: `Queued message for ${selectedAgentId}.`,
+          });
+          return;
+        }
         await submitLauncherText({
           text: parsed.text,
           providerOverride: provider,
@@ -143,6 +188,14 @@ export default function App({
     setViewStack((stack) => pushIfDifferent(stack, "agent"));
   }
 
+  const pendingForActiveAgent = useMemo(() => {
+    if (!activeClusterId || !selectedAgentId) {
+      return [];
+    }
+    const key = agentMessageKey(activeClusterId, selectedAgentId);
+    return pendingMessages[key] ?? [];
+  }, [activeClusterId, pendingMessages, selectedAgentId]);
+
   return (
     <Box flexDirection="column">
       <Box flexGrow={1} flexDirection="column">
@@ -151,6 +204,9 @@ export default function App({
           provider={provider}
           clusterId={activeClusterId}
           agentId={selectedAgentId}
+          agentPendingMessages={pendingForActiveAgent}
+          agentMessageDraft={inputValue}
+          agentInputMode={agentInputMode}
           onOpenCluster={handleOpenCluster}
           onSelectAgent={setSelectedAgentId}
           onOpenAgent={handleOpenAgent}
@@ -158,7 +214,7 @@ export default function App({
         />
       </Box>
       <StatusBar status={status} provider={provider} />
-      <CommandInput value={inputValue} />
+      <CommandInput value={inputValue} placeholder={commandPlaceholder} />
     </Box>
   );
 }
