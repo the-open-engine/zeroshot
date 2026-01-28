@@ -4,12 +4,16 @@ import LauncherView from "./views/LauncherView";
 import MonitorView from "./views/MonitorView";
 import ClusterView from "./views/ClusterView";
 import AgentView from "./views/AgentView";
+import { PendingAgentMessage } from "./services/agent-messages";
 
 type RouterProps = {
   view: ViewId;
   provider: string | null;
   clusterId?: string | null;
   agentId?: string | null;
+  agentPendingMessages?: PendingAgentMessage[];
+  agentMessageDraft?: string;
+  agentInputMode?: "command" | "message";
   onOpenCluster?: (clusterId: string) => void;
   onSelectAgent?: (agentId: string | null) => void;
   onOpenAgent?: (agentId: string) => void;
@@ -21,6 +25,9 @@ export default function Router({
   provider,
   clusterId,
   agentId,
+  agentPendingMessages,
+  agentMessageDraft,
+  agentInputMode,
   onOpenCluster,
   onSelectAgent,
   onOpenAgent,
@@ -50,7 +57,14 @@ export default function Router({
       );
     case "agent":
       return (
-        <AgentView provider={provider} clusterId={clusterId} agentId={agentId} />
+        <AgentView
+          provider={provider}
+          clusterId={clusterId}
+          agentId={agentId}
+          pendingMessages={agentPendingMessages}
+          messageDraft={agentMessageDraft}
+          inputMode={agentInputMode}
+        />
       );
     default:
       return <LauncherView provider={provider} />;
