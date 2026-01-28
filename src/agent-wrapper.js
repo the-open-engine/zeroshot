@@ -16,6 +16,7 @@ const { loadSettings, validateModelAgainstMax } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const { buildContext } = require('./agent/agent-context-builder');
+const { collectQueuedGuidance } = require('./agent/guidance-queue');
 const { findMatchingTrigger, evaluateTrigger } = require('./agent/agent-trigger-evaluator');
 const { executeHook } = require('./agent/agent-hook-executor');
 const { injectInput: injectAgentInput } = require('./agent/agent-input-injector');
@@ -74,6 +75,8 @@ class AgentWrapper {
     this.lastTaskEndTime = null; // Track when last task completed (for context filtering)
     /** @type {number | null} */
     this.lastAgentStartTime = null; // Track when agent last began executing (for context filtering)
+    /** @type {number | null} */
+    this.lastGuidanceAppliedAt = null; // Track last queued guidance applied to prompt
 
     // LIVENESS DETECTION - Track output freshness to detect stuck agents
     /** @type {number | null} */
@@ -408,6 +411,12 @@ class AgentWrapper {
    */
   _buildContext(triggeringMessage) {
     const previousAgentStart = this.lastAgentStartTime;
+    const queuedGuidance = collectQueuedGuidance({
+      messageBus: this.messageBus,
+      clusterId: this.cluster.id,
+      agentId: this.id,
+      lastDeliveredAt: this.lastGuidanceAppliedAt,
+    });
     const context = buildContext({
       id: this.id,
       role: this.role,
@@ -419,6 +428,7 @@ class AgentWrapper {
       lastAgentStartTime: previousAgentStart,
       triggeringMessage,
       selectedPrompt: this._selectPrompt(),
+      queuedGuidance: queuedGuidance.guidanceBlock,
       // Pass isolation state for conditional git restriction
       worktree: this.worktree,
       isolation: this.isolation,
@@ -430,6 +440,10 @@ class AgentWrapper {
     const now = Date.now();
     this.lastAgentStartTime =
       typeof latestTimestamp === 'number' ? Math.max(now, latestTimestamp + 1) : now;
+
+    if (queuedGuidance.latestTimestamp !== null) {
+      this.lastGuidanceAppliedAt = queuedGuidance.latestTimestamp;
+    }
 
     return context;
   }
