@@ -3288,6 +3288,27 @@ program
     }
   });
 
+function registerTuiEntrypoint(commandName, providerName) {
+  program
+    .command(commandName)
+    .description(`Interactive TUI to monitor clusters (provider: ${providerName})`)
+    .allowExcessArguments(true)
+    .allowUnknownOption(true)
+    .action(() => {
+      try {
+        startTuiSession({ provider: providerName });
+      } catch (error) {
+        console.error('Error starting TUI:', error.message);
+        process.exit(1);
+      }
+    });
+}
+
+registerTuiEntrypoint('codex', 'codex');
+registerTuiEntrypoint('claude', 'claude');
+registerTuiEntrypoint('gemini', 'gemini');
+registerTuiEntrypoint('opencode', 'opencode');
+
 // Settings management
 const settingsCmd = program.command('settings').description('Manage zeroshot settings');
 
