@@ -168,8 +168,47 @@ function extractFromMarkdown(text) {
 }
 
 /**
+ * CLI metadata fields that indicate raw provider output (not agent content).
+ * These objects should be rejected - they're wrapper metadata, not actual output.
+ */
+const CLI_METADATA_FIELDS = new Set([
+  'duration_ms',
+  'duration_api_ms',
+  'total_cost_usd',
+  'session_id',
+  'num_turns',
+  'permission_denials',
+  'modelUsage',
+]);
+
+/**
+ * Check if an object looks like CLI metadata rather than agent output.
+ * CLI metadata has specific fields like duration_ms, session_id, etc.
+ *
+ * @param {object} obj - Parsed JSON object
+ * @returns {boolean} True if this looks like CLI metadata
+ */
+function isCliMetadata(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+
+  // If it has type:result, it's definitely CLI wrapper (should have been handled by extractFromResultWrapper)
+  if (obj.type === 'result') return true;
+
+  // Check for CLI-specific metadata fields
+  const keys = Object.keys(obj);
+  const metadataFieldCount = keys.filter((k) => CLI_METADATA_FIELDS.has(k)).length;
+
+  // If 2+ CLI metadata fields present, reject as CLI output
+  return metadataFieldCount >= 2;
+}
+
+/**
  * Strategy 4: Direct JSON parse
  * Handles raw JSON output (single-line or multi-line)
+ *
+ * IMPORTANT: Rejects CLI metadata objects to prevent schema validation
+ * against wrong data structure (e.g., validating {duration_ms, session_id}
+ * against agent schema expecting {summary, completionStatus}).
  *
  * @param {string} text - Text to parse
  * @returns {object|null} Parsed JSON or null
@@ -183,6 +222,10 @@ function extractDirectJson(text) {
   try {
     const parsed = JSON.parse(trimmed);
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      // Reject CLI metadata - this is wrapper output, not agent content
+      if (isCliMetadata(parsed)) {
+        return null;
+      }
       return parsed;
     }
   } catch {

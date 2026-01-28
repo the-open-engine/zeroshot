@@ -274,6 +274,43 @@ function defineDirectJsonExtractionTests() {
       assert.strictEqual(extractDirectJson('   '), null);
       assert.strictEqual(extractDirectJson(null), null);
     });
+
+    // CLI metadata rejection tests - prevent schema validation against wrong structure
+    it('should reject type:result objects (CLI wrapper)', function () {
+      const text = '{"type":"result","subtype":"success","duration_ms":1234}';
+      const result = extractDirectJson(text);
+      assert.strictEqual(result, null);
+    });
+
+    it('should reject CLI metadata with duration_ms and session_id', function () {
+      const text =
+        '{"duration_ms":5000,"session_id":"abc123","total_cost_usd":0.05,"usage":{"input_tokens":100}}';
+      const result = extractDirectJson(text);
+      assert.strictEqual(result, null);
+    });
+
+    it('should reject CLI metadata with multiple metadata fields', function () {
+      const text =
+        '{"type":"result","subtype":"error","is_error":true,"duration_ms":123,"num_turns":5,"total_cost_usd":0.1,"permission_denials":[],"errors":["some error"]}';
+      const result = extractDirectJson(text);
+      assert.strictEqual(result, null);
+    });
+
+    it('should accept normal agent output (not CLI metadata)', function () {
+      const text = '{"summary":"Task completed","completionStatus":{"canValidate":true}}';
+      const result = extractDirectJson(text);
+      assert.deepStrictEqual(result, {
+        summary: 'Task completed',
+        completionStatus: { canValidate: true },
+      });
+    });
+
+    it('should accept agent output that has one CLI-like field by coincidence', function () {
+      // If agent happens to output a field named "errors", that's fine (< 2 CLI fields)
+      const text = '{"summary":"Fixed bugs","errors":[]}';
+      const result = extractDirectJson(text);
+      assert.deepStrictEqual(result, { summary: 'Fixed bugs', errors: [] });
+    });
   });
 }
 
@@ -492,6 +529,16 @@ Done.`;
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result.complexity, 'TRIVIAL');
       assert.strictEqual(result.taskType, 'TASK');
+    });
+
+    it('REGRESSION: Claude CLI error result without actual output', function () {
+      // When Claude has an error, it returns CLI metadata without result field.
+      // This MUST return null (not the CLI metadata object), so schema validation
+      // doesn't run against wrong structure ({duration_ms, session_id} vs {summary, completionStatus})
+      const output =
+        '{"type":"result","subtype":"error","is_error":true,"duration_ms":1234,"duration_api_ms":1200,"num_turns":0,"session_id":"abc123","total_cost_usd":0.0,"usage":{},"modelUsage":null,"permission_denials":[],"uuid":"xyz","errors":["Permission denied"]}';
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result, null);
     });
   });
 }
