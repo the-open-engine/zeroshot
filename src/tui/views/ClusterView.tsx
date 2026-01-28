@@ -7,6 +7,12 @@ import {
   MAX_LOG_LINES,
 } from "../services/cluster-logs";
 import {
+  ClusterTimelineStatus,
+  createClusterTimelineStream,
+  MAX_TIMELINE_EVENTS,
+  TimelineEvent,
+} from "../services/cluster-timeline";
+import {
   ClusterTopology,
   getClusterTopology,
   TopologyEdge,
@@ -18,8 +24,10 @@ type ClusterViewProps = {
 };
 
 type ClusterLogStreamHandle = ReturnType<typeof createClusterLogStream>;
+type ClusterTimelineStreamHandle = ReturnType<typeof createClusterTimelineStream>;
 
 const EMPTY_STATUS: ClusterLogStatus = { state: "idle" };
+const EMPTY_TIMELINE_STATUS: ClusterTimelineStatus = { state: "idle" };
 const TOPOLOGY_REFRESH_INTERVAL_MS = 1500;
 
 function padTime(value: number): string {
@@ -39,10 +47,18 @@ function formatLogLine(line: ClusterLogLine): string {
   return `[${formatTimestamp(line.timestamp)}] ${agent}${roleSuffix}: ${line.text}`;
 }
 
+function formatTimelineEvent(event: TimelineEvent): string {
+  return `[${formatTimestamp(event.timestamp)}] ${event.label}`;
+}
+
 export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
   const [logLines, setLogLines] = useState<ClusterLogLine[]>([]);
   const [logStatus, setLogStatus] = useState<ClusterLogStatus>(EMPTY_STATUS);
   const streamRef = useRef<ClusterLogStreamHandle | null>(null);
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [timelineStatus, setTimelineStatus] =
+    useState<ClusterTimelineStatus>(EMPTY_TIMELINE_STATUS);
+  const timelineStreamRef = useRef<ClusterTimelineStreamHandle | null>(null);
   const [topology, setTopology] = useState<ClusterTopology | null>(null);
   const [topologyError, setTopologyError] = useState<string | null>(null);
   const [topologyLoading, setTopologyLoading] = useState(false);
@@ -76,6 +92,47 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
     return () => {
       stream.close();
       streamRef.current = null;
+    };
+  }, [clusterId]);
+
+  useEffect(() => {
+    setTimelineEvents([]);
+    setTimelineStatus(clusterId ? { state: "waiting" } : EMPTY_TIMELINE_STATUS);
+
+    if (timelineStreamRef.current) {
+      timelineStreamRef.current.close();
+      timelineStreamRef.current = null;
+    }
+
+    const stream = createClusterTimelineStream({
+      clusterId,
+      onEvents: (events) => {
+        setTimelineEvents((prev) => {
+          const merged = new Map<string, TimelineEvent>();
+          for (const event of prev) {
+            merged.set(event.id, event);
+          }
+          for (const event of events) {
+            merged.set(event.id, event);
+          }
+          const list = Array.from(merged.values()).sort(
+            (a, b) => a.timestamp - b.timestamp
+          );
+          if (list.length <= MAX_TIMELINE_EVENTS) {
+            return list;
+          }
+          return list.slice(list.length - MAX_TIMELINE_EVENTS);
+        });
+      },
+      onStatus: setTimelineStatus,
+    });
+
+    stream.start();
+    timelineStreamRef.current = stream;
+
+    return () => {
+      stream.close();
+      timelineStreamRef.current = null;
     };
   }, [clusterId]);
 
@@ -139,6 +196,21 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
     }
     return "No logs yet.";
   }, [clusterId, logStatus]);
+
+  const timelineMessage = useMemo(() => {
+    if (!clusterId) {
+      return "No cluster selected.";
+    }
+    if (timelineStatus.state === "waiting") {
+      return "Waiting for timeline...";
+    }
+    if (timelineStatus.state === "error") {
+      return timelineStatus.message
+        ? `Timeline error: ${timelineStatus.message}`
+        : "Timeline error.";
+    }
+    return "No timeline events yet.";
+  }, [clusterId, timelineStatus]);
 
   const topologyLines = useMemo(() => {
     if (!topology) {
@@ -210,6 +282,17 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
               topologyLines.map((line) => <Text key={line}>{line}</Text>)
             )}
           </Box>
+        )}
+      </Box>
+
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color="yellow">Timeline</Text>
+        {timelineEvents.length === 0 ? (
+          <Text color="gray">{timelineMessage}</Text>
+        ) : (
+          timelineEvents.map((event) => (
+            <Text key={event.id}>{formatTimelineEvent(event)}</Text>
+          ))
         )}
       </Box>
 
