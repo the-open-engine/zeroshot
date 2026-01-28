@@ -25,6 +25,7 @@ const AttachClient = require('./attach-client');
 const RingBuffer = require('./ring-buffer');
 const protocol = require('./protocol');
 const socketDiscovery = require('./socket-discovery');
+const { sendInput } = require('./send-input');
 
 module.exports = {
   AttachServer,
@@ -32,4 +33,5 @@ module.exports = {
   RingBuffer,
   protocol,
   socketDiscovery,
+  sendInput,
 };

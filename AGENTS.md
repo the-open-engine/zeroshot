@@ -28,6 +28,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Ledger (SQLite)           | `src/ledger.js`                        |
 | Guidance topics           | `src/guidance-topics.js`               |
 | Guidance mailbox helper   | `src/ledger.js`                        |
+| Guidance live injection   | `src/orchestrator.js`                  |
 | Trigger evaluation        | `src/logic-engine.js`                  |
 | Agent wrapper             | `src/agent-wrapper.js`                 |
 | Providers registry        | `src/providers/index.js`               |
@@ -112,6 +113,7 @@ Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledge
 
 - Topics: `USER_GUIDANCE_CLUSTER`, `USER_GUIDANCE_AGENT` (see `src/guidance-topics.js`).
 - Mailbox helper: `ledger.queryGuidanceMailbox()` with `messageBus.queryGuidanceMailbox()` passthrough.
+- Live injection: `Orchestrator.sendGuidanceToAgent()` uses `agent.injectInput()` to attempt PTY stdin; always persists `USER_GUIDANCE_AGENT` with `metadata.delivery` (`status: injected|unsupported`, `method: pty`, `taskId`, `reason`).
 
 ### Agent Configuration (Minimal)
 

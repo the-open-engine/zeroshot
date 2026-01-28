@@ -38,6 +38,7 @@ const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
 const Ledger = require('./ledger');
 const InputHelpers = require('./input-helpers');
+const { USER_GUIDANCE_AGENT } = require('./guidance-topics');
 const { detectProvider } = require('./issue-providers');
 const IsolationManager = require('./isolation-manager');
 const { generateName } = require('./name-generator');
@@ -1608,6 +1609,113 @@ class Orchestrator {
     }
 
     return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt);
+  }
+
+  _validateGuidanceArgs(clusterId, agentId, text) {
+    if (!clusterId) {
+      throw new Error('sendGuidanceToAgent: clusterId is required');
+    }
+    if (!agentId) {
+      throw new Error('sendGuidanceToAgent: agentId is required');
+    }
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new Error('sendGuidanceToAgent: text must be a non-empty string');
+    }
+  }
+
+  _getClusterOrThrow(clusterId) {
+    const cluster = this.clusters.get(clusterId);
+    if (!cluster) {
+      throw new Error(`sendGuidanceToAgent: cluster not found: ${clusterId}`);
+    }
+    return cluster;
+  }
+
+  _getAgentOrThrow(cluster, agentId) {
+    const agent = cluster.agents.find((candidate) => candidate.id === agentId);
+    if (!agent) {
+      throw new Error(`sendGuidanceToAgent: agent not found: ${agentId}`);
+    }
+    return agent;
+  }
+
+  _buildDefaultDelivery(agent) {
+    return {
+      status: 'unsupported',
+      reason: 'unknown',
+      method: null,
+      taskId: agent.currentTaskId || null,
+    };
+  }
+
+  async _attemptGuidanceInjection(agent, text, timeoutMs) {
+    try {
+      const result = await agent.injectInput(text, { timeoutMs });
+      return {
+        status: result.status === 'injected' ? 'injected' : 'unsupported',
+        reason: result.status === 'injected' ? null : result.reason || 'unsupported',
+        method: result.status === 'injected' ? result.method || 'pty' : result.method || null,
+        taskId: result.taskId || agent.currentTaskId || null,
+      };
+    } catch (error) {
+      return {
+        status: 'unsupported',
+        reason: error.message,
+        method: null,
+        taskId: agent.currentTaskId || null,
+      };
+    }
+  }
+
+  _buildGuidanceMetadata(options, delivery) {
+    return {
+      ...(options.metadata || {}),
+      delivery: {
+        status: delivery.status,
+        reason: delivery.reason,
+        method: delivery.method,
+        taskId: delivery.taskId,
+        timestamp: Date.now(),
+      },
+    };
+  }
+
+  _publishGuidance(cluster, clusterId, agentId, text, metadata, sender) {
+    cluster.messageBus.publish({
+      cluster_id: clusterId,
+      topic: USER_GUIDANCE_AGENT,
+      sender,
+      target_agent_id: agentId,
+      content: { text },
+      metadata,
+    });
+  }
+
+  /**
+   * Send guidance to a specific agent with optional live injection.
+   * Always persists USER_GUIDANCE_AGENT in the ledger with delivery metadata.
+   * @param {string} clusterId
+   * @param {string} agentId
+   * @param {string} text
+   * @param {object} [options]
+   * @param {string} [options.sender='user']
+   * @param {object} [options.metadata]
+   * @param {number} [options.timeoutMs]
+   * @returns {Promise<{status: string, reason: string|null, method: string|null, taskId: string|null}>}
+   */
+  async sendGuidanceToAgent(clusterId, agentId, text, options = {}) {
+    this._validateGuidanceArgs(clusterId, agentId, text);
+
+    const cluster = this._getClusterOrThrow(clusterId);
+    const agent = this._getAgentOrThrow(cluster, agentId);
+    const defaultDelivery = this._buildDefaultDelivery(agent);
+    const delivery =
+      (await this._attemptGuidanceInjection(agent, text, options.timeoutMs)) || defaultDelivery;
+    const metadata = this._buildGuidanceMetadata(options, delivery);
+
+    this._publishGuidance(cluster, clusterId, agentId, text, metadata, options.sender || 'user');
+
+    return delivery;
   }
 
   _resolveFailureInfo(cluster, clusterId) {

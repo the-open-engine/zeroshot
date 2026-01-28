@@ -18,6 +18,7 @@ const { getProvider } = require('./providers');
 const { buildContext } = require('./agent/agent-context-builder');
 const { findMatchingTrigger, evaluateTrigger } = require('./agent/agent-trigger-evaluator');
 const { executeHook } = require('./agent/agent-hook-executor');
+const { injectInput: injectAgentInput } = require('./agent/agent-input-injector');
 const {
   spawnClaudeTask,
   followClaudeTaskLogs,
@@ -540,6 +541,16 @@ class AgentWrapper {
 
     // Execute the task with resume context
     await this._executeTask(triggeringMessage);
+  }
+
+  /**
+   * Inject live input into a running agent task when possible
+   * @param {string} text
+   * @param {object} [options]
+   * @returns {Promise<{status: string, reason?: string|null, method?: string|null, taskId?: string|null}>}
+   */
+  injectInput(text, options = {}) {
+    return injectAgentInput(this, text, options);
   }
 
   /**
