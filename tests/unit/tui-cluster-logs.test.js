@@ -140,4 +140,108 @@ describe('TUI cluster logs service', function () {
     assert.ok(seen.some((line) => line.text.includes('first log')));
     assert.ok(seen.some((line) => line.text.includes('second log')));
   });
+
+  it('filters log lines by agent id', async function () {
+    const clusterId = 'cluster-test-3';
+    const zeroshotDir = path.join(tempHome, '.zeroshot');
+    fs.mkdirSync(zeroshotDir, { recursive: true });
+
+    const dbPath = path.join(zeroshotDir, `${clusterId}.db`);
+    const clustersFile = path.join(zeroshotDir, 'clusters.json');
+    fs.writeFileSync(
+      clustersFile,
+      JSON.stringify(
+        {
+          [clusterId]: {
+            config: {
+              dbPath,
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const writer = new Ledger(dbPath);
+    writer.append({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'alpha',
+      content: {
+        text: 'alpha one',
+        data: {
+          agent: 'alpha',
+          role: 'implementation',
+          line: 'alpha one',
+        },
+      },
+    });
+    writer.append({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'bravo',
+      content: {
+        text: 'bravo one',
+        data: {
+          agent: 'bravo',
+          role: 'review',
+          line: 'bravo one',
+        },
+      },
+    });
+    writer.close();
+
+    const seen = [];
+
+    const stream = createClusterLogStream({
+      clusterId,
+      agentId: 'alpha',
+      pollIntervalMs: 25,
+      onLines: (lines) => {
+        seen.push(...lines);
+      },
+    });
+
+    stream.start();
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const writer2 = new Ledger(dbPath);
+    writer2.append({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'bravo',
+      content: {
+        text: 'bravo two',
+        data: {
+          agent: 'bravo',
+          role: 'review',
+          line: 'bravo two',
+        },
+      },
+    });
+    writer2.append({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'alpha',
+      content: {
+        text: 'alpha two',
+        data: {
+          agent: 'alpha',
+          role: 'implementation',
+          line: 'alpha two',
+        },
+      },
+    });
+    writer2.close();
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    stream.close();
+
+    assert.ok(seen.some((line) => line.text.includes('alpha one')));
+    assert.ok(seen.some((line) => line.text.includes('alpha two')));
+    assert.ok(!seen.some((line) => line.text.includes('bravo')));
+  });
 });
