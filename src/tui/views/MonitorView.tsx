@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useInput } from "ink";
 import {
   ClusterSummary,
+  ClusterMetrics,
+  listClusterMetrics,
   listClusters,
 } from "../services/cluster-registry";
 
@@ -12,6 +14,7 @@ type MonitorViewProps = {
 };
 
 const REFRESH_INTERVAL_MS = 3000;
+const METRICS_REFRESH_INTERVAL_MS = 2000;
 
 function formatAge(createdAt: number, now: number): string {
   const diffSeconds = Math.max(0, Math.floor((now - createdAt) / 1000));
@@ -51,6 +54,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function formatCpu(cpuPercent: number | null | undefined): string {
+  if (!Number.isFinite(cpuPercent)) {
+    return "-";
+  }
+  return `${Number(cpuPercent).toFixed(1)}%`;
+}
+
+function formatMemory(memoryMB: number | null | undefined): string {
+  if (!Number.isFinite(memoryMB)) {
+    return "-";
+  }
+  return `${Math.round(Number(memoryMB))}MB`;
+}
+
 export default function MonitorView({
   provider,
   onOpenCluster,
@@ -58,6 +75,9 @@ export default function MonitorView({
 }: MonitorViewProps) {
   const [clusters, setClusters] = useState<ClusterSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [metricsById, setMetricsById] = useState<
+    Record<string, ClusterMetrics>
+  >({});
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -103,14 +123,47 @@ export default function MonitorView({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    async function refreshMetrics() {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const result = await listClusterMetrics();
+        if (!cancelled) {
+          setMetricsById(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setMetricsById({});
+        }
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    void refreshMetrics();
+    const interval = setInterval(refreshMetrics, METRICS_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const rows = useMemo(() => {
     const now = Date.now();
     return clusters.map((cluster) => ({
       ...cluster,
       age: formatAge(cluster.createdAt, now),
       cwdDisplay: cluster.cwd ?? "-",
+      cpuDisplay: formatCpu(metricsById[cluster.id]?.cpuPercent),
+      memoryDisplay: formatMemory(metricsById[cluster.id]?.memoryMB),
     }));
-  }, [clusters]);
+  }, [clusters, metricsById]);
 
   const columnWidths = useMemo(() => {
     const idWidth = clamp(
@@ -128,7 +181,17 @@ export default function MonitorView({
       3,
       6
     );
-    return { idWidth, statusWidth, ageWidth };
+    const cpuWidth = clamp(
+      rows.reduce((max, row) => Math.max(max, row.cpuDisplay.length), 4),
+      4,
+      8
+    );
+    const memWidth = clamp(
+      rows.reduce((max, row) => Math.max(max, row.memoryDisplay.length), 3),
+      3,
+      10
+    );
+    return { idWidth, statusWidth, ageWidth, cpuWidth, memWidth };
   }, [rows]);
 
   useInput((_input, key) => {
@@ -176,7 +239,9 @@ export default function MonitorView({
           <Text color="gray">
             {padRight("ID", columnWidths.idWidth)}{" "}
             {padRight("Status", columnWidths.statusWidth)}{" "}
-            {padRight("Age", columnWidths.ageWidth)} CWD
+            {padRight("Age", columnWidths.ageWidth)}{" "}
+            {padRight("CPU%", columnWidths.cpuWidth)}{" "}
+            {padRight("Mem", columnWidths.memWidth)} CWD
           </Text>
           {rows.map((row) => {
             const isSelected = row.id === selectedId;
@@ -184,6 +249,8 @@ export default function MonitorView({
               padRight(row.id, columnWidths.idWidth),
               padRight(row.state, columnWidths.statusWidth),
               padRight(row.age, columnWidths.ageWidth),
+              padRight(row.cpuDisplay, columnWidths.cpuWidth),
+              padRight(row.memoryDisplay, columnWidths.memWidth),
               truncate(row.cwdDisplay, 80),
             ].join(" ");
             return (

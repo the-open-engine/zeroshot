@@ -21,7 +21,7 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { listClusters } = require('../../lib/tui/services/cluster-registry');
+const { listClusters, listClusterMetrics } = require('../../lib/tui/services/cluster-registry');
 
 function createOrchestrator(summaries, clustersById) {
   return {
@@ -79,5 +79,63 @@ describe('TUI cluster registry', function () {
     assert.strictEqual(cwdById['cluster-1'], '/worktree/path');
     assert.strictEqual(cwdById['cluster-2'], '/isolation/path');
     assert.strictEqual(cwdById['cluster-3'], null);
+  });
+
+  it('aggregates CPU and memory metrics across agent pids', async function () {
+    const summaries = [
+      { id: 'cluster-a', state: 'running', createdAt: 100, agentCount: 2, messageCount: 3 },
+      { id: 'cluster-b', state: 'running', createdAt: 200, agentCount: 3, messageCount: 4 },
+    ];
+    const clustersById = {
+      'cluster-a': { agents: [{ processPid: 11 }, { processPid: 12 }] },
+      'cluster-b': { agents: [{ processPid: 21 }, { pid: 22 }, { processPid: null }] },
+    };
+    const orchestrator = createOrchestrator(summaries, clustersById);
+    const MB = 1024 * 1024;
+    const pidusage = (pids) => {
+      const stats = {
+        11: { cpu: 10, memory: 100 * MB },
+        12: { cpu: 5, memory: 200 * MB },
+        21: { cpu: 1, memory: 50 * MB },
+        22: { cpu: 2, memory: 60 * MB },
+      };
+      return Object.fromEntries(pids.map((pid) => [String(pid), stats[pid]]));
+    };
+
+    const result = await listClusterMetrics({
+      deps: {
+        getOrchestrator: () => Promise.resolve(orchestrator),
+        pidusage,
+        platform: 'darwin',
+      },
+    });
+
+    assert.strictEqual(result['cluster-a'].supported, true);
+    assert.strictEqual(result['cluster-a'].cpuPercent, 15);
+    assert.strictEqual(result['cluster-a'].memoryMB, 300);
+    assert.strictEqual(result['cluster-b'].cpuPercent, 3);
+    assert.strictEqual(result['cluster-b'].memoryMB, 110);
+  });
+
+  it('returns unsupported metrics on unsupported platforms', async function () {
+    const summaries = [
+      { id: 'cluster-a', state: 'running', createdAt: 100, agentCount: 2, messageCount: 3 },
+    ];
+    const clustersById = {
+      'cluster-a': { agents: [{ processPid: 11 }] },
+    };
+    const orchestrator = createOrchestrator(summaries, clustersById);
+
+    const result = await listClusterMetrics({
+      deps: {
+        getOrchestrator: () => Promise.resolve(orchestrator),
+        pidusage: () => ({}),
+        platform: 'win32',
+      },
+    });
+
+    assert.strictEqual(result['cluster-a'].supported, false);
+    assert.strictEqual(result['cluster-a'].cpuPercent, null);
+    assert.strictEqual(result['cluster-a'].memoryMB, null);
   });
 });
