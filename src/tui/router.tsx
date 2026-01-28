@@ -18,6 +18,12 @@ type RouterProps = {
   onSelectAgent?: (agentId: string | null) => void;
   onOpenAgent?: (agentId: string) => void;
   isCommandInputEmpty?: boolean;
+  clusterGuidanceHistory?: Array<{
+    text: string;
+    timestamp: number;
+    injectedCount: number;
+    queuedCount: number;
+  }>;
 };
 
 export default function Router({
@@ -32,6 +38,7 @@ export default function Router({
   onSelectAgent,
   onOpenAgent,
   isCommandInputEmpty,
+  clusterGuidanceHistory,
 }: RouterProps) {
   switch (view) {
     case "launcher":
@@ -53,6 +60,7 @@ export default function Router({
           onSelectAgent={onSelectAgent}
           onOpenAgent={onOpenAgent}
           isCommandInputEmpty={isCommandInputEmpty}
+          guidanceHistory={clusterGuidanceHistory}
         />
       );
     case "agent":

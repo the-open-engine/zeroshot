@@ -38,7 +38,10 @@ function formatLogLine(line: ClusterLogLine): string {
 }
 
 function formatPendingMessage(message: PendingAgentMessage): string {
-  return `[${formatTimestamp(message.createdAt)}] pending: ${message.text}`;
+  const statusLabel = message.deliveryStatus
+    ? message.deliveryStatus.status
+    : "pending";
+  return `[${formatTimestamp(message.createdAt)}] ${statusLabel}: ${message.text}`;
 }
 
 export default function AgentView({
@@ -141,9 +144,9 @@ export default function AgentView({
       </Box>
 
       <Box flexDirection="column" marginTop={1}>
-        <Text color="yellow">Queued messages</Text>
+        <Text color="yellow">Guidance messages</Text>
         {pending.length === 0 ? (
-          <Text color="gray">No queued messages.</Text>
+          <Text color="gray">No guidance messages.</Text>
         ) : (
           pending.map((message) => (
             <Text key={message.id}>{formatPendingMessage(message)}</Text>

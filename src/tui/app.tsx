@@ -13,6 +13,10 @@ import {
   createPendingAgentMessage,
 } from "./services/agent-messages";
 import {
+  sendAgentGuidance,
+  sendClusterGuidance,
+} from "./services/guidance-delivery";
+import {
   activeView,
   createViewStack,
   popView,
@@ -52,6 +56,17 @@ export default function App({
   const [pendingMessages, setPendingMessages] = useState<
     Record<string, PendingAgentMessage[]>
   >({});
+  const [clusterGuidanceHistory, setClusterGuidanceHistory] = useState<
+    Record<
+      string,
+      Array<{
+        text: string;
+        timestamp: number;
+        injectedCount: number;
+        queuedCount: number;
+      }>
+    >
+  >({});
   const active = useMemo(() => activeView(viewStack), [viewStack]);
   const isInputActive = Boolean(process.stdin.isTTY);
   const isCommandInputEmpty = inputValue.length === 0;
@@ -65,6 +80,8 @@ export default function App({
     : "command";
   const commandPlaceholder = isAgentView
     ? "Type a message or /command"
+    : active === "cluster"
+    ? "Type guidance or /command"
     : "Type /help for commands";
 
   const setClusterId = (clusterId: string | null) => {
@@ -90,7 +107,7 @@ export default function App({
           if (!activeClusterId || !selectedAgentId) {
             setStatus({
               tone: "info",
-              message: "Select an agent to queue messages.",
+              message: "Select an agent to send guidance.",
             });
             return;
           }
@@ -106,10 +123,99 @@ export default function App({
               : [message];
             return { ...prev, [key]: nextForAgent };
           });
-          setStatus({
-            tone: "success",
-            message: `Queued message for ${selectedAgentId}.`,
-          });
+
+          try {
+            const delivery = await sendAgentGuidance({
+              clusterId: activeClusterId,
+              agentId: selectedAgentId,
+              text: parsed.text,
+            });
+            const deliveryStatus = {
+              status:
+                delivery.status === "injected" ? "injected" : "queued",
+              reason: delivery.reason,
+              method: delivery.method,
+              taskId: delivery.taskId ?? null,
+            };
+            setPendingMessages((prev) => {
+              const nextForAgent = (prev[key] ?? []).map((item) =>
+                item.id === message.id
+                  ? { ...item, deliveryStatus }
+                  : item
+              );
+              return { ...prev, [key]: nextForAgent };
+            });
+            setStatus({
+              tone: delivery.status === "injected" ? "success" : "info",
+              message: `Guidance ${deliveryStatus.status} for ${selectedAgentId}.`,
+            });
+          } catch (error) {
+            const errMsg =
+              error instanceof Error
+                ? error.message
+                : "Failed to send guidance.";
+            setPendingMessages((prev) => {
+              const nextForAgent = (prev[key] ?? []).map((item) =>
+                item.id === message.id
+                  ? {
+                      ...item,
+                      deliveryStatus: {
+                        status: "error",
+                        reason: errMsg,
+                        method: null,
+                        taskId: null,
+                      },
+                    }
+                  : item
+              );
+              return { ...prev, [key]: nextForAgent };
+            });
+            setStatus({ tone: "error", message: errMsg });
+          }
+          return;
+        }
+        if (active === "cluster") {
+          if (!activeClusterId) {
+            setStatus({
+              tone: "info",
+              message: "Select a cluster to send guidance.",
+            });
+            return;
+          }
+          try {
+            const result = await sendClusterGuidance({
+              clusterId: activeClusterId,
+              text: parsed.text,
+            });
+            const { injected, queued, total } = result.summary;
+            setClusterGuidanceHistory((prev) => {
+              const history = prev[activeClusterId] ?? [];
+              const next = [
+                ...history,
+                {
+                  text: parsed.text,
+                  timestamp: Date.now(),
+                  injectedCount: injected,
+                  queuedCount: queued,
+                },
+              ];
+              return {
+                ...prev,
+                [activeClusterId]:
+                  next.length > 10 ? next.slice(next.length - 10) : next,
+              };
+            });
+            setStatus({
+              tone: injected > 0 ? "success" : "info",
+              message: `Guidance sent to ${total} agent(s): ${injected} injected, ${queued} queued.`,
+            });
+          } catch (error) {
+            const errMsg =
+              error instanceof Error
+                ? error.message
+                : "Failed to send guidance.";
+            setStatus({ tone: "error", message: errMsg });
+          }
           return;
         }
         await submitLauncherText({
@@ -196,6 +302,13 @@ export default function App({
     return pendingMessages[key] ?? [];
   }, [activeClusterId, pendingMessages, selectedAgentId]);
 
+  const guidanceHistoryForCluster = useMemo(() => {
+    if (!activeClusterId) {
+      return [];
+    }
+    return clusterGuidanceHistory[activeClusterId] ?? [];
+  }, [activeClusterId, clusterGuidanceHistory]);
+
   return (
     <Box flexDirection="column">
       <Box flexGrow={1} flexDirection="column">
@@ -211,6 +324,7 @@ export default function App({
           onSelectAgent={setSelectedAgentId}
           onOpenAgent={handleOpenAgent}
           isCommandInputEmpty={isCommandInputEmpty}
+          clusterGuidanceHistory={guidanceHistoryForCluster}
         />
       </Box>
       <StatusBar status={status} provider={provider} />

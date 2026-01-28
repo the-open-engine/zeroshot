@@ -1,3 +1,10 @@
+export type DeliveryStatus = {
+  status: string;
+  reason: string | null;
+  method: string | null;
+  taskId?: string | null;
+};
+
 export type PendingAgentMessage = {
   id: string;
   clusterId: string;
@@ -5,6 +12,7 @@ export type PendingAgentMessage = {
   text: string;
   createdAt: number;
   status: "pending";
+  deliveryStatus?: DeliveryStatus;
 };
 
 type CreatePendingAgentMessageArgs = {

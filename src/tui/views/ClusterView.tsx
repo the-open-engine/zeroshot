@@ -25,6 +25,12 @@ type ClusterViewProps = {
   onSelectAgent?: (agentId: string | null) => void;
   onOpenAgent?: (agentId: string) => void;
   isCommandInputEmpty?: boolean;
+  guidanceHistory?: Array<{
+    text: string;
+    timestamp: number;
+    injectedCount: number;
+    queuedCount: number;
+  }>;
 };
 
 type ClusterLogStreamHandle = ReturnType<typeof createClusterLogStream>;
@@ -62,6 +68,7 @@ export default function ClusterView({
   onSelectAgent,
   onOpenAgent,
   isCommandInputEmpty = false,
+  guidanceHistory = [],
 }: ClusterViewProps) {
   const [logLines, setLogLines] = useState<ClusterLogLine[]>([]);
   const [logStatus, setLogStatus] = useState<ClusterLogStatus>(EMPTY_STATUS);
@@ -365,6 +372,23 @@ export default function ClusterView({
           ))
         )}
       </Box>
+
+      {guidanceHistory.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="yellow">Guidance history</Text>
+          {guidanceHistory.map((item, index) => {
+            const statusText =
+              item.injectedCount > 0
+                ? `${item.injectedCount} injected, ${item.queuedCount} queued`
+                : `${item.queuedCount} queued`;
+            return (
+              <Text key={index}>
+                [{formatTimestamp(item.timestamp)}] {statusText}: {item.text}
+              </Text>
+            );
+          })}
+        </Box>
+      )}
 
       <Box flexDirection="column" flexGrow={1}>
         <Text color="yellow">Live logs</Text>
