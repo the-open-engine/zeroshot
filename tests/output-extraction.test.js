@@ -9,6 +9,7 @@
 const assert = require('assert');
 const {
   extractJsonFromOutput,
+  extractCliError,
   extractFromResultWrapper,
   extractFromTextEvents,
   extractFromMarkdown,
@@ -22,6 +23,7 @@ describe('Output Extraction Module', function () {
   defineTextEventExtractionTests();
   defineMarkdownExtractionTests();
   defineDirectJsonExtractionTests();
+  defineCliErrorExtractionTests();
   defineFullPipelineTests();
   defineRegressionTests();
 });
@@ -310,6 +312,131 @@ function defineDirectJsonExtractionTests() {
       const text = '{"summary":"Fixed bugs","errors":[]}';
       const result = extractDirectJson(text);
       assert.deepStrictEqual(result, { summary: 'Fixed bugs', errors: [] });
+    });
+  });
+}
+
+function defineCliErrorExtractionTests() {
+  // ============================================================================
+  // CLI ERROR EXTRACTION (ALL PROVIDERS)
+  // ============================================================================
+  describe('extractCliError', function () {
+    // Claude errors
+    it('should extract Claude error with is_error:true', function () {
+      const output = '{"type":"result","is_error":true,"errors":["Permission denied for tool X"]}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Permission denied for tool X',
+        provider: 'claude',
+      });
+    });
+
+    it('should extract Claude error with multiple errors', function () {
+      const output = '{"type":"result","is_error":true,"errors":["Error 1","Error 2"]}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Error 1; Error 2',
+        provider: 'claude',
+      });
+    });
+
+    it('should extract Claude error with subtype:error', function () {
+      const output = '{"type":"result","subtype":"error","error":"Token limit exceeded"}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Token limit exceeded',
+        provider: 'claude',
+      });
+    });
+
+    // Codex errors
+    it('should extract Codex turn.failed error', function () {
+      const output = '{"type":"turn.failed","error":{"message":"API rate limit exceeded"}}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'API rate limit exceeded',
+        provider: 'codex',
+      });
+    });
+
+    it('should extract Codex turn.failed with string error', function () {
+      const output = '{"type":"turn.failed","error":"Something went wrong"}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Something went wrong',
+        provider: 'codex',
+      });
+    });
+
+    // Gemini errors
+    it('should extract Gemini error with success:false', function () {
+      const output = '{"type":"result","success":false,"error":"Model unavailable"}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Model unavailable',
+        provider: 'gemini',
+      });
+    });
+
+    // Opencode errors
+    it('should extract Opencode session.error', function () {
+      const output = '{"type":"session.error","error":{"message":"Connection timeout"}}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Connection timeout',
+        provider: 'opencode',
+      });
+    });
+
+    it('should extract Opencode session.error with nested data', function () {
+      const output =
+        '{"type":"session.error","error":{"data":{"message":"Auth failed"},"name":"AuthError"}}';
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Auth failed',
+        provider: 'opencode',
+      });
+    });
+
+    // No error cases
+    it('should return null for successful Claude output', function () {
+      const output = '{"type":"result","subtype":"success","result":{"foo":"bar"}}';
+      const result = extractCliError(output);
+      assert.strictEqual(result, null);
+    });
+
+    it('should return null for successful Codex output', function () {
+      const output = '{"type":"turn.completed","usage":{"input_tokens":100}}';
+      const result = extractCliError(output);
+      assert.strictEqual(result, null);
+    });
+
+    it('should return null for successful Gemini output', function () {
+      const output = '{"type":"result","success":true}';
+      const result = extractCliError(output);
+      assert.strictEqual(result, null);
+    });
+
+    it('should return null for empty output', function () {
+      assert.strictEqual(extractCliError(''), null);
+      assert.strictEqual(extractCliError(null), null);
+    });
+
+    it('should return null for non-error JSON', function () {
+      const output = '{"foo":"bar","baz":123}';
+      const result = extractCliError(output);
+      assert.strictEqual(result, null);
+    });
+
+    it('should find error in multi-line NDJSON output', function () {
+      const output = `{"type":"system","subtype":"init"}
+{"type":"assistant","message":{}}
+{"type":"result","is_error":true,"errors":["Task failed"]}`;
+      const result = extractCliError(output);
+      assert.deepStrictEqual(result, {
+        error: 'Task failed',
+        provider: 'claude',
+      });
     });
   });
 }
