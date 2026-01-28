@@ -6,6 +6,11 @@ import {
   createClusterLogStream,
   MAX_LOG_LINES,
 } from "../services/cluster-logs";
+import {
+  ClusterTopology,
+  getClusterTopology,
+  TopologyEdge,
+} from "../services/cluster-topology";
 
 type ClusterViewProps = {
   provider: string | null;
@@ -15,6 +20,7 @@ type ClusterViewProps = {
 type ClusterLogStreamHandle = ReturnType<typeof createClusterLogStream>;
 
 const EMPTY_STATUS: ClusterLogStatus = { state: "idle" };
+const TOPOLOGY_REFRESH_INTERVAL_MS = 1500;
 
 function padTime(value: number): string {
   return value.toString().padStart(2, "0");
@@ -37,6 +43,9 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
   const [logLines, setLogLines] = useState<ClusterLogLine[]>([]);
   const [logStatus, setLogStatus] = useState<ClusterLogStatus>(EMPTY_STATUS);
   const streamRef = useRef<ClusterLogStreamHandle | null>(null);
+  const [topology, setTopology] = useState<ClusterTopology | null>(null);
+  const [topologyError, setTopologyError] = useState<string | null>(null);
+  const [topologyLoading, setTopologyLoading] = useState(false);
 
   useEffect(() => {
     setLogLines([]);
@@ -70,6 +79,52 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
     };
   }, [clusterId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    async function refresh() {
+      if (!clusterId) {
+        setTopology(null);
+        setTopologyError(null);
+        setTopologyLoading(false);
+        return;
+      }
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      setTopologyLoading(true);
+      try {
+        const result = await getClusterTopology(clusterId);
+        if (cancelled) {
+          return;
+        }
+        setTopology(result);
+        setTopologyError(null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Failed to load topology.";
+        setTopologyError(message);
+        setTopology(null);
+      } finally {
+        if (!cancelled) {
+          setTopologyLoading(false);
+        }
+        inFlight = false;
+      }
+    }
+
+    void refresh();
+    const interval = setInterval(refresh, TOPOLOGY_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [clusterId]);
+
   const emptyMessage = useMemo(() => {
     if (!clusterId) {
       return "No cluster selected.";
@@ -85,12 +140,77 @@ export default function ClusterView({ provider, clusterId }: ClusterViewProps) {
     return "No logs yet.";
   }, [clusterId, logStatus]);
 
+  const topologyLines = useMemo(() => {
+    if (!topology) {
+      return [] as string[];
+    }
+    const adjacency = new Map<string, string[]>();
+
+    const addEdge = (edge: TopologyEdge) => {
+      const list = adjacency.get(edge.from) ?? [];
+      if (!list.includes(edge.to)) {
+        list.push(edge.to);
+      }
+      adjacency.set(edge.from, list);
+    };
+
+    for (const edge of topology.edges) {
+      addEdge(edge);
+    }
+
+    return Array.from(adjacency.entries()).map(
+      ([from, tos]) => `${from} -> ${tos.join(", ")}`
+    );
+  }, [topology]);
+
+  const topologyMessage = useMemo(() => {
+    if (!clusterId) {
+      return "No cluster selected.";
+    }
+    if (topologyError) {
+      return `Topology error: ${topologyError}`;
+    }
+    if (topologyLoading && !topology) {
+      return "Loading topology...";
+    }
+    if (!topology || topology.agents.length === 0) {
+      return "No topology data.";
+    }
+    return null;
+  }, [clusterId, topologyError, topologyLoading, topology]);
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" marginBottom={1}>
         <Text color="cyan">Cluster</Text>
         <Text color="gray">Id: {clusterId || "pending"}</Text>
         <Text color="gray">Provider: {provider || "auto"}</Text>
+      </Box>
+
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color="yellow">Topology</Text>
+        {topologyMessage ? (
+          <Text color="gray">{topologyMessage}</Text>
+        ) : (
+          <Box flexDirection="column">
+            <Text color="gray">Agents</Text>
+            {topology?.agents.map((agent) => {
+              const suffix = agent.role ? ` (${agent.role})` : "";
+              return (
+                <Text key={agent.id}>
+                  - {agent.id}
+                  {suffix}
+                </Text>
+              );
+            })}
+            <Text color="gray">Wiring</Text>
+            {topologyLines.length === 0 ? (
+              <Text color="gray">No wiring detected.</Text>
+            ) : (
+              topologyLines.map((line) => <Text key={line}>{line}</Text>)
+            )}
+          </Box>
+        )}
       </Box>
 
       <Box flexDirection="column" flexGrow={1}>
