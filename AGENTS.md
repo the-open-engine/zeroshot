@@ -75,7 +75,9 @@ zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot watch                    # TUI dashboard
+zeroshot                          # Ink TUI (TTY only)
+zeroshot tui                      # Ink TUI explicit entry
+zeroshot watch                    # Ink TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings

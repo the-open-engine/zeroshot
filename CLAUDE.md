@@ -45,7 +45,7 @@ IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
 | Ledger (SQLite)          | `src/ledger.js`                     |
 | Trigger evaluation       | `src/logic-engine.js`               |
 | Agent wrapper            | `src/agent-wrapper.js`              |
-| TUI dashboard            | `src/tui/`                          |
+| Ink TUI                  | `src/tui/`                          |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Issue providers          | `src/issue-providers/`              |
@@ -73,7 +73,9 @@ zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot watch                    # TUI dashboard
+zeroshot                          # Ink TUI (TTY only)
+zeroshot tui                      # Ink TUI explicit entry
+zeroshot watch                    # Ink TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings

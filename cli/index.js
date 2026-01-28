@@ -2215,6 +2215,9 @@ Examples:
   ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster from plain text
   ${chalk.cyan('zeroshot run 123 -d')}                 Run in background (detached)
   ${chalk.cyan('zeroshot run 123 --docker')}           Run in Docker container (safe for e2e tests)
+  ${chalk.cyan('zeroshot')}                            Open Ink TUI (TTY only)
+  ${chalk.cyan('zeroshot tui')}                        Open Ink TUI explicitly
+  ${chalk.cyan('zeroshot watch')}                      Open Ink TUI Monitor view
   ${chalk.cyan('zeroshot task run "Fix the bug"')}     Run single-agent background task
   ${chalk.cyan('zeroshot list')}                       List all tasks and clusters
   ${chalk.cyan('zeroshot task list')}                  List tasks only
@@ -3255,10 +3258,10 @@ program
     }
   });
 
-// Watch command - interactive TUI dashboard
+// Watch command - Ink TUI Monitor view
 program
   .command('watch')
-  .description('Interactive TUI to monitor clusters')
+  .description('Open Ink TUI in Monitor view')
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
   .action((_options) => {
     try {
@@ -3269,10 +3272,10 @@ program
     }
   });
 
-// TUI command - interactive TUI dashboard
+// TUI command - Ink TUI session
 program
   .command('tui')
-  .description('Interactive TUI to monitor clusters')
+  .description('Open Ink TUI')
   .option(
     '--provider <provider>',
     'Override provider for this TUI session (claude, codex, gemini, opencode)'

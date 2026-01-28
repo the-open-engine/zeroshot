@@ -461,7 +461,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `zeroshot kill` - Force stop running cluster
 - `zeroshot clear` - Remove all stopped clusters
 - `zeroshot export` - Export conversation as JSON or Markdown
-- `zeroshot watch` - Interactive TUI dashboard (htop-style)
+- `zeroshot` - Interactive Ink TUI (TTY only)
+- `zeroshot tui` - Open Ink TUI explicitly
+- `zeroshot watch` - Open Ink TUI Monitor view (htop-style)
 - `zeroshot agents` - View available agent definitions
 - `zeroshot settings` - Manage global settings
 - Shell completion support via omelette
@@ -493,9 +495,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auto-merge support via git-pusher agent
 - Token authentication with hosts.yml fallback
 
-#### TUI Dashboard
+#### Ink TUI
 
-- Real-time cluster monitoring with blessed/blessed-contrib
+- Real-time cluster monitoring in Ink TUI
 - Cluster list with state, agent count, and message count
 - Message viewer with topic filtering
 - Agent status display with iteration tracking

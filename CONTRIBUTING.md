@@ -351,12 +351,14 @@ evaluate(script, agent, message) {
 
 ## Debugging
 
-### Debug the TUI (zeroshot watch)
+### Debug the Ink TUI (zeroshot, zeroshot tui, zeroshot watch)
+
+Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot watch` to open Monitor view directly.
 
 1. **Run in development mode**
 
    ```bash
-   zeroshot watch
+   zeroshot tui
    ```
 
 2. **Common TUI issues**
@@ -366,14 +368,14 @@ evaluate(script, agent, message) {
    | Garbled output     | Terminal too small - resize to 80x24+                 |
    | Missing agents     | Cluster not running - start with `zeroshot run` first |
    | Stats not updating | File polling delay - wait 2-5 seconds                 |
-   | Crash on resize    | Known blessed bug - restart TUI                       |
+   | Resize glitches    | Restart TUI                                           |
 
 3. **Debug TUI rendering**
 
-   Edit `src/tui/index.js` and add:
+   Edit `src/tui/index.tsx` (or the view you are working on) and add:
 
    ```javascript
-   screen.log(`Debug: ${JSON.stringify(data)}`);
+   console.error(`Debug: ${JSON.stringify(data)}`);
    ```
 
 ### Debug Agent Execution

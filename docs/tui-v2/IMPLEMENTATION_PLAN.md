@@ -8,14 +8,14 @@ Status: Draft plan (intended to become a chain of GitHub issues)
 - Ink + TypeScript for all new TUI code.
 - Do not refactor unrelated JS during the TUI project.
   - Small, targeted extraction is allowed only when it reduces duplication for TUI integration (e.g. shared `run` helpers).
-- Replace the current dashboard feature (`zeroshot watch` / `src/tui/*`) with a new TUI experience launched by `zeroshot` (no args).
+- Replace the legacy `zeroshot watch` TUI (`src/tui/*`) with a new experience launched by `zeroshot` (no args).
 - Design/visual polish is explicitly deferred; prioritize UX flows and correctness.
 
 ## Proposed Technical Approach (Replace Existing `src/tui`)
 
 ### Code organization (proposed)
 
-- `src/tui/` (TypeScript source, Ink components) - replaces the existing blessed dashboard implementation
+- `src/tui/` (TypeScript source, Ink components) - replaces the legacy TUI implementation
   - `src/tui/app.tsx` - top-level Ink app, router, global keybindings
   - `src/tui/views/*` - launcher/monitor/cluster/agent views
   - `src/tui/commands/*` - slash command parser + dispatch
@@ -51,7 +51,7 @@ Update `cli/index.js` to:
 
 Important:
 
-- We do not keep the old blessed dashboard in parallel. As soon as the Ink entrypoint exists,
+- We do not keep the legacy watch TUI in parallel. As soon as the Ink entrypoint exists,
   the old `src/tui/*` implementation is replaced/removed.
 
 ## Workstreams
@@ -92,13 +92,13 @@ Acceptance:
 
 Scope:
 
-- Replace the existing blessed dashboard implementation under `src/tui/` with a minimal Ink app
+- Replace the existing legacy TUI implementation under `src/tui/` with a minimal Ink app
   (start with a single screen that renders and exits cleanly).
 - Create `src/tui/index.tsx` (or equivalent entry) that renders a minimal Ink screen.
 - Add `tsconfig.tui.json` emitting to `lib/tui/`.
 - Add `npm run build:tui` and ensure it runs in `prepublishOnly`.
-- Repoint the `zeroshot watch` implementation to the Ink entrypoint (old dashboard is removed immediately).
-- Remove/replace any legacy dashboard tests that depend on blessed-contrib layout behavior.
+- Repoint the `zeroshot watch` implementation to the Ink entrypoint (legacy TUI is removed immediately).
+- Remove/replace any legacy TUI tests that depend on old layout behavior.
 
 Acceptance:
 
@@ -268,7 +268,7 @@ Parallelizable with:
 
 - Issue 3.2 (once cluster id is known)
 
-### Milestone 4: Monitor View (replacement for old dashboard)
+### Milestone 4: Monitor View (replacement for legacy watch view)
 
 #### Issue 4.1 - Monitor view: list clusters from orchestrator registry
 
@@ -520,16 +520,16 @@ Depends on:
 
 - Issue 8.1 (or earlier if `zeroshot tui --provider` is already done)
 
-#### Issue 8.3 - Cleanup: remove legacy dashboard docs/tests and stale references
+#### Issue 8.3 - Cleanup: remove legacy watch TUI docs/tests and stale references
 
 Scope:
 
-- Remove any remaining blessed-dashboard-specific docs, demos, and tests (after the Ink TUI replacement).
+- Remove any remaining legacy watch-TUI docs, demos, and tests (after the Ink TUI replacement).
 - Ensure CLI help text and docs point to the Ink TUI entrypoints (`zeroshot`, `zeroshot tui`, `zeroshot watch`).
 
 Acceptance:
 
-- No references remain to the old blessed dashboard behavior.
+- No references remain to the legacy watch TUI behavior.
 
 Depends on:
 
@@ -573,9 +573,9 @@ Acceptance:
 The project is considered "v2 shipped" when:
 
 - `zeroshot` launches the Ink TUI (TTY only) and can start a cluster from text.
-- `/monitor` provides a stable cluster dashboard and drill-down.
+- `/monitor` provides a stable cluster monitor view and drill-down.
 - Cluster view supports logs + topology + timeline.
-- The blessed-based dashboard is removed; `zeroshot watch` is an alias that opens the Ink TUI Monitor view.
+- The legacy watch TUI is removed; `zeroshot watch` is an alias that opens the Ink TUI Monitor view.
 
 ## Deferred / Post-v2 Candidates
 
