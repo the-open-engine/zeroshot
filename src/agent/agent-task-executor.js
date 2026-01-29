@@ -1002,6 +1002,54 @@ function handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, re
     return false;
   }
 
+  // CRITICAL: "ID not found" means task completed or was removed - FAIL-SAFE by restarting
+  // We have zero confidence about what happened:
+  // - Task may have completed successfully
+  // - Task may have failed and been cleaned up
+  // - Task may have been manually killed
+  // - Zeroshot storage may be corrupted
+  // With zero confidence → restart is safer than assuming success
+  const errorMessage = error.message || '';
+  const stderrMessage = stderr || '';
+  const isNotFound =
+    errorMessage.includes('ID not found') ||
+    errorMessage.includes('Not found in tasks') ||
+    stderrMessage.includes('ID not found') ||
+    stderrMessage.includes('Not found in tasks');
+
+  if (isNotFound) {
+    console.warn(
+      `[Agent ${agent.id}] ⚠️ Task ${taskId} not found - will restart to ensure completion`
+    );
+
+    if (!state.resolved) {
+      state.resolved = true;
+      finalizeLogFollow(agent, state);
+
+      agent._publish({
+        topic: 'AGENT_ERROR',
+        receiver: 'broadcast',
+        content: {
+          text: `Task ${taskId} not found - restarting for safety`,
+          data: {
+            taskId,
+            error: 'task_not_found',
+            role: agent.role,
+            iteration: agent.iteration,
+          },
+        },
+      });
+
+      resolve({
+        success: false,
+        output: state.output,
+        error: `Task not found - restarting for safety`,
+      });
+    }
+
+    return true;
+  }
+
   state.consecutiveExecFailures++;
   if (state.consecutiveExecFailures < MAX_STATUS_FAILURES) {
     return true;
