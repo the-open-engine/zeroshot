@@ -289,6 +289,7 @@ class Orchestrator {
       agents,
       isolation,
       autoPr: clusterData.autoPr || false,
+      issue: clusterData.issue || null,
     };
 
     this.clusters.set(clusterId, cluster);
@@ -516,6 +517,8 @@ class Orchestrator {
           autoPr: cluster.autoPr || false,
           // Persist model override for consistent agent spawning on resume
           modelOverride: cluster.modelOverride || null,
+          // Persist issue number for heroshot/external tools
+          issue: cluster.issue || null,
           // Persist isolation info (excluding manager instance which can't be serialized)
           // CRITICAL: workDir is required for resume() to recreate container with same workspace
           isolation: cluster.isolation
@@ -788,6 +791,9 @@ class Orchestrator {
 
         // Store issue provider for logging/debugging and cross-provider workflows
         cluster.issueProvider = ProviderClass.id;
+
+        // Store issue number for heroshot/external tools (avoids log parsing)
+        cluster.issue = inputData.number || null;
 
         // Log clickable issue link
         if (inputData.url) {
@@ -2779,6 +2785,7 @@ return true;`,
         id: cluster.id,
         state: state,
         createdAt: cluster.createdAt,
+        issue: cluster.issue || null,
         agentCount: cluster.agents.length,
         messageCount: cluster.messageBus.getAll(cluster.id).length,
       };
