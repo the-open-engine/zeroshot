@@ -2274,6 +2274,12 @@ program
     '--ship',
     'Full automation: worktree isolation + PR + auto-merge (use --docker for Docker)'
   )
+  .option('--pr-base <branch>', 'Target branch for PRs (default: repo default branch)')
+  .option('--merge-queue', 'Use GitHub merge queue instead of direct merge')
+  .option(
+    '--close-issue <mode>',
+    'When to close issue after merge: auto|always|never (default: from .zeroshot/settings.json or never)'
+  )
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
   .option(
     '--provider <provider>',

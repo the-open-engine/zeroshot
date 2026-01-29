@@ -289,6 +289,7 @@ class Orchestrator {
       agents,
       isolation,
       autoPr: clusterData.autoPr || false,
+      prOptions: clusterData.prOptions || null,
       issue: clusterData.issue || null,
     };
 
@@ -515,6 +516,8 @@ class Orchestrator {
           failureInfo: cluster.failureInfo || null,
           // Persist PR mode for completion agent selection
           autoPr: cluster.autoPr || false,
+          // Persist PR options for resume
+          prOptions: cluster.prOptions || null,
           // Persist model override for consistent agent spawning on resume
           modelOverride: cluster.modelOverride || null,
           // Persist issue number for heroshot/external tools
@@ -739,6 +742,15 @@ class Orchestrator {
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
       autoPr: options.autoPr || false,
+      // PR configuration options (persisted for resume)
+      prOptions:
+        options.prBase || options.mergeQueue || options.closeIssue
+          ? {
+              prBase: options.prBase || null,
+              mergeQueue: options.mergeQueue || false,
+              closeIssue: options.closeIssue || null,
+            }
+          : null,
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
       // Issue provider tracking (where issue was fetched from)
@@ -1319,7 +1331,11 @@ class Orchestrator {
       );
     }
 
-    const gitPusherConfig = generateGitPusherAgent(platform);
+    const gitPusherConfig = generateGitPusherAgent(platform, {
+      prBase: options.prBase,
+      mergeQueue: options.mergeQueue,
+      closeIssue: options.closeIssue,
+    });
 
     // Template replacement for issue context
     const issueRef = skipCloseIssue ? '' : `Closes #${inputData.number || 'unknown'}`;
@@ -2638,7 +2654,8 @@ Continue from where you left off. Review your previous output to understand what
         );
       }
 
-      const gitPusherConfig = generateGitPusherAgent(platform);
+      // Use persisted PR options from cluster state (or empty for repo settings fallback)
+      const gitPusherConfig = generateGitPusherAgent(platform, cluster.prOptions || {});
 
       // Get issue context from ledger
       const issueMsg = cluster.messageBus.ledger.findLast({ topic: 'ISSUE_OPENED' });
