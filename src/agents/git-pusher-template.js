@@ -42,6 +42,60 @@ const hasSufficientEvidence = results.every(r => {
 });
 return hasSufficientEvidence;`;
 
+const { readRepoSettings } = require('../../lib/repo-settings');
+
+function getSafeBranchName(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  // Conservative allowlist to avoid shell injection in generated CLI commands.
+  if (!/^[A-Za-z0-9._/-]+$/.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function parseBool(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === '1' || trimmed === 'true' || trimmed === 'yes') return true;
+  if (trimmed === '0' || trimmed === 'false' || trimmed === 'no') return false;
+  return null;
+}
+
+function normalizeCloseIssueMode(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === 'auto') return 'auto';
+  if (trimmed === 'always') return 'always';
+  if (trimmed === 'never') return 'never';
+  return null;
+}
+
+const repoSettingsResult = readRepoSettings(process.cwd());
+const repoSettings = repoSettingsResult.settings || {};
+const repoGithub = repoSettings.github || {};
+
+// Environment variables override repo settings for one-off runs.
+const GITHUB_PR_BASE =
+  getSafeBranchName(process.env.ZEROSHOT_GH_PR_BASE) || getSafeBranchName(repoGithub.prBase);
+const GITHUB_USE_MERGE_QUEUE =
+  process.env.ZEROSHOT_GH_USE_MERGE_QUEUE === '1' || parseBool(repoGithub.useMergeQueue) === true;
+const GITHUB_CLOSE_ISSUE_MODE =
+  normalizeCloseIssueMode(process.env.ZEROSHOT_GH_CLOSE_ISSUE) ||
+  normalizeCloseIssueMode(repoGithub.closeIssue) ||
+  (parseBool(process.env.ZEROSHOT_GH_CLOSE_ISSUE) === true ? 'always' : null) ||
+  (parseBool(repoGithub.closeIssue) === true ? 'always' : null) ||
+  'never';
+
 /**
  * Platform-specific CLI commands and terminology
  */
@@ -49,11 +103,21 @@ const PLATFORM_CONFIGS = {
   github: {
     prName: 'PR',
     prNameLower: 'pull request',
-    createCmd: 'gh pr create --title "feat: {{issue_title}}" --body "Closes #{{issue_number}}"',
-    mergeCmd: 'gh pr merge --merge --auto',
-    mergeFallbackCmd: 'gh pr merge --merge',
+    createCmd: `gh pr create${GITHUB_PR_BASE ? ` --base ${GITHUB_PR_BASE}` : ''} --title "feat: {{issue_title}}" --body "Closes #{{issue_number}}"`,
+    mergeCmd: GITHUB_USE_MERGE_QUEUE
+      ? `PR_ID="$(gh pr view --json id --jq .id)"
+gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{state}}}' -f id="$PR_ID"
+echo "Waiting for merge..."
+until gh pr view --json mergedAt --jq .mergedAt | grep -q .; do
+  sleep 20
+done`
+      : 'gh pr merge --merge --auto',
+    mergeFallbackCmd: GITHUB_USE_MERGE_QUEUE ? 'gh pr merge --merge --auto' : 'gh pr merge --merge',
     prUrlExample: 'https://github.com/owner/repo/pull/123',
     outputFields: { urlField: 'pr_url', numberField: 'pr_number', mergedField: 'merged' },
+    rebaseBranch: GITHUB_PR_BASE || 'main',
+    usesMergeQueue: GITHUB_USE_MERGE_QUEUE,
+    closeIssueMode: GITHUB_CLOSE_ISSUE_MODE,
   },
   gitlab: {
     prName: 'MR',
@@ -99,6 +163,9 @@ function generatePrompt(config) {
     prUrlExample,
     outputFields,
     requiresPrIdExtraction,
+    rebaseBranch,
+    usesMergeQueue,
+    closeIssueMode,
   } = config;
 
   // Azure-specific instructions for PR ID extraction
@@ -111,14 +178,20 @@ Save the PR ID to a variable for step 6.`
   // Azure uses different merge terminology
   const mergeDescription = requiresPrIdExtraction
     ? 'SET AUTO-COMPLETE (MANDATORY - THIS IS NOT OPTIONAL)'
-    : `MERGE THE ${prName} (MANDATORY - THIS IS NOT OPTIONAL)`;
+    : usesMergeQueue
+      ? `ENQUEUE INTO MERGE QUEUE AND WAIT UNTIL THE ${prName} IS MERGED (MANDATORY - THIS IS NOT OPTIONAL)`
+      : `MERGE THE ${prName} (MANDATORY - THIS IS NOT OPTIONAL)`;
 
   const mergeExplanation = requiresPrIdExtraction
     ? `Replace <PR_ID> with the actual PR number from step 5.
 This enables auto-complete (auto-merge when CI passes).
 
 If auto-complete is not available or you need to merge immediately:`
-    : `This sets auto-merge. If it fails (e.g., no auto-merge enabled), try:`;
+    : usesMergeQueue
+      ? `This enqueues the ${prName} into GitHub's merge queue and waits until it is merged.
+
+If enqueue fails (merge queue not enabled, missing permissions, etc.), fall back to auto-merge:`
+      : `This sets auto-merge. If it fails (e.g., no auto-merge enabled), try:`;
 
   const postMergeStatus = requiresPrIdExtraction
     ? 'PR IS CREATED AND AUTO-COMPLETE IS SET'
@@ -194,10 +267,10 @@ ${mergeFallbackCmd}
 \`\`\`
 
 🚨 IF MERGE FAILS DUE TO CONFLICTS - YOU MUST RESOLVE THEM:
-a) Pull latest main and rebase:
+a) Pull latest ${rebaseBranch || 'main'} and rebase:
    \`\`\`bash
-   git fetch origin main
-   git rebase origin/main
+   git fetch origin ${rebaseBranch || 'main'}
+   git rebase origin/${rebaseBranch || 'main'}
    \`\`\`
 b) If conflicts appear - RESOLVE THEM IMMEDIATELY:
    - Read the conflicting files
@@ -211,11 +284,44 @@ c) Force push the resolved branch:
    \`\`\`
 d) Retry merge:
    \`\`\`bash
-   ${mergeFallbackCmd}
-   \`\`\`
+${mergeFallbackCmd}
+\`\`\`
 
 REPEAT UNTIL MERGED. DO NOT GIVE UP. DO NOT SKIP. THE ${prName} MUST BE ${requiresPrIdExtraction ? 'SET TO AUTO-COMPLETE' : 'MERGED'}.
 If merge is blocked by CI, wait and retry. ${requiresPrIdExtraction ? 'The auto-complete will merge when CI passes.' : 'If blocked by reviews, set auto-merge.'}
+
+${
+  closeIssueMode !== 'never'
+    ? `### STEP 7: Close the issue (MANDATORY)
+\`\`\`bash
+if [ "{{issue_number}}" != "unknown" ]; then
+  ISSUE_STATE="$(gh issue view {{issue_number}} --json state --jq .state 2>/dev/null || true)"
+  if [ "$ISSUE_STATE" = "OPEN" ]; then
+    BASE_BRANCH="${rebaseBranch || 'main'}"
+    DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || true)"
+    SHOULD_CLOSE="0"
+    if [ "${closeIssueMode}" = "always" ]; then
+      SHOULD_CLOSE="1"
+    elif [ "${closeIssueMode}" = "auto" ]; then
+      if [ -z "$DEFAULT_BRANCH" ] || [ "$BASE_BRANCH" != "$DEFAULT_BRANCH" ]; then
+        SHOULD_CLOSE="1"
+      fi
+    fi
+
+    if [ "$SHOULD_CLOSE" = "1" ]; then
+  PR_URL="$(gh pr view --json url --jq .url 2>/dev/null || true)"
+  if [ -n "$PR_URL" ]; then
+    gh issue close {{issue_number}} --comment "Implemented in $PR_URL"
+  else
+    gh issue close {{issue_number}} --comment "Implemented"
+  fi
+    fi
+  fi
+fi
+\`\`\`
+Only do this AFTER the ${prName} is merged.`
+    : ''
+}
 
 ## CRITICAL RULES
 - Execute EVERY step in order (1, 2, 3, 4, 5, 6)

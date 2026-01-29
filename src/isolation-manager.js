@@ -20,6 +20,7 @@ const { CLAUDE_AUTH_ENV_VARS, resolveClaudeAuth } = require('../lib/settings/cla
 const { normalizeProviderName } = require('../lib/provider-names');
 const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
 const { getProvider } = require('./providers');
+const { readRepoSettings } = require('../lib/repo-settings');
 
 /**
  * Escape a string for safe use in shell commands
@@ -1345,6 +1346,32 @@ class IsolationManager {
       throw new Error(`Cannot find git root for ${workDir}`);
     }
 
+    let worktreeBaseRef = null;
+    try {
+      const repoSettingsResult = readRepoSettings(repoRoot);
+      const repoSettings = repoSettingsResult.settings || {};
+      const candidate = repoSettings.worktree?.baseRef;
+      if (typeof candidate === 'string' && /^[A-Za-z0-9._/-]+$/.test(candidate.trim())) {
+        worktreeBaseRef = candidate.trim();
+      }
+    } catch {
+      // ignore
+    }
+
+    // Best-effort ensure origin/<branch> exists locally if requested.
+    if (worktreeBaseRef && worktreeBaseRef.startsWith('origin/')) {
+      const branch = worktreeBaseRef.slice('origin/'.length);
+      try {
+        execSync(`git fetch origin ${escapeShell(branch)}`, {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+      } catch {
+        // ignore
+      }
+    }
+
     // Create branch name from cluster ID (e.g., cluster-cosmic-meteor-87 -> zeroshot/cosmic-meteor-87)
     const baseBranchName = `zeroshot/${clusterId.replace(/^cluster-/, '')}`;
     let branchName = baseBranchName;
@@ -1381,7 +1408,9 @@ class IsolationManager {
       // ignore
     }
 
-    // Create worktree with new branch based on HEAD (retry on branch collision/in-use)
+    const baseRef = worktreeBaseRef || 'HEAD';
+
+    // Create worktree with new branch based on baseRef (retry on branch collision/in-use)
     for (let attempt = 0; attempt < 10; attempt++) {
       // Best-effort delete if branch exists and is not in use by another worktree.
       try {
@@ -1396,7 +1425,7 @@ class IsolationManager {
 
       try {
         execSync(
-          `git worktree add -b ${escapeShell(branchName)} ${escapeShell(worktreePath)} HEAD`,
+          `git worktree add -b ${escapeShell(branchName)} ${escapeShell(worktreePath)} ${escapeShell(baseRef)}`,
           {
             cwd: repoRoot,
             encoding: 'utf8',
