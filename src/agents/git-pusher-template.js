@@ -80,73 +80,106 @@ function normalizeCloseIssueMode(value) {
   return null;
 }
 
-const repoSettingsResult = readRepoSettings(process.cwd());
-const repoSettings = repoSettingsResult.settings || {};
-const repoGithub = repoSettings.github || {};
+/**
+ * Resolve GitHub configuration from CLI options and repo settings.
+ * Priority: CLI options > repo settings (.zeroshot/settings.json) > defaults
+ *
+ * @param {Object} options - CLI options
+ * @param {string} [options.prBase] - Target branch for PRs
+ * @param {boolean} [options.mergeQueue] - Use GitHub merge queue
+ * @param {string} [options.closeIssue] - When to close issue: auto|always|never
+ * @returns {Object} Resolved configuration
+ */
+function resolveGitHubConfig(options = {}) {
+  const repoSettingsResult = readRepoSettings(process.cwd());
+  const repoSettings = repoSettingsResult.settings || {};
+  const repoGithub = repoSettings.github || {};
 
-// Environment variables override repo settings for one-off runs.
-const GITHUB_PR_BASE =
-  getSafeBranchName(process.env.ZEROSHOT_GH_PR_BASE) || getSafeBranchName(repoGithub.prBase);
-const GITHUB_USE_MERGE_QUEUE =
-  process.env.ZEROSHOT_GH_USE_MERGE_QUEUE === '1' || parseBool(repoGithub.useMergeQueue) === true;
-const GITHUB_CLOSE_ISSUE_MODE =
-  normalizeCloseIssueMode(process.env.ZEROSHOT_GH_CLOSE_ISSUE) ||
-  normalizeCloseIssueMode(repoGithub.closeIssue) ||
-  (parseBool(process.env.ZEROSHOT_GH_CLOSE_ISSUE) === true ? 'always' : null) ||
-  (parseBool(repoGithub.closeIssue) === true ? 'always' : null) ||
-  'never';
+  // CLI options override repo settings
+  const prBase = getSafeBranchName(options.prBase) || getSafeBranchName(repoGithub.prBase);
+
+  const useMergeQueue =
+    options.mergeQueue === true ||
+    (options.mergeQueue !== false && parseBool(repoGithub.useMergeQueue) === true);
+
+  const closeIssueMode =
+    normalizeCloseIssueMode(options.closeIssue) ||
+    normalizeCloseIssueMode(repoGithub.closeIssue) ||
+    (parseBool(repoGithub.closeIssue) === true ? 'always' : null) ||
+    'never';
+
+  return { prBase, useMergeQueue, closeIssueMode };
+}
 
 /**
- * Platform-specific CLI commands and terminology
+ * Generate platform-specific configuration based on resolved GitHub config.
+ *
+ * @param {string} platform - Platform ID ('github', 'gitlab', 'azure-devops')
+ * @param {Object} config - Resolved GitHub config from resolveGitHubConfig()
+ * @returns {Object|null} Platform configuration or null if unsupported
  */
-const PLATFORM_CONFIGS = {
-  github: {
-    prName: 'PR',
-    prNameLower: 'pull request',
-    createCmd: `gh pr create${GITHUB_PR_BASE ? ` --base ${GITHUB_PR_BASE}` : ''} --title "feat: {{issue_title}}" --body "Closes #{{issue_number}}"`,
-    mergeCmd: GITHUB_USE_MERGE_QUEUE
-      ? `PR_ID="$(gh pr view --json id --jq .id)"
+function getPlatformConfig(platform, config = {}) {
+  const { prBase, useMergeQueue, closeIssueMode } = config;
+
+  const PLATFORM_CONFIGS = {
+    github: {
+      prName: 'PR',
+      prNameLower: 'pull request',
+      createCmd: `gh pr create${prBase ? ` --base ${prBase}` : ''} --title "feat: {{issue_title}}" --body "Closes #{{issue_number}}"`,
+      mergeCmd: useMergeQueue
+        ? `PR_ID="$(gh pr view --json id --jq .id)"
 gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{state}}}' -f id="$PR_ID"
 echo "Waiting for merge..."
 until gh pr view --json mergedAt --jq .mergedAt | grep -q .; do
   sleep 20
 done`
-      : 'gh pr merge --merge --auto',
-    mergeFallbackCmd: GITHUB_USE_MERGE_QUEUE ? 'gh pr merge --merge --auto' : 'gh pr merge --merge',
-    prUrlExample: 'https://github.com/owner/repo/pull/123',
-    outputFields: { urlField: 'pr_url', numberField: 'pr_number', mergedField: 'merged' },
-    rebaseBranch: GITHUB_PR_BASE || 'main',
-    usesMergeQueue: GITHUB_USE_MERGE_QUEUE,
-    closeIssueMode: GITHUB_CLOSE_ISSUE_MODE,
-  },
-  gitlab: {
-    prName: 'MR',
-    prNameLower: 'merge request',
-    createCmd:
-      'glab mr create --title "feat: {{issue_title}}" --description "Closes #{{issue_number}}"',
-    mergeCmd: 'glab mr merge --auto-merge',
-    mergeFallbackCmd: 'glab mr merge',
-    prUrlExample: 'https://gitlab.com/owner/repo/-/merge_requests/123',
-    outputFields: { urlField: 'mr_url', numberField: 'mr_number', mergedField: 'merged' },
-  },
-  'azure-devops': {
-    prName: 'PR',
-    prNameLower: 'pull request',
-    createCmd:
-      'az repos pr create --title "feat: {{issue_title}}" --description "Closes #{{issue_number}}"',
-    mergeCmd: 'az repos pr update --id <PR_ID> --auto-complete true',
-    mergeFallbackCmd: 'az repos pr update --id <PR_ID> --status completed',
-    prUrlExample: 'https://dev.azure.com/org/project/_git/repo/pullrequest/123',
-    outputFields: {
-      urlField: 'pr_url',
-      numberField: 'pr_number',
-      mergedField: 'merged',
-      autoCompleteField: 'auto_complete',
+        : 'gh pr merge --merge --auto',
+      mergeFallbackCmd: useMergeQueue ? 'gh pr merge --merge --auto' : 'gh pr merge --merge',
+      prUrlExample: 'https://github.com/owner/repo/pull/123',
+      outputFields: { urlField: 'pr_url', numberField: 'pr_number', mergedField: 'merged' },
+      rebaseBranch: prBase || 'main',
+      usesMergeQueue: useMergeQueue,
+      closeIssueMode: closeIssueMode || 'never',
     },
-    // Azure requires extracting PR ID from create output
-    requiresPrIdExtraction: true,
-  },
-};
+    gitlab: {
+      prName: 'MR',
+      prNameLower: 'merge request',
+      createCmd:
+        'glab mr create --title "feat: {{issue_title}}" --description "Closes #{{issue_number}}"',
+      mergeCmd: 'glab mr merge --auto-merge',
+      mergeFallbackCmd: 'glab mr merge',
+      prUrlExample: 'https://gitlab.com/owner/repo/-/merge_requests/123',
+      outputFields: { urlField: 'mr_url', numberField: 'mr_number', mergedField: 'merged' },
+      closeIssueMode: closeIssueMode || 'never',
+    },
+    'azure-devops': {
+      prName: 'PR',
+      prNameLower: 'pull request',
+      createCmd:
+        'az repos pr create --title "feat: {{issue_title}}" --description "Closes #{{issue_number}}"',
+      mergeCmd: 'az repos pr update --id <PR_ID> --auto-complete true',
+      mergeFallbackCmd: 'az repos pr update --id <PR_ID> --status completed',
+      prUrlExample: 'https://dev.azure.com/org/project/_git/repo/pullrequest/123',
+      outputFields: {
+        urlField: 'pr_url',
+        numberField: 'pr_number',
+        mergedField: 'merged',
+        autoCompleteField: 'auto_complete',
+      },
+      // Azure requires extracting PR ID from create output
+      requiresPrIdExtraction: true,
+      closeIssueMode: closeIssueMode || 'never',
+    },
+  };
+
+  return PLATFORM_CONFIGS[platform] || null;
+}
+
+/**
+ * Get list of supported platforms for git-pusher
+ * @returns {string[]} Array of platform IDs
+ */
+const SUPPORTED_PLATFORMS = ['github', 'gitlab', 'azure-devops'];
 
 /**
  * Generate the prompt for a specific platform
@@ -343,14 +376,20 @@ ${finalOutputNote}`;
  * Generate a git-pusher agent configuration for a specific platform
  *
  * @param {string} platform - Platform ID ('github', 'gitlab', 'azure-devops')
+ * @param {Object} [options] - CLI options for GitHub configuration
+ * @param {string} [options.prBase] - Target branch for PRs
+ * @param {boolean} [options.mergeQueue] - Use GitHub merge queue
+ * @param {string} [options.closeIssue] - When to close issue: auto|always|never
  * @returns {Object} Agent configuration object
  * @throws {Error} If platform is not supported
  */
-function generateGitPusherAgent(platform) {
-  const config = PLATFORM_CONFIGS[platform];
+function generateGitPusherAgent(platform, options = {}) {
+  // Resolve config from CLI options and repo settings
+  const resolvedConfig = resolveGitHubConfig(options);
+  const platformConfig = getPlatformConfig(platform, resolvedConfig);
 
-  if (!config) {
-    const supported = Object.keys(PLATFORM_CONFIGS).join(', ');
+  if (!platformConfig) {
+    const supported = SUPPORTED_PLATFORMS.join(', ');
     throw new Error(`Unsupported platform '${platform}'. Supported: ${supported}`);
   }
 
@@ -368,7 +407,7 @@ function generateGitPusherAgent(platform) {
         action: 'execute_task',
       },
     ],
-    prompt: generatePrompt(config),
+    prompt: generatePrompt(platformConfig),
     hooks: {
       onComplete: {
         action: 'publish_message',
@@ -392,7 +431,7 @@ function generateGitPusherAgent(platform) {
  * @returns {string[]} Array of platform IDs
  */
 function getSupportedPlatforms() {
-  return Object.keys(PLATFORM_CONFIGS);
+  return SUPPORTED_PLATFORMS;
 }
 
 /**
@@ -401,7 +440,7 @@ function getSupportedPlatforms() {
  * @returns {boolean}
  */
 function isPlatformSupported(platform) {
-  return platform in PLATFORM_CONFIGS;
+  return SUPPORTED_PLATFORMS.includes(platform);
 }
 
 module.exports = {
@@ -410,5 +449,7 @@ module.exports = {
   isPlatformSupported,
   // Export for testing
   SHARED_TRIGGER_SCRIPT,
-  PLATFORM_CONFIGS,
+  SUPPORTED_PLATFORMS,
+  resolveGitHubConfig,
+  getPlatformConfig,
 };
