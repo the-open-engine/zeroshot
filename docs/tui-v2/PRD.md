@@ -1,4 +1,4 @@
-# Zeroshot TUI v2 (Ink) - PRD
+# Zeroshot TUI v2 (Ratatui) - PRD
 
 Date: 2026-01-25
 Owner: Zeroshot CLI
@@ -6,7 +6,12 @@ Status: Draft
 
 ## Summary
 
-Build a new terminal UI (TUI) for Zeroshot using Ink + TypeScript. This fully replaces the legacy `zeroshot watch` TUI with a single interactive experience launched by running `zeroshot` (no args).
+Build a new terminal UI (TUI) for Zeroshot using Rust + Ratatui for fast rendering. This fully replaces the legacy `zeroshot watch` TUI with a single interactive experience launched by running `zeroshot` (no args).
+
+Implementation direction (non-user-facing):
+
+- **Frontend**: Rust (ratatui) renders the UI and owns terminal input/layout.
+- **Backend**: a headless Node/TypeScript "TUI backend" process exposes a small RPC API for reading cluster state and issuing commands (start/stop/kill/guidance).
 
 Core workflow:
 
@@ -21,7 +26,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 
 ## Goals
 
-1. Replace the legacy `zeroshot watch` TUI with an Ink-based experience.
+1. Replace the legacy `zeroshot watch` TUI with a Ratatui-based experience.
 2. Make `zeroshot` (no args) a first-class interactive mode for:
    - launching clusters from free-form text
    - monitoring all running clusters
@@ -29,7 +34,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 3. Add a command palette/input model:
    - plain text launches a cluster
    - `/`-prefixed commands run zeroshot operations without re-typing `zeroshot`
-4. Establish the first production TypeScript surface in the Zeroshot codebase (TUI + required adapters), without refactoring unrelated JS.
+4. Keep the existing JS runtime intact, while introducing a small, typed TUI backend surface (TypeScript) that can be reused by multiple frontends over time.
 
 ## Non-Goals (for v2 MVP)
 
@@ -78,7 +83,7 @@ Notes:
 
 ### `zeroshot watch`
 
-`zeroshot watch` remains as a convenience alias that opens the new Ink TUI directly in Monitor view.
+`zeroshot watch` remains as a convenience alias that opens the new Ratatui TUI directly in Monitor view.
 
 The legacy watch TUI implementation is removed (no parallel legacy UI).
 
@@ -102,8 +107,8 @@ Input semantics:
 
 On Enter with non-command input:
 
-- Start cluster
-- Transition to Cluster Focused View for that cluster
+- Start cluster (detached by default; clusters keep running after the TUI exits)
+- Transition to Cluster Focused View for that cluster (best effort; tolerate a short delay until the cluster appears in the registry)
 
 ### 2) Monitor View
 
