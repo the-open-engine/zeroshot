@@ -722,6 +722,24 @@ function setupDaemonCleanup(orchestrator, clusterId) {
 
   process.on('SIGTERM', () => cleanup('SIGTERM'));
   process.on('SIGINT', () => cleanup('SIGINT'));
+
+  // CRITICAL: Monitor cluster state for completion
+  // When CLUSTER_COMPLETE triggers orchestrator.stop(), the cluster state
+  // changes to 'stopped' but no signal is sent. Poll for this state change.
+  const checkInterval = setInterval(() => {
+    try {
+      const status = orchestrator.getStatus(clusterId);
+      if (status.state === 'stopped' || status.state === 'completed') {
+        clearInterval(checkInterval);
+        console.log(`\n[DAEMON] Cluster ${clusterId} completed, exiting.`);
+        process.exit(0);
+      }
+    } catch {
+      // Cluster no longer exists, exit gracefully
+      clearInterval(checkInterval);
+      process.exit(0);
+    }
+  }, 1000);
 }
 
 function readClusterTokenTotals(orchestrator, clusterId) {
