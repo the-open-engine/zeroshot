@@ -271,6 +271,7 @@ export default [
       'cluster-hooks/**',
       'hooks/**',
       'lib/tui/**',
+      'lib/tui-backend/**',
     ],
   },
   prettierConfig,
