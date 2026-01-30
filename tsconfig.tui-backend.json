@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "jsx": "react",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "moduleDetection": "force",
+    "outDir": "lib/tui-backend",
+    "rootDir": "src/tui-backend"
+  },
+  "include": ["src/tui-backend/**/*.ts"],
+  "exclude": ["node_modules", "lib"]
+}

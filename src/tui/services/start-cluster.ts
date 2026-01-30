@@ -1,1 +1,4 @@
-export { startClusterFromText, startClusterFromIssue } from "../../../lib/start-cluster";
+const backend = require("../../../lib/tui-backend/services/start-cluster");
+
+export const startClusterFromText = backend.startClusterFromText;
+export const startClusterFromIssue = backend.startClusterFromIssue;

@@ -1,3 +1,5 @@
+const backend = require("../../../lib/tui-backend/services/guidance-delivery");
+
 type GuidanceDeliveryResult = {
   status: string;
   reason: string | null;
@@ -21,16 +23,6 @@ type GuidanceDeliveryDeps = {
   getOrchestrator?: () => Promise<any>;
 };
 
-let orchestratorPromise: Promise<any> | null = null;
-
-async function getOrchestrator() {
-  if (!orchestratorPromise) {
-    const Orchestrator = require("../../../src/orchestrator");
-    orchestratorPromise = Orchestrator.create({ quiet: true });
-  }
-  return orchestratorPromise;
-}
-
 type SendAgentGuidanceArgs = {
   clusterId: string;
   agentId: string;
@@ -39,20 +31,6 @@ type SendAgentGuidanceArgs = {
   deps?: GuidanceDeliveryDeps;
 };
 
-export async function sendAgentGuidance({
-  clusterId,
-  agentId,
-  text,
-  timeoutMs,
-  deps = {},
-}: SendAgentGuidanceArgs): Promise<GuidanceDeliveryResult> {
-  const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
-  const orchestrator = await getOrchestratorImpl();
-  return await orchestrator.sendGuidanceToAgent(clusterId, agentId, text, {
-    timeoutMs,
-  });
-}
-
 type SendClusterGuidanceArgs = {
   clusterId: string;
   text: string;
@@ -60,15 +38,10 @@ type SendClusterGuidanceArgs = {
   deps?: GuidanceDeliveryDeps;
 };
 
-export async function sendClusterGuidance({
-  clusterId,
-  text,
-  timeoutMs,
-  deps = {},
-}: SendClusterGuidanceArgs): Promise<ClusterGuidanceDelivery> {
-  const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
-  const orchestrator = await getOrchestratorImpl();
-  return await orchestrator.sendGuidanceToCluster(clusterId, text, {
-    timeoutMs,
-  });
-}
+export const sendAgentGuidance: (
+  args: SendAgentGuidanceArgs
+) => Promise<GuidanceDeliveryResult> = backend.sendAgentGuidance;
+
+export const sendClusterGuidance: (
+  args: SendClusterGuidanceArgs
+) => Promise<ClusterGuidanceDelivery> = backend.sendClusterGuidance;

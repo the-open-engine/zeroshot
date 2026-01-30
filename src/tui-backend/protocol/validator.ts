@@ -3,7 +3,7 @@ const {
   PROTOCOL_VERSION,
   RPC_ERROR_CODES,
   RPC_ERROR_MESSAGES,
-} = require("./constants.ts");
+} = require("./constants");
 const {
   errorSchema,
   jsonRpcRequestBase,
@@ -12,10 +12,10 @@ const {
   REQUEST_SCHEMAS,
   RESPONSE_SCHEMAS,
   NOTIFICATION_SCHEMAS,
-} = require("./schemas.ts");
+} = require("./schemas");
 
-const buildError = (code, message, errors) => {
-  const data = {};
+const buildError = (code, message, errors = []) => {
+  const data = Object.create(null);
   if (errors && errors.length) {
     const detail = errors
       .map((err) => {
@@ -26,7 +26,7 @@ const buildError = (code, message, errors) => {
     if (detail) {
       data.detail = detail;
     }
-    const fields = {};
+    const fields = Object.create(null);
     for (const err of errors) {
       const key = err.instancePath || err.schemaPath || "";
       if (key && !fields[key]) {
@@ -37,7 +37,9 @@ const buildError = (code, message, errors) => {
       data.fields = fields;
     }
   }
-  const error = { code, message };
+  const error = Object.create(null);
+  error.code = code;
+  error.message = message;
   if (Object.keys(data).length) {
     error.data = data;
   }
@@ -47,7 +49,7 @@ const buildError = (code, message, errors) => {
 const compileSchemaMap = (ajv, schemas) => {
   const validators = new Map();
   for (const [key, schema] of Object.entries(schemas)) {
-    validators.set(key, ajv.compile(schema));
+    validators.set(key, /** @type {any} */ (ajv.compile(schema)));
   }
   return validators;
 };
@@ -60,10 +62,14 @@ const createValidator = () => {
     removeAdditional: false,
   });
 
-  const validateRequestBase = ajv.compile(jsonRpcRequestBase);
-  const validateNotificationBase = ajv.compile(jsonRpcNotificationBase);
-  const validateErrorObject = ajv.compile(errorSchema);
-  const validateErrorResponse = ajv.compile(buildErrorResponseSchema());
+  const validateRequestBase = /** @type {any} */ (ajv.compile(jsonRpcRequestBase));
+  const validateNotificationBase = /** @type {any} */ (
+    ajv.compile(jsonRpcNotificationBase)
+  );
+  const validateErrorObject = /** @type {any} */ (ajv.compile(errorSchema));
+  const validateErrorResponse = /** @type {any} */ (
+    ajv.compile(buildErrorResponseSchema())
+  );
 
   const requestValidators = compileSchemaMap(ajv, REQUEST_SCHEMAS);
   const responseValidators = compileSchemaMap(ajv, RESPONSE_SCHEMAS);

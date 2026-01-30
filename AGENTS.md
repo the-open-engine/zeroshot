@@ -44,6 +44,11 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | TUI CLI compat wrapper       | `src/tui/commands/cli-compat.ts`           |
 | Ink TUI views                | `src/tui/views/`                           |
 | Ink TUI build output         | `lib/tui/`                                 |
+| TUI backend entrypoint       | `src/tui-backend/index.ts`                 |
+| TUI backend server           | `src/tui-backend/server.ts`                |
+| TUI backend services         | `src/tui-backend/services/`                |
+| TUI backend subscriptions    | `src/tui-backend/subscriptions/`           |
+| TUI backend build output     | `lib/tui-backend/`                         |
 | TUI start-cluster helper     | `lib/start-cluster.js`                     |
 | TUI start-cluster service    | `src/tui/services/start-cluster.ts`        |
 | TUI launcher actions         | `src/tui/launcher-actions.ts`              |
