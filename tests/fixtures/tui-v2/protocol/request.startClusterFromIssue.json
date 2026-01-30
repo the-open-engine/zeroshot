@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "startClusterFromIssue",
+  "params": {
+    "ref": "covibes/zeroshot#240",
+    "providerOverride": null
+  }
+}

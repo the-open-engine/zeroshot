@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 100,
+  "method": "getClusterSummary",
+  "params": {
+    "clusterId": 123
+  }
+}

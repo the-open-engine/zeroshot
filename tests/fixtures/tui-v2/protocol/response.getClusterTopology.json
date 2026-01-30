@@ -1,0 +1,33 @@
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "result": {
+    "topology": {
+      "agents": [
+        { "id": "planner", "role": "planning" },
+        { "id": "worker", "role": "implementation" }
+      ],
+      "edges": [
+        {
+          "from": "system",
+          "to": "ISSUE_OPENED",
+          "topic": "ISSUE_OPENED",
+          "kind": "source"
+        },
+        {
+          "from": "ISSUE_OPENED",
+          "to": "planner",
+          "topic": "ISSUE_OPENED",
+          "kind": "trigger"
+        },
+        {
+          "from": "planner",
+          "to": "PLAN_READY",
+          "topic": "PLAN_READY",
+          "kind": "publish"
+        }
+      ],
+      "topics": ["ISSUE_OPENED", "PLAN_READY"]
+    }
+  }
+}

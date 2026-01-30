@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "sendGuidanceToAgent",
+  "params": {
+    "clusterId": "cluster-123",
+    "agentId": "worker",
+    "text": "Focus on tests",
+    "timeoutMs": 5000
+  }
+}

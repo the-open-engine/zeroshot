@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "clusterLogLines",
+  "params": {
+    "subscriptionId": "sub-logs-1",
+    "clusterId": "cluster-123",
+    "lines": [
+      {
+        "id": "log-1",
+        "timestamp": 1769811111000,
+        "text": "Agent output",
+        "agent": "worker",
+        "role": "implementation",
+        "sender": "worker"
+      }
+    ],
+    "droppedCount": 0
+  }
+}

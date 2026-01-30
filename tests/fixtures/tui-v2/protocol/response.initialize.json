@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": 1,
+    "server": {
+      "name": "zeroshot-backend",
+      "version": "5.4.0"
+    },
+    "capabilities": {
+      "methods": [
+        "initialize",
+        "listClusters",
+        "getClusterSummary",
+        "listClusterMetrics",
+        "startClusterFromText",
+        "startClusterFromIssue",
+        "sendGuidanceToAgent",
+        "sendGuidanceToCluster",
+        "subscribeClusterLogs",
+        "subscribeClusterTimeline",
+        "getClusterTopology"
+      ],
+      "notifications": ["clusterLogLines", "clusterTimelineEvents"]
+    }
+  }
+}

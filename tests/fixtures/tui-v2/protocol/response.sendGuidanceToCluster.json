@@ -1,0 +1,28 @@
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+    "result": {
+      "summary": {
+        "injected": 1,
+        "queued": 0,
+        "total": 1
+      },
+      "agents": {
+        "worker": {
+          "status": "injected",
+          "reason": null,
+          "method": "pty",
+          "taskId": "task-1"
+        },
+        "validator": {
+          "status": "queued",
+          "reason": "busy",
+          "method": null,
+          "taskId": null
+        }
+      },
+      "timestamp": 1769811111000
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "result": {
+      "status": "injected",
+      "reason": null,
+      "method": "pty",
+      "taskId": "task-1"
+    }
+  }
+}
