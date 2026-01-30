@@ -34,6 +34,9 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
+    // Prevent TypeScript from auto-inferring "type libraries" for every dependency it can see
+    // up the directory tree (monorepo parent node_modules, etc).
+    "types": ["node"],
 
     // Skip type checking of declaration files
     "skipLibCheck": true,
@@ -52,10 +55,5 @@
     "cluster-scripts/**/*",
     "test/**/*"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "coverage",
-    "task-lib"
-  ]
+  "exclude": ["node_modules", "dist", "coverage", "task-lib"]
 }
