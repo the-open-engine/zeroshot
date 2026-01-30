@@ -10,6 +10,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Rust build output
+tui-rs/target/
+
 # Environment
 .env
 .env.local

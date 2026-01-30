@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": 1,
+    "client": {
+      "name": "zeroshot-tui",
+      "version": "0.1.0",
+      "pid": 4242
+    },
+    "capabilities": {
+      "wantsMetrics": true,
+      "wantsTopology": false
+    }
+  }
+}

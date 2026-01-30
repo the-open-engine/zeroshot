@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "result": {
+    "subscriptionId": "sub-logs-1"
+  }
+}

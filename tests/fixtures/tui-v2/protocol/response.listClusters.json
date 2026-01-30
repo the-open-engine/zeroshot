@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "clusters": [
+      {
+        "id": "cluster-123",
+        "state": "running",
+        "provider": "codex",
+        "createdAt": 1769810000000,
+        "agentCount": 3,
+        "messageCount": 120,
+        "cwd": "/Users/tom/.zeroshot/worktrees/prime-falcon-67"
+      },
+      {
+        "id": "cluster-456",
+        "state": "idle",
+        "provider": null,
+        "createdAt": 1769810500000,
+        "agentCount": 0,
+        "messageCount": 0,
+        "cwd": null
+      }
+    ]
+  }
+}

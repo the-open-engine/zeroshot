@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "result": {
+    "subscriptionId": "sub-timeline-1"
+  }
+}

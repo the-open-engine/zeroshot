@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "method": "sendGuidanceToCluster",
+  "params": {
+    "clusterId": "cluster-123",
+    "text": "Ship it",
+    "timeoutMs": 5000
+  }
+}

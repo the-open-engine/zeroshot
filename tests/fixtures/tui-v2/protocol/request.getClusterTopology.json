@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "method": "getClusterTopology",
+  "params": {
+    "clusterId": "cluster-123"
+  }
+}

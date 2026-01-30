@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "subscribeClusterLogs",
+  "params": {
+    "clusterId": "cluster-123",
+    "agentId": "worker"
+  }
+}

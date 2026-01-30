@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "startClusterFromText",
+  "params": {
+    "text": "Implement the requested feature",
+    "providerOverride": "codex",
+    "clusterId": "cluster-789"
+  }
+}
