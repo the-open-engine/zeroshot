@@ -38,7 +38,6 @@ const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
 const Ledger = require('./ledger');
 const InputHelpers = require('./input-helpers');
-const { USER_GUIDANCE_AGENT, USER_GUIDANCE_CLUSTER } = require('./guidance-topics');
 const { detectProvider } = require('./issue-providers');
 const IsolationManager = require('./isolation-manager');
 const { generateName } = require('./name-generator');
@@ -289,8 +288,6 @@ class Orchestrator {
       agents,
       isolation,
       autoPr: clusterData.autoPr || false,
-      prOptions: clusterData.prOptions || null,
-      issue: clusterData.issue || null,
     };
 
     this.clusters.set(clusterId, cluster);
@@ -510,18 +507,16 @@ class Orchestrator {
           config: cluster.config,
           state: cluster.state,
           createdAt: cluster.createdAt,
+          // Issue number for heroshot/external orchestrators to track active clusters
+          issue: cluster.issue || null,
           // Track PID for zombie detection (null if cluster is stopped/killed)
           pid: cluster.state === 'running' ? cluster.pid : null,
           // Persist failure info for resume capability
           failureInfo: cluster.failureInfo || null,
           // Persist PR mode for completion agent selection
           autoPr: cluster.autoPr || false,
-          // Persist PR options for resume
-          prOptions: cluster.prOptions || null,
           // Persist model override for consistent agent spawning on resume
           modelOverride: cluster.modelOverride || null,
-          // Persist issue number for heroshot/external tools
-          issue: cluster.issue || null,
           // Persist isolation info (excluding manager instance which can't be serialized)
           // CRITICAL: workDir is required for resume() to recreate container with same workspace
           isolation: cluster.isolation
@@ -742,15 +737,6 @@ class Orchestrator {
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
       autoPr: options.autoPr || false,
-      // PR configuration options (persisted for resume)
-      prOptions:
-        options.prBase || options.mergeQueue || options.closeIssue
-          ? {
-              prBase: options.prBase || null,
-              mergeQueue: options.mergeQueue || false,
-              closeIssue: options.closeIssue || null,
-            }
-          : null,
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
       // Issue provider tracking (where issue was fetched from)
@@ -804,8 +790,8 @@ class Orchestrator {
         // Store issue provider for logging/debugging and cross-provider workflows
         cluster.issueProvider = ProviderClass.id;
 
-        // Store issue number for heroshot/external tools (avoids log parsing)
-        cluster.issue = inputData.number || null;
+        // Store issue number for heroshot/external orchestrators to track
+        cluster.issue = inputData.number;
 
         // Log clickable issue link
         if (inputData.url) {
@@ -1331,11 +1317,7 @@ class Orchestrator {
       );
     }
 
-    const gitPusherConfig = generateGitPusherAgent(platform, {
-      prBase: options.prBase,
-      mergeQueue: options.mergeQueue,
-      closeIssue: options.closeIssue,
-    });
+    const gitPusherConfig = generateGitPusherAgent(platform);
 
     // Template replacement for issue context
     const issueRef = skipCloseIssue ? '' : `Closes #${inputData.number || 'unknown'}`;
@@ -1631,197 +1613,6 @@ class Orchestrator {
     }
 
     return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt);
-  }
-
-  _validateGuidanceAgentArgs(clusterId, agentId, text) {
-    if (!clusterId) {
-      throw new Error('sendGuidanceToAgent: clusterId is required');
-    }
-    if (!agentId) {
-      throw new Error('sendGuidanceToAgent: agentId is required');
-    }
-    if (typeof text !== 'string' || !text.trim()) {
-      throw new Error('sendGuidanceToAgent: text must be a non-empty string');
-    }
-  }
-
-  _validateGuidanceClusterArgs(clusterId, text) {
-    if (!clusterId) {
-      throw new Error('sendGuidanceToCluster: clusterId is required');
-    }
-    if (typeof text !== 'string' || !text.trim()) {
-      throw new Error('sendGuidanceToCluster: text must be a non-empty string');
-    }
-  }
-
-  _getClusterOrThrow(clusterId, caller = 'sendGuidanceToAgent') {
-    const cluster = this.clusters.get(clusterId);
-    if (!cluster) {
-      throw new Error(`${caller}: cluster not found: ${clusterId}`);
-    }
-    return cluster;
-  }
-
-  _getAgentOrThrow(cluster, agentId) {
-    const agent = cluster.agents.find((candidate) => candidate.id === agentId);
-    if (!agent) {
-      throw new Error(`sendGuidanceToAgent: agent not found: ${agentId}`);
-    }
-    return agent;
-  }
-
-  _buildDefaultDelivery(agent) {
-    return {
-      status: 'unsupported',
-      reason: 'unknown',
-      method: null,
-      taskId: agent.currentTaskId || null,
-    };
-  }
-
-  async _attemptGuidanceInjection(agent, text, timeoutMs) {
-    try {
-      const result = await agent.injectInput(text, { timeoutMs });
-      return {
-        status: result.status === 'injected' ? 'injected' : 'unsupported',
-        reason: result.status === 'injected' ? null : result.reason || 'unsupported',
-        method: result.status === 'injected' ? result.method || 'pty' : result.method || null,
-        taskId: result.taskId || agent.currentTaskId || null,
-      };
-    } catch (error) {
-      return {
-        status: 'unsupported',
-        reason: error.message,
-        method: null,
-        taskId: agent.currentTaskId || null,
-      };
-    }
-  }
-
-  _buildGuidanceMetadata(options, delivery) {
-    return {
-      ...(options.metadata || {}),
-      delivery: {
-        status: delivery.status,
-        reason: delivery.reason,
-        method: delivery.method,
-        taskId: delivery.taskId,
-        timestamp: Date.now(),
-      },
-    };
-  }
-
-  _summarizeGuidanceDeliveries(deliveries) {
-    const agentIds = Object.keys(deliveries);
-    const summary = {
-      injected: 0,
-      queued: 0,
-      total: agentIds.length,
-    };
-
-    for (const agentId of agentIds) {
-      const delivery = deliveries[agentId];
-      if (delivery?.status === 'injected') {
-        summary.injected += 1;
-      } else {
-        summary.queued += 1;
-      }
-    }
-
-    return summary;
-  }
-
-  _buildClusterGuidanceMetadata(options, deliveries) {
-    return {
-      ...(options.metadata || {}),
-      delivery: {
-        summary: this._summarizeGuidanceDeliveries(deliveries),
-        agents: deliveries,
-        timestamp: Date.now(),
-      },
-    };
-  }
-
-  _publishGuidance(cluster, clusterId, agentId, text, metadata, sender) {
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: USER_GUIDANCE_AGENT,
-      sender,
-      target_agent_id: agentId,
-      content: { text },
-      metadata,
-    });
-  }
-
-  _publishClusterGuidance(cluster, clusterId, text, metadata, sender) {
-    cluster.messageBus.publish({
-      cluster_id: clusterId,
-      topic: USER_GUIDANCE_CLUSTER,
-      sender,
-      content: { text },
-      metadata,
-    });
-  }
-
-  /**
-   * Send guidance to a specific agent with optional live injection.
-   * Always persists USER_GUIDANCE_AGENT in the ledger with delivery metadata.
-   * @param {string} clusterId
-   * @param {string} agentId
-   * @param {string} text
-   * @param {object} [options]
-   * @param {string} [options.sender='user']
-   * @param {object} [options.metadata]
-   * @param {number} [options.timeoutMs]
-   * @returns {Promise<{status: string, reason: string|null, method: string|null, taskId: string|null}>}
-   */
-  async sendGuidanceToAgent(clusterId, agentId, text, options = {}) {
-    this._validateGuidanceAgentArgs(clusterId, agentId, text);
-
-    const cluster = this._getClusterOrThrow(clusterId, 'sendGuidanceToAgent');
-    const agent = this._getAgentOrThrow(cluster, agentId);
-    const defaultDelivery = this._buildDefaultDelivery(agent);
-    const delivery =
-      (await this._attemptGuidanceInjection(agent, text, options.timeoutMs)) || defaultDelivery;
-    const metadata = this._buildGuidanceMetadata(options, delivery);
-
-    this._publishGuidance(cluster, clusterId, agentId, text, metadata, options.sender || 'user');
-
-    return delivery;
-  }
-
-  /**
-   * Send guidance to every agent in a cluster with optional live injection.
-   * Always persists a single USER_GUIDANCE_CLUSTER in the ledger with delivery metadata.
-   * @param {string} clusterId
-   * @param {string} text
-   * @param {object} [options]
-   * @param {string} [options.sender='user']
-   * @param {object} [options.metadata]
-   * @param {number} [options.timeoutMs]
-   * @returns {Promise<{summary: {injected: number, queued: number, total: number}, agents: Record<string, {status: string, reason: string|null, method: string|null, taskId: string|null}>, timestamp: number}>}
-   */
-  async sendGuidanceToCluster(clusterId, text, options = {}) {
-    this._validateGuidanceClusterArgs(clusterId, text);
-
-    const cluster = this._getClusterOrThrow(clusterId, 'sendGuidanceToCluster');
-    const agents = Array.isArray(cluster.agents) ? cluster.agents : [];
-    const deliveries = {};
-
-    await Promise.all(
-      agents.map(async (agent) => {
-        const defaultDelivery = this._buildDefaultDelivery(agent);
-        const delivery =
-          (await this._attemptGuidanceInjection(agent, text, options.timeoutMs)) || defaultDelivery;
-        deliveries[agent.id] = delivery;
-      })
-    );
-
-    const metadata = this._buildClusterGuidanceMetadata(options, deliveries);
-
-    this._publishClusterGuidance(cluster, clusterId, text, metadata, options.sender || 'user');
-
-    return metadata.delivery;
   }
 
   _resolveFailureInfo(cluster, clusterId) {
@@ -2654,8 +2445,7 @@ Continue from where you left off. Review your previous output to understand what
         );
       }
 
-      // Use persisted PR options from cluster state (or empty for repo settings fallback)
-      const gitPusherConfig = generateGitPusherAgent(platform, cluster.prOptions || {});
+      const gitPusherConfig = generateGitPusherAgent(platform);
 
       // Get issue context from ledger
       const issueMsg = cluster.messageBus.ledger.findLast({ topic: 'ISSUE_OPENED' });
@@ -2802,7 +2592,6 @@ return true;`,
         id: cluster.id,
         state: state,
         createdAt: cluster.createdAt,
-        issue: cluster.issue || null,
         agentCount: cluster.agents.length,
         messageCount: cluster.messageBus.getAll(cluster.id).length,
       };
