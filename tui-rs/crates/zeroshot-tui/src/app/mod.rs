@@ -60,6 +60,7 @@ pub struct AppState {
     pub should_quit: bool,
     pub backend_status: BackendStatus,
     pub last_error: Option<String>,
+    pub provider_override: Option<String>,
 }
 
 impl Default for AppState {
@@ -75,6 +76,7 @@ impl Default for AppState {
             should_quit: false,
             backend_status: BackendStatus::Disconnected,
             last_error: None,
+            provider_override: None,
         }
     }
 }
@@ -170,6 +172,7 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     Backend(BackendRequest),
+    Command(CommandRequest),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,8 +181,14 @@ pub enum BackendRequest {
     GetClusterSummary { cluster_id: String },
     SubscribeClusterLogs { cluster_id: String },
     SubscribeClusterTimeline { cluster_id: String },
-    StartClusterFromText { text: String },
-    StartClusterFromIssue { reference: String },
+    StartClusterFromText {
+        text: String,
+        provider_override: Option<String>,
+    },
+    StartClusterFromIssue {
+        reference: String,
+        provider_override: Option<String>,
+    },
     SendGuidanceToCluster { cluster_id: String, message: String },
     SendGuidanceToAgent {
         cluster_id: String,
@@ -187,6 +196,11 @@ pub enum BackendRequest {
         message: String,
     },
     Unsubscribe { subscription_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandRequest {
+    SubmitRaw { raw: String },
 }
 
 pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
@@ -276,13 +290,47 @@ fn handle_screen_action(state: &mut AppState, action: ScreenAction, effects: &mu
 fn handle_launcher_action(state: &mut AppState, action: launcher::Action, effects: &mut Vec<Effect>) {
     match action {
         launcher::Action::Submit => {
-            if state.launcher.input.trim().is_empty() {
+            let trimmed = state.launcher.input.trim();
+            if trimmed.is_empty() {
                 state.last_error = Some("Enter text to start a cluster.".to_string());
+                return;
+            }
+
+            state.last_error = None;
+            if trimmed.starts_with('/') {
+                effects.push(Effect::Command(CommandRequest::SubmitRaw {
+                    raw: trimmed.to_string(),
+                }));
             } else {
                 effects.push(Effect::Backend(BackendRequest::StartClusterFromText {
-                    text: state.launcher.input.clone(),
+                    text: trimmed.to_string(),
+                    provider_override: state.provider_override.clone(),
                 }));
             }
+        }
+        launcher::Action::InsertChar(ch) => {
+            state.launcher.insert_char(ch);
+            state.last_error = None;
+        }
+        launcher::Action::Backspace => {
+            state.launcher.backspace();
+            state.last_error = None;
+        }
+        launcher::Action::Delete => {
+            state.launcher.delete();
+            state.last_error = None;
+        }
+        launcher::Action::MoveCursorLeft => {
+            state.launcher.move_left();
+        }
+        launcher::Action::MoveCursorRight => {
+            state.launcher.move_right();
+        }
+        launcher::Action::MoveCursorHome => {
+            state.launcher.move_home();
+        }
+        launcher::Action::MoveCursorEnd => {
+            state.launcher.move_end();
         }
     }
 }
@@ -452,6 +500,7 @@ fn handle_start_cluster_result(
     cluster_id: String,
     effects: &mut Vec<Effect>,
 ) {
+    state.launcher.clear();
     apply_navigation(
         state,
         NavigationAction::Push(ScreenId::Cluster { id: cluster_id }),
