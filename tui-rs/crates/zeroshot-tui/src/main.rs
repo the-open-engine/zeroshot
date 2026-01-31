@@ -1,86 +1,386 @@
 use std::env;
 use std::io::{self, stdout};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 
-use zeroshot_tui::app::App;
+use zeroshot_tui::app::{Action, AppState, BackendAction, BackendRequest, Effect};
+use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
+use zeroshot_tui::backend::stdio::StdioBackendClient;
+use zeroshot_tui::input;
 use zeroshot_tui::terminal::TerminalGuard;
+use zeroshot_tui::ui;
+
+type ActionSender = mpsc::Sender<Action>;
+type ActionReceiver = mpsc::Receiver<Action>;
+type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
 fn main() -> io::Result<()> {
-    let guard = TerminalGuard::new()?;
-    guard.install_panic_hook();
+    run_app()
+}
 
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+fn run_app() -> io::Result<()> {
+    let guard = init_terminal_guard()?;
+    let mut terminal = setup_terminal()?;
+    maybe_force_panic();
 
-    if env::var("ZEROSHOT_TUI_PANIC").ok().as_deref() == Some("1") {
-        panic!("ZEROSHOT_TUI_PANIC=1 requested");
-    }
-
-    let mut app = App::new();
+    let (action_tx, action_rx) = mpsc::channel::<Action>();
+    let mut backend = connect_backend(&action_tx)?;
+    let mut state = AppState::new();
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
-    loop {
-        terminal.draw(|frame| render(frame, &app))?;
+    app_loop(
+        &mut terminal,
+        &mut state,
+        &action_tx,
+        &action_rx,
+        &mut backend,
+        tick_rate,
+        &mut last_tick,
+    )?;
 
-        if app.should_quit {
-            break;
-        }
-
-        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-        if event::poll(timeout)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
-                        app.handle_key(key);
-                    }
-                }
-                Event::Resize(width, height) => {
-                    app.on_resize(width, height);
-                }
-                _ => {}
-            }
-        }
-
-        if last_tick.elapsed() >= tick_rate {
-            app.on_tick();
-            last_tick = Instant::now();
-        }
-    }
-
+    shutdown_backend(backend)?;
     drop(terminal);
     guard.restore()?;
+    Ok(())
+}
+
+fn init_terminal_guard() -> io::Result<TerminalGuard> {
+    let guard = TerminalGuard::new()?;
+    guard.install_panic_hook();
+    Ok(guard)
+}
+
+fn setup_terminal() -> io::Result<TuiTerminal> {
+    Terminal::new(CrosstermBackend::new(stdout()))
+}
+
+fn maybe_force_panic() {
+    if env::var("ZEROSHOT_TUI_PANIC").ok().as_deref() == Some("1") {
+        panic!("ZEROSHOT_TUI_PANIC=1 requested");
+    }
+}
+
+fn app_loop(
+    terminal: &mut TuiTerminal,
+    state: &mut AppState,
+    action_tx: &ActionSender,
+    action_rx: &ActionReceiver,
+    backend: &mut Option<StdioBackendClient>,
+    tick_rate: Duration,
+    last_tick: &mut Instant,
+) -> io::Result<()> {
+    loop {
+        handle_terminal_events(state, action_tx, tick_rate, last_tick)?;
+        drain_actions(state, action_rx, backend, action_tx)?;
+        terminal.draw(|frame| ui::render(frame, state))?;
+
+        if state.should_quit {
+            break;
+        }
+    }
 
     Ok(())
 }
 
-fn render(frame: &mut ratatui::Frame<'_>, app: &App) {
-    let size = frame.size();
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1)])
-        .split(size);
-
-    let mut lines = vec![
-        Line::from("Zeroshot TUI v2"),
-        Line::from("Ratatui skeleton running."),
-        Line::from(format!("Ticks: {}", app.tick_count)),
-        Line::from("Press q, Esc, or Ctrl-C to quit."),
-    ];
-
-    if let Some((width, height)) = app.last_size {
-        lines.push(Line::from(format!(
-            "Last resize: {width}x{height}"
-        )));
+fn handle_terminal_events(
+    state: &AppState,
+    action_tx: &ActionSender,
+    tick_rate: Duration,
+    last_tick: &mut Instant,
+) -> io::Result<()> {
+    let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+    if event::poll(timeout)? {
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if let Some(action) = input::route_key(state.active_screen(), key) {
+                    send_action(action_tx, action)?;
+                }
+            }
+            Event::Resize(width, height) => {
+                send_action(action_tx, Action::Resize { width, height })?;
+            }
+            _ => {}
+        }
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title("zeroshot-tui"));
-    frame.render_widget(paragraph, layout[0]);
+    if last_tick.elapsed() >= tick_rate {
+        send_action(action_tx, Action::Tick)?;
+        *last_tick = Instant::now();
+    }
+
+    Ok(())
+}
+
+fn drain_actions(
+    state: &mut AppState,
+    action_rx: &ActionReceiver,
+    backend: &mut Option<StdioBackendClient>,
+    action_tx: &ActionSender,
+) -> io::Result<()> {
+    loop {
+        match action_rx.try_recv() {
+            Ok(action) => {
+                let (next_state, effects) =
+                    zeroshot_tui::app::update(std::mem::take(state), action);
+                *state = next_state;
+                execute_effects(effects, backend, action_tx)?;
+            }
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "action channel disconnected",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn connect_backend(action_tx: &ActionSender) -> io::Result<Option<StdioBackendClient>> {
+    match StdioBackendClient::connect(BackendConfig::default()) {
+        Ok(mut client) => {
+            if let Some(events) = client.take_event_receiver() {
+                let tx = action_tx.clone();
+                thread::spawn(move || handle_backend_events(events, tx));
+            }
+            send_action(action_tx, Action::Backend(BackendAction::Connected))?;
+            Ok(Some(client))
+        }
+        Err(err) => {
+            send_action(
+                action_tx,
+                Action::Backend(BackendAction::ConnectionFailed(err.to_string())),
+            )?;
+            Ok(None)
+        }
+    }
+}
+
+fn handle_backend_events(events: mpsc::Receiver<BackendEvent>, action_tx: ActionSender) {
+    for event in events {
+        let action = match event {
+            BackendEvent::Notification(notification) => {
+                Action::Backend(BackendAction::Notification(notification))
+            }
+            BackendEvent::BackendExited(exit) => {
+                Action::Backend(BackendAction::BackendExited(exit))
+            }
+        };
+
+        if !send_action_thread(&action_tx, action) {
+            break;
+        }
+    }
+}
+
+fn send_action(action_tx: &ActionSender, action: Action) -> io::Result<()> {
+    action_tx.send(action).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            format!("action channel closed: {err}"),
+        )
+    })
+}
+
+fn send_action_thread(action_tx: &ActionSender, action: Action) -> bool {
+    if let Err(err) = action_tx.send(action) {
+        eprintln!("backend event send failed: {err}");
+        return false;
+    }
+    true
+}
+
+fn execute_effects(
+    effects: Vec<Effect>,
+    backend: &mut Option<StdioBackendClient>,
+    action_tx: &ActionSender,
+) -> io::Result<()> {
+    for effect in effects {
+        match effect {
+            Effect::Backend(request) => {
+                if let Some(client) = backend.as_ref() {
+                    match execute_backend_request(client, request) {
+                        Ok(Some(action)) => {
+                            send_action(action_tx, Action::Backend(action))?;
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            send_action(
+                                action_tx,
+                                Action::Backend(BackendAction::Error(err.to_string())),
+                            )?;
+                        }
+                    }
+                } else {
+                    send_action(
+                        action_tx,
+                        Action::Backend(BackendAction::ConnectionFailed(
+                            "Backend unavailable".to_string(),
+                        )),
+                    )?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn execute_backend_request(
+    client: &StdioBackendClient,
+    request: BackendRequest,
+) -> Result<Option<BackendAction>, BackendError> {
+    match request {
+        BackendRequest::ListClusters => list_clusters(client),
+        BackendRequest::GetClusterSummary { cluster_id } => {
+            get_cluster_summary(client, cluster_id)
+        }
+        BackendRequest::SubscribeClusterLogs { cluster_id } => {
+            subscribe_cluster_logs(client, cluster_id)
+        }
+        BackendRequest::SubscribeClusterTimeline { cluster_id } => {
+            subscribe_cluster_timeline(client, cluster_id)
+        }
+        BackendRequest::StartClusterFromText { text } => start_cluster_from_text(client, text),
+        BackendRequest::StartClusterFromIssue { reference } => {
+            start_cluster_from_issue(client, reference)
+        }
+        BackendRequest::SendGuidanceToCluster { cluster_id, message } => {
+            send_guidance_to_cluster(client, cluster_id, message)
+        }
+        BackendRequest::SendGuidanceToAgent {
+            cluster_id,
+            agent_id,
+            message,
+        } => send_guidance_to_agent(client, cluster_id, agent_id, message),
+        BackendRequest::Unsubscribe { subscription_id } => unsubscribe(client, subscription_id),
+    }
+}
+
+fn list_clusters(client: &StdioBackendClient) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.list_clusters()?;
+    Ok(Some(BackendAction::ClustersListed(result.clusters)))
+}
+
+fn get_cluster_summary(
+    client: &StdioBackendClient,
+    cluster_id: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.get_cluster_summary(zeroshot_tui::protocol::GetClusterSummaryParams {
+        cluster_id,
+    })?;
+    Ok(Some(BackendAction::ClusterSummary {
+        summary: result.summary,
+    }))
+}
+
+fn subscribe_cluster_logs(
+    client: &StdioBackendClient,
+    cluster_id: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.subscribe_cluster_logs(zeroshot_tui::protocol::SubscribeClusterLogsParams {
+        cluster_id: cluster_id.clone(),
+        agent_id: None,
+    })?;
+    Ok(Some(BackendAction::SubscribedClusterLogs {
+        cluster_id,
+        subscription_id: result.subscription_id,
+    }))
+}
+
+fn subscribe_cluster_timeline(
+    client: &StdioBackendClient,
+    cluster_id: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.subscribe_cluster_timeline(
+        zeroshot_tui::protocol::SubscribeClusterTimelineParams {
+            cluster_id: cluster_id.clone(),
+        },
+    )?;
+    Ok(Some(BackendAction::SubscribedClusterTimeline {
+        cluster_id,
+        subscription_id: result.subscription_id,
+    }))
+}
+
+fn start_cluster_from_text(
+    client: &StdioBackendClient,
+    text: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.start_cluster_from_text(zeroshot_tui::protocol::StartClusterFromTextParams {
+        text,
+        provider_override: None,
+        cluster_id: None,
+    })?;
+    Ok(Some(BackendAction::StartClusterResult {
+        cluster_id: result.cluster_id,
+    }))
+}
+
+fn start_cluster_from_issue(
+    client: &StdioBackendClient,
+    reference: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.start_cluster_from_issue(zeroshot_tui::protocol::StartClusterFromIssueParams {
+        r#ref: reference,
+        provider_override: None,
+        cluster_id: None,
+    })?;
+    Ok(Some(BackendAction::StartClusterResult {
+        cluster_id: result.cluster_id,
+    }))
+}
+
+fn send_guidance_to_cluster(
+    client: &StdioBackendClient,
+    cluster_id: String,
+    message: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    client.send_guidance_to_cluster(zeroshot_tui::protocol::SendGuidanceToClusterParams {
+        cluster_id,
+        text: message,
+        timeout_ms: None,
+    })?;
+    Ok(None)
+}
+
+fn send_guidance_to_agent(
+    client: &StdioBackendClient,
+    cluster_id: String,
+    agent_id: String,
+    message: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    client.send_guidance_to_agent(zeroshot_tui::protocol::SendGuidanceToAgentParams {
+        cluster_id,
+        agent_id,
+        text: message,
+        timeout_ms: None,
+    })?;
+    Ok(None)
+}
+
+fn unsubscribe(
+    client: &StdioBackendClient,
+    subscription_id: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    client.unsubscribe(zeroshot_tui::protocol::UnsubscribeParams { subscription_id })?;
+    Ok(None)
+}
+
+fn shutdown_backend(mut backend: Option<StdioBackendClient>) -> io::Result<()> {
+    if let Some(mut backend) = backend.take() {
+        backend.shutdown().map_err(|err| {
+            io::Error::new(io::ErrorKind::Other, format!("backend shutdown failed: {err}"))
+        })?;
+    }
+
+    Ok(())
 }

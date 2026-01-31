@@ -59,12 +59,17 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | TUI v2 protocol types (Rust) | `tui-rs/crates/zeroshot-tui/src/protocol/` |
 | Rust TUI backend client      | `tui-rs/crates/zeroshot-tui/src/backend/`  |
 | Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`   |
+| Rust TUI core loop (MVU)     | `tui-rs/crates/zeroshot-tui/src/app/mod.rs` |
+| Rust TUI input routing       | `tui-rs/crates/zeroshot-tui/src/input.rs`  |
+| Rust TUI screens             | `tui-rs/crates/zeroshot-tui/src/screens/`  |
+| Rust TUI render entrypoint   | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs` |
 | Rust TUI terminal guard      | `tui-rs/crates/zeroshot-tui/src/terminal.rs` |
 | Docker mounts/env            | `lib/docker-config.js`                     |
 | Container lifecycle          | `src/isolation-manager.js`                 |
 | Settings                     | `lib/settings.js`                          |
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
+TUI v2 (Rust) convention: centralized key routing in `src/input.rs`; `app::update()` is pure and returns effects; `ui::render()` is pure and performs no IO. Adding a screen requires a `ScreenId` variant plus a screen reducer and render entry.
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
