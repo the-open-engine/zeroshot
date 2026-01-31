@@ -22,6 +22,14 @@ type ClusterLauncherDeps = {
 
 let orchestratorPromise: Promise<any> | null = null;
 
+export class InvalidIssueReferenceError extends Error {
+  constructor(ref: string) {
+    super(`Invalid issue reference: ${ref}`);
+    this.name = "InvalidIssueReferenceError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 async function getOrchestrator() {
   if (!orchestratorPromise) {
     const Orchestrator = require("../../../src/orchestrator");
@@ -102,7 +110,7 @@ export async function launchClusterFromIssue({
 
   const parsed = detectRunInputImpl(ref);
   if (!parsed || typeof parsed !== "object" || !("issue" in parsed)) {
-    throw new Error(`Invalid issue reference: ${ref}`);
+    throw new InvalidIssueReferenceError(ref);
   }
 
   const orchestrator = await getOrchestratorImpl();

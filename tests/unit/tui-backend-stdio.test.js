@@ -85,6 +85,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     server = spawn('node', [SERVER_PATH], {
       cwd: PROJECT_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1' },
     });
 
     queue = createMessageQueue();
@@ -212,6 +213,37 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.strictEqual(response.result.summary.id, clusters[0].id);
     assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'provider'));
     assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'cwd'));
+  });
+
+  it('responds to startClusterFromText with a cluster id', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'startClusterFromText',
+      params: { text: 'Launch from text', clusterId: 'cluster-stdio' },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 11);
+    assert.deepStrictEqual(response.result, { clusterId: 'cluster-stdio' });
+  });
+
+  it('returns invalid params for invalid issue ref', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'startClusterFromIssue',
+      params: { ref: 'not-an-issue' },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 12);
+    assert.strictEqual(response.error.code, -32602);
+    assert.ok(response.error.data.detail.includes('Invalid issue reference:'));
   });
 
   it('returns parse error for invalid JSON', async function () {

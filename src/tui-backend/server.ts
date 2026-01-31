@@ -13,8 +13,25 @@ const {
   getClusterSummary,
   ClusterNotFoundError,
 } = require("./services/cluster-registry");
+const {
+  launchClusterFromText,
+  launchClusterFromIssue,
+  InvalidIssueReferenceError,
+} = require("./services/cluster-launcher");
 
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
+const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
+
+const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === "1";
+
+const createMockLauncherDeps = () => ({
+  getOrchestrator: async () => ({}),
+  loadSettings: () => ({ defaultConfig: "conductor-bootstrap", providerSettings: {} }),
+  resolveConfigPath: () => "mock-config",
+  loadClusterConfig: () => ({}),
+  startClusterFromText: async () => {},
+  startClusterFromIssue: async () => {},
+});
 
 const loadPackageInfo = () => {
   try {
@@ -75,6 +92,47 @@ const startServer = () => {
             );
           }
           throw error;
+        }
+      },
+      startClusterFromText: async (params) => {
+        try {
+          const result = await launchClusterFromText({
+            text: params.text,
+            providerOverride: params.providerOverride ?? null,
+            clusterId: params.clusterId,
+            deps: isMockLaunchEnabled() ? createMockLauncherDeps() : undefined,
+          });
+          return result;
+        } catch (error) {
+          throw buildRpcError(
+            RPC_ERROR_CODES.INTERNAL_ERROR,
+            RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
+            error instanceof Error ? error.message : "Launcher error"
+          );
+        }
+      },
+      startClusterFromIssue: async (params) => {
+        try {
+          const result = await launchClusterFromIssue({
+            ref: params.ref,
+            providerOverride: params.providerOverride ?? null,
+            clusterId: params.clusterId,
+            deps: isMockLaunchEnabled() ? createMockLauncherDeps() : undefined,
+          });
+          return result;
+        } catch (error) {
+          if (error instanceof InvalidIssueReferenceError) {
+            throw buildRpcError(
+              RPC_ERROR_CODES.INVALID_PARAMS,
+              RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_PARAMS],
+              error.message
+            );
+          }
+          throw buildRpcError(
+            RPC_ERROR_CODES.INTERNAL_ERROR,
+            RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
+            error instanceof Error ? error.message : "Launcher error"
+          );
         }
       },
     },
