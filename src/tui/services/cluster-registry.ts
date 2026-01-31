@@ -12,6 +12,7 @@ type ClusterRegistryDeps = {
 export type ClusterSummary = {
   id: string;
   state: string;
+  provider: string | null;
   createdAt: number;
   agentCount: number;
   messageCount: number;

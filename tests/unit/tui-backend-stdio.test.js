@@ -127,6 +127,8 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.ok(response.result.server.version);
     assert.ok(response.result.capabilities.methods.includes('initialize'));
     assert.ok(response.result.capabilities.methods.includes('ping'));
+    assert.ok(response.result.capabilities.methods.includes('listClusters'));
+    assert.ok(response.result.capabilities.methods.includes('getClusterSummary'));
     assert.deepStrictEqual(response.result.capabilities.notifications, []);
   });
 
@@ -143,6 +145,73 @@ describe('tui-backend stdio JSON-RPC', function () {
 
     assert.strictEqual(response.id, 2);
     assert.deepStrictEqual(response.result, { ok: true });
+  });
+
+  it('responds to listClusters with provider and cwd fields', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'listClusters',
+      params: {},
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 7);
+    assert.strictEqual(response.jsonrpc, '2.0');
+    assert.ok(response.result);
+    assert.ok(Array.isArray(response.result.clusters));
+    for (const cluster of response.result.clusters) {
+      assert.ok(Object.prototype.hasOwnProperty.call(cluster, 'provider'));
+      assert.ok(Object.prototype.hasOwnProperty.call(cluster, 'cwd'));
+    }
+  });
+
+  it('returns cluster not found for unknown cluster id', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'getClusterSummary',
+      params: { clusterId: 'missing-cluster-stdio' },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 8);
+    assert.strictEqual(response.error.code, -32002);
+  });
+
+  it('responds to getClusterSummary for a known cluster when available', async function () {
+    const listRequest = {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'listClusters',
+      params: {},
+    };
+
+    server.stdin.write(encodeFrame(listRequest));
+    const listResponse = await queue.next();
+    const clusters = listResponse.result?.clusters ?? [];
+    if (clusters.length === 0) {
+      return;
+    }
+
+    const request = {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'getClusterSummary',
+      params: { clusterId: clusters[0].id },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 10);
+    assert.strictEqual(response.result.summary.id, clusters[0].id);
+    assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'provider'));
+    assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'cwd'));
   });
 
   it('returns parse error for invalid JSON', async function () {
