@@ -57,6 +57,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | TUI v2 protocol spec         | `docs/tui-v2/protocol.md`                  |
 | TUI v2 protocol types (TS)   | `src/tui-backend/protocol/`                |
 | TUI v2 protocol types (Rust) | `tui-rs/crates/zeroshot-tui/src/protocol/` |
+| Rust TUI backend client      | `tui-rs/crates/zeroshot-tui/src/backend/`  |
 | Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`   |
 | Rust TUI terminal guard      | `tui-rs/crates/zeroshot-tui/src/terminal.rs` |
 | Docker mounts/env            | `lib/docker-config.js`                     |
