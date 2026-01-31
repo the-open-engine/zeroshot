@@ -52,6 +52,26 @@ const simpleConfig = {
   ],
 };
 
+async function rmDirWithRetries(target, attempts = 5) {
+  if (!target || !fs.existsSync(target)) {
+    return;
+  }
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const retriable =
+        error && (error.code === 'ENOTEMPTY' || error.code === 'EBUSY' || error.code === 'EPERM');
+      if (!retriable || attempt === attempts - 1) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
 function registerWorktreeHooks() {
   beforeEach(function () {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zs-worktree-test-'));
@@ -81,16 +101,14 @@ function registerWorktreeHooks() {
       }
     }
 
-    if (tempDir && fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
+    await rmDirWithRetries(tempDir);
     if (testRepoDir && fs.existsSync(testRepoDir)) {
       try {
         execSync('git worktree prune', { cwd: testRepoDir, stdio: 'pipe' });
       } catch {
         // Ignore
       }
-      fs.rmSync(testRepoDir, { recursive: true, force: true });
+      await rmDirWithRetries(testRepoDir);
     }
   });
 }
