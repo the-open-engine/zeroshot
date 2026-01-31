@@ -256,6 +256,71 @@ function hasFatalStandaloneOutput(output) {
 }
 
 /**
+ * Extract CLI error from provider output (all providers).
+ * Returns the error message if the CLI reported an error, null otherwise.
+ *
+ * Provider error formats:
+ * - Claude: {type:"result", is_error:true, errors:["msg"]} or {type:"result", subtype:"error"}
+ * - Codex:  {type:"turn.failed", error:{message:"msg"}}
+ * - Gemini: {type:"result", success:false, error:"msg"}
+ * - Opencode: {type:"session.error", error:{message:"msg"}}
+ *
+ * @param {string} output - Raw CLI output
+ * @returns {{error: string, provider: string}|null} Error info or null
+ */
+function extractCliError(output) {
+  if (!output || typeof output !== 'string') return null;
+
+  const lines = output.split('\n');
+
+  for (const line of lines) {
+    const content = stripTimestamp(line);
+    if (!content.startsWith('{')) continue;
+
+    let obj;
+    try {
+      obj = JSON.parse(content);
+    } catch {
+      continue;
+    }
+
+    // Claude: {type:"result", is_error:true, errors:[...]}
+    if (obj.type === 'result' && obj.is_error === true) {
+      const errorMsg = Array.isArray(obj.errors)
+        ? obj.errors.join('; ')
+        : obj.error || obj.result || 'Unknown CLI error';
+      return { error: errorMsg, provider: 'claude' };
+    }
+
+    // Claude: {type:"result", subtype:"error"}
+    if (obj.type === 'result' && obj.subtype === 'error') {
+      const errorMsg = obj.error || obj.result || 'CLI returned error';
+      return { error: errorMsg, provider: 'claude' };
+    }
+
+    // Codex: {type:"turn.failed", error:{message:"msg"}}
+    if (obj.type === 'turn.failed') {
+      const errorMsg = obj.error?.message || obj.error || 'CLI returned error';
+      return { error: errorMsg, provider: 'codex' };
+    }
+
+    // Gemini: {type:"result", success:false, error:"msg"}
+    if (obj.type === 'result' && obj.success === false) {
+      const errorMsg = obj.error || obj.result || 'CLI returned error';
+      return { error: errorMsg, provider: 'gemini' };
+    }
+
+    // Opencode: {type:"session.error", error:{message:"msg"}}
+    if (obj.type === 'session.error') {
+      const errorMsg = obj.error?.message || obj.error || 'CLI returned error';
+      return { error: errorMsg, provider: 'opencode' };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Main extraction function - tries all strategies in priority order
  *
  * @param {string} output - Raw output from AI provider CLI
