@@ -9,6 +9,7 @@ const { buildStartOptions } = require('../../lib/start-cluster');
 
 const ENV_VARS = [
   'ZEROSHOT_CWD',
+  'ZEROSHOT_RUN_OPTIONS',
   'ZEROSHOT_PR_BASE',
   'ZEROSHOT_MERGE_QUEUE',
   'ZEROSHOT_CLOSE_ISSUE',
@@ -41,6 +42,40 @@ describe('CLI PR config env fallback', function () {
     const result = buildStartOptions({ clusterId: 'test', options: {}, settings: {} });
 
     assert.strictEqual(result.prBase, 'dev');
+  });
+
+  it('uses ZEROSHOT_RUN_OPTIONS when options are missing', function () {
+    process.env.ZEROSHOT_CWD = '/tmp/zeroshot-test';
+    process.env.ZEROSHOT_RUN_OPTIONS = JSON.stringify({
+      prBase: 'dev',
+      mergeQueue: true,
+      closeIssue: 'always',
+    });
+
+    const result = buildStartOptions({ clusterId: 'test', options: {}, settings: {} });
+
+    assert.strictEqual(result.prBase, 'dev');
+    assert.strictEqual(result.mergeQueue, true);
+    assert.strictEqual(result.closeIssue, 'always');
+  });
+
+  it('prefers explicit options over ZEROSHOT_RUN_OPTIONS', function () {
+    process.env.ZEROSHOT_CWD = '/tmp/zeroshot-test';
+    process.env.ZEROSHOT_RUN_OPTIONS = JSON.stringify({
+      prBase: 'dev',
+      mergeQueue: false,
+      closeIssue: 'always',
+    });
+
+    const result = buildStartOptions({
+      clusterId: 'test',
+      options: { prBase: 'main', mergeQueue: true, closeIssue: 'never' },
+      settings: {},
+    });
+
+    assert.strictEqual(result.prBase, 'main');
+    assert.strictEqual(result.mergeQueue, true);
+    assert.strictEqual(result.closeIssue, 'never');
   });
 
   it('prefers options.prBase over ZEROSHOT_PR_BASE', function () {

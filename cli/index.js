@@ -255,8 +255,23 @@ function createDaemonLogFile(clusterId) {
   return fs.openSync(logPath, 'w');
 }
 
+function serializeRunOptions(options) {
+  try {
+    return JSON.stringify(options);
+  } catch {
+    return '';
+  }
+}
+
+function resolveMergeQueueEnv(value) {
+  if (value === true) return '1';
+  if (value === false) return '0';
+  return '';
+}
+
 function buildDaemonEnv(options, clusterId, targetCwd) {
-  const mergeQueueEnv = options.mergeQueue === true ? '1' : options.mergeQueue === false ? '0' : '';
+  const mergeQueueEnv = resolveMergeQueueEnv(options.mergeQueue);
+  const runOptionsEnv = serializeRunOptions(options);
   return {
     ...process.env,
     ZEROSHOT_DAEMON: '1',
@@ -268,6 +283,7 @@ function buildDaemonEnv(options, clusterId, targetCwd) {
     ZEROSHOT_WORKERS: options.workers?.toString() || '',
     ZEROSHOT_MODEL: options.model || '',
     ZEROSHOT_PROVIDER: options.provider || '',
+    ZEROSHOT_RUN_OPTIONS: runOptionsEnv,
     ZEROSHOT_PR_BASE: options.prBase || '',
     ZEROSHOT_MERGE_QUEUE: mergeQueueEnv,
     ZEROSHOT_CLOSE_ISSUE: options.closeIssue || '',
