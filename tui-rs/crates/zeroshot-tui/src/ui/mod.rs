@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             &state.launcher,
             state.provider_override.as_deref(),
         ),
-        ScreenId::Monitor => monitor::render(frame, layout[1], &state.monitor),
+        ScreenId::Monitor => monitor::render(frame, layout[1], &state.monitor, state.now_ms),
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
                 cluster::render(frame, layout[1], cluster_state);

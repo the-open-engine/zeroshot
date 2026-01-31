@@ -2,7 +2,7 @@ use std::env;
 use std::io::{self, stdout};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
@@ -111,11 +111,18 @@ fn handle_terminal_events(
     }
 
     if last_tick.elapsed() >= tick_rate {
-        send_action(action_tx, Action::Tick)?;
+        send_action(action_tx, Action::Tick { now_ms: now_ms() })?;
         *last_tick = Instant::now();
     }
 
     Ok(())
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn drain_actions(

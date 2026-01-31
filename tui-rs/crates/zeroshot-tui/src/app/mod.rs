@@ -57,6 +57,7 @@ pub struct AppState {
     pub agents: HashMap<AgentKey, agent::State>,
     pub last_size: Option<(u16, u16)>,
     pub tick_count: u64,
+    pub now_ms: i64,
     pub should_quit: bool,
     pub backend_status: BackendStatus,
     pub last_error: Option<String>,
@@ -73,6 +74,7 @@ impl Default for AppState {
             agents: HashMap::new(),
             last_size: None,
             tick_count: 0,
+            now_ms: 0,
             should_quit: false,
             backend_status: BackendStatus::Disconnected,
             last_error: None,
@@ -161,7 +163,7 @@ pub enum BackendAction {
 
 #[derive(Debug, Clone)]
 pub enum Action {
-    Tick,
+    Tick { now_ms: i64 },
     Resize { width: u16, height: u16 },
     Quit,
     Navigate(NavigationAction),
@@ -206,8 +208,15 @@ pub enum CommandRequest {
 pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
     let mut effects = Vec::new();
     match action {
-        Action::Tick => {
+        Action::Tick { now_ms } => {
             state.tick_count = state.tick_count.saturating_add(1);
+            state.now_ms = now_ms;
+            let should_poll = matches!(state.active_screen(), ScreenId::Monitor)
+                && state.monitor.poll_due(now_ms);
+            if should_poll {
+                state.monitor.mark_polled(now_ms);
+                effects.push(Effect::Backend(BackendRequest::ListClusters));
+            }
         }
         Action::Resize { width, height } => {
             state.last_size = Some((width, height));
@@ -233,6 +242,9 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
     match nav {
         NavigationAction::Push(screen) => {
             state.ensure_screen_state(&screen);
+            if matches!(screen, ScreenId::Monitor) {
+                state.monitor.mark_polled(state.now_ms);
+            }
             state.screen_stack.push(screen.clone());
             queue_navigation_effects(&screen, effects);
         }
@@ -243,6 +255,9 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
         }
         NavigationAction::ReplaceTop(screen) => {
             state.ensure_screen_state(&screen);
+            if matches!(screen, ScreenId::Monitor) {
+                state.monitor.mark_polled(state.now_ms);
+            }
             if state.screen_stack.is_empty() {
                 state.screen_stack.push(screen.clone());
             } else {
@@ -460,7 +475,7 @@ fn handle_clusters_listed(
     state: &mut AppState,
     clusters: Vec<crate::protocol::ClusterSummary>,
 ) {
-    state.monitor.set_clusters(clusters);
+    state.monitor.set_clusters(clusters, state.now_ms);
 }
 
 fn handle_cluster_summary(state: &mut AppState, summary: crate::protocol::ClusterSummary) {
