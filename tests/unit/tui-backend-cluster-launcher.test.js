@@ -12,10 +12,27 @@ const buildOutput = path.join(
   'services',
   'cluster-launcher.js'
 );
+const sourcePath = path.join(
+  __dirname,
+  '..',
+  '..',
+  'src',
+  'tui-backend',
+  'services',
+  'cluster-launcher.ts'
+);
 
 function ensureBackendBuild() {
   if (!fs.existsSync(buildOutput)) {
     execSync('npm run build:tui-backend', { stdio: 'inherit' });
+    return;
+  }
+  if (fs.existsSync(sourcePath)) {
+    const buildMtime = fs.statSync(buildOutput).mtimeMs;
+    const sourceMtime = fs.statSync(sourcePath).mtimeMs;
+    if (sourceMtime > buildMtime) {
+      execSync('npm run build:tui-backend', { stdio: 'inherit' });
+    }
   }
 }
 

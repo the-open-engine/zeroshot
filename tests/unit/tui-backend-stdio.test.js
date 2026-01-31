@@ -5,6 +5,17 @@ const { execSync, spawn } = require('child_process');
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const SERVER_PATH = path.join(PROJECT_ROOT, 'lib', 'tui-backend', 'server.js');
+const SERVER_SOURCE_PATH = path.join(PROJECT_ROOT, 'src', 'tui-backend', 'server.ts');
+
+function isBuildStale(sourcePath, buildPath) {
+  if (!fs.existsSync(buildPath)) {
+    return true;
+  }
+  if (!fs.existsSync(sourcePath)) {
+    return false;
+  }
+  return fs.statSync(sourcePath).mtimeMs > fs.statSync(buildPath).mtimeMs;
+}
 
 const encodeFrame = (payload) => {
   const body = Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload), 'utf8');
@@ -78,7 +89,7 @@ describe('tui-backend stdio JSON-RPC', function () {
   let queue;
 
   before(function () {
-    if (!fs.existsSync(SERVER_PATH)) {
+    if (isBuildStale(SERVER_SOURCE_PATH, SERVER_PATH)) {
       execSync('npm run build:tui-backend', { cwd: PROJECT_ROOT, stdio: 'inherit' });
     }
 
