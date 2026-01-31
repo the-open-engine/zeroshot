@@ -320,6 +320,18 @@ pub struct SubscribeResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UnsubscribeParams {
+    pub subscription_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnsubscribeResult {
+    pub removed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetClusterTopologyParams {
     pub cluster_id: String,
 }
@@ -368,6 +380,8 @@ pub type SubscribeClusterLogsRequest = JsonRpcRequest<SubscribeClusterLogsParams
 pub type SubscribeClusterLogsResponse = JsonRpcSuccessResponse<SubscribeResult>;
 pub type SubscribeClusterTimelineRequest = JsonRpcRequest<SubscribeClusterTimelineParams>;
 pub type SubscribeClusterTimelineResponse = JsonRpcSuccessResponse<SubscribeResult>;
+pub type UnsubscribeRequest = JsonRpcRequest<UnsubscribeParams>;
+pub type UnsubscribeResponse = JsonRpcSuccessResponse<UnsubscribeResult>;
 pub type GetClusterTopologyRequest = JsonRpcRequest<GetClusterTopologyParams>;
 pub type GetClusterTopologyResponse = JsonRpcSuccessResponse<GetClusterTopologyResult>;
 
