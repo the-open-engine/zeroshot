@@ -1,4 +1,25 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const buildOutput = path.join(
+  __dirname,
+  '..',
+  '..',
+  'lib',
+  'tui-backend',
+  'services',
+  'cluster-launcher.js'
+);
+
+function ensureBackendBuild() {
+  if (!fs.existsSync(buildOutput)) {
+    execSync('npm run build:tui-backend', { stdio: 'inherit' });
+  }
+}
+
+ensureBackendBuild();
 
 const {
   launchClusterFromIssue,
