@@ -1430,6 +1430,89 @@ class Orchestrator {
   }
 
   /**
+   * Wait for a process to exit
+   * @param {Number} pid - Process ID
+   * @param {Number} timeoutMs - Timeout in milliseconds
+   * @param {Number} intervalMs - Poll interval in milliseconds
+   * @returns {Promise<Boolean>} True if process exited
+   * @private
+   */
+  async _waitForProcessExit(pid, timeoutMs, intervalMs = 100) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this._isProcessRunning(pid)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return !this._isProcessRunning(pid);
+  }
+
+  /**
+   * Signal a remote daemon that owns the cluster and wait for exit
+   * @param {Object} cluster - Cluster object
+   * @param {Object} options - { action, timeoutMs, killTimeoutMs, signal }
+   * @returns {Promise<Object>} { handled, remotePid, exited, forced }
+   * @private
+   */
+  async _signalRemoteCluster(cluster, options) {
+    const remotePid = cluster.pid;
+    if (!remotePid || remotePid === process.pid) {
+      return { handled: false };
+    }
+
+    if (!this._isProcessRunning(remotePid)) {
+      return { handled: false, remotePid, alreadyExited: true };
+    }
+
+    const action = options?.action || 'stop';
+    const timeoutMs = options?.timeoutMs ?? 10000;
+    const killTimeoutMs = options?.killTimeoutMs ?? 5000;
+    const signal = options?.signal || 'SIGTERM';
+
+    this._log(`[Orchestrator] Sending ${signal} to daemon PID ${remotePid} for ${cluster.id}...`);
+    try {
+      process.kill(remotePid, signal);
+    } catch (error) {
+      if (error.code === 'ESRCH') {
+        return { handled: true, remotePid, exited: true };
+      }
+      throw error;
+    }
+
+    const exited = await this._waitForProcessExit(remotePid, timeoutMs);
+    if (exited) {
+      return { handled: true, remotePid, exited: true };
+    }
+
+    if (action !== 'kill') {
+      throw new Error(
+        `Timed out waiting for daemon PID ${remotePid} to stop cluster ${cluster.id}`
+      );
+    }
+
+    this._log(
+      `[Orchestrator] Daemon PID ${remotePid} still running after ${timeoutMs}ms, sending SIGKILL...`
+    );
+    try {
+      process.kill(remotePid, 'SIGKILL');
+    } catch (error) {
+      if (error.code !== 'ESRCH') {
+        throw error;
+      }
+    }
+
+    const killed = await this._waitForProcessExit(remotePid, killTimeoutMs);
+    if (!killed) {
+      throw new Error(
+        `Failed to kill daemon PID ${remotePid} for cluster ${cluster.id} after SIGKILL`
+      );
+    }
+
+    return { handled: true, remotePid, exited: true, forced: true };
+  }
+
+  /**
    * Stop a cluster
    * @param {String} clusterId - Cluster ID
    */
@@ -1438,6 +1521,8 @@ class Orchestrator {
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
     }
+
+    await this._signalRemoteCluster(cluster, { action: 'stop' });
 
     // CRITICAL: Wait for initialization to complete before stopping
     // This ensures ISSUE_OPENED is published, preventing 0-message clusters
@@ -1504,6 +1589,8 @@ class Orchestrator {
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
     }
+
+    await this._signalRemoteCluster(cluster, { action: 'kill' });
 
     cluster.state = 'stopping';
 
