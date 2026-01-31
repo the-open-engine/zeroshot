@@ -63,6 +63,56 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
         _ => panic!("expected cluster focus action"),
     }
 
+    let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+    let action = input::route_key(&cluster_screen, up);
+    assert!(matches!(
+        action,
+        Some(Action::Screen(ScreenAction::Cluster {
+            action: cluster::Action::MoveFocused(-1),
+            ..
+        }))
+    ));
+
+    let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+    let action = input::route_key(&cluster_screen, down);
+    assert!(matches!(
+        action,
+        Some(Action::Screen(ScreenAction::Cluster {
+            action: cluster::Action::MoveFocused(1),
+            ..
+        }))
+    ));
+
+    let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+    let action = input::route_key(&cluster_screen, k);
+    assert!(matches!(
+        action,
+        Some(Action::Screen(ScreenAction::Cluster {
+            action: cluster::Action::MoveFocused(-1),
+            ..
+        }))
+    ));
+
+    let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+    let action = input::route_key(&cluster_screen, j);
+    assert!(matches!(
+        action,
+        Some(Action::Screen(ScreenAction::Cluster {
+            action: cluster::Action::MoveFocused(1),
+            ..
+        }))
+    ));
+
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let action = input::route_key(&cluster_screen, enter);
+    assert!(matches!(
+        action,
+        Some(Action::Screen(ScreenAction::Cluster {
+            action: cluster::Action::ActivateFocused,
+            ..
+        }))
+    ));
+
     let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
     assert!(input::route_key(&monitor_screen, tab).is_none());
 }
