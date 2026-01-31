@@ -159,7 +159,12 @@ describe('tui-backend stdio JSON-RPC', function () {
     server = spawn('node', [SERVER_PATH], {
       cwd: PROJECT_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1', HOME: tempHome },
+      env: {
+        ...process.env,
+        ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1',
+        ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE: '1',
+        HOME: tempHome,
+      },
     });
 
     queue = createMessageQueue();
@@ -324,6 +329,90 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.strictEqual(response.id, 12);
     assert.strictEqual(response.error.code, -32602);
     assert.ok(response.error.data.detail.includes('Invalid issue reference:'));
+  });
+
+  it('responds to sendGuidanceToAgent with delivery details', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 13,
+      method: 'sendGuidanceToAgent',
+      params: {
+        clusterId: 'cluster-guidance',
+        agentId: 'agent-1',
+        text: 'Use approach A',
+        timeoutMs: 250,
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 13);
+    assert.strictEqual(response.result.result.status, 'injected');
+    assert.strictEqual(response.result.result.reason, null);
+    assert.strictEqual(response.result.result.method, 'pty');
+    assert.strictEqual(response.result.result.taskId, 'task-agent-1');
+  });
+
+  it('responds to sendGuidanceToCluster with summary and agents', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 14,
+      method: 'sendGuidanceToCluster',
+      params: {
+        clusterId: 'cluster-guidance',
+        text: 'Use approach B',
+        timeoutMs: 500,
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 14);
+    assert.strictEqual(response.result.result.summary.total, 2);
+    assert.strictEqual(response.result.result.summary.injected, 1);
+    assert.strictEqual(response.result.result.summary.queued, 1);
+    assert.strictEqual(response.result.result.agents['mock-agent-1'].status, 'injected');
+    assert.strictEqual(response.result.result.agents['mock-agent-2'].status, 'queued');
+    assert.strictEqual(response.result.result.timestamp, 1700000000000);
+  });
+
+  it('returns invalid params for empty agent guidance text', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 15,
+      method: 'sendGuidanceToAgent',
+      params: {
+        clusterId: 'cluster-guidance',
+        agentId: 'agent-1',
+        text: '   ',
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 15);
+    assert.strictEqual(response.error.code, -32602);
+  });
+
+  it('returns invalid params for empty cluster guidance text', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 16,
+      method: 'sendGuidanceToCluster',
+      params: {
+        clusterId: 'cluster-guidance',
+        text: '',
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 16);
+    assert.strictEqual(response.error.code, -32602);
   });
 
   it('returns parse error for invalid JSON', async function () {

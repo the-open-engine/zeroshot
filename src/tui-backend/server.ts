@@ -26,12 +26,18 @@ const {
   createClusterTimelineStream,
   MAX_TIMELINE_EVENTS,
 } = require("./services/cluster-timeline");
+const {
+  sendAgentGuidance,
+  sendClusterGuidance,
+} = require("./services/guidance-delivery");
 const { createSubscriptionRegistry } = require("./subscriptions");
 
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
 const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
+const MOCK_GUIDANCE_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE";
 
 const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === "1";
+const isMockGuidanceEnabled = () => process.env[MOCK_GUIDANCE_ENV] === "1";
 
 const createMockLauncherDeps = () => ({
   getOrchestrator: async () => ({}),
@@ -40,6 +46,35 @@ const createMockLauncherDeps = () => ({
   loadClusterConfig: () => ({}),
   startClusterFromText: async () => {},
   startClusterFromIssue: async () => {},
+});
+
+const createMockGuidanceDeps = () => ({
+  getOrchestrator: async () => ({
+    sendGuidanceToAgent: async (clusterId, agentId) => ({
+      status: "injected",
+      reason: null,
+      method: "pty",
+      taskId: `task-${agentId}`,
+    }),
+    sendGuidanceToCluster: async () => ({
+      summary: { injected: 1, queued: 1, total: 2 },
+      agents: {
+        "mock-agent-1": {
+          status: "injected",
+          reason: null,
+          method: "pty",
+          taskId: "task-mock-agent-1",
+        },
+        "mock-agent-2": {
+          status: "queued",
+          reason: "queued",
+          method: null,
+          taskId: "task-mock-agent-2",
+        },
+      },
+      timestamp: 1700000000000,
+    }),
+  }),
 });
 
 const loadPackageInfo = () => {
@@ -75,6 +110,69 @@ const logDiagnostic = (message, error) => {
   const details =
     error instanceof Error ? `${message}: ${error.stack || error.message}` : message;
   process.stderr.write(`${details}\n`);
+};
+
+const isNonEmptyString = (value) =>
+  typeof value === "string" && value.trim().length > 0;
+
+const isRpcError = (error) =>
+  error &&
+  typeof error === "object" &&
+  typeof error.code === "number" &&
+  typeof error.message === "string";
+
+const isGuidanceInvalidParamsError = (message) =>
+  message.includes("is required") ||
+  message.includes("non-empty string") ||
+  message.includes("agent not found");
+
+const isGuidanceClusterNotFoundError = (message) =>
+  message.includes("cluster not found");
+
+const validateGuidanceText = (text) => {
+  if (!isNonEmptyString(text)) {
+    throw buildRpcError(
+      RPC_ERROR_CODES.INVALID_PARAMS,
+      RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_PARAMS],
+      "text must be a non-empty string"
+    );
+  }
+};
+
+const validateGuidanceId = (value, label) => {
+  if (!isNonEmptyString(value)) {
+    throw buildRpcError(
+      RPC_ERROR_CODES.INVALID_PARAMS,
+      RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_PARAMS],
+      `${label} must be a non-empty string`
+    );
+  }
+};
+
+const resolveGuidanceError = (error) => {
+  if (isRpcError(error)) {
+    return error;
+  }
+  const message = error instanceof Error ? error.message : "Guidance delivery error";
+  if (isGuidanceClusterNotFoundError(message)) {
+    return buildRpcError(
+      RPC_ERROR_CODES.CLUSTER_NOT_FOUND,
+      RPC_ERROR_MESSAGES[RPC_ERROR_CODES.CLUSTER_NOT_FOUND],
+      message
+    );
+  }
+  if (isGuidanceInvalidParamsError(message)) {
+    return buildRpcError(
+      RPC_ERROR_CODES.INVALID_PARAMS,
+      RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_PARAMS],
+      message
+    );
+  }
+  return buildRpcError(
+    RPC_ERROR_CODES.INTERNAL_ERROR,
+    RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
+    message
+  );
 };
 
 const capPayload = (items, maxItems) => {
@@ -157,6 +255,38 @@ const startServer = () => {
             RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
             error instanceof Error ? error.message : "Launcher error"
           );
+        }
+      },
+      sendGuidanceToAgent: async (params) => {
+        try {
+          validateGuidanceId(params?.clusterId, "clusterId");
+          validateGuidanceId(params?.agentId, "agentId");
+          validateGuidanceText(params?.text);
+          const result = await sendAgentGuidance({
+            clusterId: params.clusterId,
+            agentId: params.agentId,
+            text: params.text,
+            timeoutMs: params.timeoutMs,
+            deps: isMockGuidanceEnabled() ? createMockGuidanceDeps() : undefined,
+          });
+          return { result };
+        } catch (error) {
+          throw resolveGuidanceError(error);
+        }
+      },
+      sendGuidanceToCluster: async (params) => {
+        try {
+          validateGuidanceId(params?.clusterId, "clusterId");
+          validateGuidanceText(params?.text);
+          const result = await sendClusterGuidance({
+            clusterId: params.clusterId,
+            text: params.text,
+            timeoutMs: params.timeoutMs,
+            deps: isMockGuidanceEnabled() ? createMockGuidanceDeps() : undefined,
+          });
+          return { result };
+        } catch (error) {
+          throw resolveGuidanceError(error);
         }
       },
       subscribeClusterLogs: async (params) => {
