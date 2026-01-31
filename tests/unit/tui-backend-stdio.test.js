@@ -106,6 +106,8 @@ describe('tui-backend stdio JSON-RPC', function () {
   const originalHome = process.env.HOME;
   let tempHome;
   let MAX_LOG_LINES;
+  const topologyClusterId = 'cluster-stdio-topology';
+  const metricsClusterId = 'cluster-stdio-metrics';
 
   const waitForMessage = async (predicate, timeoutMs = 2000) => {
     const deadline = Date.now() + timeoutMs;
@@ -146,6 +148,55 @@ describe('tui-backend stdio JSON-RPC', function () {
   before(function () {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-tui-backend-'));
     process.env.HOME = tempHome;
+    const zeroshotDir = path.join(tempHome, '.zeroshot');
+    fs.mkdirSync(zeroshotDir, { recursive: true });
+
+    const clustersFile = path.join(zeroshotDir, 'clusters.json');
+    const now = Date.now();
+    const baseConfig = {
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: { onComplete: { config: { topic: 'IMPLEMENTATION_READY' } } },
+        },
+        {
+          id: 'validator',
+          role: 'validator',
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+        },
+      ],
+    };
+    const clustersData = {
+      [topologyClusterId]: {
+        id: topologyClusterId,
+        config: baseConfig,
+        state: 'stopped',
+        createdAt: now - 1000,
+        pid: null,
+      },
+      [metricsClusterId]: {
+        id: metricsClusterId,
+        config: baseConfig,
+        state: 'stopped',
+        createdAt: now,
+        pid: null,
+      },
+    };
+    fs.writeFileSync(clustersFile, JSON.stringify(clustersData, null, 2));
+
+    for (const clusterId of [topologyClusterId, metricsClusterId]) {
+      const dbPath = path.join(zeroshotDir, `${clusterId}.db`);
+      const ledger = new Ledger(dbPath);
+      ledger.append({
+        cluster_id: clusterId,
+        topic: 'SYSTEM',
+        sender: 'test',
+        content: { text: `seed ${clusterId}`, data: { line: `seed ${clusterId}` } },
+      });
+      ledger.close();
+    }
 
     if (
       isBuildStale(SERVER_SOURCE_PATH, SERVER_PATH) ||
@@ -163,6 +214,7 @@ describe('tui-backend stdio JSON-RPC', function () {
         ...process.env,
         ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1',
         ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE: '1',
+        ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM: 'sunos',
         HOME: tempHome,
       },
     });
@@ -211,6 +263,8 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.ok(response.result.capabilities.methods.includes('ping'));
     assert.ok(response.result.capabilities.methods.includes('listClusters'));
     assert.ok(response.result.capabilities.methods.includes('getClusterSummary'));
+    assert.ok(response.result.capabilities.methods.includes('listClusterMetrics'));
+    assert.ok(response.result.capabilities.methods.includes('getClusterTopology'));
     assert.ok(response.result.capabilities.methods.includes('unsubscribe'));
     assert.deepStrictEqual(response.result.capabilities.notifications, [
       'clusterLogLines',
@@ -298,6 +352,66 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.strictEqual(response.result.summary.id, clusters[0].id);
     assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'provider'));
     assert.ok(Object.prototype.hasOwnProperty.call(response.result.summary, 'cwd'));
+  });
+
+  it('responds to getClusterTopology for a seeded cluster', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 17,
+      method: 'getClusterTopology',
+      params: { clusterId: topologyClusterId },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 17);
+    assert.ok(response.result.topology);
+    assert.ok(Array.isArray(response.result.topology.agents));
+    assert.ok(Array.isArray(response.result.topology.edges));
+    assert.ok(Array.isArray(response.result.topology.topics));
+    assert.ok(response.result.topology.topics.includes('ISSUE_OPENED'));
+    assert.ok(response.result.topology.topics.includes('IMPLEMENTATION_READY'));
+    assert.ok(
+      response.result.topology.edges.some(
+        (edge) => edge.from === 'system' && edge.to === 'ISSUE_OPENED' && edge.kind === 'source'
+      )
+    );
+    assert.ok(
+      response.result.topology.edges.some(
+        (edge) => edge.from === 'ISSUE_OPENED' && edge.to === 'worker'
+      )
+    );
+    assert.ok(
+      response.result.topology.edges.some(
+        (edge) => edge.from === 'worker' && edge.to === 'IMPLEMENTATION_READY'
+      )
+    );
+  });
+
+  it('responds to listClusterMetrics with filtered cluster ids', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 18,
+      method: 'listClusterMetrics',
+      params: {
+        clusterIds: [metricsClusterId, 'missing-metrics', topologyClusterId],
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 18);
+    assert.ok(Array.isArray(response.result.metrics));
+    assert.strictEqual(response.result.metrics.length, 2);
+    assert.strictEqual(response.result.metrics[0].id, metricsClusterId);
+    assert.strictEqual(response.result.metrics[1].id, topologyClusterId);
+    for (const metric of response.result.metrics) {
+      assert.strictEqual(metric.supported, false);
+      assert.strictEqual(metric.cpuPercent, null);
+      assert.strictEqual(metric.memoryMB, null);
+    }
   });
 
   it('responds to startClusterFromText with a cluster id', async function () {

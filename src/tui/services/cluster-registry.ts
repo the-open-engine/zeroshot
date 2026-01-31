@@ -31,6 +31,7 @@ type ListClustersArgs = {
 };
 
 type ListClusterMetricsArgs = {
+  clusterIds?: string[];
   deps?: ClusterRegistryDeps;
 };
 

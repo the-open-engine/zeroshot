@@ -11,8 +11,10 @@ const {
 const {
   listClusters,
   getClusterSummary,
+  listClusterMetrics,
   ClusterNotFoundError,
 } = require("./services/cluster-registry");
+const { getClusterTopology } = require("./services/cluster-topology");
 const {
   launchClusterFromText,
   launchClusterFromIssue,
@@ -35,6 +37,7 @@ const { createSubscriptionRegistry } = require("./subscriptions");
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
 const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
 const MOCK_GUIDANCE_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE";
+const METRICS_PLATFORM_ENV = "ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM";
 
 const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === "1";
 const isMockGuidanceEnabled = () => process.env[MOCK_GUIDANCE_ENV] === "1";
@@ -115,6 +118,11 @@ const logDiagnostic = (message, error) => {
 const isNonEmptyString = (value) =>
   typeof value === "string" && value.trim().length > 0;
 
+const resolveMetricsPlatformOverride = () => {
+  const value = process.env[METRICS_PLATFORM_ENV];
+  return isNonEmptyString(value) ? value : null;
+};
+
 const isRpcError = (error) =>
   error &&
   typeof error === "object" &&
@@ -128,6 +136,9 @@ const isGuidanceInvalidParamsError = (message) =>
 
 const isGuidanceClusterNotFoundError = (message) =>
   message.includes("cluster not found");
+
+const isTopologyClusterNotFoundError = (error) =>
+  error instanceof Error && /cluster/i.test(error.message) && /not found/i.test(error.message);
 
 const validateGuidanceText = (text) => {
   if (!isNonEmptyString(text)) {
@@ -215,6 +226,35 @@ const startServer = () => {
           }
           throw error;
         }
+      },
+      getClusterTopology: async (params) => {
+        try {
+          const topology = await getClusterTopology(params.clusterId);
+          return { topology };
+        } catch (error) {
+          if (isTopologyClusterNotFoundError(error)) {
+            throw buildRpcError(
+              RPC_ERROR_CODES.CLUSTER_NOT_FOUND,
+              RPC_ERROR_MESSAGES[RPC_ERROR_CODES.CLUSTER_NOT_FOUND],
+              error instanceof Error ? error.message : "Cluster not found"
+            );
+          }
+          throw error;
+        }
+      },
+      listClusterMetrics: async (params) => {
+        const clusterIds = Array.isArray(params?.clusterIds)
+          ? params.clusterIds
+          : undefined;
+        const platformOverride = resolveMetricsPlatformOverride();
+        const metricsById = await listClusterMetrics({
+          clusterIds,
+          deps: platformOverride ? { platform: platformOverride } : undefined,
+        });
+        const metrics = Array.isArray(clusterIds)
+          ? clusterIds.map((id) => metricsById[id]).filter(Boolean)
+          : Object.values(metricsById);
+        return { metrics };
       },
       startClusterFromText: async (params) => {
         try {

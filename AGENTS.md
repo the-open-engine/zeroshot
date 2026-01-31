@@ -63,6 +63,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
+TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 
 ## CLI Quick Reference
 

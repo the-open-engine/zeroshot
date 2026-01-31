@@ -156,6 +156,7 @@ type ListClustersArgs = {
 };
 
 type ListClusterMetricsArgs = {
+  clusterIds?: string[];
   deps?: ClusterRegistryDeps;
 };
 
@@ -204,18 +205,33 @@ export async function getClusterSummary({
 }
 
 export async function listClusterMetrics(
-  { deps = {} }: ListClusterMetricsArgs = {}
+  { clusterIds, deps = {} }: ListClusterMetricsArgs = {}
 ): Promise<Record<string, ClusterMetrics>> {
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
   const pidusageImpl = deps.pidusage ?? pidusage;
   const platform = deps.platform ?? process.platform;
   const orchestrator = await getOrchestratorImpl();
   const summaries = orchestrator.listClusters();
-  const clusterIds = summaries.map((summary: any) => summary.id);
+  const availableIds = summaries.map((summary: any) => summary.id);
+  const requestedIds = Array.isArray(clusterIds)
+    ? clusterIds.filter((id) => typeof id === "string")
+    : null;
+  let resolvedIds = availableIds;
+  if (requestedIds) {
+    if (requestedIds.length === 0) {
+      return {};
+    }
+    const availableSet = new Set(availableIds);
+    resolvedIds = requestedIds.filter((id) => availableSet.has(id));
+  }
+
+  if (resolvedIds.length === 0) {
+    return {};
+  }
 
   if (!SUPPORTED_PLATFORMS.has(platform)) {
     return Object.fromEntries(
-      clusterIds.map((id) => [
+      resolvedIds.map((id) => [
         id,
         {
           id,
@@ -229,7 +245,7 @@ export async function listClusterMetrics(
 
   const pidsByCluster = new Map<string, number[]>();
   const allPids = new Set<number>();
-  for (const clusterId of clusterIds) {
+  for (const clusterId of resolvedIds) {
     const cluster = orchestrator.getCluster(clusterId);
     const pids = collectAgentPids(cluster);
     pidsByCluster.set(clusterId, pids);
@@ -248,7 +264,7 @@ export async function listClusterMetrics(
   }
 
   const results: Record<string, ClusterMetrics> = {};
-  for (const clusterId of clusterIds) {
+  for (const clusterId of resolvedIds) {
     const pids = pidsByCluster.get(clusterId) ?? [];
     let cpuTotal = 0;
     let memoryTotalBytes = 0;
