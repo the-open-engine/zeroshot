@@ -43,7 +43,8 @@ tmp/
 *.tmp
 
 # Zeroshot runtime
-.zeroshot/
+.zeroshot/*
+!.zeroshot/settings.json
 .claude-zeroshots/
 zeroshot-isolated/
 zeroshot-cluster-configs/
