@@ -157,6 +157,8 @@ export type SendGuidanceToClusterResult = { result: ClusterGuidanceDelivery };
 export type SubscribeClusterLogsParams = { clusterId: string; agentId?: string | null };
 export type SubscribeClusterTimelineParams = { clusterId: string };
 export type SubscribeResult = { subscriptionId: string };
+export type UnsubscribeParams = { subscriptionId: string };
+export type UnsubscribeResult = { removed: boolean };
 export type GetClusterTopologyParams = { clusterId: string };
 export type GetClusterTopologyResult = { topology: ClusterTopology };
 
@@ -171,4 +173,5 @@ export type ClusterTimelineEventsNotification = {
   subscriptionId: string;
   clusterId: string;
   events: TimelineEvent[];
+  droppedCount?: number;
 };

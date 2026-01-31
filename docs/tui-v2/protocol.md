@@ -155,7 +155,7 @@ Response:
     "protocolVersion": 1,
     "server": { "name": "zeroshot-backend", "version": "5.4.0" },
     "capabilities": {
-      "methods": ["initialize", "listClusters", "getClusterSummary"],
+      "methods": ["initialize", "listClusters", "getClusterSummary", "unsubscribe"],
       "notifications": ["clusterLogLines", "clusterTimelineEvents"]
     }
   }
@@ -373,7 +373,7 @@ Response:
 { "jsonrpc": "2.0", "id": 10, "result": { "subscriptionId": "sub-timeline-1" } }
 ```
 
-### getClusterTopology
+### unsubscribe
 
 Request:
 
@@ -381,6 +381,25 @@ Request:
 {
   "jsonrpc": "2.0",
   "id": 11,
+  "method": "unsubscribe",
+  "params": { "subscriptionId": "sub-logs-1" }
+}
+```
+
+Response:
+
+```json
+{ "jsonrpc": "2.0", "id": 11, "result": { "removed": true } }
+```
+
+### getClusterTopology
+
+Request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 12,
   "method": "getClusterTopology",
   "params": { "clusterId": "cluster-123" }
 }
@@ -391,7 +410,7 @@ Response:
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 11,
+  "id": 12,
   "result": {
     "topology": {
       /* ClusterTopology */
@@ -430,7 +449,8 @@ Response:
     "clusterId": "cluster-123",
     "events": [
       /* TimelineEvent[] */
-    ]
+    ],
+    "droppedCount": 0
   }
 }
 ```

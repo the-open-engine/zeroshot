@@ -13,6 +13,7 @@
         "approved": null,
         "sender": "planner"
       }
-    ]
+    ],
+    "droppedCount": 0
   }
 }

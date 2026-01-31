@@ -19,6 +19,7 @@
         "sendGuidanceToCluster",
         "subscribeClusterLogs",
         "subscribeClusterTimeline",
+        "unsubscribe",
         "getClusterTopology"
       ],
       "notifications": ["clusterLogLines", "clusterTimelineEvents"]
