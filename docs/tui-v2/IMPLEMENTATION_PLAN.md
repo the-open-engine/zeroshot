@@ -339,6 +339,8 @@ Goal: <single sentence describing the outcome>
 
 ### Issue 1 — Protocol Spec + Shared Types (v0)
 
+Status: Completed (Issue #240, closed 2026-01-31)
+
 **Goal:** Define the stable, versioned boundary between the Ratatui UI and Node backend.
 
 **Scope**
@@ -361,6 +363,8 @@ Goal: <single sentence describing the outcome>
 
 ### Issue 2 — TUI Backend Skeleton + Service Migration
 
+Status: Completed (Issue #241, closed 2026-01-31)
+
 **Goal:** Create the Node backend process and relocate reusable services.
 
 **Scope**
@@ -381,6 +385,8 @@ Goal: <single sentence describing the outcome>
 ---
 
 ### Issue 3 — JSON-RPC Server + Initialize Handshake
+
+Status: Completed (Issue #242, closed 2026-01-31)
 
 **Goal:** Implement the stdio JSON-RPC server with version negotiation.
 
