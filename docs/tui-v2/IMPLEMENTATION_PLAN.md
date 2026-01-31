@@ -409,6 +409,8 @@ Status: Completed (Issue #242, closed 2026-01-31)
 
 ### Issue 4 — Cluster Listing + Summary APIs
 
+Status: Open (Issue #249)
+
 **Goal:** Expose baseline cluster discovery for Launcher/Monitor.
 
 **Scope**
@@ -427,6 +429,8 @@ Status: Completed (Issue #242, closed 2026-01-31)
 ---
 
 ### Issue 5 — Start Cluster from Text / Issue
+
+Status: Open (Issue #250)
 
 **Goal:** Enable TUI to launch clusters using existing CLI paths.
 
@@ -447,6 +451,8 @@ Status: Completed (Issue #242, closed 2026-01-31)
 ---
 
 ### Issue 6 — Log + Timeline Subscriptions
+
+Status: Open (Issue #251)
 
 **Goal:** Stream live logs and timeline events to the UI.
 
