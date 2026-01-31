@@ -3,30 +3,29 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const buildOutput = path.join(
-  __dirname,
-  '..',
-  '..',
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const LAUNCHER_PATH = path.join(
+  PROJECT_ROOT,
   'lib',
   'tui-backend',
   'services',
   'cluster-launcher.js'
 );
 
-function ensureBackendBuild() {
-  if (!fs.existsSync(buildOutput)) {
-    execSync('npm run build:tui-backend', { stdio: 'inherit' });
+const loadLauncher = () => {
+  if (!fs.existsSync(LAUNCHER_PATH)) {
+    execSync('npm run build:tui-backend', { cwd: PROJECT_ROOT, stdio: 'inherit' });
   }
-}
-
-ensureBackendBuild();
-
-const {
-  launchClusterFromIssue,
-  InvalidIssueReferenceError,
-} = require('../../lib/tui-backend/services/cluster-launcher');
+  return require(LAUNCHER_PATH);
+};
 
 describe('tui-backend cluster launcher', function () {
+  let launchClusterFromIssue;
+  let InvalidIssueReferenceError;
+
+  before(function () {
+    ({ launchClusterFromIssue, InvalidIssueReferenceError } = loadLauncher());
+  });
   it('throws InvalidIssueReferenceError for invalid issue refs', async function () {
     await assert.rejects(
       () =>
