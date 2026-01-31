@@ -79,14 +79,19 @@ fn route_monitor(key: KeyEvent) -> Option<Action> {
 }
 
 fn route_cluster(id: &str, key: KeyEvent) -> Option<Action> {
-    let direction = match key.code {
-        KeyCode::Tab | KeyCode::Right => Some(cluster::FocusDirection::Next),
-        KeyCode::Left => Some(cluster::FocusDirection::Prev),
-        _ => None,
-    }?;
+    let action = match key.code {
+        KeyCode::Tab | KeyCode::Right => {
+            cluster::Action::CycleFocus(cluster::FocusDirection::Next)
+        }
+        KeyCode::Left => cluster::Action::CycleFocus(cluster::FocusDirection::Prev),
+        KeyCode::Up | KeyCode::Char('k') => cluster::Action::MoveFocused(-1),
+        KeyCode::Down | KeyCode::Char('j') => cluster::Action::MoveFocused(1),
+        KeyCode::Enter => cluster::Action::ActivateFocused,
+        _ => return None,
+    };
 
     Some(Action::Screen(ScreenAction::Cluster {
         id: id.to_string(),
-        action: cluster::Action::CycleFocus(direction),
+        action,
     }))
 }

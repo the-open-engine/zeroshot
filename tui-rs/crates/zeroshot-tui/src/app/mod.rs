@@ -241,6 +241,13 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
 fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut Vec<Effect>) {
     match nav {
         NavigationAction::Push(screen) => {
+            let cluster_id = match state.screen_stack.last() {
+                Some(ScreenId::Cluster { id }) => Some(id.clone()),
+                _ => None,
+            };
+            if let Some(id) = cluster_id {
+                cleanup_cluster_subscriptions(state, &id, effects);
+            }
             state.ensure_screen_state(&screen);
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
@@ -250,10 +257,30 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
         }
         NavigationAction::Pop => {
             if state.screen_stack.len() > 1 {
+                let cluster_id = match state.screen_stack.last() {
+                    Some(ScreenId::Cluster { id }) => Some(id.clone()),
+                    _ => None,
+                };
+                if let Some(id) = cluster_id {
+                    cleanup_cluster_subscriptions(state, &id, effects);
+                }
                 state.screen_stack.pop();
+                if let Some(active) = state.screen_stack.last() {
+                    if matches!(active, ScreenId::Monitor) {
+                        state.monitor.mark_polled(state.now_ms);
+                    }
+                    queue_navigation_effects(active, effects);
+                }
             }
         }
         NavigationAction::ReplaceTop(screen) => {
+            let cluster_id = match state.screen_stack.last() {
+                Some(ScreenId::Cluster { id }) => Some(id.clone()),
+                _ => None,
+            };
+            if let Some(id) = cluster_id {
+                cleanup_cluster_subscriptions(state, &id, effects);
+            }
             state.ensure_screen_state(&screen);
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
@@ -381,6 +408,21 @@ fn handle_cluster_action(
         cluster::Action::CycleFocus(direction) => {
             entry.cycle_focus(direction);
         }
+        cluster::Action::MoveFocused(delta) => {
+            entry.move_focused(delta);
+        }
+        cluster::Action::ActivateFocused => {
+            if let Some(agent_id) = entry.activate_focused() {
+                apply_navigation(
+                    state,
+                    NavigationAction::Push(ScreenId::Agent {
+                        cluster_id: id,
+                        agent_id,
+                    }),
+                    effects,
+                );
+            }
+        }
         cluster::Action::OpenAgent(agent_id) => {
             apply_navigation(
                 state,
@@ -456,7 +498,7 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
                 .clusters
                 .entry(params.cluster_id)
                 .or_insert_with(cluster::State::default);
-            entry.push_log_lines(params.lines);
+            entry.push_log_lines(params.lines, params.dropped_count);
         }
         BackendNotification::ClusterTimelineEvents(params) => {
             let entry = state
@@ -525,4 +567,16 @@ fn handle_start_cluster_result(
 
 fn handle_backend_error(state: &mut AppState, message: String) {
     state.last_error = Some(message);
+}
+
+fn cleanup_cluster_subscriptions(state: &mut AppState, id: &str, effects: &mut Vec<Effect>) {
+    let Some(entry) = state.clusters.get_mut(id) else {
+        return;
+    };
+    if let Some(subscription_id) = entry.log_subscription.take() {
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
+    if let Some(subscription_id) = entry.timeline_subscription.take() {
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
 }
