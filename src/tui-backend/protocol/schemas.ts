@@ -19,6 +19,7 @@ const errorDataSchema = {
       type: "object",
       additionalProperties: { type: "string" },
     },
+    supportedVersions: { type: "array", items: { type: "number" } },
   },
 };
 
@@ -265,6 +266,17 @@ const initializeResultSchema = {
   },
 };
 
+const pingParamsSchema = emptyParamsSchema;
+
+const pingResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok"],
+  properties: {
+    ok: { const: true },
+  },
+};
+
 const listClustersResultSchema = {
   type: "object",
   additionalProperties: false,
@@ -497,6 +509,7 @@ const buildNotificationSchema = (method, paramsSchema) => ({
 
 const REQUEST_SCHEMAS = {
   initialize: buildRequestSchema("initialize", initializeParamsSchema, true),
+  ping: buildRequestSchema("ping", pingParamsSchema, true),
   listClusters: buildRequestSchema("listClusters", emptyParamsSchema, false),
   getClusterSummary: buildRequestSchema(
     "getClusterSummary",
@@ -547,6 +560,7 @@ const REQUEST_SCHEMAS = {
 
 const RESPONSE_SCHEMAS = {
   initialize: buildResponseSchema(initializeResultSchema),
+  ping: buildResponseSchema(pingResultSchema),
   listClusters: buildResponseSchema(listClustersResultSchema),
   getClusterSummary: buildResponseSchema(getClusterSummaryResultSchema),
   listClusterMetrics: buildResponseSchema(listClusterMetricsResultSchema),

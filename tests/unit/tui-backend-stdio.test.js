@@ -1,0 +1,221 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { execSync, spawn } = require('child_process');
+
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const SERVER_PATH = path.join(PROJECT_ROOT, 'lib', 'tui-backend', 'server.js');
+
+const encodeFrame = (payload) => {
+  const body = Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload), 'utf8');
+  const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'utf8');
+  return Buffer.concat([header, body]);
+};
+
+const createFrameCollector = () => {
+  let buffer = Buffer.alloc(0);
+  return (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    const frames = [];
+    while (true) {
+      const headerIndex = buffer.indexOf('\r\n\r\n');
+      if (headerIndex === -1) {
+        break;
+      }
+      const headerText = buffer.slice(0, headerIndex).toString('utf8');
+      const match = headerText.match(/Content-Length:\s*(\d+)/i);
+      if (!match) {
+        throw new Error('Missing Content-Length header in response');
+      }
+      const length = Number.parseInt(match[1], 10);
+      const totalLength = headerIndex + 4 + length;
+      if (buffer.length < totalLength) {
+        break;
+      }
+      const payload = buffer.slice(headerIndex + 4, totalLength).toString('utf8');
+      frames.push(payload);
+      buffer = buffer.slice(totalLength);
+    }
+    return frames;
+  };
+};
+
+const createMessageQueue = () => {
+  const queue = [];
+  const waiters = [];
+  return {
+    push(message) {
+      if (waiters.length) {
+        const waiter = waiters.shift();
+        clearTimeout(waiter.timer);
+        waiter.resolve(message);
+        return;
+      }
+      queue.push(message);
+    },
+    next(timeoutMs = 2000) {
+      if (queue.length) {
+        return Promise.resolve(queue.shift());
+      }
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const index = waiters.findIndex((waiter) => waiter.resolve === resolve);
+          if (index !== -1) {
+            waiters.splice(index, 1);
+          }
+          reject(new Error('Timed out waiting for response'));
+        }, timeoutMs);
+        waiters.push({ resolve, reject, timer });
+      });
+    },
+  };
+};
+
+describe('tui-backend stdio JSON-RPC', function () {
+  this.timeout(15000);
+
+  let server;
+  let queue;
+
+  before(function () {
+    if (!fs.existsSync(SERVER_PATH)) {
+      execSync('npm run build:tui-backend', { cwd: PROJECT_ROOT, stdio: 'inherit' });
+    }
+
+    server = spawn('node', [SERVER_PATH], {
+      cwd: PROJECT_ROOT,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    queue = createMessageQueue();
+    const collectFrames = createFrameCollector();
+
+    server.stdout.on('data', (chunk) => {
+      const frames = collectFrames(chunk);
+      for (const frame of frames) {
+        queue.push(JSON.parse(frame));
+      }
+    });
+
+    server.stderr.on('data', () => {});
+  });
+
+  after(async function () {
+    if (!server) return;
+    server.stdin.end();
+    await new Promise((resolve) => server.on('exit', resolve));
+  });
+
+  it('responds to initialize with capabilities', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: 1,
+        client: { name: 'test-client', version: '0.1.0' },
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 1);
+    assert.strictEqual(response.jsonrpc, '2.0');
+    assert.strictEqual(response.result.protocolVersion, 1);
+    assert.ok(response.result.server.name);
+    assert.ok(response.result.server.version);
+    assert.ok(response.result.capabilities.methods.includes('initialize'));
+    assert.ok(response.result.capabilities.methods.includes('ping'));
+    assert.deepStrictEqual(response.result.capabilities.notifications, []);
+  });
+
+  it('responds to ping', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'ping',
+      params: {},
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 2);
+    assert.deepStrictEqual(response.result, { ok: true });
+  });
+
+  it('returns parse error for invalid JSON', async function () {
+    server.stdin.write(encodeFrame('{ not-json'));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, null);
+    assert.strictEqual(response.error.code, -32700);
+  });
+
+  it('returns method not found for unknown method', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'nope',
+      params: {},
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 3);
+    assert.strictEqual(response.error.code, -32601);
+  });
+
+  it('returns invalid params for malformed initialize', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'initialize',
+      params: { protocolVersion: 1 },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 4);
+    assert.strictEqual(response.error.code, -32602);
+  });
+
+  it('returns protocol mismatch with supported versions', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'initialize',
+      params: {
+        protocolVersion: 999,
+        client: { name: 'test-client', version: '0.1.0' },
+      },
+    };
+
+    server.stdin.write(encodeFrame(request));
+    const response = await queue.next();
+
+    assert.strictEqual(response.id, 5);
+    assert.strictEqual(response.error.code, -32000);
+    assert.deepStrictEqual(response.error.data.supportedVersions, [1]);
+  });
+
+  it('reassembles partial frames across chunks', async function () {
+    const request = {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'ping',
+      params: {},
+    };
+    const frame = encodeFrame(request);
+    const splitIndex = Math.floor(frame.length / 2);
+    server.stdin.write(frame.slice(0, splitIndex));
+    server.stdin.write(frame.slice(splitIndex));
+
+    const response = await queue.next();
+    assert.strictEqual(response.id, 6);
+    assert.deepStrictEqual(response.result, { ok: true });
+  });
+});

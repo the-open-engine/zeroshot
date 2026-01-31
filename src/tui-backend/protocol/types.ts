@@ -3,6 +3,7 @@ export type JsonRpcId = string | number;
 export type RpcErrorData = {
   detail?: string;
   fields?: Record<string, string>;
+  supportedVersions?: number[];
 };
 
 export type RpcError = {
@@ -120,6 +121,9 @@ export type InitializeResult = {
   server: { name: string; version: string };
   capabilities: { methods: string[]; notifications: string[] };
 };
+
+export type PingParams = Record<string, never> | null;
+export type PingResult = { ok: true };
 
 export type ListClustersResult = { clusters: ClusterSummary[] };
 export type GetClusterSummaryParams = { clusterId: string };

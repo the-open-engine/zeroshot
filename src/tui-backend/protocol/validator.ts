@@ -114,12 +114,17 @@ const createValidator = () => {
       message.params &&
       message.params.protocolVersion !== PROTOCOL_VERSION
     ) {
+      const error = buildError(
+        RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH,
+        RPC_ERROR_MESSAGES[RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH]
+      );
+      error.data = {
+        ...(error.data || {}),
+        supportedVersions: [PROTOCOL_VERSION],
+      };
       return {
         ok: false,
-        error: buildError(
-          RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH,
-          RPC_ERROR_MESSAGES[RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH]
-        ),
+        error,
       };
     }
 
