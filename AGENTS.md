@@ -70,6 +70,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
 TUI v2 (Rust) convention: centralized key routing in `src/input.rs`; `app::update()` is pure and returns effects; `ui::render()` is pure and performs no IO. Adding a screen requires a `ScreenId` variant plus a screen reducer and render entry.
+TUI v2 (Rust) command flow: `Effect::Command(CommandRequest)` is emitted by `app::update()` and executed in `src/main.rs` via `commands::dispatch()`, with failures surfaced through `BackendAction::Error`.
+TUI v2 (Rust) provider override lives in `AppState.provider_override` and is forwarded when launching clusters (e.g. `StartClusterFromText`).
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.

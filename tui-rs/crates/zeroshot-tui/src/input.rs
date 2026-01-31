@@ -4,7 +4,7 @@ use crate::app::{Action, NavigationAction, ScreenAction, ScreenId};
 use crate::screens::{cluster, launcher, monitor};
 
 pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
-    if let Some(action) = route_global(key) {
+    if let Some(action) = route_global(screen, key) {
         return Some(action);
     }
 
@@ -16,13 +16,16 @@ pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn route_global(key: KeyEvent) -> Option<Action> {
+fn route_global(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Navigate(NavigationAction::Pop)),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::Quit)
         }
-        KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Char('q') => match screen {
+            ScreenId::Launcher => None,
+            _ => Some(Action::Quit),
+        },
         _ => None,
     }
 }
@@ -30,6 +33,32 @@ fn route_global(key: KeyEvent) -> Option<Action> {
 fn route_launcher(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Enter => Some(Action::Screen(ScreenAction::Launcher(launcher::Action::Submit))),
+        KeyCode::Backspace => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::Backspace,
+        ))),
+        KeyCode::Delete => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::Delete,
+        ))),
+        KeyCode::Left => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::MoveCursorLeft,
+        ))),
+        KeyCode::Right => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::MoveCursorRight,
+        ))),
+        KeyCode::Home => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::MoveCursorHome,
+        ))),
+        KeyCode::End => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::MoveCursorEnd,
+        ))),
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(Action::Screen(ScreenAction::Launcher(
+                launcher::Action::InsertChar(ch),
+            )))
+        }
         _ => None,
     }
 }

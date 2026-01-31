@@ -11,6 +11,7 @@ use ratatui::Terminal;
 use zeroshot_tui::app::{Action, AppState, BackendAction, BackendRequest, Effect};
 use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
 use zeroshot_tui::backend::stdio::StdioBackendClient;
+use zeroshot_tui::commands;
 use zeroshot_tui::input;
 use zeroshot_tui::terminal::TerminalGuard;
 use zeroshot_tui::ui;
@@ -228,6 +229,19 @@ fn execute_effects(
                     )?;
                 }
             }
+            Effect::Command(request) => match commands::dispatch(request) {
+                Ok(actions) => {
+                    for action in actions {
+                        send_action(action_tx, action)?;
+                    }
+                }
+                Err(err) => {
+                    send_action(
+                        action_tx,
+                        Action::Backend(BackendAction::Error(err.to_string())),
+                    )?;
+                }
+            },
         }
     }
 
@@ -249,10 +263,14 @@ fn execute_backend_request(
         BackendRequest::SubscribeClusterTimeline { cluster_id } => {
             subscribe_cluster_timeline(client, cluster_id)
         }
-        BackendRequest::StartClusterFromText { text } => start_cluster_from_text(client, text),
-        BackendRequest::StartClusterFromIssue { reference } => {
-            start_cluster_from_issue(client, reference)
-        }
+        BackendRequest::StartClusterFromText {
+            text,
+            provider_override,
+        } => start_cluster_from_text(client, text, provider_override),
+        BackendRequest::StartClusterFromIssue {
+            reference,
+            provider_override,
+        } => start_cluster_from_issue(client, reference, provider_override),
         BackendRequest::SendGuidanceToCluster { cluster_id, message } => {
             send_guidance_to_cluster(client, cluster_id, message)
         }
@@ -314,10 +332,11 @@ fn subscribe_cluster_timeline(
 fn start_cluster_from_text(
     client: &StdioBackendClient,
     text: String,
+    provider_override: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
     let result = client.start_cluster_from_text(zeroshot_tui::protocol::StartClusterFromTextParams {
         text,
-        provider_override: None,
+        provider_override,
         cluster_id: None,
     })?;
     Ok(Some(BackendAction::StartClusterResult {
@@ -328,10 +347,11 @@ fn start_cluster_from_text(
 fn start_cluster_from_issue(
     client: &StdioBackendClient,
     reference: String,
+    provider_override: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
     let result = client.start_cluster_from_issue(zeroshot_tui::protocol::StartClusterFromIssueParams {
         r#ref: reference,
-        provider_override: None,
+        provider_override,
         cluster_id: None,
     })?;
     Ok(Some(BackendAction::StartClusterResult {

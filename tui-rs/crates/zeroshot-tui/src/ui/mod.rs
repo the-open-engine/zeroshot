@@ -4,7 +4,9 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId};
-use crate::screens::{agent, cluster, launcher, monitor};
+use crate::screens::{agent, cluster, monitor};
+
+pub mod launcher;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     let size = frame.size();
@@ -16,7 +18,12 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     render_header(frame, layout[0], state);
 
     match state.active_screen() {
-        ScreenId::Launcher => launcher::render(frame, layout[1], &state.launcher),
+        ScreenId::Launcher => launcher::render(
+            frame,
+            layout[1],
+            &state.launcher,
+            state.provider_override.as_deref(),
+        ),
         ScreenId::Monitor => monitor::render(frame, layout[1], &state.monitor),
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
