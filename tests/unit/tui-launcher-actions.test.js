@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'launcher-actions.js');
 
@@ -13,7 +14,11 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { submitLauncherText } = require('../../lib/tui/launcher-actions');
+let submitLauncherText;
+
+before(async function () {
+  ({ submitLauncherText } = await loadTuiModule('lib/tui/launcher-actions.js'));
+});
 
 function createHarness() {
   const calls = {

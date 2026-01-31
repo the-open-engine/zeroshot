@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'view-stack.js');
 
@@ -13,13 +14,16 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const {
-  createViewStack,
-  pushView,
-  popView,
-  activeView,
-  DEFAULT_VIEW,
-} = require('../../lib/tui/view-stack');
+let createViewStack;
+let pushView;
+let popView;
+let activeView;
+let DEFAULT_VIEW;
+
+before(async function () {
+  ({ createViewStack, pushView, popView, activeView, DEFAULT_VIEW } =
+    await loadTuiModule('lib/tui/view-stack.js'));
+});
 
 describe('TUI view stack', function () {
   it('pushes and pops views', function () {

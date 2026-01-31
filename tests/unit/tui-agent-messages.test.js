@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'services', 'agent-messages.js');
 
@@ -13,10 +14,14 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const {
-  agentMessageKey,
-  createPendingAgentMessage,
-} = require('../../lib/tui/services/agent-messages');
+let agentMessageKey;
+let createPendingAgentMessage;
+
+before(async function () {
+  ({ agentMessageKey, createPendingAgentMessage } = await loadTuiModule(
+    'lib/tui/services/agent-messages.js'
+  ));
+});
 
 describe('TUI agent messages', function () {
   it('builds a stable key for cluster and agent', function () {

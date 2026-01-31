@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'views', 'MonitorView.js');
 
@@ -13,11 +14,15 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const {
-  buildMonitorRows,
-  computeMonitorColumnWidths,
-  formatMonitorRowLine,
-} = require('../../lib/tui/views/MonitorView');
+let buildMonitorRows;
+let computeMonitorColumnWidths;
+let formatMonitorRowLine;
+
+before(async function () {
+  ({ buildMonitorRows, computeMonitorColumnWidths, formatMonitorRowLine } = await loadTuiModule(
+    'lib/tui/views/MonitorView.js'
+  ));
+});
 
 describe('TUI monitor list rendering', function () {
   it('builds rows and formats list lines', function () {

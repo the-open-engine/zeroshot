@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(
   __dirname,
@@ -22,7 +23,11 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { createClusterTimelineStream } = require('../../lib/tui/services/cluster-timeline');
+let createClusterTimelineStream;
+
+before(async function () {
+  ({ createClusterTimelineStream } = await loadTuiModule('lib/tui/services/cluster-timeline.js'));
+});
 const Ledger = require('../../src/ledger');
 
 describe('TUI cluster timeline service', function () {

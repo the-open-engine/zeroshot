@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'app.js');
 
@@ -13,8 +14,17 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { handleAppInput } = require('../../lib/tui/app');
-const { activeView, createViewStack, popView, pushView } = require('../../lib/tui/view-stack');
+let handleAppInput;
+let activeView;
+let createViewStack;
+let popView;
+let pushView;
+
+before(async function () {
+  ({ handleAppInput } = await loadTuiModule('lib/tui/app.js'));
+  ({ activeView, createViewStack, popView, pushView } =
+    await loadTuiModule('lib/tui/view-stack.js'));
+});
 
 describe('TUI Esc-back handling', function () {
   it('pops the view stack on escape', function () {

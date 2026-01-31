@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
 const { pathToFileURL } = require('url');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'commands', 'dispatcher.js');
 
@@ -19,7 +20,11 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { dispatchCommand } = require('../../lib/tui/commands/dispatcher');
+let dispatchCommand;
+
+before(async function () {
+  ({ dispatchCommand } = await loadTuiModule('lib/tui/commands/dispatcher.js'));
+});
 
 let seeded = false;
 

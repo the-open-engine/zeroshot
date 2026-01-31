@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'commands', 'parser.js');
 
@@ -13,7 +14,11 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { parseInput } = require('../../lib/tui/commands/parser');
+let parseInput;
+
+before(async function () {
+  ({ parseInput } = await loadTuiModule('lib/tui/commands/parser.js'));
+});
 
 describe('TUI command parser', function () {
   it('parses slash commands', function () {

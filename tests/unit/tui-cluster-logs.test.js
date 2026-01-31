@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(__dirname, '..', '..', 'lib', 'tui', 'services', 'cluster-logs.js');
 
@@ -14,10 +15,14 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const {
-  createClusterLogStream,
-  resolveClusterDbPath,
-} = require('../../lib/tui/services/cluster-logs');
+let createClusterLogStream;
+let resolveClusterDbPath;
+
+before(async function () {
+  ({ createClusterLogStream, resolveClusterDbPath } = await loadTuiModule(
+    'lib/tui/services/cluster-logs.js'
+  ));
+});
 const Ledger = require('../../src/ledger');
 
 describe('TUI cluster logs service', function () {

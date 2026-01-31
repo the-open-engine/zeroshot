@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(
   __dirname,
@@ -21,7 +22,11 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { buildTopologyModel } = require('../../lib/tui/services/cluster-topology');
+let buildTopologyModel;
+
+before(async function () {
+  ({ buildTopologyModel } = await loadTuiModule('lib/tui/services/cluster-topology.js'));
+});
 
 function edgeKey(edge) {
   return `${edge.from}=>${edge.to}::${edge.topic}`;

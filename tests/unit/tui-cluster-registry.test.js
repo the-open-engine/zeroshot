@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(
   __dirname,
@@ -21,7 +22,14 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const { listClusters, listClusterMetrics } = require('../../lib/tui/services/cluster-registry');
+let listClusters;
+let listClusterMetrics;
+
+before(async function () {
+  ({ listClusters, listClusterMetrics } = await loadTuiModule(
+    'lib/tui/services/cluster-registry.js'
+  ));
+});
 
 function createOrchestrator(summaries, clustersById) {
   return {

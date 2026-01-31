@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { loadTuiModule } = require('../helpers/load-tui');
 
 const buildOutput = path.join(
   __dirname,
@@ -21,10 +22,14 @@ function ensureTuiBuild() {
 
 ensureTuiBuild();
 
-const {
-  sendAgentGuidance,
-  sendClusterGuidance,
-} = require('../../lib/tui/services/guidance-delivery');
+let sendAgentGuidance;
+let sendClusterGuidance;
+
+before(async function () {
+  ({ sendAgentGuidance, sendClusterGuidance } = await loadTuiModule(
+    'lib/tui/services/guidance-delivery.js'
+  ));
+});
 
 describe('TUI guidance delivery service', function () {
   it('delegates agent guidance to orchestrator', async function () {

@@ -31,7 +31,7 @@
     "deadcode:all": "npm run deadcode && npm run deadcode:files && npm run deadcode:deps",
     "dupcheck": "jscpd src/ --min-lines 5 --min-tokens 50 --threshold 5",
     "build:tui-backend": "tsc -p tsconfig.tui-backend.json",
-    "build:tui": "npm run build:tui-backend && tsc -p tsconfig.tui.json",
+    "build:tui": "npm run build:tui-backend && tsc -p tsconfig.tui.json && node scripts/copy-tui-package.js",
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",

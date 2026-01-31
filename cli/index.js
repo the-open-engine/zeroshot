@@ -187,9 +187,9 @@ function resolveTuiProviderOverride(options = {}) {
   return normalized;
 }
 
-function startTuiSession(options = {}) {
+async function startTuiSession(options = {}) {
   const providerOverride = resolveTuiProviderOverride(options);
-  const { start } = require('../lib/tui');
+  const { start } = await import('../lib/tui/index.js');
   start({
     autoExit: false,
     providerOverride,
@@ -3273,9 +3273,9 @@ program
   .command('watch')
   .description('Open Ink TUI in Monitor view')
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
-  .action((_options) => {
+  .action(async (_options) => {
     try {
-      startTuiSession({ initialView: 'monitor' });
+      await startTuiSession({ initialView: 'monitor' });
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);
@@ -3292,9 +3292,9 @@ program
   )
   .allowExcessArguments(true)
   .allowUnknownOption(true)
-  .action((options) => {
+  .action(async (options) => {
     try {
-      startTuiSession(options);
+      await startTuiSession(options);
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);
@@ -3307,9 +3307,9 @@ function registerTuiEntrypoint(commandName, providerName) {
     .description(`Interactive TUI to monitor clusters (provider: ${providerName})`)
     .allowExcessArguments(true)
     .allowUnknownOption(true)
-    .action(() => {
+    .action(async () => {
       try {
-        startTuiSession({ provider: providerName });
+        await startTuiSession({ provider: providerName });
       } catch (error) {
         console.error('Error starting TUI:', error.message);
         process.exit(1);
