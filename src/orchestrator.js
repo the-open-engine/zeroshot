@@ -272,18 +272,24 @@ class Orchestrator {
     // Restore isolation manager FIRST if cluster was running in isolation mode
     const { isolation, isolationManager } = this._restoreClusterIsolation(clusterId, clusterData);
 
+    // Create mutable cluster context for reload path (used by AgentWrapper/SubClusterWrapper)
+    const clusterContext = {
+      ...clusterData,
+      id: clusterId,
+      isolation,
+    };
+
     // Reconstruct agent metadata from config (processes are ephemeral)
     // CRITICAL: Pass isolation context to agents if cluster was running in isolation
     const agents = this._rebuildClusterAgents(
-      clusterId,
-      clusterData,
+      clusterContext,
       messageBus,
       isolation,
       isolationManager
     );
 
     const cluster = {
-      ...clusterData,
+      ...clusterContext,
       ledger,
       messageBus,
       agents,
@@ -293,11 +299,13 @@ class Orchestrator {
       issue: clusterData.issue || null,
     };
 
-    this.clusters.set(clusterId, cluster);
-    this._startSnapshotter(cluster);
+    Object.assign(clusterContext, cluster);
+
+    this.clusters.set(clusterId, clusterContext);
+    this._startSnapshotter(clusterContext);
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
-    return cluster;
+    return clusterContext;
   }
 
   _restoreClusterIsolation(clusterId, clusterData) {
@@ -351,12 +359,12 @@ class Orchestrator {
     return agentOptions;
   }
 
-  _instantiateAgent(agentConfig, messageBus, clusterId, agentOptions) {
+  _instantiateAgent(agentConfig, messageBus, clusterContext, agentOptions) {
     if (agentConfig.type === 'subcluster') {
-      return new SubClusterWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
+      return new SubClusterWrapper(agentConfig, messageBus, clusterContext, agentOptions);
     }
 
-    return new AgentWrapper(agentConfig, messageBus, { id: clusterId }, agentOptions);
+    return new AgentWrapper(agentConfig, messageBus, clusterContext, agentOptions);
   }
 
   _restoreAgentState(agent, agentConfig, clusterData) {
@@ -372,8 +380,10 @@ class Orchestrator {
     agent.processPid = savedState.processPid || null;
   }
 
-  _rebuildClusterAgents(clusterId, clusterData, messageBus, isolation, isolationManager) {
+  _rebuildClusterAgents(clusterContext, messageBus, isolation, isolationManager) {
     const agents = [];
+    const clusterId = clusterContext.id;
+    const clusterData = clusterContext;
     const agentCwd = this._resolveAgentCwd(clusterData);
 
     if (!clusterData.config?.agents) {
@@ -396,7 +406,7 @@ class Orchestrator {
         isolation,
         isolationManager
       );
-      const agent = this._instantiateAgent(agentConfig, messageBus, clusterId, agentOptions);
+      const agent = this._instantiateAgent(agentConfig, messageBus, clusterContext, agentOptions);
       this._restoreAgentState(agent, agentConfig, clusterData);
       agents.push(agent);
     }
