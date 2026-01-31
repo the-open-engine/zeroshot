@@ -18,6 +18,15 @@ const {
   launchClusterFromIssue,
   InvalidIssueReferenceError,
 } = require("./services/cluster-launcher");
+const {
+  createClusterLogStream,
+  MAX_LOG_LINES,
+} = require("./services/cluster-logs");
+const {
+  createClusterTimelineStream,
+  MAX_TIMELINE_EVENTS,
+} = require("./services/cluster-timeline");
+const { createSubscriptionRegistry } = require("./subscriptions");
 
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
 const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
@@ -68,11 +77,26 @@ const logDiagnostic = (message, error) => {
   process.stderr.write(`${details}\n`);
 };
 
+const capPayload = (items, maxItems) => {
+  if (!Array.isArray(items)) {
+    return { items: [], droppedCount: 0 };
+  }
+  if (items.length <= maxItems) {
+    return { items, droppedCount: 0 };
+  }
+  const trimmed = items.slice(items.length - maxItems);
+  return { items: trimmed, droppedCount: items.length - trimmed.length };
+};
+
 const startServer = () => {
+  const registry = createSubscriptionRegistry();
+  const notifications = ["clusterLogLines", "clusterTimelineEvents"];
+  let shuttingDown = false;
   const validator = createValidator();
   const dispatcher = createDispatcher({
     serverInfo: loadPackageInfo(),
     protocolVersion: PROTOCOL_VERSION,
+    notifications,
     handlers: {
       listClusters: async () => ({
         clusters: await listClusters(),
@@ -135,9 +159,90 @@ const startServer = () => {
           );
         }
       },
+      subscribeClusterLogs: async (params) => {
+        const clusterId = params.clusterId;
+        const agentId = params.agentId ?? null;
+        let subscriptionId = "";
+        const stream = createClusterLogStream({
+          clusterId,
+          agentId,
+          maxInitialLines: MAX_LOG_LINES * 5,
+          onLines: (lines) => {
+            if (!subscriptionId) return;
+            const { items, droppedCount } = capPayload(lines, MAX_LOG_LINES);
+            if (!items.length) return;
+            const payload =
+              droppedCount > 0
+                ? {
+                    subscriptionId,
+                    clusterId,
+                    lines: items,
+                    droppedCount,
+                  }
+                : {
+                    subscriptionId,
+                    clusterId,
+                    lines: items,
+                  };
+            writeFrame({
+              jsonrpc: "2.0",
+              method: "clusterLogLines",
+              params: payload,
+            });
+          },
+        });
+        subscriptionId = registry.add("clusterLogs", () => stream.close());
+        stream.start();
+        return { subscriptionId };
+      },
+      subscribeClusterTimeline: async (params) => {
+        const clusterId = params.clusterId;
+        let subscriptionId = "";
+        const stream = createClusterTimelineStream({
+          clusterId,
+          maxInitialEvents: MAX_TIMELINE_EVENTS * 5,
+          onEvents: (events) => {
+            if (!subscriptionId) return;
+            const { items, droppedCount } = capPayload(
+              events,
+              MAX_TIMELINE_EVENTS
+            );
+            if (!items.length) return;
+            const payload =
+              droppedCount > 0
+                ? {
+                    subscriptionId,
+                    clusterId,
+                    events: items,
+                    droppedCount,
+                  }
+                : {
+                    subscriptionId,
+                    clusterId,
+                    events: items,
+                  };
+            writeFrame({
+              jsonrpc: "2.0",
+              method: "clusterTimelineEvents",
+              params: payload,
+            });
+          },
+        });
+        subscriptionId = registry.add("clusterTimeline", () => stream.close());
+        stream.start();
+        return { subscriptionId };
+      },
+      unsubscribe: async (params) => registry.unsubscribe(params.subscriptionId),
     },
   });
   const parser = createFrameParser();
+
+  const shutdown = (code) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    registry.closeAll();
+    process.exit(code);
+  };
 
   const handleFrame = async (payload) => {
     let message;
@@ -211,20 +316,26 @@ const startServer = () => {
 
   process.stdin.on("data", handleChunk);
   process.stdin.on("end", () => {
-    process.exit(0);
+    shutdown(0);
   });
   process.stdin.on("error", (error) => {
     logDiagnostic("Stdin error", error);
-    process.exit(1);
+    shutdown(1);
   });
 
   process.on("uncaughtException", (error) => {
     logDiagnostic("Uncaught exception", error);
-    process.exit(1);
+    shutdown(1);
   });
   process.on("unhandledRejection", (error) => {
     logDiagnostic("Unhandled rejection", error);
-    process.exit(1);
+    shutdown(1);
+  });
+  process.on("exit", () => {
+    if (!shuttingDown) {
+      shuttingDown = true;
+      registry.closeAll();
+    }
   });
 
   process.stdin.resume();

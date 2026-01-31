@@ -1,11 +1,27 @@
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
+const Ledger = require('../../src/ledger');
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const SERVER_PATH = path.join(PROJECT_ROOT, 'lib', 'tui-backend', 'server.js');
 const SERVER_SOURCE_PATH = path.join(PROJECT_ROOT, 'src', 'tui-backend', 'server.ts');
+const CLUSTER_LOGS_SOURCE_PATH = path.join(
+  PROJECT_ROOT,
+  'src',
+  'tui-backend',
+  'services',
+  'cluster-logs.ts'
+);
+const CLUSTER_LOGS_BUILD_PATH = path.join(
+  PROJECT_ROOT,
+  'lib',
+  'tui-backend',
+  'services',
+  'cluster-logs.js'
+);
 
 function isBuildStale(sourcePath, buildPath) {
   if (!fs.existsSync(buildPath)) {
@@ -87,16 +103,63 @@ describe('tui-backend stdio JSON-RPC', function () {
 
   let server;
   let queue;
+  const originalHome = process.env.HOME;
+  let tempHome;
+  let MAX_LOG_LINES;
+
+  const waitForMessage = async (predicate, timeoutMs = 2000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const remaining = Math.max(deadline - Date.now(), 10);
+      try {
+        const message = await queue.next(remaining);
+        if (predicate(message)) {
+          return message;
+        }
+      } catch (error) {
+        if (Date.now() >= deadline) {
+          throw error;
+        }
+      }
+    }
+    throw new Error('Timed out waiting for matching response');
+  };
+
+  const expectNoMessage = async (predicate, timeoutMs = 300) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const remaining = Math.max(deadline - Date.now(), 10);
+      try {
+        const message = await queue.next(remaining);
+        if (predicate(message)) {
+          assert.fail(`Unexpected message: ${JSON.stringify(message)}`);
+        }
+      } catch (error) {
+        if (error && String(error.message).includes('Timed out waiting for response')) {
+          return;
+        }
+        throw error;
+      }
+    }
+  };
 
   before(function () {
-    if (isBuildStale(SERVER_SOURCE_PATH, SERVER_PATH)) {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-tui-backend-'));
+    process.env.HOME = tempHome;
+
+    if (
+      isBuildStale(SERVER_SOURCE_PATH, SERVER_PATH) ||
+      isBuildStale(CLUSTER_LOGS_SOURCE_PATH, CLUSTER_LOGS_BUILD_PATH)
+    ) {
       execSync('npm run build:tui-backend', { cwd: PROJECT_ROOT, stdio: 'inherit' });
     }
+
+    ({ MAX_LOG_LINES } = require('../../lib/tui-backend/services/cluster-logs'));
 
     server = spawn('node', [SERVER_PATH], {
       cwd: PROJECT_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1' },
+      env: { ...process.env, ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH: '1', HOME: tempHome },
     });
 
     queue = createMessageQueue();
@@ -116,6 +179,8 @@ describe('tui-backend stdio JSON-RPC', function () {
     if (!server) return;
     server.stdin.end();
     await new Promise((resolve) => server.on('exit', resolve));
+    process.env.HOME = originalHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
   });
 
   it('responds to initialize with capabilities', async function () {
@@ -141,7 +206,11 @@ describe('tui-backend stdio JSON-RPC', function () {
     assert.ok(response.result.capabilities.methods.includes('ping'));
     assert.ok(response.result.capabilities.methods.includes('listClusters'));
     assert.ok(response.result.capabilities.methods.includes('getClusterSummary'));
-    assert.deepStrictEqual(response.result.capabilities.notifications, []);
+    assert.ok(response.result.capabilities.methods.includes('unsubscribe'));
+    assert.deepStrictEqual(response.result.capabilities.notifications, [
+      'clusterLogLines',
+      'clusterTimelineEvents',
+    ]);
   });
 
   it('responds to ping', async function () {
@@ -329,5 +398,107 @@ describe('tui-backend stdio JSON-RPC', function () {
     const response = await queue.next();
     assert.strictEqual(response.id, 6);
     assert.deepStrictEqual(response.result, { ok: true });
+  });
+
+  it('streams cluster logs and stops after unsubscribe', async function () {
+    const clusterId = 'cluster-stdio-logs';
+    const zeroshotDir = path.join(tempHome, '.zeroshot');
+    fs.mkdirSync(zeroshotDir, { recursive: true });
+
+    const dbPath = path.join(zeroshotDir, `${clusterId}.db`);
+    const clustersFile = path.join(zeroshotDir, 'clusters.json');
+    fs.writeFileSync(
+      clustersFile,
+      JSON.stringify(
+        {
+          [clusterId]: {
+            config: {
+              dbPath,
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const seedLedger = new Ledger(dbPath);
+    seedLedger.close();
+
+    const subscribeRequest = {
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'subscribeClusterLogs',
+      params: { clusterId },
+    };
+
+    server.stdin.write(encodeFrame(subscribeRequest));
+    const subscribeResponse = await waitForMessage((msg) => msg.id === 20);
+    const subscriptionId = subscribeResponse.result.subscriptionId;
+
+    const writer = new Ledger(dbPath);
+    const payloadCount = MAX_LOG_LINES + 5;
+    const messages = Array.from({ length: payloadCount }, (_, index) => ({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'worker',
+      content: {
+        text: `line ${index}`,
+        data: {
+          agent: 'worker',
+          role: 'implementation',
+          line: `line ${index}`,
+        },
+      },
+    }));
+    writer.batchAppend(messages);
+    writer.close();
+
+    const notification = await waitForMessage(
+      (msg) =>
+        msg.method === 'clusterLogLines' &&
+        msg.params &&
+        msg.params.subscriptionId === subscriptionId,
+      4000
+    );
+
+    assert.strictEqual(notification.params.clusterId, clusterId);
+    assert.strictEqual(notification.params.lines.length, MAX_LOG_LINES);
+    assert.strictEqual(notification.params.droppedCount, 5);
+
+    const unsubscribeRequest = {
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'unsubscribe',
+      params: { subscriptionId },
+    };
+
+    server.stdin.write(encodeFrame(unsubscribeRequest));
+    const unsubscribeResponse = await waitForMessage((msg) => msg.id === 21);
+    assert.deepStrictEqual(unsubscribeResponse.result, { removed: true });
+
+    const writer2 = new Ledger(dbPath);
+    writer2.append({
+      cluster_id: clusterId,
+      topic: 'AGENT_OUTPUT',
+      sender: 'worker',
+      content: {
+        text: 'after unsubscribe',
+        data: {
+          agent: 'worker',
+          role: 'implementation',
+          line: 'after unsubscribe',
+        },
+      },
+    });
+    writer2.close();
+
+    await expectNoMessage(
+      (msg) =>
+        msg.method === 'clusterLogLines' &&
+        msg.params &&
+        msg.params.subscriptionId === subscriptionId,
+      600
+    );
   });
 });

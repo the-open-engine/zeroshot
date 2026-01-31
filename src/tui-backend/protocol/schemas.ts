@@ -421,6 +421,24 @@ const subscribeResultSchema = {
   },
 };
 
+const unsubscribeParamsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["subscriptionId"],
+  properties: {
+    subscriptionId: { type: "string" },
+  },
+};
+
+const unsubscribeResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["removed"],
+  properties: {
+    removed: { type: "boolean" },
+  },
+};
+
 const getClusterTopologyParamsSchema = {
   type: "object",
   additionalProperties: false,
@@ -459,6 +477,7 @@ const clusterTimelineEventsNotificationSchema = {
     subscriptionId: { type: "string" },
     clusterId: { type: "string" },
     events: { type: "array", items: timelineEventSchema },
+    droppedCount: { type: "number" },
   },
 };
 
@@ -551,6 +570,7 @@ const REQUEST_SCHEMAS = {
     subscribeClusterTimelineParamsSchema,
     true
   ),
+  unsubscribe: buildRequestSchema("unsubscribe", unsubscribeParamsSchema, true),
   getClusterTopology: buildRequestSchema(
     "getClusterTopology",
     getClusterTopologyParamsSchema,
@@ -570,6 +590,7 @@ const RESPONSE_SCHEMAS = {
   sendGuidanceToCluster: buildResponseSchema(sendGuidanceToClusterResultSchema),
   subscribeClusterLogs: buildResponseSchema(subscribeResultSchema),
   subscribeClusterTimeline: buildResponseSchema(subscribeResultSchema),
+  unsubscribe: buildResponseSchema(unsubscribeResultSchema),
   getClusterTopology: buildResponseSchema(getClusterTopologyResultSchema),
 };
 
