@@ -1,3 +1,6 @@
+import { loadSettings } from "../../../lib/settings";
+import { normalizeProviderName } from "../../../lib/provider-names";
+
 const pidusage = require("pidusage");
 
 type PidusageStats = Record<string, { cpu?: number; memory?: number }>;
@@ -7,11 +10,13 @@ type ClusterRegistryDeps = {
   getOrchestrator?: () => Promise<any>;
   pidusage?: PidusageFn;
   platform?: string;
+  loadSettings?: typeof loadSettings;
 };
 
 export type ClusterSummary = {
   id: string;
   state: string;
+  provider: string | null;
   createdAt: number;
   agentCount: number;
   messageCount: number;
@@ -48,6 +53,27 @@ function resolveClusterCwd(cluster: any): string | null {
   return null;
 }
 
+function resolveClusterProvider(cluster: any, settings: any): string | null {
+  if (!cluster || typeof cluster !== "object") {
+    const fallback = settings?.defaultProvider ?? null;
+    const normalizedFallback = normalizeProviderName(fallback);
+    return typeof normalizedFallback === "string" ? normalizedFallback : null;
+  }
+  const forced = cluster.config?.forceProvider ?? null;
+  const defaultProvider = cluster.config?.defaultProvider ?? null;
+  const settingsProvider = settings?.defaultProvider ?? null;
+  const provider =
+    forced && typeof forced === "string"
+      ? forced
+      : defaultProvider && typeof defaultProvider === "string"
+        ? defaultProvider
+        : settingsProvider && typeof settingsProvider === "string"
+          ? settingsProvider
+          : null;
+  const normalized = normalizeProviderName(provider);
+  return typeof normalized === "string" ? normalized : null;
+}
+
 function resolveAgentPid(agent: any): number | null {
   if (!agent || typeof agent !== "object") {
     return null;
@@ -81,7 +107,11 @@ function collectAgentPids(cluster: any): number[] {
   return Array.from(pids);
 }
 
-function normalizeSummary(summary: any, orchestrator: any): ClusterSummary {
+function normalizeSummary(
+  summary: any,
+  orchestrator: any,
+  settings: any
+): ClusterSummary {
   if (!summary || typeof summary !== "object") {
     throw new Error("Invalid cluster summary.");
   }
@@ -99,14 +129,26 @@ function normalizeSummary(summary: any, orchestrator: any): ClusterSummary {
   }
   const cluster = orchestrator.getCluster(summary.id);
   const cwd = resolveClusterCwd(cluster);
+  const provider = resolveClusterProvider(cluster, settings);
   return {
     id: summary.id,
     state: String(summary.state ?? "unknown"),
+    provider,
     createdAt: summary.createdAt,
     agentCount: summary.agentCount,
     messageCount: summary.messageCount,
     cwd,
   };
+}
+
+export class ClusterNotFoundError extends Error {
+  clusterId: string;
+
+  constructor(clusterId: string) {
+    super(`Cluster not found: ${clusterId}`);
+    this.name = "ClusterNotFoundError";
+    this.clusterId = clusterId;
+  }
 }
 
 type ListClustersArgs = {
@@ -117,6 +159,11 @@ type ListClusterMetricsArgs = {
   deps?: ClusterRegistryDeps;
 };
 
+type GetClusterSummaryArgs = {
+  clusterId: string;
+  deps?: ClusterRegistryDeps;
+};
+
 const SUPPORTED_PLATFORMS = new Set(["darwin", "linux"]);
 const BYTES_PER_MB = 1024 * 1024;
 
@@ -124,10 +171,12 @@ export async function listClusters(
   { deps = {} }: ListClustersArgs = {}
 ): Promise<ClusterSummary[]> {
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
+  const loadSettingsImpl = deps.loadSettings ?? loadSettings;
   const orchestrator = await getOrchestratorImpl();
+  const settings = loadSettingsImpl();
   const summaries = orchestrator.listClusters();
   const results = summaries.map((summary: any) =>
-    normalizeSummary(summary, orchestrator)
+    normalizeSummary(summary, orchestrator, settings)
   );
   results.sort((left, right) => {
     if (left.createdAt !== right.createdAt) {
@@ -136,6 +185,22 @@ export async function listClusters(
     return left.id.localeCompare(right.id);
   });
   return results;
+}
+
+export async function getClusterSummary({
+  clusterId,
+  deps = {},
+}: GetClusterSummaryArgs): Promise<ClusterSummary> {
+  const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
+  const loadSettingsImpl = deps.loadSettings ?? loadSettings;
+  const orchestrator = await getOrchestratorImpl();
+  const settings = loadSettingsImpl();
+  const summaries = orchestrator.listClusters();
+  const summary = summaries.find((entry: any) => entry.id === clusterId);
+  if (!summary) {
+    throw new ClusterNotFoundError(clusterId);
+  }
+  return normalizeSummary(summary, orchestrator, settings);
 }
 
 export async function listClusterMetrics(

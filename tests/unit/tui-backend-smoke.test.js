@@ -26,6 +26,7 @@ describe('TUI backend build', function () {
     const registry = require('../../lib/tui-backend/services/cluster-registry');
     assert.ok(registry);
     assert.strictEqual(typeof registry.listClusters, 'function');
+    assert.strictEqual(typeof registry.getClusterSummary, 'function');
     assert.strictEqual(typeof registry.listClusterMetrics, 'function');
   });
 });

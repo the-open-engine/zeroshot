@@ -8,6 +8,11 @@ const {
   RPC_ERROR_MESSAGES,
   PROTOCOL_VERSION,
 } = require("./protocol");
+const {
+  listClusters,
+  getClusterSummary,
+  ClusterNotFoundError,
+} = require("./services/cluster-registry");
 
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
 
@@ -37,6 +42,9 @@ const writeError = (id, error) => {
   });
 };
 
+const buildRpcError = (code, message, detail) =>
+  detail ? { code, message, data: { detail } } : { code, message };
+
 const logDiagnostic = (message, error) => {
   const details =
     error instanceof Error ? `${message}: ${error.stack || error.message}` : message;
@@ -48,6 +56,28 @@ const startServer = () => {
   const dispatcher = createDispatcher({
     serverInfo: loadPackageInfo(),
     protocolVersion: PROTOCOL_VERSION,
+    handlers: {
+      listClusters: async () => ({
+        clusters: await listClusters(),
+      }),
+      getClusterSummary: async (params) => {
+        try {
+          const summary = await getClusterSummary({
+            clusterId: params.clusterId,
+          });
+          return { summary };
+        } catch (error) {
+          if (error instanceof ClusterNotFoundError) {
+            throw buildRpcError(
+              RPC_ERROR_CODES.CLUSTER_NOT_FOUND,
+              RPC_ERROR_MESSAGES[RPC_ERROR_CODES.CLUSTER_NOT_FOUND],
+              error.message
+            );
+          }
+          throw error;
+        }
+      },
+    },
   });
   const parser = createFrameParser();
 
