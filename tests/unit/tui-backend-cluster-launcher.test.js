@@ -26,6 +26,7 @@ describe('tui-backend cluster launcher', function () {
   before(function () {
     ({ launchClusterFromIssue, InvalidIssueReferenceError } = loadLauncher());
   });
+
   it('throws InvalidIssueReferenceError for invalid issue refs', async function () {
     await assert.rejects(
       () =>

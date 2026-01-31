@@ -312,7 +312,13 @@ function extractCliError(output) {
 
     // Opencode: {type:"session.error", error:{message:"msg"}}
     if (obj.type === 'session.error') {
-      const errorMsg = obj.error?.message || obj.error || 'CLI returned error';
+      const errorObj = obj.error;
+      const errorMsg =
+        errorObj?.message ||
+        errorObj?.data?.message ||
+        errorObj?.data?.detail ||
+        (typeof errorObj === 'string' ? errorObj : null) ||
+        'CLI returned error';
       return { error: errorMsg, provider: 'opencode' };
     }
   }
