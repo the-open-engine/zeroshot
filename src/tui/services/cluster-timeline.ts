@@ -1,4 +1,4 @@
-const backend = require("../../../lib/tui-backend/services/cluster-timeline");
+import * as backend from "../../../lib/tui-backend/services/cluster-timeline.js";
 
 export const MAX_TIMELINE_EVENTS: number = backend.MAX_TIMELINE_EVENTS;
 export const TIMELINE_POLL_INTERVAL_MS: number = backend.TIMELINE_POLL_INTERVAL_MS;

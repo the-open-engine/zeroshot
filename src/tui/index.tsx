@@ -1,7 +1,7 @@
 import React from "react";
 import { render } from "ink";
-import App from "./app";
-import { ViewId } from "./view-stack";
+import App from "./app.js";
+import { ViewId } from "./view-stack.js";
 
 type StartOptions = {
   autoExit?: boolean;

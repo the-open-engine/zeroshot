@@ -1,4 +1,4 @@
-import { CommandContext, CommandResult, ParsedCommand } from "./types";
+import { CommandContext, CommandResult, ParsedCommand } from "./types.js";
 
 export type CommandHandler = (
   args: string[],

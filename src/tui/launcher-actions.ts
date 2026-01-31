@@ -1,6 +1,6 @@
-import { CommandResult } from "./commands/types";
-import { generateClusterId, launchClusterFromText } from "./services/cluster-launcher";
-import { ViewId } from "./view-stack";
+import { CommandResult } from "./commands/types.js";
+import { generateClusterId, launchClusterFromText } from "./services/cluster-launcher.js";
+import { ViewId } from "./view-stack.js";
 
 type LauncherActionDeps = {
   generateClusterId?: () => string;

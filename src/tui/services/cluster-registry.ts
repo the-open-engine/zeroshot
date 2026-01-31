@@ -1,4 +1,4 @@
-const backend = require("../../../lib/tui-backend/services/cluster-registry");
+import * as backend from "../../../lib/tui-backend/services/cluster-registry.js";
 
 type PidusageStats = Record<string, { cpu?: number; memory?: number }>;
 type PidusageFn = (pids: number[]) => Promise<PidusageStats>;

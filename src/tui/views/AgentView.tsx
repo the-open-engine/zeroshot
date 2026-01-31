@@ -5,8 +5,8 @@ import {
   ClusterLogStatus,
   createClusterLogStream,
   MAX_LOG_LINES,
-} from "../services/cluster-logs";
-import { PendingAgentMessage } from "../services/agent-messages";
+} from "../services/cluster-logs.js";
+import { PendingAgentMessage } from "../services/agent-messages.js";
 
 type AgentViewProps = {
   provider: string | null;

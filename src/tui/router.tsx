@@ -1,10 +1,10 @@
 import React from "react";
-import { ViewId } from "./view-stack";
-import LauncherView from "./views/LauncherView";
-import MonitorView from "./views/MonitorView";
-import ClusterView from "./views/ClusterView";
-import AgentView from "./views/AgentView";
-import { PendingAgentMessage } from "./services/agent-messages";
+import { ViewId } from "./view-stack.js";
+import LauncherView from "./views/LauncherView.js";
+import MonitorView from "./views/MonitorView.js";
+import ClusterView from "./views/ClusterView.js";
+import AgentView from "./views/AgentView.js";
+import { PendingAgentMessage } from "./services/agent-messages.js";
 
 type RouterProps = {
   view: ViewId;

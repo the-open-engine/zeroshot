@@ -1,4 +1,4 @@
-import { ParsedInput } from "./types";
+import { ParsedInput } from "./types.js";
 
 export function parseInput(rawInput: string): ParsedInput {
   const raw = rawInput ?? "";

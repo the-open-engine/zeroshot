@@ -1,4 +1,4 @@
-import { ViewId } from "../view-stack";
+import { ViewId } from "../view-stack.js";
 
 export type ParsedCommand = {
   type: "command";

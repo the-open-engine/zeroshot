@@ -5,7 +5,7 @@ import {
   ClusterMetrics,
   listClusterMetrics,
   listClusters,
-} from "../services/cluster-registry";
+} from "../services/cluster-registry.js";
 
 type MonitorViewProps = {
   provider: string | null;

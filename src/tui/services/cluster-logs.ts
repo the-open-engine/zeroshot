@@ -1,4 +1,4 @@
-const backend = require("../../../lib/tui-backend/services/cluster-logs");
+import * as backend from "../../../lib/tui-backend/services/cluster-logs.js";
 
 export const MAX_LOG_LINES: number = backend.MAX_LOG_LINES;
 export const LOG_POLL_INTERVAL_MS: number = backend.LOG_POLL_INTERVAL_MS;

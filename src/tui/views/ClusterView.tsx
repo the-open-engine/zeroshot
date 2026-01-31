@@ -5,18 +5,18 @@ import {
   ClusterLogStatus,
   createClusterLogStream,
   MAX_LOG_LINES,
-} from "../services/cluster-logs";
+} from "../services/cluster-logs.js";
 import {
   ClusterTimelineStatus,
   createClusterTimelineStream,
   MAX_TIMELINE_EVENTS,
   TimelineEvent,
-} from "../services/cluster-timeline";
+} from "../services/cluster-timeline.js";
 import {
   ClusterTopology,
   getClusterTopology,
   TopologyEdge,
-} from "../services/cluster-topology";
+} from "../services/cluster-topology.js";
 
 type ClusterViewProps = {
   provider: string | null;

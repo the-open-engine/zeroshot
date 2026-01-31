@@ -1,21 +1,21 @@
-import { CommandContext, CommandResult, ParsedCommand } from "./types";
+import { CommandContext, CommandResult, ParsedCommand } from "./types.js";
 import {
   CommandDefinition,
   CommandRegistry,
   createCommandRegistry,
-} from "./registry";
-import { runListTasks, runShowStatus } from "./cli-compat";
+} from "./registry.js";
+import { runListTasks, runShowStatus } from "./cli-compat.js";
 import {
   generateClusterId,
   launchClusterFromIssue,
-} from "../services/cluster-launcher";
+} from "../services/cluster-launcher.js";
 import {
   normalizeProviderName,
   VALID_PROVIDERS,
-} from "../../../lib/provider-names";
-
-const { detectIdType } = require("../../../lib/id-detector");
-const { detectRunInput } = require("../../../lib/start-cluster");
+} from "../../../lib/provider-names.js";
+import { detectIdType } from "../../../lib/id-detector.js";
+import { detectRunInput } from "../../../lib/start-cluster.js";
+import * as Orchestrator from "../../../src/orchestrator.js";
 
 type ListOptions = {
   status?: string;
@@ -102,7 +102,6 @@ async function handleList(args: string[]): Promise<CommandResult> {
 
 async function handleClusterStatus(clusterId: string): Promise<CommandResult> {
   try {
-    const Orchestrator = require("../../../src/orchestrator");
     const orchestrator = await Orchestrator.create({ quiet: true });
     const status = orchestrator.getStatus(clusterId);
     const state = status.isZombie ? "zombie" : status.state;

@@ -1,13 +1,13 @@
-const backend = require("../../../lib/tui-backend/services/cluster-launcher");
+import * as backend from "../../../lib/tui-backend/services/cluster-launcher.js";
 
 type ClusterLauncherDeps = {
   getOrchestrator?: () => Promise<any>;
-  loadSettings?: typeof import("../../../lib/settings").loadSettings;
-  resolveConfigPath?: typeof import("../../../lib/start-cluster").resolveConfigPath;
-  loadClusterConfig?: typeof import("../../../lib/start-cluster").loadClusterConfig;
-  startClusterFromText?: typeof import("../../../lib/start-cluster").startClusterFromText;
-  startClusterFromIssue?: typeof import("../../../lib/start-cluster").startClusterFromIssue;
-  detectRunInput?: typeof import("../../../lib/start-cluster").detectRunInput;
+  loadSettings?: typeof import("../../../lib/settings.js").loadSettings;
+  resolveConfigPath?: typeof import("../../../lib/start-cluster.js").resolveConfigPath;
+  loadClusterConfig?: typeof import("../../../lib/start-cluster.js").loadClusterConfig;
+  startClusterFromText?: typeof import("../../../lib/start-cluster.js").startClusterFromText;
+  startClusterFromIssue?: typeof import("../../../lib/start-cluster.js").startClusterFromIssue;
+  detectRunInput?: typeof import("../../../lib/start-cluster.js").detectRunInput;
   generateClusterId?: () => string;
 };
 

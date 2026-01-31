@@ -1,4 +1,4 @@
-const backend = require("../../../lib/tui-backend/services/guidance-delivery");
+import * as backend from "../../../lib/tui-backend/services/guidance-delivery.js";
 
 type GuidanceDeliveryResult = {
   status: string;

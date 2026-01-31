@@ -1,4 +1,4 @@
-const backend = require("../../../lib/tui-backend/services/cluster-topology");
+import * as backend from "../../../lib/tui-backend/services/cluster-topology.js";
 
 type ClusterTopologyDeps = {
   getOrchestrator?: () => Promise<any>;

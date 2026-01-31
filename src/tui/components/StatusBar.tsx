@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { CommandResult } from "../commands/types";
+import { CommandResult } from "../commands/types.js";
 
 type StatusBarProps = {
   status: CommandResult | null;

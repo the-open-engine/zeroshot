@@ -1,28 +1,28 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, useApp, useInput } from "ink";
-import Router from "./router";
-import CommandInput from "./components/CommandInput";
-import StatusBar from "./components/StatusBar";
-import { dispatchCommand } from "./commands/dispatcher";
-import { parseInput } from "./commands/parser";
-import { CommandResult } from "./commands/types";
-import { submitLauncherText } from "./launcher-actions";
+import Router from "./router.js";
+import CommandInput from "./components/CommandInput.js";
+import StatusBar from "./components/StatusBar.js";
+import { dispatchCommand } from "./commands/dispatcher.js";
+import { parseInput } from "./commands/parser.js";
+import { CommandResult } from "./commands/types.js";
+import { submitLauncherText } from "./launcher-actions.js";
 import {
   PendingAgentMessage,
   agentMessageKey,
   createPendingAgentMessage,
-} from "./services/agent-messages";
+} from "./services/agent-messages.js";
 import {
   sendAgentGuidance,
   sendClusterGuidance,
-} from "./services/guidance-delivery";
+} from "./services/guidance-delivery.js";
 import {
   activeView,
   createViewStack,
   popView,
   pushView,
   ViewId,
-} from "./view-stack";
+} from "./view-stack.js";
 
 type AppProps = {
   autoExit: boolean;
