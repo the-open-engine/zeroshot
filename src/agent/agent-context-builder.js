@@ -389,7 +389,7 @@ function buildContext({
   lastAgentStartTime,
   triggeringMessage,
   selectedPrompt,
-  queuedGuidance,
+  _queuedGuidance,
   worktree,
   isolation,
 }) {

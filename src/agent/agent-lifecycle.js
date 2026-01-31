@@ -20,6 +20,7 @@ const {
   isPlatformSupported,
   STUCK_THRESHOLD,
 } = require('./agent-stuck-detector');
+const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-backoff');
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');

@@ -187,12 +187,14 @@ function resolveTuiProviderOverride(options = {}) {
   return normalized;
 }
 
-function resolveProviderOverride(options) {
-  const override = options.provider || process.env.ZEROSHOT_PROVIDER;
-  if (!override || (typeof override === 'string' && !override.trim())) {
-    return null;
-  }
-  return normalizeProviderName(override);
+function startTuiSession(options = {}) {
+  const providerOverride = resolveTuiProviderOverride(options);
+  const { start } = require('../lib/tui');
+  start({
+    autoExit: false,
+    providerOverride,
+    initialView: options.initialView,
+  });
 }
 
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
