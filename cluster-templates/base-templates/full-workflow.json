@@ -339,7 +339,7 @@
           },
           "transform": {
             "engine": "javascript",
-            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ operation: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
+            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ action: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
           },
           "logic": {
             "engine": "javascript",
