@@ -1,0 +1,8 @@
+{
+  "github": {
+    "prBase": "dev"
+  },
+  "worktree": {
+    "baseRef": "origin/dev"
+  }
+}
