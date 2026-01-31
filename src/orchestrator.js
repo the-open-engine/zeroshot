@@ -1270,7 +1270,13 @@ class Orchestrator {
       const workDir = options.cwd || process.cwd();
 
       isolationManager = new IsolationManager({});
-      worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir);
+      // Use origin/${prBase} if prBase is set (ensures worktree is up-to-date with remote)
+      const worktreeOptions = {};
+      if (options.prBase) {
+        worktreeOptions.baseRef = `origin/${options.prBase}`;
+        this._log(`[Orchestrator] Using remote base ref: origin/${options.prBase}`);
+      }
+      worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir, worktreeOptions);
 
       this._log(`[Orchestrator] Starting cluster in worktree isolation mode`);
       this._log(`[Orchestrator] Worktree: ${worktreeInfo.path}`);

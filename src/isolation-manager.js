@@ -1300,14 +1300,14 @@ class IsolationManager {
    * @param {string} workDir - Original working directory (must be a git repo)
    * @returns {{ path: string, branch: string, repoRoot: string }}
    */
-  createWorktreeIsolation(clusterId, workDir) {
+  createWorktreeIsolation(clusterId, workDir, options = {}) {
     if (!this._isGitRepo(workDir)) {
       throw new Error(
         `Worktree isolation requires a git repository. ${workDir} is not a git repo.`
       );
     }
 
-    const worktreeInfo = this.createWorktree(clusterId, workDir);
+    const worktreeInfo = this.createWorktree(clusterId, workDir, options);
     this.worktrees.set(clusterId, worktreeInfo);
 
     console.log(`[IsolationManager] Created worktree isolation at ${worktreeInfo.path}`);
@@ -1340,18 +1340,23 @@ class IsolationManager {
    * @param {string} workDir - Original working directory
    * @returns {{ path: string, branch: string, repoRoot: string }}
    */
-  createWorktree(clusterId, workDir) {
+  createWorktree(clusterId, workDir, options = {}) {
     const repoRoot = this._getGitRoot(workDir);
     if (!repoRoot) {
       throw new Error(`Cannot find git root for ${workDir}`);
     }
 
-    let worktreeBaseRef = null;
+    // Priority: 1) options.baseRef, 2) repo settings, 3) HEAD (default)
+    let worktreeBaseRef = options.baseRef || null;
     try {
       const repoSettingsResult = readRepoSettings(repoRoot);
       const repoSettings = repoSettingsResult.settings || {};
       const candidate = repoSettings.worktree?.baseRef;
-      if (typeof candidate === 'string' && /^[A-Za-z0-9._/-]+$/.test(candidate.trim())) {
+      if (
+        !worktreeBaseRef &&
+        typeof candidate === 'string' &&
+        /^[A-Za-z0-9._/-]+$/.test(candidate.trim())
+      ) {
         worktreeBaseRef = candidate.trim();
       }
     } catch {
