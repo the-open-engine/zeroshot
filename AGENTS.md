@@ -11,6 +11,7 @@ Operational rules and references for automated agents working on this repo. Inst
 - Never use git in validator prompts. Validate files directly.
 - Never ask questions. Agents run non-interactively; make autonomous decisions.
 - Never edit `CLAUDE.md` unless explicitly asked to update docs.
+- Detached (`-d`) runs must forward all `zeroshot run` options via `ZEROSHOT_RUN_OPTIONS` (see `buildDaemonEnv` + `buildStartOptions`) so PR/worktree config cannot be dropped.
 
 Worker git operations are allowed only with isolation (`--worktree`, `--docker`, `--pr`, `--ship`). They are forbidden without isolation.
 

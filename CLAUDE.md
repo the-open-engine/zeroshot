@@ -19,6 +19,8 @@ Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @co
 
 **Destructive (needs permission):** `zeroshot kill`, `zeroshot clear`, `zeroshot purge`
 
+**Detached runs:** Always forward `zeroshot run` options via `ZEROSHOT_RUN_OPTIONS` (see `buildDaemonEnv` + `buildStartOptions`) so PR/worktree config survives daemon mode.
+
 ## 🔴 BEHAVIORAL STANDARDS
 
 ```
