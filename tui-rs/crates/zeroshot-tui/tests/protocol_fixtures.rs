@@ -55,6 +55,7 @@ fn protocol_fixtures_round_trip() {
                 "sendGuidanceToCluster" => round_trip::<SendGuidanceToClusterRequest>(&path),
                 "subscribeClusterLogs" => round_trip::<SubscribeClusterLogsRequest>(&path),
                 "subscribeClusterTimeline" => round_trip::<SubscribeClusterTimelineRequest>(&path),
+                "unsubscribe" => round_trip::<UnsubscribeRequest>(&path),
                 "getClusterTopology" => round_trip::<GetClusterTopologyRequest>(&path),
                 other => panic!("unknown request fixture: {other}"),
             },
@@ -71,6 +72,7 @@ fn protocol_fixtures_round_trip() {
                 "subscribeClusterTimeline" => {
                     round_trip::<SubscribeClusterTimelineResponse>(&path)
                 }
+                "unsubscribe" => round_trip::<UnsubscribeResponse>(&path),
                 "getClusterTopology" => round_trip::<GetClusterTopologyResponse>(&path),
                 other => panic!("unknown response fixture: {other}"),
             },
