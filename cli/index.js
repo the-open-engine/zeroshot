@@ -256,6 +256,7 @@ function createDaemonLogFile(clusterId) {
 }
 
 function buildDaemonEnv(options, clusterId, targetCwd) {
+  const mergeQueueEnv = options.mergeQueue === true ? '1' : options.mergeQueue === false ? '0' : '';
   return {
     ...process.env,
     ZEROSHOT_DAEMON: '1',
@@ -267,6 +268,9 @@ function buildDaemonEnv(options, clusterId, targetCwd) {
     ZEROSHOT_WORKERS: options.workers?.toString() || '',
     ZEROSHOT_MODEL: options.model || '',
     ZEROSHOT_PROVIDER: options.provider || '',
+    ZEROSHOT_PR_BASE: options.prBase || '',
+    ZEROSHOT_MERGE_QUEUE: mergeQueueEnv,
+    ZEROSHOT_CLOSE_ISSUE: options.closeIssue || '',
     ZEROSHOT_CWD: targetCwd,
   };
 }
