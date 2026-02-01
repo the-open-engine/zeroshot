@@ -264,6 +264,9 @@ fn execute_backend_request(
         BackendRequest::GetClusterSummary { cluster_id } => {
             get_cluster_summary(client, cluster_id)
         }
+        BackendRequest::GetClusterTopology { cluster_id } => {
+            get_cluster_topology(client, cluster_id)
+        }
         BackendRequest::SubscribeClusterLogs {
             cluster_id,
             agent_id,
@@ -306,6 +309,24 @@ fn get_cluster_summary(
     Ok(Some(BackendAction::ClusterSummary {
         summary: result.summary,
     }))
+}
+
+fn get_cluster_topology(
+    client: &StdioBackendClient,
+    cluster_id: String,
+) -> Result<Option<BackendAction>, BackendError> {
+    match client.get_cluster_topology(zeroshot_tui::protocol::GetClusterTopologyParams {
+        cluster_id: cluster_id.clone(),
+    }) {
+        Ok(result) => Ok(Some(BackendAction::ClusterTopology {
+            cluster_id,
+            topology: result.topology,
+        })),
+        Err(err) => Ok(Some(BackendAction::ClusterTopologyError {
+            cluster_id,
+            message: err.to_string(),
+        })),
+    }
 }
 
 fn subscribe_cluster_logs(
