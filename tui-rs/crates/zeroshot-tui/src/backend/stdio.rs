@@ -20,11 +20,11 @@ use crate::protocol::{
     ClusterLogLinesParams, ClusterTimelineEventsParams, ClientCapabilities, ClientInfo,
     GetClusterSummaryParams, GetClusterSummaryResult, GetClusterTopologyParams,
     GetClusterTopologyResult, InitializeParams, InitializeResult, JsonRpcId, JsonRpcRequest,
-    ListClustersParams, ListClustersResult, SendGuidanceToAgentParams, SendGuidanceToAgentResult,
-    SendGuidanceToClusterParams, SendGuidanceToClusterResult, ServerCapabilities,
-    StartClusterFromIssueParams, StartClusterFromTextParams, StartClusterResult,
-    SubscribeClusterLogsParams, SubscribeClusterTimelineParams, SubscribeResult, UnsubscribeParams,
-    UnsubscribeResult,
+    ListClusterMetricsParams, ListClusterMetricsResult, ListClustersParams, ListClustersResult,
+    SendGuidanceToAgentParams, SendGuidanceToAgentResult, SendGuidanceToClusterParams,
+    SendGuidanceToClusterResult, ServerCapabilities, StartClusterFromIssueParams,
+    StartClusterFromTextParams, StartClusterResult, SubscribeClusterLogsParams,
+    SubscribeClusterTimelineParams, SubscribeResult, UnsubscribeParams, UnsubscribeResult,
 };
 
 const JSONRPC_VERSION: &str = "2.0";
@@ -114,6 +114,13 @@ impl StdioBackendClient {
 
     pub fn list_clusters(&self) -> Result<ListClustersResult, BackendError> {
         self.send_request("listClusters", ListClustersParams {})
+    }
+
+    pub fn list_cluster_metrics(
+        &self,
+        params: ListClusterMetricsParams,
+    ) -> Result<ListClusterMetricsResult, BackendError> {
+        self.send_request("listClusterMetrics", params)
     }
 
     pub fn get_cluster_summary(

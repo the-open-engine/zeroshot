@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::{BackendExit, BackendNotification};
 use crate::screens::{agent, cluster, launcher, monitor};
+use crate::protocol::ClusterMetrics;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentKey {
@@ -164,6 +165,8 @@ pub struct AppState {
     pub screen_stack: Vec<ScreenId>,
     pub launcher: launcher::State,
     pub monitor: monitor::State,
+    pub metrics: HashMap<String, ClusterMetrics>,
+    pub last_metrics_poll_at: Option<i64>,
     pub clusters: HashMap<String, cluster::State>,
     pub agents: HashMap<AgentKey, agent::State>,
     pub last_size: Option<(u16, u16)>,
@@ -183,6 +186,8 @@ impl Default for AppState {
             screen_stack: vec![ScreenId::Launcher],
             launcher: launcher::State::default(),
             monitor: monitor::State::default(),
+            metrics: HashMap::new(),
+            last_metrics_poll_at: None,
             clusters: HashMap::new(),
             agents: HashMap::new(),
             last_size: None,
@@ -214,6 +219,17 @@ impl AppState {
             provider_override: self.provider_override.clone(),
             active_screen: self.active_screen().clone(),
         }
+    }
+
+    fn metrics_poll_due(&self, now_ms: i64) -> bool {
+        match self.last_metrics_poll_at {
+            None => true,
+            Some(last) => now_ms.saturating_sub(last) >= METRICS_POLL_INTERVAL_MS,
+        }
+    }
+
+    fn mark_metrics_polled(&mut self, now_ms: i64) {
+        self.last_metrics_poll_at = Some(now_ms);
     }
 
     fn ensure_screen_state(&mut self, screen: &ScreenId) {
@@ -266,6 +282,7 @@ pub enum BackendAction {
     BackendExited(BackendExit),
     Notification(BackendNotification),
     ClustersListed(Vec<crate::protocol::ClusterSummary>),
+    ClusterMetricsListed { metrics: Vec<ClusterMetrics> },
     ClusterSummary {
         summary: crate::protocol::ClusterSummary,
     },
@@ -323,6 +340,7 @@ pub enum Effect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendRequest {
     ListClusters,
+    ListClusterMetrics { cluster_ids: Option<Vec<String>> },
     GetClusterSummary { cluster_id: String },
     GetClusterTopology { cluster_id: String },
     SubscribeClusterLogs {
@@ -377,6 +395,7 @@ pub enum CommandAction {
 }
 
 const TOAST_DURATION_MS: i64 = 5000;
+const METRICS_POLL_INTERVAL_MS: i64 = 2000;
 
 pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
     let mut effects = Vec::new();
@@ -394,6 +413,16 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
             if should_poll {
                 state.monitor.mark_polled(now_ms);
                 effects.push(Effect::Backend(BackendRequest::ListClusters));
+            }
+            let should_poll_metrics = matches!(
+                state.active_screen(),
+                ScreenId::Monitor | ScreenId::Cluster { .. }
+            ) && state.metrics_poll_due(now_ms);
+            if should_poll_metrics {
+                if let Some(request) = metrics_request_for_screen(&state) {
+                    state.mark_metrics_polled(now_ms);
+                    effects.push(Effect::Backend(request));
+                }
             }
         }
         Action::Resize { width, height } => {
@@ -729,6 +758,9 @@ fn handle_backend_action(state: &mut AppState, action: BackendAction, effects: &
         BackendAction::BackendExited(exit) => handle_backend_exited(state, exit),
         BackendAction::Notification(notification) => handle_backend_notification(state, notification),
         BackendAction::ClustersListed(clusters) => handle_clusters_listed(state, clusters),
+        BackendAction::ClusterMetricsListed { metrics } => {
+            handle_cluster_metrics_listed(state, metrics)
+        }
         BackendAction::ClusterSummary { summary } => handle_cluster_summary(state, summary),
         BackendAction::ClusterTopology {
             cluster_id,
@@ -819,6 +851,19 @@ fn handle_clusters_listed(
     clusters: Vec<crate::protocol::ClusterSummary>,
 ) {
     state.monitor.set_clusters(clusters, state.now_ms);
+    let ids: HashSet<String> = state
+        .monitor
+        .clusters
+        .iter()
+        .map(|cluster| cluster.id.clone())
+        .collect();
+    state.metrics.retain(|id, _| ids.contains(id));
+}
+
+fn handle_cluster_metrics_listed(state: &mut AppState, metrics: Vec<ClusterMetrics>) {
+    for metric in metrics {
+        state.metrics.insert(metric.id.clone(), metric);
+    }
 }
 
 fn handle_cluster_summary(state: &mut AppState, summary: crate::protocol::ClusterSummary) {
@@ -1050,6 +1095,30 @@ fn cleanup_agent_subscriptions(
     };
     if let Some(subscription_id) = entry.log_subscription.take() {
         effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
+}
+
+fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
+    match state.active_screen() {
+        ScreenId::Monitor => {
+            let ids: Vec<String> = state
+                .monitor
+                .clusters
+                .iter()
+                .map(|cluster| cluster.id.clone())
+                .collect();
+            if ids.is_empty() {
+                None
+            } else {
+                Some(BackendRequest::ListClusterMetrics {
+                    cluster_ids: Some(ids),
+                })
+            }
+        }
+        ScreenId::Cluster { id } => Some(BackendRequest::ListClusterMetrics {
+            cluster_ids: Some(vec![id.clone()]),
+        }),
+        _ => None,
     }
 }
 

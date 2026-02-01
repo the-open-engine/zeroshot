@@ -6,7 +6,8 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::protocol::{ClusterLogLine, ClusterSummary, ClusterTopology, TimelineEvent};
+use crate::protocol::{ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTopology, TimelineEvent};
+use crate::screens::metrics;
 use crate::ui::widgets::topology;
 
 pub const MAX_LOG_LINES: usize = 1000;
@@ -258,11 +259,17 @@ impl State {
     }
 }
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, metrics: Option<&ClusterMetrics>) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+    render_metrics_line(frame, rows[0], metrics);
+    let content = rows[1];
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
-        .split(area);
+        .split(content);
     let top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -276,6 +283,12 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State) {
     render_agents(frame, top[1], state);
     render_logs(frame, bottom[0], state);
     render_timeline(frame, bottom[1], state);
+}
+
+fn render_metrics_line(frame: &mut Frame<'_>, area: Rect, metrics: Option<&ClusterMetrics>) {
+    let line = format!("Metrics: {}", metrics::format_metrics_line(metrics));
+    let widget = Paragraph::new(Line::from(line));
+    frame.render_widget(widget, area);
 }
 
 fn render_topology(frame: &mut Frame<'_>, area: Rect, state: &State) {
