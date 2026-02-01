@@ -26,6 +26,9 @@ const INITIAL_SCREEN_ENV: &str = "ZEROSHOT_TUI_INITIAL_SCREEN";
 const PROVIDER_OVERRIDE_ENV: &str = "ZEROSHOT_TUI_PROVIDER_OVERRIDE";
 
 fn main() -> io::Result<()> {
+    if handle_cli_flags()? {
+        return Ok(());
+    }
     run_app()
 }
 
@@ -56,6 +59,19 @@ fn run_app() -> io::Result<()> {
     drop(terminal);
     guard.restore()?;
     Ok(())
+}
+
+fn handle_cli_flags() -> io::Result<bool> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--version") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(true);
+    }
+    if args.iter().any(|arg| arg == "--smoke-test") {
+        println!("ok");
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn init_terminal_guard() -> io::Result<TerminalGuard> {

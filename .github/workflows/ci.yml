@@ -60,6 +60,8 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        env:
+          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
 
       - name: Security audit
@@ -122,6 +124,8 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
+        env:
+          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
 
       - name: Link CLI

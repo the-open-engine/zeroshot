@@ -17,7 +17,7 @@
     "test:all": "npm run test && npm run test:slow",
     "test:coverage": "c8 npm run test:unit",
     "test:coverage:report": "c8 --reporter=html npm run test:unit && echo 'Coverage report generated at coverage/index.html'",
-    "postinstall": "node scripts/fix-node-pty-permissions.js",
+    "postinstall": "node scripts/fix-node-pty-permissions.js && node scripts/install-tui-binary.js",
     "start": "node cli/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -109,7 +109,8 @@
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
     "proper-lockfile": "^4.1.2",
-    "react": "^17.0.2"
+    "react": "^17.0.2",
+    "tar": "^7.5.3"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
@@ -140,7 +141,7 @@
   "overrides": {
     "xml2js": "^0.5.0",
     "diff": ">=8.0.3",
-    "tar": ">=7.5.3",
+    "tar": "^7.5.3",
     "undici": ">=7.18.2"
   },
   "lint-staged": {
