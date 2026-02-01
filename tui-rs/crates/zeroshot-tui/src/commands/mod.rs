@@ -4,6 +4,7 @@ mod dispatcher;
 mod parser;
 mod types;
 
+pub use parser::parse;
 pub use types::{CommandError, ParsedCommand, VALID_PROVIDERS};
 
 pub fn dispatch(request: CommandRequest) -> Result<Vec<Action>, CommandError> {

@@ -5,6 +5,8 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::app::SpineHintTone;
+
 // ── Base palette ────────────────────────────────────────────────────────────
 
 pub const ACCENT: Color = Color::Rgb(137, 180, 250); // #89b4fa blue
@@ -97,7 +99,17 @@ pub fn spine_completion_style() -> Style {
 
 /// Spine right-side hint text.
 pub fn spine_hint_style() -> Style {
-    Style::default().fg(FG_MUTED)
+    spine_hint_style_for(SpineHintTone::Muted)
+}
+
+/// Spine hint style by tone.
+pub fn spine_hint_style_for(tone: SpineHintTone) -> Style {
+    match tone {
+        SpineHintTone::Muted => Style::default().fg(FG_MUTED),
+        SpineHintTone::Info => Style::default().fg(ACCENT),
+        SpineHintTone::Success => Style::default().fg(ACCENT2),
+        SpineHintTone::Error => Style::default().fg(STATUS_ERROR),
+    }
 }
 
 /// Spine command prefix.

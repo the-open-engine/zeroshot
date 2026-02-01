@@ -3,7 +3,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{SpineMode, SpineState};
+use crate::app::{SpineHintTone, SpineMode, SpineState};
 use crate::ui::theme;
 
 const PLACEHOLDER_INTENT: &str = "Type intent...";
@@ -12,13 +12,23 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &SpineState) {
     let block = spine_block();
     let inner = block.inner(area);
 
-    let mut spans = build_spans(state);
-    append_hint(&mut spans, inner.width, state.hint.as_str());
+    let hint_text = state.hint.text.as_str();
+    let hint_tone = state.hint.tone;
 
-    let line = Line::from(spans);
-    let widget = Paragraph::new(line)
-        .block(block)
-        .alignment(Alignment::Left);
+    let mut spans = build_spans(state);
+    let mut lines = Vec::new();
+    let mut hint_on_first_line = false;
+    if hint_fits(&spans, inner.width, hint_text) {
+        append_hint(&mut spans, inner.width, hint_text, hint_tone);
+        hint_on_first_line = true;
+    }
+    lines.push(Line::from(spans));
+
+    if !hint_on_first_line && !hint_text.is_empty() && inner.height >= 2 {
+        lines.push(build_hint_line(inner.width, hint_text, hint_tone));
+    }
+
+    let widget = Paragraph::new(lines).block(block).alignment(Alignment::Left);
     frame.render_widget(widget, area);
 }
 
@@ -113,7 +123,22 @@ fn push_completion<'a>(spans: &mut Vec<Span<'a>>, state: &'a SpineState) {
     ));
 }
 
-fn append_hint<'a>(spans: &mut Vec<Span<'a>>, width: u16, hint: &'a str) {
+fn hint_fits(spans: &[Span<'_>], width: u16, hint: &str) -> bool {
+    if hint.is_empty() || width == 0 {
+        return false;
+    }
+    let used_len: usize = spans.iter().map(|span| span.content.len()).sum();
+    let hint_len = hint.len();
+    let width = width as usize;
+    width > used_len + hint_len + 1
+}
+
+fn append_hint<'a>(
+    spans: &mut Vec<Span<'a>>,
+    width: u16,
+    hint: &'a str,
+    tone: SpineHintTone,
+) {
     if hint.is_empty() || width == 0 {
         return;
     }
@@ -125,7 +150,23 @@ fn append_hint<'a>(spans: &mut Vec<Span<'a>>, width: u16, hint: &'a str) {
     }
     let gap = width - used_len - hint_len;
     spans.push(Span::raw(" ".repeat(gap)));
-    spans.push(Span::styled(hint, theme::spine_hint_style()));
+    spans.push(Span::styled(hint, theme::spine_hint_style_for(tone)));
+}
+
+fn build_hint_line<'a>(width: u16, hint: &'a str, tone: SpineHintTone) -> Line<'a> {
+    if width == 0 {
+        return Line::from(Span::raw(""));
+    }
+    let width = width as usize;
+    let hint_len = hint.len();
+    if hint_len >= width {
+        return Line::from(Span::styled(hint, theme::spine_hint_style_for(tone)));
+    }
+    let gap = width - hint_len;
+    Line::from(vec![
+        Span::raw(" ".repeat(gap)),
+        Span::styled(hint, theme::spine_hint_style_for(tone)),
+    ])
 }
 
 #[cfg(test)]
@@ -197,5 +238,27 @@ mod tests {
         terminal
             .backend_mut()
             .assert_cursor_position(Position::new(expected_x, 1));
+    }
+
+    #[test]
+    fn hint_moves_to_second_line_when_no_space() {
+        let backend = TestBackend::new(22, 4);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = SpineState::default();
+        state.input.input = "extremelylonginput".to_string();
+        state.hint = crate::app::SpineHint::new("Second line hint", SpineHintTone::Info);
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &state);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let line1 = line_text(buffer, 1);
+        let line2 = line_text(buffer, 2);
+        assert!(!line1.contains("Second line hint"));
+        assert!(line2.contains("Second line hint"));
     }
 }
