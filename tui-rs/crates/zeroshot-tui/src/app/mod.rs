@@ -269,6 +269,14 @@ pub enum BackendAction {
     ClusterSummary {
         summary: crate::protocol::ClusterSummary,
     },
+    ClusterTopology {
+        cluster_id: String,
+        topology: crate::protocol::ClusterTopology,
+    },
+    ClusterTopologyError {
+        cluster_id: String,
+        message: String,
+    },
     SubscribedClusterLogs {
         cluster_id: String,
         agent_id: Option<String>,
@@ -316,6 +324,7 @@ pub enum Effect {
 pub enum BackendRequest {
     ListClusters,
     GetClusterSummary { cluster_id: String },
+    GetClusterTopology { cluster_id: String },
     SubscribeClusterLogs {
         cluster_id: String,
         agent_id: Option<String>,
@@ -460,6 +469,9 @@ fn queue_navigation_effects(screen: &ScreenId, effects: &mut Vec<Effect>) {
         }
         ScreenId::Cluster { id } => {
             effects.push(Effect::Backend(BackendRequest::GetClusterSummary {
+                cluster_id: id.clone(),
+            }));
+            effects.push(Effect::Backend(BackendRequest::GetClusterTopology {
                 cluster_id: id.clone(),
             }));
             effects.push(Effect::Backend(BackendRequest::SubscribeClusterLogs {
@@ -718,6 +730,13 @@ fn handle_backend_action(state: &mut AppState, action: BackendAction, effects: &
         BackendAction::Notification(notification) => handle_backend_notification(state, notification),
         BackendAction::ClustersListed(clusters) => handle_clusters_listed(state, clusters),
         BackendAction::ClusterSummary { summary } => handle_cluster_summary(state, summary),
+        BackendAction::ClusterTopology {
+            cluster_id,
+            topology,
+        } => handle_cluster_topology(state, cluster_id, topology),
+        BackendAction::ClusterTopologyError { cluster_id, message } => {
+            handle_cluster_topology_error(state, cluster_id, message)
+        }
         BackendAction::SubscribedClusterLogs {
             cluster_id,
             agent_id,
@@ -808,6 +827,28 @@ fn handle_cluster_summary(state: &mut AppState, summary: crate::protocol::Cluste
         .entry(summary.id.clone())
         .or_insert_with(cluster::State::default);
     entry.summary = Some(summary);
+}
+
+fn handle_cluster_topology(
+    state: &mut AppState,
+    cluster_id: String,
+    topology: crate::protocol::ClusterTopology,
+) {
+    let entry = state
+        .clusters
+        .entry(cluster_id)
+        .or_insert_with(cluster::State::default);
+    entry.topology = Some(topology);
+    entry.topology_error = None;
+}
+
+fn handle_cluster_topology_error(state: &mut AppState, cluster_id: String, message: String) {
+    let entry = state
+        .clusters
+        .entry(cluster_id)
+        .or_insert_with(cluster::State::default);
+    entry.topology = None;
+    entry.topology_error = Some(message);
 }
 
 fn handle_log_subscription(

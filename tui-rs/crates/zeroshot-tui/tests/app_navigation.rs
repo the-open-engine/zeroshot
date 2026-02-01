@@ -43,6 +43,23 @@ fn push_replace_pop_behave_correctly() {
 }
 
 #[test]
+fn cluster_entry_requests_topology() {
+    let state = AppState::default();
+    let (_state, effects) = app::update(
+        state,
+        Action::Navigate(NavigationAction::Push(ScreenId::Cluster {
+            id: "cluster-1".to_string(),
+        })),
+    );
+
+    assert!(effects.contains(&Effect::Backend(
+        BackendRequest::GetClusterTopology {
+            cluster_id: "cluster-1".to_string(),
+        }
+    )));
+}
+
+#[test]
 fn pop_from_cluster_unsubscribes_active_streams() {
     let state = AppState::default();
     let (state, _) = app::update(

@@ -18,10 +18,11 @@ use crate::backend::{
 };
 use crate::protocol::{
     ClusterLogLinesParams, ClusterTimelineEventsParams, ClientCapabilities, ClientInfo,
-    GetClusterSummaryParams, GetClusterSummaryResult, InitializeParams, InitializeResult,
-    JsonRpcId, JsonRpcRequest, ListClustersParams, ListClustersResult, SendGuidanceToAgentParams,
-    SendGuidanceToAgentResult, SendGuidanceToClusterParams, SendGuidanceToClusterResult,
-    ServerCapabilities, StartClusterFromIssueParams, StartClusterFromTextParams, StartClusterResult,
+    GetClusterSummaryParams, GetClusterSummaryResult, GetClusterTopologyParams,
+    GetClusterTopologyResult, InitializeParams, InitializeResult, JsonRpcId, JsonRpcRequest,
+    ListClustersParams, ListClustersResult, SendGuidanceToAgentParams, SendGuidanceToAgentResult,
+    SendGuidanceToClusterParams, SendGuidanceToClusterResult, ServerCapabilities,
+    StartClusterFromIssueParams, StartClusterFromTextParams, StartClusterResult,
     SubscribeClusterLogsParams, SubscribeClusterTimelineParams, SubscribeResult, UnsubscribeParams,
     UnsubscribeResult,
 };
@@ -120,6 +121,13 @@ impl StdioBackendClient {
         params: GetClusterSummaryParams,
     ) -> Result<GetClusterSummaryResult, BackendError> {
         self.send_request("getClusterSummary", params)
+    }
+
+    pub fn get_cluster_topology(
+        &self,
+        params: GetClusterTopologyParams,
+    ) -> Result<GetClusterTopologyResult, BackendError> {
+        self.send_request("getClusterTopology", params)
     }
 
     pub fn subscribe_cluster_logs(

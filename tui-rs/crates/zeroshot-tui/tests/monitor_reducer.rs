@@ -65,6 +65,9 @@ fn monitor_open_selected_pushes_cluster() {
             Effect::Backend(BackendRequest::GetClusterSummary {
                 cluster_id: "c1".to_string()
             }),
+            Effect::Backend(BackendRequest::GetClusterTopology {
+                cluster_id: "c1".to_string()
+            }),
             Effect::Backend(BackendRequest::SubscribeClusterLogs {
                 cluster_id: "c1".to_string(),
                 agent_id: None,

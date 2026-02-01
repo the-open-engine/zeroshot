@@ -6,7 +6,8 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::protocol::{ClusterLogLine, ClusterSummary, TimelineEvent};
+use crate::protocol::{ClusterLogLine, ClusterSummary, ClusterTopology, TimelineEvent};
+use crate::ui::widgets::topology;
 
 pub const MAX_LOG_LINES: usize = 1000;
 pub const MAX_TIMELINE_EVENTS: usize = 500;
@@ -50,6 +51,8 @@ impl ClusterPane {
 pub struct State {
     pub focus: ClusterPane,
     pub summary: Option<ClusterSummary>,
+    pub topology: Option<ClusterTopology>,
+    pub topology_error: Option<String>,
     pub logs: VecDeque<ClusterLogLine>,
     pub timeline: VecDeque<TimelineEvent>,
     pub log_scroll_offset: usize,
@@ -66,6 +69,8 @@ impl Default for State {
         Self {
             focus: ClusterPane::Topology,
             summary: None,
+            topology: None,
+            topology_error: None,
             logs: VecDeque::new(),
             timeline: VecDeque::new(),
             log_scroll_offset: 0,
@@ -274,22 +279,15 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State) {
 }
 
 fn render_topology(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let summary_line = state
-        .summary
-        .as_ref()
-        .map(|summary| format!("State: {} | Provider: {:?}", summary.state, summary.provider))
-        .unwrap_or_else(|| "Summary: (pending)".to_string());
-
-    let lines = vec![
-        Line::from("Topology"),
-        Line::from(summary_line),
-        Line::from(format!("Agents: {}", state.agents.len())),
-        Line::from("Tab/Left/Right cycles focus"),
-    ];
-
     let block = pane_block("Topology", state.focus == ClusterPane::Topology);
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    topology::render(
+        frame,
+        area,
+        block,
+        state.summary.as_ref(),
+        state.topology.as_ref(),
+        state.topology_error.as_deref(),
+    );
 }
 
 fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
