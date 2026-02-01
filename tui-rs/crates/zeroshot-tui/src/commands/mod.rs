@@ -1,32 +1,19 @@
-use std::fmt;
+use crate::app::{Action, CommandAction, CommandRequest, ToastLevel};
 
-use crate::app::{Action, CommandRequest};
+mod dispatcher;
+mod parser;
+mod types;
 
-#[derive(Debug, Clone)]
-pub struct CommandError {
-    message: String,
-}
-
-impl CommandError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-impl fmt::Display for CommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for CommandError {}
+pub use types::{CommandError, ParsedCommand, VALID_PROVIDERS};
 
 pub fn dispatch(request: CommandRequest) -> Result<Vec<Action>, CommandError> {
     match request {
-        CommandRequest::SubmitRaw { raw } => Err(CommandError::new(format!(
-            "Command handling not implemented yet: {raw}"
-        ))),
+        CommandRequest::SubmitRaw { raw, context } => match parser::parse(&raw) {
+            Ok(parsed) => Ok(dispatcher::dispatch(parsed, context)),
+            Err(err) => Ok(vec![Action::Command(CommandAction::ShowToast {
+                level: ToastLevel::Error,
+                message: err.to_string(),
+            })]),
+        },
     }
 }

@@ -61,8 +61,15 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`   |
 | Rust TUI core loop (MVU)     | `tui-rs/crates/zeroshot-tui/src/app/mod.rs` |
 | Rust TUI input routing       | `tui-rs/crates/zeroshot-tui/src/input.rs`  |
+| Rust TUI commands            | `tui-rs/crates/zeroshot-tui/src/commands/` |
+| Rust TUI command parser      | `tui-rs/crates/zeroshot-tui/src/commands/parser.rs` |
+| Rust TUI command dispatch    | `tui-rs/crates/zeroshot-tui/src/commands/dispatcher.rs` |
+| Rust TUI command types       | `tui-rs/crates/zeroshot-tui/src/commands/types.rs` |
 | Rust TUI screens             | `tui-rs/crates/zeroshot-tui/src/screens/`  |
 | Rust TUI render entrypoint   | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs` |
+| Rust TUI widgets             | `tui-rs/crates/zeroshot-tui/src/ui/widgets/` |
+| Rust TUI toast widget        | `tui-rs/crates/zeroshot-tui/src/ui/widgets/toast.rs` |
+| Rust TUI command bar widget  | `tui-rs/crates/zeroshot-tui/src/ui/widgets/command_bar.rs` |
 | Rust TUI terminal guard      | `tui-rs/crates/zeroshot-tui/src/terminal.rs` |
 | Docker mounts/env            | `lib/docker-config.js`                     |
 | Container lifecycle          | `src/isolation-manager.js`                 |
@@ -72,6 +79,7 @@ TUI navigation convention: view stack with `launcher` as root; Esc pops the stac
 TUI v2 (Rust) convention: centralized key routing in `src/input.rs`; `app::update()` is pure and returns effects; `ui::render()` is pure and performs no IO. Adding a screen requires a `ScreenId` variant plus a screen reducer and render entry.
 TUI v2 (Rust) command flow: `Effect::Command(CommandRequest)` is emitted by `app::update()` and executed in `src/main.rs` via `commands::dispatch()`, with failures surfaced through `BackendAction::Error`.
 TUI v2 (Rust) provider override lives in `AppState.provider_override` and is forwarded when launching clusters (e.g. `StartClusterFromText`).
+TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
