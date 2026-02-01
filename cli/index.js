@@ -49,6 +49,7 @@ const {
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider, parseProviderChunk } = require('../src/providers');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
+const { launchTuiSession } = require('../lib/tui-launcher');
 const {
   detectGitRepoRoot,
   detectRunInput,
@@ -175,26 +176,6 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
-}
-
-function resolveTuiProviderOverride(options = {}) {
-  const override = options.provider;
-  if (!override || (typeof override === 'string' && !override.trim())) {
-    return null;
-  }
-  const normalized = normalizeProviderName(override);
-  getProvider(normalized);
-  return normalized;
-}
-
-function startTuiSession(options = {}) {
-  const providerOverride = resolveTuiProviderOverride(options);
-  const { start } = require('../lib/tui');
-  start({
-    autoExit: false,
-    providerOverride,
-    initialView: options.initialView,
-  });
 }
 
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
@@ -2235,9 +2216,9 @@ Examples:
   ${chalk.cyan('zeroshot run "Implement feature X"')}  Run cluster from plain text
   ${chalk.cyan('zeroshot run 123 -d')}                 Run in background (detached)
   ${chalk.cyan('zeroshot run 123 --docker')}           Run in Docker container (safe for e2e tests)
-  ${chalk.cyan('zeroshot')}                            Open Ink TUI (TTY only)
-  ${chalk.cyan('zeroshot tui')}                        Open Ink TUI explicitly
-  ${chalk.cyan('zeroshot watch')}                      Open Ink TUI Monitor view
+  ${chalk.cyan('zeroshot')}                            Open TUI (TTY only)
+  ${chalk.cyan('zeroshot tui')}                        Open TUI explicitly
+  ${chalk.cyan('zeroshot watch')}                      Open TUI Monitor view
   ${chalk.cyan('zeroshot task run "Fix the bug"')}     Run single-agent background task
   ${chalk.cyan('zeroshot list')}                       List all tasks and clusters
   ${chalk.cyan('zeroshot task list')}                  List tasks only
@@ -3284,24 +3265,24 @@ program
     }
   });
 
-// Watch command - Ink TUI Monitor view
+// Watch command - TUI Monitor view
 program
   .command('watch')
-  .description('Open Ink TUI in Monitor view')
+  .description('Open TUI in Monitor view')
   .option('--refresh-rate <ms>', 'Refresh interval in milliseconds', '1000')
   .action((_options) => {
     try {
-      startTuiSession({ initialView: 'monitor' });
+      launchTuiSession({ initialView: 'monitor' });
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);
     }
   });
 
-// TUI command - Ink TUI session
+// TUI command - TUI session
 program
   .command('tui')
-  .description('Open Ink TUI')
+  .description('Open TUI')
   .option(
     '--provider <provider>',
     'Override provider for this TUI session (claude, codex, gemini, opencode)'
@@ -3310,7 +3291,7 @@ program
   .allowUnknownOption(true)
   .action((options) => {
     try {
-      startTuiSession(options);
+      launchTuiSession(options);
     } catch (error) {
       console.error('Error starting TUI:', error.message);
       process.exit(1);
@@ -3325,7 +3306,7 @@ function registerTuiEntrypoint(commandName, providerName) {
     .allowUnknownOption(true)
     .action(() => {
       try {
-        startTuiSession({ provider: providerName });
+        launchTuiSession({ provider: providerName });
       } catch (error) {
         console.error('Error starting TUI:', error.message);
         process.exit(1);

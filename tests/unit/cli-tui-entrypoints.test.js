@@ -5,32 +5,10 @@
  */
 
 const assert = require('assert');
-const { normalizeProviderName, VALID_PROVIDERS } = require('../../lib/provider-names');
-
-// Mirrors resolveTuiProviderOverride in cli/index.js
-function resolveTuiProviderOverride(options = {}) {
-  const override = options.provider;
-  if (!override || (typeof override === 'string' && !override.trim())) {
-    return null;
-  }
-  const normalized = normalizeProviderName(override);
-  if (!VALID_PROVIDERS.includes(normalized)) {
-    throw new Error(`Unknown provider: ${normalized}. Valid: ${VALID_PROVIDERS.join(', ')}`);
-  }
-  return normalized;
-}
-
-// Mirrors the TUI bootstrap call options in cli/index.js
-function buildTuiStartOptions(options = {}) {
-  return {
-    autoExit: false,
-    providerOverride: resolveTuiProviderOverride(options),
-    initialView: options.initialView,
-  };
-}
+const { resolveTuiProviderOverride } = require('../../lib/tui-launcher');
 
 function buildEntrypointOptions(providerName) {
-  return buildTuiStartOptions({ provider: providerName });
+  return { providerOverride: resolveTuiProviderOverride({ provider: providerName }) };
 }
 
 describe('CLI TUI Entrypoints', function () {

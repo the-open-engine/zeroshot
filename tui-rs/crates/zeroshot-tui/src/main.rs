@@ -8,7 +8,9 @@ use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use zeroshot_tui::app::{Action, AppState, BackendAction, BackendRequest, Effect};
+use zeroshot_tui::app::{
+    Action, AppState, BackendAction, BackendRequest, Effect, InitialScreen, StartupOptions,
+};
 use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
 use zeroshot_tui::backend::stdio::StdioBackendClient;
 use zeroshot_tui::commands;
@@ -20,6 +22,9 @@ type ActionSender = mpsc::Sender<Action>;
 type ActionReceiver = mpsc::Receiver<Action>;
 type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
+const INITIAL_SCREEN_ENV: &str = "ZEROSHOT_TUI_INITIAL_SCREEN";
+const PROVIDER_OVERRIDE_ENV: &str = "ZEROSHOT_TUI_PROVIDER_OVERRIDE";
+
 fn main() -> io::Result<()> {
     run_app()
 }
@@ -28,10 +33,12 @@ fn run_app() -> io::Result<()> {
     let guard = init_terminal_guard()?;
     let mut terminal = setup_terminal()?;
     maybe_force_panic();
+    let startup_options = parse_startup_options()?;
 
     let (action_tx, action_rx) = mpsc::channel::<Action>();
     let mut backend = connect_backend(&action_tx)?;
     let mut state = AppState::new();
+    state.apply_startup_options(startup_options);
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
@@ -65,6 +72,57 @@ fn maybe_force_panic() {
     if env::var("ZEROSHOT_TUI_PANIC").ok().as_deref() == Some("1") {
         panic!("ZEROSHOT_TUI_PANIC=1 requested");
     }
+}
+
+fn parse_startup_options() -> io::Result<StartupOptions> {
+    let mut options = StartupOptions::default();
+    let mut args = env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--initial-screen" => {
+                let value = args.next().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--initial-screen requires a value")
+                })?;
+                options.initial_screen = Some(parse_initial_screen(&value)?);
+            }
+            "--provider-override" => {
+                let value = args.next().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--provider-override requires a value",
+                    )
+                })?;
+                if !value.trim().is_empty() {
+                    options.provider_override = Some(value.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if options.initial_screen.is_none() {
+        if let Ok(value) = env::var(INITIAL_SCREEN_ENV) {
+            if !value.trim().is_empty() {
+                options.initial_screen = Some(parse_initial_screen(&value)?);
+            }
+        }
+    }
+
+    if options.provider_override.is_none() {
+        if let Ok(value) = env::var(PROVIDER_OVERRIDE_ENV) {
+            if !value.trim().is_empty() {
+                options.provider_override = Some(value.trim().to_string());
+            }
+        }
+    }
+
+    Ok(options)
+}
+
+fn parse_initial_screen(value: &str) -> io::Result<InitialScreen> {
+    InitialScreen::parse(value)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
 }
 
 fn app_loop(

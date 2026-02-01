@@ -21,59 +21,60 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                      | File                                       |
-| ---------------------------- | ------------------------------------------ |
-| Conductor classification     | `src/conductor-bootstrap.js`               |
-| Base templates               | `cluster-templates/base-templates/`        |
-| Message bus                  | `src/message-bus.js`                       |
-| Ledger (SQLite)              | `src/ledger.js`                            |
-| Guidance topics              | `src/guidance-topics.js`                   |
-| Guidance mailbox helper      | `src/ledger.js`                            |
-| Guidance live injection      | `src/orchestrator.js`                      |
-| Trigger evaluation           | `src/logic-engine.js`                      |
-| Agent wrapper                | `src/agent-wrapper.js`                     |
-| Providers registry           | `src/providers/index.js`                   |
-| Provider implementations     | `src/providers/`                           |
-| Provider detection           | `lib/provider-detection.js`                |
-| Provider capabilities        | `src/providers/capabilities.js`            |
-| Ink TUI entrypoint           | `src/tui/index.tsx`                        |
-| Ink TUI app                  | `src/tui/app.tsx`                          |
-| Ink TUI router               | `src/tui/router.tsx`                       |
-| Ink TUI view stack           | `src/tui/view-stack.ts`                    |
-| Ink TUI commands             | `src/tui/commands/`                        |
-| TUI command registry         | `src/tui/commands/registry.ts`             |
-| TUI CLI compat wrapper       | `src/tui/commands/cli-compat.ts`           |
-| Ink TUI views                | `src/tui/views/`                           |
-| Ink TUI build output         | `lib/tui/`                                 |
-| TUI backend entrypoint       | `src/tui-backend/index.ts`                 |
-| TUI backend server           | `src/tui-backend/server.ts`                |
-| TUI backend services         | `src/tui-backend/services/`                |
-| TUI backend subscriptions    | `src/tui-backend/subscriptions/`           |
-| TUI backend build output     | `lib/tui-backend/`                         |
-| TUI start-cluster helper     | `lib/start-cluster.js`                     |
-| TUI start-cluster service    | `src/tui/services/start-cluster.ts`        |
-| TUI launcher actions         | `src/tui/launcher-actions.ts`              |
-| TUI cluster launcher         | `src/tui/services/cluster-launcher.ts`     |
-| TUI v2 protocol spec         | `docs/tui-v2/protocol.md`                  |
-| TUI v2 protocol types (TS)   | `src/tui-backend/protocol/`                |
-| TUI v2 protocol types (Rust) | `tui-rs/crates/zeroshot-tui/src/protocol/` |
-| Rust TUI backend client      | `tui-rs/crates/zeroshot-tui/src/backend/`  |
-| Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`   |
-| Rust TUI core loop (MVU)     | `tui-rs/crates/zeroshot-tui/src/app/mod.rs` |
-| Rust TUI input routing       | `tui-rs/crates/zeroshot-tui/src/input.rs`  |
-| Rust TUI commands            | `tui-rs/crates/zeroshot-tui/src/commands/` |
-| Rust TUI command parser      | `tui-rs/crates/zeroshot-tui/src/commands/parser.rs` |
-| Rust TUI command dispatch    | `tui-rs/crates/zeroshot-tui/src/commands/dispatcher.rs` |
-| Rust TUI command types       | `tui-rs/crates/zeroshot-tui/src/commands/types.rs` |
-| Rust TUI screens             | `tui-rs/crates/zeroshot-tui/src/screens/`  |
-| Rust TUI render entrypoint   | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs` |
-| Rust TUI widgets             | `tui-rs/crates/zeroshot-tui/src/ui/widgets/` |
-| Rust TUI toast widget        | `tui-rs/crates/zeroshot-tui/src/ui/widgets/toast.rs` |
+| Concept                      | File                                                       |
+| ---------------------------- | ---------------------------------------------------------- |
+| Conductor classification     | `src/conductor-bootstrap.js`                               |
+| Base templates               | `cluster-templates/base-templates/`                        |
+| Message bus                  | `src/message-bus.js`                                       |
+| Ledger (SQLite)              | `src/ledger.js`                                            |
+| Guidance topics              | `src/guidance-topics.js`                                   |
+| Guidance mailbox helper      | `src/ledger.js`                                            |
+| Guidance live injection      | `src/orchestrator.js`                                      |
+| Trigger evaluation           | `src/logic-engine.js`                                      |
+| Agent wrapper                | `src/agent-wrapper.js`                                     |
+| Providers registry           | `src/providers/index.js`                                   |
+| Provider implementations     | `src/providers/`                                           |
+| Provider detection           | `lib/provider-detection.js`                                |
+| Provider capabilities        | `src/providers/capabilities.js`                            |
+| Ink TUI entrypoint           | `src/tui/index.tsx`                                        |
+| Ink TUI app                  | `src/tui/app.tsx`                                          |
+| Ink TUI router               | `src/tui/router.tsx`                                       |
+| Ink TUI view stack           | `src/tui/view-stack.ts`                                    |
+| Ink TUI commands             | `src/tui/commands/`                                        |
+| TUI command registry         | `src/tui/commands/registry.ts`                             |
+| TUI CLI compat wrapper       | `src/tui/commands/cli-compat.ts`                           |
+| Ink TUI views                | `src/tui/views/`                                           |
+| Ink TUI build output         | `lib/tui/`                                                 |
+| TUI backend entrypoint       | `src/tui-backend/index.ts`                                 |
+| TUI backend server           | `src/tui-backend/server.ts`                                |
+| TUI backend services         | `src/tui-backend/services/`                                |
+| TUI backend subscriptions    | `src/tui-backend/subscriptions/`                           |
+| TUI backend build output     | `lib/tui-backend/`                                         |
+| TUI start-cluster helper     | `lib/start-cluster.js`                                     |
+| TUI launcher (Node)          | `lib/tui-launcher.js`                                      |
+| TUI start-cluster service    | `src/tui/services/start-cluster.ts`                        |
+| TUI launcher actions         | `src/tui/launcher-actions.ts`                              |
+| TUI cluster launcher         | `src/tui/services/cluster-launcher.ts`                     |
+| TUI v2 protocol spec         | `docs/tui-v2/protocol.md`                                  |
+| TUI v2 protocol types (TS)   | `src/tui-backend/protocol/`                                |
+| TUI v2 protocol types (Rust) | `tui-rs/crates/zeroshot-tui/src/protocol/`                 |
+| Rust TUI backend client      | `tui-rs/crates/zeroshot-tui/src/backend/`                  |
+| Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`                   |
+| Rust TUI core loop (MVU)     | `tui-rs/crates/zeroshot-tui/src/app/mod.rs`                |
+| Rust TUI input routing       | `tui-rs/crates/zeroshot-tui/src/input.rs`                  |
+| Rust TUI commands            | `tui-rs/crates/zeroshot-tui/src/commands/`                 |
+| Rust TUI command parser      | `tui-rs/crates/zeroshot-tui/src/commands/parser.rs`        |
+| Rust TUI command dispatch    | `tui-rs/crates/zeroshot-tui/src/commands/dispatcher.rs`    |
+| Rust TUI command types       | `tui-rs/crates/zeroshot-tui/src/commands/types.rs`         |
+| Rust TUI screens             | `tui-rs/crates/zeroshot-tui/src/screens/`                  |
+| Rust TUI render entrypoint   | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs`                 |
+| Rust TUI widgets             | `tui-rs/crates/zeroshot-tui/src/ui/widgets/`               |
+| Rust TUI toast widget        | `tui-rs/crates/zeroshot-tui/src/ui/widgets/toast.rs`       |
 | Rust TUI command bar widget  | `tui-rs/crates/zeroshot-tui/src/ui/widgets/command_bar.rs` |
-| Rust TUI terminal guard      | `tui-rs/crates/zeroshot-tui/src/terminal.rs` |
-| Docker mounts/env            | `lib/docker-config.js`                     |
-| Container lifecycle          | `src/isolation-manager.js`                 |
-| Settings                     | `lib/settings.js`                          |
+| Rust TUI terminal guard      | `tui-rs/crates/zeroshot-tui/src/terminal.rs`               |
+| Docker mounts/env            | `lib/docker-config.js`                                     |
+| Container lifecycle          | `src/isolation-manager.js`                                 |
+| Settings                     | `lib/settings.js`                                          |
 
 TUI navigation convention: view stack with `launcher` as root; Esc pops the stack to the previous view. Global command box is always available and slash commands live under `src/tui/commands/`.
 TUI v2 (Rust) convention: centralized key routing in `src/input.rs`; `app::update()` is pure and returns effects; `ui::render()` is pure and performs no IO. Adding a screen requires a `ScreenId` variant plus a screen reducer and render entry.
@@ -83,6 +84,7 @@ TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it o
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
+TUI launcher env: `ZEROSHOT_TUI=ink` forces Ink fallback, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` feed Rust startup defaults.
 
 ## CLI Quick Reference
 
@@ -105,9 +107,9 @@ zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot                          # Ink TUI (TTY only)
-zeroshot tui                      # Ink TUI explicit entry
-zeroshot watch                    # Ink TUI Monitor view
+zeroshot                          # TUI (TTY only; Rust default, Ink fallback via env)
+zeroshot tui                      # TUI explicit entry
+zeroshot watch                    # TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings
