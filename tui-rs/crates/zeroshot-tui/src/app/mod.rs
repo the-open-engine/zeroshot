@@ -138,23 +138,33 @@ impl Default for TimeCursor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpineMode {
     #[default]
-    Idle,
-    Input,
+    Intent,
+    Command,
+    WhisperCluster,
+    WhisperAgent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpineCompletion {
+    pub text: String,
+    pub selection: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpineState {
     pub mode: SpineMode,
-    pub input: String,
-    pub cursor: usize,
+    pub input: InputState,
+    pub hint: String,
+    pub completion: Option<SpineCompletion>,
 }
 
 impl Default for SpineState {
     fn default() -> Self {
         Self {
-            mode: SpineMode::Idle,
-            input: String::new(),
-            cursor: 0,
+            mode: SpineMode::Intent,
+            input: InputState::default(),
+            hint: String::new(),
+            completion: None,
         }
     }
 }
@@ -447,6 +457,7 @@ pub enum Action {
     Screen(ScreenAction),
     Backend(BackendAction),
     CommandBar(CommandBarAction),
+    Spine(SpineAction),
     Command(CommandAction),
 }
 
@@ -501,6 +512,21 @@ pub enum CommandBarAction {
     MoveCursorHome,
     MoveCursorEnd,
     Submit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpineAction {
+    SetMode(SpineMode),
+    SetHint(String),
+    SetCompletion(Option<SpineCompletion>),
+    InsertChar(char),
+    Backspace,
+    Delete,
+    MoveCursorLeft,
+    MoveCursorRight,
+    MoveCursorHome,
+    MoveCursorEnd,
+    Clear,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -561,6 +587,9 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
         }
         Action::CommandBar(command_action) => {
             handle_command_bar_action(&mut state, command_action, &mut effects);
+        }
+        Action::Spine(spine_action) => {
+            handle_spine_action(&mut state, spine_action);
         }
         Action::Command(command_action) => {
             handle_command_action(&mut state, command_action, &mut effects);
@@ -1154,6 +1183,44 @@ fn handle_command_bar_action(
     }
 }
 
+fn handle_spine_action(state: &mut AppState, action: SpineAction) {
+    match action {
+        SpineAction::SetMode(mode) => {
+            state.spine.mode = mode;
+        }
+        SpineAction::SetHint(hint) => {
+            state.spine.hint = hint;
+        }
+        SpineAction::SetCompletion(completion) => {
+            state.spine.completion = completion;
+        }
+        SpineAction::InsertChar(ch) => {
+            state.spine.input.insert_char(ch);
+        }
+        SpineAction::Backspace => {
+            state.spine.input.backspace();
+        }
+        SpineAction::Delete => {
+            state.spine.input.delete();
+        }
+        SpineAction::MoveCursorLeft => {
+            state.spine.input.move_left();
+        }
+        SpineAction::MoveCursorRight => {
+            state.spine.input.move_right();
+        }
+        SpineAction::MoveCursorHome => {
+            state.spine.input.move_home();
+        }
+        SpineAction::MoveCursorEnd => {
+            state.spine.input.move_end();
+        }
+        SpineAction::Clear => {
+            state.spine.input.clear();
+        }
+    }
+}
+
 fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &mut Vec<Effect>) {
     match action {
         CommandAction::ShowToast { level, message } => {
@@ -1286,5 +1353,61 @@ mod tests {
             }
         }
         assert!(found, "expected StartClusterFromIssue effect");
+    }
+
+    #[test]
+    fn spine_state_editing() {
+        let mut state = AppState::default();
+
+        let (next, _) = update(state, Action::Spine(SpineAction::InsertChar('a')));
+        state = next;
+        assert_eq!(state.spine.input.input, "a");
+        assert_eq!(state.spine.input.cursor, 1);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::InsertChar('b')));
+        state = next;
+        assert_eq!(state.spine.input.input, "ab");
+        assert_eq!(state.spine.input.cursor, 2);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::InsertChar('c')));
+        state = next;
+        assert_eq!(state.spine.input.input, "abc");
+        assert_eq!(state.spine.input.cursor, 3);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::MoveCursorLeft));
+        state = next;
+        assert_eq!(state.spine.input.cursor, 2);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::Backspace));
+        state = next;
+        assert_eq!(state.spine.input.input, "ac");
+        assert_eq!(state.spine.input.cursor, 1);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::Delete));
+        state = next;
+        assert_eq!(state.spine.input.input, "a");
+        assert_eq!(state.spine.input.cursor, 1);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::MoveCursorHome));
+        state = next;
+        assert_eq!(state.spine.input.cursor, 0);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::InsertChar('z')));
+        state = next;
+        assert_eq!(state.spine.input.input, "za");
+        assert_eq!(state.spine.input.cursor, 1);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::MoveCursorEnd));
+        state = next;
+        assert_eq!(state.spine.input.cursor, 2);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::MoveCursorRight));
+        state = next;
+        assert_eq!(state.spine.input.cursor, 2);
+
+        let (next, _) = update(state, Action::Spine(SpineAction::Clear));
+        state = next;
+        assert_eq!(state.spine.input.input, "");
+        assert_eq!(state.spine.input.cursor, 0);
     }
 }

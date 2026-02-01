@@ -42,17 +42,9 @@ pub fn set_cursor(frame: &mut Frame<'_>, area: Rect, state: &CommandBarState) {
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
-    fn line_text(buffer: &Buffer, y: u16) -> String {
-        let area = buffer.area;
-        let mut line = String::new();
-        for x in area.left()..area.right() {
-            line.push_str(buffer.cell((x, y)).map_or("", |c| c.symbol()));
-        }
-        line
-    }
+    use crate::ui::widgets::test_utils::line_text;
 
     #[test]
     fn active_command_bar_renders_input() {

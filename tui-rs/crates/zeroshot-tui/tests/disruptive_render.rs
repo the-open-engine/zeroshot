@@ -19,7 +19,7 @@ fn buffer_text(buffer: &Buffer) -> String {
 }
 
 #[test]
-fn disruptive_render_draws_canvas_and_spine_placeholders() {
+fn disruptive_render_draws_canvas_and_spine() {
     let backend = TestBackend::new(60, 12);
     let mut terminal = Terminal::new(backend).expect("terminal");
     let mut state = AppState::default();
@@ -31,6 +31,7 @@ fn disruptive_render_draws_canvas_and_spine_placeholders() {
 
     let content = buffer_text(terminal.backend().buffer());
     assert!(content.contains("Canvas"));
-    assert!(content.contains("Spine"));
+    assert!(content.contains("Intent"));
+    assert!(content.contains("Type intent..."));
     assert!(!content.contains("ZEROSHOT"));
 }
