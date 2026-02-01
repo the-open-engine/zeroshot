@@ -149,6 +149,41 @@ describe('Two-Stage Validation Pipeline', function () {
       assert.strictEqual(roleErrors.length, 0, `Unexpected role reference errors: ${roleErrors}`);
     });
 
+    it('meta-coordinator should republish trigger topic after load_config (prevents validator deadlock)', function () {
+      const resolved = resolver.resolve('full-workflow', {
+        task_type: 'TASK',
+        complexity: 'CRITICAL',
+        max_tokens: 150000,
+        max_iterations: 25,
+        planner_level: 'level3',
+        worker_level: 'level2',
+        validator_level: 'level2',
+        validator_count: 0,
+      });
+
+      const metaCoordinator = resolved.agents.find((a) => a.id === 'meta-coordinator');
+      assert.ok(metaCoordinator, 'meta-coordinator should be present for CRITICAL tasks');
+
+      const hookTransformScript = metaCoordinator.hooks?.onComplete?.transform?.script || '';
+      assert.ok(
+        hookTransformScript.includes("action: 'publish'") ||
+          hookTransformScript.includes('action: "publish"'),
+        'meta-coordinator should publish a republished trigger topic after load_config'
+      );
+      assert.ok(
+        hookTransformScript.includes('_republished'),
+        'meta-coordinator republish should include _republished metadata'
+      );
+
+      const implTrigger = metaCoordinator.triggers?.find((t) => t.topic === 'IMPLEMENTATION_READY');
+      assert.ok(implTrigger?.logic?.script?.includes('_republished'));
+
+      const stage2Trigger = metaCoordinator.triggers?.find(
+        (t) => t.topic === 'QUICK_VALIDATION_PASSED'
+      );
+      assert.ok(stage2Trigger?.logic?.script?.includes('_republished'));
+    });
+
     it('should NOT load meta-coordinator for STANDARD tasks', function () {
       const resolved = resolver.resolve('full-workflow', {
         task_type: 'TASK',
