@@ -216,7 +216,7 @@ fn q_quits_except_in_launcher_input() {
 
 #[test]
 fn disruptive_routes_spine_shortcuts() {
-    let mut state = state_for(ScreenId::Monitor);
+    let mut state = state_for(ScreenId::FleetRadar);
     state.ui_variant = UiVariant::Disruptive;
 
     let action = input::route_key(
@@ -252,7 +252,7 @@ fn disruptive_routes_spine_shortcuts() {
 
 #[test]
 fn disruptive_esc_cancels_or_pops() {
-    let mut state = state_for(ScreenId::Monitor);
+    let mut state = state_for(ScreenId::FleetRadar);
     state.ui_variant = UiVariant::Disruptive;
 
     let action = input::route_key(&state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -268,7 +268,7 @@ fn disruptive_esc_cancels_or_pops() {
 
 #[test]
 fn disruptive_enter_submits_or_zooms() {
-    let mut state = state_for(ScreenId::Monitor);
+    let mut state = state_for(ScreenId::FleetRadar);
     state.ui_variant = UiVariant::Disruptive;
     state.monitor.clusters = vec![ClusterSummary {
         id: "c1".to_string(),
@@ -283,7 +283,7 @@ fn disruptive_enter_submits_or_zooms() {
     let action = input::route_key(&state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(
         action,
-        Some(Action::Navigate(NavigationAction::Push(ScreenId::Cluster { id })))
+        Some(Action::Navigate(NavigationAction::Push(ScreenId::ClusterCanvas { id })))
             if id == "c1"
     ));
 
@@ -294,7 +294,7 @@ fn disruptive_enter_submits_or_zooms() {
 
 #[test]
 fn disruptive_ctrl_c_quits() {
-    let mut state = state_for(ScreenId::Monitor);
+    let mut state = state_for(ScreenId::FleetRadar);
     state.ui_variant = UiVariant::Disruptive;
 
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);

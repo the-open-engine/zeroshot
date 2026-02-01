@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
     Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, SpineAction,
-    SpineMode, UiVariant,
+    SpineMode, UiVariant, ZoomStackContext,
 };
 use crate::screens::{agent, cluster, launcher, monitor};
 
@@ -20,7 +20,7 @@ pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
         return Some(action);
     }
 
-    if !matches!(screen, ScreenId::Launcher) {
+    if !matches!(screen, ScreenId::Launcher | ScreenId::IntentConsole) {
         match key.code {
             KeyCode::Char('/')
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -50,6 +50,10 @@ pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
             cluster_id,
             agent_id,
         } => route_agent(cluster_id, agent_id, key),
+        ScreenId::IntentConsole
+        | ScreenId::FleetRadar
+        | ScreenId::ClusterCanvas { .. }
+        | ScreenId::AgentMicroscope { .. } => None,
     }
 }
 
@@ -108,32 +112,32 @@ fn spine_active(state: &AppState) -> bool {
 }
 
 fn intent_mode_for_context(state: &AppState) -> SpineMode {
-    match state.active_screen() {
-        ScreenId::Agent { .. } => SpineMode::WhisperAgent,
-        ScreenId::Cluster { .. } => SpineMode::WhisperCluster,
-        ScreenId::Monitor => {
+    match state.zoom_stack_context() {
+        ZoomStackContext::Agent { .. } => SpineMode::WhisperAgent,
+        ZoomStackContext::Cluster { .. } => SpineMode::WhisperCluster,
+        ZoomStackContext::FleetRadar => {
             if state.monitor.selected_cluster_id().is_some() {
                 SpineMode::WhisperCluster
             } else {
                 SpineMode::Intent
             }
         }
-        ScreenId::Launcher => SpineMode::Intent,
+        ZoomStackContext::Root => SpineMode::Intent,
     }
 }
 
 fn zoom_in_action(state: &AppState) -> Option<Action> {
-    match state.active_screen() {
-        ScreenId::Monitor => state.monitor.selected_cluster_id().map(|cluster_id| {
-            Action::Navigate(NavigationAction::Push(ScreenId::Cluster { id: cluster_id }))
+    match state.zoom_stack_context() {
+        ZoomStackContext::FleetRadar => state.monitor.selected_cluster_id().map(|cluster_id| {
+            Action::Navigate(NavigationAction::Push(ScreenId::ClusterCanvas { id: cluster_id }))
         }),
-        ScreenId::Cluster { id } => selected_agent_id(state, id).map(|agent_id| {
-            Action::Navigate(NavigationAction::Push(ScreenId::Agent {
-                cluster_id: id.clone(),
+        ZoomStackContext::Cluster { id } => selected_agent_id(state, &id).map(|agent_id| {
+            Action::Navigate(NavigationAction::Push(ScreenId::AgentMicroscope {
+                cluster_id: id,
                 agent_id,
             }))
         }),
-        ScreenId::Launcher | ScreenId::Agent { .. } => None,
+        ZoomStackContext::Agent { .. } | ZoomStackContext::Root => None,
     }
 }
 
@@ -170,7 +174,7 @@ fn route_global(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
             Some(Action::Quit)
         }
         KeyCode::Char('q') => match screen {
-            ScreenId::Launcher => None,
+            ScreenId::Launcher | ScreenId::IntentConsole => None,
             _ => Some(Action::Quit),
         },
         _ => None,
