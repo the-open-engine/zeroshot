@@ -1,3 +1,7 @@
+const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
+const MOCK_GUIDANCE_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE";
+const METRICS_PLATFORM_ENV = "ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM";
+
 const path = require("path");
 const {
   createValidator,
@@ -35,9 +39,6 @@ const {
 const { createSubscriptionRegistry } = require("./subscriptions");
 
 const isValidId = (value) => typeof value === "string" || typeof value === "number";
-const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
-const MOCK_GUIDANCE_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE";
-const METRICS_PLATFORM_ENV = "ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM";
 
 const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === "1";
 const isMockGuidanceEnabled = () => process.env[MOCK_GUIDANCE_ENV] === "1";

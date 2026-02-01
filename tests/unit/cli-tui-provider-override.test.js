@@ -6,7 +6,7 @@
  */
 
 const assert = require('assert');
-const { buildInkStartOptions, resolveTuiProviderOverride } = require('../../lib/tui-launcher');
+const { buildRustTuiCommand, resolveTuiProviderOverride } = require('../../lib/tui-launcher');
 
 describe('CLI TUI Provider Override', function () {
   it('returns null when no override is set', function () {
@@ -14,9 +14,10 @@ describe('CLI TUI Provider Override', function () {
     assert.strictEqual(result, null);
   });
 
-  it('passes provider override into TUI start options', function () {
-    const result = buildInkStartOptions({ provider: 'codex' });
-    assert.strictEqual(result.providerOverride, 'codex');
+  it('passes provider override into Rust TUI command', function () {
+    const result = buildRustTuiCommand({ provider: 'codex', binaryPath: '/tmp/zeroshot-tui' });
+    assert.deepStrictEqual(result.args, ['--provider-override', 'codex']);
+    assert.strictEqual(result.env.ZEROSHOT_TUI_PROVIDER_OVERRIDE, 'codex');
   });
 
   it('normalizes provider aliases', function () {
