@@ -2411,6 +2411,14 @@ Continue from where you left off. Review your previous output to understand what
             proposedAgentConfigs.push(agentConfig);
           }
         }
+      } else if (op.action === 'load_config' && op.config) {
+        const loadedAgentConfigs = this._resolveLoadConfigAgents(op.config);
+        for (const agentConfig of loadedAgentConfigs) {
+          const existingIdx = proposedAgentConfigs.findIndex((a) => a.id === agentConfig.id);
+          if (existingIdx === -1) {
+            proposedAgentConfigs.push(agentConfig);
+          }
+        }
       } else if (op.action === 'remove_agents' && op.agentIds) {
         for (const agentId of op.agentIds) {
           const idx = proposedAgentConfigs.findIndex((a) => a.id === agentId);
@@ -2427,6 +2435,40 @@ Continue from where you left off. Review your previous output to understand what
     }
 
     return proposedAgentConfigs;
+  }
+
+  _resolveLoadConfigAgents(config) {
+    if (!config) {
+      throw new Error('load_config operation missing config');
+    }
+
+    const templatesDir = path.join(__dirname, '..', 'cluster-templates');
+    let loadedConfig;
+
+    // Parameterized template - resolve with TemplateResolver
+    if (typeof config === 'object' && config.base) {
+      const { base, params } = config;
+      const resolver = new TemplateResolver(templatesDir);
+      loadedConfig = resolver.resolve(base, params || {});
+    } else if (typeof config === 'string') {
+      // Static config - load directly from file
+      const configPath = path.join(templatesDir, `${config}.json`);
+      if (!fs.existsSync(configPath)) {
+        throw new Error(`Config not found: ${config} (looked in ${configPath})`);
+      }
+      const configContent = fs.readFileSync(configPath, 'utf8');
+      loadedConfig = JSON.parse(configContent);
+    } else {
+      throw new Error(
+        `Invalid config format: expected string or {base, params}, got ${typeof config}`
+      );
+    }
+
+    if (!loadedConfig.agents || !Array.isArray(loadedConfig.agents)) {
+      throw new Error(`Config has no agents array`);
+    }
+
+    return loadedConfig.agents;
   }
 
   _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
