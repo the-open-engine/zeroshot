@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::{BackendExit, BackendNotification};
-use crate::screens::{agent, cluster, launcher, monitor};
+use crate::screens::{agent, cluster, launcher, monitor, radar};
 use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
@@ -289,6 +289,7 @@ pub struct AppState {
     pub screen_stack: Vec<ScreenId>,
     pub launcher: launcher::State,
     pub monitor: monitor::State,
+    pub fleet_radar: radar::FleetRadarState,
     pub metrics: HashMap<String, ClusterMetrics>,
     pub last_metrics_poll_at: Option<i64>,
     pub clusters: HashMap<String, cluster::State>,
@@ -314,6 +315,7 @@ impl Default for AppState {
             screen_stack: vec![ScreenId::Launcher],
             launcher: launcher::State::default(),
             monitor: monitor::State::default(),
+            fleet_radar: radar::FleetRadarState::default(),
             metrics: HashMap::new(),
             last_metrics_poll_at: None,
             clusters: HashMap::new(),
@@ -352,9 +354,7 @@ impl AppState {
         let initial_screen = options.initial_screen;
         if matches!(self.ui_variant, UiVariant::Disruptive) {
             let mut stack = vec![ScreenId::IntentConsole];
-            if matches!(initial_screen, Some(InitialScreen::Monitor)) {
-                stack.push(ScreenId::FleetRadar);
-            }
+            stack.push(ScreenId::FleetRadar);
             self.screen_stack = stack;
         } else if let Some(initial_screen) = initial_screen {
             self.screen_stack = vec![ScreenId::Launcher];
@@ -623,13 +623,25 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
                     state.toast = None;
                 }
             }
-            let should_poll = matches!(
-                state.active_screen(),
-                ScreenId::Monitor | ScreenId::FleetRadar
-            )
-                && state.monitor.poll_due(now_ms);
+            let should_poll = if matches!(state.ui_variant, UiVariant::Disruptive) {
+                state.fleet_radar.poll_due(now_ms)
+            } else {
+                match state.active_screen() {
+                    ScreenId::Monitor => state.monitor.poll_due(now_ms),
+                    ScreenId::FleetRadar => state.fleet_radar.poll_due(now_ms),
+                    _ => false,
+                }
+            };
             if should_poll {
-                state.monitor.mark_polled(now_ms);
+                if matches!(state.ui_variant, UiVariant::Disruptive) {
+                    state.fleet_radar.mark_polled(now_ms);
+                } else {
+                    match state.active_screen() {
+                        ScreenId::Monitor => state.monitor.mark_polled(now_ms),
+                        ScreenId::FleetRadar => state.fleet_radar.mark_polled(now_ms),
+                        _ => {}
+                    }
+                }
                 effects.push(Effect::Backend(BackendRequest::ListClusters));
             }
             let should_poll_metrics = matches!(
@@ -681,8 +693,10 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
-            if matches!(screen, ScreenId::Monitor | ScreenId::FleetRadar) {
+            if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
+            } else if matches!(screen, ScreenId::FleetRadar) {
+                state.fleet_radar.mark_polled(state.now_ms);
             }
             state.screen_stack.push(screen.clone());
             queue_navigation_effects(&screen, effects);
@@ -692,8 +706,10 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
                 cleanup_active_screen(state, effects);
                 state.screen_stack.pop();
                 if let Some(active) = state.screen_stack.last() {
-                    if matches!(active, ScreenId::Monitor | ScreenId::FleetRadar) {
+                    if matches!(active, ScreenId::Monitor) {
                         state.monitor.mark_polled(state.now_ms);
+                    } else if matches!(active, ScreenId::FleetRadar) {
+                        state.fleet_radar.mark_polled(state.now_ms);
                     }
                     queue_navigation_effects(active, effects);
                 }
@@ -703,8 +719,10 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
-            if matches!(screen, ScreenId::Monitor | ScreenId::FleetRadar) {
+            if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
+            } else if matches!(screen, ScreenId::FleetRadar) {
+                state.fleet_radar.mark_polled(state.now_ms);
             }
             if state.screen_stack.is_empty() {
                 state.screen_stack.push(screen.clone());
@@ -1108,7 +1126,9 @@ fn handle_clusters_listed(
     state: &mut AppState,
     clusters: Vec<crate::protocol::ClusterSummary>,
 ) {
+    let radar_clusters = clusters.clone();
     state.monitor.set_clusters(clusters, state.now_ms);
+    state.fleet_radar.set_clusters(radar_clusters, state.now_ms);
     let ids: HashSet<String> = state
         .monitor
         .clusters
@@ -1383,7 +1403,10 @@ fn resolve_spine_cluster_target(state: &AppState) -> Option<String> {
     match state.zoom_stack_context() {
         ZoomStackContext::Agent { cluster_id, .. } => Some(cluster_id),
         ZoomStackContext::Cluster { id } => Some(id),
-        ZoomStackContext::FleetRadar => state.monitor.selected_cluster_id(),
+        ZoomStackContext::FleetRadar => match state.active_screen() {
+            ScreenId::Monitor => state.monitor.selected_cluster_id(),
+            _ => state.fleet_radar.selected_cluster_id(),
+        },
         ZoomStackContext::Root => None,
     }
 }

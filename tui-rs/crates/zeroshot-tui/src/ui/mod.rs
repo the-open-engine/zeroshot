@@ -1,10 +1,10 @@
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
-use crate::screens::{agent, cluster, monitor};
+use crate::screens::{agent, cluster, monitor, radar};
 use crate::ui::widgets::{command_bar, spine, toast};
 
 pub mod launcher;
@@ -90,12 +90,7 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     ])
     .areas(size);
 
-    let canvas = Paragraph::new("Canvas").alignment(Alignment::Center).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Disruptive"),
-    );
-    frame.render_widget(canvas, canvas_area);
+    radar::render(frame, canvas_area, &state.fleet_radar, state.now_ms);
 
     let mut spine_state = state.spine.clone();
     if let Some(toast_state) = state.toast.as_ref() {

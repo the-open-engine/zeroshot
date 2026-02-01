@@ -57,6 +57,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Rust TUI command dispatch    | `tui-rs/crates/zeroshot-tui/src/commands/dispatcher.rs`    |
 | Rust TUI command types       | `tui-rs/crates/zeroshot-tui/src/commands/types.rs`         |
 | Rust TUI screens             | `tui-rs/crates/zeroshot-tui/src/screens/`                  |
+| Rust TUI Fleet Radar screen  | `tui-rs/crates/zeroshot-tui/src/screens/radar.rs`          |
 | Rust TUI render entrypoint   | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs`                 |
 | Rust TUI widgets             | `tui-rs/crates/zeroshot-tui/src/ui/widgets/`               |
 | Rust TUI toast widget        | `tui-rs/crates/zeroshot-tui/src/ui/widgets/toast.rs`       |
