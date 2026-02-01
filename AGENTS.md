@@ -52,6 +52,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | TUI backend build output     | `lib/tui-backend/`                                         |
 | TUI start-cluster helper     | `lib/start-cluster.js`                                     |
 | TUI launcher (Node)          | `lib/tui-launcher.js`                                      |
+| TUI binary mapping           | `lib/tui-binary.js`                                        |
+| TUI binary installer         | `scripts/install-tui-binary.js`                            |
 | TUI start-cluster service    | `src/tui/services/start-cluster.ts`                        |
 | TUI launcher actions         | `src/tui/launcher-actions.ts`                              |
 | TUI cluster launcher         | `src/tui/services/cluster-launcher.ts`                     |
@@ -84,7 +86,7 @@ TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it o
 TUI command convention: register slash commands in `src/tui/commands/dispatcher.ts` via `createCommandRegistry()`; use `src/tui/commands/cli-compat.ts` to reuse task-lib CLI helpers and return condensed output for the status bar.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
-TUI launcher env: `ZEROSHOT_TUI=ink` forces Ink fallback, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` feed Rust startup defaults.
+TUI launcher env: `ZEROSHOT_TUI=ink` forces Ink fallback, `ZEROSHOT_TUI_BINARY_PATH` overrides the installed Rust binary, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_BINARY_URL` overrides release asset URL, `ZEROSHOT_TUI_BINARY_SKIP` skips download, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` feed Rust startup defaults.
 
 ## CLI Quick Reference
 

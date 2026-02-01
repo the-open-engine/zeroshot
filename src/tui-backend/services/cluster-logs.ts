@@ -33,7 +33,16 @@ type ClusterLogStreamOptions = {
 };
 
 export function resolveClusterDbPath(clusterId: string): string {
-  const storageDir = path.join(os.homedir(), ".zeroshot");
+  const envHome =
+    (typeof process.env.HOME === "string" && process.env.HOME.trim()) ||
+    (typeof process.env.USERPROFILE === "string" &&
+      process.env.USERPROFILE.trim()) ||
+    (typeof process.env.HOMEDRIVE === "string" &&
+      typeof process.env.HOMEPATH === "string" &&
+      `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`.trim()) ||
+    "";
+  const homeDir = envHome || os.homedir();
+  const storageDir = path.join(homeDir, ".zeroshot");
   const clustersFile = path.join(storageDir, "clusters.json");
 
   try {

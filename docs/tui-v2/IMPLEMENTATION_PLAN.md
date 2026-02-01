@@ -228,6 +228,21 @@ Preferred approach:
 2. Publish binaries as release artifacts.
 3. NPM package includes an install script that downloads the correct binary (esbuild-style).
 
+Asset naming + mapping:
+
+- Asset name: `zeroshot-tui-{platform}-{arch}.tar.gz`
+- Platform/arch mapping:
+  - `darwin/x64` → `zeroshot-tui-darwin-x64.tar.gz`
+  - `darwin/arm64` → `zeroshot-tui-darwin-arm64.tar.gz`
+  - `linux/x64` → `zeroshot-tui-linux-x64.tar.gz`
+  - `linux/arm64` → `zeroshot-tui-linux-arm64.tar.gz`
+
+Install-time overrides:
+
+- `ZEROSHOT_TUI_BINARY_PATH`: copy a local binary into `libexec/zeroshot-tui` (CI/offline)
+- `ZEROSHOT_TUI_BINARY_URL`: override the release asset URL
+- `ZEROSHOT_TUI_BINARY_SKIP`: skip download (truthy values)
+
 Fallback approach (acceptable if we accept the tradeoff):
 
 - Require `cargo` on install and build from source in `postinstall`.
