@@ -116,7 +116,7 @@ fn intent_mode_for_context(state: &AppState) -> SpineMode {
         ZoomStackContext::Agent { .. } => SpineMode::WhisperAgent,
         ZoomStackContext::Cluster { .. } => SpineMode::WhisperCluster,
         ZoomStackContext::FleetRadar => {
-            if state.monitor.selected_cluster_id().is_some() {
+            if selected_cluster_id_for_zoom(state).is_some() {
                 SpineMode::WhisperCluster
             } else {
                 SpineMode::Intent
@@ -128,7 +128,7 @@ fn intent_mode_for_context(state: &AppState) -> SpineMode {
 
 fn zoom_in_action(state: &AppState) -> Option<Action> {
     match state.zoom_stack_context() {
-        ZoomStackContext::FleetRadar => state.monitor.selected_cluster_id().map(|cluster_id| {
+        ZoomStackContext::FleetRadar => selected_cluster_id_for_zoom(state).map(|cluster_id| {
             Action::Navigate(NavigationAction::Push(ScreenId::ClusterCanvas { id: cluster_id }))
         }),
         ZoomStackContext::Cluster { id } => selected_agent_id(state, &id).map(|agent_id| {
@@ -138,6 +138,13 @@ fn zoom_in_action(state: &AppState) -> Option<Action> {
             }))
         }),
         ZoomStackContext::Agent { .. } | ZoomStackContext::Root => None,
+    }
+}
+
+fn selected_cluster_id_for_zoom(state: &AppState) -> Option<String> {
+    match state.active_screen() {
+        ScreenId::Monitor => state.monitor.selected_cluster_id(),
+        _ => state.fleet_radar.selected_cluster_id(),
     }
 }
 

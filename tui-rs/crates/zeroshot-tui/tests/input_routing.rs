@@ -270,15 +270,18 @@ fn disruptive_esc_cancels_or_pops() {
 fn disruptive_enter_submits_or_zooms() {
     let mut state = state_for(ScreenId::FleetRadar);
     state.ui_variant = UiVariant::Disruptive;
-    state.monitor.clusters = vec![ClusterSummary {
-        id: "c1".to_string(),
-        state: "running".to_string(),
-        provider: None,
-        created_at: 0,
-        agent_count: 0,
-        message_count: 0,
-        cwd: None,
-    }];
+    state.fleet_radar.set_clusters(
+        vec![ClusterSummary {
+            id: "c1".to_string(),
+            state: "running".to_string(),
+            provider: None,
+            created_at: 0,
+            agent_count: 0,
+            message_count: 0,
+            cwd: None,
+        }],
+        1000,
+    );
 
     let action = input::route_key(&state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(
