@@ -87,9 +87,8 @@ fn handle_provider(parsed: ParsedCommand) -> Vec<Action> {
 
 fn help_message() -> String {
     let lines = [
-        "Commands: /help  /monitor  /issue <ref>",
-        "          /provider <name>  /quit  /exit",
-        "Keys: / opens command bar (non-Launcher), Esc cancels",
+        "Commands: /help /monitor /issue <ref> /provider <name> /quit /exit",
+        "Keys: / command bar, ? help, Esc back, q quit (not in Launcher), Ctrl+C quit, j/k or arrows move, PgUp/PgDn fast, Tab/Shift+Tab or h/l switch panes",
     ];
     lines.join("\n")
 }

@@ -55,12 +55,12 @@ pub fn build_lines(
 }
 
 fn append_error(lines: &mut Vec<String>, message: &str) {
-    lines.push(format!("(topology unavailable: {message})"));
+    lines.push(format!("Topology unavailable: {message}"));
     append_focus_hint(lines);
 }
 
 fn append_pending(lines: &mut Vec<String>) {
-    lines.push("(topology pending)".to_string());
+    lines.push("Topology pending. Waiting for backend.".to_string());
     append_focus_hint(lines);
 }
 
@@ -90,7 +90,7 @@ fn append_no_edges(lines: &mut Vec<String>, agents: &[TopologyAgent], topics: &[
     if !topics.is_empty() {
         lines.push(format!("Topics: {}", topics.join(", ")));
     }
-    lines.push("(no edges)".to_string());
+    lines.push("No edges yet.".to_string());
     append_focus_hint(lines);
 }
 
@@ -106,7 +106,7 @@ fn append_edges(lines: &mut Vec<String>, edges: Vec<TopologyEdge>) {
 }
 
 fn append_focus_hint(lines: &mut Vec<String>) {
-    lines.push("Tab/Left/Right cycles focus".to_string());
+    lines.push("Tab/Shift+Tab or h/l (Left/Right) to switch panes".to_string());
 }
 
 fn sorted_topology(
@@ -141,8 +141,11 @@ fn sorted_topology(
 
 fn summary_line(summary: Option<&ClusterSummary>) -> String {
     summary
-        .map(|summary| format!("State: {} | Provider: {:?}", summary.state, summary.provider))
-        .unwrap_or_else(|| "Summary: (pending)".to_string())
+        .map(|summary| {
+            let provider = summary.provider.as_deref().unwrap_or("default");
+            format!("State: {} | Provider: {}", summary.state, provider)
+        })
+        .unwrap_or_else(|| "Summary pending.".to_string())
 }
 
 fn edge_details(edge: &TopologyEdge) -> String {

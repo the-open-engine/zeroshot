@@ -16,14 +16,24 @@ pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     }
 
     if !matches!(screen, ScreenId::Launcher) {
-        if let KeyCode::Char('/') = key.code {
-            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT)
+        match key.code {
+            KeyCode::Char('/')
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 return Some(Action::CommandBar(CommandBarAction::Open {
                     prefill: "/".to_string(),
                 }));
             }
+            KeyCode::Char('?')
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                return Some(Action::CommandBar(CommandBarAction::Open {
+                    prefill: "/help ".to_string(),
+                }));
+            }
+            _ => {}
         }
     }
 
@@ -113,6 +123,12 @@ fn route_monitor(key: KeyEvent) -> Option<Action> {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Screen(ScreenAction::Monitor(
             monitor::Action::MoveSelection(1),
         ))),
+        KeyCode::PageUp => Some(Action::Screen(ScreenAction::Monitor(
+            monitor::Action::MoveSelection(-5),
+        ))),
+        KeyCode::PageDown => Some(Action::Screen(ScreenAction::Monitor(
+            monitor::Action::MoveSelection(5),
+        ))),
         KeyCode::Enter => Some(Action::Screen(ScreenAction::Monitor(
             monitor::Action::OpenSelected,
         ))),
@@ -122,12 +138,16 @@ fn route_monitor(key: KeyEvent) -> Option<Action> {
 
 fn route_cluster(id: &str, key: KeyEvent) -> Option<Action> {
     let action = match key.code {
-        KeyCode::Tab | KeyCode::Right => {
+        KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
             cluster::Action::CycleFocus(cluster::FocusDirection::Next)
         }
-        KeyCode::Left => cluster::Action::CycleFocus(cluster::FocusDirection::Prev),
+        KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
+            cluster::Action::CycleFocus(cluster::FocusDirection::Prev)
+        }
         KeyCode::Up | KeyCode::Char('k') => cluster::Action::MoveFocused(-1),
         KeyCode::Down | KeyCode::Char('j') => cluster::Action::MoveFocused(1),
+        KeyCode::PageUp => cluster::Action::MoveFocused(-5),
+        KeyCode::PageDown => cluster::Action::MoveFocused(5),
         KeyCode::Enter => cluster::Action::ActivateFocused,
         _ => return None,
     };

@@ -1,5 +1,6 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::text::Line;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
@@ -15,7 +16,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(1),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -58,29 +59,51 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     }
 
     toast::render(frame, layout[2], state.toast.as_ref());
-    command_bar::render(frame, layout[3], &state.command_bar);
+    let allow_command_bar = !matches!(state.active_screen(), ScreenId::Launcher);
+    command_bar::render(frame, layout[3], &state.command_bar, allow_command_bar);
     command_bar::set_cursor(frame, layout[3], &state.command_bar);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let backend = match &state.backend_status {
-        BackendStatus::Disconnected => "backend: disconnected".to_string(),
-        BackendStatus::Connected => "backend: connected".to_string(),
-        BackendStatus::Error(message) => format!("backend: error ({message})"),
-        BackendStatus::Exited(exit) => {
-            format!("backend: exited ({})", exit.code.unwrap_or(-1))
-        }
+    let (backend_label, backend_style) = match &state.backend_status {
+        BackendStatus::Disconnected => (
+            "backend: disconnected".to_string(),
+            Style::default().fg(Color::Red),
+        ),
+        BackendStatus::Connected => (
+            "backend: connected".to_string(),
+            Style::default().fg(Color::Green),
+        ),
+        BackendStatus::Error(message) => (
+            format!("backend: error ({message})"),
+            Style::default().fg(Color::Red),
+        ),
+        BackendStatus::Exited(exit) => (
+            format!("backend: exited ({})", exit.code.unwrap_or(-1)),
+            Style::default().fg(Color::Red),
+        ),
     };
 
-    let mut lines = vec![
-        Line::from(format!("Screen: {}", state.active_screen().title())),
-        Line::from(format!("{} | ticks: {}", backend, state.tick_count)),
+    let mut spans = vec![
+        Span::styled(
+            format!("Screen: {}", state.active_screen().title()),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(backend_label, backend_style),
+        Span::raw("  "),
+        Span::raw(format!("ticks {}", state.tick_count)),
     ];
 
     if let Some(error) = &state.last_error {
-        lines.push(Line::from(format!("last error: {error}")));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("last error: {error}"),
+            Style::default().fg(Color::Red),
+        ));
     }
 
-    let widget = Paragraph::new(lines).block(Block::default().borders(Borders::ALL));
+    let widget = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(widget, area);
 }

@@ -55,7 +55,7 @@ fn renders_sorted_edges() {
     assert_eq!(
         lines,
         vec![
-            "Summary: (pending)",
+            "Summary pending.",
             "Agents: 3 | Topics: 2 | Edges: 3",
             "ISSUE_OPENED:",
             "  -> worker (trigger:ISSUE_OPENED dynamic)",
@@ -63,7 +63,7 @@ fn renders_sorted_edges() {
             "  -> ISSUE_OPENED (source:ISSUE_OPENED)",
             "worker:",
             "  -> IMPLEMENTATION_READY (publish:IMPLEMENTATION_READY)",
-            "Tab/Left/Right cycles focus",
+            "Tab/Shift+Tab or h/l (Left/Right) to switch panes",
         ]
     );
 }
@@ -74,9 +74,9 @@ fn renders_placeholder_on_error() {
     assert_eq!(
         lines,
         vec![
-            "Summary: (pending)",
-            "(topology unavailable: backend unavailable)",
-            "Tab/Left/Right cycles focus",
+            "Summary pending.",
+            "Topology unavailable: backend unavailable",
+            "Tab/Shift+Tab or h/l (Left/Right) to switch panes",
         ]
     );
 }
