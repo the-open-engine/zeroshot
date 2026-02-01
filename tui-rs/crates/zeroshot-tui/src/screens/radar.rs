@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::protocol::ClusterSummary;
+use crate::app::Camera;
 use crate::ui::theme;
 
 const POLL_INTERVAL_MS: i64 = 1000;
@@ -19,6 +20,7 @@ const BASE_ORB_RADIUS: f64 = 1.8;
 const MAX_ORB_RADIUS: f64 = 4.6;
 const ERROR_PULSE_RADIUS: f64 = 1.6;
 const SELECTION_RING_RADIUS: f64 = 1.2;
+const MIN_CAMERA_ZOOM: f32 = 0.2;
 
 const ACTIVITY_BANDS_MS: [i64; 4] = [5_000, 30_000, 120_000, 600_000];
 const RING_RADII: [f64; 5] = [10.0, 20.0, 30.0, 40.0, 46.0];
@@ -28,6 +30,30 @@ pub struct LayoutPosition {
     pub x: f64,
     pub y: f64,
     pub ring_radius: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveSpeed {
+    Step,
+    Fast,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    MoveSelection {
+        direction: Direction,
+        speed: MoveSpeed,
+    },
+    CenterOnSelection,
+    ResetView,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,6 +91,33 @@ impl FleetRadarState {
         self.clusters
             .get(self.selected)
             .map(|cluster| cluster.id.clone())
+    }
+
+    pub fn selected_layout(&self, now_ms: i64) -> Option<LayoutPosition> {
+        let cluster = self.clusters.get(self.selected)?;
+        let age_ms = self.activity_age_ms(cluster, now_ms);
+        Some(self.layout_for(cluster.id.as_str(), age_ms))
+    }
+
+    pub fn move_selection_direction(
+        &mut self,
+        now_ms: i64,
+        direction: Direction,
+        speed: MoveSpeed,
+    ) -> bool {
+        let steps = match speed {
+            MoveSpeed::Step => 1,
+            MoveSpeed::Fast => 2,
+        };
+        let mut moved = false;
+        for _ in 0..steps {
+            if self.move_selection_step(now_ms, direction) {
+                moved = true;
+            } else {
+                break;
+            }
+        }
+        moved
     }
 
     pub fn activity_age_ms(&self, cluster: &ClusterSummary, now_ms: i64) -> i64 {
@@ -150,6 +203,71 @@ impl FleetRadarState {
 
         self.selected = 0;
     }
+
+    fn move_selection_step(&mut self, now_ms: i64, direction: Direction) -> bool {
+        if self.clusters.is_empty() {
+            self.selected = 0;
+            return false;
+        }
+        if self.selected >= self.clusters.len() {
+            self.selected = self.clusters.len().saturating_sub(1);
+        }
+
+        let current_cluster = &self.clusters[self.selected];
+        let current_layout = self.layout_for(
+            current_cluster.id.as_str(),
+            self.activity_age_ms(current_cluster, now_ms),
+        );
+
+        let mut best: Option<(usize, f64, f64)> = None;
+
+        for (idx, cluster) in self.clusters.iter().enumerate() {
+            if idx == self.selected {
+                continue;
+            }
+            let layout = self.layout_for(
+                cluster.id.as_str(),
+                self.activity_age_ms(cluster, now_ms),
+            );
+            let dx = layout.x - current_layout.x;
+            let dy = layout.y - current_layout.y;
+
+            let (axis, off) = match direction {
+                Direction::Right if dx > 0.0 => (dx, dy.abs()),
+                Direction::Left if dx < 0.0 => (-dx, dy.abs()),
+                Direction::Up if dy > 0.0 => (dy, dx.abs()),
+                Direction::Down if dy < 0.0 => (-dy, dx.abs()),
+                _ => continue,
+            };
+
+            let angle_score = off / axis;
+            let dist2 = dx * dx + dy * dy;
+            let replace = match best {
+                None => true,
+                Some((_best_idx, best_angle, best_dist)) => {
+                    const EPS: f64 = 1e-6;
+                    if (angle_score - best_angle).abs() > EPS {
+                        angle_score < best_angle
+                    } else if (dist2 - best_dist).abs() > EPS {
+                        dist2 < best_dist
+                    } else {
+                        idx < _best_idx
+                    }
+                }
+            };
+
+            if replace {
+                best = Some((idx, angle_score, dist2));
+            }
+        }
+
+        if let Some((idx, _, _)) = best {
+            self.selected = idx;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub fn layout_position(cluster_id: &str, activity_age_ms: i64) -> LayoutPosition {
@@ -157,7 +275,13 @@ pub fn layout_position(cluster_id: &str, activity_age_ms: i64) -> LayoutPosition
     layout_with_angle(angle, activity_age_ms)
 }
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, state: &FleetRadarState, now_ms: i64) {
+pub fn render(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &FleetRadarState,
+    camera: &Camera,
+    now_ms: i64,
+) {
     if state.clusters.is_empty() {
         render_empty(frame, area);
         return;
@@ -165,6 +289,10 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &FleetRadarState, now_ms
 
     let selected_id = state.selected_cluster_id();
     let selected_id = selected_id.as_deref();
+    let zoom = camera.zoom.max(MIN_CAMERA_ZOOM);
+    let half_span = WORLD_RADIUS / zoom as f64;
+    let center_x = camera.position.0 as f64;
+    let center_y = camera.position.1 as f64;
 
     let canvas = Canvas::default()
         .block(
@@ -172,8 +300,8 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &FleetRadarState, now_ms
                 .borders(Borders::ALL)
                 .title("Fleet Radar"),
         )
-        .x_bounds([-WORLD_RADIUS, WORLD_RADIUS])
-        .y_bounds([-WORLD_RADIUS, WORLD_RADIUS])
+        .x_bounds([center_x - half_span, center_x + half_span])
+        .y_bounds([center_y - half_span, center_y + half_span])
         .marker(Marker::Braille)
         .paint(|ctx| {
             for ring in RING_RADII.iter().take(RING_RADII.len().saturating_sub(1)) {
@@ -355,6 +483,18 @@ fn stable_hash(input: &str) -> u64 {
 mod tests {
     use super::*;
 
+    fn cluster(id: &str) -> ClusterSummary {
+        ClusterSummary {
+            id: id.to_string(),
+            state: "running".to_string(),
+            provider: None,
+            created_at: 0,
+            agent_count: 1,
+            message_count: 0,
+            cwd: None,
+        }
+    }
+
     #[test]
     fn layout_position_is_deterministic() {
         let first = layout_position("cluster-1", 10_000);
@@ -367,5 +507,65 @@ mod tests {
         let recent = layout_position("cluster-1", 1_000);
         let older = layout_position("cluster-1", 1_000_000);
         assert!(recent.ring_radius < older.ring_radius);
+    }
+
+    #[test]
+    fn radar_directional_selection() {
+        let now_ms = 10_000;
+        let mut state = FleetRadarState::default();
+        state.set_clusters(
+            vec![
+                cluster("east"),
+                cluster("west"),
+                cluster("north"),
+                cluster("south"),
+            ],
+            now_ms,
+        );
+        state.layout_angles.insert("east".to_string(), 0.0);
+        state
+            .layout_angles
+            .insert("north".to_string(), std::f64::consts::FRAC_PI_2);
+        state
+            .layout_angles
+            .insert("west".to_string(), std::f64::consts::PI);
+        state.layout_angles.insert(
+            "south".to_string(),
+            std::f64::consts::TAU * 0.75,
+        );
+
+        state.selected = state
+            .clusters
+            .iter()
+            .position(|cluster| cluster.id == "west")
+            .unwrap();
+
+        assert!(state.move_selection_direction(
+            now_ms,
+            Direction::Right,
+            MoveSpeed::Step
+        ));
+        assert_eq!(state.selected_cluster_id().as_deref(), Some("east"));
+
+        assert!(state.move_selection_direction(
+            now_ms,
+            Direction::Up,
+            MoveSpeed::Step
+        ));
+        assert_eq!(state.selected_cluster_id().as_deref(), Some("north"));
+
+        assert!(state.move_selection_direction(
+            now_ms,
+            Direction::Down,
+            MoveSpeed::Step
+        ));
+        assert_eq!(state.selected_cluster_id().as_deref(), Some("south"));
+
+        assert!(!state.move_selection_direction(
+            now_ms,
+            Direction::Down,
+            MoveSpeed::Step
+        ));
+        assert_eq!(state.selected_cluster_id().as_deref(), Some("south"));
     }
 }

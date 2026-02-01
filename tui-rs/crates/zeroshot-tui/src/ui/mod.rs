@@ -4,7 +4,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
-use crate::screens::{agent, cluster, monitor, radar};
+use crate::screens::{agent, cluster, cluster_canvas, monitor, radar};
 use crate::ui::widgets::{command_bar, spine, toast};
 
 pub mod launcher;
@@ -42,7 +42,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         ScreenId::Monitor | ScreenId::FleetRadar => {
             monitor::render(frame, content_area, &state.monitor, &state.metrics, state.now_ms)
         }
-        ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
+        ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
                 let metrics = state.metrics.get(id);
                 cluster::render(frame, content_area, cluster_state, metrics);
@@ -50,6 +50,9 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
                 let default_state = cluster::State::default();
                 cluster::render(frame, content_area, &default_state, None);
             }
+        }
+        ScreenId::ClusterCanvas { id } => {
+            cluster_canvas::render(frame, content_area, id);
         }
         ScreenId::Agent {
             cluster_id,
@@ -90,7 +93,45 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     ])
     .areas(size);
 
-    radar::render(frame, canvas_area, &state.fleet_radar, state.now_ms);
+    match state.active_screen() {
+        ScreenId::FleetRadar | ScreenId::Launcher | ScreenId::IntentConsole | ScreenId::Monitor => {
+            radar::render(
+                frame,
+                canvas_area,
+                &state.fleet_radar,
+                &state.camera,
+                state.now_ms,
+            );
+        }
+        ScreenId::ClusterCanvas { id } => {
+            cluster_canvas::render(frame, canvas_area, id);
+        }
+        ScreenId::Cluster { id } => {
+            if let Some(cluster_state) = state.clusters.get(id) {
+                let metrics = state.metrics.get(id);
+                cluster::render(frame, canvas_area, cluster_state, metrics);
+            } else {
+                let default_state = cluster::State::default();
+                cluster::render(frame, canvas_area, &default_state, None);
+            }
+        }
+        ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        }
+        | ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        } => {
+            let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
+            if let Some(agent_state) = state.agents.get(&key) {
+                agent::render(frame, canvas_area, agent_state, cluster_id, agent_id);
+            } else {
+                let default_state = agent::State::default();
+                agent::render(frame, canvas_area, &default_state, cluster_id, agent_id);
+            }
+        }
+    }
 
     let mut spine_state = state.spine.clone();
     if let Some(toast_state) = state.toast.as_ref() {
@@ -237,6 +278,8 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("Esc", "back"),
         ],
         ScreenId::FleetRadar => vec![
+            ("h/j/k/l", "select"),
+            ("g/G", "center"),
             ("Enter", "zoom"),
             ("/", "commands"),
             ("Esc", "back"),
