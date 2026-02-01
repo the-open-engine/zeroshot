@@ -530,10 +530,27 @@ function evaluateHookLogic(params) {
     throw new Error(`Unsupported hook logic engine: ${logic.engine}`);
   }
 
+  // Build ledger API wrapper (auto-scoped to cluster) - same as LogicEngine
+  const clusterId = agent.cluster?.id;
+  const ledgerAPI = {
+    query: (criteria) => {
+      return agent.messageBus.query({ ...criteria, cluster_id: clusterId });
+    },
+    findLast: (criteria) => {
+      return agent.messageBus.findLast({ ...criteria, cluster_id: clusterId });
+    },
+    count: (criteria) => {
+      return agent.messageBus.count({ ...criteria, cluster_id: clusterId });
+    },
+  };
+
   // Build sandbox context - similar to LogicEngine but focused on result data
   const sandbox = {
     // The parsed result from agent output - this is the main input
     result: resultData || {},
+
+    // Ledger API for querying message history
+    ledger: ledgerAPI,
 
     // Agent context
     agent: {
