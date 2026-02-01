@@ -24,8 +24,12 @@ impl AgentKey {
 pub enum ScreenId {
     Launcher,
     Monitor,
+    IntentConsole,
+    FleetRadar,
     Cluster { id: String },
+    ClusterCanvas { id: String },
     Agent { cluster_id: String, agent_id: String },
+    AgentMicroscope { cluster_id: String, agent_id: String },
 }
 
 impl ScreenId {
@@ -33,13 +37,28 @@ impl ScreenId {
         match self {
             ScreenId::Launcher => "Launcher".to_string(),
             ScreenId::Monitor => "Monitor".to_string(),
+            ScreenId::IntentConsole => "Intent Console".to_string(),
+            ScreenId::FleetRadar => "Fleet Radar".to_string(),
             ScreenId::Cluster { id } => format!("Cluster {id}"),
+            ScreenId::ClusterCanvas { id } => format!("Cluster Canvas {id}"),
             ScreenId::Agent {
                 cluster_id,
                 agent_id,
             } => format!("Agent {agent_id} @ {cluster_id}"),
+            ScreenId::AgentMicroscope {
+                cluster_id,
+                agent_id,
+            } => format!("Agent Microscope {agent_id} @ {cluster_id}"),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ZoomStackContext {
+    Root,
+    FleetRadar,
+    Cluster { id: String },
+    Agent { cluster_id: String, agent_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +278,7 @@ pub struct ToastState {
 pub struct CommandContext {
     pub provider_override: Option<String>,
     pub active_screen: ScreenId,
+    pub ui_variant: UiVariant,
 }
 
 #[derive(Debug, Clone)]
@@ -326,7 +346,14 @@ impl AppState {
             self.ui_variant = ui_variant;
         }
 
-        if let Some(initial_screen) = options.initial_screen {
+        let initial_screen = options.initial_screen;
+        if matches!(self.ui_variant, UiVariant::Disruptive) {
+            let mut stack = vec![ScreenId::IntentConsole];
+            if matches!(initial_screen, Some(InitialScreen::Monitor)) {
+                stack.push(ScreenId::FleetRadar);
+            }
+            self.screen_stack = stack;
+        } else if let Some(initial_screen) = initial_screen {
             self.screen_stack = vec![ScreenId::Launcher];
             match initial_screen {
                 InitialScreen::Launcher => {}
@@ -343,10 +370,39 @@ impl AppState {
             .unwrap_or(&ScreenId::Launcher)
     }
 
+    pub fn zoom_stack_context(&self) -> ZoomStackContext {
+        for screen in self.screen_stack.iter().rev() {
+            match screen {
+                ScreenId::Agent {
+                    cluster_id,
+                    agent_id,
+                }
+                | ScreenId::AgentMicroscope {
+                    cluster_id,
+                    agent_id,
+                } => {
+                    return ZoomStackContext::Agent {
+                        cluster_id: cluster_id.clone(),
+                        agent_id: agent_id.clone(),
+                    };
+                }
+                ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
+                    return ZoomStackContext::Cluster { id: id.clone() };
+                }
+                ScreenId::Monitor | ScreenId::FleetRadar => {
+                    return ZoomStackContext::FleetRadar;
+                }
+                ScreenId::Launcher | ScreenId::IntentConsole => {}
+            }
+        }
+        ZoomStackContext::Root
+    }
+
     pub fn command_context(&self) -> CommandContext {
         CommandContext {
             provider_override: self.provider_override.clone(),
             active_screen: self.active_screen().clone(),
+            ui_variant: self.ui_variant,
         }
     }
 
@@ -363,13 +419,20 @@ impl AppState {
 
     fn ensure_screen_state(&mut self, screen: &ScreenId) {
         match screen {
-            ScreenId::Launcher | ScreenId::Monitor => {}
-            ScreenId::Cluster { id } => {
+            ScreenId::Launcher
+            | ScreenId::Monitor
+            | ScreenId::IntentConsole
+            | ScreenId::FleetRadar => {}
+            ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
                 self.clusters
                     .entry(id.clone())
                     .or_default();
             }
             ScreenId::Agent {
+                cluster_id,
+                agent_id,
+            }
+            | ScreenId::AgentMicroscope {
                 cluster_id,
                 agent_id,
             } => {
@@ -557,7 +620,10 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
                     state.toast = None;
                 }
             }
-            let should_poll = matches!(state.active_screen(), ScreenId::Monitor)
+            let should_poll = matches!(
+                state.active_screen(),
+                ScreenId::Monitor | ScreenId::FleetRadar
+            )
                 && state.monitor.poll_due(now_ms);
             if should_poll {
                 state.monitor.mark_polled(now_ms);
@@ -565,7 +631,10 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
             }
             let should_poll_metrics = matches!(
                 state.active_screen(),
-                ScreenId::Monitor | ScreenId::Cluster { .. }
+                ScreenId::Monitor
+                    | ScreenId::FleetRadar
+                    | ScreenId::Cluster { .. }
+                    | ScreenId::ClusterCanvas { .. }
             ) && state.metrics_poll_due(now_ms);
             if should_poll_metrics {
                 if let Some(request) = metrics_request_for_screen(&state) {
@@ -609,7 +678,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
-            if matches!(screen, ScreenId::Monitor) {
+            if matches!(screen, ScreenId::Monitor | ScreenId::FleetRadar) {
                 state.monitor.mark_polled(state.now_ms);
             }
             state.screen_stack.push(screen.clone());
@@ -620,7 +689,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
                 cleanup_active_screen(state, effects);
                 state.screen_stack.pop();
                 if let Some(active) = state.screen_stack.last() {
-                    if matches!(active, ScreenId::Monitor) {
+                    if matches!(active, ScreenId::Monitor | ScreenId::FleetRadar) {
                         state.monitor.mark_polled(state.now_ms);
                     }
                     queue_navigation_effects(active, effects);
@@ -631,7 +700,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
-            if matches!(screen, ScreenId::Monitor) {
+            if matches!(screen, ScreenId::Monitor | ScreenId::FleetRadar) {
                 state.monitor.mark_polled(state.now_ms);
             }
             if state.screen_stack.is_empty() {
@@ -646,12 +715,16 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
 }
 
 fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
-    let ScreenId::Agent {
-        cluster_id,
-        agent_id,
-    } = screen
-    else {
-        return;
+    let (cluster_id, agent_id) = match screen {
+        ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        }
+        | ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        } => (cluster_id, agent_id),
+        _ => return,
     };
 
     let role = state
@@ -669,10 +742,10 @@ fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
 
 fn queue_navigation_effects(screen: &ScreenId, effects: &mut Vec<Effect>) {
     match screen {
-        ScreenId::Monitor => {
+        ScreenId::Monitor | ScreenId::FleetRadar => {
             effects.push(Effect::Backend(BackendRequest::ListClusters));
         }
-        ScreenId::Cluster { id } => {
+        ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
             effects.push(Effect::Backend(BackendRequest::GetClusterSummary {
                 cluster_id: id.clone(),
             }));
@@ -690,13 +763,17 @@ fn queue_navigation_effects(screen: &ScreenId, effects: &mut Vec<Effect>) {
         ScreenId::Agent {
             cluster_id,
             agent_id,
+        }
+        | ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
         } => {
             effects.push(Effect::Backend(BackendRequest::SubscribeClusterLogs {
                 cluster_id: cluster_id.clone(),
                 agent_id: Some(agent_id.clone()),
             }));
         }
-        ScreenId::Launcher => {}
+        ScreenId::Launcher | ScreenId::IntentConsole => {}
     }
 }
 
@@ -1144,11 +1221,12 @@ fn handle_start_cluster_result(
     effects: &mut Vec<Effect>,
 ) {
     state.launcher.clear();
-    apply_navigation(
-        state,
-        NavigationAction::Push(ScreenId::Cluster { id: cluster_id }),
-        effects,
-    );
+    let screen = if matches!(state.ui_variant, UiVariant::Disruptive) {
+        ScreenId::ClusterCanvas { id: cluster_id }
+    } else {
+        ScreenId::Cluster { id: cluster_id }
+    };
+    apply_navigation(state, NavigationAction::Push(screen), effects);
 }
 
 fn handle_backend_error(state: &mut AppState, message: String) {
@@ -1222,27 +1300,99 @@ fn reset_spine_state(state: &mut AppState) {
     state.spine.completion = None;
 }
 
+fn set_disruptive_spine_toast(state: &mut AppState, level: ToastLevel, message: String) {
+    if !matches!(state.ui_variant, UiVariant::Disruptive) {
+        return;
+    }
+    state.toast = Some(ToastState {
+        message,
+        level,
+        expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+    });
+}
+
+fn detect_issue_reference(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return Some(trimmed.to_string());
+    }
+    if let Some(reference) = parse_owner_repo_issue(trimmed) {
+        return Some(reference);
+    }
+    parse_github_issue_url(trimmed)
+}
+
+fn parse_owner_repo_issue(input: &str) -> Option<String> {
+    let mut parts = input.split('#');
+    let repo_ref = parts.next()?;
+    let number = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let mut repo_parts = repo_ref.split('/');
+    let owner = repo_parts.next()?;
+    let repo = repo_parts.next()?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    if repo_parts.next().is_some() {
+        return None;
+    }
+    Some(format!("{owner}/{repo}#{number}"))
+}
+
+fn parse_github_issue_url(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let without_host = without_scheme.strip_prefix("github.com/")?;
+    let mut parts = without_host.split('/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    let issues = parts.next()?;
+    if owner.is_empty() || repo.is_empty() || issues != "issues" {
+        return None;
+    }
+    let number_segment = parts.next()?;
+    let number = number_segment
+        .split(|ch| ch == '?' || ch == '#')
+        .next()
+        .unwrap_or("");
+    if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("{owner}/{repo}#{number}"))
+}
+
 fn resolve_spine_cluster_target(state: &AppState) -> Option<String> {
-    match state.active_screen() {
-        ScreenId::Cluster { id } => Some(id.clone()),
-        ScreenId::Agent { cluster_id, .. } => Some(cluster_id.clone()),
-        ScreenId::Monitor => state.monitor.selected_cluster_id(),
-        ScreenId::Launcher => None,
+    match state.zoom_stack_context() {
+        ZoomStackContext::Agent { cluster_id, .. } => Some(cluster_id),
+        ZoomStackContext::Cluster { id } => Some(id),
+        ZoomStackContext::FleetRadar => state.monitor.selected_cluster_id(),
+        ZoomStackContext::Root => None,
     }
 }
 
 fn resolve_spine_agent_target(state: &AppState) -> Option<(String, String)> {
-    match state.active_screen() {
-        ScreenId::Agent {
+    match state.zoom_stack_context() {
+        ZoomStackContext::Agent {
             cluster_id,
             agent_id,
-        } => Some((cluster_id.clone(), agent_id.clone())),
-        ScreenId::Cluster { id } => {
-            let cluster_state = state.clusters.get(id)?;
+        } => Some((cluster_id, agent_id)),
+        ZoomStackContext::Cluster { id } => {
+            let cluster_state = state.clusters.get(&id)?;
             let agent = cluster_state.agents.get(cluster_state.selected_agent)?;
-            Some((id.clone(), agent.id.clone()))
+            Some((id, agent.id.clone()))
         }
-        _ => None,
+        ZoomStackContext::FleetRadar | ZoomStackContext::Root => None,
     }
 }
 
@@ -1269,6 +1419,7 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
             let mode = state.spine.mode;
             let raw_input = state.spine.input.input.clone();
             let trimmed = raw_input.trim();
+            let mut toast_message: Option<String> = None;
             match mode {
                 SpineMode::Command => {
                     let raw = if raw_input.starts_with('/') {
@@ -1281,10 +1432,20 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
                 }
                 SpineMode::Intent => {
                     if !trimmed.is_empty() {
-                        effects.push(Effect::Backend(BackendRequest::StartClusterFromText {
-                            text: trimmed.to_string(),
-                            provider_override: state.provider_override.clone(),
-                        }));
+                        if let Some(reference) = detect_issue_reference(trimmed) {
+                            effects.push(Effect::Backend(BackendRequest::StartClusterFromIssue {
+                                reference: reference.clone(),
+                                provider_override: state.provider_override.clone(),
+                            }));
+                            toast_message =
+                                Some(format!("Starting cluster from issue {reference}..."));
+                        } else {
+                            effects.push(Effect::Backend(BackendRequest::StartClusterFromText {
+                                text: trimmed.to_string(),
+                                provider_override: state.provider_override.clone(),
+                            }));
+                            toast_message = Some("Starting cluster...".to_string());
+                        }
                     }
                 }
                 SpineMode::WhisperCluster => {
@@ -1294,6 +1455,7 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
                                 cluster_id,
                                 message: trimmed.to_string(),
                             }));
+                            toast_message = Some("Whisper sent to cluster.".to_string());
                         }
                     }
                 }
@@ -1305,9 +1467,13 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
                                 agent_id,
                                 message: trimmed.to_string(),
                             }));
+                            toast_message = Some("Whisper sent to agent.".to_string());
                         }
                     }
                 }
+            }
+            if let Some(message) = toast_message {
+                set_disruptive_spine_toast(state, ToastLevel::Success, message);
             }
             reset_spine_state(state);
         }
@@ -1374,8 +1540,14 @@ fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &
 fn cleanup_active_screen(state: &mut AppState, effects: &mut Vec<Effect>) {
     let active = state.screen_stack.last().cloned();
     match active {
-        Some(ScreenId::Cluster { id }) => cleanup_cluster_subscriptions(state, &id, effects),
+        Some(ScreenId::Cluster { id }) | Some(ScreenId::ClusterCanvas { id }) => {
+            cleanup_cluster_subscriptions(state, &id, effects)
+        }
         Some(ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        })
+        | Some(ScreenId::AgentMicroscope {
             cluster_id,
             agent_id,
         }) => cleanup_agent_subscriptions(state, &cluster_id, &agent_id, effects),
@@ -1412,7 +1584,7 @@ fn cleanup_agent_subscriptions(
 
 fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
     match state.active_screen() {
-        ScreenId::Monitor => {
+        ScreenId::Monitor | ScreenId::FleetRadar => {
             let ids: Vec<String> = state
                 .monitor
                 .clusters
@@ -1427,9 +1599,11 @@ fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
                 })
             }
         }
-        ScreenId::Cluster { id } => Some(BackendRequest::ListClusterMetrics {
+        ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
+            Some(BackendRequest::ListClusterMetrics {
             cluster_ids: Some(vec![id.clone()]),
-        }),
+        })
+        }
         _ => None,
     }
 }

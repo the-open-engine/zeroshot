@@ -43,6 +43,7 @@ fn submit_command_routes_to_command_effect() {
             context: CommandContext {
                 provider_override: None,
                 active_screen: ScreenId::Launcher,
+                ui_variant: state.ui_variant,
             },
         })]
     );

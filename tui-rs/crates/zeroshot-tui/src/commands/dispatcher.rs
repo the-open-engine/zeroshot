@@ -1,4 +1,6 @@
-use crate::app::{Action, CommandAction, CommandContext, NavigationAction, ScreenId, ToastLevel};
+use crate::app::{
+    Action, CommandAction, CommandContext, NavigationAction, ScreenId, ToastLevel, UiVariant,
+};
 use crate::commands::types::{ParsedCommand, VALID_PROVIDERS};
 
 pub fn dispatch(parsed: ParsedCommand, context: CommandContext) -> Vec<Action> {
@@ -19,18 +21,24 @@ pub fn dispatch(parsed: ParsedCommand, context: CommandContext) -> Vec<Action> {
 }
 
 fn handle_monitor(context: CommandContext) -> Vec<Action> {
-    if matches!(context.active_screen, ScreenId::Monitor) {
+    let (target, label) = if matches!(context.ui_variant, UiVariant::Disruptive) {
+        (ScreenId::FleetRadar, "Fleet Radar")
+    } else {
+        (ScreenId::Monitor, "Monitor")
+    };
+
+    if context.active_screen == target {
         return vec![Action::Command(CommandAction::ShowToast {
             level: ToastLevel::Info,
-            message: "Already on Monitor.".to_string(),
+            message: format!("Already on {label}."),
         })];
     }
 
     vec![
-        Action::Navigate(NavigationAction::Push(ScreenId::Monitor)),
+        Action::Navigate(NavigationAction::Push(target)),
         Action::Command(CommandAction::ShowToast {
             level: ToastLevel::Success,
-            message: "Opened Monitor.".to_string(),
+            message: format!("Opened {label}."),
         }),
     ]
 }
@@ -96,13 +104,14 @@ fn help_message() -> String {
 #[cfg(test)]
 mod tests {
     use super::dispatch;
-    use crate::app::{CommandContext, ScreenId, ToastLevel};
+    use crate::app::{Action, CommandContext, NavigationAction, ScreenId, ToastLevel, UiVariant};
     use crate::commands::types::ParsedCommand;
 
     fn context() -> CommandContext {
         CommandContext {
             provider_override: None,
             active_screen: ScreenId::Launcher,
+            ui_variant: UiVariant::Classic,
         }
     }
 
@@ -148,5 +157,35 @@ mod tests {
             .expect("expected toast action");
         assert_eq!(toast.0, &ToastLevel::Error);
         assert!(toast.1.contains("Unknown provider"));
+    }
+
+    #[test]
+    fn monitor_command_targets_fleet_radar_in_disruptive() {
+        let parsed = ParsedCommand {
+            raw: "/monitor".to_string(),
+            name: "monitor".to_string(),
+            args: vec![],
+        };
+        let mut context = context();
+        context.ui_variant = UiVariant::Disruptive;
+        let actions = dispatch(parsed, context);
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Navigate(NavigationAction::Push(ScreenId::FleetRadar))
+        )));
+    }
+
+    #[test]
+    fn monitor_command_targets_monitor_in_classic() {
+        let parsed = ParsedCommand {
+            raw: "/monitor".to_string(),
+            name: "monitor".to_string(),
+            args: vec![],
+        };
+        let actions = dispatch(parsed, context());
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Navigate(NavigationAction::Push(ScreenId::Monitor))
+        )));
     }
 }

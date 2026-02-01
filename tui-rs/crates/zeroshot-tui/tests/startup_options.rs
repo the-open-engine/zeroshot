@@ -13,7 +13,7 @@ fn startup_options_apply_monitor_and_provider_override() {
 
     assert_eq!(
         state.screen_stack,
-        vec![ScreenId::Launcher, ScreenId::Monitor]
+        vec![ScreenId::IntentConsole, ScreenId::FleetRadar]
     );
     assert_eq!(state.provider_override, Some("codex".to_string()));
     assert_eq!(state.ui_variant, UiVariant::Disruptive);

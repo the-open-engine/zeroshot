@@ -32,17 +32,17 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     render_header(frame, header_area, state);
 
     match state.active_screen() {
-        ScreenId::Launcher => launcher::render(
+        ScreenId::Launcher | ScreenId::IntentConsole => launcher::render(
             frame,
             content_area,
             &state.launcher,
             state.provider_override.as_deref(),
             &state.monitor.clusters,
         ),
-        ScreenId::Monitor => {
+        ScreenId::Monitor | ScreenId::FleetRadar => {
             monitor::render(frame, content_area, &state.monitor, &state.metrics, state.now_ms)
         }
-        ScreenId::Cluster { id } => {
+        ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
                 let metrics = state.metrics.get(id);
                 cluster::render(frame, content_area, cluster_state, metrics);
@@ -52,6 +52,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             }
         }
         ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        }
+        | ScreenId::AgentMicroscope {
             cluster_id,
             agent_id,
         } => {
@@ -66,7 +70,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     }
 
     // Status bar: if command bar active, show command input; otherwise show hints + toast
-    let allow_command_bar = !matches!(state.active_screen(), ScreenId::Launcher);
+    let allow_command_bar = !matches!(
+        state.active_screen(),
+        ScreenId::Launcher | ScreenId::IntentConsole
+    );
     if state.command_bar.active {
         command_bar::render(frame, status_area, &state.command_bar, allow_command_bar);
         command_bar::set_cursor(frame, status_area, &state.command_bar);
@@ -91,7 +98,9 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     frame.render_widget(canvas, canvas_area);
 
     let mut spine_state = state.spine.clone();
-    if spine_state.hint.is_empty() {
+    if let Some((toast_text, _)) = toast::format_inline(state.toast.as_ref()) {
+        spine_state.hint = toast_text;
+    } else if spine_state.hint.is_empty() {
         spine_state.hint = DISRUPTIVE_SPINE_HINT.to_string();
     }
     spine::render(frame, spine_area, &spine_state);
@@ -181,12 +190,23 @@ fn screen_breadcrumb(screen: &ScreenId) -> String {
     match screen {
         ScreenId::Launcher => "Launcher".to_string(),
         ScreenId::Monitor => "Monitor".to_string(),
+        ScreenId::IntentConsole => "Intent Console".to_string(),
+        ScreenId::FleetRadar => "Fleet Radar".to_string(),
         ScreenId::Cluster { id } => format!("Monitor > {}", truncate_id(id)),
+        ScreenId::ClusterCanvas { id } => format!("Fleet Radar > {}", truncate_id(id)),
         ScreenId::Agent {
             cluster_id,
             agent_id,
         } => format!(
             "Monitor > {} > {}",
+            truncate_id(cluster_id),
+            agent_id
+        ),
+        ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        } => format!(
+            "Fleet Radar > {} > {}",
             truncate_id(cluster_id),
             agent_id
         ),
@@ -208,9 +228,19 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("/", "commands"),
             ("Ctrl+C", "quit"),
         ],
+        ScreenId::IntentConsole => vec![
+            ("i", "intent"),
+            ("/", "commands"),
+            ("Esc", "back"),
+        ],
         ScreenId::Monitor => vec![
             ("j/k", "navigate"),
             ("Enter", "open"),
+            ("/", "commands"),
+            ("Esc", "back"),
+        ],
+        ScreenId::FleetRadar => vec![
+            ("Enter", "zoom"),
             ("/", "commands"),
             ("Esc", "back"),
         ],
@@ -220,10 +250,12 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("Enter", "agent"),
             ("Esc", "back"),
         ],
+        ScreenId::ClusterCanvas { .. } => vec![("Enter", "zoom"), ("Esc", "back")],
         ScreenId::Agent { .. } => vec![
             ("Enter", "send"),
             ("j/k", "scroll"),
             ("Esc", "back"),
         ],
+        ScreenId::AgentMicroscope { .. } => vec![("Esc", "back")],
     }
 }
