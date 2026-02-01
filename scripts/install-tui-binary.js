@@ -1,13 +1,15 @@
 'use strict';
 
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const os = require('os');
 const path = require('path');
 const { pipeline } = require('stream/promises');
-const tar = require('tar');
+const { URL } = require('url');
+const { promisify } = require('util');
 
 const {
   ENV_BINARY_PATH,
@@ -23,6 +25,7 @@ const {
 } = require('../lib/tui-binary');
 
 const MAX_REDIRECTS = 5;
+const execFileAsync = promisify(execFile);
 
 async function main() {
   if (shouldSkipBinaryInstall()) {
@@ -32,6 +35,7 @@ async function main() {
 
   const installContext = await prepareInstallContext();
   if (installContext.overridePath) {
+    console.log(`${ENV_BINARY_PATH} set; using local Rust TUI binary at ${installContext.overridePath}.`);
     await installFromLocalBinary(installContext.overridePath, installContext.installPath);
     return;
   }
@@ -205,7 +209,7 @@ async function streamToFileWithLengthCheck(response, destination, url) {
   }
 }
 
-async function fetchSha256(url, redirectsRemaining = MAX_REDIRECTS) {
+function fetchSha256(url, redirectsRemaining = MAX_REDIRECTS) {
   const client = getHttpClient(url);
 
   return new Promise((resolve, reject) => {
@@ -276,7 +280,34 @@ async function verifySha256(filePath, expected) {
 }
 
 async function extractArchive(archivePath, destinationDir) {
-  await tar.x({ file: archivePath, cwd: destinationDir });
+  const entries = await listArchiveEntries(archivePath);
+  const unsafeEntry = entries.find((entry) => !isSafeTarEntry(entry));
+  if (unsafeEntry) {
+    throw new Error(`Unsafe archive entry detected: ${unsafeEntry}`);
+  }
+  await execFileAsync('tar', ['-xzf', archivePath, '-C', destinationDir]);
+}
+
+async function listArchiveEntries(archivePath) {
+  const { stdout } = await execFileAsync('tar', ['-tf', archivePath]);
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function isSafeTarEntry(entry) {
+  if (!entry || entry.includes('\0')) {
+    return false;
+  }
+  const normalized = path.posix.normalize(entry);
+  if (path.posix.isAbsolute(normalized)) {
+    return false;
+  }
+  if (normalized === '..' || normalized.startsWith('../')) {
+    return false;
+  }
+  return true;
 }
 
 async function ensureBinaryInstalled(installPath, installDir) {
