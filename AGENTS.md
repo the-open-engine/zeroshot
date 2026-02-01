@@ -74,6 +74,7 @@ TUI v2 (Rust) provider override lives in `AppState.provider_override` and is for
 TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
 TUI v2 (Rust) Disruptive zoom stack: `ScreenId::IntentConsole` (root), `FleetRadar`, `ClusterCanvas { id }`, `AgentMicroscope { cluster_id, agent_id }`; zoom stack context drives spine whisper targets.
 TUI v2 (Rust) spine intent submit detects issue refs (`123`, `owner/repo#123`, GitHub issue URL) → `StartClusterFromIssue`; otherwise `StartClusterFromText`.
+TUI v2 (Rust) Disruptive pre-M3 decisions live in `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus, labels, topology, scrub, spine height).
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
 TUI launcher env: `ZEROSHOT_TUI_BINARY_PATH` overrides the installed Rust binary, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_BINARY_URL` overrides release asset URL, `ZEROSHOT_TUI_BINARY_SKIP` skips download, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` + `ZEROSHOT_TUI_UI` feed Rust startup defaults (UI variants: classic, disruptive; CLI: `zeroshot tui --ui <variant>`).
