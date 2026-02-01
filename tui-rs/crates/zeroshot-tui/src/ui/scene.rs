@@ -17,21 +17,11 @@ impl Default for WorldBounds {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Scene {
     pub world_bounds: WorldBounds,
     pub objects: Vec<Object>,
     pub overlays: Vec<Overlay>,
-}
-
-impl Default for Scene {
-    fn default() -> Self {
-        Self {
-            world_bounds: WorldBounds::default(),
-            objects: Vec::new(),
-            overlays: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
