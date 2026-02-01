@@ -12,7 +12,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use zeroshot_tui::app::{
-    Action, AppState, BackendAction, BackendRequest, Effect, InitialScreen, StartupOptions,
+    resolve_ui_variant, Action, AppState, BackendAction, BackendRequest, Effect, InitialScreen,
+    StartupOptions,
 };
 use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
 use zeroshot_tui::backend::stdio::StdioBackendClient;
@@ -27,6 +28,7 @@ type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
 const INITIAL_SCREEN_ENV: &str = "ZEROSHOT_TUI_INITIAL_SCREEN";
 const PROVIDER_OVERRIDE_ENV: &str = "ZEROSHOT_TUI_PROVIDER_OVERRIDE";
+const UI_VARIANT_ENV: &str = "ZEROSHOT_TUI_UI";
 
 fn main() -> io::Result<()> {
     if handle_cli_flags()? {
@@ -96,6 +98,7 @@ fn maybe_force_panic() {
 fn parse_startup_options() -> io::Result<StartupOptions> {
     let mut options = StartupOptions::default();
     let mut args = env::args().skip(1);
+    let mut ui_arg: Option<String> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -116,6 +119,12 @@ fn parse_startup_options() -> io::Result<StartupOptions> {
                     options.provider_override = Some(value.trim().to_string());
                 }
             }
+            "--ui" => {
+                let value = args.next().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--ui requires a value")
+                })?;
+                ui_arg = Some(value);
+            }
             _ => {}
         }
     }
@@ -135,6 +144,10 @@ fn parse_startup_options() -> io::Result<StartupOptions> {
             }
         }
     }
+
+    let env_ui = env::var(UI_VARIANT_ENV).ok();
+    options.ui_variant = resolve_ui_variant(ui_arg.as_deref(), env_ui.as_deref())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
 
     Ok(options)
 }

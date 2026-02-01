@@ -1,18 +1,24 @@
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{AppState, BackendStatus, ScreenId};
+use crate::app::{AppState, BackendStatus, ScreenId, UiVariant};
 use crate::screens::{agent, cluster, monitor};
 use crate::ui::widgets::{command_bar, toast};
 
 pub mod launcher;
+pub mod scene;
 pub mod shared;
 pub mod theme;
 pub mod widgets;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState) {
+    if matches!(state.ui_variant, UiVariant::Disruptive) {
+        render_disruptive(frame, state);
+        return;
+    }
+
     let size = frame.area();
     let [header_area, content_area, status_area] = Layout::vertical([
         Constraint::Length(1), // header
@@ -65,6 +71,29 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     } else {
         render_status_bar(frame, status_area, state);
     }
+}
+
+fn render_disruptive(frame: &mut Frame<'_>, _state: &AppState) {
+    let size = frame.area();
+    let [canvas_area, spine_area] = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(3),
+    ])
+    .areas(size);
+
+    let canvas = Paragraph::new("Canvas").alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Disruptive"),
+    );
+    frame.render_widget(canvas, canvas_area);
+
+    let spine = Paragraph::new("Spine").alignment(Alignment::Left).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .title("Spine"),
+    );
+    frame.render_widget(spine, spine_area);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {

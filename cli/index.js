@@ -3287,6 +3287,7 @@ program
     '--provider <provider>',
     'Override provider for this TUI session (claude, codex, gemini, opencode)'
   )
+  .option('--ui <variant>', 'Select UI variant (classic, disruptive)')
   .allowExcessArguments(true)
   .allowUnknownOption(true)
   .action((options) => {

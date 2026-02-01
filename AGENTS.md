@@ -73,7 +73,7 @@ TUI v2 (Rust) provider override lives in `AppState.provider_override` and is for
 TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
 TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
-TUI launcher env: `ZEROSHOT_TUI_BINARY_PATH` overrides the installed Rust binary, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_BINARY_URL` overrides release asset URL, `ZEROSHOT_TUI_BINARY_SKIP` skips download, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` feed Rust startup defaults.
+TUI launcher env: `ZEROSHOT_TUI_BINARY_PATH` overrides the installed Rust binary, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_BINARY_URL` overrides release asset URL, `ZEROSHOT_TUI_BINARY_SKIP` skips download, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` + `ZEROSHOT_TUI_UI` feed Rust startup defaults (UI variants: classic, disruptive; CLI: `zeroshot tui --ui <variant>`).
 
 ## CLI Quick Reference
 

@@ -1,4 +1,4 @@
-use zeroshot_tui::app::{AppState, InitialScreen, ScreenId, StartupOptions};
+use zeroshot_tui::app::{AppState, InitialScreen, ScreenId, StartupOptions, UiVariant};
 
 #[test]
 fn startup_options_apply_monitor_and_provider_override() {
@@ -6,6 +6,7 @@ fn startup_options_apply_monitor_and_provider_override() {
     let options = StartupOptions {
         initial_screen: Some(InitialScreen::Monitor),
         provider_override: Some("codex".to_string()),
+        ui_variant: Some(UiVariant::Disruptive),
     };
 
     state.apply_startup_options(options);
@@ -15,4 +16,5 @@ fn startup_options_apply_monitor_and_provider_override() {
         vec![ScreenId::Launcher, ScreenId::Monitor]
     );
     assert_eq!(state.provider_override, Some("codex".to_string()));
+    assert_eq!(state.ui_variant, UiVariant::Disruptive);
 }
