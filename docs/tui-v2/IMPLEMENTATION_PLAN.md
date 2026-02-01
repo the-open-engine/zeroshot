@@ -518,6 +518,8 @@ Status: Open (Issue #251)
 
 ### Issue 9 — Rust TUI Crate Skeleton + Terminal Safety
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Bootstrap the Ratatui app with safe terminal lifecycle handling.
 
 **Scope**
@@ -536,6 +538,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 10 — Backend Client (stdio) + Handshake
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Connect Rust UI to the Node backend over stdio.
 
@@ -556,6 +560,8 @@ Status: Open (Issue #251)
 
 ### Issue 11 — Core App Architecture (State/Action/Effects)
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Implement the MVU-style core with navigation stack.
 
 **Scope**
@@ -574,6 +580,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 12 — Launcher Screen (Text + Commands)
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Make the primary launcher flow functional.
 
@@ -595,6 +603,8 @@ Status: Open (Issue #251)
 
 ### Issue 13 — Monitor Screen (Cluster List)
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Provide high-level view of all clusters.
 
 **Scope**
@@ -614,6 +624,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 14 — Cluster Screen (Logs + Agents + Timeline)
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Provide focused cluster monitoring.
 
@@ -635,6 +647,8 @@ Status: Open (Issue #251)
 
 ### Issue 15 — Agent Screen (Focused Logs + Guidance Input)
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Drill into a single agent and send guidance.
 
 **Scope**
@@ -653,6 +667,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 16 — Slash Command MVP
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Implement MVP command set and global command bar.
 
@@ -673,6 +689,8 @@ Status: Open (Issue #251)
 
 ### Issue 17 — Topology Rendering (MVP)
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Render the cluster topology in the Cluster screen.
 
 **Scope**
@@ -692,6 +710,8 @@ Status: Open (Issue #251)
 
 ### Issue 18 — Metrics Display (Monitor + Cluster)
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Surface CPU/memory where available.
 
 **Scope**
@@ -710,6 +730,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 19 — CLI Wiring + Entry Points
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Make new TUI accessible from existing commands.
 
@@ -731,6 +753,8 @@ Status: Open (Issue #251)
 
 ### Issue 20 — Packaging + Distribution
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Ship Rust TUI without requiring cargo on user machines.
 
 **Scope**
@@ -750,6 +774,8 @@ Status: Open (Issue #251)
 
 ### Issue 21 — Cutover + Cleanup
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 **Goal:** Fully replace legacy UI and remove legacy dependencies.
 
 **Scope**
@@ -768,6 +794,8 @@ Status: Open (Issue #251)
 ---
 
 ### Issue 22 — Final Design Touch-Up (Iterative with Product)
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 **Goal:** Refine layout, spacing, typography, and interaction polish based on user feedback.
 
@@ -794,6 +822,8 @@ Design reference: Catppuccin Mocha palette, inspired by lazygit/k9s/gitui aesthe
 
 ### Issue 23 — Theme Module + Color Palette
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 Status: Open
 
 **Goal:** Centralize all colors/styles into a reusable theme module.
@@ -819,6 +849,8 @@ Status: Open
 ---
 
 ### Issue 24 — Compact Global Chrome (8 → 2 lines)
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 Status: Open
 
@@ -847,6 +879,8 @@ Status: Open
 
 ### Issue 25 — Launcher Screen Redesign
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 Status: Open
 
 **Goal:** Transform empty black screen into a modern command launcher.
@@ -873,6 +907,8 @@ Status: Open
 ---
 
 ### Issue 26 — Monitor Table Polish
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 Status: Open
 
@@ -906,6 +942,8 @@ Status: Open
 
 ### Issue 27 — Cluster Pane Styling
 
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
+
 Status: Open
 
 **Goal:** Improve the 4-pane cluster view with better visual hierarchy.
@@ -933,6 +971,8 @@ Status: Open
 ---
 
 ### Issue 28 — Agent Screen + Widget Polish
+
+**Decision outputs:** See `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus/labels/topology/scrub/spine).
 
 Status: Open
 
