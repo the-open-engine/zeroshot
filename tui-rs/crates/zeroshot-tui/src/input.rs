@@ -1,11 +1,20 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
-    Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId,
+    Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, UiVariant,
 };
 use crate::screens::{agent, cluster, launcher, monitor};
 
 pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
+    if matches!(state.ui_variant, UiVariant::Disruptive) {
+        return match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Quit)
+            }
+            _ => None,
+        };
+    }
+
     if state.command_bar.active {
         return route_command_bar(key);
     }

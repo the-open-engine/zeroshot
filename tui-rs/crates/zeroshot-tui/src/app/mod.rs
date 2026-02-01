@@ -60,10 +60,110 @@ impl InitialScreen {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UiVariant {
+    #[default]
+    Classic,
+    Disruptive,
+}
+
+impl UiVariant {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_lowercase().as_str() {
+            "classic" => Ok(Self::Classic),
+            "disruptive" => Ok(Self::Disruptive),
+            other => Err(format!(
+                "Unknown UI variant: {other}. Valid: classic, disruptive"
+            )),
+        }
+    }
+}
+
+pub fn resolve_ui_variant(
+    cli_value: Option<&str>,
+    env_value: Option<&str>,
+) -> Result<Option<UiVariant>, String> {
+    if let Some(raw) = cli_value {
+        if !raw.trim().is_empty() {
+            return Ok(Some(UiVariant::parse(raw)?));
+        }
+    }
+
+    if let Some(raw) = env_value {
+        if !raw.trim().is_empty() {
+            return Ok(Some(UiVariant::parse(raw)?));
+        }
+    }
+
+    Ok(None)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Camera {
+    pub position: (f32, f32),
+    pub zoom: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            position: (0.0, 0.0),
+            zoom: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimeCursorMode {
+    #[default]
+    Live,
+    Scrub,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeCursor {
+    pub mode: TimeCursorMode,
+    pub cursor_ms: i64,
+}
+
+impl Default for TimeCursor {
+    fn default() -> Self {
+        Self {
+            mode: TimeCursorMode::Live,
+            cursor_ms: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpineMode {
+    #[default]
+    Idle,
+    Input,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpineState {
+    pub mode: SpineMode,
+    pub input: String,
+    pub cursor: usize,
+}
+
+impl Default for SpineState {
+    fn default() -> Self {
+        Self {
+            mode: SpineMode::Idle,
+            input: String::new(),
+            cursor: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartupOptions {
     pub initial_screen: Option<InitialScreen>,
     pub provider_override: Option<String>,
+    pub ui_variant: Option<UiVariant>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +267,10 @@ pub struct AppState {
     pub backend_status: BackendStatus,
     pub last_error: Option<String>,
     pub provider_override: Option<String>,
+    pub ui_variant: UiVariant,
+    pub camera: Camera,
+    pub time_cursor: TimeCursor,
+    pub spine: SpineState,
     pub command_bar: CommandBarState,
     pub toast: Option<ToastState>,
 }
@@ -188,6 +292,10 @@ impl Default for AppState {
             backend_status: BackendStatus::Disconnected,
             last_error: None,
             provider_override: None,
+            ui_variant: UiVariant::Classic,
+            camera: Camera::default(),
+            time_cursor: TimeCursor::default(),
+            spine: SpineState::default(),
             command_bar: CommandBarState::default(),
             toast: None,
         }
@@ -202,6 +310,10 @@ impl AppState {
     pub fn apply_startup_options(&mut self, options: StartupOptions) {
         if let Some(provider) = options.provider_override {
             self.provider_override = Some(provider);
+        }
+
+        if let Some(ui_variant) = options.ui_variant {
+            self.ui_variant = ui_variant;
         }
 
         if let Some(initial_screen) = options.initial_screen {

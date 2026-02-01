@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use zeroshot_tui::app::{self, Action, NavigationAction, ScreenAction, ScreenId};
+use zeroshot_tui::app::{self, Action, NavigationAction, ScreenAction, ScreenId, UiVariant};
 use zeroshot_tui::input;
 use zeroshot_tui::screens::{cluster, launcher, monitor};
 
@@ -209,4 +209,23 @@ fn q_quits_except_in_launcher_input() {
             input::route_key(&state, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(matches!(action, Some(Action::Quit)));
     }
+}
+
+#[test]
+fn disruptive_ui_only_allows_ctrl_c() {
+    let mut state = state_for(ScreenId::Monitor);
+    state.ui_variant = UiVariant::Disruptive;
+
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    assert!(input::route_key(&state, esc).is_none());
+
+    let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    assert!(input::route_key(&state, q).is_none());
+
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert!(input::route_key(&state, enter).is_none());
+
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    let action = input::route_key(&state, ctrl_c);
+    assert!(matches!(action, Some(Action::Quit)));
 }
