@@ -279,12 +279,124 @@ Qualitative:
 - Users can launch, monitor, and drill down without remembering command syntax.
 - Navigation feels consistent (Esc always goes back).
 
+## Visual Design (v2 Polish Pass)
+
+Date: 2026-02-01
+
+Architecture is stable (Issues 1-22 complete). The UI polish pass focuses entirely on `ui/` and render code — no backend or state changes.
+
+### Design Principles
+
+- **Modern dark aesthetic:** Catppuccin Mocha palette, inspired by lazygit, k9s, gitui
+- **Minimal chrome:** 2 lines total (1 header + 1 status bar), maximize content area
+- **Color as information:** Status colors, per-agent coloring, focus indicators
+- **Progressive disclosure:** Launcher shows quick actions, Monitor shows state at a glance, Cluster shows detail
+
+### Color Palette
+
+```
+Accent (blue):    #89b4fa    Accent2 (green):  #a6e3a1
+FG primary:       #cdd6f4    FG dim:           DarkGray
+FG muted:         #6c7086    Focus border:     #89b4fa
+Unfocus border:   #45475a
+
+Status running:   Green      Status done:      #a6e3a1
+Status error:     #f38ba8    Status pending:   Yellow
+
+Agent colors (rotating by hash of agent_id):
+  #89b4fa (blue), #a6e3a1 (green), #f9e2af (yellow),
+  #cba6f7 (mauve), #94e2d5 (teal), #f2cdcd (flamingo)
+```
+
+### Global Chrome
+
+**Header (1 line):**
+```
+◆ ZEROSHOT  <Screen Title>              ● connected    provider: sonnet
+```
+
+**Status bar (1 line):**
+```
+Enter:start  /:commands  Ctrl+C:quit                    ✓ Cluster started
+```
+Keys in accent+bold, descriptions in dim. Toast right-aligned. Command bar replaces status bar when active.
+
+### Launcher Wireframe
+
+```
+                    ◆  Z E R O S H O T
+                 Multi-Agent Orchestrator
+
+       ┌───────────────────────────────────────┐
+       │ Describe a task or paste an issue...  │
+       └───────────────────────────────────────┘
+
+       ╭─ Quick Actions ───────────────────────╮
+       │  /issue org/repo#123  Start from issue│
+       │  /monitor             View active runs│
+       │  /provider <name>     Switch AI model │
+       ╰───────────────────────────────────────╯
+
+       Recent
+       (no recent clusters)
+```
+
+Centered content, max 60 columns wide.
+
+### Monitor Wireframe
+
+```
+ ID                STATE      AGENTS  MSGS   CPU%  MEM    DURATION  LAST
+ ─────────────────────────────────────────────────────────────────────────
+>cluster-a8f2c     running    3/3     142    12%   256MB  4m        12s
+ cluster-7b91e     done       5/5     891     -      -    2h        1h
+ cluster-c3d4f     error      2/3      47     -      -    15m       14m
+```
+
+Borderless table. Selected row: accent bg + dark fg. State-colored text per row.
+
+### Cluster Wireframe
+
+```
+┌─ Topology (40%) ─────────────┬─ Agents (60%) ──────────────────────┐
+│ State: running | sonnet      │ > worker      (implementation)      │
+│ worker → validator-1         │   validator-1 (validation)          │
+│ worker → validator-2         │   validator-2 (validation)          │
+├─ [Logs] (50%) ───────────────┼─ Timeline (50%) ───────────────────┤
+│ [worker]    Editing file...  │ ▶ ISSUE_OPENED      started  (co..)│
+│ [worker]    Running tests    │ ● IMPL_READY        done     (wor.)│
+│ [valid..]   Reviewing code   │ ◆ VALIDATION        approved (v-1) │
+└──────────────────────────────┴─────────────────────────────────────┘
+```
+
+Focused pane: double border in accent. Log prefixes colored per-agent. Timeline icons by topic.
+
+### Agent Wireframe
+
+```
+ Agent: worker  Role: implementation  Status: ● executing
+ Cluster: cluster-a8f2c
+──────────────────────────────────────────────────────────
+ 14:23:01  Reading issue description...
+ 14:23:05  Planning implementation approach
+ 14:23:12  Editing src/lib.rs - adding new function
+ 14:23:18  Running cargo test...
+ 14:23:25  All 42 tests passing
+──────────────────────────────────────────────────────────
+ Guidance: ✓ Last: injected via pty
+ │ Type guidance here...                                 │
+```
+
+### Implementation Issues
+
+See IMPLEMENTATION_PLAN.md Issues 23–28 for the step-by-step breakdown.
+
 ## Out of Scope / Deferred
 
 - Full parity with all CLI flags (`--docker`, `--ship`, `--worktree`, etc) in the launcher input.
   - These can be added incrementally via `/run --docker ...` style.
 - Rich graphs (true layout engine). MVP uses simplified ASCII representation.
-- Advanced UX (themes, mouse, split panes, persistent layouts).
+- Mouse support (keyboard-only for now).
 - AI summary panel (provider/model choice + cost controls TBD).
 
 ## Resolved Decisions (from product feedback)

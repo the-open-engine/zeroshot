@@ -784,10 +784,173 @@ Status: Open (Issue #251)
 
 **Dependencies:** Issues 14–21.
 
-## Deferred: UI Layout Reflection (When We’re Ready)
+## UI Polish Issues (Post-Architecture)
 
-We will iterate on layout after the architecture is stable. The design constraints to keep in mind:
+Architecture is stable. These issues focus on visual design — all changes are in `ui/` and render functions in `screens/`. No backend or state management changes required.
 
-- Prefer a **stable global command/input bar** across screens (muscle memory).
-- Treat panes as **widgets** with independent state (log viewer, list, topology view).
-- Keep all layout in `ui/*` so we can redesign without touching reducers/backend calls.
+Design reference: Catppuccin Mocha palette, inspired by lazygit/k9s/gitui aesthetics.
+
+---
+
+### Issue 23 — Theme Module + Color Palette
+
+Status: Open
+
+**Goal:** Centralize all colors/styles into a reusable theme module.
+
+**Scope**
+
+- Create `src/ui/theme.rs` with Catppuccin Mocha-inspired palette:
+  - Accent: `#89b4fa` (blue), Accent2: `#a6e3a1` (green)
+  - FG primary: `#cdd6f4`, FG dim: DarkGray, FG muted: `#6c7086`
+  - Focus border: `#89b4fa`, Unfocus border: `#45475a`
+  - Status colors: running=Green, done=`#a6e3a1`, error=`#f38ba8`, pending=Yellow
+  - Agent colors (rotating): blue, green, yellow, mauve, teal, flamingo
+- Export as `const Style` values and helper functions (`status_style(state)`, `agent_color(index)`)
+- Refactor all render functions to import from theme instead of inline `Style::default().fg(...)`
+
+**Acceptance Criteria**
+
+- Zero inline color definitions in render code (all from `theme::`)
+- `cargo test` passes (no functional changes)
+
+**Dependencies:** None (can start immediately).
+
+---
+
+### Issue 24 — Compact Global Chrome (8 → 2 lines)
+
+Status: Open
+
+**Goal:** Reclaim 6 vertical lines by compressing header, toast, and command bar.
+
+**Scope**
+
+- Change layout constraints from `[Length(2), Min(1), Length(3), Length(3)]` to `[Length(1), Min(1), Length(1)]`
+- **Header (1 line):** `◆ ZEROSHOT  <ScreenTitle>` left-aligned (accent+bold), backend status dot + provider right-aligned
+- **Status bar (1 line):** Context-sensitive keyboard hints left-aligned (key in accent, description in dim), toast message right-aligned (fades after 5s)
+- When command bar is active (`/` pressed): status bar becomes full-width command input with accent prefix
+- Breadcrumb navigation for nested screens: `Monitor > cluster-abc > agent-worker`
+
+**Files:** `ui/mod.rs`, `ui/widgets/command_bar.rs`, `ui/widgets/toast.rs`
+
+**Acceptance Criteria**
+
+- Header fits in 1 line with all info visible
+- Toast messages appear inline in status bar and auto-dismiss
+- Command bar replaces status bar when active
+- 6 more lines available for screen content
+
+**Dependencies:** Issue 23.
+
+---
+
+### Issue 25 — Launcher Screen Redesign
+
+Status: Open
+
+**Goal:** Transform empty black screen into a modern command launcher.
+
+**Scope**
+
+- Vertically and horizontally center content (max 60 cols or 70% width)
+- **Logo block (2 lines):** `◆ Z E R O S H O T` in accent+bold, `Multi-Agent Orchestrator` subtitle in dim
+- **Input field (3 lines):** Accent border, placeholder text "Describe a task or paste an issue URL..." in dim
+- **Quick actions card (5 lines):** Rounded border, showing `/issue`, `/monitor`, `/provider` with command in accent and description in dim
+- **Recent clusters (variable):** Last 3 clusters from monitor state as clickable rows, or "(no recent clusters)" if empty
+
+**Files:** `ui/launcher.rs`
+
+**Acceptance Criteria**
+
+- Content centered both vertically and horizontally
+- Logo and branding visible
+- Quick actions provide discoverability for new users
+- Existing input functionality unchanged
+
+**Dependencies:** Issue 23.
+
+---
+
+### Issue 26 — Monitor Table Polish
+
+Status: Open
+
+**Goal:** Make the cluster table visually informative at a glance.
+
+**Scope**
+
+- Remove outer block border (let table breathe)
+- Header row: dim + bold + underlined
+- **Row styling by state:**
+  - `running`: normal text, STATE cell green
+  - `done`: entire row dimmed, STATE cell in done-green
+  - `error`/`failed`: STATE cell red
+  - `pending`/`starting`: STATE cell yellow
+- Selected row: accent background + dark foreground (lazygit style)
+- Highlight symbol: ` > ` (bold)
+- **Empty state:** Centered "No active clusters" + hint to use Launcher (Esc)
+- Add AGENTS column showing `active/total` format
+
+**Files:** `screens/monitor.rs`
+
+**Acceptance Criteria**
+
+- Cluster state immediately visible via color coding
+- Empty state provides clear next action
+- Selection is prominent and readable
+
+**Dependencies:** Issue 23.
+
+---
+
+### Issue 27 — Cluster Pane Styling
+
+Status: Open
+
+**Goal:** Improve the 4-pane cluster view with better visual hierarchy.
+
+**Scope**
+
+- **Focus indicator:** Focused pane gets double border (`BorderType::Double`) in accent + bold title wrapped in `[ ]`; unfocused panes get single border in dark gray
+- **Layout proportions:** Top row 40/60 (topology narrower, agents wider), bottom 50/50
+- **Log coloring:** Agent prefix `[worker]` colored per-agent from rotating palette (hash agent_id to color index)
+- **Timeline icons:** Prefix based on topic: `▶` (issue), `●` (implementation), `◆` (validation), `★` (consensus), `·` (default). Label colored by result (green=approved, red=rejected, yellow=pending)
+- **Agent list:** Count in title `Agents (3)`, status dot before name, selected agent highlighted with accent bg
+- **Metrics:** Move from separate line into header bar (right side)
+
+**Files:** `screens/cluster.rs`, `ui/widgets/topology.rs`
+
+**Acceptance Criteria**
+
+- Focus is immediately visible via border style
+- Agent attribution in logs is color-coded
+- Timeline events have visual semantic indicators
+- No functional/state changes
+
+**Dependencies:** Issue 23.
+
+---
+
+### Issue 28 — Agent Screen + Widget Polish
+
+Status: Open
+
+**Goal:** Final polish pass on agent view and shared widgets.
+
+**Scope**
+
+- **Agent identity:** Status dot with color (`●` green=executing, yellow=waiting, gray=idle, red=error), agent ID and role in assigned agent color
+- **Log timestamps:** Prepend `HH:MM:SS` in dim (parse from `ClusterLogLine.timestamp` epoch ms)
+- **Guidance input:** Status line above input showing last delivery result (`✓ injected` in green, `✗ failed` in red, `⟳ Sending...` in yellow)
+- **Status bar hints:** Per-screen context: Launcher shows `Enter:start`, Monitor shows `j/k:navigate Enter:open`, Cluster shows `Tab:pane j/k:scroll`, Agent shows `Enter:send j/k:scroll`
+
+**Files:** `screens/agent.rs`, `ui/widgets/command_bar.rs`
+
+**Acceptance Criteria**
+
+- Agent status immediately visible via colored dot
+- Guidance delivery feedback shown to user
+- Keyboard hints adapt to current screen
+
+**Dependencies:** Issues 23–27.
