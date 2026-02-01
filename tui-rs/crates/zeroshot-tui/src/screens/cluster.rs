@@ -1,13 +1,15 @@
-use std::collections::VecDeque;
-
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{
+    List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui::Frame;
 
 use crate::protocol::{ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTopology, TimelineEvent};
 use crate::screens::metrics;
+use crate::ui::shared::{pane_block, ScrollableBuffer};
+use crate::ui::theme;
 use crate::ui::widgets::topology;
 
 pub const MAX_LOG_LINES: usize = 1000;
@@ -45,7 +47,6 @@ impl ClusterPane {
             ClusterPane::Agents => ClusterPane::Timeline,
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -54,10 +55,8 @@ pub struct State {
     pub summary: Option<ClusterSummary>,
     pub topology: Option<ClusterTopology>,
     pub topology_error: Option<String>,
-    pub logs: VecDeque<ClusterLogLine>,
-    pub timeline: VecDeque<TimelineEvent>,
-    pub log_scroll_offset: usize,
-    pub timeline_scroll_offset: usize,
+    pub logs: ScrollableBuffer<ClusterLogLine>,
+    pub timeline: ScrollableBuffer<TimelineEvent>,
     pub agents: Vec<AgentInfo>,
     pub selected_agent: usize,
     pub log_drop_seq: u64,
@@ -72,10 +71,8 @@ impl Default for State {
             summary: None,
             topology: None,
             topology_error: None,
-            logs: VecDeque::new(),
-            timeline: VecDeque::new(),
-            log_scroll_offset: 0,
-            timeline_scroll_offset: 0,
+            logs: ScrollableBuffer::new(MAX_LOG_LINES),
+            timeline: ScrollableBuffer::new(MAX_TIMELINE_EVENTS),
             agents: Vec::new(),
             selected_agent: 0,
             log_drop_seq: 0,
@@ -110,8 +107,8 @@ impl State {
     pub fn move_focused(&mut self, delta: i32) {
         match self.focus {
             ClusterPane::Topology => {}
-            ClusterPane::Logs => self.move_log_scroll(delta),
-            ClusterPane::Timeline => self.move_timeline_scroll(delta),
+            ClusterPane::Logs => self.logs.move_scroll(delta),
+            ClusterPane::Timeline => self.timeline.move_scroll(delta),
             ClusterPane::Agents => self.move_agent_selection(delta),
         }
     }
@@ -126,7 +123,7 @@ impl State {
     pub fn push_log_lines(&mut self, mut lines: Vec<ClusterLogLine>, dropped_count: Option<i64>) {
         self.update_agents_from_logs(&lines);
 
-        let mut added = 0usize;
+        let mut to_push = Vec::new();
         if let Some(count) = dropped_count {
             if count > 0 {
                 let line = ClusterLogLine {
@@ -138,34 +135,16 @@ impl State {
                     sender: None,
                 };
                 self.log_drop_seq = self.log_drop_seq.saturating_add(1);
-                self.logs.push_back(line);
-                added += 1;
+                to_push.push(line);
             }
         }
 
-        added += lines.len();
-        self.logs.extend(lines.drain(..));
-        Self::adjust_scroll_on_append(&mut self.log_scroll_offset, added);
-        let dropped = trim_vecdeque(&mut self.logs, MAX_LOG_LINES);
-        Self::adjust_scroll_on_trim(&mut self.log_scroll_offset, dropped);
-        Self::clamp_scroll(&mut self.log_scroll_offset, self.logs.len());
+        to_push.append(&mut lines);
+        self.logs.push_many(to_push);
     }
 
-    pub fn push_timeline_events(&mut self, mut events: Vec<TimelineEvent>) {
-        let added = events.len();
-        self.timeline.extend(events.drain(..));
-        Self::adjust_scroll_on_append(&mut self.timeline_scroll_offset, added);
-        let dropped = trim_vecdeque(&mut self.timeline, MAX_TIMELINE_EVENTS);
-        Self::adjust_scroll_on_trim(&mut self.timeline_scroll_offset, dropped);
-        Self::clamp_scroll(&mut self.timeline_scroll_offset, self.timeline.len());
-    }
-
-    fn move_log_scroll(&mut self, delta: i32) {
-        Self::move_scroll(&mut self.log_scroll_offset, delta, self.logs.len());
-    }
-
-    fn move_timeline_scroll(&mut self, delta: i32) {
-        Self::move_scroll(&mut self.timeline_scroll_offset, delta, self.timeline.len());
+    pub fn push_timeline_events(&mut self, events: Vec<TimelineEvent>) {
+        self.timeline.push_many(events);
     }
 
     fn move_agent_selection(&mut self, delta: i32) {
@@ -227,69 +206,46 @@ impl State {
             .get(self.selected_agent)
             .map(|agent| agent.id.clone())
     }
-
-    fn adjust_scroll_on_append(offset: &mut usize, added: usize) {
-        if *offset > 0 {
-            *offset = offset.saturating_add(added);
-        }
-    }
-
-    fn adjust_scroll_on_trim(offset: &mut usize, dropped: usize) {
-        *offset = offset.saturating_sub(dropped);
-    }
-
-    fn clamp_scroll(offset: &mut usize, len: usize) {
-        let max_offset = len.saturating_sub(1);
-        if *offset > max_offset {
-            *offset = max_offset;
-        }
-    }
-
-    fn move_scroll(offset: &mut usize, delta: i32, len: usize) {
-        if len == 0 {
-            *offset = 0;
-            return;
-        }
-        if delta < 0 {
-            *offset = offset.saturating_add(delta.abs() as usize);
-        } else {
-            *offset = offset.saturating_sub(delta as usize);
-        }
-        Self::clamp_scroll(offset, len);
-    }
 }
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, metrics: Option<&ClusterMetrics>) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(area);
-    render_metrics_line(frame, rows[0], metrics);
-    let content = rows[1];
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-        .split(content);
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[0]);
-    let bottom = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[1]);
+    let [metrics_area, content] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(area);
 
-    render_topology(frame, top[0], state);
-    render_agents(frame, top[1], state);
-    render_logs(frame, bottom[0], state);
-    render_timeline(frame, bottom[1], state);
+    render_metrics_line(frame, metrics_area, metrics);
+
+    let [top, bottom] = Layout::vertical([
+        Constraint::Percentage(30),
+        Constraint::Percentage(70),
+    ])
+    .areas(content);
+
+    let [topo_area, agents_area] = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .areas(top);
+
+    let [logs_area, timeline_area] = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .areas(bottom);
+
+    render_topology(frame, topo_area, state);
+    render_agents(frame, agents_area, state);
+    render_logs(frame, logs_area, state);
+    render_timeline(frame, timeline_area, state);
 }
 
 fn render_metrics_line(frame: &mut Frame<'_>, area: Rect, metrics: Option<&ClusterMetrics>) {
     let line = Line::from(vec![
-        Span::styled("Metrics:", Style::default().fg(Color::DarkGray)),
+        Span::styled("Metrics:", theme::dim_style()),
         Span::raw(" "),
-        Span::styled(metrics::format_metrics_line(metrics), Style::default()),
+        Span::styled(metrics::format_metrics_line(metrics), theme::dim_style()),
     ]);
     let widget = Paragraph::new(line);
     frame.render_widget(widget, area);
@@ -308,48 +264,50 @@ fn render_topology(frame: &mut Frame<'_>, area: Rect, state: &State) {
 }
 
 fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let block = pane_block("Agents", state.focus == ClusterPane::Agents);
+    let title = format!("Agents ({})", state.agents.len());
+    let block = pane_block(title, state.focus == ClusterPane::Agents);
     let inner = block.inner(area);
-    let height = inner.height as usize;
-    let mut lines = Vec::new();
 
-    if state.agents.is_empty() || height == 0 {
-        lines.push(Line::from("No agents yet."));
-        lines.push(Line::from("Wait for logs to identify agents."));
-    } else {
-        let start = agent_scroll_start(state.selected_agent, state.agents.len(), height);
-        for (idx, agent) in state
-            .agents
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(height)
-        {
-            let selected = idx == state.selected_agent;
-            let style = if selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            let prefix = if selected { "> " } else { "  " };
-            let text = match &agent.role {
-                Some(role) => format!("{prefix}{} ({role})", agent.id),
-                None => format!("{prefix}{}", agent.id),
-            };
-            lines.push(Line::from(Span::styled(text, style)));
-        }
+    if state.agents.is_empty() || inner.height == 0 {
+        let lines = vec![
+            Line::from(Span::styled("No agents yet.", theme::muted_style())),
+            Line::from(Span::styled(
+                "Wait for logs to identify agents.",
+                theme::muted_style(),
+            )),
+        ];
+        let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+        frame.render_widget(widget, area);
+        return;
     }
 
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    let items: Vec<ListItem> = state
+        .agents
+        .iter()
+        .map(|agent| {
+            let agent_color = theme::agent_color(&agent.id);
+            let text = match &agent.role {
+                Some(role) => format!("{} ({role})", agent.id),
+                None => agent.id.clone(),
+            };
+            ListItem::new(text).style(Style::default().fg(agent_color))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(theme::selected_style())
+        .highlight_symbol(" > ");
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(state.selected_agent));
+
+    frame.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let title = if state.log_scroll_offset > 0 {
-        format!("Logs (up {})", state.log_scroll_offset)
+    let title = if state.logs.scroll_offset > 0 {
+        format!("Logs (up {})", state.logs.scroll_offset)
     } else {
         "Logs".to_string()
     };
@@ -357,32 +315,45 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let inner = block.inner(area);
     let height = inner.height as usize;
 
-    let lines = if state.logs.is_empty() || height == 0 {
+    let lines: Vec<Line> = if state.logs.is_empty() || height == 0 {
         vec![
-            Line::from("No logs yet."),
-            Line::from("Waiting for cluster output."),
+            Line::from(Span::styled("No logs yet.", theme::muted_style())),
+            Line::from(Span::styled("Waiting for cluster output.", theme::muted_style())),
         ]
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
-        let start = max_start.saturating_sub(state.log_scroll_offset.min(max_start));
+        let start = max_start.saturating_sub(state.logs.scroll_offset.min(max_start));
         state
             .logs
+            .items
             .iter()
             .skip(start)
             .take(height)
-            .map(format_log_line)
-            .map(Line::from)
+            .map(format_log_line_styled)
             .collect()
     };
 
     let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+
+    // Scrollbar
+    if !state.logs.is_empty() && height > 0 {
+        let total = state.logs.len();
+        let position = total.saturating_sub(height).saturating_sub(state.logs.scroll_offset);
+        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
+            .position(position);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            inner,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let title = if state.timeline_scroll_offset > 0 {
-        format!("Timeline (up {})", state.timeline_scroll_offset)
+    let title = if state.timeline.scroll_offset > 0 {
+        format!("Timeline (up {})", state.timeline.scroll_offset)
     } else {
         "Timeline".to_string()
     };
@@ -390,79 +361,99 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let inner = block.inner(area);
     let height = inner.height as usize;
 
-    let lines = if state.timeline.is_empty() || height == 0 {
+    let lines: Vec<Line> = if state.timeline.is_empty() || height == 0 {
         vec![
-            Line::from("No timeline events yet."),
-            Line::from("New activity will appear here."),
+            Line::from(Span::styled("No timeline events yet.", theme::muted_style())),
+            Line::from(Span::styled("New activity will appear here.", theme::muted_style())),
         ]
     } else {
         let total = state.timeline.len();
         let max_start = total.saturating_sub(height);
-        let start = max_start.saturating_sub(state.timeline_scroll_offset.min(max_start));
+        let start = max_start.saturating_sub(state.timeline.scroll_offset.min(max_start));
         state
             .timeline
+            .items
             .iter()
             .skip(start)
             .take(height)
-            .map(format_timeline_event)
-            .map(Line::from)
+            .map(format_timeline_event_styled)
             .collect()
     };
 
     let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+
+    // Scrollbar
+    if !state.timeline.is_empty() && height > 0 {
+        let total = state.timeline.len();
+        let position = total.saturating_sub(height).saturating_sub(state.timeline.scroll_offset);
+        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
+            .position(position);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            inner,
+            &mut scrollbar_state,
+        );
+    }
 }
 
-fn pane_block<'a>(title: impl Into<Line<'a>>, focused: bool) -> Block<'a> {
-    let style = if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(style)
-}
-
-fn format_log_line(line: &ClusterLogLine) -> String {
+fn format_log_line_styled(line: &ClusterLogLine) -> Line<'_> {
     if let Some(agent) = line.agent.as_deref().or(line.sender.as_deref()) {
-        format!("[{}] {}", agent, line.text)
+        let color = theme::agent_color(agent);
+        Line::from(vec![
+            Span::styled(format!("[{agent}]"), Style::default().fg(color)),
+            Span::raw(" "),
+            Span::raw(line.text.as_str()),
+        ])
     } else {
-        line.text.clone()
+        Line::from(line.text.as_str())
     }
 }
 
-fn format_timeline_event(event: &TimelineEvent) -> String {
+fn format_timeline_event_styled(event: &TimelineEvent) -> Line<'_> {
+    let icon = timeline_icon(&event.topic);
+    let label_style = timeline_label_style(&event.label);
+    let mut spans = vec![
+        Span::styled(icon, theme::dim_style()),
+        Span::raw(" "),
+        Span::styled(event.topic.as_str(), theme::dim_style()),
+        Span::raw("  "),
+        Span::styled(event.label.as_str(), label_style),
+    ];
     if let Some(sender) = event.sender.as_deref() {
-        format!("{} - {} ({})", event.topic, event.label, sender)
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("({sender})"),
+            theme::muted_style(),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn timeline_icon(topic: &str) -> &'static str {
+    let topic_lower = topic.to_lowercase();
+    if topic_lower.contains("issue") {
+        "\u{25b6}" // ▶
+    } else if topic_lower.contains("implementation") || topic_lower.contains("impl") {
+        "\u{25cf}" // ●
+    } else if topic_lower.contains("validation") || topic_lower.contains("review") {
+        "\u{25c6}" // ◆
+    } else if topic_lower.contains("consensus") || topic_lower.contains("complete") {
+        "\u{2605}" // ★
     } else {
-        format!("{} - {}", event.topic, event.label)
+        "\u{00b7}" // ·
     }
 }
 
-fn trim_vecdeque<T>(items: &mut VecDeque<T>, max: usize) -> usize {
-    if items.len() <= max {
-        return 0;
-    }
-    let mut dropped = 0usize;
-    while items.len() > max {
-        items.pop_front();
-        dropped += 1;
-    }
-    dropped
-}
-
-fn agent_scroll_start(selected: usize, len: usize, height: usize) -> usize {
-    if len <= height {
-        return 0;
-    }
-    let end = selected.saturating_add(1);
-    if end > height {
-        end.saturating_sub(height)
+fn timeline_label_style(label: &str) -> Style {
+    let label_lower = label.to_lowercase();
+    if label_lower.contains("approved") || label_lower.contains("done") || label_lower.contains("complete") {
+        theme::status_style("done")
+    } else if label_lower.contains("rejected") || label_lower.contains("failed") || label_lower.contains("error") {
+        theme::status_style("error")
+    } else if label_lower.contains("pending") || label_lower.contains("waiting") {
+        theme::status_style("pending")
     } else {
-        0
+        Style::default()
     }
 }

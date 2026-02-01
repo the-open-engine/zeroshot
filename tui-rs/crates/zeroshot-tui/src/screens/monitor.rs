@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
+use ratatui::layout::{Alignment, Constraint, Rect};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::protocol::{ClusterMetrics, ClusterSummary};
 use crate::screens::metrics;
+use crate::ui::theme;
 
 const POLL_INTERVAL_MS: i64 = 1000;
 
@@ -115,73 +117,106 @@ pub fn render(
     metrics_map: &HashMap<String, ClusterMetrics>,
     now_ms: i64,
 ) {
+    // Empty state
+    if state.clusters.is_empty() {
+        render_empty(frame, area);
+        return;
+    }
+
     let header = Row::new(vec![
         Cell::from("ID"),
-        Cell::from("State"),
-        Cell::from("Provider"),
+        Cell::from("STATE"),
+        Cell::from("PROVIDER"),
         Cell::from("CPU%"),
-        Cell::from("Mem MB"),
-        Cell::from("Duration"),
-        Cell::from("Last activity"),
+        Cell::from("MEM"),
+        Cell::from("DURATION"),
+        Cell::from("LAST"),
     ])
-    .style(Style::default().add_modifier(Modifier::BOLD));
+    .style(theme::table_header_style());
 
-    let rows = state.clusters.iter().map(|cluster| {
-        let provider = cluster
-            .provider
-            .clone()
-            .unwrap_or_else(|| "-".to_string());
-        let metrics = metrics_map.get(&cluster.id);
-        let cpu = metrics::format_cpu_percent(metrics);
-        let mem = metrics::format_memory_mb(metrics);
-        let duration = format_duration(now_ms.saturating_sub(cluster.created_at));
-        let last_activity = state
-            .last_activity_at
-            .get(&cluster.id)
-            .map(|activity| format!("{} ago", format_duration(now_ms.saturating_sub(*activity))))
-            .unwrap_or_else(|| "-".to_string());
+    let rows: Vec<Row> = state
+        .clusters
+        .iter()
+        .map(|cluster| {
+            let provider = cluster
+                .provider
+                .clone()
+                .unwrap_or_else(|| "-".to_string());
+            let metrics = metrics_map.get(&cluster.id);
+            let cpu = metrics::format_cpu_percent(metrics);
+            let mem = metrics::format_memory_mb(metrics);
+            let duration = format_duration(now_ms.saturating_sub(cluster.created_at));
+            let last_activity = state
+                .last_activity_at
+                .get(&cluster.id)
+                .map(|activity| {
+                    format_duration(now_ms.saturating_sub(*activity))
+                })
+                .unwrap_or_else(|| "-".to_string());
 
-        Row::new(vec![
-            Cell::from(cluster.id.clone()),
-            Cell::from(cluster.state.clone()),
-            Cell::from(provider),
-            Cell::from(cpu),
-            Cell::from(mem),
-            Cell::from(duration),
-            Cell::from(last_activity),
-        ])
-    });
+            let state_style = theme::status_style(&cluster.state);
+            let is_done = matches!(
+                cluster.state.as_str(),
+                "done" | "completed" | "complete" | "stopped"
+            );
+            let row_style = if is_done {
+                theme::done_row_style()
+            } else {
+                Style::default()
+            };
+
+            Row::new(vec![
+                Cell::from(cluster.id.clone()),
+                Cell::from(Span::styled(cluster.state.clone(), state_style)),
+                Cell::from(provider),
+                Cell::from(cpu),
+                Cell::from(mem),
+                Cell::from(duration),
+                Cell::from(last_activity),
+            ])
+            .style(row_style)
+        })
+        .collect();
 
     let table = Table::new(
         rows,
         [
-            Constraint::Length(18),
+            Constraint::Min(18),
             Constraint::Length(10),
             Constraint::Length(10),
             Constraint::Length(metrics::CPU_COLUMN_WIDTH as u16),
             Constraint::Length(metrics::MEM_COLUMN_WIDTH as u16),
             Constraint::Length(10),
-            Constraint::Length(14),
+            Constraint::Length(8),
         ],
     )
     .header(header)
-    .block(Block::default().title("Monitor").borders(Borders::ALL))
-    .highlight_style(
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )
-    .highlight_symbol("> ");
+    .row_highlight_style(theme::selected_style())
+    .highlight_symbol(" > ");
 
     let mut table_state = TableState::default();
-    if state.clusters.is_empty() {
-        table_state.select(None);
-    } else {
-        table_state.select(Some(state.selected));
-    }
+    table_state.select(Some(state.selected));
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_empty(frame: &mut Frame<'_>, area: Rect) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(""),
+        Line::from(Span::styled("No active clusters", theme::muted_style())),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Start a cluster from the Launcher (Esc)",
+            theme::dim_style(),
+        )),
+        Line::from(Span::styled(
+            "or run: zeroshot run <issue> --ship",
+            theme::dim_style(),
+        )),
+    ];
+    let widget = Paragraph::new(lines).alignment(Alignment::Center);
+    frame.render_widget(widget, area);
 }
 
 fn format_duration(delta_ms: i64) -> String {

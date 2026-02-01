@@ -95,6 +95,44 @@ jobs:
           fail_ci_if_error: false
         continue-on-error: true
 
+  # Rust TUI: build, test, clippy (runs in parallel with JS checks)
+  rust-tui:
+    needs: [enforce-main-pr-source]
+    if: always() && (needs.enforce-main-pr-source.result == 'success' || needs.enforce-main-pr-source.result == 'skipped')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tui-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tui-rs/target
+          key: rust-${{ runner.os }}-${{ hashFiles('tui-rs/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Smoke test binary
+        run: ./target/release/zeroshot-tui --version
+
   # Cross-platform/version compatibility (main only)
   # NOTE: macOS runners cost 10x Linux minutes - keep this scoped to main.
   install-matrix:

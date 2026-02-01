@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::backend::{BackendExit, BackendNotification};
 use crate::screens::{agent, cluster, launcher, monitor};
 use crate::protocol::ClusterMetrics;
+use crate::ui::shared::InputState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentKey {
@@ -76,91 +77,57 @@ pub enum BackendStatus {
 #[derive(Debug, Clone, Default)]
 pub struct CommandBarState {
     pub active: bool,
-    pub input: String,
-    pub cursor: usize,
+    inner: InputState,
 }
 
 impl CommandBarState {
+    /// Read-only access to input text.
+    pub fn input(&self) -> &str {
+        &self.inner.input
+    }
+
+    /// Read-only access to cursor position.
+    pub fn cursor(&self) -> usize {
+        self.inner.cursor
+    }
+
     pub fn open_with(&mut self, prefill: String) {
         self.active = true;
-        self.input = prefill;
-        self.cursor = self.len_chars();
+        self.inner.input = prefill;
+        self.inner.move_end();
     }
 
     pub fn close(&mut self) {
         self.active = false;
-        self.clear();
+        self.inner.clear();
     }
 
     pub fn insert_char(&mut self, ch: char) {
-        let idx = self.byte_index(self.cursor);
-        self.input.insert(idx, ch);
-        self.cursor = self.cursor.saturating_add(1);
+        self.inner.insert_char(ch);
     }
 
     pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let start = self.byte_index(self.cursor - 1);
-        let end = self.byte_index(self.cursor);
-        if start < end {
-            self.input.replace_range(start..end, "");
-            self.cursor = self.cursor.saturating_sub(1);
-        }
+        self.inner.backspace();
     }
 
     pub fn delete(&mut self) {
-        let len = self.len_chars();
-        if self.cursor >= len {
-            return;
-        }
-        let start = self.byte_index(self.cursor);
-        let end = self.byte_index(self.cursor + 1);
-        if start < end {
-            self.input.replace_range(start..end, "");
-        }
+        self.inner.delete();
     }
 
     pub fn move_left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
+        self.inner.move_left();
     }
 
     pub fn move_right(&mut self) {
-        let len = self.len_chars();
-        if self.cursor < len {
-            self.cursor += 1;
-        }
+        self.inner.move_right();
     }
 
     pub fn move_home(&mut self) {
-        self.cursor = 0;
+        self.inner.move_home();
     }
 
     pub fn move_end(&mut self) {
-        self.cursor = self.len_chars();
-    }
-
-    pub fn clear(&mut self) {
-        self.input.clear();
-        self.cursor = 0;
-    }
-
-    fn len_chars(&self) -> usize {
-        self.input.chars().count()
-    }
-
-    fn byte_index(&self, char_index: usize) -> usize {
-        if char_index == 0 {
-            return 0;
-        }
-        self.input
-            .char_indices()
-            .nth(char_index)
-            .map(|(idx, _)| idx)
-            .unwrap_or_else(|| self.input.len())
+        self.inner.move_end();
     }
 }
 
@@ -278,7 +245,7 @@ impl AppState {
             ScreenId::Cluster { id } => {
                 self.clusters
                     .entry(id.clone())
-                    .or_insert_with(cluster::State::default);
+                    .or_default();
             }
             ScreenId::Agent {
                 cluster_id,
@@ -287,7 +254,7 @@ impl AppState {
                 let key = AgentKey::new(cluster_id.clone(), agent_id.clone());
                 self.agents
                     .entry(key)
-                    .or_insert_with(agent::State::default);
+                    .or_default();
             }
         }
     }
@@ -654,14 +621,14 @@ fn handle_cluster_action(
             let entry = state
                 .clusters
                 .entry(id)
-                .or_insert_with(cluster::State::default);
+                .or_default();
             entry.cycle_focus(direction);
         }
         cluster::Action::MoveFocused(delta) => {
             let entry = state
                 .clusters
                 .entry(id)
-                .or_insert_with(cluster::State::default);
+                .or_default();
             entry.move_focused(delta);
         }
         cluster::Action::ActivateFocused => {
@@ -669,7 +636,7 @@ fn handle_cluster_action(
                 let entry = state
                     .clusters
                     .entry(id.clone())
-                    .or_insert_with(cluster::State::default);
+                    .or_default();
                 let agent_id = entry.activate_focused();
                 let role = agent_id
                     .as_ref()
@@ -699,7 +666,7 @@ fn handle_cluster_action(
                 let entry = state
                     .clusters
                     .entry(id.clone())
-                    .or_insert_with(cluster::State::default);
+                    .or_default();
                 entry
                     .agents
                     .iter()
@@ -730,7 +697,7 @@ fn seed_agent_role(
         let entry = state
             .agents
             .entry(key)
-            .or_insert_with(agent::State::default);
+            .or_default();
         if entry.role.is_none() {
             entry.role = Some(role);
         }
@@ -748,7 +715,7 @@ fn handle_agent_action(
     let entry = state
         .agents
         .entry(key)
-        .or_insert_with(agent::State::default);
+        .or_default();
     match action {
         agent::Action::SubmitGuidance => {
             let trimmed = entry.guidance_input.input.trim();
@@ -877,7 +844,7 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
             let entry = state
                 .clusters
                 .entry(params.cluster_id)
-                .or_insert_with(cluster::State::default);
+                .or_default();
             entry.push_timeline_events(params.events);
         }
         BackendNotification::Unknown { method, .. } => {
@@ -910,7 +877,7 @@ fn handle_cluster_summary(state: &mut AppState, summary: crate::protocol::Cluste
     let entry = state
         .clusters
         .entry(summary.id.clone())
-        .or_insert_with(cluster::State::default);
+        .or_default();
     entry.summary = Some(summary);
 }
 
@@ -922,7 +889,7 @@ fn handle_cluster_topology(
     let entry = state
         .clusters
         .entry(cluster_id)
-        .or_insert_with(cluster::State::default);
+        .or_default();
     entry.topology = Some(topology);
     entry.topology_error = None;
 }
@@ -931,7 +898,7 @@ fn handle_cluster_topology_error(state: &mut AppState, cluster_id: String, messa
     let entry = state
         .clusters
         .entry(cluster_id)
-        .or_insert_with(cluster::State::default);
+        .or_default();
     entry.topology = None;
     entry.topology_error = Some(message);
 }
@@ -948,14 +915,14 @@ fn handle_log_subscription(
             let entry = state
                 .agents
                 .entry(key)
-                .or_insert_with(agent::State::default);
+                .or_default();
             entry.log_subscription = Some(subscription_id);
         }
         None => {
             let entry = state
                 .clusters
                 .entry(cluster_id)
-                .or_insert_with(cluster::State::default);
+                .or_default();
             entry.log_subscription = Some(subscription_id);
         }
     }
@@ -969,7 +936,7 @@ fn handle_cluster_timeline_subscription(
     let entry = state
         .clusters
         .entry(cluster_id)
-        .or_insert_with(cluster::State::default);
+        .or_default();
     entry.timeline_subscription = Some(subscription_id);
 }
 
@@ -983,7 +950,7 @@ fn handle_guidance_result(
     let entry = state
         .agents
         .entry(key)
-        .or_insert_with(agent::State::default);
+        .or_default();
     entry.apply_guidance_result(result);
 }
 
@@ -997,7 +964,7 @@ fn handle_guidance_error(
     let entry = state
         .agents
         .entry(key)
-        .or_insert_with(agent::State::default);
+        .or_default();
     entry.apply_guidance_error(message.clone());
     state.last_error = Some(message);
 }
@@ -1067,7 +1034,7 @@ fn handle_command_bar_action(
             }
         }
         CommandBarAction::Submit => {
-            let raw = state.command_bar.input.clone();
+            let raw = state.command_bar.input().to_string();
             let context = state.command_context();
             state.command_bar.close();
             effects.push(Effect::Command(CommandRequest::SubmitRaw { raw, context }));
