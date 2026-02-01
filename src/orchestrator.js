@@ -2560,10 +2560,27 @@ Continue from where you left off. Review your previous output to understand what
         throw new Error('Agent config missing required field: id');
       }
 
-      // Check for duplicate agent ID
+      // Check for duplicate agent ID - MERGE triggers instead of skipping
       const existingAgent = cluster.agents.find((a) => a.id === agentConfig.id);
       if (existingAgent) {
-        this._log(`    ⚠️ Agent ${agentConfig.id} already exists, skipping`);
+        // Merge new triggers into existing agent (avoid duplicates)
+        const newTriggers = agentConfig.triggers || [];
+        const existingTriggers = existingAgent.config.triggers || [];
+
+        for (const newTrigger of newTriggers) {
+          const isDuplicate = existingTriggers.some(
+            (t) => t.topic === newTrigger.topic && t.action === newTrigger.action
+          );
+          if (!isDuplicate) {
+            existingTriggers.push(newTrigger);
+            this._log(`    ✅ Merged trigger ${newTrigger.topic} into agent ${agentConfig.id}`);
+          }
+        }
+        existingAgent.config.triggers = existingTriggers;
+
+        this._log(
+          `    ℹ️ Agent ${agentConfig.id} already exists, merged ${newTriggers.length} triggers`
+        );
         continue;
       }
 
