@@ -252,7 +252,7 @@
           "topic": "VALIDATION_RESULT",
           "logic": {
             "engine": "javascript",
-            "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (responses.length < validators.length) return false;\nreturn responses.some(r => r.content?.data?.approved === false || r.content?.data?.approved === 'false');"
+            "script": "const validators = cluster.getAgentsByRole('validator');\nif (validators.length === 0) return false;\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (responses.length < validators.length) return false;\nreturn responses.some(r => r.content?.data?.approved === false || r.content?.data?.approved === 'false');"
           },
           "action": "execute_task"
         }
@@ -339,7 +339,7 @@
           },
           "transform": {
             "engine": "javascript",
-            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ operation: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
+            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ action: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
           },
           "logic": {
             "engine": "javascript",

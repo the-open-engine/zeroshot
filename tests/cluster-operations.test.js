@@ -116,6 +116,34 @@ describe('CLUSTER_OPERATIONS', function () {
         'Should have error about missing ISSUE_OPENED trigger'
       );
     });
+
+    it('should include agents from load_config when building proposed config (parameterized)', function () {
+      const existing = [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+        },
+      ];
+
+      const ops = [
+        {
+          action: 'load_config',
+          config: { base: 'quick-validation', params: {} },
+        },
+      ];
+
+      const proposed = orchestrator._buildProposedAgentConfigs(existing, ops);
+
+      assert(
+        proposed.some((a) => a.id === 'validator-requirements'),
+        'Expected load_config to add validator-requirements'
+      );
+      assert(
+        proposed.some((a) => a.id === 'validator-code'),
+        'Expected load_config to add validator-code'
+      );
+    });
   });
 
   describe('VALID_OPERATIONS constant', function () {

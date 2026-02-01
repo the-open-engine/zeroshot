@@ -5,6 +5,7 @@
 const assert = require('assert');
 const path = require('path');
 const TemplateResolver = require('../src/template-resolver');
+const { validateConfig } = require('../src/config-validator');
 
 describe('Two-Stage Validation Pipeline', function () {
   let resolver;
@@ -136,6 +137,16 @@ describe('Two-Stage Validation Pipeline', function () {
       // Inline validators should be filtered out
       const validators = resolved.agents.filter((a) => a.role === 'validator');
       assert.strictEqual(validators.length, 0, 'No inline validators for CRITICAL tasks');
+
+      // Regression: config-validator should NOT raise Gap 15 role-reference errors when validators are absent.
+      const validation = validateConfig(resolved);
+      const roleErrors = validation.errors.filter(
+        (e) =>
+          e.includes('[Gap 15]') ||
+          e.includes("Logic references role 'validator'") ||
+          e.includes('Logic references role "validator"')
+      );
+      assert.strictEqual(roleErrors.length, 0, `Unexpected role reference errors: ${roleErrors}`);
     });
 
     it('should NOT load meta-coordinator for STANDARD tasks', function () {
