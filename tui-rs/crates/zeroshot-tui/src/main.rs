@@ -264,9 +264,10 @@ fn execute_backend_request(
         BackendRequest::GetClusterSummary { cluster_id } => {
             get_cluster_summary(client, cluster_id)
         }
-        BackendRequest::SubscribeClusterLogs { cluster_id } => {
-            subscribe_cluster_logs(client, cluster_id)
-        }
+        BackendRequest::SubscribeClusterLogs {
+            cluster_id,
+            agent_id,
+        } => subscribe_cluster_logs(client, cluster_id, agent_id),
         BackendRequest::SubscribeClusterTimeline { cluster_id } => {
             subscribe_cluster_timeline(client, cluster_id)
         }
@@ -310,13 +311,15 @@ fn get_cluster_summary(
 fn subscribe_cluster_logs(
     client: &StdioBackendClient,
     cluster_id: String,
+    agent_id: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
     let result = client.subscribe_cluster_logs(zeroshot_tui::protocol::SubscribeClusterLogsParams {
         cluster_id: cluster_id.clone(),
-        agent_id: None,
+        agent_id: agent_id.clone(),
     })?;
     Ok(Some(BackendAction::SubscribedClusterLogs {
         cluster_id,
+        agent_id,
         subscription_id: result.subscription_id,
     }))
 }
@@ -385,13 +388,23 @@ fn send_guidance_to_agent(
     agent_id: String,
     message: String,
 ) -> Result<Option<BackendAction>, BackendError> {
-    client.send_guidance_to_agent(zeroshot_tui::protocol::SendGuidanceToAgentParams {
-        cluster_id,
-        agent_id,
+    match client.send_guidance_to_agent(zeroshot_tui::protocol::SendGuidanceToAgentParams {
+        cluster_id: cluster_id.clone(),
+        agent_id: agent_id.clone(),
         text: message,
         timeout_ms: None,
-    })?;
-    Ok(None)
+    }) {
+        Ok(result) => Ok(Some(BackendAction::GuidanceToAgentResult {
+            cluster_id,
+            agent_id,
+            result: result.result,
+        })),
+        Err(err) => Ok(Some(BackendAction::GuidanceToAgentError {
+            cluster_id,
+            agent_id,
+            message: err.to_string(),
+        })),
+    }
 }
 
 fn unsubscribe(

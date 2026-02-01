@@ -39,10 +39,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         } => {
             let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
             if let Some(agent_state) = state.agents.get(&key) {
-                agent::render(frame, layout[1], agent_state);
+                agent::render(frame, layout[1], agent_state, cluster_id, agent_id);
             } else {
                 let default_state = agent::State::default();
-                agent::render(frame, layout[1], &default_state);
+                agent::render(frame, layout[1], &default_state, cluster_id, agent_id);
             }
         }
     }

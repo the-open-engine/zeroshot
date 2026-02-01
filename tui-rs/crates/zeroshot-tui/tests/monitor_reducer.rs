@@ -66,7 +66,8 @@ fn monitor_open_selected_pushes_cluster() {
                 cluster_id: "c1".to_string()
             }),
             Effect::Backend(BackendRequest::SubscribeClusterLogs {
-                cluster_id: "c1".to_string()
+                cluster_id: "c1".to_string(),
+                agent_id: None,
             }),
             Effect::Backend(BackendRequest::SubscribeClusterTimeline {
                 cluster_id: "c1".to_string()

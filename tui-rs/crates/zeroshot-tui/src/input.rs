@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{Action, NavigationAction, ScreenAction, ScreenId};
-use crate::screens::{cluster, launcher, monitor};
+use crate::screens::{agent, cluster, launcher, monitor};
 
 pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
     if let Some(action) = route_global(screen, key) {
@@ -12,7 +12,10 @@ pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
         ScreenId::Launcher => route_launcher(key),
         ScreenId::Monitor => route_monitor(key),
         ScreenId::Cluster { id } => route_cluster(id, key),
-        ScreenId::Agent { .. } => None,
+        ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        } => route_agent(cluster_id, agent_id, key),
     }
 }
 
@@ -92,6 +95,35 @@ fn route_cluster(id: &str, key: KeyEvent) -> Option<Action> {
 
     Some(Action::Screen(ScreenAction::Cluster {
         id: id.to_string(),
+        action,
+    }))
+}
+
+fn route_agent(cluster_id: &str, agent_id: &str, key: KeyEvent) -> Option<Action> {
+    let action = match key.code {
+        KeyCode::Enter => agent::Action::SubmitGuidance,
+        KeyCode::Backspace => agent::Action::Backspace,
+        KeyCode::Delete => agent::Action::Delete,
+        KeyCode::Left => agent::Action::MoveCursorLeft,
+        KeyCode::Right => agent::Action::MoveCursorRight,
+        KeyCode::Home => agent::Action::MoveCursorHome,
+        KeyCode::End => agent::Action::MoveCursorEnd,
+        KeyCode::Up | KeyCode::Char('k') => agent::Action::ScrollLogs(-1),
+        KeyCode::Down | KeyCode::Char('j') => agent::Action::ScrollLogs(1),
+        KeyCode::PageUp => agent::Action::ScrollLogs(-5),
+        KeyCode::PageDown => agent::Action::ScrollLogs(5),
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            agent::Action::InsertChar(ch)
+        }
+        _ => return None,
+    };
+
+    Some(Action::Screen(ScreenAction::Agent {
+        cluster_id: cluster_id.to_string(),
+        agent_id: agent_id.to_string(),
         action,
     }))
 }
