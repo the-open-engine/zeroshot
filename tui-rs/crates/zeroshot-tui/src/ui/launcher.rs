@@ -13,16 +13,16 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, provider_overrid
 
     let provider_label = provider_override.unwrap_or("default");
     let hint_lines = vec![
-        Line::from("Type a task and press Enter."),
+        Line::from("Enter: start cluster from text. Ctrl+C: quit."),
         Line::from(format!(
-            "Commands: /monitor  /help  provider: {provider_label}"
+            "Commands: /help /monitor /issue /provider /quit /exit (use / outside Launcher) | provider: {provider_label}"
         )),
     ];
-    let hints = Paragraph::new(hint_lines).block(Block::default().borders(Borders::ALL));
+    let hints = Paragraph::new(hint_lines).block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(hints, chunks[0]);
 
     let input = Paragraph::new(state.input.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Input"));
+        .block(Block::default().borders(Borders::ALL).title("Task"));
     frame.render_widget(input, chunks[1]);
 
     if chunks[1].height > 2 && chunks[1].width > 2 {

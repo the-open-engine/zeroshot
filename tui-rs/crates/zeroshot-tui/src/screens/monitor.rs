@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
@@ -155,7 +155,7 @@ pub fn render(
     let table = Table::new(
         rows,
         [
-            Constraint::Percentage(30),
+            Constraint::Length(18),
             Constraint::Length(10),
             Constraint::Length(10),
             Constraint::Length(metrics::CPU_COLUMN_WIDTH as u16),
@@ -166,8 +166,13 @@ pub fn render(
     )
     .header(header)
     .block(Block::default().title("Monitor").borders(Borders::ALL))
-    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .highlight_symbol(">> ");
+    .highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .highlight_symbol("> ");
 
     let mut table_state = TableState::default();
     if state.clusters.is_empty() {

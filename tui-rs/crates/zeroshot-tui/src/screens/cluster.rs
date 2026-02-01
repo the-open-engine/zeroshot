@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
@@ -268,7 +268,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, metrics: Option<
     let content = rows[1];
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(content);
     let top = Layout::default()
         .direction(Direction::Horizontal)
@@ -286,8 +286,12 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, metrics: Option<
 }
 
 fn render_metrics_line(frame: &mut Frame<'_>, area: Rect, metrics: Option<&ClusterMetrics>) {
-    let line = format!("Metrics: {}", metrics::format_metrics_line(metrics));
-    let widget = Paragraph::new(Line::from(line));
+    let line = Line::from(vec![
+        Span::styled("Metrics:", Style::default().fg(Color::DarkGray)),
+        Span::raw(" "),
+        Span::styled(metrics::format_metrics_line(metrics), Style::default()),
+    ]);
+    let widget = Paragraph::new(line);
     frame.render_widget(widget, area);
 }
 
@@ -310,7 +314,8 @@ fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let mut lines = Vec::new();
 
     if state.agents.is_empty() || height == 0 {
-        lines.push(Line::from("(no agents yet)"));
+        lines.push(Line::from("No agents yet."));
+        lines.push(Line::from("Wait for logs to identify agents."));
     } else {
         let start = agent_scroll_start(state.selected_agent, state.agents.len(), height);
         for (idx, agent) in state
@@ -320,12 +325,21 @@ fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .skip(start)
             .take(height)
         {
-            let prefix = if idx == state.selected_agent { "> " } else { "  " };
-            let line = match &agent.role {
+            let selected = idx == state.selected_agent;
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            let prefix = if selected { "> " } else { "  " };
+            let text = match &agent.role {
                 Some(role) => format!("{prefix}{} ({role})", agent.id),
                 None => format!("{prefix}{}", agent.id),
             };
-            lines.push(Line::from(line));
+            lines.push(Line::from(Span::styled(text, style)));
         }
     }
 
@@ -335,7 +349,7 @@ fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
 
 fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let title = if state.log_scroll_offset > 0 {
-        format!("Logs (scroll {})", state.log_scroll_offset)
+        format!("Logs (up {})", state.log_scroll_offset)
     } else {
         "Logs".to_string()
     };
@@ -344,7 +358,10 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let height = inner.height as usize;
 
     let lines = if state.logs.is_empty() || height == 0 {
-        vec![Line::from("(no logs yet)")]
+        vec![
+            Line::from("No logs yet."),
+            Line::from("Waiting for cluster output."),
+        ]
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
@@ -365,7 +382,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
 
 fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let title = if state.timeline_scroll_offset > 0 {
-        format!("Timeline (scroll {})", state.timeline_scroll_offset)
+        format!("Timeline (up {})", state.timeline_scroll_offset)
     } else {
         "Timeline".to_string()
     };
@@ -374,7 +391,10 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let height = inner.height as usize;
 
     let lines = if state.timeline.is_empty() || height == 0 {
-        vec![Line::from("(no timeline events)")]
+        vec![
+            Line::from("No timeline events yet."),
+            Line::from("New activity will appear here."),
+        ]
     } else {
         let total = state.timeline.len();
         let max_start = total.saturating_sub(height);
@@ -396,10 +416,10 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
 fn pane_block<'a>(title: impl Into<Line<'a>>, focused: bool) -> Block<'a> {
     let style = if focused {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default()
+        Style::default().fg(Color::DarkGray)
     };
     Block::default()
         .title(title)

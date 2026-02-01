@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
@@ -82,15 +82,15 @@ impl State {
 
     pub fn guidance_status_line(&self) -> String {
         if self.guidance_pending {
-            return "Guidance: sending...".to_string();
+            return "Sending guidance...".to_string();
         }
         if let Some(error) = &self.last_guidance_error {
-            return format!("Guidance error: {error}");
+            return format!("Last send failed: {error}");
         }
         if let Some(result) = &self.last_guidance {
-            return format_guidance_result(result);
+            return format!("Last send: {}", format_guidance_result(result));
         }
-        "Guidance: (no delivery yet)".to_string()
+        "Guidance ready. Enter to send.".to_string()
     }
 
     fn adjust_scroll_on_append(offset: &mut usize, added: usize) {
@@ -237,17 +237,15 @@ pub fn render(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(3),
             Constraint::Min(4),
-            Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(area);
 
     render_header(frame, rows[0], state, cluster_id, agent_id);
     render_logs(frame, rows[1], state);
-    render_guidance_status(frame, rows[2], state);
-    render_guidance_input(frame, rows[3], state);
+    render_guidance(frame, rows[2], state);
 }
 
 fn render_header(
@@ -260,17 +258,16 @@ fn render_header(
     let role = state.role.as_deref().unwrap_or("unknown");
     let status = state.status.as_deref().unwrap_or("unknown");
     let lines = vec![
-        Line::from(format!("Agent: {agent_id}")),
-        Line::from(format!("Cluster: {cluster_id} | Role: {role}")),
-        Line::from(format!("Status: {status}")),
+        Line::from(format!("Agent: {agent_id} | Role: {role} | Status: {status}")),
+        Line::from(format!("Cluster: {cluster_id}")),
     ];
-    let widget = Paragraph::new(lines).block(Block::default().borders(Borders::ALL));
+    let widget = Paragraph::new(lines).block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(widget, area);
 }
 
 fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let title = if state.log_scroll_offset > 0 {
-        format!("Logs (scroll {})", state.log_scroll_offset)
+        format!("Logs (up {})", state.log_scroll_offset)
     } else {
         "Logs".to_string()
     };
@@ -278,7 +275,10 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let inner = block.inner(area);
     let height = inner.height as usize;
     let lines = if state.logs.is_empty() || height == 0 {
-        vec![Line::from("(no logs yet)")]
+        vec![
+            Line::from("No logs yet."),
+            Line::from("Waiting for agent output."),
+        ]
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
@@ -296,48 +296,49 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     frame.render_widget(widget, area);
 }
 
-fn render_guidance_status(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let lines = vec![Line::from(state.guidance_status_line())];
+fn render_guidance(frame: &mut Frame<'_>, area: Rect, state: &State) {
+    let status_line = Line::from(state.guidance_status_line());
+    let input_line = if state.guidance_input.input.is_empty() {
+        Line::from(Span::styled(
+            "Type guidance...",
+            Style::default().fg(Color::DarkGray),
+        ))
+    } else {
+        Line::from(state.guidance_input.input.as_str())
+    };
+    let lines = vec![status_line, input_line];
     let block = Block::default()
-        .title("Guidance Status")
+        .title("Guidance (Enter to send)")
         .borders(Borders::ALL);
-    let widget = Paragraph::new(lines).block(block);
-    frame.render_widget(widget, area);
-}
-
-fn render_guidance_input(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let block = Block::default()
-        .title("Guidance Input")
-        .borders(Borders::ALL);
-    let input = Paragraph::new(state.guidance_input.input.as_str()).block(block);
+    let input = Paragraph::new(lines).block(block);
     frame.render_widget(input, area);
 
-    if area.height > 2 && area.width > 2 {
+    if area.height > 3 && area.width > 2 {
         let max_x = area.x + area.width.saturating_sub(2);
         let cursor_x = area.x + 1 + state.guidance_input.cursor as u16;
         let cursor_x = cursor_x.min(max_x);
-        let cursor_y = area.y + 1;
+        let cursor_y = area.y + 2;
         frame.set_cursor(cursor_x, cursor_y);
     }
 }
 
 pub fn format_guidance_result(result: &GuidanceDeliveryResult) -> String {
-    let mut parts = vec![format!("Delivery: {}", result.status)];
+    let mut parts = vec![result.status.clone()];
     if let Some(method) = &result.method {
-        parts.push(format!("method={method}"));
+        parts.push(format!("via {method}"));
     }
     if let Some(task_id) = &result.task_id {
-        parts.push(format!("task={task_id}"));
+        parts.push(format!("task {task_id}"));
     }
     if let Some(reason) = &result.reason {
-        parts.push(format!("reason={reason}"));
+        parts.push(format!("reason {reason}"));
     }
     parts.join(" | ")
 }
 
 fn pane_block<'a>(title: impl Into<Line<'a>>) -> Block<'a> {
     let style = Style::default()
-        .fg(Color::Yellow)
+        .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
     Block::default()
         .title(title)
@@ -419,8 +420,8 @@ mod tests {
         let formatted = format_guidance_result(&result);
 
         assert!(formatted.contains("queued"));
-        assert!(formatted.contains("method=queue"));
-        assert!(formatted.contains("task=task-9"));
-        assert!(formatted.contains("reason=no tty"));
+        assert!(formatted.contains("via queue"));
+        assert!(formatted.contains("task task-9"));
+        assert!(formatted.contains("reason no tty"));
     }
 }
