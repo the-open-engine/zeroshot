@@ -1,19 +1,20 @@
-use std::collections::VecDeque;
-
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui::Frame;
 
 use crate::protocol::{ClusterLogLine, GuidanceDeliveryResult};
+use crate::ui::shared::{pane_block, InputState, ScrollableBuffer};
+use crate::ui::theme;
 
 pub const MAX_LOG_LINES: usize = 500;
 
 #[derive(Debug, Clone)]
 pub struct State {
-    pub logs: VecDeque<ClusterLogLine>,
-    pub log_scroll_offset: usize,
+    pub logs: ScrollableBuffer<ClusterLogLine>,
     pub log_drop_seq: u64,
     pub log_subscription: Option<String>,
     pub guidance_input: InputState,
@@ -39,7 +40,7 @@ pub enum Action {
 
 impl State {
     pub fn push_log_lines(&mut self, mut lines: Vec<ClusterLogLine>, dropped_count: Option<i64>) {
-        let mut added = 0usize;
+        let mut to_push = Vec::new();
         if let Some(count) = dropped_count {
             if count > 0 {
                 let line = ClusterLogLine {
@@ -51,21 +52,16 @@ impl State {
                     sender: None,
                 };
                 self.log_drop_seq = self.log_drop_seq.saturating_add(1);
-                self.logs.push_back(line);
-                added += 1;
+                to_push.push(line);
             }
         }
 
-        added += lines.len();
-        self.logs.extend(lines.drain(..));
-        Self::adjust_scroll_on_append(&mut self.log_scroll_offset, added);
-        let dropped = trim_vecdeque(&mut self.logs, MAX_LOG_LINES);
-        Self::adjust_scroll_on_trim(&mut self.log_scroll_offset, dropped);
-        Self::clamp_scroll(&mut self.log_scroll_offset, self.logs.len());
+        to_push.append(&mut lines);
+        self.logs.push_many(to_push);
     }
 
     pub fn move_log_scroll(&mut self, delta: i32) {
-        Self::move_scroll(&mut self.log_scroll_offset, delta, self.logs.len());
+        self.logs.move_scroll(delta);
     }
 
     pub fn apply_guidance_result(&mut self, result: GuidanceDeliveryResult) {
@@ -92,43 +88,12 @@ impl State {
         }
         "Guidance ready. Enter to send.".to_string()
     }
-
-    fn adjust_scroll_on_append(offset: &mut usize, added: usize) {
-        if *offset > 0 {
-            *offset = offset.saturating_add(added);
-        }
-    }
-
-    fn adjust_scroll_on_trim(offset: &mut usize, dropped: usize) {
-        *offset = offset.saturating_sub(dropped);
-    }
-
-    fn clamp_scroll(offset: &mut usize, len: usize) {
-        let max_offset = len.saturating_sub(1);
-        if *offset > max_offset {
-            *offset = max_offset;
-        }
-    }
-
-    fn move_scroll(offset: &mut usize, delta: i32, len: usize) {
-        if len == 0 {
-            *offset = 0;
-            return;
-        }
-        if delta < 0 {
-            *offset = offset.saturating_add(delta.abs() as usize);
-        } else {
-            *offset = offset.saturating_sub(delta as usize);
-        }
-        Self::clamp_scroll(offset, len);
-    }
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
-            logs: VecDeque::new(),
-            log_scroll_offset: 0,
+            logs: ScrollableBuffer::new(MAX_LOG_LINES),
             log_drop_seq: 0,
             log_subscription: None,
             guidance_input: InputState::default(),
@@ -141,92 +106,6 @@ impl Default for State {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct InputState {
-    pub input: String,
-    pub cursor: usize,
-}
-
-impl InputState {
-    pub fn insert_char(&mut self, ch: char) {
-        let idx = self.byte_index(self.cursor);
-        self.input.insert(idx, ch);
-        self.cursor = self.cursor.saturating_add(1);
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let start = self.byte_index(self.cursor - 1);
-        let end = self.byte_index(self.cursor);
-        if start < end {
-            self.input.replace_range(start..end, "");
-            self.cursor = self.cursor.saturating_sub(1);
-        }
-    }
-
-    pub fn delete(&mut self) {
-        let len = self.len_chars();
-        if self.cursor >= len {
-            return;
-        }
-        let start = self.byte_index(self.cursor);
-        let end = self.byte_index(self.cursor + 1);
-        if start < end {
-            self.input.replace_range(start..end, "");
-        }
-    }
-
-    pub fn move_left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
-    }
-
-    pub fn move_right(&mut self) {
-        let len = self.len_chars();
-        if self.cursor < len {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn move_home(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn move_end(&mut self) {
-        self.cursor = self.len_chars();
-    }
-
-    pub fn clear(&mut self) {
-        self.input.clear();
-        self.cursor = 0;
-    }
-
-    pub fn clamp_cursor(&mut self) {
-        let len = self.len_chars();
-        if self.cursor > len {
-            self.cursor = len;
-        }
-    }
-
-    fn len_chars(&self) -> usize {
-        self.input.chars().count()
-    }
-
-    fn byte_index(&self, char_index: usize) -> usize {
-        if char_index == 0 {
-            return 0;
-        }
-        self.input
-            .char_indices()
-            .nth(char_index)
-            .map(|(idx, _)| idx)
-            .unwrap_or_else(|| self.input.len())
-    }
-}
-
 pub fn render(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -234,18 +113,16 @@ pub fn render(
     cluster_id: &str,
     agent_id: &str,
 ) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(4),
-            Constraint::Length(4),
-        ])
-        .split(area);
+    let [header_area, logs_area, guidance_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(4),
+        Constraint::Length(4),
+    ])
+    .areas(area);
 
-    render_header(frame, rows[0], state, cluster_id, agent_id);
-    render_logs(frame, rows[1], state);
-    render_guidance(frame, rows[2], state);
+    render_header(frame, header_area, state, cluster_id, agent_id);
+    render_logs(frame, logs_area, state);
+    render_guidance(frame, guidance_area, state);
 }
 
 fn render_header(
@@ -257,59 +134,91 @@ fn render_header(
 ) {
     let role = state.role.as_deref().unwrap_or("unknown");
     let status = state.status.as_deref().unwrap_or("unknown");
+    let (status_dot, status_style) = match status {
+        "executing" | "running" | "active" => ("\u{25cf}", theme::status_style("running")),
+        "waiting" | "idle" => ("\u{25cf}", theme::status_style("pending")),
+        "error" | "failed" => ("\u{25cf}", theme::status_style("error")),
+        "done" | "completed" => ("\u{25cf}", theme::status_style("done")),
+        _ => ("\u{25cb}", theme::dim_style()),
+    };
+    let agent_color = theme::agent_color(agent_id);
+
     let lines = vec![
-        Line::from(format!("Agent: {agent_id} | Role: {role} | Status: {status}")),
-        Line::from(format!("Cluster: {cluster_id}")),
+        Line::from(vec![
+            Span::styled(" Agent: ", theme::dim_style()),
+            Span::styled(agent_id, Style::default().fg(agent_color)),
+            Span::styled("  Role: ", theme::dim_style()),
+            Span::styled(role, theme::dim_style()),
+            Span::styled("  Status: ", theme::dim_style()),
+            Span::styled(status_dot, status_style),
+            Span::raw(" "),
+            Span::styled(status, status_style),
+        ]),
+        Line::from(vec![
+            Span::styled(" Cluster: ", theme::dim_style()),
+            Span::styled(cluster_id, theme::muted_style()),
+        ]),
     ];
-    let widget = Paragraph::new(lines).block(Block::default().borders(Borders::BOTTOM));
+    let widget = Paragraph::new(lines);
     frame.render_widget(widget, area);
 }
 
 fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
-    let title = if state.log_scroll_offset > 0 {
-        format!("Logs (up {})", state.log_scroll_offset)
+    let title = if state.logs.scroll_offset > 0 {
+        format!("Logs (up {})", state.logs.scroll_offset)
     } else {
         "Logs".to_string()
     };
-    let block = pane_block(title);
+    let block = pane_block(title, true);
     let inner = block.inner(area);
     let height = inner.height as usize;
     let lines = if state.logs.is_empty() || height == 0 {
         vec![
-            Line::from("No logs yet."),
-            Line::from("Waiting for agent output."),
+            Line::from(Span::styled("No logs yet.", theme::muted_style())),
+            Line::from(Span::styled("Waiting for agent output.", theme::dim_style())),
         ]
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
-        let start = max_start.saturating_sub(state.log_scroll_offset.min(max_start));
+        let start = max_start.saturating_sub(state.logs.scroll_offset.min(max_start));
         state
             .logs
+            .items
             .iter()
             .skip(start)
             .take(height)
-            .map(format_log_line)
-            .map(Line::from)
+            .map(format_log_line_styled)
             .collect()
     };
     let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+
+    // Scrollbar
+    if !state.logs.is_empty() && height > 0 {
+        let total = state.logs.len();
+        let position = total.saturating_sub(height).saturating_sub(state.logs.scroll_offset);
+        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
+            .position(position);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            inner,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 fn render_guidance(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let status_line = Line::from(state.guidance_status_line());
     let input_line = if state.guidance_input.input.is_empty() {
-        Line::from(Span::styled(
-            "Type guidance...",
-            Style::default().fg(Color::DarkGray),
-        ))
+        Line::from(Span::styled("Type guidance...", theme::muted_style()))
     } else {
         Line::from(state.guidance_input.input.as_str())
     };
     let lines = vec![status_line, input_line];
     let block = Block::default()
         .title("Guidance (Enter to send)")
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(theme::focus_border_style());
     let input = Paragraph::new(lines).block(block);
     frame.render_widget(input, area);
 
@@ -318,7 +227,7 @@ fn render_guidance(frame: &mut Frame<'_>, area: Rect, state: &State) {
         let cursor_x = area.x + 1 + state.guidance_input.cursor as u16;
         let cursor_x = cursor_x.min(max_x);
         let cursor_y = area.y + 2;
-        frame.set_cursor(cursor_x, cursor_y);
+        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 }
 
@@ -336,34 +245,17 @@ pub fn format_guidance_result(result: &GuidanceDeliveryResult) -> String {
     parts.join(" | ")
 }
 
-fn pane_block<'a>(title: impl Into<Line<'a>>) -> Block<'a> {
-    let style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
-    Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(style)
-}
-
-fn format_log_line(line: &ClusterLogLine) -> String {
+fn format_log_line_styled(line: &ClusterLogLine) -> Line<'_> {
     if let Some(agent) = line.agent.as_deref().or(line.sender.as_deref()) {
-        format!("[{}] {}", agent, line.text)
+        let color = theme::agent_color(agent);
+        Line::from(vec![
+            Span::styled(format!("[{agent}]"), Style::default().fg(color)),
+            Span::raw(" "),
+            Span::raw(&line.text),
+        ])
     } else {
-        line.text.clone()
+        Line::from(line.text.as_str())
     }
-}
-
-fn trim_vecdeque<T>(items: &mut VecDeque<T>, max: usize) -> usize {
-    if items.len() <= max {
-        return 0;
-    }
-    let mut dropped = 0usize;
-    while items.len() > max {
-        items.pop_front();
-        dropped += 1;
-    }
-    dropped
 }
 
 #[cfg(test)]

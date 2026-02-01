@@ -1,3 +1,6 @@
+#![allow(clippy::needless_return)]
+#![allow(clippy::io_other_error)]
+
 use std::env;
 use std::io::{self, stdout};
 use std::sync::mpsc;

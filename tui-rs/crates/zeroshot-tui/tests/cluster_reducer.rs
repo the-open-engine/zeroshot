@@ -28,7 +28,7 @@ fn log_buffer_bounds_and_dropped_count() {
     let mut state = cluster::State::default();
     state.push_log_lines(vec![log_line(0, None, None)], Some(3));
     assert_eq!(state.logs.len(), 2);
-    let first = state.logs.front().expect("expected synthetic line");
+    let first = state.logs.items.front().expect("expected synthetic line");
     assert!(first.text.contains("dropped 3"));
 
     let mut state = cluster::State::default();
@@ -37,7 +37,7 @@ fn log_buffer_bounds_and_dropped_count() {
         .collect();
     state.push_log_lines(lines, None);
     assert_eq!(state.logs.len(), cluster::MAX_LOG_LINES);
-    let first = state.logs.front().expect("expected log line");
+    let first = state.logs.items.front().expect("expected log line");
     assert_eq!(first.id, "log-5");
 }
 
@@ -49,7 +49,7 @@ fn timeline_buffer_bounds() {
         .collect();
     state.push_timeline_events(events);
     assert_eq!(state.timeline.len(), cluster::MAX_TIMELINE_EVENTS);
-    let first = state.timeline.front().expect("expected event");
+    let first = state.timeline.items.front().expect("expected event");
     assert_eq!(first.id, "event-3");
 }
 
@@ -85,7 +85,7 @@ fn scroll_offset_grows_when_new_lines_arrive() {
         None,
     );
     state.move_focused(-1);
-    assert_eq!(state.log_scroll_offset, 1);
+    assert_eq!(state.logs.scroll_offset, 1);
     state.push_log_lines(vec![log_line(2, None, None)], None);
-    assert_eq!(state.log_scroll_offset, 2);
+    assert_eq!(state.logs.scroll_offset, 2);
 }
