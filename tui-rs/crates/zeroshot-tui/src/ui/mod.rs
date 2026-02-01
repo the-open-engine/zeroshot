@@ -3,7 +3,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{AppState, BackendStatus, ScreenId, UiVariant};
+use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
 use crate::screens::{agent, cluster, monitor};
 use crate::ui::widgets::{command_bar, spine, toast};
 
@@ -98,10 +98,12 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     frame.render_widget(canvas, canvas_area);
 
     let mut spine_state = state.spine.clone();
-    if let Some((toast_text, _)) = toast::format_inline(state.toast.as_ref()) {
-        spine_state.hint = toast_text;
+    if let Some(toast_state) = state.toast.as_ref() {
+        if let Some((toast_text, _)) = toast::format_inline(Some(toast_state)) {
+            spine_state.hint = SpineHint::from_toast(toast_text, toast_state.level.clone());
+        }
     } else if spine_state.hint.is_empty() {
-        spine_state.hint = DISRUPTIVE_SPINE_HINT.to_string();
+        spine_state.hint = SpineHint::new(DISRUPTIVE_SPINE_HINT, SpineHintTone::Muted);
     }
     spine::render(frame, spine_area, &spine_state);
     spine::set_cursor(frame, spine_area, &spine_state);

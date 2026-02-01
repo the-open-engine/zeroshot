@@ -5,6 +5,9 @@ use crate::screens::{agent, cluster, launcher, monitor};
 use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
+mod spine_hint;
+pub use spine_hint::{compute_spine_hint, SpineHint, SpineHintTone};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentKey {
     pub cluster_id: String,
@@ -173,7 +176,7 @@ pub struct SpineCompletion {
 pub struct SpineState {
     pub mode: SpineMode,
     pub input: InputState,
-    pub hint: String,
+    pub hint: SpineHint,
     pub completion: Option<SpineCompletion>,
 }
 
@@ -182,7 +185,7 @@ impl Default for SpineState {
         Self {
             mode: SpineMode::Intent,
             input: InputState::default(),
-            hint: String::new(),
+            hint: SpineHint::default(),
             completion: None,
         }
     }
@@ -580,7 +583,7 @@ pub enum CommandBarAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpineAction {
     SetMode(SpineMode),
-    SetHint(String),
+    SetHint(SpineHint),
     SetCompletion(Option<SpineCompletion>),
     EnterMode { mode: SpineMode, prefill: String },
     Cancel,
@@ -712,6 +715,8 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             queue_navigation_effects(&screen, effects);
         }
     }
+
+    refresh_spine_hint(state);
 }
 
 fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
@@ -1298,6 +1303,7 @@ fn reset_spine_state(state: &mut AppState) {
     state.spine.mode = SpineMode::Intent;
     state.spine.input.clear();
     state.spine.completion = None;
+    state.spine.hint = SpineHint::default();
 }
 
 fn set_disruptive_spine_toast(state: &mut AppState, level: ToastLevel, message: String) {
@@ -1309,6 +1315,10 @@ fn set_disruptive_spine_toast(state: &mut AppState, level: ToastLevel, message: 
         level,
         expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
     });
+}
+
+fn refresh_spine_hint(state: &mut AppState) {
+    state.spine.hint = compute_spine_hint(state);
 }
 
 fn detect_issue_reference(input: &str) -> Option<String> {
@@ -1394,9 +1404,11 @@ fn resolve_spine_agent_target(state: &AppState) -> Option<(String, String)> {
 }
 
 fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut Vec<Effect>) {
+    let mut should_refresh_hint = false;
     match action {
         SpineAction::SetMode(mode) => {
             state.spine.mode = mode;
+            should_refresh_hint = true;
         }
         SpineAction::SetHint(hint) => {
             state.spine.hint = hint;
@@ -1408,9 +1420,11 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
             state.spine.mode = mode;
             set_spine_input(state, prefill);
             state.spine.completion = None;
+            should_refresh_hint = true;
         }
         SpineAction::Cancel => {
             reset_spine_state(state);
+            should_refresh_hint = true;
         }
         SpineAction::Submit => {
             let mode = state.spine.mode;
@@ -1473,6 +1487,7 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
                 set_disruptive_spine_toast(state, ToastLevel::Success, message);
             }
             reset_spine_state(state);
+            should_refresh_hint = true;
         }
         SpineAction::Complete => {
             if let Some(completion) = state.spine.completion.take() {
@@ -1481,15 +1496,19 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
                     state.spine.input.cursor = state.spine.input.input.chars().count();
                 }
             }
+            should_refresh_hint = true;
         }
         SpineAction::InsertChar(ch) => {
             state.spine.input.insert_char(ch);
+            should_refresh_hint = true;
         }
         SpineAction::Backspace => {
             state.spine.input.backspace();
+            should_refresh_hint = true;
         }
         SpineAction::Delete => {
             state.spine.input.delete();
+            should_refresh_hint = true;
         }
         SpineAction::MoveCursorLeft => {
             state.spine.input.move_left();
@@ -1506,7 +1525,12 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
         SpineAction::Clear => {
             state.spine.input.clear();
             state.spine.completion = None;
+            should_refresh_hint = true;
         }
+    }
+
+    if should_refresh_hint {
+        refresh_spine_hint(state);
     }
 }
 
@@ -1521,6 +1545,7 @@ fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &
         }
         CommandAction::SetProviderOverride { provider } => {
             state.provider_override = provider;
+            refresh_spine_hint(state);
         }
         CommandAction::StartClusterFromIssue {
             reference,
