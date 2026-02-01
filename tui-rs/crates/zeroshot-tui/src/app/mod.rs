@@ -1362,10 +1362,7 @@ fn parse_github_issue_url(input: &str) -> Option<String> {
         return None;
     }
     let number_segment = parts.next()?;
-    let number = number_segment
-        .split(|ch| ch == '?' || ch == '#')
-        .next()
-        .unwrap_or("");
+    let number = number_segment.split(['?', '#']).next().unwrap_or("");
     if number.is_empty() || !number.chars().all(|ch| ch.is_ascii_digit()) {
         return None;
     }
