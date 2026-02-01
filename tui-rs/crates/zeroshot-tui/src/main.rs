@@ -261,6 +261,9 @@ fn execute_backend_request(
 ) -> Result<Option<BackendAction>, BackendError> {
     match request {
         BackendRequest::ListClusters => list_clusters(client),
+        BackendRequest::ListClusterMetrics { cluster_ids } => {
+            list_cluster_metrics(client, cluster_ids)
+        }
         BackendRequest::GetClusterSummary { cluster_id } => {
             get_cluster_summary(client, cluster_id)
         }
@@ -297,6 +300,18 @@ fn execute_backend_request(
 fn list_clusters(client: &StdioBackendClient) -> Result<Option<BackendAction>, BackendError> {
     let result = client.list_clusters()?;
     Ok(Some(BackendAction::ClustersListed(result.clusters)))
+}
+
+fn list_cluster_metrics(
+    client: &StdioBackendClient,
+    cluster_ids: Option<Vec<String>>,
+) -> Result<Option<BackendAction>, BackendError> {
+    let result = client.list_cluster_metrics(zeroshot_tui::protocol::ListClusterMetricsParams {
+        cluster_ids,
+    })?;
+    Ok(Some(BackendAction::ClusterMetricsListed {
+        metrics: result.metrics,
+    }))
 }
 
 fn get_cluster_summary(

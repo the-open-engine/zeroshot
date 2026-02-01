@@ -5,7 +5,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
-use crate::protocol::ClusterSummary;
+use crate::protocol::{ClusterMetrics, ClusterSummary};
+use crate::screens::metrics;
 
 const POLL_INTERVAL_MS: i64 = 1000;
 
@@ -107,11 +108,19 @@ impl State {
     }
 }
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, now_ms: i64) {
+pub fn render(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &State,
+    metrics_map: &HashMap<String, ClusterMetrics>,
+    now_ms: i64,
+) {
     let header = Row::new(vec![
         Cell::from("ID"),
         Cell::from("State"),
         Cell::from("Provider"),
+        Cell::from("CPU%"),
+        Cell::from("Mem MB"),
         Cell::from("Duration"),
         Cell::from("Last activity"),
     ])
@@ -122,6 +131,9 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, now_ms: i64) {
             .provider
             .clone()
             .unwrap_or_else(|| "-".to_string());
+        let metrics = metrics_map.get(&cluster.id);
+        let cpu = metrics::format_cpu_percent(metrics);
+        let mem = metrics::format_memory_mb(metrics);
         let duration = format_duration(now_ms.saturating_sub(cluster.created_at));
         let last_activity = state
             .last_activity_at
@@ -133,6 +145,8 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, now_ms: i64) {
             Cell::from(cluster.id.clone()),
             Cell::from(cluster.state.clone()),
             Cell::from(provider),
+            Cell::from(cpu),
+            Cell::from(mem),
             Cell::from(duration),
             Cell::from(last_activity),
         ])
@@ -141,9 +155,11 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, now_ms: i64) {
     let table = Table::new(
         rows,
         [
-            Constraint::Percentage(36),
+            Constraint::Percentage(30),
             Constraint::Length(10),
             Constraint::Length(10),
+            Constraint::Length(metrics::CPU_COLUMN_WIDTH as u16),
+            Constraint::Length(metrics::MEM_COLUMN_WIDTH as u16),
             Constraint::Length(10),
             Constraint::Length(14),
         ],

@@ -31,13 +31,16 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             &state.launcher,
             state.provider_override.as_deref(),
         ),
-        ScreenId::Monitor => monitor::render(frame, layout[1], &state.monitor, state.now_ms),
+        ScreenId::Monitor => {
+            monitor::render(frame, layout[1], &state.monitor, &state.metrics, state.now_ms)
+        }
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
-                cluster::render(frame, layout[1], cluster_state);
+                let metrics = state.metrics.get(id);
+                cluster::render(frame, layout[1], cluster_state, metrics);
             } else {
                 let default_state = cluster::State::default();
-                cluster::render(frame, layout[1], &default_state);
+                cluster::render(frame, layout[1], &default_state, None);
             }
         }
         ScreenId::Agent {
