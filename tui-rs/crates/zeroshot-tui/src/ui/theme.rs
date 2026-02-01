@@ -75,6 +75,36 @@ pub fn key_desc_style() -> Style {
     Style::default().fg(FG_DIM)
 }
 
+/// Spine mode label (Intent/Command/etc).
+pub fn spine_mode_style() -> Style {
+    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+}
+
+/// Spine input text.
+pub fn spine_input_style() -> Style {
+    Style::default().fg(FG_PRIMARY)
+}
+
+/// Spine placeholder text.
+pub fn spine_placeholder_style() -> Style {
+    Style::default().fg(FG_MUTED)
+}
+
+/// Spine completion text (ghost).
+pub fn spine_completion_style() -> Style {
+    Style::default().fg(FG_DIM)
+}
+
+/// Spine right-side hint text.
+pub fn spine_hint_style() -> Style {
+    Style::default().fg(FG_MUTED)
+}
+
+/// Spine command prefix.
+pub fn spine_prefix_style() -> Style {
+    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+}
+
 /// Focused pane border.
 pub fn focus_border_style() -> Style {
     Style::default()
@@ -84,6 +114,11 @@ pub fn focus_border_style() -> Style {
 
 /// Unfocused pane border.
 pub fn unfocus_border_style() -> Style {
+    Style::default().fg(UNFOCUS_BORDER)
+}
+
+/// Spine border style.
+pub fn spine_border_style() -> Style {
     Style::default().fg(UNFOCUS_BORDER)
 }
 

@@ -5,7 +5,7 @@ use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId, UiVariant};
 use crate::screens::{agent, cluster, monitor};
-use crate::ui::widgets::{command_bar, toast};
+use crate::ui::widgets::{command_bar, spine, toast};
 
 pub mod launcher;
 pub mod scene;
@@ -73,11 +73,11 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     }
 }
 
-fn render_disruptive(frame: &mut Frame<'_>, _state: &AppState) {
+fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     let size = frame.area();
     let [canvas_area, spine_area] = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(3),
+        Constraint::Length(2),
     ])
     .areas(size);
 
@@ -88,12 +88,8 @@ fn render_disruptive(frame: &mut Frame<'_>, _state: &AppState) {
     );
     frame.render_widget(canvas, canvas_area);
 
-    let spine = Paragraph::new("Spine").alignment(Alignment::Left).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .title("Spine"),
-    );
-    frame.render_widget(spine, spine_area);
+    spine::render(frame, spine_area, &state.spine);
+    spine::set_cursor(frame, spine_area, &state.spine);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
