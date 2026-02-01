@@ -4,7 +4,7 @@ use crate::app::{
     Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, SpineAction,
     SpineMode, UiVariant, ZoomStackContext,
 };
-use crate::screens::{agent, cluster, launcher, monitor};
+use crate::screens::{agent, cluster, launcher, monitor, radar};
 
 pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     if matches!(state.ui_variant, UiVariant::Disruptive) {
@@ -65,6 +65,12 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
         return Some(Action::Quit);
     }
 
+    if !spine_active(state) {
+        if let Some(action) = route_disruptive_radar(state, key, ctrl, alt) {
+            return Some(action);
+        }
+    }
+
     match key.code {
         KeyCode::Esc => {
             if spine_active(state) {
@@ -103,6 +109,56 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
         KeyCode::Char(ch) if !ctrl && !alt => Some(Action::Spine(SpineAction::InsertChar(ch))),
         _ => None,
     }
+}
+
+fn route_disruptive_radar(
+    state: &AppState,
+    key: KeyEvent,
+    ctrl: bool,
+    alt: bool,
+) -> Option<Action> {
+    if ctrl || alt {
+        return None;
+    }
+    if !matches!(state.zoom_stack_context(), ZoomStackContext::FleetRadar) {
+        return None;
+    }
+
+    let speed = if key.modifiers.contains(KeyModifiers::SHIFT) {
+        radar::MoveSpeed::Fast
+    } else {
+        radar::MoveSpeed::Step
+    };
+
+    let action = match key.code {
+        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
+            radar::Action::MoveSelection {
+                direction: radar::Direction::Left,
+                speed,
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
+            radar::Action::MoveSelection {
+                direction: radar::Direction::Right,
+                speed,
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => radar::Action::MoveSelection {
+            direction: radar::Direction::Up,
+            speed,
+        },
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            radar::Action::MoveSelection {
+                direction: radar::Direction::Down,
+                speed,
+            }
+        }
+        KeyCode::Char('g') => radar::Action::CenterOnSelection,
+        KeyCode::Char('G') => radar::Action::ResetView,
+        _ => return None,
+    };
+
+    Some(Action::Screen(ScreenAction::FleetRadar(action)))
 }
 
 fn spine_active(state: &AppState) -> bool {

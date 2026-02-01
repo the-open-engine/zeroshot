@@ -459,6 +459,7 @@ pub enum NavigationAction {
 pub enum ScreenAction {
     Launcher(launcher::Action),
     Monitor(monitor::Action),
+    FleetRadar(radar::Action),
     Cluster {
         id: String,
         action: cluster::Action,
@@ -804,6 +805,7 @@ fn handle_screen_action(state: &mut AppState, action: ScreenAction, effects: &mu
     match action {
         ScreenAction::Launcher(action) => handle_launcher_action(state, action, effects),
         ScreenAction::Monitor(action) => handle_monitor_action(state, action, effects),
+        ScreenAction::FleetRadar(action) => handle_radar_action(state, action, effects),
         ScreenAction::Cluster { id, action } => handle_cluster_action(state, id, action, effects),
         ScreenAction::Agent {
             cluster_id,
@@ -875,6 +877,25 @@ fn handle_monitor_action(state: &mut AppState, action: monitor::Action, effects:
                     effects,
                 );
             }
+        }
+    }
+}
+
+fn handle_radar_action(state: &mut AppState, action: radar::Action, _effects: &mut Vec<Effect>) {
+    match action {
+        radar::Action::MoveSelection { direction, speed } => {
+            if state
+                .fleet_radar
+                .move_selection_direction(state.now_ms, direction, speed)
+            {
+                sync_camera_to_selection(state);
+            }
+        }
+        radar::Action::CenterOnSelection => {
+            sync_camera_to_selection(state);
+        }
+        radar::Action::ResetView => {
+            state.camera = Camera::default();
         }
     }
 }
@@ -1129,6 +1150,7 @@ fn handle_clusters_listed(
     let radar_clusters = clusters.clone();
     state.monitor.set_clusters(clusters, state.now_ms);
     state.fleet_radar.set_clusters(radar_clusters, state.now_ms);
+    sync_camera_to_selection(state);
     let ids: HashSet<String> = state
         .monitor
         .clusters
@@ -1136,6 +1158,12 @@ fn handle_clusters_listed(
         .map(|cluster| cluster.id.clone())
         .collect();
     state.metrics.retain(|id, _| ids.contains(id));
+}
+
+fn sync_camera_to_selection(state: &mut AppState) {
+    if let Some(layout) = state.fleet_radar.selected_layout(state.now_ms) {
+        state.camera.position = (layout.x as f32, layout.y as f32);
+    }
 }
 
 fn handle_cluster_metrics_listed(state: &mut AppState, metrics: Vec<ClusterMetrics>) {
@@ -1657,6 +1685,19 @@ fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
 mod tests {
     use super::*;
     use crate::commands;
+    use crate::protocol::ClusterSummary;
+
+    fn radar_cluster(id: &str) -> ClusterSummary {
+        ClusterSummary {
+            id: id.to_string(),
+            state: "running".to_string(),
+            provider: None,
+            created_at: 0,
+            agent_count: 1,
+            message_count: 0,
+            cwd: None,
+        }
+    }
 
     fn apply_actions(mut state: AppState, actions: Vec<Action>) -> (AppState, Vec<Effect>) {
         let mut effects = Vec::new();
@@ -1854,5 +1895,46 @@ mod tests {
         )));
         assert_eq!(state.spine.mode, SpineMode::Intent);
         assert_eq!(state.spine.input.input, "");
+    }
+
+    #[test]
+    fn radar_camera_centering() {
+        let mut state = AppState::default();
+        state.ui_variant = UiVariant::Disruptive;
+        state.now_ms = 10_000;
+        state
+            .fleet_radar
+            .set_clusters(vec![radar_cluster("west"), radar_cluster("east")], state.now_ms);
+        state
+            .fleet_radar
+            .layout_angles
+            .insert("west".to_string(), std::f64::consts::PI);
+        state
+            .fleet_radar
+            .layout_angles
+            .insert("east".to_string(), 0.0);
+        state.fleet_radar.selected = 0;
+
+        let (state, _) = update(
+            state,
+            Action::Screen(ScreenAction::FleetRadar(radar::Action::CenterOnSelection)),
+        );
+        assert!(state.camera.position.0 < 0.0);
+
+        let (state, _) = update(
+            state,
+            Action::Screen(ScreenAction::FleetRadar(radar::Action::MoveSelection {
+                direction: radar::Direction::Right,
+                speed: radar::MoveSpeed::Step,
+            })),
+        );
+        assert_eq!(state.fleet_radar.selected_cluster_id().as_deref(), Some("east"));
+        assert!(state.camera.position.0 > 0.0);
+
+        let (state, _) = update(
+            state,
+            Action::Screen(ScreenAction::FleetRadar(radar::Action::ResetView)),
+        );
+        assert_eq!(state.camera, Camera::default());
     }
 }
