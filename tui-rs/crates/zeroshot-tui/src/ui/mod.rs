@@ -13,6 +13,8 @@ pub mod shared;
 pub mod theme;
 pub mod widgets;
 
+const DISRUPTIVE_SPINE_HINT: &str = "/ cmd  i  ?  Tab  Esc  Enter";
+
 pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     if matches!(state.ui_variant, UiVariant::Disruptive) {
         render_disruptive(frame, state);
@@ -88,8 +90,12 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     );
     frame.render_widget(canvas, canvas_area);
 
-    spine::render(frame, spine_area, &state.spine);
-    spine::set_cursor(frame, spine_area, &state.spine);
+    let mut spine_state = state.spine.clone();
+    if spine_state.hint.is_empty() {
+        spine_state.hint = DISRUPTIVE_SPINE_HINT.to_string();
+    }
+    spine::render(frame, spine_area, &spine_state);
+    spine::set_cursor(frame, spine_area, &spine_state);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {

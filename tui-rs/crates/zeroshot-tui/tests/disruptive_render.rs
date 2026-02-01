@@ -33,5 +33,10 @@ fn disruptive_render_draws_canvas_and_spine() {
     assert!(content.contains("Canvas"));
     assert!(content.contains("Intent"));
     assert!(content.contains("Type intent..."));
+    assert!(content.contains("/ cmd"));
+    assert!(content.contains("?"));
+    assert!(content.contains("Tab"));
+    assert!(content.contains("Esc"));
+    assert!(content.contains("Enter"));
     assert!(!content.contains("ZEROSHOT"));
 }
