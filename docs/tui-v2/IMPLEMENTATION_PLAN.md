@@ -1,11 +1,11 @@
 # Zeroshot TUI v2 (Ratatui) - Architecture + Migration Plan
 
 Date: 2026-01-30
-Status: Proposed (supersedes the Ink-only plan)
+Status: Completed (Ratatui-only; legacy UI removed)
 
 ## Summary
 
-We already implemented an Ink/TypeScript UI under `src/tui/`. We are pivoting to:
+The legacy TypeScript UI has been removed. The Ratatui UI is now the only TUI:
 
 - **Frontend:** Rust + Ratatui (rendering + input + layout)
 - **Backend:** existing Node/TypeScript code (orchestrator/ledger/providers/etc) exposed via a small local RPC protocol
@@ -16,11 +16,10 @@ The goal is to make UI changes cheap: a layout tweak should generally touch only
 
 ## Guiding Constraints
 
-- Ratatui is the only renderer/input system for the new TUI UI (no Ink in the hot path).
+- Ratatui is the only renderer/input system for the new TUI (no legacy UI in the hot path).
 - Avoid rewriting core orchestration in Rust; treat Node as the source of truth for clusters.
 - Keep the UI architecture **screen/component-oriented** with a pure render layer.
 - Backend ↔ frontend boundary must be **versioned**, **typed**, and testable.
-- Allow an incremental cutover (Ink TUI can remain as a fallback during migration).
 
 ## Reuse vs Replace (Final Call)
 
@@ -28,24 +27,22 @@ The goal is to make UI changes cheap: a layout tweak should generally touch only
 
 - **All orchestration/runtime code**:
   - `src/orchestrator.js`, `src/ledger.js`, `src/message-bus.js`, providers, settings, id detection, etc.
-- **Most of the existing Ink TUI “backend-ish” services** (these are already UI-agnostic and should become the TUI backend implementation):
-  - `src/tui/services/cluster-launcher.ts`
-  - `src/tui/services/cluster-registry.ts`
-  - `src/tui/services/cluster-logs.ts`
-  - `src/tui/services/cluster-timeline.ts`
-  - `src/tui/services/cluster-topology.ts`
-  - `src/tui/services/guidance-delivery.ts`
+- **TUI backend services** (UI-agnostic and now the backend implementation):
+  - `src/tui-backend/services/cluster-launcher.ts`
+  - `src/tui-backend/services/cluster-registry.ts`
+  - `src/tui-backend/services/cluster-logs.ts`
+  - `src/tui-backend/services/cluster-timeline.ts`
+  - `src/tui-backend/services/cluster-topology.ts`
+  - `src/tui-backend/services/guidance-delivery.ts`
 - Any existing helpers under `lib/` that the services rely on (e.g. `lib/start-cluster.js`).
 
 Net: we keep essentially **all non-UI business logic**.
 
 ### Replace (rewrite)
 
-- All Ink rendering and React component code:
-  - `src/tui/app.tsx`, `src/tui/views/*`, `src/tui/components/*`, `src/tui/router.tsx`
-- Ink-specific navigation plumbing:
-  - `src/tui/view-stack.ts`, Ink `useInput` handling, etc.
-- Any “UI state helpers” that only exist because of Ink component structure (e.g. pending message UI state).
+- Legacy UI rendering and React component code (removed during cutover).
+- Legacy UI navigation plumbing (removed during cutover).
+- Legacy UI-only state helpers (removed during cutover).
 
 Net: we replace essentially **all presentation + input plumbing**.
 
@@ -196,11 +193,8 @@ Introduce a backend module that is explicitly _not_ a UI:
 - `src/tui-backend/`
   - `server.ts` (stdio JSON-RPC server)
   - `protocol/*` (TS runtime validation + types)
-  - `services/*` (moved from `src/tui/services/*` with minimal changes)
   - `subscriptions/*` (log/timeline stream management)
 - `lib/tui-backend/` (compiled output shipped in npm package)
-
-During migration, keep the existing Ink UI in place (or moved to `src/tui-ink/`) so we can cut over safely.
 
 ### Backend implementation notes
 
@@ -243,8 +237,6 @@ Install-time overrides:
 - `ZEROSHOT_TUI_BINARY_URL`: override the release asset URL
 - `ZEROSHOT_TUI_BINARY_SKIP`: skip download (truthy values)
 
-Fallback approach (acceptable if we accept the tradeoff):
-
 - Require `cargo` on install and build from source in `postinstall`.
 
 ## Migration Plan (Milestones)
@@ -258,7 +250,7 @@ Goal: get a testable backend API without changing user-facing behavior.
 - Create `src/tui-backend/*` and move/rewire the reusable services.
 - Implement stdio JSON-RPC server with `initialize` + a couple methods (`listClusters`, `startClusterFromText`).
 - Add integration tests that spawn the backend and exercise the protocol.
-- Keep Ink TUI unchanged for now.
+- Keep legacy UI TUI unchanged for now.
 
 ### Milestone 1: Rust “Hello UI” + backend handshake
 
@@ -291,9 +283,8 @@ Goal: feature parity with the _flows_, not visuals.
 ### Milestone 4: Cutover + cleanup
 
 - Switch `zeroshot` (TTY + no args) and `zeroshot tui` to launch the Rust TUI by default.
-- Keep `ZEROSHOT_TUI=ink` fallback for one release.
-- Remove Ink UI and dependencies once stable:
-  - `ink`, `react`, `@types/react`, `tsconfig.tui.json` (or repurpose for backend build)
+- Remove legacy UI and dependencies once stable:
+  - Remove legacy UI dependencies: `react`, `@types/react`, `tsconfig.tui.json` (or repurpose for backend build)
 - Update docs + help text (`zeroshot watch` behavior, etc).
 
 ## Detailed Issue Plan (Issue-by-Issue)
@@ -385,7 +376,6 @@ Status: Completed (Issue #241, closed 2026-01-31)
 **Scope**
 
 - Add `src/tui-backend/` with `server.ts`, `protocol/*`, `services/*`, `subscriptions/*`.
-- Move or re-export existing services from `src/tui/services/*` into backend services.
 - Ensure backend starts a single orchestrator instance (quiet mode).
 - Build output to `lib/tui-backend/`.
 
@@ -729,7 +719,6 @@ Status: Open (Issue #251)
 - `zeroshot tui` always launches TUI.
 - `zeroshot watch` opens Monitor screen.
 - `zeroshot codex|claude|gemini|opencode` sets session provider override.
-- `ZEROSHOT_TUI=ink` fallback retained for one release.
 
 **Acceptance Criteria**
 
@@ -761,17 +750,17 @@ Status: Open (Issue #251)
 
 ### Issue 21 — Cutover + Cleanup
 
-**Goal:** Fully replace Ink UI and remove legacy dependencies.
+**Goal:** Fully replace legacy UI and remove legacy dependencies.
 
 **Scope**
 
 - Switch default entrypoints to Rust TUI.
-- Remove Ink UI code and deps after stabilization.
+- Remove legacy UI code and deps after stabilization.
 - Update docs, help text, and `zeroshot watch` description.
 
 **Acceptance Criteria**
 
-- No Ink deps remain in package graph.
+- No legacy UI deps remain in package graph.
 - All docs refer to Ratatui TUI as default.
 
 **Dependencies:** Issues 19–20.

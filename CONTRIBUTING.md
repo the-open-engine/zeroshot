@@ -351,7 +351,7 @@ evaluate(script, agent, message) {
 
 ## Debugging
 
-### Debug the Ink TUI (zeroshot, zeroshot tui, zeroshot watch)
+### Debug the Rust TUI (zeroshot, zeroshot tui, zeroshot watch)
 
 Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot watch` to open Monitor view directly.
 
@@ -372,10 +372,10 @@ Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot 
 
 3. **Debug TUI rendering**
 
-   Edit `src/tui/index.tsx` (or the view you are working on) and add:
+   Edit `tui-rs/crates/zeroshot-tui/src/` (screen or widget) and add:
 
-   ```javascript
-   console.error(`Debug: ${JSON.stringify(data)}`);
+   ```rust
+   eprintln!("Debug: {data:?}");
    ```
 
 ### Debug Agent Execution

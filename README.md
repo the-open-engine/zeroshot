@@ -469,6 +469,14 @@ Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
 
 For security issues, see [SECURITY.md](SECURITY.md).
 
+## TUI
+
+Ratatui (Rust) is the only supported TUI. Entry points:
+
+- `zeroshot` (TTY + no args)
+- `zeroshot tui`
+- `zeroshot watch`
+
 ---
 
 MIT - [Covibes](https://github.com/covibes)
