@@ -519,6 +519,10 @@ pub enum SpineAction {
     SetMode(SpineMode),
     SetHint(String),
     SetCompletion(Option<SpineCompletion>),
+    EnterMode { mode: SpineMode, prefill: String },
+    Cancel,
+    Submit,
+    Complete,
     InsertChar(char),
     Backspace,
     Delete,
@@ -589,7 +593,7 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
             handle_command_bar_action(&mut state, command_action, &mut effects);
         }
         Action::Spine(spine_action) => {
-            handle_spine_action(&mut state, spine_action);
+            handle_spine_action(&mut state, spine_action, &mut effects);
         }
         Action::Command(command_action) => {
             handle_command_action(&mut state, command_action, &mut effects);
@@ -603,6 +607,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
     match nav {
         NavigationAction::Push(screen) => {
             cleanup_active_screen(state, effects);
+            seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
@@ -624,6 +629,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
         }
         NavigationAction::ReplaceTop(screen) => {
             cleanup_active_screen(state, effects);
+            seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
@@ -637,6 +643,28 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             queue_navigation_effects(&screen, effects);
         }
     }
+}
+
+fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
+    let ScreenId::Agent {
+        cluster_id,
+        agent_id,
+    } = screen
+    else {
+        return;
+    };
+
+    let role = state
+        .clusters
+        .get(cluster_id)
+        .and_then(|cluster_state| {
+            cluster_state
+                .agents
+                .iter()
+                .find(|agent| agent.id == *agent_id)
+                .and_then(|agent| agent.role.clone())
+        });
+    seed_agent_role(state, cluster_id, agent_id, role);
 }
 
 fn queue_navigation_effects(screen: &ScreenId, effects: &mut Vec<Effect>) {
@@ -1183,7 +1211,42 @@ fn handle_command_bar_action(
     }
 }
 
-fn handle_spine_action(state: &mut AppState, action: SpineAction) {
+fn set_spine_input(state: &mut AppState, value: String) {
+    state.spine.input.input = value;
+    state.spine.input.cursor = state.spine.input.input.chars().count();
+}
+
+fn reset_spine_state(state: &mut AppState) {
+    state.spine.mode = SpineMode::Intent;
+    state.spine.input.clear();
+    state.spine.completion = None;
+}
+
+fn resolve_spine_cluster_target(state: &AppState) -> Option<String> {
+    match state.active_screen() {
+        ScreenId::Cluster { id } => Some(id.clone()),
+        ScreenId::Agent { cluster_id, .. } => Some(cluster_id.clone()),
+        ScreenId::Monitor => state.monitor.selected_cluster_id(),
+        ScreenId::Launcher => None,
+    }
+}
+
+fn resolve_spine_agent_target(state: &AppState) -> Option<(String, String)> {
+    match state.active_screen() {
+        ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        } => Some((cluster_id.clone(), agent_id.clone())),
+        ScreenId::Cluster { id } => {
+            let cluster_state = state.clusters.get(id)?;
+            let agent = cluster_state.agents.get(cluster_state.selected_agent)?;
+            Some((id.clone(), agent.id.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut Vec<Effect>) {
     match action {
         SpineAction::SetMode(mode) => {
             state.spine.mode = mode;
@@ -1193,6 +1256,68 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction) {
         }
         SpineAction::SetCompletion(completion) => {
             state.spine.completion = completion;
+        }
+        SpineAction::EnterMode { mode, prefill } => {
+            state.spine.mode = mode;
+            set_spine_input(state, prefill);
+            state.spine.completion = None;
+        }
+        SpineAction::Cancel => {
+            reset_spine_state(state);
+        }
+        SpineAction::Submit => {
+            let mode = state.spine.mode;
+            let raw_input = state.spine.input.input.clone();
+            let trimmed = raw_input.trim();
+            match mode {
+                SpineMode::Command => {
+                    let raw = if raw_input.starts_with('/') {
+                        raw_input
+                    } else {
+                        format!("/{}", raw_input)
+                    };
+                    let context = state.command_context();
+                    effects.push(Effect::Command(CommandRequest::SubmitRaw { raw, context }));
+                }
+                SpineMode::Intent => {
+                    if !trimmed.is_empty() {
+                        effects.push(Effect::Backend(BackendRequest::StartClusterFromText {
+                            text: trimmed.to_string(),
+                            provider_override: state.provider_override.clone(),
+                        }));
+                    }
+                }
+                SpineMode::WhisperCluster => {
+                    if !trimmed.is_empty() {
+                        if let Some(cluster_id) = resolve_spine_cluster_target(state) {
+                            effects.push(Effect::Backend(BackendRequest::SendGuidanceToCluster {
+                                cluster_id,
+                                message: trimmed.to_string(),
+                            }));
+                        }
+                    }
+                }
+                SpineMode::WhisperAgent => {
+                    if !trimmed.is_empty() {
+                        if let Some((cluster_id, agent_id)) = resolve_spine_agent_target(state) {
+                            effects.push(Effect::Backend(BackendRequest::SendGuidanceToAgent {
+                                cluster_id,
+                                agent_id,
+                                message: trimmed.to_string(),
+                            }));
+                        }
+                    }
+                }
+            }
+            reset_spine_state(state);
+        }
+        SpineAction::Complete => {
+            if let Some(completion) = state.spine.completion.take() {
+                if !completion.text.is_empty() {
+                    state.spine.input.input.push_str(completion.text.as_str());
+                    state.spine.input.cursor = state.spine.input.input.chars().count();
+                }
+            }
         }
         SpineAction::InsertChar(ch) => {
             state.spine.input.insert_char(ch);
@@ -1217,6 +1342,7 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction) {
         }
         SpineAction::Clear => {
             state.spine.input.clear();
+            state.spine.completion = None;
         }
     }
 }
@@ -1409,5 +1535,105 @@ mod tests {
         state = next;
         assert_eq!(state.spine.input.input, "");
         assert_eq!(state.spine.input.cursor, 0);
+    }
+
+    #[test]
+    fn spine_cancel_resets_mode_and_input() {
+        let mut state = AppState::default();
+        state.spine.mode = SpineMode::Command;
+        state.spine.input.input = "help".to_string();
+        state.spine.input.cursor = 4;
+        state.spine.completion = Some(SpineCompletion {
+            text: "er".to_string(),
+            selection: 0,
+        });
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Cancel));
+        assert!(effects.is_empty());
+        assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
+        assert_eq!(state.spine.input.cursor, 0);
+        assert!(state.spine.completion.is_none());
+    }
+
+    #[test]
+    fn spine_submit_command_emits_command_effect() {
+        let mut state = AppState::default();
+        state.spine.mode = SpineMode::Command;
+        state.spine.input.input = "help ".to_string();
+        state.spine.input.cursor = 5;
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
+        assert!(effects.iter().any(|effect| {
+            matches!(
+                effect,
+                Effect::Command(CommandRequest::SubmitRaw { raw, .. }) if raw == "/help "
+            )
+        }));
+        assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
+        assert!(state.spine.completion.is_none());
+    }
+
+    #[test]
+    fn spine_submit_intent_starts_cluster() {
+        let mut state = AppState::default();
+        state.spine.mode = SpineMode::Intent;
+        state.spine.input.input = "launch".to_string();
+        state.spine.input.cursor = 6;
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::StartClusterFromText {
+                text: "launch".to_string(),
+                provider_override: None,
+            }
+        )));
+        assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
+    }
+
+    #[test]
+    fn spine_submit_whisper_cluster_sends_guidance() {
+        let mut state = AppState::default();
+        state.screen_stack = vec![ScreenId::Cluster {
+            id: "cluster-1".to_string(),
+        }];
+        state.spine.mode = SpineMode::WhisperCluster;
+        state.spine.input.input = "ping".to_string();
+        state.spine.input.cursor = 4;
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::SendGuidanceToCluster {
+                cluster_id: "cluster-1".to_string(),
+                message: "ping".to_string(),
+            }
+        )));
+        assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
+    }
+
+    #[test]
+    fn spine_submit_whisper_agent_sends_guidance() {
+        let mut state = AppState::default();
+        state.screen_stack = vec![ScreenId::Agent {
+            cluster_id: "cluster-1".to_string(),
+            agent_id: "agent-1".to_string(),
+        }];
+        state.spine.mode = SpineMode::WhisperAgent;
+        state.spine.input.input = "ping".to_string();
+        state.spine.input.cursor = 4;
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::SendGuidanceToAgent {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                message: "ping".to_string(),
+            }
+        )));
+        assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
     }
 }

@@ -1,18 +1,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
-    Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, UiVariant,
+    Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, SpineAction,
+    SpineMode, UiVariant,
 };
 use crate::screens::{agent, cluster, launcher, monitor};
 
 pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     if matches!(state.ui_variant, UiVariant::Disruptive) {
-        return match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Quit)
-            }
-            _ => None,
-        };
+        return route_disruptive(state, key);
     }
 
     if state.command_bar.active {
@@ -55,6 +51,96 @@ pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
             agent_id,
         } => route_agent(cluster_id, agent_id, key),
     }
+}
+
+fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    if ctrl && matches!(key.code, KeyCode::Char('c')) {
+        return Some(Action::Quit);
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            if spine_active(state) {
+                Some(Action::Spine(SpineAction::Cancel))
+            } else {
+                Some(Action::Navigate(NavigationAction::Pop))
+            }
+        }
+        KeyCode::Enter => {
+            if spine_active(state) {
+                Some(Action::Spine(SpineAction::Submit))
+            } else {
+                zoom_in_action(state)
+            }
+        }
+        KeyCode::Char('?') if !ctrl && !alt => Some(Action::Spine(SpineAction::EnterMode {
+            mode: SpineMode::Command,
+            prefill: "help ".to_string(),
+        })),
+        KeyCode::Char('/') if !ctrl && !alt => Some(Action::Spine(SpineAction::EnterMode {
+            mode: SpineMode::Command,
+            prefill: String::new(),
+        })),
+        KeyCode::Char('i') if !ctrl && !alt => Some(Action::Spine(SpineAction::EnterMode {
+            mode: intent_mode_for_context(state),
+            prefill: String::new(),
+        })),
+        KeyCode::Char('u') if ctrl => Some(Action::Spine(SpineAction::Clear)),
+        KeyCode::Tab => Some(Action::Spine(SpineAction::Complete)),
+        KeyCode::Backspace => Some(Action::Spine(SpineAction::Backspace)),
+        KeyCode::Delete => Some(Action::Spine(SpineAction::Delete)),
+        KeyCode::Left => Some(Action::Spine(SpineAction::MoveCursorLeft)),
+        KeyCode::Right => Some(Action::Spine(SpineAction::MoveCursorRight)),
+        KeyCode::Home => Some(Action::Spine(SpineAction::MoveCursorHome)),
+        KeyCode::End => Some(Action::Spine(SpineAction::MoveCursorEnd)),
+        KeyCode::Char(ch) if !ctrl && !alt => Some(Action::Spine(SpineAction::InsertChar(ch))),
+        _ => None,
+    }
+}
+
+fn spine_active(state: &AppState) -> bool {
+    !state.spine.input.input.is_empty()
+        || !matches!(state.spine.mode, SpineMode::Intent)
+        || state.spine.completion.is_some()
+}
+
+fn intent_mode_for_context(state: &AppState) -> SpineMode {
+    match state.active_screen() {
+        ScreenId::Agent { .. } => SpineMode::WhisperAgent,
+        ScreenId::Cluster { .. } => SpineMode::WhisperCluster,
+        ScreenId::Monitor => {
+            if state.monitor.selected_cluster_id().is_some() {
+                SpineMode::WhisperCluster
+            } else {
+                SpineMode::Intent
+            }
+        }
+        ScreenId::Launcher => SpineMode::Intent,
+    }
+}
+
+fn zoom_in_action(state: &AppState) -> Option<Action> {
+    match state.active_screen() {
+        ScreenId::Monitor => state.monitor.selected_cluster_id().map(|cluster_id| {
+            Action::Navigate(NavigationAction::Push(ScreenId::Cluster { id: cluster_id }))
+        }),
+        ScreenId::Cluster { id } => selected_agent_id(state, id).map(|agent_id| {
+            Action::Navigate(NavigationAction::Push(ScreenId::Agent {
+                cluster_id: id.clone(),
+                agent_id,
+            }))
+        }),
+        ScreenId::Launcher | ScreenId::Agent { .. } => None,
+    }
+}
+
+fn selected_agent_id(state: &AppState, cluster_id: &str) -> Option<String> {
+    let cluster_state = state.clusters.get(cluster_id)?;
+    let agent = cluster_state.agents.get(cluster_state.selected_agent)?;
+    Some(agent.id.clone())
 }
 
 fn route_command_bar(key: KeyEvent) -> Option<Action> {

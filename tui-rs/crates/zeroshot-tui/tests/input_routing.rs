@@ -1,7 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use zeroshot_tui::app::{self, Action, NavigationAction, ScreenAction, ScreenId, UiVariant};
+use zeroshot_tui::app::{
+    self, Action, NavigationAction, ScreenAction, ScreenId, SpineAction, SpineMode, UiVariant,
+};
 use zeroshot_tui::input;
+use zeroshot_tui::protocol::ClusterSummary;
 use zeroshot_tui::screens::{cluster, launcher, monitor};
 
 fn state_for(screen: ScreenId) -> app::AppState {
@@ -212,18 +215,87 @@ fn q_quits_except_in_launcher_input() {
 }
 
 #[test]
-fn disruptive_ui_only_allows_ctrl_c() {
+fn disruptive_routes_spine_shortcuts() {
     let mut state = state_for(ScreenId::Monitor);
     state.ui_variant = UiVariant::Disruptive;
 
-    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-    assert!(input::route_key(&state, esc).is_none());
+    let action = input::route_key(
+        &state,
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+    );
+    match action {
+        Some(Action::Spine(SpineAction::EnterMode { mode, prefill })) => {
+            assert_eq!(mode, SpineMode::Command);
+            assert_eq!(prefill, "");
+        }
+        _ => panic!("expected command mode for /"),
+    }
 
-    let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-    assert!(input::route_key(&state, q).is_none());
+    let action = input::route_key(
+        &state,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    match action {
+        Some(Action::Spine(SpineAction::EnterMode { mode, prefill })) => {
+            assert_eq!(mode, SpineMode::Command);
+            assert_eq!(prefill, "help ");
+        }
+        _ => panic!("expected help prefill for ?"),
+    }
 
-    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    assert!(input::route_key(&state, enter).is_none());
+    let action = input::route_key(
+        &state,
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+    );
+    assert!(matches!(action, Some(Action::Spine(SpineAction::Clear))));
+}
+
+#[test]
+fn disruptive_esc_cancels_or_pops() {
+    let mut state = state_for(ScreenId::Monitor);
+    state.ui_variant = UiVariant::Disruptive;
+
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(
+        action,
+        Some(Action::Navigate(NavigationAction::Pop))
+    ));
+
+    state.spine.mode = SpineMode::Command;
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(action, Some(Action::Spine(SpineAction::Cancel))));
+}
+
+#[test]
+fn disruptive_enter_submits_or_zooms() {
+    let mut state = state_for(ScreenId::Monitor);
+    state.ui_variant = UiVariant::Disruptive;
+    state.monitor.clusters = vec![ClusterSummary {
+        id: "c1".to_string(),
+        state: "running".to_string(),
+        provider: None,
+        created_at: 0,
+        agent_count: 0,
+        message_count: 0,
+        cwd: None,
+    }];
+
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        action,
+        Some(Action::Navigate(NavigationAction::Push(ScreenId::Cluster { id })))
+            if id == "c1"
+    ));
+
+    state.spine.input.input = "hello".to_string();
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(action, Some(Action::Spine(SpineAction::Submit))));
+}
+
+#[test]
+fn disruptive_ctrl_c_quits() {
+    let mut state = state_for(ScreenId::Monitor);
+    state.ui_variant = UiVariant::Disruptive;
 
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
     let action = input::route_key(&state, ctrl_c);
