@@ -52,7 +52,9 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             }
         }
         ScreenId::ClusterCanvas { id } => {
-            cluster_canvas::render(frame, content_area, id);
+            let cluster_state = state.clusters.get(id);
+            let canvas_state = state.cluster_canvases.get(id);
+            cluster_canvas::render(frame, content_area, id, cluster_state, canvas_state);
         }
         ScreenId::Agent {
             cluster_id,
@@ -104,7 +106,9 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             );
         }
         ScreenId::ClusterCanvas { id } => {
-            cluster_canvas::render(frame, canvas_area, id);
+            let cluster_state = state.clusters.get(id);
+            let canvas_state = state.cluster_canvases.get(id);
+            cluster_canvas::render(frame, canvas_area, id, cluster_state, canvas_state);
         }
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
@@ -251,12 +255,17 @@ fn screen_breadcrumb(screen: &ScreenId) -> String {
     }
 }
 
-fn truncate_id(id: &str) -> &str {
-    if id.len() > 16 {
-        &id[..16]
-    } else {
-        id
+fn truncate_id(id: &str) -> String {
+    const LIMIT: usize = 16;
+    let mut iter = id.chars();
+    let mut out = String::new();
+    for _ in 0..LIMIT {
+        match iter.next() {
+            Some(ch) => out.push(ch),
+            None => return id.to_string(),
+        }
     }
+    out
 }
 
 fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
