@@ -41,6 +41,30 @@ impl ScreenId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InitialScreen {
+    Launcher,
+    Monitor,
+}
+
+impl InitialScreen {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_lowercase().as_str() {
+            "launcher" => Ok(Self::Launcher),
+            "monitor" => Ok(Self::Monitor),
+            other => Err(format!(
+                "Unknown initial screen: {other}. Valid: launcher, monitor"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartupOptions {
+    pub initial_screen: Option<InitialScreen>,
+    pub provider_override: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum BackendStatus {
     Disconnected,
@@ -206,6 +230,22 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn apply_startup_options(&mut self, options: StartupOptions) {
+        if let Some(provider) = options.provider_override {
+            self.provider_override = Some(provider);
+        }
+
+        if let Some(initial_screen) = options.initial_screen {
+            self.screen_stack = vec![ScreenId::Launcher];
+            match initial_screen {
+                InitialScreen::Launcher => {}
+                InitialScreen::Monitor => {
+                    self.screen_stack.push(ScreenId::Monitor);
+                }
+            }
+        }
     }
 
     pub fn active_screen(&self) -> &ScreenId {
