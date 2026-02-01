@@ -48,6 +48,117 @@ pub enum BackendStatus {
     Exited(BackendExit),
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CommandBarState {
+    pub active: bool,
+    pub input: String,
+    pub cursor: usize,
+}
+
+impl CommandBarState {
+    pub fn open_with(&mut self, prefill: String) {
+        self.active = true;
+        self.input = prefill;
+        self.cursor = self.len_chars();
+    }
+
+    pub fn close(&mut self) {
+        self.active = false;
+        self.clear();
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        let idx = self.byte_index(self.cursor);
+        self.input.insert(idx, ch);
+        self.cursor = self.cursor.saturating_add(1);
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let start = self.byte_index(self.cursor - 1);
+        let end = self.byte_index(self.cursor);
+        if start < end {
+            self.input.replace_range(start..end, "");
+            self.cursor = self.cursor.saturating_sub(1);
+        }
+    }
+
+    pub fn delete(&mut self) {
+        let len = self.len_chars();
+        if self.cursor >= len {
+            return;
+        }
+        let start = self.byte_index(self.cursor);
+        let end = self.byte_index(self.cursor + 1);
+        if start < end {
+            self.input.replace_range(start..end, "");
+        }
+    }
+
+    pub fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        let len = self.len_chars();
+        if self.cursor < len {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn move_end(&mut self) {
+        self.cursor = self.len_chars();
+    }
+
+    pub fn clear(&mut self) {
+        self.input.clear();
+        self.cursor = 0;
+    }
+
+    fn len_chars(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn byte_index(&self, char_index: usize) -> usize {
+        if char_index == 0 {
+            return 0;
+        }
+        self.input
+            .char_indices()
+            .nth(char_index)
+            .map(|(idx, _)| idx)
+            .unwrap_or_else(|| self.input.len())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToastLevel {
+    Info,
+    Success,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToastState {
+    pub message: String,
+    pub level: ToastLevel,
+    pub expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandContext {
+    pub provider_override: Option<String>,
+    pub active_screen: ScreenId,
+}
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub screen_stack: Vec<ScreenId>,
@@ -62,6 +173,8 @@ pub struct AppState {
     pub backend_status: BackendStatus,
     pub last_error: Option<String>,
     pub provider_override: Option<String>,
+    pub command_bar: CommandBarState,
+    pub toast: Option<ToastState>,
 }
 
 impl Default for AppState {
@@ -79,6 +192,8 @@ impl Default for AppState {
             backend_status: BackendStatus::Disconnected,
             last_error: None,
             provider_override: None,
+            command_bar: CommandBarState::default(),
+            toast: None,
         }
     }
 }
@@ -92,6 +207,13 @@ impl AppState {
         self.screen_stack
             .last()
             .unwrap_or(&ScreenId::Launcher)
+    }
+
+    pub fn command_context(&self) -> CommandContext {
+        CommandContext {
+            provider_override: self.provider_override.clone(),
+            active_screen: self.active_screen().clone(),
+        }
     }
 
     fn ensure_screen_state(&mut self, screen: &ScreenId) {
@@ -180,6 +302,8 @@ pub enum Action {
     Navigate(NavigationAction),
     Screen(ScreenAction),
     Backend(BackendAction),
+    CommandBar(CommandBarAction),
+    Command(CommandAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,8 +340,34 @@ pub enum BackendRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRequest {
-    SubmitRaw { raw: String },
+    SubmitRaw { raw: String, context: CommandContext },
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandBarAction {
+    Open { prefill: String },
+    Close,
+    InsertChar(char),
+    Backspace,
+    Delete,
+    MoveCursorLeft,
+    MoveCursorRight,
+    MoveCursorHome,
+    MoveCursorEnd,
+    Submit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandAction {
+    ShowToast { level: ToastLevel, message: String },
+    SetProviderOverride { provider: Option<String> },
+    StartClusterFromIssue {
+        reference: String,
+        provider_override: Option<String>,
+    },
+}
+
+const TOAST_DURATION_MS: i64 = 5000;
 
 pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
     let mut effects = Vec::new();
@@ -225,6 +375,11 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
         Action::Tick { now_ms } => {
             state.tick_count = state.tick_count.saturating_add(1);
             state.now_ms = now_ms;
+            if let Some(toast) = &state.toast {
+                if toast.expires_at_ms <= state.now_ms {
+                    state.toast = None;
+                }
+            }
             let should_poll = matches!(state.active_screen(), ScreenId::Monitor)
                 && state.monitor.poll_due(now_ms);
             if should_poll {
@@ -246,6 +401,12 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
         }
         Action::Backend(backend_action) => {
             handle_backend_action(&mut state, backend_action, &mut effects);
+        }
+        Action::CommandBar(command_action) => {
+            handle_command_bar_action(&mut state, command_action, &mut effects);
+        }
+        Action::Command(command_action) => {
+            handle_command_action(&mut state, command_action, &mut effects);
         }
     }
 
@@ -348,6 +509,7 @@ fn handle_launcher_action(state: &mut AppState, action: launcher::Action, effect
             if trimmed.starts_with('/') {
                 effects.push(Effect::Command(CommandRequest::SubmitRaw {
                     raw: trimmed.to_string(),
+                    context: state.command_context(),
                 }));
             } else {
                 effects.push(Effect::Backend(BackendRequest::StartClusterFromText {
@@ -731,6 +893,86 @@ fn handle_backend_error(state: &mut AppState, message: String) {
     state.last_error = Some(message);
 }
 
+fn handle_command_bar_action(
+    state: &mut AppState,
+    action: CommandBarAction,
+    effects: &mut Vec<Effect>,
+) {
+    match action {
+        CommandBarAction::Open { prefill } => {
+            state.command_bar.open_with(prefill);
+        }
+        CommandBarAction::Close => {
+            state.command_bar.close();
+        }
+        CommandBarAction::InsertChar(ch) => {
+            if state.command_bar.active {
+                state.command_bar.insert_char(ch);
+            }
+        }
+        CommandBarAction::Backspace => {
+            if state.command_bar.active {
+                state.command_bar.backspace();
+            }
+        }
+        CommandBarAction::Delete => {
+            if state.command_bar.active {
+                state.command_bar.delete();
+            }
+        }
+        CommandBarAction::MoveCursorLeft => {
+            if state.command_bar.active {
+                state.command_bar.move_left();
+            }
+        }
+        CommandBarAction::MoveCursorRight => {
+            if state.command_bar.active {
+                state.command_bar.move_right();
+            }
+        }
+        CommandBarAction::MoveCursorHome => {
+            if state.command_bar.active {
+                state.command_bar.move_home();
+            }
+        }
+        CommandBarAction::MoveCursorEnd => {
+            if state.command_bar.active {
+                state.command_bar.move_end();
+            }
+        }
+        CommandBarAction::Submit => {
+            let raw = state.command_bar.input.clone();
+            let context = state.command_context();
+            state.command_bar.close();
+            effects.push(Effect::Command(CommandRequest::SubmitRaw { raw, context }));
+        }
+    }
+}
+
+fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &mut Vec<Effect>) {
+    match action {
+        CommandAction::ShowToast { level, message } => {
+            state.toast = Some(ToastState {
+                message,
+                level,
+                expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+            });
+        }
+        CommandAction::SetProviderOverride { provider } => {
+            state.provider_override = provider;
+        }
+        CommandAction::StartClusterFromIssue {
+            reference,
+            provider_override,
+        } => {
+            effects.push(Effect::Backend(BackendRequest::StartClusterFromIssue {
+                reference,
+                provider_override,
+            }));
+        }
+    }
+}
+
 fn cleanup_active_screen(state: &mut AppState, effects: &mut Vec<Effect>) {
     let active = state.screen_stack.last().cloned();
     match active {
@@ -767,5 +1009,53 @@ fn cleanup_agent_subscriptions(
     };
     if let Some(subscription_id) = entry.log_subscription.take() {
         effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands;
+
+    fn apply_actions(mut state: AppState, actions: Vec<Action>) -> (AppState, Vec<Effect>) {
+        let mut effects = Vec::new();
+        for action in actions {
+            let (next_state, next_effects) = update(state, action);
+            state = next_state;
+            effects.extend(next_effects);
+        }
+        (state, effects)
+    }
+
+    #[test]
+    fn provider_override_applies_to_issue_start() {
+        let state = AppState::default();
+        let actions = commands::dispatch(CommandRequest::SubmitRaw {
+            raw: "/provider codex".to_string(),
+            context: state.command_context(),
+        })
+        .expect("dispatch provider");
+        let (state, _) = apply_actions(state, actions);
+        assert_eq!(state.provider_override, Some("codex".to_string()));
+
+        let actions = commands::dispatch(CommandRequest::SubmitRaw {
+            raw: "/issue org/repo#123".to_string(),
+            context: state.command_context(),
+        })
+        .expect("dispatch issue");
+        let (_state, effects) = apply_actions(state, actions);
+        let mut found = false;
+        for effect in effects {
+            if let Effect::Backend(BackendRequest::StartClusterFromIssue {
+                reference,
+                provider_override,
+            }) = effect
+            {
+                found = true;
+                assert_eq!(reference, "org/repo#123");
+                assert_eq!(provider_override, Some("codex".to_string()));
+            }
+        }
+        assert!(found, "expected StartClusterFromIssue effect");
     }
 }

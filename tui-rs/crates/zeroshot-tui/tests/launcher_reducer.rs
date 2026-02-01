@@ -1,4 +1,7 @@
-use zeroshot_tui::app::{self, Action, AppState, BackendAction, BackendRequest, CommandRequest, Effect, ScreenAction};
+use zeroshot_tui::app::{
+    self, Action, AppState, BackendAction, BackendRequest, CommandContext, CommandRequest, Effect,
+    ScreenAction, ScreenId,
+};
 use zeroshot_tui::screens::launcher;
 
 #[test]
@@ -37,6 +40,10 @@ fn submit_command_routes_to_command_effect() {
         effects,
         vec![Effect::Command(CommandRequest::SubmitRaw {
             raw: "/help".to_string(),
+            context: CommandContext {
+                provider_override: None,
+                active_screen: ScreenId::Launcher,
+            },
         })]
     );
 }

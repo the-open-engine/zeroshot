@@ -5,14 +5,21 @@ use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId};
 use crate::screens::{agent, cluster, monitor};
+use crate::ui::widgets::{command_bar, toast};
 
 pub mod launcher;
+pub mod widgets;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     let size = frame.size();
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ])
         .split(size);
 
     render_header(frame, layout[0], state);
@@ -46,6 +53,10 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             }
         }
     }
+
+    toast::render(frame, layout[2], state.toast.as_ref());
+    command_bar::render(frame, layout[3], &state.command_bar);
+    command_bar::set_cursor(frame, layout[3], &state.command_bar);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {

@@ -99,7 +99,7 @@ fn handle_terminal_events(
     if event::poll(timeout)? {
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if let Some(action) = input::route_key(state.active_screen(), key) {
+                if let Some(action) = input::route_key(state, key) {
                     send_action(action_tx, action)?;
                 }
             }

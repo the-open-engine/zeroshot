@@ -4,6 +4,12 @@ use zeroshot_tui::app::{self, Action, NavigationAction, ScreenAction, ScreenId};
 use zeroshot_tui::input;
 use zeroshot_tui::screens::{cluster, launcher, monitor};
 
+fn state_for(screen: ScreenId) -> app::AppState {
+    let mut state = app::AppState::default();
+    state.screen_stack = vec![screen];
+    state
+}
+
 #[test]
 fn global_keys_apply_everywhere() {
     let screens = vec![
@@ -19,15 +25,16 @@ fn global_keys_apply_everywhere() {
     ];
 
     for screen in screens {
+        let state = state_for(screen);
         let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let action = input::route_key(&screen, esc);
+        let action = input::route_key(&state, esc);
         assert!(matches!(
             action,
             Some(Action::Navigate(NavigationAction::Pop))
         ));
 
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        let action = input::route_key(&screen, ctrl_c);
+        let action = input::route_key(&state, ctrl_c);
         assert!(matches!(action, Some(Action::Quit)));
     }
 }
@@ -41,17 +48,20 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     };
 
     let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
-    assert!(input::route_key(&launcher, down).is_none());
+    let state = state_for(launcher);
+    assert!(input::route_key(&state, down).is_none());
 
     let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
-    let action = input::route_key(&monitor_screen, down);
+    let state = state_for(monitor_screen);
+    let action = input::route_key(&state, down);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Monitor(monitor::Action::MoveSelection(1))))
     ));
 
     let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, tab);
+    let state = state_for(cluster_screen.clone());
+    let action = input::route_key(&state, tab);
     match action {
         Some(Action::Screen(ScreenAction::Cluster { id, action })) => {
             assert_eq!(id, "c1");
@@ -64,7 +74,8 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     }
 
     let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, up);
+    let state = state_for(cluster_screen.clone());
+    let action = input::route_key(&state, up);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Cluster {
@@ -74,7 +85,8 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     ));
 
     let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, down);
+    let state = state_for(cluster_screen.clone());
+    let action = input::route_key(&state, down);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Cluster {
@@ -84,7 +96,8 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     ));
 
     let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, k);
+    let state = state_for(cluster_screen.clone());
+    let action = input::route_key(&state, k);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Cluster {
@@ -94,7 +107,8 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     ));
 
     let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, j);
+    let state = state_for(cluster_screen.clone());
+    let action = input::route_key(&state, j);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Cluster {
@@ -104,7 +118,8 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     ));
 
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    let action = input::route_key(&cluster_screen, enter);
+    let state = state_for(cluster_screen);
+    let action = input::route_key(&state, enter);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Cluster {
@@ -114,16 +129,17 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     ));
 
     let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
-    assert!(input::route_key(&monitor_screen, tab).is_none());
+    let state = state_for(ScreenId::Monitor);
+    assert!(input::route_key(&state, tab).is_none());
 }
 
 #[test]
 fn launcher_keys_edit_input_state() {
-    let screen = ScreenId::Launcher;
     let mut state = app::AppState::default();
+    state.screen_stack = vec![ScreenId::Launcher];
 
     let action = input::route_key(
-        &screen,
+        &state,
         KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
     )
     .expect("expected insert char");
@@ -133,7 +149,7 @@ fn launcher_keys_edit_input_state() {
     assert_eq!(state.launcher.cursor, 1);
 
     let action = input::route_key(
-        &screen,
+        &state,
         KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE),
     )
     .expect("expected insert char");
@@ -142,21 +158,21 @@ fn launcher_keys_edit_input_state() {
     assert_eq!(state.launcher.input, "ab");
     assert_eq!(state.launcher.cursor, 2);
 
-    let action = input::route_key(&screen, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
         .expect("expected move left");
     let (next_state, _) = app::update(state, action);
     state = next_state;
     assert_eq!(state.launcher.cursor, 1);
 
     let action =
-        input::route_key(&screen, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        input::route_key(&state, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
             .expect("expected backspace");
     let (next_state, _) = app::update(state, action);
     state = next_state;
     assert_eq!(state.launcher.input, "b");
     assert_eq!(state.launcher.cursor, 0);
 
-    let action = input::route_key(&screen, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+    let action = input::route_key(&state, KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
         .expect("expected delete");
     let (next_state, _) = app::update(state, action);
     state = next_state;
@@ -167,7 +183,8 @@ fn launcher_keys_edit_input_state() {
 #[test]
 fn q_quits_except_in_launcher_input() {
     let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-    let action = input::route_key(&ScreenId::Launcher, key);
+    let state = state_for(ScreenId::Launcher);
+    let action = input::route_key(&state, key);
     assert!(matches!(
         action,
         Some(Action::Screen(ScreenAction::Launcher(
@@ -187,7 +204,9 @@ fn q_quits_except_in_launcher_input() {
     ];
 
     for screen in screens {
-        let action = input::route_key(&screen, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        let state = state_for(screen);
+        let action =
+            input::route_key(&state, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(matches!(action, Some(Action::Quit)));
     }
 }

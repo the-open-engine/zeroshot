@@ -1,11 +1,30 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{Action, NavigationAction, ScreenAction, ScreenId};
+use crate::app::{
+    Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId,
+};
 use crate::screens::{agent, cluster, launcher, monitor};
 
-pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
+pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
+    if state.command_bar.active {
+        return route_command_bar(key);
+    }
+
+    let screen = state.active_screen();
     if let Some(action) = route_global(screen, key) {
         return Some(action);
+    }
+
+    if !matches!(screen, ScreenId::Launcher) {
+        if let KeyCode::Char('/') = key.code {
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+            {
+                return Some(Action::CommandBar(CommandBarAction::Open {
+                    prefill: "/".to_string(),
+                }));
+            }
+        }
     }
 
     match screen {
@@ -16,6 +35,26 @@ pub fn route_key(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
             cluster_id,
             agent_id,
         } => route_agent(cluster_id, agent_id, key),
+    }
+}
+
+fn route_command_bar(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc => Some(Action::CommandBar(CommandBarAction::Close)),
+        KeyCode::Enter => Some(Action::CommandBar(CommandBarAction::Submit)),
+        KeyCode::Backspace => Some(Action::CommandBar(CommandBarAction::Backspace)),
+        KeyCode::Delete => Some(Action::CommandBar(CommandBarAction::Delete)),
+        KeyCode::Left => Some(Action::CommandBar(CommandBarAction::MoveCursorLeft)),
+        KeyCode::Right => Some(Action::CommandBar(CommandBarAction::MoveCursorRight)),
+        KeyCode::Home => Some(Action::CommandBar(CommandBarAction::MoveCursorHome)),
+        KeyCode::End => Some(Action::CommandBar(CommandBarAction::MoveCursorEnd)),
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(Action::CommandBar(CommandBarAction::InsertChar(ch)))
+        }
+        _ => None,
     }
 }
 
