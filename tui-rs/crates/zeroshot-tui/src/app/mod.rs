@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::{BackendExit, BackendNotification};
-use crate::screens::{agent, cluster, launcher, monitor, radar};
+use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
@@ -293,6 +293,7 @@ pub struct AppState {
     pub metrics: HashMap<String, ClusterMetrics>,
     pub last_metrics_poll_at: Option<i64>,
     pub clusters: HashMap<String, cluster::State>,
+    pub cluster_canvases: HashMap<String, cluster_canvas::State>,
     pub agents: HashMap<AgentKey, agent::State>,
     pub last_size: Option<(u16, u16)>,
     pub tick_count: u64,
@@ -319,6 +320,7 @@ impl Default for AppState {
             metrics: HashMap::new(),
             last_metrics_poll_at: None,
             clusters: HashMap::new(),
+            cluster_canvases: HashMap::new(),
             agents: HashMap::new(),
             last_size: None,
             tick_count: 0,
@@ -426,10 +428,12 @@ impl AppState {
             | ScreenId::Monitor
             | ScreenId::IntentConsole
             | ScreenId::FleetRadar => {}
-            ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
-                self.clusters
-                    .entry(id.clone())
-                    .or_default();
+            ScreenId::Cluster { id } => {
+                self.clusters.entry(id.clone()).or_default();
+            }
+            ScreenId::ClusterCanvas { id } => {
+                self.clusters.entry(id.clone()).or_default();
+                self.cluster_canvases.entry(id.clone()).or_default();
             }
             ScreenId::Agent {
                 cluster_id,
@@ -1185,6 +1189,12 @@ fn handle_cluster_topology(
     cluster_id: String,
     topology: crate::protocol::ClusterTopology,
 ) {
+    let canvas_entry = state
+        .cluster_canvases
+        .entry(cluster_id.clone())
+        .or_default();
+    canvas_entry.update_layout(&topology);
+
     let entry = state
         .clusters
         .entry(cluster_id)
@@ -1196,10 +1206,14 @@ fn handle_cluster_topology(
 fn handle_cluster_topology_error(state: &mut AppState, cluster_id: String, message: String) {
     let entry = state
         .clusters
-        .entry(cluster_id)
+        .entry(cluster_id.clone())
         .or_default();
     entry.topology = None;
     entry.topology_error = Some(message);
+
+    if let Some(canvas_entry) = state.cluster_canvases.get_mut(&cluster_id) {
+        canvas_entry.clear_layout();
+    }
 }
 
 fn handle_log_subscription(
@@ -1220,9 +1234,12 @@ fn handle_log_subscription(
         None => {
             let entry = state
                 .clusters
-                .entry(cluster_id)
+                .entry(cluster_id.clone())
                 .or_default();
-            entry.log_subscription = Some(subscription_id);
+            entry.log_subscription = Some(subscription_id.clone());
+            if let Some(canvas_entry) = state.cluster_canvases.get_mut(&cluster_id) {
+                canvas_entry.log_subscription = Some(subscription_id);
+            }
         }
     }
 }
@@ -1234,9 +1251,12 @@ fn handle_cluster_timeline_subscription(
 ) {
     let entry = state
         .clusters
-        .entry(cluster_id)
+        .entry(cluster_id.clone())
         .or_default();
-    entry.timeline_subscription = Some(subscription_id);
+    entry.timeline_subscription = Some(subscription_id.clone());
+    if let Some(canvas_entry) = state.cluster_canvases.get_mut(&cluster_id) {
+        canvas_entry.timeline_subscription = Some(subscription_id);
+    }
 }
 
 fn handle_guidance_result(
@@ -1637,6 +1657,10 @@ fn cleanup_cluster_subscriptions(state: &mut AppState, id: &str, effects: &mut V
     }
     if let Some(subscription_id) = entry.timeline_subscription.take() {
         effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
+    if let Some(canvas_entry) = state.cluster_canvases.get_mut(id) {
+        canvas_entry.log_subscription = None;
+        canvas_entry.timeline_subscription = None;
     }
 }
 

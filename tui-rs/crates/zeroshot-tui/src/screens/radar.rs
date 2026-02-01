@@ -449,11 +449,18 @@ fn orb_radius(delta: i64, age_ms: i64) -> f64 {
 
 fn truncate_label(id: &str) -> String {
     const LIMIT: usize = 10;
-    if id.len() <= LIMIT {
-        id.to_string()
-    } else {
-        format!("{}..", &id[..LIMIT])
+    let mut iter = id.chars();
+    let mut out = String::new();
+    for _ in 0..LIMIT {
+        match iter.next() {
+            Some(ch) => out.push(ch),
+            None => return id.to_string(),
+        }
     }
+    if iter.next().is_some() {
+        out.push_str("..");
+    }
+    out
 }
 
 fn cluster_color(cluster: &ClusterSummary) -> Color {
@@ -507,6 +514,13 @@ mod tests {
         let recent = layout_position("cluster-1", 1_000);
         let older = layout_position("cluster-1", 1_000_000);
         assert!(recent.ring_radius < older.ring_radius);
+    }
+
+    #[test]
+    fn truncate_label_handles_unicode() {
+        let label = "αβγδεζηθικλμ";
+        let truncated = truncate_label(label);
+        assert_eq!(truncated, "αβγδεζηθικ..");
     }
 
     #[test]

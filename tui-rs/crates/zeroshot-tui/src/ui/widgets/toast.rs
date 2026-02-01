@@ -13,10 +13,20 @@ pub fn format_inline(toast: Option<&ToastState>) -> Option<(String, Style)> {
         ToastLevel::Error => ("\u{2717}", theme::toast_error_style()),     // ✗
     };
     let first_line = toast.message.lines().next().unwrap_or("");
-    let msg = if first_line.len() > 40 {
-        format!("{prefix} {}...", &first_line[..37])
-    } else {
-        format!("{prefix} {first_line}")
-    };
+    let msg = format!("{prefix} {}", truncate_toast_line(first_line));
     Some((msg, style))
+}
+
+fn truncate_toast_line(line: &str) -> String {
+    const MAX_LEN: usize = 40;
+    const TRUNC_LEN: usize = 37;
+    if line.chars().count() <= MAX_LEN {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    for ch in line.chars().take(TRUNC_LEN) {
+        out.push(ch);
+    }
+    out.push_str("...");
+    out
 }
