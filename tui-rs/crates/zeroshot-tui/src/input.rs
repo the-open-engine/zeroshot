@@ -4,7 +4,7 @@ use crate::app::{
     Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, SpineAction,
     SpineMode, UiVariant, ZoomStackContext,
 };
-use crate::screens::{agent, cluster, launcher, monitor, radar};
+use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 
 pub fn route_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     if matches!(state.ui_variant, UiVariant::Disruptive) {
@@ -69,6 +69,9 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
         if let Some(action) = route_disruptive_radar(state, key, ctrl, alt) {
             return Some(action);
         }
+        if let Some(action) = route_disruptive_cluster_canvas(state, key, ctrl, alt) {
+            return Some(action);
+        }
     }
 
     match key.code {
@@ -82,6 +85,8 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
         KeyCode::Enter => {
             if spine_active(state) {
                 Some(Action::Spine(SpineAction::Submit))
+            } else if let Some(action) = cluster_canvas_zoom_action(state) {
+                Some(action)
             } else {
                 zoom_in_action(state)
             }
@@ -161,6 +166,60 @@ fn route_disruptive_radar(
     Some(Action::Screen(ScreenAction::FleetRadar(action)))
 }
 
+fn route_disruptive_cluster_canvas(
+    state: &AppState,
+    key: KeyEvent,
+    ctrl: bool,
+    alt: bool,
+) -> Option<Action> {
+    if ctrl || alt {
+        return None;
+    }
+
+    let ScreenId::ClusterCanvas { id } = state.active_screen() else {
+        return None;
+    };
+
+    let speed = if key.modifiers.contains(KeyModifiers::SHIFT) {
+        cluster_canvas::MoveSpeed::Fast
+    } else {
+        cluster_canvas::MoveSpeed::Step
+    };
+
+    let action = match key.code {
+        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
+            cluster_canvas::Action::MoveFocus {
+                direction: cluster_canvas::Direction::Left,
+                speed,
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
+            cluster_canvas::Action::MoveFocus {
+                direction: cluster_canvas::Direction::Right,
+                speed,
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            cluster_canvas::Action::MoveFocus {
+                direction: cluster_canvas::Direction::Up,
+                speed,
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            cluster_canvas::Action::MoveFocus {
+                direction: cluster_canvas::Direction::Down,
+                speed,
+            }
+        }
+        _ => return None,
+    };
+
+    Some(Action::Screen(ScreenAction::ClusterCanvas {
+        id: id.clone(),
+        action,
+    }))
+}
+
 fn spine_active(state: &AppState) -> bool {
     !state.spine.input.input.is_empty()
         || !matches!(state.spine.mode, SpineMode::Intent)
@@ -194,6 +253,16 @@ fn zoom_in_action(state: &AppState) -> Option<Action> {
             }))
         }),
         ZoomStackContext::Agent { .. } | ZoomStackContext::Root => None,
+    }
+}
+
+fn cluster_canvas_zoom_action(state: &AppState) -> Option<Action> {
+    match state.active_screen() {
+        ScreenId::ClusterCanvas { id } => Some(Action::Screen(ScreenAction::ClusterCanvas {
+            id: id.clone(),
+            action: cluster_canvas::Action::ZoomIn,
+        })),
+        _ => None,
     }
 }
 

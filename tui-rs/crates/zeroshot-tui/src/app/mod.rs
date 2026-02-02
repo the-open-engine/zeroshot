@@ -468,6 +468,10 @@ pub enum ScreenAction {
         id: String,
         action: cluster::Action,
     },
+    ClusterCanvas {
+        id: String,
+        action: cluster_canvas::Action,
+    },
     Agent {
         cluster_id: String,
         agent_id: String,
@@ -698,6 +702,9 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
+            if let ScreenId::ClusterCanvas { id } = &screen {
+                ensure_cluster_canvas_focus(state, id);
+            }
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
             } else if matches!(screen, ScreenId::FleetRadar) {
@@ -724,6 +731,9 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
             cleanup_active_screen(state, effects);
             seed_agent_role_for_navigation(state, &screen);
             state.ensure_screen_state(&screen);
+            if let ScreenId::ClusterCanvas { id } = &screen {
+                ensure_cluster_canvas_focus(state, id);
+            }
             if matches!(screen, ScreenId::Monitor) {
                 state.monitor.mark_polled(state.now_ms);
             } else if matches!(screen, ScreenId::FleetRadar) {
@@ -740,6 +750,18 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
     }
 
     refresh_spine_hint(state);
+}
+
+fn ensure_cluster_canvas_focus(state: &mut AppState, id: &str) {
+    let Some(cluster_state) = state.clusters.get(id) else {
+        return;
+    };
+    let Some(topology) = cluster_state.topology.as_ref() else {
+        return;
+    };
+    if let Some(canvas_state) = state.cluster_canvases.get_mut(id) {
+        canvas_state.update_layout(topology);
+    }
 }
 
 fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
@@ -811,6 +833,9 @@ fn handle_screen_action(state: &mut AppState, action: ScreenAction, effects: &mu
         ScreenAction::Monitor(action) => handle_monitor_action(state, action, effects),
         ScreenAction::FleetRadar(action) => handle_radar_action(state, action, effects),
         ScreenAction::Cluster { id, action } => handle_cluster_action(state, id, action, effects),
+        ScreenAction::ClusterCanvas { id, action } => {
+            handle_cluster_canvas_action(state, id, action, effects)
+        }
         ScreenAction::Agent {
             cluster_id,
             agent_id,
@@ -976,6 +1001,50 @@ fn handle_cluster_action(
                 }),
                 effects,
             );
+        }
+    }
+}
+
+fn handle_cluster_canvas_action(
+    state: &mut AppState,
+    id: String,
+    action: cluster_canvas::Action,
+    effects: &mut Vec<Effect>,
+) {
+    match action {
+        cluster_canvas::Action::MoveFocus { direction, speed } => {
+            let entry = state
+                .cluster_canvases
+                .entry(id)
+                .or_default();
+            entry.move_focus(direction, speed);
+        }
+        cluster_canvas::Action::ZoomIn => {
+            let agent_id = state
+                .cluster_canvases
+                .get(&id)
+                .and_then(|entry| entry.focused_agent_id());
+            if let Some(agent_id) = agent_id {
+                let role = state
+                    .clusters
+                    .get(&id)
+                    .and_then(|entry| {
+                        entry
+                            .agents
+                            .iter()
+                            .find(|agent| agent.id == agent_id)
+                            .and_then(|agent| agent.role.clone())
+                    });
+                seed_agent_role(state, &id, &agent_id, role);
+                apply_navigation(
+                    state,
+                    NavigationAction::Push(ScreenId::AgentMicroscope {
+                        cluster_id: id,
+                        agent_id,
+                    }),
+                    effects,
+                );
+            }
         }
     }
 }

@@ -4,7 +4,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
-use crate::screens::{agent, cluster, cluster_canvas, monitor, radar};
+use crate::screens::{agent, agent_microscope, cluster, cluster_canvas, monitor, radar};
 use crate::ui::widgets::{command_bar, spine, toast};
 
 pub mod launcher;
@@ -60,10 +60,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             cluster_id,
             agent_id,
         }
-        | ScreenId::AgentMicroscope {
-            cluster_id,
-            agent_id,
-        } => {
+        => {
             let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
             if let Some(agent_state) = state.agents.get(&key) {
                 agent::render(frame, content_area, agent_state, cluster_id, agent_id);
@@ -71,6 +68,12 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
                 let default_state = agent::State::default();
                 agent::render(frame, content_area, &default_state, cluster_id, agent_id);
             }
+        }
+        ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        } => {
+            agent_microscope::render(frame, content_area, cluster_id, agent_id);
         }
     }
 
@@ -119,11 +122,7 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 cluster::render(frame, canvas_area, &default_state, None);
             }
         }
-        ScreenId::AgentMicroscope {
-            cluster_id,
-            agent_id,
-        }
-        | ScreenId::Agent {
+        ScreenId::Agent {
             cluster_id,
             agent_id,
         } => {
@@ -134,6 +133,12 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 let default_state = agent::State::default();
                 agent::render(frame, canvas_area, &default_state, cluster_id, agent_id);
             }
+        }
+        ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        } => {
+            agent_microscope::render(frame, canvas_area, cluster_id, agent_id);
         }
     }
 
@@ -299,7 +304,12 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("Enter", "agent"),
             ("Esc", "back"),
         ],
-        ScreenId::ClusterCanvas { .. } => vec![("Enter", "zoom"), ("Esc", "back")],
+        ScreenId::ClusterCanvas { .. } => vec![
+            ("h/j/k/l", "focus"),
+            ("Shift+h/j/k/l", "fast"),
+            ("Enter", "zoom"),
+            ("Esc", "back"),
+        ],
         ScreenId::Agent { .. } => vec![
             ("Enter", "send"),
             ("j/k", "scroll"),
