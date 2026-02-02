@@ -9,6 +9,7 @@ use ratatui::Frame;
 use crate::protocol::{ClusterLogLine, GuidanceDeliveryResult};
 use crate::ui::shared::{pane_block, InputState, ScrollableBuffer};
 use crate::ui::theme;
+use crate::ui::widgets::stream;
 
 pub const MAX_LOG_LINES: usize = 500;
 
@@ -173,10 +174,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let inner = block.inner(area);
     let height = inner.height as usize;
     let lines = if state.logs.is_empty() || height == 0 {
-        vec![
-            Line::from(Span::styled("No logs yet.", theme::muted_style())),
-            Line::from(Span::styled("Waiting for agent output.", theme::dim_style())),
-        ]
+        stream::log_placeholder_lines(stream::LogPlaceholderContext::Agent)
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
@@ -187,7 +185,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .iter()
             .skip(start)
             .take(height)
-            .map(format_log_line_styled)
+            .map(stream::format_log_line_styled)
             .collect()
     };
     let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
@@ -245,18 +243,7 @@ pub fn format_guidance_result(result: &GuidanceDeliveryResult) -> String {
     parts.join(" | ")
 }
 
-fn format_log_line_styled(line: &ClusterLogLine) -> Line<'_> {
-    if let Some(agent) = line.agent.as_deref().or(line.sender.as_deref()) {
-        let color = theme::agent_color(agent);
-        Line::from(vec![
-            Span::styled(format!("[{agent}]"), Style::default().fg(color)),
-            Span::raw(" "),
-            Span::raw(&line.text),
-        ])
-    } else {
-        Line::from(line.text.as_str())
-    }
-}
+// shared stream formatters live in ui/widgets/stream.rs
 
 #[cfg(test)]
 mod tests {

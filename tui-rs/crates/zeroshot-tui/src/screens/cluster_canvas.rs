@@ -8,9 +8,10 @@ use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::protocol::{ClusterTopology, TopologyAgent};
+use crate::protocol::{ClusterLogLine, ClusterTopology, TimelineEvent, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::theme;
+use crate::ui::widgets::stream::{self, StreamOverlay};
 
 const WORLD_RADIUS: f64 = 48.0;
 const AGENT_RING_RADIUS: f64 = 28.0;
@@ -255,7 +256,15 @@ pub fn render(
         .unwrap_or((0.0, 0.0));
 
     render_canvas(
-        frame, area, cluster_id, topology, layout, focused, camera, block,
+        frame,
+        area,
+        cluster_id,
+        cluster_state,
+        topology,
+        layout,
+        focused,
+        camera,
+        block,
     );
 }
 
@@ -289,6 +298,7 @@ fn render_canvas(
     frame: &mut Frame<'_>,
     area: Rect,
     cluster_id: &str,
+    cluster_state: &cluster::State,
     topology: &ClusterTopology,
     layout: &LayoutCache,
     focused: Option<&str>,
@@ -297,8 +307,10 @@ fn render_canvas(
 ) {
     let title = format!("Cluster Canvas {cluster_id}");
     let render_bounds = camera_bounds(layout, camera);
+    let block = block.title(title);
+    let canvas_inner = block.inner(area);
     let canvas = Canvas::default()
-        .block(block.title(title))
+        .block(block)
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
         .y_bounds([render_bounds.min_y, render_bounds.max_y])
         .marker(Marker::Braille)
@@ -369,6 +381,321 @@ fn render_canvas(
         });
 
     frame.render_widget(canvas, area);
+    render_stream_overlay(
+        frame,
+        canvas_inner,
+        layout,
+        focused,
+        &render_bounds,
+        cluster_state,
+        None,
+    );
+}
+
+fn render_stream_overlay(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    layout: &LayoutCache,
+    focused: Option<&str>,
+    render_bounds: &LayoutBounds,
+    cluster_state: &cluster::State,
+    spine_area: Option<Rect>,
+) {
+    let Some(focused_id) = focused else {
+        return;
+    };
+    let Some(node) = layout.nodes.get(focused_id) else {
+        return;
+    };
+    if area.width < 6 || area.height < 4 {
+        return;
+    }
+
+    let focus_point = world_to_screen(area, render_bounds, node.x, node.y);
+    let overlay_size = overlay_dimensions(area);
+    if overlay_size.0 == 0 || overlay_size.1 == 0 {
+        return;
+    }
+
+    let overlay_rect = overlay_rect_near_focus(area, focus_point, overlay_size, spine_area);
+    let inner = Block::default().borders(Borders::ALL).inner(overlay_rect);
+    let max_lines = inner.height as usize;
+    if max_lines == 0 {
+        return;
+    }
+
+    let (title, lines) = build_overlay_lines(cluster_state, node, max_lines);
+    let overlay = StreamOverlay::new(title, lines)
+        .placeholder_lines(stream::log_placeholder_lines(
+            stream::LogPlaceholderContext::Overlay,
+        ))
+        .border_style(theme::focus_border_style());
+    frame.render_widget(overlay, overlay_rect);
+}
+
+fn build_overlay_lines<'a>(
+    cluster_state: &'a cluster::State,
+    node: &NodeLayout,
+    max_lines: usize,
+) -> (Line<'a>, Vec<Line<'a>>) {
+    let is_agent = node.kind == NodeKind::Agent;
+    let log_title = if is_agent {
+        Line::from(format!("Logs - agent {}", node.id))
+    } else {
+        Line::from("Logs - cluster")
+    };
+    let timeline_title = if is_agent {
+        Line::from(format!("Timeline - agent {}", node.id))
+    } else {
+        Line::from("Timeline - cluster")
+    };
+
+    let log_lines = collect_log_lines(cluster_state, is_agent.then_some(node.id.as_str()), max_lines);
+    if !log_lines.is_empty() {
+        return (log_title, log_lines);
+    }
+
+    let timeline_lines = collect_timeline_lines(cluster_state, max_lines);
+    if !timeline_lines.is_empty() {
+        return (timeline_title, timeline_lines);
+    }
+
+    (log_title, Vec::new())
+}
+
+fn collect_log_lines<'a>(
+    cluster_state: &'a cluster::State,
+    agent_id: Option<&str>,
+    max_lines: usize,
+) -> Vec<Line<'a>> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    let mut collected: Vec<&ClusterLogLine> = Vec::new();
+    for line in cluster_state.logs.items.iter().rev() {
+        if let Some(agent_id) = agent_id {
+            let matches_agent = line.agent.as_deref() == Some(agent_id)
+                || line.sender.as_deref() == Some(agent_id);
+            if !matches_agent {
+                continue;
+            }
+        }
+        collected.push(line);
+        if collected.len() >= max_lines {
+            break;
+        }
+    }
+    collected.reverse();
+    collected
+        .into_iter()
+        .map(stream::format_log_line_styled)
+        .collect()
+}
+
+fn collect_timeline_lines<'a>(
+    cluster_state: &'a cluster::State,
+    max_lines: usize,
+) -> Vec<Line<'a>> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    let mut collected: Vec<&TimelineEvent> = Vec::new();
+    for event in cluster_state.timeline.items.iter().rev() {
+        collected.push(event);
+        if collected.len() >= max_lines {
+            break;
+        }
+    }
+    collected.reverse();
+    collected
+        .into_iter()
+        .map(stream::format_timeline_event_styled)
+        .collect()
+}
+
+fn overlay_dimensions(area: Rect) -> (u16, u16) {
+    if area.width < 6 || area.height < 4 {
+        return (0, 0);
+    }
+    let max_width = area.width.saturating_sub(2);
+    let max_height = area.height.saturating_sub(2);
+    if max_width == 0 || max_height == 0 {
+        return (0, 0);
+    }
+
+    let mut width = ((area.width as f32) * 0.45).round() as u16;
+    let mut height = ((area.height as f32) * 0.35).round() as u16;
+    width = width.clamp(18, 52).min(max_width);
+    height = height.clamp(5, 12).min(max_height);
+
+    if width == 0 || height == 0 {
+        return (0, 0);
+    }
+    (width, height)
+}
+
+fn world_to_screen(
+    area: Rect,
+    render_bounds: &LayoutBounds,
+    world_x: f64,
+    world_y: f64,
+) -> (u16, u16) {
+    if area.width == 0 || area.height == 0 {
+        return (area.x, area.y);
+    }
+    let width = (render_bounds.max_x - render_bounds.min_x).max(1.0);
+    let height = (render_bounds.max_y - render_bounds.min_y).max(1.0);
+    let mut rel_x = (world_x - render_bounds.min_x) / width;
+    let mut rel_y = (render_bounds.max_y - world_y) / height;
+    rel_x = rel_x.clamp(0.0, 1.0);
+    rel_y = rel_y.clamp(0.0, 1.0);
+    let x = area.x as f64 + rel_x * ((area.width - 1) as f64);
+    let y = area.y as f64 + rel_y * ((area.height - 1) as f64);
+    (x.round() as u16, y.round() as u16)
+}
+
+fn overlay_rect_near_focus(
+    bounds: Rect,
+    focus: (u16, u16),
+    size: (u16, u16),
+    spine: Option<Rect>,
+) -> Rect {
+    let width = size.0.min(bounds.width);
+    let height = size.1.min(bounds.height);
+    let candidates = [
+        (true, true),
+        (true, false),
+        (false, true),
+        (false, false),
+    ];
+
+    for (right, down) in candidates {
+        let x = if right {
+            focus.0.saturating_add(1)
+        } else {
+            focus.0.saturating_sub(width.saturating_add(1))
+        };
+        let y = if down {
+            focus.1.saturating_add(1)
+        } else {
+            focus.1.saturating_sub(height.saturating_add(1))
+        };
+        let rect = clamp_rect_to_bounds(
+            Rect {
+                x,
+                y,
+                width,
+                height,
+            },
+            bounds,
+        );
+        let rect = avoid_spine(rect, bounds, spine);
+        if !rect_intersects_spine(rect, spine) {
+            return rect;
+        }
+    }
+
+    let rect = clamp_rect_to_bounds(
+        Rect {
+            x: bounds.x,
+            y: bounds.y,
+            width,
+            height,
+        },
+        bounds,
+    );
+    avoid_spine(rect, bounds, spine)
+}
+
+fn clamp_rect_to_bounds(rect: Rect, bounds: Rect) -> Rect {
+    let width = rect.width.min(bounds.width);
+    let height = rect.height.min(bounds.height);
+    if bounds.width == 0 || bounds.height == 0 || width == 0 || height == 0 {
+        return Rect {
+            x: bounds.x,
+            y: bounds.y,
+            width,
+            height,
+        };
+    }
+
+    let max_x = bounds.x.saturating_add(bounds.width.saturating_sub(width));
+    let max_y = bounds.y.saturating_add(bounds.height.saturating_sub(height));
+    let mut x = rect.x;
+    let mut y = rect.y;
+    if x < bounds.x {
+        x = bounds.x;
+    } else if x > max_x {
+        x = max_x;
+    }
+    if y < bounds.y {
+        y = bounds.y;
+    } else if y > max_y {
+        y = max_y;
+    }
+
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
+fn rect_intersects_spine(rect: Rect, spine: Option<Rect>) -> bool {
+    spine.map_or(false, |spine| rects_intersect(rect, spine))
+}
+
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    let a_right = a.x.saturating_add(a.width);
+    let a_bottom = a.y.saturating_add(a.height);
+    let b_right = b.x.saturating_add(b.width);
+    let b_bottom = b.y.saturating_add(b.height);
+    a.x < b_right && a_right > b.x && a.y < b_bottom && a_bottom > b.y
+}
+
+fn avoid_spine(rect: Rect, bounds: Rect, spine: Option<Rect>) -> Rect {
+    let Some(spine) = spine else {
+        return rect;
+    };
+    if !rects_intersect(rect, spine) {
+        return rect;
+    }
+
+    let mut options = Vec::new();
+    options.push(Rect {
+        x: rect.x,
+        y: spine.y.saturating_sub(rect.height.saturating_add(1)),
+        width: rect.width,
+        height: rect.height,
+    });
+    options.push(Rect {
+        x: rect.x,
+        y: spine.y.saturating_add(spine.height).saturating_add(1),
+        width: rect.width,
+        height: rect.height,
+    });
+    options.push(Rect {
+        x: spine.x.saturating_sub(rect.width.saturating_add(1)),
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    });
+    options.push(Rect {
+        x: spine.x.saturating_add(spine.width).saturating_add(1),
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    });
+
+    for option in options {
+        let candidate = clamp_rect_to_bounds(option, bounds);
+        if !rects_intersect(candidate, spine) {
+            return candidate;
+        }
+    }
+
+    rect
 }
 
 fn topology_summary(topology: &ClusterTopology) -> Option<String> {
@@ -576,7 +903,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    use crate::protocol::{TopologyAgent, TopologyEdge, TopologyEdgeKind};
+    use crate::protocol::{ClusterLogLine, TopologyAgent, TopologyEdge, TopologyEdgeKind};
     use crate::ui::widgets::test_utils::line_text;
     use std::collections::HashMap;
 
@@ -630,6 +957,17 @@ mod tests {
             }
         }
         false
+    }
+
+    fn rect_within_bounds(rect: Rect, bounds: Rect) -> bool {
+        let rect_right = rect.x.saturating_add(rect.width);
+        let rect_bottom = rect.y.saturating_add(rect.height);
+        let bounds_right = bounds.x.saturating_add(bounds.width);
+        let bounds_bottom = bounds.y.saturating_add(bounds.height);
+        rect.x >= bounds.x
+            && rect.y >= bounds.y
+            && rect_right <= bounds_right
+            && rect_bottom <= bounds_bottom
     }
 
     fn layout_with_nodes(nodes: Vec<NodeLayout>) -> LayoutCache {
@@ -902,6 +1240,109 @@ mod tests {
         let second = terminal.backend().buffer().clone();
 
         assert!(buffers_differ(&first, &second));
+    }
+
+    #[test]
+    fn overlay_rect_clamps_to_bounds() {
+        let bounds = Rect {
+            x: 2,
+            y: 1,
+            width: 40,
+            height: 18,
+        };
+        let focus = (41, 18);
+        let size = (26, 10);
+        let rect = overlay_rect_near_focus(bounds, focus, size, None);
+        assert!(rect_within_bounds(rect, bounds));
+    }
+
+    #[test]
+    fn overlay_rect_avoids_spine() {
+        let bounds = Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 20,
+        };
+        let spine = Rect {
+            x: 22,
+            y: 12,
+            width: 12,
+            height: 4,
+        };
+        let focus = (26, 13);
+        let rect = overlay_rect_near_focus(bounds, focus, (20, 8), Some(spine));
+        assert!(!rects_intersect(rect, spine));
+    }
+
+    #[test]
+    fn cluster_canvas_renders_log_overlay() {
+        let backend = TestBackend::new(90, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let topology = sample_topology();
+        let mut cluster_state = cluster::State::default();
+        cluster_state.topology = Some(topology.clone());
+        cluster_state.push_log_lines(
+            vec![ClusterLogLine {
+                id: "line-1".to_string(),
+                timestamp: 0,
+                text: "build complete".to_string(),
+                agent: Some("agent-alpha".to_string()),
+                role: None,
+                sender: None,
+            }],
+            None,
+        );
+
+        let mut canvas_state = State::default();
+        canvas_state.update_layout(&topology);
+        canvas_state.focused_id = Some("agent-alpha".to_string());
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-5",
+                    Some(&cluster_state),
+                    Some(&canvas_state),
+                );
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, "Logs - agent agent-alpha"));
+        assert!(buffer_contains(buffer, "build complete"));
+    }
+
+    #[test]
+    fn cluster_canvas_renders_overlay_placeholder() {
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let topology = sample_topology();
+        let mut cluster_state = cluster::State::default();
+        cluster_state.topology = Some(topology.clone());
+
+        let mut canvas_state = State::default();
+        canvas_state.update_layout(&topology);
+        canvas_state.focused_id = Some("agent-alpha".to_string());
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-6",
+                    Some(&cluster_state),
+                    Some(&canvas_state),
+                );
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, "No logs yet."));
     }
 
     #[test]

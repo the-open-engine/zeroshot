@@ -10,7 +10,7 @@ use crate::protocol::{ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTop
 use crate::screens::metrics;
 use crate::ui::shared::{pane_block, ScrollableBuffer};
 use crate::ui::theme;
-use crate::ui::widgets::topology;
+use crate::ui::widgets::{stream, topology};
 
 pub const MAX_LOG_LINES: usize = 1000;
 pub const MAX_TIMELINE_EVENTS: usize = 500;
@@ -316,10 +316,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let height = inner.height as usize;
 
     let lines: Vec<Line> = if state.logs.is_empty() || height == 0 {
-        vec![
-            Line::from(Span::styled("No logs yet.", theme::muted_style())),
-            Line::from(Span::styled("Waiting for cluster output.", theme::muted_style())),
-        ]
+        stream::log_placeholder_lines(stream::LogPlaceholderContext::Cluster)
     } else {
         let total = state.logs.len();
         let max_start = total.saturating_sub(height);
@@ -330,7 +327,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .iter()
             .skip(start)
             .take(height)
-            .map(format_log_line_styled)
+            .map(stream::format_log_line_styled)
             .collect()
     };
 
@@ -362,10 +359,7 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
     let height = inner.height as usize;
 
     let lines: Vec<Line> = if state.timeline.is_empty() || height == 0 {
-        vec![
-            Line::from(Span::styled("No timeline events yet.", theme::muted_style())),
-            Line::from(Span::styled("New activity will appear here.", theme::muted_style())),
-        ]
+        stream::timeline_placeholder_lines()
     } else {
         let total = state.timeline.len();
         let max_start = total.saturating_sub(height);
@@ -376,7 +370,7 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .iter()
             .skip(start)
             .take(height)
-            .map(format_timeline_event_styled)
+            .map(stream::format_timeline_event_styled)
             .collect()
     };
 
@@ -397,63 +391,4 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
     }
 }
 
-fn format_log_line_styled(line: &ClusterLogLine) -> Line<'_> {
-    if let Some(agent) = line.agent.as_deref().or(line.sender.as_deref()) {
-        let color = theme::agent_color(agent);
-        Line::from(vec![
-            Span::styled(format!("[{agent}]"), Style::default().fg(color)),
-            Span::raw(" "),
-            Span::raw(line.text.as_str()),
-        ])
-    } else {
-        Line::from(line.text.as_str())
-    }
-}
-
-fn format_timeline_event_styled(event: &TimelineEvent) -> Line<'_> {
-    let icon = timeline_icon(&event.topic);
-    let label_style = timeline_label_style(&event.label);
-    let mut spans = vec![
-        Span::styled(icon, theme::dim_style()),
-        Span::raw(" "),
-        Span::styled(event.topic.as_str(), theme::dim_style()),
-        Span::raw("  "),
-        Span::styled(event.label.as_str(), label_style),
-    ];
-    if let Some(sender) = event.sender.as_deref() {
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format!("({sender})"),
-            theme::muted_style(),
-        ));
-    }
-    Line::from(spans)
-}
-
-fn timeline_icon(topic: &str) -> &'static str {
-    let topic_lower = topic.to_lowercase();
-    if topic_lower.contains("issue") {
-        "\u{25b6}" // ▶
-    } else if topic_lower.contains("implementation") || topic_lower.contains("impl") {
-        "\u{25cf}" // ●
-    } else if topic_lower.contains("validation") || topic_lower.contains("review") {
-        "\u{25c6}" // ◆
-    } else if topic_lower.contains("consensus") || topic_lower.contains("complete") {
-        "\u{2605}" // ★
-    } else {
-        "\u{00b7}" // ·
-    }
-}
-
-fn timeline_label_style(label: &str) -> Style {
-    let label_lower = label.to_lowercase();
-    if label_lower.contains("approved") || label_lower.contains("done") || label_lower.contains("complete") {
-        theme::status_style("done")
-    } else if label_lower.contains("rejected") || label_lower.contains("failed") || label_lower.contains("error") {
-        theme::status_style("error")
-    } else if label_lower.contains("pending") || label_lower.contains("waiting") {
-        theme::status_style("pending")
-    } else {
-        Style::default()
-    }
-}
+// shared stream formatters live in ui/widgets/stream.rs
