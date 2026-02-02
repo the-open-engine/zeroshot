@@ -2,8 +2,9 @@ use crate::commands::{parse, VALID_PROVIDERS};
 use crate::protocol::GuidanceDeliveryResult;
 
 use super::{
-    detect_issue_reference, resolve_spine_agent_target, resolve_spine_cluster_target, AgentKey,
-    AppState, SpineMode, ToastLevel, UiVariant, ZoomStackContext,
+    detect_issue_reference, resolve_focus_target, resolve_spine_agent_target,
+    resolve_spine_cluster_target, AgentKey, AppState, SpineMode, ToastLevel, UiVariant,
+    ZoomStackContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +94,10 @@ fn command_hint(state: &AppState) -> SpineHint {
                     SpineHintTone::Info,
                 )
             }
+            "guide" => guidance_command_hint(state, &parsed.args, "Guide", true),
+            "nudge" => guidance_command_hint(state, &parsed.args, "Nudge", true),
+            "interrupt" => guidance_command_hint(state, &parsed.args, "Interrupt", false),
+            "pin" => pin_command_hint(state),
             "provider" => provider_hint(&parsed.args),
             "quit" | "exit" => SpineHint::new("Quit TUI", SpineHintTone::Info),
             other => SpineHint::new(
@@ -125,7 +130,7 @@ fn provider_hint(args: &[String]) -> SpineHint {
 }
 
 fn command_help_line() -> String {
-    "Commands: /help /monitor /issue <ref> /provider <name> /quit /exit".to_string()
+    "Commands: /help /monitor /issue <ref> /provider <name> /guide <text> /nudge <text> /interrupt [text] /pin /quit /exit".to_string()
 }
 
 fn provider_usage() -> String {
@@ -134,6 +139,49 @@ fn provider_usage() -> String {
 
 fn issue_usage() -> &'static str {
     "Usage: /issue <ref>"
+}
+
+fn guidance_command_hint(
+    state: &AppState,
+    args: &[String],
+    verb: &str,
+    require_text: bool,
+) -> SpineHint {
+    if require_text && args.is_empty() {
+        return SpineHint::new(
+            format!("Usage: /{} <text>", verb.to_lowercase()),
+            SpineHintTone::Error,
+        );
+    }
+    let Some(target) = resolve_focus_target(state) else {
+        return SpineHint::new(
+            "Select a cluster or agent to guide.".to_string(),
+            SpineHintTone::Error,
+        );
+    };
+    let label = target.label();
+    SpineHint::new(format!("{verb} {label}"), SpineHintTone::Info)
+}
+
+fn pin_command_hint(state: &AppState) -> SpineHint {
+    if !matches!(state.ui_variant, UiVariant::Disruptive) {
+        return SpineHint::new(
+            "Pinning is only available in Disruptive UI.".to_string(),
+            SpineHintTone::Error,
+        );
+    }
+    let Some(target) = resolve_focus_target(state) else {
+        return SpineHint::new(
+            "Select a cluster or agent to pin.".to_string(),
+            SpineHintTone::Error,
+        );
+    };
+    let action = if state.pinned_target.as_ref() == Some(&target) {
+        "Unpin"
+    } else {
+        "Pin"
+    };
+    SpineHint::new(format!("{action} {}", target.label()), SpineHintTone::Info)
 }
 
 fn intent_hint(state: &AppState) -> SpineHint {

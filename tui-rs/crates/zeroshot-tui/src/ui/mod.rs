@@ -3,7 +3,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
+use crate::app::{
+    AppState, BackendStatus, FocusTarget, ScreenId, SpineHint, SpineHintTone, UiVariant,
+};
 use crate::screens::{agent, agent_microscope, cluster, cluster_canvas, monitor, radar};
 use crate::ui::widgets::{command_bar, scrub_bar, spine, toast};
 
@@ -13,7 +15,7 @@ pub mod shared;
 pub mod theme;
 pub mod widgets;
 
-const DISRUPTIVE_SPINE_HINT: &str = "/ cmd  i  ?  Tab  Esc  Enter";
+const DISRUPTIVE_SPINE_HINT: &str = "/guide /nudge /interrupt /pin  /  i  ?  Tab  Esc  Enter";
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     if matches!(state.ui_variant, UiVariant::Disruptive) {
@@ -61,6 +63,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
                 cluster_state,
                 canvas_state,
                 &state.time_cursor,
+                state.pinned_target.as_ref(),
             );
         }
         ScreenId::Agent {
@@ -129,12 +132,17 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
 
     match state.active_screen() {
         ScreenId::FleetRadar | ScreenId::Launcher | ScreenId::IntentConsole | ScreenId::Monitor => {
+            let pinned_cluster = match state.pinned_target.as_ref() {
+                Some(FocusTarget::Cluster { id }) => Some(id.as_str()),
+                _ => None,
+            };
             radar::render(
                 frame,
                 canvas_area,
                 &state.fleet_radar,
                 &state.camera,
                 state.now_ms,
+                pinned_cluster,
             );
         }
         ScreenId::ClusterCanvas { id } => {
@@ -147,6 +155,7 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 cluster_state,
                 canvas_state,
                 &state.time_cursor,
+                state.pinned_target.as_ref(),
             );
         }
         ScreenId::Cluster { id } => {
