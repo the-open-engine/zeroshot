@@ -137,11 +137,11 @@ where
     }
 }
 
-fn select_live_tail<'a, T, F>(
-    buffer: &'a TimeIndexedBuffer<T>,
+fn select_live_tail<T, F>(
+    buffer: &TimeIndexedBuffer<T>,
     max_items: usize,
     filter: F,
-) -> Vec<&'a T>
+) -> Vec<&T>
 where
     T: HasTimestamp,
     F: Fn(&T) -> bool,
