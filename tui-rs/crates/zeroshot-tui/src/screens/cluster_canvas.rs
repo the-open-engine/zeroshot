@@ -394,50 +394,54 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
     frame.render_widget(canvas, canvas_ctx.area);
     render_stream_overlay(
         frame,
-        canvas_inner,
-        canvas_ctx.layout,
-        canvas_ctx.focused,
-        &render_bounds,
-        canvas_ctx.cluster_state,
-        canvas_ctx.time_cursor,
-        None,
+        StreamOverlayContext {
+            area: canvas_inner,
+            layout: canvas_ctx.layout,
+            focused: canvas_ctx.focused,
+            render_bounds: &render_bounds,
+            cluster_state: canvas_ctx.cluster_state,
+            time_cursor: canvas_ctx.time_cursor,
+            spine_area: None,
+        },
     );
 }
 
-fn render_stream_overlay(
-    frame: &mut Frame<'_>,
+struct StreamOverlayContext<'a> {
     area: Rect,
-    layout: &LayoutCache,
-    focused: Option<&str>,
-    render_bounds: &LayoutBounds,
-    cluster_state: &cluster::State,
-    time_cursor: &TimeCursor,
+    layout: &'a LayoutCache,
+    focused: Option<&'a str>,
+    render_bounds: &'a LayoutBounds,
+    cluster_state: &'a cluster::State,
+    time_cursor: &'a TimeCursor,
     spine_area: Option<Rect>,
-) {
-    let Some(focused_id) = focused else {
+}
+
+fn render_stream_overlay(frame: &mut Frame<'_>, ctx: StreamOverlayContext<'_>) {
+    let Some(focused_id) = ctx.focused else {
         return;
     };
-    let Some(node) = layout.nodes.get(focused_id) else {
+    let Some(node) = ctx.layout.nodes.get(focused_id) else {
         return;
     };
-    if area.width < 6 || area.height < 4 {
+    if ctx.area.width < 6 || ctx.area.height < 4 {
         return;
     }
 
-    let focus_point = world_to_screen(area, render_bounds, node.x, node.y);
-    let overlay_size = overlay_dimensions(area);
+    let focus_point = world_to_screen(ctx.area, ctx.render_bounds, node.x, node.y);
+    let overlay_size = overlay_dimensions(ctx.area);
     if overlay_size.0 == 0 || overlay_size.1 == 0 {
         return;
     }
 
-    let overlay_rect = overlay_rect_near_focus(area, focus_point, overlay_size, spine_area);
+    let overlay_rect =
+        overlay_rect_near_focus(ctx.area, focus_point, overlay_size, ctx.spine_area);
     let inner = Block::default().borders(Borders::ALL).inner(overlay_rect);
     let max_lines = inner.height as usize;
     if max_lines == 0 {
         return;
     }
 
-    let (title, lines) = build_overlay_lines(cluster_state, node, time_cursor, max_lines);
+    let (title, lines) = build_overlay_lines(ctx.cluster_state, node, ctx.time_cursor, max_lines);
     let overlay = StreamOverlay::new(title, lines)
         .placeholder_lines(stream::log_placeholder_lines(
             stream::LogPlaceholderContext::Overlay,
