@@ -119,7 +119,7 @@ fn build_metadata_overlay(
         .iter()
         .map(|line| line.chars().count())
         .max()
-        .unwrap_or(0) as u16;
+        .unwrap_or_default() as u16;
 
     let overlay_width = (max_line_len + 2).min(available_width);
     let overlay_height = (lines.len() as u16 + 2).min(available_height);
