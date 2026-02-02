@@ -114,14 +114,16 @@ impl State {
         if self.layout.is_none() {
             return;
         }
-        if self.focused_id.is_none() {
-            if let Some(layout) = self.layout.as_ref() {
-                self.focused_id = default_focus_id_from_layout(layout);
-            }
-        } else if let Some(layout) = self.layout.as_ref() {
-            let focused = self.focused_id.as_ref().expect("focused id");
-            if !layout.nodes.contains_key(focused) {
-                self.focused_id = default_focus_id_from_layout(layout);
+        if let Some(layout) = self.layout.as_ref() {
+            match self.focused_id.as_ref() {
+                Some(focused) => {
+                    if !layout.nodes.contains_key(focused) {
+                        self.focused_id = default_focus_id_from_layout(layout);
+                    }
+                }
+                None => {
+                    self.focused_id = default_focus_id_from_layout(layout);
+                }
             }
         }
         if self.focused_id.is_none() {
