@@ -5,6 +5,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{agent_microscope, TimeCursor};
+use crate::protocol::{ClusterLogLine, TimelineEvent};
+use crate::ui::shared::TimeIndexedBuffer;
 use crate::ui::theme;
 use crate::ui::widgets::stream::{self, StreamOverlay};
 
@@ -13,6 +15,7 @@ pub fn render(
     area: Rect,
     cluster_id: &str,
     agent_id: &str,
+    cluster_timeline: Option<&TimeIndexedBuffer<TimelineEvent>>,
     microscope_state: Option<&agent_microscope::State>,
     time_cursor: &TimeCursor,
 ) {
@@ -28,19 +31,29 @@ pub fn render(
 
     let max_lines = area.height.saturating_sub(2) as usize;
     let window_max = max_lines.saturating_sub(reserved_lines);
-    let log_lines = microscope_state
+    let log_entries = microscope_state
         .map(|state| {
             stream::select_time_window(&state.logs_time, time_cursor, window_max, |_| true)
         })
         .unwrap_or_default()
         .into_iter()
-        .map(stream::format_log_line_styled)
         .collect::<Vec<_>>();
 
-    let mut content_lines = if log_lines.is_empty() {
+    let marker_margin =
+        build_phase_marker_margin(area, cluster_timeline, time_cursor, &log_entries);
+
+    let mut content_lines = if log_entries.is_empty() {
         stream::log_placeholder_lines(stream::LogPlaceholderContext::Agent)
     } else {
-        log_lines
+        let log_lines = log_entries
+            .iter()
+            .map(|line| stream::format_log_line_styled(line))
+            .collect::<Vec<_>>();
+        if let Some(marker_margin) = marker_margin {
+            apply_phase_marker_margin(log_lines, &marker_margin)
+        } else {
+            log_lines
+        }
     };
 
     if reserved_lines > 0 {
@@ -59,6 +72,11 @@ pub fn render(
     if let Some(metadata) = metadata {
         render_metadata_overlay(frame, metadata);
     }
+}
+
+struct PhaseMarkerMargin {
+    labels: Vec<Option<String>>,
+    margin_width: usize,
 }
 
 struct MetadataOverlay {
@@ -154,6 +172,135 @@ fn render_metadata_overlay(frame: &mut Frame<'_>, metadata: MetadataOverlay) {
     frame.render_widget(widget, metadata.area);
 }
 
+fn build_phase_marker_margin(
+    area: Rect,
+    timeline: Option<&TimeIndexedBuffer<TimelineEvent>>,
+    time_cursor: &TimeCursor,
+    log_entries: &[&ClusterLogLine],
+) -> Option<PhaseMarkerMargin> {
+    let timeline = timeline?;
+    if log_entries.is_empty() {
+        return None;
+    }
+    let available_width = area.width.saturating_sub(2);
+    let margin_width = phase_marker_margin_width(available_width);
+    if margin_width == 0 {
+        return None;
+    }
+
+    let markers =
+        stream::derive_phase_markers(timeline, time_cursor, stream::PHASE_MARKER_LIMIT);
+    if markers.is_empty() {
+        return None;
+    }
+
+    let mut labels = vec![None; log_entries.len()];
+    for marker in markers {
+        let index = marker_line_index(log_entries, marker.timestamp_ms);
+        let raw = stream::format_phase_marker_label(&marker.topic, &marker.label);
+        let truncated = stream::truncate_marker_label(&raw, margin_width);
+        labels[index] = Some(pad_phase_label(&truncated, margin_width));
+    }
+
+    Some(PhaseMarkerMargin {
+        labels,
+        margin_width,
+    })
+}
+
+fn phase_marker_margin_width(available_width: u16) -> usize {
+    let available = available_width as usize;
+    let min_content = 16usize;
+    let min_margin = 8usize;
+    if available < min_content + min_margin {
+        return 0;
+    }
+    let mut margin = available / 4;
+    if margin < min_margin {
+        margin = min_margin;
+    }
+    if margin > 14 {
+        margin = 14;
+    }
+    if available.saturating_sub(margin) < min_content {
+        return 0;
+    }
+    margin
+}
+
+fn marker_line_index(log_entries: &[&ClusterLogLine], timestamp: i64) -> usize {
+    if log_entries.is_empty() {
+        return 0;
+    }
+    let mut left = 0usize;
+    let mut right = log_entries.len();
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if log_entries[mid].timestamp < timestamp {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    if left >= log_entries.len() {
+        log_entries.len().saturating_sub(1)
+    } else {
+        left
+    }
+}
+
+fn pad_phase_label(label: &str, width: usize) -> String {
+    let len = label.chars().count();
+    if len >= width {
+        return label.to_string();
+    }
+    let mut out = String::with_capacity(width);
+    out.push_str(label);
+    for _ in 0..(width - len) {
+        out.push(' ');
+    }
+    out
+}
+
+fn apply_phase_marker_margin<'a>(
+    lines: Vec<Line<'a>>,
+    marker_margin: &PhaseMarkerMargin,
+) -> Vec<Line<'a>> {
+    let empty_label = " ".repeat(marker_margin.margin_width);
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let label = marker_margin
+                .labels
+                .get(idx)
+                .and_then(|label| label.as_ref())
+                .unwrap_or(&empty_label);
+            prepend_phase_marker_label(line, label, marker_margin.margin_width)
+        })
+        .collect()
+}
+
+fn prepend_phase_marker_label<'a>(
+    line: Line<'a>,
+    label: &str,
+    margin_width: usize,
+) -> Line<'a> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 2);
+    let mut label_text = label.to_string();
+    if label_text.chars().count() < margin_width {
+        label_text = pad_phase_label(&label_text, margin_width);
+    }
+    spans.push(Span::styled(label_text, theme::muted_style()));
+    spans.push(Span::raw(" "));
+    spans.extend(line.spans);
+    Line {
+        style: line.style,
+        alignment: line.alignment,
+        spans,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +327,17 @@ mod tests {
         state
     }
 
+    fn sample_timeline_event(id: &str, timestamp: i64, topic: &str, label: &str) -> TimelineEvent {
+        TimelineEvent {
+            id: id.to_string(),
+            timestamp,
+            topic: topic.to_string(),
+            label: label.to_string(),
+            approved: None,
+            sender: None,
+        }
+    }
+
     #[test]
     fn agent_microscope_renders_empty_state() {
         let backend = TestBackend::new(70, 12);
@@ -193,7 +351,15 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                render(frame, area, "cluster-1", "agent-1", None, &cursor);
+                render(
+                    frame,
+                    area,
+                    "cluster-1",
+                    "agent-1",
+                    None,
+                    None,
+                    &cursor,
+                );
             })
             .expect("draw");
 
@@ -238,6 +404,7 @@ mod tests {
                     area,
                     "cluster-1",
                     "agent-1",
+                    None,
                     Some(&state),
                     &cursor,
                 );
@@ -292,6 +459,7 @@ mod tests {
                     area,
                     "cluster-1",
                     "agent-1",
+                    None,
                     Some(&state),
                     &cursor,
                 );
@@ -301,5 +469,60 @@ mod tests {
         assert!(buffer_contains(&terminal, "mid-line"));
         assert!(!buffer_contains(&terminal, "old-line"));
         assert!(!buffer_contains(&terminal, "new-line"));
+    }
+
+    #[test]
+    fn agent_microscope_renders_phase_markers_margin() {
+        let backend = TestBackend::new(70, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let state = sample_state(vec![
+            ClusterLogLine {
+                id: "line-1".to_string(),
+                timestamp: 100,
+                text: "first-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+            ClusterLogLine {
+                id: "line-2".to_string(),
+                timestamp: 220,
+                text: "second-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+        ]);
+        let mut timeline = TimeIndexedBuffer::new(16);
+        timeline.push_many(vec![sample_timeline_event(
+            "event-1",
+            150,
+            "plan",
+            "start",
+        )]);
+
+        let cursor = TimeCursor {
+            mode: TimeCursorMode::Live,
+            t_ms: 220,
+            window_ms: 60,
+        };
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-1",
+                    "agent-1",
+                    Some(&timeline),
+                    Some(&state),
+                    &cursor,
+                );
+            })
+            .expect("draw");
+
+        assert!(buffer_contains(&terminal, "plan: start"));
+        assert!(buffer_contains(&terminal, "second-line"));
     }
 }

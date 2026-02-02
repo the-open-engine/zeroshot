@@ -9,11 +9,20 @@ use crate::protocol::{ClusterLogLine, TimelineEvent};
 use crate::ui::shared::{HasTimestamp, TimeIndexedBuffer};
 use crate::ui::theme;
 
+pub const PHASE_MARKER_LIMIT: usize = 50;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogPlaceholderContext {
     Cluster,
     Agent,
     Overlay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseMarker {
+    pub timestamp_ms: i64,
+    pub label: String,
+    pub topic: String,
 }
 
 pub struct StreamOverlay<'a> {
@@ -107,6 +116,70 @@ pub fn mode_tag_span(time_cursor: &TimeCursor) -> Span<'static> {
         TimeCursorMode::Scrub => ("SCRUB", theme::key_style()),
     };
     Span::styled(format!("[{label}]"), style)
+}
+
+pub fn derive_phase_markers(
+    timeline: &TimeIndexedBuffer<TimelineEvent>,
+    time_cursor: &TimeCursor,
+    max_markers: usize,
+) -> Vec<PhaseMarker> {
+    if max_markers == 0 || timeline.is_empty() {
+        return Vec::new();
+    }
+
+    let max_items = timeline.len();
+    let events = select_time_window(timeline, time_cursor, max_items, |_| true);
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    let mut markers = Vec::new();
+    let mut last_topic = String::new();
+    let mut last_label = String::new();
+    let mut has_last = false;
+    for event in events {
+        if has_last && last_topic == event.topic && last_label == event.label {
+            continue;
+        }
+        markers.push(PhaseMarker {
+            timestamp_ms: event.timestamp,
+            label: event.label.clone(),
+            topic: event.topic.clone(),
+        });
+        last_topic = event.topic.clone();
+        last_label = event.label.clone();
+        has_last = true;
+    }
+
+    if markers.len() > max_markers {
+        let start = markers.len().saturating_sub(max_markers);
+        markers = markers.split_off(start);
+    }
+    markers
+}
+
+pub fn format_phase_marker_label(topic: &str, label: &str) -> String {
+    if label.is_empty() {
+        topic.to_string()
+    } else {
+        format!("{topic}: {label}")
+    }
+}
+
+pub fn truncate_marker_label(label: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let label_len = label.chars().count();
+    if label_len <= max_chars {
+        return label.to_string();
+    }
+    if max_chars <= 3 {
+        return label.chars().take(max_chars).collect();
+    }
+    let mut out: String = label.chars().take(max_chars - 3).collect();
+    out.push_str("...");
+    out
 }
 
 pub fn overlay_title(base: impl Into<String>, time_cursor: &TimeCursor) -> Line<'static> {
@@ -314,6 +387,17 @@ mod tests {
         }
     }
 
+    fn sample_event(id: &str, timestamp: i64, topic: &str, label: &str) -> TimelineEvent {
+        TimelineEvent {
+            id: id.to_string(),
+            timestamp,
+            topic: topic.to_string(),
+            label: label.to_string(),
+            approved: None,
+            sender: None,
+        }
+    }
+
     #[test]
     fn stream_window_live_uses_tail() {
         let mut buffer = TimeIndexedBuffer::new(16);
@@ -364,5 +448,40 @@ mod tests {
             .expect("draw");
 
         assert!(buffer_contains(&terminal, "LIVE"));
+    }
+
+    #[test]
+    fn derive_phase_markers_caps_and_dedup() {
+        let mut buffer = TimeIndexedBuffer::new(128);
+        buffer.push_many(vec![
+            sample_event("e1", 100, "topic-a", "phase-1"),
+            sample_event("e2", 110, "topic-a", "phase-1"),
+            sample_event("e3", 120, "topic-b", "phase-2"),
+            sample_event("e4", 130, "topic-b", "phase-2"),
+            sample_event("e5", 140, "topic-b", "phase-3"),
+        ]);
+
+        let cursor = TimeCursor::default();
+        let markers = derive_phase_markers(&buffer, &cursor, PHASE_MARKER_LIMIT);
+        assert_eq!(markers.len(), 3);
+        assert_eq!(markers[0].topic, "topic-a");
+        assert_eq!(markers[1].label, "phase-2");
+        assert_eq!(markers[2].label, "phase-3");
+
+        let mut buffer = TimeIndexedBuffer::new(128);
+        let mut events = Vec::new();
+        for idx in 0..60 {
+            events.push(sample_event(
+                &format!("cap-{idx}"),
+                1000 + idx as i64,
+                &format!("topic-{idx}"),
+                "phase",
+            ));
+        }
+        buffer.push_many(events);
+        let markers = derive_phase_markers(&buffer, &cursor, 50);
+        assert_eq!(markers.len(), 50);
+        assert_eq!(markers.first().unwrap().topic, "topic-10");
+        assert_eq!(markers.last().unwrap().topic, "topic-59");
     }
 }

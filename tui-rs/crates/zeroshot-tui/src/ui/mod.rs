@@ -82,11 +82,13 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         } => {
             let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
             let microscope_state = state.agent_microscopes.get(&key);
+            let cluster_state = state.clusters.get(cluster_id);
             agent_microscope::render(
                 frame,
                 content_area,
                 cluster_id,
                 agent_id,
+                cluster_state.map(|state| &state.timeline_time),
                 microscope_state,
                 &state.time_cursor,
             );
@@ -174,11 +176,13 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
         } => {
             let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
             let microscope_state = state.agent_microscopes.get(&key);
+            let cluster_state = state.clusters.get(cluster_id);
             agent_microscope::render(
                 frame,
                 canvas_area,
                 cluster_id,
                 agent_id,
+                cluster_state.map(|state| &state.timeline_time),
                 microscope_state,
                 &state.time_cursor,
             );

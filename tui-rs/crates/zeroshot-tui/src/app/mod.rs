@@ -867,14 +867,22 @@ fn queue_navigation_effects(screen: &ScreenId, effects: &mut Vec<Effect>) {
         ScreenId::Agent {
             cluster_id,
             agent_id,
+        } => {
+            effects.push(Effect::Backend(BackendRequest::SubscribeClusterLogs {
+                cluster_id: cluster_id.clone(),
+                agent_id: Some(agent_id.clone()),
+            }));
         }
-        | ScreenId::AgentMicroscope {
+        ScreenId::AgentMicroscope {
             cluster_id,
             agent_id,
         } => {
             effects.push(Effect::Backend(BackendRequest::SubscribeClusterLogs {
                 cluster_id: cluster_id.clone(),
                 agent_id: Some(agent_id.clone()),
+            }));
+            effects.push(Effect::Backend(BackendRequest::SubscribeClusterTimeline {
+                cluster_id: cluster_id.clone(),
             }));
         }
         ScreenId::Launcher | ScreenId::IntentConsole => {}
@@ -1956,11 +1964,14 @@ fn cleanup_active_screen(state: &mut AppState, effects: &mut Vec<Effect>) {
         Some(ScreenId::Agent {
             cluster_id,
             agent_id,
-        })
-        | Some(ScreenId::AgentMicroscope {
+        }) => cleanup_agent_subscriptions(state, &cluster_id, &agent_id, effects),
+        Some(ScreenId::AgentMicroscope {
             cluster_id,
             agent_id,
-        }) => cleanup_agent_subscriptions(state, &cluster_id, &agent_id, effects),
+        }) => {
+            cleanup_agent_subscriptions(state, &cluster_id, &agent_id, effects);
+            cleanup_cluster_timeline_subscription(state, &cluster_id, effects);
+        }
         _ => {}
     }
 }
@@ -1977,6 +1988,22 @@ fn cleanup_cluster_subscriptions(state: &mut AppState, id: &str, effects: &mut V
     }
     if let Some(canvas_entry) = state.cluster_canvases.get_mut(id) {
         canvas_entry.log_subscription = None;
+        canvas_entry.timeline_subscription = None;
+    }
+}
+
+fn cleanup_cluster_timeline_subscription(
+    state: &mut AppState,
+    id: &str,
+    effects: &mut Vec<Effect>,
+) {
+    let Some(entry) = state.clusters.get_mut(id) else {
+        return;
+    };
+    if let Some(subscription_id) = entry.timeline_subscription.take() {
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    }
+    if let Some(canvas_entry) = state.cluster_canvases.get_mut(id) {
         canvas_entry.timeline_subscription = None;
     }
 }
@@ -2260,6 +2287,23 @@ mod tests {
             })),
         );
         assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
+    }
+
+    #[test]
+    fn navigation_to_microscope_subscribes_timeline() {
+        let state = AppState::default();
+        let (_, effects) = update(
+            state,
+            Action::Navigate(NavigationAction::Push(ScreenId::AgentMicroscope {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+            })),
+        );
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::SubscribeClusterTimeline {
+                cluster_id: "cluster-1".to_string(),
+            }
+        )));
     }
 
     #[test]
