@@ -6,7 +6,9 @@ use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
 pub mod agent_microscope;
+mod spine_completion;
 mod spine_hint;
+use spine_completion::{build_spine_completion, select_spine_completion};
 pub use spine_hint::{compute_spine_hint, SpineHint, SpineHintTone};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -207,8 +209,9 @@ pub enum SpineMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpineCompletion {
-    pub text: String,
-    pub selection: usize,
+    pub candidates: Vec<String>,
+    pub selected: usize,
+    pub ghost: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -659,7 +662,8 @@ pub enum SpineAction {
     EnterMode { mode: SpineMode, prefill: String },
     Cancel,
     Submit,
-    Complete,
+    AcceptCompletion,
+    CycleCompletion,
     InsertChar(char),
     Backspace,
     Delete,
@@ -828,6 +832,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
 
     apply_spine_defaults_for_screen(state);
     refresh_spine_hint(state);
+    refresh_spine_completion(state);
     sync_temporal_focus(state);
 }
 
@@ -1613,6 +1618,14 @@ fn refresh_spine_hint(state: &mut AppState) {
     state.spine.hint = compute_spine_hint(state);
 }
 
+fn refresh_spine_completion(state: &mut AppState) {
+    state.spine.completion = build_spine_completion(
+        state.spine.mode,
+        state.spine.input.input.as_str(),
+        state.spine.input.cursor,
+    );
+}
+
 fn sync_temporal_focus(state: &mut AppState) {
     if !state.temporal_focus.is_active() {
         return;
@@ -1709,10 +1722,12 @@ fn resolve_spine_agent_target(state: &AppState) -> Option<(String, String)> {
 
 fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut Vec<Effect>) {
     let mut should_refresh_hint = false;
+    let mut should_refresh_completion = false;
     match action {
         SpineAction::SetMode(mode) => {
             state.spine.mode = mode;
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::SetHint(hint) => {
             state.spine.hint = hint;
@@ -1725,10 +1740,12 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
             set_spine_input(state, prefill);
             state.spine.completion = None;
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::Cancel => {
             reset_spine_state(state);
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::Submit => {
             let mode = state.spine.mode;
@@ -1792,47 +1809,73 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
             }
             reset_spine_state(state);
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
-        SpineAction::Complete => {
+        SpineAction::AcceptCompletion => {
             if let Some(completion) = state.spine.completion.take() {
-                if !completion.text.is_empty() {
-                    state.spine.input.input.push_str(completion.text.as_str());
+                if !completion.ghost.is_empty() {
+                    state.spine.input.input.push_str(completion.ghost.as_str());
                     state.spine.input.cursor = state.spine.input.input.chars().count();
                 }
             }
             should_refresh_hint = true;
+            should_refresh_completion = true;
+        }
+        SpineAction::CycleCompletion => {
+            if let Some(completion) = state.spine.completion.as_ref() {
+                if completion.candidates.len() > 1 {
+                    let next = (completion.selected + 1) % completion.candidates.len();
+                    state.spine.completion = select_spine_completion(
+                        state.spine.mode,
+                        state.spine.input.input.as_str(),
+                        state.spine.input.cursor,
+                        next,
+                    );
+                }
+            }
         }
         SpineAction::InsertChar(ch) => {
             state.spine.input.insert_char(ch);
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::Backspace => {
             state.spine.input.backspace();
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::Delete => {
             state.spine.input.delete();
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
         SpineAction::MoveCursorLeft => {
             state.spine.input.move_left();
+            should_refresh_completion = true;
         }
         SpineAction::MoveCursorRight => {
             state.spine.input.move_right();
+            should_refresh_completion = true;
         }
         SpineAction::MoveCursorHome => {
             state.spine.input.move_home();
+            should_refresh_completion = true;
         }
         SpineAction::MoveCursorEnd => {
             state.spine.input.move_end();
+            should_refresh_completion = true;
         }
         SpineAction::Clear => {
             state.spine.input.clear();
             state.spine.completion = None;
             should_refresh_hint = true;
+            should_refresh_completion = true;
         }
     }
 
+    if should_refresh_completion {
+        refresh_spine_completion(state);
+    }
     if should_refresh_hint {
         refresh_spine_hint(state);
     }
@@ -2383,14 +2426,43 @@ mod tests {
     }
 
     #[test]
+    fn spine_accept_completion_appends_ghost() {
+        let mut state = AppState::default();
+        state.spine.mode = SpineMode::Command;
+
+        let (state, _) = update(state, Action::Spine(SpineAction::InsertChar('p')));
+        let completion = state.spine.completion.as_ref().expect("completion");
+        assert_eq!(completion.ghost, "rovider");
+
+        let (state, _) = update(state, Action::Spine(SpineAction::AcceptCompletion));
+        assert_eq!(state.spine.input.input, "provider");
+        assert!(state.spine.completion.is_none());
+    }
+
+    #[test]
+    fn spine_cycle_completion_updates_ghost() {
+        let mut state = AppState::default();
+        state.spine.mode = SpineMode::Command;
+
+        let (state, _) = update(state, Action::Spine(SpineAction::InsertChar('i')));
+        let completion = state.spine.completion.as_ref().expect("completion");
+        assert_eq!(completion.ghost, "ssue");
+
+        let (state, _) = update(state, Action::Spine(SpineAction::CycleCompletion));
+        let completion = state.spine.completion.as_ref().expect("completion");
+        assert_eq!(completion.ghost, "nterrupt");
+    }
+
+    #[test]
     fn spine_cancel_resets_mode_and_input() {
         let mut state = AppState::default();
         state.spine.mode = SpineMode::Command;
         state.spine.input.input = "help".to_string();
         state.spine.input.cursor = 4;
         state.spine.completion = Some(SpineCompletion {
-            text: "er".to_string(),
-            selection: 0,
+            candidates: vec!["help".to_string()],
+            selected: 0,
+            ghost: "er".to_string(),
         });
 
         let (state, effects) = update(state, Action::Spine(SpineAction::Cancel));

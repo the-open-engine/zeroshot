@@ -114,11 +114,11 @@ fn push_completion<'a>(spans: &mut Vec<Span<'a>>, state: &'a SpineState) {
     let Some(completion) = &state.completion else {
         return;
     };
-    if completion.text.is_empty() || state.input.input.is_empty() {
+    if completion.ghost.is_empty() || state.input.input.is_empty() {
         return;
     }
     spans.push(Span::styled(
-        completion.text.as_str(),
+        completion.ghost.as_str(),
         theme::spine_completion_style(),
     ));
 }
@@ -260,5 +260,36 @@ mod tests {
         let line2 = line_text(buffer, 2);
         assert!(!line1.contains("Second line hint"));
         assert!(line2.contains("Second line hint"));
+    }
+
+    #[test]
+    fn completion_renders_dimmed_after_input() {
+        let backend = TestBackend::new(40, 3);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = SpineState::default();
+        state.mode = SpineMode::Command;
+        state.input.input = "pro".to_string();
+        state.input.cursor = 3;
+        state.completion = Some(crate::app::SpineCompletion {
+            candidates: vec!["provider".to_string()],
+            selected: 0,
+            ghost: "vider".to_string(),
+        });
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &state);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let line = line_text(buffer, 1);
+        let ghost_start = line.find("vider").expect("ghost text");
+        let cell = buffer
+            .cell((ghost_start as u16, 1))
+            .expect("ghost cell");
+        let expected_fg = theme::spine_completion_style().fg.expect("fg");
+        assert_eq!(cell.fg, expected_fg);
     }
 }

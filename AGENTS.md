@@ -51,6 +51,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Rust TUI backend client      | `tui-rs/crates/zeroshot-tui/src/backend/`                  |
 | Rust TUI entrypoint          | `tui-rs/crates/zeroshot-tui/src/main.rs`                   |
 | Rust TUI core loop (MVU)     | `tui-rs/crates/zeroshot-tui/src/app/mod.rs`                |
+| Rust TUI spine completion    | `tui-rs/crates/zeroshot-tui/src/app/spine_completion.rs`   |
 | Rust TUI input routing       | `tui-rs/crates/zeroshot-tui/src/input.rs`                  |
 | Rust TUI commands            | `tui-rs/crates/zeroshot-tui/src/commands/`                 |
 | Rust TUI command parser      | `tui-rs/crates/zeroshot-tui/src/commands/parser.rs`        |
