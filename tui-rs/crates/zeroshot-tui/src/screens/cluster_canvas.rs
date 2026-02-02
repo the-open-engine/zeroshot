@@ -303,25 +303,28 @@ struct CanvasRenderContext<'a> {
     layout: &'a LayoutCache,
     focused: Option<&'a str>,
     camera: (f64, f64),
-    block: Block,
+    block: Block<'a>,
 }
 
-fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
-    let title = format!("Cluster Canvas {}", ctx.cluster_id);
-    let render_bounds = camera_bounds(ctx.layout, ctx.camera);
-    let block = ctx.block.title(title);
-    let canvas_inner = block.inner(ctx.area);
+fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
+    let title = format!("Cluster Canvas {}", canvas_ctx.cluster_id);
+    let render_bounds = camera_bounds(canvas_ctx.layout, canvas_ctx.camera);
+    let block = canvas_ctx.block.title(title);
+    let canvas_inner = block.inner(canvas_ctx.area);
+    let layout = canvas_ctx.layout;
+    let focused = canvas_ctx.focused;
+    let topology = canvas_ctx.topology;
     let canvas = Canvas::default()
         .block(block)
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
         .y_bounds([render_bounds.min_y, render_bounds.max_y])
         .marker(Marker::Braille)
         .paint(|ctx| {
-            for edge in &ctx.layout.edges {
-                let Some(from) = ctx.layout.nodes.get(&edge.from) else {
+            for edge in &layout.edges {
+                let Some(from) = layout.nodes.get(&edge.from) else {
                     continue;
                 };
-                let Some(to) = ctx.layout.nodes.get(&edge.to) else {
+                let Some(to) = layout.nodes.get(&edge.to) else {
                     continue;
                 };
                 ctx.draw(&CanvasLine {
@@ -333,7 +336,7 @@ fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
                 });
             }
 
-            for node in ctx.layout.nodes.values() {
+            for node in layout.nodes.values() {
                 let color = match node.kind {
                     NodeKind::Agent => theme::agent_color(node.id.as_str()),
                     NodeKind::Topic => theme::FG_MUTED,
@@ -343,7 +346,7 @@ fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
                     NodeKind::Topic => TOPIC_ORB_RADIUS,
                 };
 
-                if ctx.focused == Some(node.id.as_str()) {
+                if focused == Some(node.id.as_str()) {
                     ctx.draw(&Circle {
                         x: node.x,
                         y: node.y,
@@ -371,7 +374,7 @@ fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
                 ctx.print(label_x, label_y, line);
             }
 
-            let summary_line = topology_summary(ctx.topology);
+            let summary_line = topology_summary(topology);
             if let Some(summary_line) = summary_line {
                 let line = Line::from(Span::styled(summary_line, theme::dim_style()));
                 ctx.print(
@@ -382,14 +385,14 @@ fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
             }
         });
 
-    frame.render_widget(canvas, ctx.area);
+    frame.render_widget(canvas, canvas_ctx.area);
     render_stream_overlay(
         frame,
         canvas_inner,
-        ctx.layout,
-        ctx.focused,
+        canvas_ctx.layout,
+        canvas_ctx.focused,
         &render_bounds,
-        ctx.cluster_state,
+        canvas_ctx.cluster_state,
         None,
     );
 }
