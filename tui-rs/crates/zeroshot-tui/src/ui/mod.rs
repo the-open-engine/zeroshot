@@ -80,7 +80,15 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             cluster_id,
             agent_id,
         } => {
-            agent_microscope::render(frame, content_area, cluster_id, agent_id);
+            let cluster_state = state.clusters.get(cluster_id);
+            agent_microscope::render(
+                frame,
+                content_area,
+                cluster_id,
+                agent_id,
+                cluster_state,
+                &state.time_cursor,
+            );
         }
     }
 
@@ -163,7 +171,15 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             cluster_id,
             agent_id,
         } => {
-            agent_microscope::render(frame, canvas_area, cluster_id, agent_id);
+            let cluster_state = state.clusters.get(cluster_id);
+            agent_microscope::render(
+                frame,
+                canvas_area,
+                cluster_id,
+                agent_id,
+                cluster_state,
+                &state.time_cursor,
+            );
         }
     }
 

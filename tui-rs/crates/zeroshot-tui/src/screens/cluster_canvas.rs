@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::app::TimeCursor;
-use crate::protocol::{ClusterLogLine, ClusterTopology, TimelineEvent, TopologyAgent};
+use crate::protocol::{ClusterTopology, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::theme;
 use crate::ui::widgets::stream::{self, StreamOverlay};
@@ -471,14 +471,14 @@ fn build_overlay_lines<'a>(
 ) -> (Line<'a>, Vec<Line<'a>>) {
     let is_agent = node.kind == NodeKind::Agent;
     let log_title = if is_agent {
-        Line::from(format!("Logs - agent {}", node.id))
+        stream::overlay_title(format!("Logs - agent {}", node.id), time_cursor)
     } else {
-        Line::from("Logs - cluster")
+        stream::overlay_title("Logs - cluster", time_cursor)
     };
     let timeline_title = if is_agent {
-        Line::from(format!("Timeline - agent {}", node.id))
+        stream::overlay_title(format!("Timeline - agent {}", node.id), time_cursor)
     } else {
-        Line::from("Timeline - cluster")
+        stream::overlay_title("Timeline - cluster", time_cursor)
     };
 
     let log_lines = collect_log_lines(
@@ -508,24 +508,19 @@ fn collect_log_lines<'a>(
     if max_lines == 0 {
         return Vec::new();
     }
-    let mut collected: Vec<&ClusterLogLine> = Vec::new();
-    let windowed = cluster_state
-        .logs_time
-        .window(time_cursor.t_ms, time_cursor.window_ms);
-    for line in windowed.iter().rev() {
-        if let Some(agent_id) = agent_id {
-            let matches_agent = line.agent.as_deref() == Some(agent_id)
-                || line.sender.as_deref() == Some(agent_id);
-            if !matches_agent {
-                continue;
+    let collected = stream::select_time_window(
+        &cluster_state.logs_time,
+        time_cursor,
+        max_lines,
+        |line| {
+            if let Some(agent_id) = agent_id {
+                line.agent.as_deref() == Some(agent_id)
+                    || line.sender.as_deref() == Some(agent_id)
+            } else {
+                true
             }
-        }
-        collected.push(line);
-        if collected.len() >= max_lines {
-            break;
-        }
-    }
-    collected.reverse();
+        },
+    );
     collected
         .into_iter()
         .map(stream::format_log_line_styled)
@@ -540,13 +535,12 @@ fn collect_timeline_lines<'a>(
     if max_lines == 0 {
         return Vec::new();
     }
-    let windowed = cluster_state
-        .timeline_time
-        .window(time_cursor.t_ms, time_cursor.window_ms);
-    let mut collected: Vec<&TimelineEvent> = windowed;
-    if collected.len() > max_lines {
-        collected = collected.split_off(collected.len().saturating_sub(max_lines));
-    }
+    let collected = stream::select_time_window(
+        &cluster_state.timeline_time,
+        time_cursor,
+        max_lines,
+        |_| true,
+    );
     collected
         .into_iter()
         .map(stream::format_timeline_event_styled)

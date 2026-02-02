@@ -4,7 +4,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 
+use crate::app::{TimeCursor, TimeCursorMode};
 use crate::protocol::{ClusterLogLine, TimelineEvent};
+use crate::ui::shared::{HasTimestamp, TimeIndexedBuffer};
 use crate::ui::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +99,83 @@ pub fn timeline_placeholder_lines<'a>() -> Vec<Line<'a>> {
             theme::muted_style(),
         )),
     ]
+}
+
+pub fn mode_tag_span(time_cursor: &TimeCursor) -> Span<'static> {
+    let (label, style) = match time_cursor.mode {
+        TimeCursorMode::Live => ("LIVE", theme::toast_success_style()),
+        TimeCursorMode::Scrub => ("SCRUB", theme::key_style()),
+    };
+    Span::styled(format!("[{label}]"), style)
+}
+
+pub fn overlay_title(base: impl Into<String>, time_cursor: &TimeCursor) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(base.into()),
+        Span::raw(" "),
+        mode_tag_span(time_cursor),
+    ])
+}
+
+pub fn select_time_window<'a, T, F>(
+    buffer: &'a TimeIndexedBuffer<T>,
+    time_cursor: &TimeCursor,
+    max_items: usize,
+    filter: F,
+) -> Vec<&'a T>
+where
+    T: HasTimestamp,
+    F: Fn(&T) -> bool,
+{
+    if max_items == 0 || buffer.is_empty() {
+        return Vec::new();
+    }
+
+    match time_cursor.mode {
+        TimeCursorMode::Live => select_live_tail(buffer, max_items, filter),
+        TimeCursorMode::Scrub => select_scrub_window(buffer, time_cursor, max_items, filter),
+    }
+}
+
+fn select_live_tail<'a, T, F>(
+    buffer: &'a TimeIndexedBuffer<T>,
+    max_items: usize,
+    filter: F,
+) -> Vec<&'a T>
+where
+    T: HasTimestamp,
+    F: Fn(&T) -> bool,
+{
+    let mut collected = Vec::with_capacity(max_items);
+    for item in buffer.iter_rev() {
+        if filter(item) {
+            collected.push(item);
+            if collected.len() >= max_items {
+                break;
+            }
+        }
+    }
+    collected.reverse();
+    collected
+}
+
+fn select_scrub_window<'a, T, F>(
+    buffer: &'a TimeIndexedBuffer<T>,
+    time_cursor: &TimeCursor,
+    max_items: usize,
+    filter: F,
+) -> Vec<&'a T>
+where
+    T: HasTimestamp,
+    F: Fn(&T) -> bool,
+{
+    let windowed = buffer.window(time_cursor.t_ms, time_cursor.window_ms);
+    let mut collected: Vec<&T> = windowed.into_iter().filter(|item| filter(item)).collect();
+    if collected.len() > max_items {
+        let start = collected.len().saturating_sub(max_items);
+        collected = collected.split_off(start);
+    }
+    collected
 }
 
 pub fn format_log_line_styled(line: &ClusterLogLine) -> Line<'_> {
@@ -222,5 +301,68 @@ mod tests {
 
         assert!(buffer_contains(&terminal, "No logs yet."));
         assert!(buffer_contains(&terminal, "Waiting for stream output."));
+    }
+
+    fn sample_log(id: &str, timestamp: i64, agent: Option<&str>) -> ClusterLogLine {
+        ClusterLogLine {
+            id: id.to_string(),
+            timestamp,
+            text: format!("log-{id}"),
+            agent: agent.map(|value| value.to_string()),
+            role: None,
+            sender: None,
+        }
+    }
+
+    #[test]
+    fn stream_window_live_uses_tail() {
+        let mut buffer = TimeIndexedBuffer::new(16);
+        buffer.push_many(vec![
+            sample_log("one", 100, Some("alpha")),
+            sample_log("two", 200, Some("alpha")),
+            sample_log("three", 300, Some("alpha")),
+        ]);
+
+        let cursor = TimeCursor::default();
+        let selected = select_time_window(&buffer, &cursor, 2, |_| true);
+        let ids: Vec<&str> = selected.iter().map(|line| line.id.as_str()).collect();
+        assert_eq!(ids, vec!["two", "three"]);
+    }
+
+    #[test]
+    fn stream_window_scrub_uses_window() {
+        let mut buffer = TimeIndexedBuffer::new(16);
+        buffer.push_many(vec![
+            sample_log("one", 100, Some("alpha")),
+            sample_log("two", 200, Some("alpha")),
+            sample_log("three", 300, Some("alpha")),
+        ]);
+
+        let cursor = TimeCursor {
+            mode: TimeCursorMode::Scrub,
+            t_ms: 250,
+            window_ms: 120,
+        };
+        let selected = select_time_window(&buffer, &cursor, 10, |_| true);
+        let ids: Vec<&str> = selected.iter().map(|line| line.id.as_str()).collect();
+        assert_eq!(ids, vec!["two"]);
+    }
+
+    #[test]
+    fn stream_overlay_renders_mode_tag() {
+        let backend = TestBackend::new(40, 6);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let cursor = TimeCursor::default();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                let overlay = StreamOverlay::new(overlay_title("Logs", &cursor), Vec::new())
+                    .placeholder_lines(log_placeholder_lines(LogPlaceholderContext::Overlay));
+                frame.render_widget(overlay, area);
+            })
+            .expect("draw");
+
+        assert!(buffer_contains(&terminal, "LIVE"));
     }
 }
