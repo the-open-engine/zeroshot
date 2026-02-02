@@ -39,7 +39,9 @@ const AGENT_COLORS: [Color; 6] = [
 
 /// Get a color for an agent by hashing its ID to an index.
 pub fn agent_color(agent_id: &str) -> Color {
-    let hash = agent_id.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32));
+    let hash = agent_id
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_add(b as u32));
     AGENT_COLORS[hash as usize % AGENT_COLORS.len()]
 }
 
@@ -52,9 +54,7 @@ pub fn logo_style() -> Style {
 
 /// Screen title in the header.
 pub fn title_style() -> Style {
-    Style::default()
-        .fg(FG_PRIMARY)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD)
 }
 
 /// Hint / secondary text.

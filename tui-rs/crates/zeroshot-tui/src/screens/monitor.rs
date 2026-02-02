@@ -78,7 +78,10 @@ impl State {
             let prev_activity = self.last_activity_at.get(&cluster.id).copied();
             let mut activity = prev_activity;
 
-            if prev_count.map(|prev| cluster.message_count > prev).unwrap_or(true) {
+            if prev_count
+                .map(|prev| cluster.message_count > prev)
+                .unwrap_or(true)
+            {
                 activity = Some(now_ms);
             }
 
@@ -94,11 +97,7 @@ impl State {
 
     fn reconcile_selection(&mut self, selected_id: Option<String>) {
         if let Some(id) = selected_id {
-            if let Some(index) = self
-                .clusters
-                .iter()
-                .position(|cluster| cluster.id == id)
-            {
+            if let Some(index) = self.clusters.iter().position(|cluster| cluster.id == id) {
                 self.selected = index;
                 return;
             }
@@ -138,10 +137,7 @@ pub fn render(
         .clusters
         .iter()
         .map(|cluster| {
-            let provider = cluster
-                .provider
-                .clone()
-                .unwrap_or_else(|| "-".to_string());
+            let provider = cluster.provider.clone().unwrap_or_else(|| "-".to_string());
             let metrics = metrics_map.get(&cluster.id);
             let cpu = metrics::format_cpu_percent(metrics);
             let mem = metrics::format_memory_mb(metrics);
@@ -149,9 +145,7 @@ pub fn render(
             let last_activity = state
                 .last_activity_at
                 .get(&cluster.id)
-                .map(|activity| {
-                    format_duration(now_ms.saturating_sub(*activity))
-                })
+                .map(|activity| format_duration(now_ms.saturating_sub(*activity)))
                 .unwrap_or_else(|| "-".to_string());
 
             let state_style = theme::status_style(&cluster.state);

@@ -26,6 +26,29 @@ const {
 
 const MAX_REDIRECTS = 5;
 const execFileAsync = promisify(execFile);
+const PACKAGE_ROOT = path.resolve(__dirname, '..');
+
+function isGitCheckout() {
+  let current = PACKAGE_ROOT;
+  while (true) {
+    const gitPath = path.join(current, '.git');
+    if (fs.existsSync(gitPath)) {
+      return true;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}
+
+function isNotFoundError(error) {
+  if (!error || typeof error.message !== 'string') {
+    return false;
+  }
+  return /\(404\)/.test(error.message);
+}
 
 async function main() {
   if (shouldSkipBinaryInstall()) {
@@ -35,7 +58,9 @@ async function main() {
 
   const installContext = await prepareInstallContext();
   if (installContext.overridePath) {
-    console.log(`${ENV_BINARY_PATH} set; using local Rust TUI binary at ${installContext.overridePath}.`);
+    console.log(
+      `${ENV_BINARY_PATH} set; using local Rust TUI binary at ${installContext.overridePath}.`
+    );
     await installFromLocalBinary(installContext.overridePath, installContext.installPath);
     return;
   }
@@ -88,7 +113,18 @@ async function downloadAndInstall(downloadContext, installContext) {
   const archivePath = path.join(tempDir, downloadContext.assetName);
 
   try {
-    await downloadToFile(downloadContext.archiveUrl, archivePath, MAX_REDIRECTS);
+    try {
+      await downloadToFile(downloadContext.archiveUrl, archivePath, MAX_REDIRECTS);
+    } catch (error) {
+      if (isGitCheckout() && isNotFoundError(error)) {
+        console.log(
+          'Rust TUI binary not found for this version in git checkout; skipping install. ' +
+            `Set ${ENV_BINARY_URL} or ${ENV_BINARY_PATH} to override.`
+        );
+        return;
+      }
+      throw error;
+    }
     const shaUrl = `${downloadContext.archiveUrl}.sha256`;
     const expectedSha = await fetchSha256(shaUrl);
     if (expectedSha) {
@@ -205,7 +241,9 @@ async function streamToFileWithLengthCheck(response, destination, url) {
   await pipeline(response, fileStream);
 
   if (!Number.isNaN(expectedLength) && expectedLength > 0 && downloaded !== expectedLength) {
-    throw new Error(`Download size mismatch for ${url}: expected ${expectedLength}, got ${downloaded}`);
+    throw new Error(
+      `Download size mismatch for ${url}: expected ${expectedLength}, got ${downloaded}`
+    );
   }
 }
 

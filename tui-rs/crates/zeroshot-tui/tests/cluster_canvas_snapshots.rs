@@ -37,7 +37,10 @@ fn sample_topology() -> ClusterTopology {
                 dynamic: None,
             },
         ],
-        topics: vec!["ISSUE_OPENED".to_string(), "IMPLEMENTATION_READY".to_string()],
+        topics: vec![
+            "ISSUE_OPENED".to_string(),
+            "IMPLEMENTATION_READY".to_string(),
+        ],
     }
 }
 
@@ -98,9 +101,7 @@ fn cluster_canvas_snapshot_with_focus_and_overlay() {
     canvas_state.focused_id = Some("worker".to_string());
     canvas_state.update_layout(&topology);
 
-    state
-        .clusters
-        .insert(cluster_id.clone(), cluster_state);
+    state.clusters.insert(cluster_id.clone(), cluster_state);
     state
         .cluster_canvases
         .insert(cluster_id.clone(), canvas_state);

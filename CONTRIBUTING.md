@@ -361,7 +361,17 @@ Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot 
    zeroshot tui
    ```
 
-2. **Common TUI issues**
+2. **CI note**
+
+   The Rust TUI backend integration tests require the Node TUI backend to be built.
+   CI enforces this (fails if missing). Locally, run:
+
+   ```bash
+   npm ci
+   npm run build:tui-backend
+   ```
+
+3. **Common TUI issues**
 
    | Issue              | Fix                                                   |
    | ------------------ | ----------------------------------------------------- |
@@ -370,7 +380,7 @@ Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot 
    | Stats not updating | File polling delay - wait 2-5 seconds                 |
    | Resize glitches    | Restart TUI                                           |
 
-3. **Debug TUI rendering**
+4. **Debug TUI rendering**
 
    Edit `tui-rs/crates/zeroshot-tui/src/` (screen or widget) and add:
 

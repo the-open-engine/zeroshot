@@ -1,7 +1,7 @@
-import { loadSettings } from "../../../lib/settings";
-import { normalizeProviderName } from "../../../lib/provider-names";
+import { loadSettings } from '../../../lib/settings';
+import { normalizeProviderName } from '../../../lib/provider-names';
 
-const pidusage = require("pidusage");
+const pidusage = require('pidusage');
 
 type PidusageStats = Record<string, { cpu?: number; memory?: number }>;
 type PidusageFn = (pids: number[]) => Promise<PidusageStats>;
@@ -34,14 +34,14 @@ let orchestratorPromise: Promise<any> | null = null;
 
 async function getOrchestrator() {
   if (!orchestratorPromise) {
-    const Orchestrator = require("../../../src/orchestrator");
+    const Orchestrator = require('../../../src/orchestrator');
     orchestratorPromise = Orchestrator.create({ quiet: true });
   }
   return orchestratorPromise;
 }
 
 function resolveClusterCwd(cluster: any): string | null {
-  if (!cluster || typeof cluster !== "object") {
+  if (!cluster || typeof cluster !== 'object') {
     return null;
   }
   if (cluster.worktree?.path) {
@@ -54,35 +54,35 @@ function resolveClusterCwd(cluster: any): string | null {
 }
 
 function resolveClusterProvider(cluster: any, settings: any): string | null {
-  if (!cluster || typeof cluster !== "object") {
+  if (!cluster || typeof cluster !== 'object') {
     const fallback = settings?.defaultProvider ?? null;
     const normalizedFallback = normalizeProviderName(fallback);
-    return typeof normalizedFallback === "string" ? normalizedFallback : null;
+    return typeof normalizedFallback === 'string' ? normalizedFallback : null;
   }
   const forced = cluster.config?.forceProvider ?? null;
   const defaultProvider = cluster.config?.defaultProvider ?? null;
   const settingsProvider = settings?.defaultProvider ?? null;
   const provider =
-    forced && typeof forced === "string"
+    forced && typeof forced === 'string'
       ? forced
-      : defaultProvider && typeof defaultProvider === "string"
+      : defaultProvider && typeof defaultProvider === 'string'
         ? defaultProvider
-        : settingsProvider && typeof settingsProvider === "string"
+        : settingsProvider && typeof settingsProvider === 'string'
           ? settingsProvider
           : null;
   const normalized = normalizeProviderName(provider);
-  return typeof normalized === "string" ? normalized : null;
+  return typeof normalized === 'string' ? normalized : null;
 }
 
 function resolveAgentPid(agent: any): number | null {
-  if (!agent || typeof agent !== "object") {
+  if (!agent || typeof agent !== 'object') {
     return null;
   }
   const pid = agent.processPid ?? agent.pid ?? null;
   if (Number.isFinite(pid) && pid > 0) {
     return pid;
   }
-  if (typeof agent.getState === "function") {
+  if (typeof agent.getState === 'function') {
     const state = agent.getState();
     const statePid = state?.pid ?? null;
     if (Number.isFinite(statePid) && statePid > 0) {
@@ -93,7 +93,7 @@ function resolveAgentPid(agent: any): number | null {
 }
 
 function collectAgentPids(cluster: any): number[] {
-  if (!cluster || typeof cluster !== "object") {
+  if (!cluster || typeof cluster !== 'object') {
     return [];
   }
   const agents = Array.isArray(cluster.agents) ? cluster.agents : [];
@@ -107,16 +107,12 @@ function collectAgentPids(cluster: any): number[] {
   return Array.from(pids);
 }
 
-function normalizeSummary(
-  summary: any,
-  orchestrator: any,
-  settings: any
-): ClusterSummary {
-  if (!summary || typeof summary !== "object") {
-    throw new Error("Invalid cluster summary.");
+function normalizeSummary(summary: any, orchestrator: any, settings: any): ClusterSummary {
+  if (!summary || typeof summary !== 'object') {
+    throw new Error('Invalid cluster summary.');
   }
-  if (typeof summary.id !== "string" || summary.id.length === 0) {
-    throw new Error("Invalid cluster id.");
+  if (typeof summary.id !== 'string' || summary.id.length === 0) {
+    throw new Error('Invalid cluster id.');
   }
   if (!Number.isFinite(summary.createdAt)) {
     throw new Error(`Invalid createdAt for cluster ${summary.id}.`);
@@ -132,7 +128,7 @@ function normalizeSummary(
   const provider = resolveClusterProvider(cluster, settings);
   return {
     id: summary.id,
-    state: String(summary.state ?? "unknown"),
+    state: String(summary.state ?? 'unknown'),
     provider,
     createdAt: summary.createdAt,
     agentCount: summary.agentCount,
@@ -146,7 +142,7 @@ export class ClusterNotFoundError extends Error {
 
   constructor(clusterId: string) {
     super(`Cluster not found: ${clusterId}`);
-    this.name = "ClusterNotFoundError";
+    this.name = 'ClusterNotFoundError';
     this.clusterId = clusterId;
   }
 }
@@ -165,12 +161,12 @@ type GetClusterSummaryArgs = {
   deps?: ClusterRegistryDeps;
 };
 
-const SUPPORTED_PLATFORMS = new Set(["darwin", "linux"]);
+const SUPPORTED_PLATFORMS = new Set(['darwin', 'linux']);
 const BYTES_PER_MB = 1024 * 1024;
 
-export async function listClusters(
-  { deps = {} }: ListClustersArgs = {}
-): Promise<ClusterSummary[]> {
+export async function listClusters({ deps = {} }: ListClustersArgs = {}): Promise<
+  ClusterSummary[]
+> {
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
   const loadSettingsImpl = deps.loadSettings ?? loadSettings;
   const orchestrator = await getOrchestratorImpl();
@@ -204,9 +200,10 @@ export async function getClusterSummary({
   return normalizeSummary(summary, orchestrator, settings);
 }
 
-export async function listClusterMetrics(
-  { clusterIds, deps = {} }: ListClusterMetricsArgs = {}
-): Promise<Record<string, ClusterMetrics>> {
+export async function listClusterMetrics({
+  clusterIds,
+  deps = {},
+}: ListClusterMetricsArgs = {}): Promise<Record<string, ClusterMetrics>> {
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
   const pidusageImpl = deps.pidusage ?? pidusage;
   const platform = deps.platform ?? process.platform;
@@ -214,7 +211,7 @@ export async function listClusterMetrics(
   const summaries = orchestrator.listClusters();
   const availableIds = summaries.map((summary: any) => summary.id);
   const requestedIds = Array.isArray(clusterIds)
-    ? clusterIds.filter((id) => typeof id === "string")
+    ? clusterIds.filter((id) => typeof id === 'string')
     : null;
   let resolvedIds = availableIds;
   if (requestedIds) {

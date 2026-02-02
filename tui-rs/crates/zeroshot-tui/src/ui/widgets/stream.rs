@@ -210,11 +210,7 @@ where
     }
 }
 
-fn select_live_tail<T, F>(
-    buffer: &TimeIndexedBuffer<T>,
-    max_items: usize,
-    filter: F,
-) -> Vec<&T>
+fn select_live_tail<T, F>(buffer: &TimeIndexedBuffer<T>, max_items: usize, filter: F) -> Vec<&T>
 where
     T: HasTimestamp,
     F: Fn(&T) -> bool,
@@ -276,10 +272,7 @@ pub fn format_timeline_event_styled(event: &TimelineEvent) -> Line<'_> {
     ];
     if let Some(sender) = event.sender.as_deref() {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format!("({sender})"),
-            theme::muted_style(),
-        ));
+        spans.push(Span::styled(format!("({sender})"), theme::muted_style()));
     }
     Line::from(spans)
 }
@@ -365,9 +358,8 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                let overlay = StreamOverlay::new(Line::from("Logs"), Vec::new()).placeholder_lines(
-                    log_placeholder_lines(LogPlaceholderContext::Overlay),
-                );
+                let overlay = StreamOverlay::new(Line::from("Logs"), Vec::new())
+                    .placeholder_lines(log_placeholder_lines(LogPlaceholderContext::Overlay));
                 frame.render_widget(overlay, area);
             })
             .expect("draw");

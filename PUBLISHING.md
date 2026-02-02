@@ -25,6 +25,7 @@ If you get an error or "organization not found", you need to create it:
 ### Create the organization:
 
 1. Log in to npm:
+
    ```bash
    npm login
    ```
@@ -65,6 +66,7 @@ For CI/CD publishing, you need an **automation token** (not a classic token).
 ### Token Permissions:
 
 Automation tokens have these capabilities:
+
 - ✅ Publish packages
 - ✅ Update package metadata
 - ✅ Read private packages (if your org has any)
@@ -144,6 +146,7 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
 1. **Make changes** to the codebase
 
 2. **Commit with conventional commit messages**:
+
    ```bash
    git commit -m "feat: add new feature"      # Minor version bump (0.1.0 → 0.2.0)
    git commit -m "fix: fix bug"               # Patch version bump (0.1.0 → 0.1.1)
@@ -151,6 +154,7 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
    ```
 
 3. **Push to main branch**:
+
    ```bash
    git push origin main
    ```
@@ -171,12 +175,12 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
 
 semantic-release uses conventional commits to determine version bumps:
 
-| Commit Type | Version Bump | Example |
-|-------------|-------------|---------|
-| `fix:` | Patch (0.1.0 → 0.1.1) | `fix: resolve memory leak` |
-| `feat:` | Minor (0.1.0 → 0.2.0) | `feat: add cluster resume` |
-| `feat!:` or `BREAKING CHANGE:` | Major (0.1.0 → 1.0.0) | `feat!: change API signature` |
-| `docs:`, `chore:`, `style:`, etc. | No release | `docs: update README` |
+| Commit Type                       | Version Bump          | Example                       |
+| --------------------------------- | --------------------- | ----------------------------- |
+| `fix:`                            | Patch (0.1.0 → 0.1.1) | `fix: resolve memory leak`    |
+| `feat:`                           | Minor (0.1.0 → 0.2.0) | `feat: add cluster resume`    |
+| `feat!:` or `BREAKING CHANGE:`    | Major (0.1.0 → 1.0.0) | `feat!: change API signature` |
+| `docs:`, `chore:`, `style:`, etc. | No release            | `docs: update README`         |
 
 ### Breaking changes:
 
@@ -203,6 +207,7 @@ git commit -m "feat: new API" -m "BREAKING CHANGE: removes old API"
 **Cause:** The NPM_TOKEN doesn't have permission to publish to @covibes.
 
 **Fix:**
+
 1. Verify you're a member of the @covibes npm organization
 2. Regenerate the automation token
 3. Update the GitHub secret

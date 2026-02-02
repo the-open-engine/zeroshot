@@ -6,7 +6,9 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use crate::protocol::{ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTopology, TimelineEvent};
+use crate::protocol::{
+    ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTopology, TimelineEvent,
+};
 use crate::screens::metrics;
 use crate::ui::shared::{pane_block, HasTimestamp, ScrollableBuffer, TimeIndexedBuffer};
 use crate::ui::theme;
@@ -229,31 +231,19 @@ impl HasTimestamp for TimelineEvent {
 }
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, metrics: Option<&ClusterMetrics>) {
-    let [metrics_area, content] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-    ])
-    .areas(area);
+    let [metrics_area, content] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
 
     render_metrics_line(frame, metrics_area, metrics);
 
-    let [top, bottom] = Layout::vertical([
-        Constraint::Percentage(30),
-        Constraint::Percentage(70),
-    ])
-    .areas(content);
+    let [top, bottom] =
+        Layout::vertical([Constraint::Percentage(30), Constraint::Percentage(70)]).areas(content);
 
-    let [topo_area, agents_area] = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .areas(top);
+    let [topo_area, agents_area] =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(top);
 
-    let [logs_area, timeline_area] = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .areas(bottom);
+    let [logs_area, timeline_area] =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(bottom);
 
     render_topology(frame, topo_area, state);
     render_agents(frame, agents_area, state);
@@ -296,7 +286,9 @@ fn render_agents(frame: &mut Frame<'_>, area: Rect, state: &State) {
                 theme::muted_style(),
             )),
         ];
-        let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+        let widget = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
         frame.render_widget(widget, area);
         return;
     }
@@ -351,15 +343,19 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .collect()
     };
 
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let widget = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 
     // Scrollbar
     if !state.logs.is_empty() && height > 0 {
         let total = state.logs.len();
-        let position = total.saturating_sub(height).saturating_sub(state.logs.scroll_offset);
-        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-            .position(position);
+        let position = total
+            .saturating_sub(height)
+            .saturating_sub(state.logs.scroll_offset);
+        let mut scrollbar_state =
+            ScrollbarState::new(total.saturating_sub(height)).position(position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             inner,
@@ -394,15 +390,19 @@ fn render_timeline(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .collect()
     };
 
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let widget = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 
     // Scrollbar
     if !state.timeline.is_empty() && height > 0 {
         let total = state.timeline.len();
-        let position = total.saturating_sub(height).saturating_sub(state.timeline.scroll_offset);
-        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-            .position(position);
+        let position = total
+            .saturating_sub(height)
+            .saturating_sub(state.timeline.scroll_offset);
+        let mut scrollbar_state =
+            ScrollbarState::new(total.saturating_sub(height)).position(position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             inner,

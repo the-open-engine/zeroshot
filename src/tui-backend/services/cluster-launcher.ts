@@ -1,13 +1,13 @@
-import { loadSettings } from "../../../lib/settings";
+import { loadSettings } from '../../../lib/settings';
 import {
   detectRunInput,
   loadClusterConfig,
   resolveConfigPath,
   startClusterFromIssue,
   startClusterFromText,
-} from "../../../lib/start-cluster";
+} from '../../../lib/start-cluster';
 
-const { generateName } = require("../../../src/name-generator");
+const { generateName } = require('../../../src/name-generator');
 
 type ClusterLauncherDeps = {
   getOrchestrator?: () => Promise<any>;
@@ -25,21 +25,21 @@ let orchestratorPromise: Promise<any> | null = null;
 export class InvalidIssueReferenceError extends Error {
   constructor(ref: string) {
     super(`Invalid issue reference: ${ref}`);
-    this.name = "InvalidIssueReferenceError";
+    this.name = 'InvalidIssueReferenceError';
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 async function getOrchestrator() {
   if (!orchestratorPromise) {
-    const Orchestrator = require("../../../src/orchestrator");
+    const Orchestrator = require('../../../src/orchestrator');
     orchestratorPromise = Orchestrator.create({ quiet: true });
   }
   return orchestratorPromise;
 }
 
 export function generateClusterId(): string {
-  return generateName("cluster");
+  return generateName('cluster');
 }
 
 type LaunchClusterFromTextArgs = {
@@ -64,14 +64,9 @@ export async function launchClusterFromText({
 
   const orchestrator = await getOrchestratorImpl();
   const settings = loadSettingsImpl();
-  const configName = settings.defaultConfig || "conductor-bootstrap";
+  const configName = settings.defaultConfig || 'conductor-bootstrap';
   const configPath = resolveConfigPathImpl(configName);
-  const config = loadClusterConfigImpl(
-    orchestrator,
-    configPath,
-    settings,
-    providerOverride
-  );
+  const config = loadClusterConfigImpl(orchestrator, configPath, settings, providerOverride);
   const resolvedClusterId = clusterId || generateClusterIdImpl();
 
   await startClusterFromTextImpl({
@@ -103,26 +98,20 @@ export async function launchClusterFromIssue({
   const loadSettingsImpl = deps.loadSettings ?? loadSettings;
   const resolveConfigPathImpl = deps.resolveConfigPath ?? resolveConfigPath;
   const loadClusterConfigImpl = deps.loadClusterConfig ?? loadClusterConfig;
-  const startClusterFromIssueImpl =
-    deps.startClusterFromIssue ?? startClusterFromIssue;
+  const startClusterFromIssueImpl = deps.startClusterFromIssue ?? startClusterFromIssue;
   const detectRunInputImpl = deps.detectRunInput ?? detectRunInput;
   const generateClusterIdImpl = deps.generateClusterId ?? generateClusterId;
 
   const parsed = detectRunInputImpl(ref);
-  if (!parsed || typeof parsed !== "object" || !("issue" in parsed)) {
+  if (!parsed || typeof parsed !== 'object' || !('issue' in parsed)) {
     throw new InvalidIssueReferenceError(ref);
   }
 
   const orchestrator = await getOrchestratorImpl();
   const settings = loadSettingsImpl();
-  const configName = settings.defaultConfig || "conductor-bootstrap";
+  const configName = settings.defaultConfig || 'conductor-bootstrap';
   const configPath = resolveConfigPathImpl(configName);
-  const config = loadClusterConfigImpl(
-    orchestrator,
-    configPath,
-    settings,
-    providerOverride
-  );
+  const config = loadClusterConfigImpl(orchestrator, configPath, settings, providerOverride);
   const resolvedClusterId = clusterId || generateClusterIdImpl();
 
   await startClusterFromIssueImpl({

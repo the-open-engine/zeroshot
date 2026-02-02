@@ -69,18 +69,14 @@ fn protocol_fixtures_round_trip() {
                 "sendGuidanceToAgent" => round_trip::<SendGuidanceToAgentResponse>(&path),
                 "sendGuidanceToCluster" => round_trip::<SendGuidanceToClusterResponse>(&path),
                 "subscribeClusterLogs" => round_trip::<SubscribeClusterLogsResponse>(&path),
-                "subscribeClusterTimeline" => {
-                    round_trip::<SubscribeClusterTimelineResponse>(&path)
-                }
+                "subscribeClusterTimeline" => round_trip::<SubscribeClusterTimelineResponse>(&path),
                 "unsubscribe" => round_trip::<UnsubscribeResponse>(&path),
                 "getClusterTopology" => round_trip::<GetClusterTopologyResponse>(&path),
                 other => panic!("unknown response fixture: {other}"),
             },
             "notification" => match parts[1] {
                 "clusterLogLines" => round_trip::<ClusterLogLinesNotification>(&path),
-                "clusterTimelineEvents" => {
-                    round_trip::<ClusterTimelineEventsNotification>(&path)
-                }
+                "clusterTimelineEvents" => round_trip::<ClusterTimelineEventsNotification>(&path),
                 other => panic!("unknown notification fixture: {other}"),
             },
             other => panic!("unknown fixture prefix: {other}"),

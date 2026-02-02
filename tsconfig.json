@@ -29,6 +29,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "typeRoots": ["./node_modules/@types"],
 
     // Target Node.js 18+
     "target": "ES2022",
@@ -52,10 +53,5 @@
     "cluster-scripts/**/*",
     "test/**/*"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "coverage",
-    "task-lib"
-  ]
+  "exclude": ["node_modules", "dist", "coverage", "task-lib"]
 }

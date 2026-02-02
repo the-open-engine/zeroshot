@@ -1,40 +1,40 @@
 version: 2
 updates:
   # Enable version updates for npm
-  - package-ecosystem: "npm"
-    directory: "/"
-    target-branch: "dev"
+  - package-ecosystem: 'npm'
+    directory: '/'
+    target-branch: 'dev'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "Europe/Oslo"
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+      timezone: 'Europe/Oslo'
     # Limit number of open PRs
     open-pull-requests-limit: 10
     # Group minor and patch updates
     groups:
       development-dependencies:
-        dependency-type: "development"
+        dependency-type: 'development'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
       production-dependencies:
-        dependency-type: "production"
+        dependency-type: 'production'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     # Auto-approve and merge patch updates for dev dependencies
     # (Requires GitHub Actions workflow with dependabot-auto-merge)
     labels:
-      - "dependencies"
-      - "automated"
+      - 'dependencies'
+      - 'automated'
     # Ignore major version bumps for these (manual review required)
     ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     # Rebase strategy (cleaner history)
-    rebase-strategy: "auto"
+    rebase-strategy: 'auto'
     # Commit message prefix for semantic versioning
     commit-message:
-      prefix: "chore"
-      include: "scope"
+      prefix: 'chore'
+      include: 'scope'

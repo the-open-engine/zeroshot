@@ -1,9 +1,5 @@
-const Ajv = require("ajv");
-const {
-  PROTOCOL_VERSION,
-  RPC_ERROR_CODES,
-  RPC_ERROR_MESSAGES,
-} = require("./constants");
+const Ajv = require('ajv');
+const { PROTOCOL_VERSION, RPC_ERROR_CODES, RPC_ERROR_MESSAGES } = require('./constants');
 const {
   errorSchema,
   jsonRpcRequestBase,
@@ -12,25 +8,25 @@ const {
   REQUEST_SCHEMAS,
   RESPONSE_SCHEMAS,
   NOTIFICATION_SCHEMAS,
-} = require("./schemas");
+} = require('./schemas');
 
 const buildError = (code, message, errors = []) => {
   const data = Object.create(null);
   if (errors && errors.length) {
     const detail = errors
       .map((err) => {
-        const path = err.instancePath || err.schemaPath || "";
+        const path = err.instancePath || err.schemaPath || '';
         return path ? `${path} ${err.message}` : err.message;
       })
-      .join("; ");
+      .join('; ');
     if (detail) {
       data.detail = detail;
     }
     const fields = Object.create(null);
     for (const err of errors) {
-      const key = err.instancePath || err.schemaPath || "";
+      const key = err.instancePath || err.schemaPath || '';
       if (key && !fields[key]) {
-        fields[key] = err.message || "invalid";
+        fields[key] = err.message || 'invalid';
       }
     }
     if (Object.keys(fields).length) {
@@ -49,7 +45,7 @@ const buildError = (code, message, errors = []) => {
 const compileSchemaMap = (ajv, schemas) => {
   const validators = new Map();
   for (const [key, schema] of Object.entries(schemas)) {
-    validators.set(key, /** @type {any} */ (ajv.compile(schema)));
+    validators.set(key, /** @type {any} */ ajv.compile(schema));
   }
   return validators;
 };
@@ -62,14 +58,10 @@ const createValidator = () => {
     removeAdditional: false,
   });
 
-  const validateRequestBase = /** @type {any} */ (ajv.compile(jsonRpcRequestBase));
-  const validateNotificationBase = /** @type {any} */ (
-    ajv.compile(jsonRpcNotificationBase)
-  );
-  const validateErrorObject = /** @type {any} */ (ajv.compile(errorSchema));
-  const validateErrorResponse = /** @type {any} */ (
-    ajv.compile(buildErrorResponseSchema())
-  );
+  const validateRequestBase = /** @type {any} */ ajv.compile(jsonRpcRequestBase);
+  const validateNotificationBase = /** @type {any} */ ajv.compile(jsonRpcNotificationBase);
+  const validateErrorObject = /** @type {any} */ ajv.compile(errorSchema);
+  const validateErrorResponse = /** @type {any} */ ajv.compile(buildErrorResponseSchema());
 
   const requestValidators = compileSchemaMap(ajv, REQUEST_SCHEMAS);
   const responseValidators = compileSchemaMap(ajv, RESPONSE_SCHEMAS);
@@ -110,7 +102,7 @@ const createValidator = () => {
     }
 
     if (
-      message.method === "initialize" &&
+      message.method === 'initialize' &&
       message.params &&
       message.params.protocolVersion !== PROTOCOL_VERSION
     ) {
@@ -168,16 +160,11 @@ const createValidator = () => {
     return { ok: true, value: message };
   };
 
-  const isValidId = (id) => typeof id === "string" || typeof id === "number";
-  const isObject = (value) =>
-    value !== null && typeof value === "object" && !Array.isArray(value);
+  const isValidId = (id) => typeof id === 'string' || typeof id === 'number';
+  const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
   const validateResponse = (message, method) => {
-    if (
-      !isObject(message) ||
-      message.jsonrpc !== "2.0" ||
-      !isValidId(message.id)
-    ) {
+    if (!isObject(message) || message.jsonrpc !== '2.0' || !isValidId(message.id)) {
       return {
         ok: false,
         error: buildError(
@@ -188,8 +175,8 @@ const createValidator = () => {
       };
     }
 
-    const hasError = Object.prototype.hasOwnProperty.call(message, "error");
-    const hasResult = Object.prototype.hasOwnProperty.call(message, "result");
+    const hasError = Object.prototype.hasOwnProperty.call(message, 'error');
+    const hasResult = Object.prototype.hasOwnProperty.call(message, 'result');
     if ((hasError && hasResult) || (!hasError && !hasResult)) {
       return {
         ok: false,

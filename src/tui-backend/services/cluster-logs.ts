@@ -1,13 +1,13 @@
-import fs from "fs";
-import os from "os";
-import path from "path";
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-const Ledger = require("../../../src/ledger");
+const Ledger = require('../../../src/ledger');
 
 export const MAX_LOG_LINES = 400;
 export const LOG_POLL_INTERVAL_MS = 250;
 
-type ClusterLogState = "idle" | "waiting" | "ready" | "error";
+type ClusterLogState = 'idle' | 'waiting' | 'ready' | 'error';
 
 export type ClusterLogStatus = {
   state: ClusterLogState;
@@ -34,26 +34,25 @@ type ClusterLogStreamOptions = {
 
 export function resolveClusterDbPath(clusterId: string): string {
   const envHome =
-    (typeof process.env.HOME === "string" && process.env.HOME.trim()) ||
-    (typeof process.env.USERPROFILE === "string" &&
-      process.env.USERPROFILE.trim()) ||
-    (typeof process.env.HOMEDRIVE === "string" &&
-      typeof process.env.HOMEPATH === "string" &&
+    (typeof process.env.HOME === 'string' && process.env.HOME.trim()) ||
+    (typeof process.env.USERPROFILE === 'string' && process.env.USERPROFILE.trim()) ||
+    (typeof process.env.HOMEDRIVE === 'string' &&
+      typeof process.env.HOMEPATH === 'string' &&
       `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`.trim()) ||
-    "";
+    '';
   const homeDir = envHome || os.homedir();
-  const storageDir = path.join(homeDir, ".zeroshot");
-  const clustersFile = path.join(storageDir, "clusters.json");
+  const storageDir = path.join(homeDir, '.zeroshot');
+  const clustersFile = path.join(storageDir, 'clusters.json');
 
   try {
     if (fs.existsSync(clustersFile)) {
-      const raw = fs.readFileSync(clustersFile, "utf8");
+      const raw = fs.readFileSync(clustersFile, 'utf8');
       try {
         const data = JSON.parse(raw);
-        const entry = data && typeof data === "object" ? data[clusterId] : null;
+        const entry = data && typeof data === 'object' ? data[clusterId] : null;
         const dbPath = entry?.config?.dbPath;
 
-        if (typeof dbPath === "string" && dbPath.trim()) {
+        if (typeof dbPath === 'string' && dbPath.trim()) {
           return dbPath;
         }
       } catch {
@@ -68,27 +67,26 @@ export function resolveClusterDbPath(clusterId: string): string {
 }
 
 export function normalizeAgentOutput(message: any): ClusterLogLine | null {
-  if (!message || typeof message !== "object") {
+  if (!message || typeof message !== 'object') {
     return null;
   }
 
   const content = message.content || {};
   const data = content.data || {};
-  const contentText = typeof content.text === "string" ? content.text : "";
-  const dataLine = typeof data.line === "string" ? data.line : "";
+  const contentText = typeof content.text === 'string' ? content.text : '';
+  const dataLine = typeof data.line === 'string' ? data.line : '';
   const text = contentText.trim() ? contentText : dataLine;
 
   if (!text || !text.trim()) {
     return null;
   }
 
-  const timestamp =
-    typeof message.timestamp === "number" ? message.timestamp : Date.now();
-  const sender = typeof message.sender === "string" ? message.sender : null;
-  const agent = typeof data.agent === "string" ? data.agent : sender;
-  const role = typeof data.role === "string" ? data.role : null;
+  const timestamp = typeof message.timestamp === 'number' ? message.timestamp : Date.now();
+  const sender = typeof message.sender === 'string' ? message.sender : null;
+  const agent = typeof data.agent === 'string' ? data.agent : sender;
+  const role = typeof data.role === 'string' ? data.role : null;
   const id =
-    typeof message.id === "string"
+    typeof message.id === 'string'
       ? message.id
       : `${timestamp}-${Math.random().toString(16).slice(2)}`;
 
@@ -116,26 +114,20 @@ export function createClusterLogStream({
   let initialized = false;
   let closed = false;
   let lastStatus: ClusterLogStatus | null = null;
-  const normalizedAgentId =
-    typeof agentId === "string" && agentId.trim() ? agentId.trim() : null;
+  const normalizedAgentId = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : null;
 
   const filterLines = (lines: ClusterLogLine[]) => {
     if (!normalizedAgentId) {
       return lines;
     }
     return lines.filter(
-      (line) =>
-        line.agent === normalizedAgentId || line.sender === normalizedAgentId
+      (line) => line.agent === normalizedAgentId || line.sender === normalizedAgentId
     );
   };
 
   const emitStatus = (status: ClusterLogStatus) => {
     if (!onStatus) return;
-    if (
-      lastStatus &&
-      lastStatus.state === status.state &&
-      lastStatus.message === status.message
-    ) {
+    if (lastStatus && lastStatus.state === status.state && lastStatus.message === status.message) {
       return;
     }
     lastStatus = status;
@@ -144,13 +136,9 @@ export function createClusterLogStream({
 
   const emitError = (err: unknown, context: string) => {
     const message =
-      err instanceof Error
-        ? err.message
-        : typeof err === "string"
-        ? err
-        : "Unknown error";
+      err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error';
     emitStatus({
-      state: "error",
+      state: 'error',
       message: context ? `${context}: ${message}` : message,
     });
   };
@@ -169,7 +157,7 @@ export function createClusterLogStream({
 
   const ensureLedger = () => {
     if (!clusterId) {
-      emitStatus({ state: "idle" });
+      emitStatus({ state: 'idle' });
       return false;
     }
 
@@ -179,7 +167,7 @@ export function createClusterLogStream({
 
     const dbPath = resolveClusterDbPath(clusterId);
     if (!fs.existsSync(dbPath)) {
-      emitStatus({ state: "waiting" });
+      emitStatus({ state: 'waiting' });
       return false;
     }
 
@@ -188,10 +176,10 @@ export function createClusterLogStream({
       if (!initialized) {
         lastTimestamp = 0;
       }
-      emitStatus({ state: "ready" });
+      emitStatus({ state: 'ready' });
       return true;
     } catch (err) {
-      resetLedger(err, "Failed to open log database");
+      resetLedger(err, 'Failed to open log database');
       return false;
     }
   };
@@ -205,12 +193,12 @@ export function createClusterLogStream({
     try {
       rows = ledger.query({
         cluster_id: clusterId,
-        topic: "AGENT_OUTPUT",
-        order: "desc",
+        topic: 'AGENT_OUTPUT',
+        order: 'desc',
         limit: maxInitialLines,
       });
     } catch (err) {
-      resetLedger(err, "Failed to read initial logs");
+      resetLedger(err, 'Failed to read initial logs');
       return;
     }
 
@@ -227,7 +215,7 @@ export function createClusterLogStream({
 
     if (messages.length > 0) {
       const last = messages[messages.length - 1];
-      if (last && typeof last.timestamp === "number") {
+      if (last && typeof last.timestamp === 'number') {
         lastTimestamp = Math.max(lastTimestamp, last.timestamp);
       }
     }
@@ -241,7 +229,7 @@ export function createClusterLogStream({
     }
 
     if (!clusterId) {
-      emitStatus({ state: "idle" });
+      emitStatus({ state: 'idle' });
       return;
     }
 
@@ -255,12 +243,12 @@ export function createClusterLogStream({
     try {
       rows = ledger.query({
         cluster_id: clusterId,
-        topic: "AGENT_OUTPUT",
+        topic: 'AGENT_OUTPUT',
         since: lastTimestamp + 1,
-        order: "asc",
+        order: 'asc',
       });
     } catch (err) {
-      resetLedger(err, "Failed to read logs");
+      resetLedger(err, 'Failed to read logs');
       return;
     }
 
@@ -269,9 +257,7 @@ export function createClusterLogStream({
     }
 
     const lines = filterLines(
-      rows
-        .map((message: any) => normalizeAgentOutput(message))
-        .filter(Boolean) as ClusterLogLine[]
+      rows.map((message: any) => normalizeAgentOutput(message)).filter(Boolean) as ClusterLogLine[]
     );
 
     if (lines.length > 0) {
@@ -279,7 +265,7 @@ export function createClusterLogStream({
     }
 
     const last = rows[rows.length - 1];
-    if (last && typeof last.timestamp === "number") {
+    if (last && typeof last.timestamp === 'number') {
       lastTimestamp = Math.max(lastTimestamp, last.timestamp);
     }
   };

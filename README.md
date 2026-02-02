@@ -477,6 +477,69 @@ Ratatui (Rust) is the only supported TUI. Entry points:
 - `zeroshot tui`
 - `zeroshot watch`
 
+### TUI Development
+
+The Rust TUI spawns a Node backend over stdio. Run both while iterating.
+
+Single command dev loop (auto-rebuild + restart):
+
+```bash
+cargo install cargo-watch
+npm run dev:tui
+```
+
+1. Install deps
+
+   ```bash
+   npm ci
+   ```
+
+2. Build the TUI backend in watch mode
+
+   ```bash
+   npm run build:tui-backend -- --watch
+   # or
+   npx tsc -p tsconfig.tui-backend.json -w
+   ```
+
+3. Run the Rust TUI (second terminal)
+
+   ```bash
+   cd tui-rs
+   cargo run -p zeroshot-tui -- --ui disruptive
+   ```
+
+### Local CLI From This Repo
+
+If you want `zeroshot` to run from the dev branch globally:
+
+```bash
+npm run dev:link
+```
+
+One command to link + run the TUI dev loop:
+
+```bash
+npm run dev:bootstrap
+```
+
+### CLI Integration Loop
+
+Use the Node CLI to launch your local Rust binary:
+
+```bash
+cd tui-rs
+cargo build -p zeroshot-tui
+cd ..
+ZEROSHOT_TUI_BINARY_PATH="$PWD/tui-rs/target/debug/zeroshot-tui" node cli/index.js tui
+```
+
+### TUI Overrides
+
+- `ZEROSHOT_TUI_BACKEND_PATH` points to a specific `lib/tui-backend/server.js`
+- `ZEROSHOT_TUI_BINARY_PATH` points to a local Rust binary
+- `ZEROSHOT_TUI_UI=classic|disruptive` forces UI variant
+
 ---
 
 MIT - [Covibes](https://github.com/covibes)

@@ -13,21 +13,13 @@
             "properties": {
               "complexity": {
                 "type": "string",
-                "enum": [
-                  "TRIVIAL",
-                  "SIMPLE",
-                  "STANDARD",
-                  "CRITICAL"
-                ]
+                "enum": ["TRIVIAL", "SIMPLE", "STANDARD", "CRITICAL"]
               },
               "reasoning": {
                 "type": "string"
               }
             },
-            "required": [
-              "complexity",
-              "reasoning"
-            ]
+            "required": ["complexity", "reasoning"]
           },
           "prompt": "Classify this task: {{ISSUE_OPENED.content.text}}. Return JSON with complexity and reasoning.",
           "triggers": [
@@ -96,12 +88,7 @@
                 "description": "MUST extract from gh pr merge output"
               }
             },
-            "required": [
-              "pr_number",
-              "pr_url",
-              "merged",
-              "merge_commit_sha"
-            ]
+            "required": ["pr_number", "pr_url", "merged", "merge_commit_sha"]
           },
           "cwd": "/home/ubuntu/.zeroshot/worktrees/frozen-equinox-32",
           "outputFormat": "json",
@@ -117,10 +104,7 @@
                 "description": "Detailed result or output"
               }
             },
-            "required": [
-              "summary",
-              "result"
-            ]
+            "required": ["summary", "result"]
           },
           "strictSchema": true,
           "timeout": 0

@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from 'crypto';
 
 export type SubscriptionKind = string;
 
@@ -20,8 +20,8 @@ export function createSubscriptionRegistry(): SubscriptionRegistry {
   const entries = new Map<string, SubscriptionEntry>();
 
   const add = (kind: SubscriptionKind, close: () => void) => {
-    if (typeof close !== "function") {
-      throw new TypeError("Subscription close must be a function.");
+    if (typeof close !== 'function') {
+      throw new TypeError('Subscription close must be a function.');
     }
     const id = randomUUID();
     entries.set(id, {

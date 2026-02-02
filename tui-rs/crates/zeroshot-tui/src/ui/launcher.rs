@@ -21,11 +21,11 @@ pub fn render(
 
     // Vertical layout: logo (3) + input (3) + gap (1) + quick actions (6) + gap (1) + recent (rest)
     let [logo_area, input_area, _, actions_area, _, recent_area] = Layout::vertical([
-        Constraint::Length(3),  // logo
-        Constraint::Length(3),  // input
-        Constraint::Length(1),  // gap
-        Constraint::Length(6),  // quick actions
-        Constraint::Length(1),  // gap
+        Constraint::Length(3), // logo
+        Constraint::Length(3), // input
+        Constraint::Length(1), // gap
+        Constraint::Length(6), // quick actions
+        Constraint::Length(1), // gap
         Constraint::Min(2),    // recent clusters
     ])
     .areas(centered);
@@ -40,9 +40,10 @@ fn render_logo(frame: &mut Frame<'_>, area: Rect, provider_override: Option<&str
     let provider = provider_override.unwrap_or("default");
     let lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("\u{25c6}  Z E R O S H O T", theme::logo_style()),
-        ]),
+        Line::from(vec![Span::styled(
+            "\u{25c6}  Z E R O S H O T",
+            theme::logo_style(),
+        )]),
         Line::from(vec![
             Span::styled("Multi-Agent Orchestrator", theme::dim_style()),
             Span::raw("  "),

@@ -45,7 +45,9 @@ impl<T> ScrollableBuffer<T> {
             return;
         }
         if delta < 0 {
-            self.scroll_offset = self.scroll_offset.saturating_add(delta.unsigned_abs() as usize);
+            self.scroll_offset = self
+                .scroll_offset
+                .saturating_add(delta.unsigned_abs() as usize);
         } else {
             self.scroll_offset = self.scroll_offset.saturating_sub(delta as usize);
         }
@@ -360,11 +362,26 @@ mod tests {
     fn time_indexed_buffer_window_returns_expected_items() {
         let mut buffer = TimeIndexedBuffer::new(10);
         buffer.push_many([
-            Sample { ts: 100, label: "a" },
-            Sample { ts: 110, label: "b" },
-            Sample { ts: 120, label: "c" },
-            Sample { ts: 130, label: "d" },
-            Sample { ts: 140, label: "e" },
+            Sample {
+                ts: 100,
+                label: "a",
+            },
+            Sample {
+                ts: 110,
+                label: "b",
+            },
+            Sample {
+                ts: 120,
+                label: "c",
+            },
+            Sample {
+                ts: 130,
+                label: "d",
+            },
+            Sample {
+                ts: 140,
+                label: "e",
+            },
         ]);
 
         let window = buffer.window(130, 20);
@@ -392,10 +409,22 @@ mod tests {
     fn time_indexed_buffer_window_includes_equal_timestamps() {
         let mut buffer = TimeIndexedBuffer::new(10);
         buffer.push_many([
-            Sample { ts: 100, label: "a" },
-            Sample { ts: 100, label: "b" },
-            Sample { ts: 100, label: "c" },
-            Sample { ts: 110, label: "d" },
+            Sample {
+                ts: 100,
+                label: "a",
+            },
+            Sample {
+                ts: 100,
+                label: "b",
+            },
+            Sample {
+                ts: 100,
+                label: "c",
+            },
+            Sample {
+                ts: 110,
+                label: "d",
+            },
         ]);
 
         let window = buffer.window(100, 0);

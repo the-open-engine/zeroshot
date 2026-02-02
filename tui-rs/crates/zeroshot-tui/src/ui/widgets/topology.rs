@@ -19,7 +19,9 @@ pub fn render(
         .into_iter()
         .map(Line::from)
         .collect::<Vec<_>>();
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let widget = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
 
@@ -122,18 +124,12 @@ fn sorted_topology(
     edges.sort_by(|a, b| {
         let kind_a = kind_label(&a.kind);
         let kind_b = kind_label(&b.kind);
-        (
-            a.from.as_str(),
-            a.to.as_str(),
-            kind_a,
-            a.topic.as_str(),
-        )
-            .cmp(&(
-                b.from.as_str(),
-                b.to.as_str(),
-                kind_b,
-                b.topic.as_str(),
-            ))
+        (a.from.as_str(), a.to.as_str(), kind_a, a.topic.as_str()).cmp(&(
+            b.from.as_str(),
+            b.to.as_str(),
+            kind_b,
+            b.topic.as_str(),
+        ))
     });
 
     (agents, topics, edges)

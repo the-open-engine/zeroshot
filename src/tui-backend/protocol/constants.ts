@@ -14,15 +14,15 @@ const RPC_ERROR_CODES = Object.freeze({
 });
 
 const RPC_ERROR_MESSAGES = Object.freeze({
-  [RPC_ERROR_CODES.PARSE_ERROR]: "Parse error",
-  [RPC_ERROR_CODES.INVALID_REQUEST]: "Invalid request",
-  [RPC_ERROR_CODES.METHOD_NOT_FOUND]: "Method not found",
-  [RPC_ERROR_CODES.INVALID_PARAMS]: "Invalid params",
-  [RPC_ERROR_CODES.INTERNAL_ERROR]: "Internal error",
-  [RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH]: "Protocol version mismatch",
-  [RPC_ERROR_CODES.ORCHESTRATOR_UNAVAILABLE]: "Orchestrator unavailable",
-  [RPC_ERROR_CODES.CLUSTER_NOT_FOUND]: "Cluster not found",
-  [RPC_ERROR_CODES.UNSUPPORTED_CAPABILITY]: "Unsupported capability",
+  [RPC_ERROR_CODES.PARSE_ERROR]: 'Parse error',
+  [RPC_ERROR_CODES.INVALID_REQUEST]: 'Invalid request',
+  [RPC_ERROR_CODES.METHOD_NOT_FOUND]: 'Method not found',
+  [RPC_ERROR_CODES.INVALID_PARAMS]: 'Invalid params',
+  [RPC_ERROR_CODES.INTERNAL_ERROR]: 'Internal error',
+  [RPC_ERROR_CODES.PROTOCOL_VERSION_MISMATCH]: 'Protocol version mismatch',
+  [RPC_ERROR_CODES.ORCHESTRATOR_UNAVAILABLE]: 'Orchestrator unavailable',
+  [RPC_ERROR_CODES.CLUSTER_NOT_FOUND]: 'Cluster not found',
+  [RPC_ERROR_CODES.UNSUPPORTED_CAPABILITY]: 'Unsupported capability',
 });
 
 module.exports = {

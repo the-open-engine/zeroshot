@@ -337,7 +337,12 @@ function definePrModeFlowTests() {
     it('should stop after git-pusher completes in autoPr mode', async () => {
       mockRunner.when('worker').returns({ summary: 'No changes', result: 'noop' });
       mockRunner.when('validator').returns({ approved: true });
-      mockRunner.when('git-pusher').returns({ summary: 'PR done', result: 'Merged', pr_number: 12345, pr_url: 'https://github.com/test/test/pull/12345' });
+      mockRunner.when('git-pusher').returns({
+        summary: 'PR done',
+        result: 'Merged',
+        pr_number: 12345,
+        pr_url: 'https://github.com/test/test/pull/12345',
+      });
 
       createOrchestrator();
 

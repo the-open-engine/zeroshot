@@ -43,16 +43,15 @@ fn monitor_tick_triggers_polling_interval() {
     assert_eq!(state.monitor.last_poll_at, Some(1000));
 
     let (_state, effects) = app::update(state, Action::Tick { now_ms: 2001 });
-    assert_eq!(
-        effects,
-        vec![Effect::Backend(BackendRequest::ListClusters)]
-    );
+    assert_eq!(effects, vec![Effect::Backend(BackendRequest::ListClusters)]);
 }
 
 #[test]
 fn monitor_open_selected_pushes_cluster() {
     let mut state = AppState::default();
-    state.monitor.set_clusters(vec![cluster_summary("c1", 0)], 1000);
+    state
+        .monitor
+        .set_clusters(vec![cluster_summary("c1", 0)], 1000);
 
     let (_state, effects) = app::update(
         state,

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::backend::{BackendExit, BackendNotification};
-use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 use crate::protocol::ClusterMetrics;
+use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 use crate::ui::shared::InputState;
 
 pub mod agent_microscope;
@@ -34,10 +34,20 @@ pub enum ScreenId {
     Monitor,
     IntentConsole,
     FleetRadar,
-    Cluster { id: String },
-    ClusterCanvas { id: String },
-    Agent { cluster_id: String, agent_id: String },
-    AgentMicroscope { cluster_id: String, agent_id: String },
+    Cluster {
+        id: String,
+    },
+    ClusterCanvas {
+        id: String,
+    },
+    Agent {
+        cluster_id: String,
+        agent_id: String,
+    },
+    AgentMicroscope {
+        cluster_id: String,
+        agent_id: String,
+    },
 }
 
 impl ScreenId {
@@ -65,22 +75,37 @@ impl ScreenId {
 pub enum ZoomStackContext {
     Root,
     FleetRadar,
-    Cluster { id: String },
-    Agent { cluster_id: String, agent_id: String },
+    Cluster {
+        id: String,
+    },
+    Agent {
+        cluster_id: String,
+        agent_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TemporalFocus {
     #[default]
     None,
-    Cluster { id: String },
-    Agent { cluster_id: String, agent_id: String },
+    Cluster {
+        id: String,
+    },
+    Agent {
+        cluster_id: String,
+        agent_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FocusTarget {
-    Cluster { id: String },
-    Agent { cluster_id: String, agent_id: String },
+    Cluster {
+        id: String,
+    },
+    Agent {
+        cluster_id: String,
+        agent_id: String,
+    },
 }
 
 impl FocusTarget {
@@ -428,9 +453,7 @@ impl AppState {
     }
 
     pub fn active_screen(&self) -> &ScreenId {
-        self.screen_stack
-            .last()
-            .unwrap_or(&ScreenId::Launcher)
+        self.screen_stack.last().unwrap_or(&ScreenId::Launcher)
     }
 
     pub fn temporal_focus_scope(&self) -> Option<TemporalFocus> {
@@ -560,7 +583,9 @@ pub enum BackendAction {
     BackendExited(BackendExit),
     Notification(BackendNotification),
     ClustersListed(Vec<crate::protocol::ClusterSummary>),
-    ClusterMetricsListed { metrics: Vec<ClusterMetrics> },
+    ClusterMetricsListed {
+        metrics: Vec<ClusterMetrics>,
+    },
     ClusterSummary {
         summary: crate::protocol::ClusterSummary,
     },
@@ -620,14 +645,22 @@ pub enum Effect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendRequest {
     ListClusters,
-    ListClusterMetrics { cluster_ids: Option<Vec<String>> },
-    GetClusterSummary { cluster_id: String },
-    GetClusterTopology { cluster_id: String },
+    ListClusterMetrics {
+        cluster_ids: Option<Vec<String>>,
+    },
+    GetClusterSummary {
+        cluster_id: String,
+    },
+    GetClusterTopology {
+        cluster_id: String,
+    },
     SubscribeClusterLogs {
         cluster_id: String,
         agent_id: Option<String>,
     },
-    SubscribeClusterTimeline { cluster_id: String },
+    SubscribeClusterTimeline {
+        cluster_id: String,
+    },
     StartClusterFromText {
         text: String,
         provider_override: Option<String>,
@@ -636,18 +669,26 @@ pub enum BackendRequest {
         reference: String,
         provider_override: Option<String>,
     },
-    SendGuidanceToCluster { cluster_id: String, message: String },
+    SendGuidanceToCluster {
+        cluster_id: String,
+        message: String,
+    },
     SendGuidanceToAgent {
         cluster_id: String,
         agent_id: String,
         message: String,
     },
-    Unsubscribe { subscription_id: String },
+    Unsubscribe {
+        subscription_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandRequest {
-    SubmitRaw { raw: String, context: CommandContext },
+    SubmitRaw {
+        raw: String,
+        context: CommandContext,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -693,8 +734,13 @@ pub enum TimeCursorAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandAction {
-    ShowToast { level: ToastLevel, message: String },
-    SetProviderOverride { provider: Option<String> },
+    ShowToast {
+        level: ToastLevel,
+        message: String,
+    },
+    SetProviderOverride {
+        provider: Option<String>,
+    },
     StartClusterFromIssue {
         reference: String,
         provider_override: Option<String>,
@@ -882,16 +928,13 @@ fn seed_agent_role_for_navigation(state: &mut AppState, screen: &ScreenId) {
         _ => return,
     };
 
-    let role = state
-        .clusters
-        .get(cluster_id)
-        .and_then(|cluster_state| {
-            cluster_state
-                .agents
-                .iter()
-                .find(|agent| agent.id == *agent_id)
-                .and_then(|agent| agent.role.clone())
-        });
+    let role = state.clusters.get(cluster_id).and_then(|cluster_state| {
+        cluster_state
+            .agents
+            .iter()
+            .find(|agent| agent.id == *agent_id)
+            .and_then(|agent| agent.role.clone())
+    });
     seed_agent_role(state, cluster_id, agent_id, role);
 }
 
@@ -957,7 +1000,11 @@ fn handle_screen_action(state: &mut AppState, action: ScreenAction, effects: &mu
     }
 }
 
-fn handle_launcher_action(state: &mut AppState, action: launcher::Action, effects: &mut Vec<Effect>) {
+fn handle_launcher_action(
+    state: &mut AppState,
+    action: launcher::Action,
+    effects: &mut Vec<Effect>,
+) {
     match action {
         launcher::Action::Submit => {
             let trimmed = state.launcher.input.trim();
@@ -1052,35 +1099,24 @@ fn handle_cluster_action(
 ) {
     match action {
         cluster::Action::CycleFocus(direction) => {
-            let entry = state
-                .clusters
-                .entry(id)
-                .or_default();
+            let entry = state.clusters.entry(id).or_default();
             entry.cycle_focus(direction);
         }
         cluster::Action::MoveFocused(delta) => {
-            let entry = state
-                .clusters
-                .entry(id)
-                .or_default();
+            let entry = state.clusters.entry(id).or_default();
             entry.move_focused(delta);
         }
         cluster::Action::ActivateFocused => {
             let (agent_id, role) = {
-                let entry = state
-                    .clusters
-                    .entry(id.clone())
-                    .or_default();
+                let entry = state.clusters.entry(id.clone()).or_default();
                 let agent_id = entry.activate_focused();
-                let role = agent_id
-                    .as_ref()
-                    .and_then(|selected| {
-                        entry
-                            .agents
-                            .iter()
-                            .find(|agent| agent.id == *selected)
-                            .and_then(|agent| agent.role.clone())
-                    });
+                let role = agent_id.as_ref().and_then(|selected| {
+                    entry
+                        .agents
+                        .iter()
+                        .find(|agent| agent.id == *selected)
+                        .and_then(|agent| agent.role.clone())
+                });
                 (agent_id, role)
             };
             if let Some(agent_id) = agent_id {
@@ -1097,10 +1133,7 @@ fn handle_cluster_action(
         }
         cluster::Action::OpenAgent(agent_id) => {
             let role = {
-                let entry = state
-                    .clusters
-                    .entry(id.clone())
-                    .or_default();
+                let entry = state.clusters.entry(id.clone()).or_default();
                 entry
                     .agents
                     .iter()
@@ -1128,10 +1161,7 @@ fn handle_cluster_canvas_action(
 ) {
     match action {
         cluster_canvas::Action::MoveFocus { direction, speed } => {
-            let entry = state
-                .cluster_canvases
-                .entry(id)
-                .or_default();
+            let entry = state.cluster_canvases.entry(id).or_default();
             entry.move_focus(direction, speed);
         }
         cluster_canvas::Action::ZoomIn => {
@@ -1140,16 +1170,13 @@ fn handle_cluster_canvas_action(
                 .get(&id)
                 .and_then(|entry| entry.focused_agent_id());
             if let Some(agent_id) = agent_id {
-                let role = state
-                    .clusters
-                    .get(&id)
-                    .and_then(|entry| {
-                        entry
-                            .agents
-                            .iter()
-                            .find(|agent| agent.id == agent_id)
-                            .and_then(|agent| agent.role.clone())
-                    });
+                let role = state.clusters.get(&id).and_then(|entry| {
+                    entry
+                        .agents
+                        .iter()
+                        .find(|agent| agent.id == agent_id)
+                        .and_then(|agent| agent.role.clone())
+                });
                 seed_agent_role(state, &id, &agent_id, role);
                 apply_navigation(
                     state,
@@ -1164,12 +1191,7 @@ fn handle_cluster_canvas_action(
     }
 }
 
-fn seed_agent_role(
-    state: &mut AppState,
-    cluster_id: &str,
-    agent_id: &str,
-    role: Option<String>,
-) {
+fn seed_agent_role(state: &mut AppState, cluster_id: &str, agent_id: &str, role: Option<String>) {
     if let Some(role) = role {
         let key = AgentKey::new(cluster_id.to_string(), agent_id.to_string());
         let entry = state.agents.entry(key.clone()).or_default();
@@ -1191,10 +1213,7 @@ fn handle_agent_action(
     effects: &mut Vec<Effect>,
 ) {
     let key = AgentKey::new(cluster_id.clone(), agent_id.clone());
-    let entry = state
-        .agents
-        .entry(key)
-        .or_default();
+    let entry = state.agents.entry(key).or_default();
     match action {
         agent::Action::SubmitGuidance => {
             let trimmed = entry.guidance_input.input.trim();
@@ -1240,9 +1259,13 @@ fn handle_agent_action(
 fn handle_backend_action(state: &mut AppState, action: BackendAction, effects: &mut Vec<Effect>) {
     match action {
         BackendAction::Connected => handle_backend_connected(state),
-        BackendAction::ConnectionFailed(message) => handle_backend_connection_failed(state, message),
+        BackendAction::ConnectionFailed(message) => {
+            handle_backend_connection_failed(state, message)
+        }
         BackendAction::BackendExited(exit) => handle_backend_exited(state, exit),
-        BackendAction::Notification(notification) => handle_backend_notification(state, notification),
+        BackendAction::Notification(notification) => {
+            handle_backend_notification(state, notification)
+        }
         BackendAction::ClustersListed(clusters) => handle_clusters_listed(state, clusters),
         BackendAction::ClusterMetricsListed { metrics } => {
             handle_cluster_metrics_listed(state, metrics)
@@ -1252,9 +1275,10 @@ fn handle_backend_action(state: &mut AppState, action: BackendAction, effects: &
             cluster_id,
             topology,
         } => handle_cluster_topology(state, cluster_id, topology),
-        BackendAction::ClusterTopologyError { cluster_id, message } => {
-            handle_cluster_topology_error(state, cluster_id, message)
-        }
+        BackendAction::ClusterTopologyError {
+            cluster_id,
+            message,
+        } => handle_cluster_topology_error(state, cluster_id, message),
         BackendAction::SubscribedClusterLogs {
             cluster_id,
             agent_id,
@@ -1302,14 +1326,9 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
             let lines = params.lines;
             let dropped_count = params.dropped_count;
             let role_from_lines = lines.iter().find_map(|line| line.role.clone());
-            if let Some((key, entry)) = state
-                .agent_microscopes
-                .iter_mut()
-                .find(|(_, entry)| {
-                    entry.log_subscription.as_deref()
-                        == Some(params.subscription_id.as_str())
-                })
-            {
+            if let Some((key, entry)) = state.agent_microscopes.iter_mut().find(|(_, entry)| {
+                entry.log_subscription.as_deref() == Some(params.subscription_id.as_str())
+            }) {
                 if entry.role.is_none() {
                     if let Some(role) = role_from_lines.clone() {
                         entry.role = Some(role);
@@ -1326,14 +1345,9 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
                 return;
             }
 
-            if let Some(entry) = state
-                .agents
-                .values_mut()
-                .find(|agent| {
-                    agent.log_subscription.as_deref()
-                        == Some(params.subscription_id.as_str())
-                })
-            {
+            if let Some(entry) = state.agents.values_mut().find(|agent| {
+                agent.log_subscription.as_deref() == Some(params.subscription_id.as_str())
+            }) {
                 if entry.role.is_none() {
                     if let Some(role) = role_from_lines.clone() {
                         entry.role = Some(role);
@@ -1353,10 +1367,7 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
         }
         BackendNotification::ClusterTimelineEvents(params) => {
             let latest_ts = params.events.iter().map(|event| event.timestamp).max();
-            let entry = state
-                .clusters
-                .entry(params.cluster_id)
-                .or_default();
+            let entry = state.clusters.entry(params.cluster_id).or_default();
             entry.push_timeline_events(params.events);
             advance_time_cursor_if_live(state, latest_ts);
         }
@@ -1378,10 +1389,7 @@ fn advance_time_cursor_if_live(state: &mut AppState, latest_ts: Option<i64>) {
     }
 }
 
-fn handle_clusters_listed(
-    state: &mut AppState,
-    clusters: Vec<crate::protocol::ClusterSummary>,
-) {
+fn handle_clusters_listed(state: &mut AppState, clusters: Vec<crate::protocol::ClusterSummary>) {
     let radar_clusters = clusters.clone();
     state.monitor.set_clusters(clusters, state.now_ms);
     state.fleet_radar.set_clusters(radar_clusters, state.now_ms);
@@ -1429,10 +1437,7 @@ fn handle_cluster_metrics_listed(state: &mut AppState, metrics: Vec<ClusterMetri
 }
 
 fn handle_cluster_summary(state: &mut AppState, summary: crate::protocol::ClusterSummary) {
-    let entry = state
-        .clusters
-        .entry(summary.id.clone())
-        .or_default();
+    let entry = state.clusters.entry(summary.id.clone()).or_default();
     entry.summary = Some(summary);
 }
 
@@ -1447,19 +1452,13 @@ fn handle_cluster_topology(
         .or_default();
     canvas_entry.update_layout(&topology);
 
-    let entry = state
-        .clusters
-        .entry(cluster_id)
-        .or_default();
+    let entry = state.clusters.entry(cluster_id).or_default();
     entry.topology = Some(topology);
     entry.topology_error = None;
 }
 
 fn handle_cluster_topology_error(state: &mut AppState, cluster_id: String, message: String) {
-    let entry = state
-        .clusters
-        .entry(cluster_id.clone())
-        .or_default();
+    let entry = state.clusters.entry(cluster_id.clone()).or_default();
     entry.topology = None;
     entry.topology_error = Some(message);
 
@@ -1491,10 +1490,7 @@ fn handle_log_subscription(
             }
         }
         None => {
-            let entry = state
-                .clusters
-                .entry(cluster_id.clone())
-                .or_default();
+            let entry = state.clusters.entry(cluster_id.clone()).or_default();
             entry.log_subscription = Some(subscription_id.clone());
             if let Some(canvas_entry) = state.cluster_canvases.get_mut(&cluster_id) {
                 canvas_entry.log_subscription = Some(subscription_id);
@@ -1508,10 +1504,7 @@ fn handle_cluster_timeline_subscription(
     cluster_id: String,
     subscription_id: String,
 ) {
-    let entry = state
-        .clusters
-        .entry(cluster_id.clone())
-        .or_default();
+    let entry = state.clusters.entry(cluster_id.clone()).or_default();
     entry.timeline_subscription = Some(subscription_id.clone());
     if let Some(canvas_entry) = state.cluster_canvases.get_mut(&cluster_id) {
         canvas_entry.timeline_subscription = Some(subscription_id);
@@ -1525,10 +1518,7 @@ fn handle_guidance_result(
     result: crate::protocol::GuidanceDeliveryResult,
 ) {
     let key = AgentKey::new(cluster_id, agent_id);
-    let entry = state
-        .agents
-        .entry(key)
-        .or_default();
+    let entry = state.agents.entry(key).or_default();
     entry.apply_guidance_result(result);
 }
 
@@ -1539,10 +1529,7 @@ fn handle_guidance_error(
     message: String,
 ) {
     let key = AgentKey::new(cluster_id, agent_id);
-    let entry = state
-        .agents
-        .entry(key)
-        .or_default();
+    let entry = state.agents.entry(key).or_default();
     entry.apply_guidance_error(message.clone());
     state.last_error = Some(message);
 }
@@ -1674,9 +1661,7 @@ fn sync_temporal_focus(state: &mut AppState) {
     if !state.temporal_focus.is_active() {
         return;
     }
-    state.temporal_focus = state
-        .temporal_focus_scope()
-        .unwrap_or(TemporalFocus::None);
+    state.temporal_focus = state.temporal_focus_scope().unwrap_or(TemporalFocus::None);
 }
 
 fn detect_issue_reference(input: &str) -> Option<String> {
@@ -2021,8 +2006,8 @@ fn time_bounds_for_cluster(
 
     for line in cluster_state.logs_time.iter() {
         if let Some(agent_id) = agent_id {
-            let matches_agent = line.agent.as_deref() == Some(agent_id)
-                || line.sender.as_deref() == Some(agent_id);
+            let matches_agent =
+                line.agent.as_deref() == Some(agent_id) || line.sender.as_deref() == Some(agent_id);
             if !matches_agent {
                 continue;
             }
@@ -2230,10 +2215,14 @@ fn cleanup_cluster_subscriptions(state: &mut AppState, id: &str, effects: &mut V
         return;
     };
     if let Some(subscription_id) = entry.log_subscription.take() {
-        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe {
+            subscription_id,
+        }));
     }
     if let Some(subscription_id) = entry.timeline_subscription.take() {
-        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe {
+            subscription_id,
+        }));
     }
     if let Some(canvas_entry) = state.cluster_canvases.get_mut(id) {
         canvas_entry.log_subscription = None;
@@ -2250,7 +2239,9 @@ fn cleanup_cluster_timeline_subscription(
         return;
     };
     if let Some(subscription_id) = entry.timeline_subscription.take() {
-        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+        effects.push(Effect::Backend(BackendRequest::Unsubscribe {
+            subscription_id,
+        }));
     }
     if let Some(canvas_entry) = state.cluster_canvases.get_mut(id) {
         canvas_entry.timeline_subscription = None;
@@ -2268,13 +2259,17 @@ fn cleanup_agent_subscriptions(
     if let Some(entry) = state.agents.get_mut(&key) {
         if let Some(subscription_id) = entry.log_subscription.take() {
             unsubscribed.insert(subscription_id.clone());
-            effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+            effects.push(Effect::Backend(BackendRequest::Unsubscribe {
+                subscription_id,
+            }));
         }
     }
     if let Some(entry) = state.agent_microscopes.get_mut(&key) {
         if let Some(subscription_id) = entry.log_subscription.take() {
             if !unsubscribed.contains(&subscription_id) {
-                effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+                effects.push(Effect::Backend(BackendRequest::Unsubscribe {
+                    subscription_id,
+                }));
             }
         }
     }
@@ -2299,8 +2294,8 @@ fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
         }
         ScreenId::Cluster { id } | ScreenId::ClusterCanvas { id } => {
             Some(BackendRequest::ListClusterMetrics {
-            cluster_ids: Some(vec![id.clone()]),
-        })
+                cluster_ids: Some(vec![id.clone()]),
+            })
         }
         _ => None,
     }
@@ -2385,13 +2380,13 @@ mod tests {
             }),
         );
 
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::SendGuidanceToAgent {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToAgent {
                 cluster_id: "cluster-1".to_string(),
                 agent_id: "agent-1".to_string(),
                 message: "[nudge] hi".to_string(),
-            }
-        )));
+            }))
+        );
     }
 
     #[test]
@@ -2399,7 +2394,9 @@ mod tests {
         let mut state = AppState::default();
         state.ui_variant = UiVariant::Disruptive;
         state.screen_stack = vec![ScreenId::FleetRadar];
-        state.fleet_radar.set_clusters(vec![radar_cluster("cluster-1")], 0);
+        state
+            .fleet_radar
+            .set_clusters(vec![radar_cluster("cluster-1")], 0);
 
         let (state, _) = update(state, Action::Command(CommandAction::TogglePin));
         assert_eq!(
@@ -2544,12 +2541,12 @@ mod tests {
         state.spine.input.cursor = 6;
 
         let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::StartClusterFromText {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::StartClusterFromText {
                 text: "launch".to_string(),
                 provider_override: None,
-            }
-        )));
+            }))
+        );
         assert_eq!(state.spine.mode, SpineMode::Intent);
         assert_eq!(state.spine.input.input, "");
     }
@@ -2565,12 +2562,12 @@ mod tests {
         state.spine.input.cursor = 4;
 
         let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::SendGuidanceToCluster {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToCluster {
                 cluster_id: "cluster-1".to_string(),
                 message: "ping".to_string(),
-            }
-        )));
+            }))
+        );
         assert_eq!(state.spine.mode, SpineMode::Intent);
         assert_eq!(state.spine.input.input, "");
     }
@@ -2587,13 +2584,13 @@ mod tests {
         state.spine.input.cursor = 4;
 
         let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::SendGuidanceToAgent {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToAgent {
                 cluster_id: "cluster-1".to_string(),
                 agent_id: "agent-1".to_string(),
                 message: "ping".to_string(),
-            }
-        )));
+            }))
+        );
         assert_eq!(state.spine.mode, SpineMode::Intent);
         assert_eq!(state.spine.input.input, "");
     }
@@ -2621,11 +2618,11 @@ mod tests {
                 agent_id: "agent-1".to_string(),
             })),
         );
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::SubscribeClusterTimeline {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::SubscribeClusterTimeline {
                 cluster_id: "cluster-1".to_string(),
-            }
-        )));
+            }))
+        );
     }
 
     #[test]
@@ -2640,13 +2637,13 @@ mod tests {
         state.spine.input.cursor = 4;
 
         let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
-        assert!(effects.contains(&Effect::Backend(
-            BackendRequest::SendGuidanceToAgent {
+        assert!(
+            effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToAgent {
                 cluster_id: "cluster-1".to_string(),
                 agent_id: "agent-1".to_string(),
                 message: "ping".to_string(),
-            }
-        )));
+            }))
+        );
         assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
         assert_eq!(state.spine.input.input, "");
     }
@@ -2848,9 +2845,10 @@ mod tests {
         let mut state = AppState::default();
         state.ui_variant = UiVariant::Disruptive;
         state.now_ms = 10_000;
-        state
-            .fleet_radar
-            .set_clusters(vec![radar_cluster("west"), radar_cluster("east")], state.now_ms);
+        state.fleet_radar.set_clusters(
+            vec![radar_cluster("west"), radar_cluster("east")],
+            state.now_ms,
+        );
         state
             .fleet_radar
             .layout_angles
@@ -2874,7 +2872,10 @@ mod tests {
                 speed: radar::MoveSpeed::Step,
             })),
         );
-        assert_eq!(state.fleet_radar.selected_cluster_id().as_deref(), Some("east"));
+        assert_eq!(
+            state.fleet_radar.selected_cluster_id().as_deref(),
+            Some("east")
+        );
         assert!(state.camera_target.0 > 0.0);
 
         let (state, _) = update(

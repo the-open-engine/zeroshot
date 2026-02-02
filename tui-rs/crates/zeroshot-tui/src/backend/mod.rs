@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::protocol::{
-    ClusterLogLinesParams, ClusterTimelineEventsParams, ClientCapabilities, ClientInfo, RpcError,
+    ClientCapabilities, ClientInfo, ClusterLogLinesParams, ClusterTimelineEventsParams, RpcError,
     ServerCapabilities,
 };
 

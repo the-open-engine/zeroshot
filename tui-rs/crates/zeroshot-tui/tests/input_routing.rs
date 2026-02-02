@@ -59,7 +59,9 @@ fn screen_specific_keys_only_apply_to_focused_screen() {
     let action = input::route_key(&state, down);
     assert!(matches!(
         action,
-        Some(Action::Screen(ScreenAction::Monitor(monitor::Action::MoveSelection(1))))
+        Some(Action::Screen(ScreenAction::Monitor(
+            monitor::Action::MoveSelection(1)
+        )))
     ));
 
     let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
@@ -167,9 +169,11 @@ fn launcher_keys_edit_input_state() {
     state = next_state;
     assert_eq!(state.launcher.cursor, 1);
 
-    let action =
-        input::route_key(&state, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
-            .expect("expected backspace");
+    let action = input::route_key(
+        &state,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    )
+    .expect("expected backspace");
     let (next_state, _) = app::update(state, action);
     state = next_state;
     assert_eq!(state.launcher.input, "b");
@@ -208,8 +212,10 @@ fn q_quits_except_in_launcher_input() {
 
     for screen in screens {
         let state = state_for(screen);
-        let action =
-            input::route_key(&state, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        let action = input::route_key(
+            &state,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+        );
         assert!(matches!(action, Some(Action::Quit)));
     }
 }

@@ -924,7 +924,7 @@ Status: Open
   - `error`/`failed`: STATE cell red
   - `pending`/`starting`: STATE cell yellow
 - Selected row: accent background + dark foreground (lazygit style)
-- Highlight symbol: ` > ` (bold)
+- Highlight symbol: `>` (bold)
 - **Empty state:** Centered "No active clusters" + hint to use Launcher (Esc)
 - Add AGENTS column showing `active/total` format
 
