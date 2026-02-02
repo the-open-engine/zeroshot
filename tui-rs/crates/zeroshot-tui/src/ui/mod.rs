@@ -59,12 +59,14 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             cluster_canvas::render(
                 frame,
                 content_area,
-                id,
-                cluster_state,
-                canvas_state,
-                &state.time_cursor,
-                &state.anim_clock,
-                state.pinned_target.as_ref(),
+                cluster_canvas::RenderContext {
+                    cluster_id: id,
+                    cluster_state,
+                    canvas_state,
+                    time_cursor: &state.time_cursor,
+                    anim_clock: &state.anim_clock,
+                    pinned_target: state.pinned_target.as_ref(),
+                },
             );
         }
         ScreenId::Agent {
@@ -153,12 +155,14 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             cluster_canvas::render(
                 frame,
                 canvas_area,
-                id,
-                cluster_state,
-                canvas_state,
-                &state.time_cursor,
-                &state.anim_clock,
-                state.pinned_target.as_ref(),
+                cluster_canvas::RenderContext {
+                    cluster_id: id,
+                    cluster_state,
+                    canvas_state,
+                    time_cursor: &state.time_cursor,
+                    anim_clock: &state.anim_clock,
+                    pinned_target: state.pinned_target.as_ref(),
+                },
             );
         }
         ScreenId::Cluster { id } => {

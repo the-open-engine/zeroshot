@@ -265,16 +265,24 @@ struct OverlayTarget<'a> {
     force_cluster: bool,
 }
 
-pub fn render(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    cluster_id: &str,
-    cluster_state: Option<&cluster::State>,
-    canvas_state: Option<&State>,
-    time_cursor: &TimeCursor,
-    anim_clock: &AnimClock,
-    pinned_target: Option<&FocusTarget>,
-) {
+pub struct RenderContext<'a> {
+    pub cluster_id: &'a str,
+    pub cluster_state: Option<&'a cluster::State>,
+    pub canvas_state: Option<&'a State>,
+    pub time_cursor: &'a TimeCursor,
+    pub anim_clock: &'a AnimClock,
+    pub pinned_target: Option<&'a FocusTarget>,
+}
+
+pub fn render(frame: &mut Frame<'_>, area: Rect, context: RenderContext<'_>) {
+    let RenderContext {
+        cluster_id,
+        cluster_state,
+        canvas_state,
+        time_cursor,
+        anim_clock,
+        pinned_target,
+    } = context;
     let block = Block::default()
         .borders(Borders::ALL)
         .title("Cluster Canvas");
