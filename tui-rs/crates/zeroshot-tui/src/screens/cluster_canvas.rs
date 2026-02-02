@@ -1225,6 +1225,7 @@ mod tests {
         let cluster_state = cluster::State::default();
         let canvas_state = State::default();
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         terminal
             .draw(|frame| {
@@ -1232,12 +1233,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-1",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-1",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1254,6 +1257,7 @@ mod tests {
         cluster_state.topology_error = Some("backend timeout".to_string());
         let canvas_state = State::default();
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         terminal
             .draw(|frame| {
@@ -1261,12 +1265,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-2",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-2",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1286,6 +1292,7 @@ mod tests {
         let mut canvas_state = State::default();
         canvas_state.update_layout(&topology);
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         terminal
             .draw(|frame| {
@@ -1293,12 +1300,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-3",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-3",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1434,6 +1443,7 @@ mod tests {
         let mut cluster_state = cluster::State::default();
         cluster_state.topology = Some(topology.clone());
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         let canvas_state = State {
             focused_id: Some("agent-alpha".to_string()),
@@ -1446,12 +1456,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-4",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-4",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1470,12 +1482,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-4",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-4",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1540,6 +1554,7 @@ mod tests {
         canvas_state.update_layout(&topology);
         canvas_state.focused_id = Some("agent-alpha".to_string());
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         terminal
             .draw(|frame| {
@@ -1547,12 +1562,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-5",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-5",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1616,12 +1633,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-5",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &time_cursor,
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-5",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
@@ -1644,6 +1663,7 @@ mod tests {
         canvas_state.update_layout(&topology);
         canvas_state.focused_id = Some("agent-alpha".to_string());
         let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
 
         terminal
             .draw(|frame| {
@@ -1651,12 +1671,14 @@ mod tests {
                 render(
                     frame,
                     area,
-                    "cluster-6",
-                    Some(&cluster_state),
-                    Some(&canvas_state),
-                    &TimeCursor::default(),
-                    &anim_clock,
-                    None,
+                    RenderContext {
+                        cluster_id: "cluster-6",
+                        cluster_state: Some(&cluster_state),
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
                 );
             })
             .expect("draw");
