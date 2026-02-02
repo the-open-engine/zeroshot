@@ -89,6 +89,116 @@ impl<T> ScrollableBuffer<T> {
     }
 }
 
+// ── TimeIndexedBuffer ────────────────────────────────────────────────────────
+
+pub trait HasTimestamp {
+    fn timestamp_ms(&self) -> i64;
+}
+
+/// A capped, time-indexed buffer with stable insertion ordering.
+///
+/// Optimized for windowed reads by timestamp while maintaining bounded memory.
+#[derive(Debug, Clone)]
+pub struct TimeIndexedBuffer<T: HasTimestamp> {
+    items: VecDeque<T>,
+    max_capacity: usize,
+}
+
+impl<T: HasTimestamp> TimeIndexedBuffer<T> {
+    pub fn new(max_capacity: usize) -> Self {
+        Self {
+            items: VecDeque::new(),
+            max_capacity,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn push_many(&mut self, items: impl IntoIterator<Item = T>) {
+        self.items.extend(items);
+        self.trim();
+    }
+
+    pub fn window(&self, t_ms: i64, window_ms: i64) -> Vec<&T> {
+        if self.items.is_empty() {
+            return Vec::new();
+        }
+        let window_ms = window_ms.max(0);
+        let start = t_ms.saturating_sub(window_ms);
+        let end = t_ms;
+        let lower = self.lower_bound(start);
+        let upper = self.upper_bound(end);
+        let mut out = Vec::with_capacity(upper.saturating_sub(lower));
+        for idx in lower..upper {
+            if let Some(item) = self.items.get(idx) {
+                out.push(item);
+            }
+        }
+        out
+    }
+
+    pub fn latest(&self, n: usize) -> Vec<&T> {
+        if n == 0 || self.items.is_empty() {
+            return Vec::new();
+        }
+        let len = self.items.len();
+        let start = len.saturating_sub(n);
+        let mut out = Vec::with_capacity(len - start);
+        for idx in start..len {
+            if let Some(item) = self.items.get(idx) {
+                out.push(item);
+            }
+        }
+        out
+    }
+
+    fn lower_bound(&self, target: i64) -> usize {
+        let mut left = 0usize;
+        let mut right = self.items.len();
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let Some(item) = self.items.get(mid) else {
+                break;
+            };
+            if item.timestamp_ms() < target {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        left
+    }
+
+    fn upper_bound(&self, target: i64) -> usize {
+        let mut left = 0usize;
+        let mut right = self.items.len();
+        while left < right {
+            let mid = left + (right - left) / 2;
+            let Some(item) = self.items.get(mid) else {
+                break;
+            };
+            if item.timestamp_ms() <= target {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        left
+    }
+
+    fn trim(&mut self) {
+        while self.items.len() > self.max_capacity {
+            self.items.pop_front();
+        }
+    }
+}
+
 // ── InputState ────────────────────────────────────────────────────────────────
 
 /// Character-indexed cursor input state, shared between agent guidance,
@@ -194,5 +304,69 @@ pub fn pane_block<'a>(title: impl Into<Line<'a>>, focused: bool) -> Block<'a> {
             .title(title)
             .borders(Borders::ALL)
             .border_style(theme::unfocus_border_style())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    struct Sample {
+        ts: i64,
+        label: &'static str,
+    }
+
+    impl HasTimestamp for Sample {
+        fn timestamp_ms(&self) -> i64 {
+            self.ts
+        }
+    }
+
+    #[test]
+    fn time_indexed_buffer_window_returns_expected_items() {
+        let mut buffer = TimeIndexedBuffer::new(10);
+        buffer.push_many([
+            Sample { ts: 100, label: "a" },
+            Sample { ts: 110, label: "b" },
+            Sample { ts: 120, label: "c" },
+            Sample { ts: 130, label: "d" },
+            Sample { ts: 140, label: "e" },
+        ]);
+
+        let window = buffer.window(130, 20);
+        let labels: Vec<&str> = window.iter().map(|item| item.label).collect();
+        assert_eq!(labels, vec!["b", "c", "d"]);
+    }
+
+    #[test]
+    fn time_indexed_buffer_trims_to_capacity_preserving_order() {
+        let mut buffer = TimeIndexedBuffer::new(3);
+        buffer.push_many([
+            Sample { ts: 1, label: "a" },
+            Sample { ts: 2, label: "b" },
+            Sample { ts: 3, label: "c" },
+            Sample { ts: 4, label: "d" },
+            Sample { ts: 5, label: "e" },
+        ]);
+
+        let latest = buffer.latest(10);
+        let labels: Vec<&str> = latest.iter().map(|item| item.label).collect();
+        assert_eq!(labels, vec!["c", "d", "e"]);
+    }
+
+    #[test]
+    fn time_indexed_buffer_window_includes_equal_timestamps() {
+        let mut buffer = TimeIndexedBuffer::new(10);
+        buffer.push_many([
+            Sample { ts: 100, label: "a" },
+            Sample { ts: 100, label: "b" },
+            Sample { ts: 100, label: "c" },
+            Sample { ts: 110, label: "d" },
+        ]);
+
+        let window = buffer.window(100, 0);
+        let labels: Vec<&str> = window.iter().map(|item| item.label).collect();
+        assert_eq!(labels, vec!["a", "b", "c"]);
     }
 }

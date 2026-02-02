@@ -75,6 +75,7 @@ TUI v2 (Rust) provider override lives in `AppState.provider_override` and is for
 TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
 TUI v2 (Rust) Disruptive zoom stack: `ScreenId::IntentConsole` (root), `FleetRadar`, `ClusterCanvas { id }`, `AgentMicroscope { cluster_id, agent_id }`; zoom stack context drives spine whisper targets.
 TUI v2 (Rust) Cluster Canvas overlays: use `ui/widgets/stream.rs` StreamOverlay + placement helper in `screens/cluster_canvas.rs` to render bounded log/timeline slices near focus, clamped to canvas bounds and never intersecting the spine; render after the canvas draw.
+TUI v2 (Rust) Disruptive stream windowing: `TimeCursor` (mode, `t_ms`, `window_ms`) plus `TimeIndexedBuffer` in `ui/shared.rs` back logs/timeline window queries; cluster canvas overlay renders windowed slices from time-indexed buffers.
 TUI v2 (Rust) spine intent submit detects issue refs (`123`, `owner/repo#123`, GitHub issue URL) → `StartClusterFromIssue`; otherwise `StartClusterFromText`.
 TUI v2 (Rust) Disruptive pre-M3 decisions live in `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus, labels, topology, scrub, spine height).
 TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).

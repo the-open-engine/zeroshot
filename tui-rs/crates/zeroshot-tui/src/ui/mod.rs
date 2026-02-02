@@ -54,7 +54,14 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         ScreenId::ClusterCanvas { id } => {
             let cluster_state = state.clusters.get(id);
             let canvas_state = state.cluster_canvases.get(id);
-            cluster_canvas::render(frame, content_area, id, cluster_state, canvas_state);
+            cluster_canvas::render(
+                frame,
+                content_area,
+                id,
+                cluster_state,
+                canvas_state,
+                &state.time_cursor,
+            );
         }
         ScreenId::Agent {
             cluster_id,
@@ -111,7 +118,14 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
         ScreenId::ClusterCanvas { id } => {
             let cluster_state = state.clusters.get(id);
             let canvas_state = state.cluster_canvases.get(id);
-            cluster_canvas::render(frame, canvas_area, id, cluster_state, canvas_state);
+            cluster_canvas::render(
+                frame,
+                canvas_area,
+                id,
+                cluster_state,
+                canvas_state,
+                &state.time_cursor,
+            );
         }
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
