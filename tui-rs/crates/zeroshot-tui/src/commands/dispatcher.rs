@@ -10,6 +10,10 @@ pub fn dispatch(parsed: ParsedCommand, context: CommandContext) -> Vec<Action> {
             message: help_message(),
         })],
         "monitor" => handle_monitor(context),
+        "guide" => handle_guidance(parsed, None, true),
+        "nudge" => handle_guidance(parsed, Some("[nudge]"), true),
+        "interrupt" => handle_guidance(parsed, Some("[interrupt]"), false),
+        "pin" => vec![Action::Command(CommandAction::TogglePin)],
         "issue" => handle_issue(parsed, context),
         "provider" => handle_provider(parsed),
         "quit" | "exit" => vec![Action::Quit],
@@ -63,6 +67,24 @@ fn handle_issue(parsed: ParsedCommand, context: CommandContext) -> Vec<Action> {
     ]
 }
 
+fn handle_guidance(
+    parsed: ParsedCommand,
+    prefix: Option<&'static str>,
+    require_text: bool,
+) -> Vec<Action> {
+    let message = parsed.args.join(" ");
+    if require_text && message.trim().is_empty() {
+        return vec![Action::Command(CommandAction::ShowToast {
+            level: ToastLevel::Error,
+            message: format!("Usage: /{} <text>", parsed.name),
+        })];
+    }
+    vec![Action::Command(CommandAction::SendGuidance {
+        message,
+        prefix: prefix.map(|value| value.to_string()),
+    })]
+}
+
 fn handle_provider(parsed: ParsedCommand) -> Vec<Action> {
     let Some(name) = parsed.args.first() else {
         return vec![Action::Command(CommandAction::ShowToast {
@@ -95,7 +117,7 @@ fn handle_provider(parsed: ParsedCommand) -> Vec<Action> {
 
 fn help_message() -> String {
     let lines = [
-        "Commands: /help /monitor /issue <ref> /provider <name> /quit /exit",
+        "Commands: /help /monitor /issue <ref> /provider <name> /guide <text> /nudge <text> /interrupt [text] /pin /quit /exit",
         "Keys: / command bar, ? help, Esc back, q quit (not in Launcher), Ctrl+C quit, j/k or arrows move, PgUp/PgDn fast, Tab/Shift+Tab or h/l switch panes",
     ];
     lines.join("\n")
@@ -186,6 +208,65 @@ mod tests {
         assert!(actions.iter().any(|action| matches!(
             action,
             Action::Navigate(NavigationAction::Push(ScreenId::Monitor))
+        )));
+    }
+
+    #[test]
+    fn guide_command_dispatches_guidance_without_prefix() {
+        let parsed = ParsedCommand {
+            raw: "/guide hi there".to_string(),
+            name: "guide".to_string(),
+            args: vec!["hi".to_string(), "there".to_string()],
+        };
+        let actions = dispatch(parsed, context());
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Command(crate::app::CommandAction::SendGuidance { message, prefix })
+                if message == "hi there" && prefix.is_none()
+        )));
+    }
+
+    #[test]
+    fn nudge_command_dispatches_guidance_with_prefix() {
+        let parsed = ParsedCommand {
+            raw: "/nudge hi".to_string(),
+            name: "nudge".to_string(),
+            args: vec!["hi".to_string()],
+        };
+        let actions = dispatch(parsed, context());
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Command(crate::app::CommandAction::SendGuidance { message, prefix })
+                if message == "hi" && prefix.as_deref() == Some("[nudge]")
+        )));
+    }
+
+    #[test]
+    fn interrupt_command_allows_empty_text() {
+        let parsed = ParsedCommand {
+            raw: "/interrupt".to_string(),
+            name: "interrupt".to_string(),
+            args: vec![],
+        };
+        let actions = dispatch(parsed, context());
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Command(crate::app::CommandAction::SendGuidance { message, prefix })
+                if message.is_empty() && prefix.as_deref() == Some("[interrupt]")
+        )));
+    }
+
+    #[test]
+    fn pin_command_dispatches_toggle() {
+        let parsed = ParsedCommand {
+            raw: "/pin".to_string(),
+            name: "pin".to_string(),
+            args: vec![],
+        };
+        let actions = dispatch(parsed, context());
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            Action::Command(crate::app::CommandAction::TogglePin)
         )));
     }
 }

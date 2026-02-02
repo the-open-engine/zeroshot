@@ -73,6 +73,24 @@ pub enum TemporalFocus {
     Agent { cluster_id: String, agent_id: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FocusTarget {
+    Cluster { id: String },
+    Agent { cluster_id: String, agent_id: String },
+}
+
+impl FocusTarget {
+    fn label(&self) -> String {
+        match self {
+            FocusTarget::Cluster { id } => format!("cluster {id}"),
+            FocusTarget::Agent {
+                cluster_id,
+                agent_id,
+            } => format!("agent {agent_id} @ {cluster_id}"),
+        }
+    }
+}
+
 impl TemporalFocus {
     pub fn is_active(&self) -> bool {
         !matches!(self, TemporalFocus::None)
@@ -328,6 +346,7 @@ pub struct AppState {
     pub camera: Camera,
     pub time_cursor: TimeCursor,
     pub temporal_focus: TemporalFocus,
+    pub pinned_target: Option<FocusTarget>,
     pub spine: SpineState,
     pub command_bar: CommandBarState,
     pub toast: Option<ToastState>,
@@ -357,6 +376,7 @@ impl Default for AppState {
             camera: Camera::default(),
             time_cursor: TimeCursor::default(),
             temporal_focus: TemporalFocus::default(),
+            pinned_target: None,
             spine: SpineState::default(),
             command_bar: CommandBarState::default(),
             toast: None,
@@ -665,6 +685,11 @@ pub enum CommandAction {
         reference: String,
         provider_override: Option<String>,
     },
+    SendGuidance {
+        message: String,
+        prefix: Option<String>,
+    },
+    TogglePin,
 }
 
 const TOAST_DURATION_MS: i64 = 5000;
@@ -1930,6 +1955,69 @@ fn time_bounds_for_cluster(
     }
 }
 
+fn build_guidance_message(prefix: Option<&str>, message: &str) -> String {
+    let trimmed = message.trim();
+    match prefix {
+        Some(prefix) if trimmed.is_empty() => prefix.to_string(),
+        Some(prefix) => format!("{prefix} {trimmed}"),
+        None => trimmed.to_string(),
+    }
+}
+
+fn resolve_canvas_focused_agent(state: &AppState, cluster_id: &str) -> Option<String> {
+    let canvas_state = state.cluster_canvases.get(cluster_id)?;
+    let focused_id = canvas_state.focused_id.as_deref()?;
+    if let Some(layout) = canvas_state.layout.as_ref() {
+        if let Some(node) = layout.nodes.get(focused_id) {
+            if matches!(node.kind, cluster_canvas::NodeKind::Agent) {
+                return Some(node.id.clone());
+            }
+        }
+    }
+    let cluster_state = state.clusters.get(cluster_id)?;
+    let topology = cluster_state.topology.as_ref()?;
+    if topology.agents.iter().any(|agent| agent.id == focused_id) {
+        Some(focused_id.to_string())
+    } else {
+        None
+    }
+}
+
+fn resolve_focus_target(state: &AppState) -> Option<FocusTarget> {
+    match state.active_screen() {
+        ScreenId::Agent {
+            cluster_id,
+            agent_id,
+        }
+        | ScreenId::AgentMicroscope {
+            cluster_id,
+            agent_id,
+        } => Some(FocusTarget::Agent {
+            cluster_id: cluster_id.clone(),
+            agent_id: agent_id.clone(),
+        }),
+        ScreenId::ClusterCanvas { id } => {
+            if let Some(agent_id) = resolve_canvas_focused_agent(state, id) {
+                return Some(FocusTarget::Agent {
+                    cluster_id: id.clone(),
+                    agent_id,
+                });
+            }
+            Some(FocusTarget::Cluster { id: id.clone() })
+        }
+        ScreenId::Cluster { id } => Some(FocusTarget::Cluster { id: id.clone() }),
+        ScreenId::Monitor => state
+            .monitor
+            .selected_cluster_id()
+            .map(|id| FocusTarget::Cluster { id }),
+        ScreenId::FleetRadar => state
+            .fleet_radar
+            .selected_cluster_id()
+            .map(|id| FocusTarget::Cluster { id }),
+        ScreenId::Launcher | ScreenId::IntentConsole => None,
+    }
+}
+
 fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &mut Vec<Effect>) {
     match action {
         CommandAction::ShowToast { level, message } => {
@@ -1951,6 +2039,80 @@ fn handle_command_action(state: &mut AppState, action: CommandAction, effects: &
                 reference,
                 provider_override,
             }));
+        }
+        CommandAction::SendGuidance { message, prefix } => {
+            let Some(target) = resolve_focus_target(state) else {
+                state.toast = Some(ToastState {
+                    message: "No focused cluster or agent.".to_string(),
+                    level: ToastLevel::Error,
+                    expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+                });
+                return;
+            };
+            let built = build_guidance_message(prefix.as_deref(), &message);
+            if built.trim().is_empty() {
+                state.toast = Some(ToastState {
+                    message: "Guidance text is required.".to_string(),
+                    level: ToastLevel::Error,
+                    expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+                });
+                return;
+            }
+            let toast_message = match &target {
+                FocusTarget::Cluster { id } => {
+                    effects.push(Effect::Backend(BackendRequest::SendGuidanceToCluster {
+                        cluster_id: id.clone(),
+                        message: built.clone(),
+                    }));
+                    format!("Guidance sent to cluster {id}.")
+                }
+                FocusTarget::Agent {
+                    cluster_id,
+                    agent_id,
+                } => {
+                    effects.push(Effect::Backend(BackendRequest::SendGuidanceToAgent {
+                        cluster_id: cluster_id.clone(),
+                        agent_id: agent_id.clone(),
+                        message: built.clone(),
+                    }));
+                    format!("Guidance sent to agent {agent_id} @ {cluster_id}.")
+                }
+            };
+            state.toast = Some(ToastState {
+                message: toast_message,
+                level: ToastLevel::Success,
+                expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+            });
+        }
+        CommandAction::TogglePin => {
+            if !matches!(state.ui_variant, UiVariant::Disruptive) {
+                state.toast = Some(ToastState {
+                    message: "Pinning is only available in Disruptive UI.".to_string(),
+                    level: ToastLevel::Error,
+                    expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+                });
+                return;
+            }
+            let Some(target) = resolve_focus_target(state) else {
+                state.toast = Some(ToastState {
+                    message: "No focus target to pin.".to_string(),
+                    level: ToastLevel::Error,
+                    expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+                });
+                return;
+            };
+            let message = if state.pinned_target.as_ref() == Some(&target) {
+                state.pinned_target = None;
+                format!("Unpinned {}.", target.label())
+            } else {
+                state.pinned_target = Some(target.clone());
+                format!("Pinned {}.", target.label())
+            };
+            state.toast = Some(ToastState {
+                message,
+                level: ToastLevel::Success,
+                expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
+            });
         }
     }
 }
@@ -2118,6 +2280,50 @@ mod tests {
             }
         }
         assert!(found, "expected StartClusterFromIssue effect");
+    }
+
+    #[test]
+    fn command_guidance_sends_to_agent_with_prefix() {
+        let mut state = AppState::default();
+        state.screen_stack = vec![ScreenId::Agent {
+            cluster_id: "cluster-1".to_string(),
+            agent_id: "agent-1".to_string(),
+        }];
+
+        let (_state, effects) = update(
+            state,
+            Action::Command(CommandAction::SendGuidance {
+                message: "hi".to_string(),
+                prefix: Some("[nudge]".to_string()),
+            }),
+        );
+
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::SendGuidanceToAgent {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                message: "[nudge] hi".to_string(),
+            }
+        )));
+    }
+
+    #[test]
+    fn pin_toggles_pinned_target() {
+        let mut state = AppState::default();
+        state.ui_variant = UiVariant::Disruptive;
+        state.screen_stack = vec![ScreenId::FleetRadar];
+        state.fleet_radar.set_clusters(vec![radar_cluster("cluster-1")], 0);
+
+        let (state, _) = update(state, Action::Command(CommandAction::TogglePin));
+        assert_eq!(
+            state.pinned_target,
+            Some(FocusTarget::Cluster {
+                id: "cluster-1".to_string()
+            })
+        );
+
+        let (state, _) = update(state, Action::Command(CommandAction::TogglePin));
+        assert_eq!(state.pinned_target, None);
     }
 
     #[test]

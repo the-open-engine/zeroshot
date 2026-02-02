@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::TimeCursor;
+use crate::app::{FocusTarget, TimeCursor};
 use crate::protocol::{ClusterTopology, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::theme;
@@ -211,6 +211,11 @@ impl State {
     }
 }
 
+struct OverlayTarget<'a> {
+    id: &'a str,
+    force_cluster: bool,
+}
+
 pub fn render(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -218,6 +223,7 @@ pub fn render(
     cluster_state: Option<&cluster::State>,
     canvas_state: Option<&State>,
     time_cursor: &TimeCursor,
+    pinned_target: Option<&FocusTarget>,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -254,6 +260,19 @@ pub fn render(
     };
 
     let focused = canvas_state.and_then(|state| state.focused_id.as_deref());
+    let pinned_highlight = match pinned_target {
+        Some(FocusTarget::Agent {
+            cluster_id: pinned_cluster_id,
+            agent_id,
+        }) if *pinned_cluster_id == cluster_id => Some(agent_id.as_str()),
+        _ => None,
+    };
+    let pinned_overlay = resolve_pinned_overlay(
+        pinned_target,
+        cluster_id,
+        canvas_state,
+        Some(cluster_state),
+    );
     let camera = canvas_state
         .map(|state| state.camera)
         .unwrap_or((0.0, 0.0));
@@ -267,6 +286,8 @@ pub fn render(
             topology,
             layout,
             focused,
+            pinned_highlight,
+            pinned_overlay,
             camera,
             block,
             time_cursor,
@@ -300,6 +321,52 @@ fn render_placeholder(
     frame.render_widget(widget, area);
 }
 
+fn resolve_pinned_overlay<'a>(
+    pinned_target: Option<&'a FocusTarget>,
+    cluster_id: &str,
+    canvas_state: Option<&'a State>,
+    cluster_state: Option<&'a cluster::State>,
+) -> Option<OverlayTarget<'a>> {
+    let pinned_target = pinned_target?;
+    match pinned_target {
+        FocusTarget::Agent {
+            cluster_id: pinned_cluster_id,
+            agent_id,
+        } if pinned_cluster_id == cluster_id => Some(OverlayTarget {
+            id: agent_id.as_str(),
+            force_cluster: false,
+        }),
+        FocusTarget::Cluster { id } if id == cluster_id => {
+            if let Some(focused_id) = canvas_state.and_then(|state| state.focused_id.as_deref()) {
+                return Some(OverlayTarget {
+                    id: focused_id,
+                    force_cluster: true,
+                });
+            }
+            if let Some(layout) = canvas_state.and_then(|state| state.layout.as_ref()) {
+                if let Some(id) = layout.nodes.keys().next() {
+                    return Some(OverlayTarget {
+                        id: id.as_str(),
+                        force_cluster: true,
+                    });
+                }
+            }
+            let topology = cluster_state.and_then(|state| state.topology.as_ref())?;
+            if let Some(agent) = topology.agents.first() {
+                return Some(OverlayTarget {
+                    id: agent.id.as_str(),
+                    force_cluster: true,
+                });
+            }
+            topology.topics.first().map(|topic| OverlayTarget {
+                id: topic.as_str(),
+                force_cluster: true,
+            })
+        }
+        _ => None,
+    }
+}
+
 struct CanvasRenderContext<'a> {
     area: Rect,
     cluster_id: &'a str,
@@ -307,6 +374,8 @@ struct CanvasRenderContext<'a> {
     topology: &'a ClusterTopology,
     layout: &'a LayoutCache,
     focused: Option<&'a str>,
+    pinned_highlight: Option<&'a str>,
+    pinned_overlay: Option<OverlayTarget<'a>>,
     camera: (f64, f64),
     block: Block<'a>,
     time_cursor: &'a TimeCursor,
@@ -319,6 +388,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
     let canvas_inner = block.inner(canvas_ctx.area);
     let layout = canvas_ctx.layout;
     let focused = canvas_ctx.focused;
+    let pinned_highlight = canvas_ctx.pinned_highlight;
     let topology = canvas_ctx.topology;
     let canvas = Canvas::default()
         .block(block)
@@ -361,6 +431,17 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
                     });
                 }
 
+                if pinned_highlight == Some(node.id.as_str())
+                    && focused != Some(node.id.as_str())
+                {
+                    ctx.draw(&Circle {
+                        x: node.x,
+                        y: node.y,
+                        radius: orb_radius + 1.2,
+                        color: theme::ACCENT2,
+                    });
+                }
+
                 ctx.draw(&Circle {
                     x: node.x,
                     y: node.y,
@@ -396,6 +477,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
         area: canvas_inner,
         layout: canvas_ctx.layout,
         focused: canvas_ctx.focused,
+        pinned_overlay: canvas_ctx.pinned_overlay,
         render_bounds: &render_bounds,
         spine_area: None,
     };
@@ -411,6 +493,7 @@ struct StreamOverlayLayout<'a> {
     area: Rect,
     layout: &'a LayoutCache,
     focused: Option<&'a str>,
+    pinned_overlay: Option<OverlayTarget<'a>>,
     render_bounds: &'a LayoutBounds,
     spine_area: Option<Rect>,
 }
@@ -421,16 +504,53 @@ fn render_stream_overlay(
     cluster_state: &cluster::State,
     time_cursor: &TimeCursor,
 ) {
-    let Some(focused_id) = layout_ctx.focused else {
-        return;
-    };
-    let Some(node) = layout_ctx.layout.nodes.get(focused_id) else {
-        return;
-    };
     if layout_ctx.area.width < 6 || layout_ctx.area.height < 4 {
         return;
     }
 
+    if let Some(focused_id) = layout_ctx.focused {
+        if let Some(node) = layout_ctx.layout.nodes.get(focused_id) {
+            render_overlay_for_node(
+                frame,
+                &layout_ctx,
+                node,
+                cluster_state,
+                time_cursor,
+                theme::focus_border_style(),
+                false,
+            );
+        }
+    }
+
+    if let Some(pinned) = layout_ctx.pinned_overlay.as_ref() {
+        if Some(pinned.id) != layout_ctx.focused || pinned.force_cluster {
+            if let Some(node) = layout_ctx.layout.nodes.get(pinned.id) {
+                let style = Style::default()
+                    .fg(theme::ACCENT2)
+                    .add_modifier(Modifier::BOLD);
+                render_overlay_for_node(
+                    frame,
+                    &layout_ctx,
+                    node,
+                    cluster_state,
+                    time_cursor,
+                    style,
+                    pinned.force_cluster,
+                );
+            }
+        }
+    }
+}
+
+fn render_overlay_for_node(
+    frame: &mut Frame<'_>,
+    layout_ctx: &StreamOverlayLayout<'_>,
+    node: &NodeLayout,
+    cluster_state: &cluster::State,
+    time_cursor: &TimeCursor,
+    border_style: Style,
+    force_cluster: bool,
+) {
     let focus_point = world_to_screen(
         layout_ctx.area,
         layout_ctx.render_bounds,
@@ -454,12 +574,12 @@ fn render_stream_overlay(
         return;
     }
 
-    let (title, lines) = build_overlay_lines(cluster_state, node, time_cursor, max_lines);
+    let (title, lines) = build_overlay_lines(cluster_state, node, time_cursor, max_lines, force_cluster);
     let overlay = StreamOverlay::new(title, lines)
         .placeholder_lines(stream::log_placeholder_lines(
             stream::LogPlaceholderContext::Overlay,
         ))
-        .border_style(theme::focus_border_style());
+        .border_style(border_style);
     frame.render_widget(overlay, overlay_rect);
 }
 
@@ -468,8 +588,13 @@ fn build_overlay_lines<'a>(
     node: &NodeLayout,
     time_cursor: &TimeCursor,
     max_lines: usize,
+    force_cluster: bool,
 ) -> (Line<'a>, Vec<Line<'a>>) {
-    let is_agent = node.kind == NodeKind::Agent;
+    let is_agent = if force_cluster {
+        false
+    } else {
+        node.kind == NodeKind::Agent
+    };
     let log_title = if is_agent {
         stream::overlay_title(format!("Logs - agent {}", node.id), time_cursor)
     } else {
@@ -1047,6 +1172,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1073,6 +1199,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1102,6 +1229,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1252,6 +1380,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1274,6 +1403,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1348,6 +1478,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");
@@ -1414,6 +1545,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &time_cursor,
+                    None,
                 );
             })
             .expect("draw");
@@ -1446,6 +1578,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    None,
                 );
             })
             .expect("draw");

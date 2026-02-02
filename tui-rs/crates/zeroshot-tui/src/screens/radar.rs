@@ -20,6 +20,7 @@ const BASE_ORB_RADIUS: f64 = 1.8;
 const MAX_ORB_RADIUS: f64 = 4.6;
 const ERROR_PULSE_RADIUS: f64 = 1.6;
 const SELECTION_RING_RADIUS: f64 = 1.2;
+const PIN_RING_RADIUS: f64 = 2.2;
 const MIN_CAMERA_ZOOM: f32 = 0.2;
 
 const ACTIVITY_BANDS_MS: [i64; 4] = [5_000, 30_000, 120_000, 600_000];
@@ -281,6 +282,7 @@ pub fn render(
     state: &FleetRadarState,
     camera: &Camera,
     now_ms: i64,
+    pinned_cluster_id: Option<&str>,
 ) {
     if state.clusters.is_empty() {
         render_empty(frame, area);
@@ -289,6 +291,7 @@ pub fn render(
 
     let selected_id = state.selected_cluster_id();
     let selected_id = selected_id.as_deref();
+    let pinned_id = pinned_cluster_id;
     let zoom = camera.zoom.max(MIN_CAMERA_ZOOM);
     let half_span = WORLD_RADIUS / zoom as f64;
     let center_x = camera.position.0 as f64;
@@ -320,6 +323,7 @@ pub fn render(
                 let color = cluster_color(cluster);
                 let orb_radius = orb_radius(delta, age_ms);
                 let is_selected = selected_id == Some(cluster.id.as_str());
+                let is_pinned = pinned_id == Some(cluster.id.as_str());
                 let is_error = matches!(
                     cluster.state.as_str(),
                     "error" | "failed" | "failure"
@@ -340,6 +344,15 @@ pub fn render(
                         y: layout.y,
                         radius: orb_radius + SELECTION_RING_RADIUS,
                         color: theme::ACCENT,
+                    });
+                }
+
+                if is_pinned {
+                    ctx.draw(&Circle {
+                        x: layout.x,
+                        y: layout.y,
+                        radius: orb_radius + PIN_RING_RADIUS,
+                        color: theme::ACCENT2,
                     });
                 }
 
