@@ -96,15 +96,14 @@ impl State {
     }
 
     pub fn ensure_focus(&mut self, topology: &ClusterTopology) {
-        let mut needs_focus = self.focused_id.is_none();
-        if !needs_focus {
-            let focused = self.focused_id.as_ref().expect("focused id");
-            let in_agents = topology.agents.iter().any(|agent| agent.id == *focused);
-            let in_topics = topology.topics.iter().any(|topic| topic == focused);
-            if !in_agents && !in_topics {
-                needs_focus = true;
+        let needs_focus = match self.focused_id.as_ref() {
+            None => true,
+            Some(focused) => {
+                let in_agents = topology.agents.iter().any(|agent| agent.id == *focused);
+                let in_topics = topology.topics.iter().any(|topic| topic == focused);
+                !in_agents && !in_topics
             }
-        }
+        };
         if needs_focus {
             self.focused_id = default_focus_id(topology);
         }
@@ -114,14 +113,16 @@ impl State {
         if self.layout.is_none() {
             return;
         }
-        if self.focused_id.is_none() {
-            if let Some(layout) = self.layout.as_ref() {
-                self.focused_id = default_focus_id_from_layout(layout);
-            }
-        } else if let Some(layout) = self.layout.as_ref() {
-            let focused = self.focused_id.as_ref().expect("focused id");
-            if !layout.nodes.contains_key(focused) {
-                self.focused_id = default_focus_id_from_layout(layout);
+        if let Some(layout) = self.layout.as_ref() {
+            match self.focused_id.as_ref() {
+                None => {
+                    self.focused_id = default_focus_id_from_layout(layout);
+                }
+                Some(focused) => {
+                    if !layout.nodes.contains_key(focused) {
+                        self.focused_id = default_focus_id_from_layout(layout);
+                    }
+                }
             }
         }
         if self.focused_id.is_none() {
@@ -254,9 +255,14 @@ pub fn render(
         .map(|state| state.camera)
         .unwrap_or((0.0, 0.0));
 
-    render_canvas(
-        frame, area, cluster_id, topology, layout, focused, camera, block,
-    );
+    let view = CanvasView {
+        cluster_id,
+        topology,
+        layout,
+        focused,
+        camera,
+    };
+    render_canvas(frame, area, view, block);
 }
 
 fn render_placeholder(
@@ -285,29 +291,28 @@ fn render_placeholder(
     frame.render_widget(widget, area);
 }
 
-fn render_canvas(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    cluster_id: &str,
-    topology: &ClusterTopology,
-    layout: &LayoutCache,
-    focused: Option<&str>,
+struct CanvasView<'a> {
+    cluster_id: &'a str,
+    topology: &'a ClusterTopology,
+    layout: &'a LayoutCache,
+    focused: Option<&'a str>,
     camera: (f64, f64),
-    block: Block,
-) {
-    let title = format!("Cluster Canvas {cluster_id}");
-    let render_bounds = camera_bounds(layout, camera);
+}
+
+fn render_canvas(frame: &mut Frame<'_>, area: Rect, view: CanvasView<'_>, block: Block) {
+    let title = format!("Cluster Canvas {}", view.cluster_id);
+    let render_bounds = camera_bounds(view.layout, view.camera);
     let canvas = Canvas::default()
         .block(block.title(title))
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
         .y_bounds([render_bounds.min_y, render_bounds.max_y])
         .marker(Marker::Braille)
         .paint(|ctx| {
-            for edge in &layout.edges {
-                let Some(from) = layout.nodes.get(&edge.from) else {
+            for edge in &view.layout.edges {
+                let Some(from) = view.layout.nodes.get(&edge.from) else {
                     continue;
                 };
-                let Some(to) = layout.nodes.get(&edge.to) else {
+                let Some(to) = view.layout.nodes.get(&edge.to) else {
                     continue;
                 };
                 ctx.draw(&CanvasLine {
@@ -319,7 +324,7 @@ fn render_canvas(
                 });
             }
 
-            for node in layout.nodes.values() {
+            for node in view.layout.nodes.values() {
                 let color = match node.kind {
                     NodeKind::Agent => theme::agent_color(node.id.as_str()),
                     NodeKind::Topic => theme::FG_MUTED,
@@ -329,7 +334,7 @@ fn render_canvas(
                     NodeKind::Topic => TOPIC_ORB_RADIUS,
                 };
 
-                if focused == Some(node.id.as_str()) {
+                if view.focused == Some(node.id.as_str()) {
                     ctx.draw(&Circle {
                         x: node.x,
                         y: node.y,
@@ -357,7 +362,7 @@ fn render_canvas(
                 ctx.print(label_x, label_y, line);
             }
 
-            let summary_line = topology_summary(topology);
+            let summary_line = topology_summary(view.topology);
             if let Some(summary_line) = summary_line {
                 let line = Line::from(Span::styled(summary_line, theme::dim_style()));
                 ctx.print(
