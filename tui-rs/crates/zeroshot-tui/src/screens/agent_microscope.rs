@@ -86,7 +86,7 @@ fn build_metadata_overlay(
         .and_then(|state| state.status.as_deref())
         .unwrap_or("unknown");
 
-    let raw_lines = vec![
+    let raw_lines = [
         format!("Agent: {agent_id}"),
         format!("Role: {role}"),
         format!("Status: {status}"),
@@ -119,7 +119,7 @@ fn build_metadata_overlay(
         .iter()
         .map(|line| line.chars().count())
         .max()
-        .unwrap_or(0) as u16;
+        .unwrap_or_default() as u16;
 
     let overlay_width = (max_line_len + 2).min(available_width);
     let overlay_height = (lines.len() as u16 + 2).min(available_height);
