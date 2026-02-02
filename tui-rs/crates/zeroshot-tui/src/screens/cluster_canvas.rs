@@ -8,7 +8,8 @@ use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{FocusTarget, TimeCursor};
+use crate::app::{animation, FocusTarget, TimeCursor};
+use crate::app::animation::AnimClock;
 use crate::protocol::{ClusterTopology, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::theme;
@@ -24,6 +25,9 @@ const LABEL_RADIAL_OFFSET: f64 = 1.4;
 const LABEL_LIMIT: usize = 14;
 const PENDING_MESSAGE: &str = "Waiting for cluster topology";
 const FOCUS_EPSILON: f64 = 0.0001;
+const CANVAS_CAMERA_ACCEL: f64 = 0.16;
+const CANVAS_CAMERA_FRICTION: f64 = 0.82;
+const CANVAS_CAMERA_SNAP_EPSILON: f64 = 0.08;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
@@ -88,13 +92,20 @@ pub struct State {
     pub log_subscription: Option<String>,
     pub timeline_subscription: Option<String>,
     pub camera: (f64, f64),
+    pub camera_target: (f64, f64),
+    pub camera_velocity: (f64, f64),
 }
 
 impl State {
     pub fn update_layout(&mut self, topology: &ClusterTopology) {
+        let had_layout = self.layout.is_some();
         self.layout = Some(layout_for(topology));
         self.ensure_focus(topology);
-        self.center_camera_on_focus();
+        if had_layout {
+            self.set_camera_target_to_focus();
+        } else {
+            self.snap_camera_to_focus();
+        }
     }
 
     pub fn ensure_focus(&mut self, topology: &ClusterTopology) {
@@ -131,7 +142,7 @@ impl State {
             return;
         }
 
-        self.center_camera_on_focus();
+        self.set_camera_target_to_focus();
 
         let mut steps = match speed {
             MoveSpeed::Step => 1,
@@ -142,7 +153,7 @@ impl State {
                 break;
             };
             self.focused_id = Some(next);
-            self.center_camera_on_focus();
+            self.set_camera_target_to_focus();
             steps -= 1;
         }
     }
@@ -161,6 +172,28 @@ impl State {
     pub fn clear_layout(&mut self) {
         self.layout = None;
         self.camera = (0.0, 0.0);
+        self.camera_target = (0.0, 0.0);
+        self.camera_velocity = (0.0, 0.0);
+    }
+
+    pub fn tick_camera(&mut self, dt_ms: i64) {
+        let (position, velocity) = animation::step_spring_f64(
+            self.camera,
+            self.camera_velocity,
+            self.camera_target,
+            dt_ms,
+            CANVAS_CAMERA_ACCEL,
+            CANVAS_CAMERA_FRICTION,
+        );
+        self.camera = position;
+        self.camera_velocity = velocity;
+
+        let dx = self.camera.0 - self.camera_target.0;
+        let dy = self.camera.1 - self.camera_target.1;
+        if dx.abs() <= CANVAS_CAMERA_SNAP_EPSILON && dy.abs() <= CANVAS_CAMERA_SNAP_EPSILON {
+            self.camera = self.camera_target;
+            self.camera_velocity = (0.0, 0.0);
+        }
     }
 
     fn next_focus_id(&self, direction: Direction) -> Option<String> {
@@ -197,17 +230,33 @@ impl State {
         best.map(|(_, id)| id)
     }
 
-    fn center_camera_on_focus(&mut self) {
-        let Some(layout) = self.layout.as_ref() else {
+    fn set_camera_target_to_focus(&mut self) {
+        let Some((x, y)) = self.focus_position() else {
             return;
+        };
+        self.camera_target = (x, y);
+    }
+
+    fn snap_camera_to_focus(&mut self) {
+        let Some((x, y)) = self.focus_position() else {
+            return;
+        };
+        self.camera = (x, y);
+        self.camera_target = (x, y);
+        self.camera_velocity = (0.0, 0.0);
+    }
+
+    fn focus_position(&self) -> Option<(f64, f64)> {
+        let Some(layout) = self.layout.as_ref() else {
+            return None;
         };
         let Some(focused_id) = self.focused_id.as_ref() else {
-            return;
+            return None;
         };
         let Some(node) = layout.nodes.get(focused_id) else {
-            return;
+            return None;
         };
-        self.camera = (node.x, node.y);
+        Some((node.x, node.y))
     }
 }
 
@@ -223,6 +272,7 @@ pub fn render(
     cluster_state: Option<&cluster::State>,
     canvas_state: Option<&State>,
     time_cursor: &TimeCursor,
+    anim_clock: &AnimClock,
     pinned_target: Option<&FocusTarget>,
 ) {
     let block = Block::default()
@@ -276,6 +326,7 @@ pub fn render(
     let camera = canvas_state
         .map(|state| state.camera)
         .unwrap_or((0.0, 0.0));
+    let focus_pulse = animation::pulse_factor(anim_clock.phase) as f64;
 
     render_canvas(
         frame,
@@ -291,6 +342,7 @@ pub fn render(
             camera,
             block,
             time_cursor,
+            focus_pulse,
         },
     );
 }
@@ -379,6 +431,7 @@ struct CanvasRenderContext<'a> {
     camera: (f64, f64),
     block: Block<'a>,
     time_cursor: &'a TimeCursor,
+    focus_pulse: f64,
 }
 
 fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
@@ -390,6 +443,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
     let focused = canvas_ctx.focused;
     let pinned_highlight = canvas_ctx.pinned_highlight;
     let topology = canvas_ctx.topology;
+    let focus_pulse = canvas_ctx.focus_pulse;
     let canvas = Canvas::default()
         .block(block)
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
@@ -426,7 +480,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
                     ctx.draw(&Circle {
                         x: node.x,
                         y: node.y,
-                        radius: orb_radius + 0.8,
+                        radius: orb_radius + 0.8 + 0.25 * focus_pulse,
                         color: theme::ACCENT,
                     });
                 }
@@ -1063,6 +1117,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    use crate::app::animation::AnimClock;
     use crate::protocol::{ClusterLogLine, TopologyAgent, TopologyEdge, TopologyEdgeKind};
     use crate::ui::widgets::test_utils::line_text;
     use std::collections::HashMap;
@@ -1161,6 +1216,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let cluster_state = cluster::State::default();
         let canvas_state = State::default();
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1172,6 +1228,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1188,6 +1245,7 @@ mod tests {
         let mut cluster_state = cluster::State::default();
         cluster_state.topology_error = Some("backend timeout".to_string());
         let canvas_state = State::default();
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1199,6 +1257,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1218,6 +1277,7 @@ mod tests {
         cluster_state.topology = Some(topology.clone());
         let mut canvas_state = State::default();
         canvas_state.update_layout(&topology);
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1229,6 +1289,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1364,6 +1425,7 @@ mod tests {
         let layout = layout_for(&topology);
         let mut cluster_state = cluster::State::default();
         cluster_state.topology = Some(topology.clone());
+        let anim_clock = AnimClock::default();
 
         let canvas_state = State {
             focused_id: Some("agent-alpha".to_string()),
@@ -1380,6 +1442,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1403,6 +1466,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1467,6 +1531,7 @@ mod tests {
         let mut canvas_state = State::default();
         canvas_state.update_layout(&topology);
         canvas_state.focused_id = Some("agent-alpha".to_string());
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1478,6 +1543,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })
@@ -1534,6 +1600,7 @@ mod tests {
             t_ms: 250,
             window_ms: 120,
         };
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1545,6 +1612,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &time_cursor,
+                    &anim_clock,
                     None,
                 );
             })
@@ -1567,6 +1635,7 @@ mod tests {
         let mut canvas_state = State::default();
         canvas_state.update_layout(&topology);
         canvas_state.focused_id = Some("agent-alpha".to_string());
+        let anim_clock = AnimClock::default();
 
         terminal
             .draw(|frame| {
@@ -1578,6 +1647,7 @@ mod tests {
                     Some(&cluster_state),
                     Some(&canvas_state),
                     &TimeCursor::default(),
+                    &anim_clock,
                     None,
                 );
             })

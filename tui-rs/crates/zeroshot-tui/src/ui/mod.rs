@@ -63,6 +63,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
                 cluster_state,
                 canvas_state,
                 &state.time_cursor,
+                &state.anim_clock,
                 state.pinned_target.as_ref(),
             );
         }
@@ -142,6 +143,7 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 &state.fleet_radar,
                 &state.camera,
                 state.now_ms,
+                &state.anim_clock,
                 pinned_cluster,
             );
         }
@@ -155,6 +157,7 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 cluster_state,
                 canvas_state,
                 &state.time_cursor,
+                &state.anim_clock,
                 state.pinned_target.as_ref(),
             );
         }
