@@ -2833,6 +2833,7 @@ Continue from where you left off. Review your previous output to understand what
       this._log(`    [--pr mode] Injected ${platform}-git-pusher agent`);
     } else {
       // Default completion-detector
+      const { SHARED_TRIGGER_SCRIPT } = require('./agents/git-pusher-template');
       const completionDetector = {
         id: 'completion-detector',
         role: 'orchestrator',
@@ -2843,29 +2844,7 @@ Continue from where you left off. Review your previous output to understand what
             topic: 'VALIDATION_RESULT',
             logic: {
               engine: 'javascript',
-              script: `const validators = cluster.getAgentsByRole('validator');
-const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
-if (!lastPush) return false;
-if (validators.length === 0) return true;
-
-const validatorIds = new Set(validators.map((v) => v.id));
-const results = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });
-
-const latestByValidator = new Map();
-for (const msg of results) {
-  if (!validatorIds.has(msg.sender)) continue;
-  latestByValidator.set(msg.sender, msg);
-}
-
-if (latestByValidator.size < validators.length) return false;
-
-for (const validator of validators) {
-  const msg = latestByValidator.get(validator.id);
-  const approved = msg?.content?.data?.approved;
-  if (!(approved === true || approved === 'true')) return false;
-}
-
-return true;`,
+              script: SHARED_TRIGGER_SCRIPT,
             },
             action: 'stop_cluster',
           },

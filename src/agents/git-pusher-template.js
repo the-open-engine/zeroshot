@@ -18,14 +18,43 @@ const SHARED_TRIGGER_SCRIPT = `const validators = cluster.getAgentsByRole('valid
 const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });
 if (!lastPush) return false;
 if (validators.length === 0) return true;
+
 const results = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });
-if (results.length < validators.length) return false;
-const allApproved = results.every(r => r.content?.data?.approved === 'true' || r.content?.data?.approved === true);
-if (!allApproved) return false;
-const hasSufficientEvidence = results.every(r => {
+if (results.length === 0) return false;
+
+const validatorIds = new Set(validators.map((v) => v.id));
+const validatorResults = results.filter((r) => validatorIds.has(r.sender));
+
+// Two supported patterns:
+// 1) Per-validator VALIDATION_RESULT (sender is a validator) → require all validators approve.
+// 2) Consensus-only VALIDATION_RESULT (sender is coordinator) → treat latest result as final.
+if (validatorResults.length === 0) {
+  let latest = null;
+  for (const msg of results) {
+    if (!latest || (typeof msg.timestamp === 'number' && msg.timestamp > latest.timestamp)) {
+      latest = msg;
+    }
+  }
+  const approved = latest?.content?.data?.approved;
+  return approved === true || approved === 'true';
+}
+
+const latestByValidator = new Map();
+for (const msg of validatorResults) {
+  latestByValidator.set(msg.sender, msg);
+}
+if (latestByValidator.size < validators.length) return false;
+
+for (const validator of validators) {
+  const msg = latestByValidator.get(validator.id);
+  const approved = msg?.content?.data?.approved;
+  if (!(approved === true || approved === 'true')) return false;
+}
+
+const hasSufficientEvidence = Array.from(latestByValidator.values()).every((r) => {
   const criteria = r.content?.data?.criteriaResults;
   if (!Array.isArray(criteria) || criteria.length === 0) return true;
-  return criteria.every(c => {
+  return criteria.every((c) => {
     const status = String(c.status || '').toUpperCase();
     if (status === 'CANNOT_VALIDATE') return true;
     if (status === 'SKIPPED') return true;
@@ -40,6 +69,7 @@ const hasSufficientEvidence = results.every(r => {
     return hasCommand && hasExitCode && hasOutput;
   });
 });
+
 return hasSufficientEvidence;`;
 
 const { readRepoSettings } = require('../../lib/repo-settings');
