@@ -44,7 +44,8 @@ fn disruptive_render_empty_radar() {
 
     let content = buffer_text(terminal.backend().buffer());
     assert!(content.contains("Fleet Radar"));
-    assert!(content.contains("No clusters on the radar"));
+    assert!(content.contains("No clusters yet."));
+    assert!(content.contains("Type an intent in the spine to start a cluster."));
     assert!(!content.contains("ID"));
     assert!(!content.contains("STATE"));
     assert!(!content.contains("ZEROSHOT"));

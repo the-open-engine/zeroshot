@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::app::{animation, FocusTarget, TimeCursor};
 use crate::app::animation::AnimClock;
 use crate::protocol::{ClusterTopology, TopologyAgent};
 use crate::screens::cluster;
+use crate::ui::shared::calm_empty_state;
 use crate::ui::theme;
 use crate::ui::widgets::stream::{self, StreamOverlay};
 
@@ -23,7 +24,8 @@ const TOPIC_ORB_RADIUS: f64 = 1.2;
 const LABEL_OFFSET: f64 = 4.0;
 const LABEL_RADIAL_OFFSET: f64 = 1.4;
 const LABEL_LIMIT: usize = 14;
-const PENDING_MESSAGE: &str = "Waiting for cluster topology";
+const PENDING_MESSAGE: &str = "Topology pending";
+const UNAVAILABLE_MESSAGE: &str = "Topology unavailable";
 const FOCUS_EPSILON: f64 = 0.0001;
 const CANVAS_CAMERA_ACCEL: f64 = 0.16;
 const CANVAS_CAMERA_FRICTION: f64 = 0.82;
@@ -288,23 +290,17 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, context: RenderContext<'_>) {
         .title("Cluster Canvas");
 
     let Some(cluster_state) = cluster_state else {
-        render_placeholder(frame, area, block, PENDING_MESSAGE, None);
+        render_placeholder(frame, area, UNAVAILABLE_MESSAGE, None);
         return;
     };
 
     if let Some(error) = cluster_state.topology_error.as_deref() {
-        render_placeholder(
-            frame,
-            area,
-            block,
-            "Topology error",
-            Some(error),
-        );
+        render_placeholder(frame, area, UNAVAILABLE_MESSAGE, Some(error));
         return;
     }
 
     let Some(topology) = cluster_state.topology.as_ref() else {
-        render_placeholder(frame, area, block, PENDING_MESSAGE, None);
+        render_placeholder(frame, area, PENDING_MESSAGE, None);
         return;
     };
 
@@ -355,29 +351,13 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, context: RenderContext<'_>) {
     );
 }
 
-fn render_placeholder(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    block: Block,
-    headline: &str,
-    detail: Option<&str>,
-) {
-    let mut lines = Vec::new();
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(headline, theme::muted_style())));
-    if let Some(detail) = detail {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(detail, theme::dim_style())));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Press Esc to return to Fleet Radar",
-        theme::dim_style(),
-    )));
-
-    let widget = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .block(block);
+fn render_placeholder(frame: &mut Frame<'_>, area: Rect, headline: &str, detail: Option<&str>) {
+    let widget = calm_empty_state(
+        "Cluster Canvas",
+        headline,
+        detail,
+        Some("Press Esc to return to Fleet Radar"),
+    );
     frame.render_widget(widget, area);
 }
 
@@ -1250,7 +1230,37 @@ mod tests {
     }
 
     #[test]
-    fn render_topology_error() {
+    fn render_missing_cluster_as_unavailable() {
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let canvas_state = State::default();
+        let anim_clock = AnimClock::default();
+        let time_cursor = TimeCursor::default();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    RenderContext {
+                        cluster_id: "cluster-missing",
+                        cluster_state: None,
+                        canvas_state: Some(&canvas_state),
+                        time_cursor: &time_cursor,
+                        anim_clock: &anim_clock,
+                        pinned_target: None,
+                    },
+                );
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, UNAVAILABLE_MESSAGE));
+    }
+
+    #[test]
+    fn render_topology_unavailable_on_error() {
         let backend = TestBackend::new(60, 12);
         let mut terminal = Terminal::new(backend).expect("terminal");
         let mut cluster_state = cluster::State::default();
@@ -1278,7 +1288,7 @@ mod tests {
             .expect("draw");
 
         let buffer = terminal.backend().buffer();
-        assert!(buffer_contains(buffer, "Topology error"));
+        assert!(buffer_contains(buffer, UNAVAILABLE_MESSAGE));
         assert!(buffer_contains(buffer, "backend timeout"));
     }
 
