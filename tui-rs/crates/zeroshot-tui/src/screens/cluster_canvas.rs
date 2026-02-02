@@ -21,11 +21,32 @@ const LABEL_OFFSET: f64 = 4.0;
 const LABEL_RADIAL_OFFSET: f64 = 1.4;
 const LABEL_LIMIT: usize = 14;
 const PENDING_MESSAGE: &str = "Waiting for cluster topology";
+const FOCUS_EPSILON: f64 = 0.0001;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
     Agent,
     Topic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveSpeed {
+    Step,
+    Fast,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    MoveFocus { direction: Direction, speed: MoveSpeed },
+    ZoomIn,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,15 +85,126 @@ pub struct State {
     pub layout: Option<LayoutCache>,
     pub log_subscription: Option<String>,
     pub timeline_subscription: Option<String>,
+    pub camera: (f64, f64),
 }
 
 impl State {
     pub fn update_layout(&mut self, topology: &ClusterTopology) {
         self.layout = Some(layout_for(topology));
+        self.ensure_focus(topology);
+        self.center_camera_on_focus();
+    }
+
+    pub fn ensure_focus(&mut self, topology: &ClusterTopology) {
+        let mut needs_focus = self.focused_id.is_none();
+        if !needs_focus {
+            let focused = self.focused_id.as_ref().expect("focused id");
+            let in_agents = topology.agents.iter().any(|agent| agent.id == *focused);
+            let in_topics = topology.topics.iter().any(|topic| topic == focused);
+            if !in_agents && !in_topics {
+                needs_focus = true;
+            }
+        }
+        if needs_focus {
+            self.focused_id = default_focus_id(topology);
+        }
+    }
+
+    pub fn move_focus(&mut self, direction: Direction, speed: MoveSpeed) {
+        if self.layout.is_none() {
+            return;
+        }
+        if self.focused_id.is_none() {
+            if let Some(layout) = self.layout.as_ref() {
+                self.focused_id = default_focus_id_from_layout(layout);
+            }
+        } else if let Some(layout) = self.layout.as_ref() {
+            let focused = self.focused_id.as_ref().expect("focused id");
+            if !layout.nodes.contains_key(focused) {
+                self.focused_id = default_focus_id_from_layout(layout);
+            }
+        }
+        if self.focused_id.is_none() {
+            return;
+        }
+
+        self.center_camera_on_focus();
+
+        let mut steps = match speed {
+            MoveSpeed::Step => 1,
+            MoveSpeed::Fast => 2,
+        };
+        while steps > 0 {
+            let Some(next) = self.next_focus_id(direction) else {
+                break;
+            };
+            self.focused_id = Some(next);
+            self.center_camera_on_focus();
+            steps -= 1;
+        }
+    }
+
+    pub fn focused_agent_id(&self) -> Option<String> {
+        let layout = self.layout.as_ref()?;
+        let focused = self.focused_id.as_ref()?;
+        let node = layout.nodes.get(focused)?;
+        if node.kind == NodeKind::Agent {
+            Some(node.id.clone())
+        } else {
+            None
+        }
     }
 
     pub fn clear_layout(&mut self) {
         self.layout = None;
+        self.camera = (0.0, 0.0);
+    }
+
+    fn next_focus_id(&self, direction: Direction) -> Option<String> {
+        let layout = self.layout.as_ref()?;
+        let focused_id = self.focused_id.as_ref()?;
+        let focused = layout.nodes.get(focused_id)?;
+        let (dir_x, dir_y) = direction_vector(direction);
+        let mut best: Option<(f64, String)> = None;
+
+        for node in layout.nodes.values() {
+            if node.id == focused.id {
+                continue;
+            }
+            let dx = node.x - focused.x;
+            let dy = node.y - focused.y;
+            let dot = dx * dir_x + dy * dir_y;
+            if dot <= FOCUS_EPSILON {
+                continue;
+            }
+            let dist = dx * dx + dy * dy;
+            match &mut best {
+                Some((best_dist, best_id)) => {
+                    if dist + FOCUS_EPSILON < *best_dist
+                        || (dist - *best_dist).abs() <= FOCUS_EPSILON && node.id < *best_id
+                    {
+                        *best_dist = dist;
+                        *best_id = node.id.clone();
+                    }
+                }
+                None => best = Some((dist, node.id.clone())),
+            }
+        }
+
+        best.map(|(_, id)| id)
+    }
+
+    fn center_camera_on_focus(&mut self) {
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let Some(focused_id) = self.focused_id.as_ref() else {
+            return;
+        };
+        let Some(node) = layout.nodes.get(focused_id) else {
+            return;
+        };
+        self.camera = (node.x, node.y);
     }
 }
 
@@ -118,8 +250,13 @@ pub fn render(
     };
 
     let focused = canvas_state.and_then(|state| state.focused_id.as_deref());
+    let camera = canvas_state
+        .map(|state| state.camera)
+        .unwrap_or((0.0, 0.0));
 
-    render_canvas(frame, area, cluster_id, topology, layout, focused, block);
+    render_canvas(
+        frame, area, cluster_id, topology, layout, focused, camera, block,
+    );
 }
 
 fn render_placeholder(
@@ -155,13 +292,15 @@ fn render_canvas(
     topology: &ClusterTopology,
     layout: &LayoutCache,
     focused: Option<&str>,
+    camera: (f64, f64),
     block: Block,
 ) {
     let title = format!("Cluster Canvas {cluster_id}");
+    let render_bounds = camera_bounds(layout, camera);
     let canvas = Canvas::default()
         .block(block.title(title))
-        .x_bounds([layout.bounds.min_x, layout.bounds.max_x])
-        .y_bounds([layout.bounds.min_y, layout.bounds.max_y])
+        .x_bounds([render_bounds.min_x, render_bounds.max_x])
+        .y_bounds([render_bounds.min_y, render_bounds.max_y])
         .marker(Marker::Braille)
         .paint(|ctx| {
             for edge in &layout.edges {
@@ -222,8 +361,8 @@ fn render_canvas(
             if let Some(summary_line) = summary_line {
                 let line = Line::from(Span::styled(summary_line, theme::dim_style()));
                 ctx.print(
-                    layout.bounds.min_x + 1.0,
-                    layout.bounds.max_y - 1.0,
+                    render_bounds.min_x + 1.0,
+                    render_bounds.max_y - 1.0,
                     line,
                 );
             }
@@ -242,6 +381,60 @@ fn topology_summary(topology: &ClusterTopology) -> Option<String> {
         topology.topics.len(),
         topology.edges.len()
     ))
+}
+
+fn camera_bounds(layout: &LayoutCache, camera: (f64, f64)) -> LayoutBounds {
+    let width = layout.bounds.max_x - layout.bounds.min_x;
+    let height = layout.bounds.max_y - layout.bounds.min_y;
+    let half_w = width / 2.0;
+    let half_h = height / 2.0;
+    LayoutBounds {
+        min_x: camera.0 - half_w,
+        max_x: camera.0 + half_w,
+        min_y: camera.1 - half_h,
+        max_y: camera.1 + half_h,
+    }
+}
+
+fn direction_vector(direction: Direction) -> (f64, f64) {
+    match direction {
+        Direction::Left => (-1.0, 0.0),
+        Direction::Right => (1.0, 0.0),
+        Direction::Up => (0.0, 1.0),
+        Direction::Down => (0.0, -1.0),
+    }
+}
+
+fn default_focus_id(topology: &ClusterTopology) -> Option<String> {
+    let mut agent_ids: Vec<&String> = topology.agents.iter().map(|agent| &agent.id).collect();
+    agent_ids.sort();
+    if let Some(id) = agent_ids.first() {
+        return Some((*id).clone());
+    }
+    let mut topics: Vec<&String> = topology.topics.iter().collect();
+    topics.sort();
+    topics.first().map(|id| (*id).clone())
+}
+
+fn default_focus_id_from_layout(layout: &LayoutCache) -> Option<String> {
+    let mut agent_ids: Vec<&String> = layout
+        .nodes
+        .values()
+        .filter(|node| node.kind == NodeKind::Agent)
+        .map(|node| &node.id)
+        .collect();
+    agent_ids.sort();
+    if let Some(id) = agent_ids.first() {
+        return Some((*id).clone());
+    }
+    let mut topic_ids: Vec<&String> = layout
+        .nodes
+        .values()
+        .filter(|node| node.kind == NodeKind::Topic)
+        .map(|node| &node.id)
+        .collect();
+    topic_ids.sort();
+    topic_ids.first().map(|id| (*id).clone())
 }
 
 fn layout_for(topology: &ClusterTopology) -> LayoutCache {
@@ -385,6 +578,7 @@ mod tests {
 
     use crate::protocol::{TopologyAgent, TopologyEdge, TopologyEdgeKind};
     use crate::ui::widgets::test_utils::line_text;
+    use std::collections::HashMap;
 
     fn sample_topology() -> ClusterTopology {
         ClusterTopology {
@@ -420,6 +614,39 @@ mod tests {
             }
         }
         false
+    }
+
+    fn buffers_differ(first: &Buffer, second: &Buffer) -> bool {
+        if first.area != second.area {
+            return true;
+        }
+        for y in first.area.top()..first.area.bottom() {
+            for x in first.area.left()..first.area.right() {
+                let first_cell = first.cell((x, y));
+                let second_cell = second.cell((x, y));
+                if first_cell != second_cell {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn layout_with_nodes(nodes: Vec<NodeLayout>) -> LayoutCache {
+        let mut map = HashMap::new();
+        for node in nodes {
+            map.insert(node.id.clone(), node);
+        }
+        LayoutCache {
+            nodes: map,
+            edges: Vec::new(),
+            bounds: LayoutBounds {
+                min_x: -WORLD_RADIUS,
+                max_x: WORLD_RADIUS,
+                min_y: -WORLD_RADIUS,
+                max_y: WORLD_RADIUS,
+            },
+        }
     }
 
     #[test]
@@ -506,6 +733,175 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert!(buffer_contains(buffer, "agent-alpha"));
         assert!(buffer_contains(buffer, "ISSUE_OPENED"));
+    }
+
+    #[test]
+    fn default_focus_prefers_agents() {
+        let topology = ClusterTopology {
+            agents: vec![
+                TopologyAgent {
+                    id: "worker".to_string(),
+                    role: None,
+                },
+                TopologyAgent {
+                    id: "planner".to_string(),
+                    role: None,
+                },
+            ],
+            topics: vec!["topic-b".to_string(), "topic-a".to_string()],
+            edges: Vec::new(),
+        };
+        assert_eq!(default_focus_id(&topology), Some("planner".to_string()));
+
+        let topology = ClusterTopology {
+            agents: Vec::new(),
+            topics: vec!["topic-b".to_string(), "topic-a".to_string()],
+            edges: Vec::new(),
+        };
+        assert_eq!(default_focus_id(&topology), Some("topic-a".to_string()));
+    }
+
+    #[test]
+    fn move_focus_direction() {
+        let layout = layout_with_nodes(vec![
+            NodeLayout {
+                id: "center".to_string(),
+                label: "center".to_string(),
+                x: 0.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "right".to_string(),
+                label: "right".to_string(),
+                x: 10.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "right-far".to_string(),
+                label: "right-far".to_string(),
+                x: 18.0,
+                y: 2.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "left".to_string(),
+                label: "left".to_string(),
+                x: -10.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "up".to_string(),
+                label: "up".to_string(),
+                x: 0.0,
+                y: 10.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "down".to_string(),
+                label: "down".to_string(),
+                x: 0.0,
+                y: -10.0,
+                kind: NodeKind::Agent,
+            },
+        ]);
+
+        let mut state = State {
+            focused_id: Some("center".to_string()),
+            layout: Some(layout),
+            ..State::default()
+        };
+        state.move_focus(Direction::Right, MoveSpeed::Step);
+        assert_eq!(state.focused_id.as_deref(), Some("right"));
+    }
+
+    #[test]
+    fn move_focus_fast() {
+        let layout = layout_with_nodes(vec![
+            NodeLayout {
+                id: "a".to_string(),
+                label: "a".to_string(),
+                x: 0.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "b".to_string(),
+                label: "b".to_string(),
+                x: 10.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+            NodeLayout {
+                id: "c".to_string(),
+                label: "c".to_string(),
+                x: 20.0,
+                y: 0.0,
+                kind: NodeKind::Agent,
+            },
+        ]);
+
+        let mut state = State {
+            focused_id: Some("a".to_string()),
+            layout: Some(layout),
+            ..State::default()
+        };
+        state.move_focus(Direction::Right, MoveSpeed::Fast);
+        assert_eq!(state.focused_id.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn render_focus_ring_changes_output() {
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let topology = sample_topology();
+        let layout = layout_for(&topology);
+        let mut cluster_state = cluster::State::default();
+        cluster_state.topology = Some(topology.clone());
+
+        let canvas_state = State {
+            focused_id: Some("agent-alpha".to_string()),
+            layout: Some(layout.clone()),
+            ..State::default()
+        };
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-4",
+                    Some(&cluster_state),
+                    Some(&canvas_state),
+                );
+            })
+            .expect("draw");
+        let first = terminal.backend().buffer().clone();
+
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let canvas_state = State {
+            focused_id: Some("agent-bravo".to_string()),
+            layout: Some(layout),
+            ..State::default()
+        };
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-4",
+                    Some(&cluster_state),
+                    Some(&canvas_state),
+                );
+            })
+            .expect("draw");
+        let second = terminal.backend().buffer().clone();
+
+        assert!(buffers_differ(&first, &second));
     }
 
     #[test]
