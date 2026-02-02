@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::protocol::{ClusterLogLine, ClusterMetrics, ClusterSummary, ClusterTopology, TimelineEvent};
 use crate::screens::metrics;
-use crate::ui::shared::{pane_block, ScrollableBuffer};
+use crate::ui::shared::{pane_block, HasTimestamp, ScrollableBuffer, TimeIndexedBuffer};
 use crate::ui::theme;
 use crate::ui::widgets::{stream, topology};
 
@@ -56,7 +56,9 @@ pub struct State {
     pub topology: Option<ClusterTopology>,
     pub topology_error: Option<String>,
     pub logs: ScrollableBuffer<ClusterLogLine>,
+    pub logs_time: TimeIndexedBuffer<ClusterLogLine>,
     pub timeline: ScrollableBuffer<TimelineEvent>,
+    pub timeline_time: TimeIndexedBuffer<TimelineEvent>,
     pub agents: Vec<AgentInfo>,
     pub selected_agent: usize,
     pub log_drop_seq: u64,
@@ -72,7 +74,9 @@ impl Default for State {
             topology: None,
             topology_error: None,
             logs: ScrollableBuffer::new(MAX_LOG_LINES),
+            logs_time: TimeIndexedBuffer::new(MAX_LOG_LINES),
             timeline: ScrollableBuffer::new(MAX_TIMELINE_EVENTS),
+            timeline_time: TimeIndexedBuffer::new(MAX_TIMELINE_EVENTS),
             agents: Vec::new(),
             selected_agent: 0,
             log_drop_seq: 0,
@@ -140,11 +144,15 @@ impl State {
         }
 
         to_push.append(&mut lines);
+        let time_lines = to_push.clone();
         self.logs.push_many(to_push);
+        self.logs_time.push_many(time_lines);
     }
 
     pub fn push_timeline_events(&mut self, events: Vec<TimelineEvent>) {
+        let time_events = events.clone();
         self.timeline.push_many(events);
+        self.timeline_time.push_many(time_events);
     }
 
     fn move_agent_selection(&mut self, delta: i32) {
@@ -205,6 +213,18 @@ impl State {
         self.agents
             .get(self.selected_agent)
             .map(|agent| agent.id.clone())
+    }
+}
+
+impl HasTimestamp for ClusterLogLine {
+    fn timestamp_ms(&self) -> i64 {
+        self.timestamp
+    }
+}
+
+impl HasTimestamp for TimelineEvent {
+    fn timestamp_ms(&self) -> i64 {
+        self.timestamp
     }
 }
 

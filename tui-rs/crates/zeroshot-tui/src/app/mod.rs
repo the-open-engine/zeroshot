@@ -142,17 +142,21 @@ pub enum TimeCursorMode {
     Scrub,
 }
 
+const DEFAULT_TIME_WINDOW_MS: i64 = 60_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeCursor {
     pub mode: TimeCursorMode,
-    pub cursor_ms: i64,
+    pub t_ms: i64,
+    pub window_ms: i64,
 }
 
 impl Default for TimeCursor {
     fn default() -> Self {
         Self {
             mode: TimeCursorMode::Live,
-            cursor_ms: 0,
+            t_ms: 0,
+            window_ms: DEFAULT_TIME_WINDOW_MS,
         }
     }
 }
@@ -1182,6 +1186,7 @@ fn handle_backend_exited(state: &mut AppState, exit: BackendExit) {
 fn handle_backend_notification(state: &mut AppState, notification: BackendNotification) {
     match notification {
         BackendNotification::ClusterLogLines(params) => {
+            let latest_ts = params.lines.iter().map(|line| line.timestamp).max();
             if let Some(entry) = state
                 .agents
                 .values_mut()
@@ -1194,25 +1199,41 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
                     }
                 }
                 entry.push_log_lines(params.lines, params.dropped_count);
+                advance_time_cursor_if_live(state, latest_ts);
                 return;
             }
 
             if let Some(entry) = state.clusters.get_mut(&params.cluster_id) {
                 if entry.log_subscription.as_deref() == Some(params.subscription_id.as_str()) {
                     entry.push_log_lines(params.lines, params.dropped_count);
+                    advance_time_cursor_if_live(state, latest_ts);
                 }
             }
         }
         BackendNotification::ClusterTimelineEvents(params) => {
+            let latest_ts = params.events.iter().map(|event| event.timestamp).max();
             let entry = state
                 .clusters
                 .entry(params.cluster_id)
                 .or_default();
             entry.push_timeline_events(params.events);
+            advance_time_cursor_if_live(state, latest_ts);
         }
         BackendNotification::Unknown { method, .. } => {
             state.last_error = Some(format!("Unhandled backend notification: {method}"));
         }
+    }
+}
+
+fn advance_time_cursor_if_live(state: &mut AppState, latest_ts: Option<i64>) {
+    if state.time_cursor.mode != TimeCursorMode::Live {
+        return;
+    }
+    let Some(latest_ts) = latest_ts else {
+        return;
+    };
+    if latest_ts > state.time_cursor.t_ms {
+        state.time_cursor.t_ms = latest_ts;
     }
 }
 
@@ -1778,7 +1799,10 @@ fn metrics_request_for_screen(state: &AppState) -> Option<BackendRequest> {
 mod tests {
     use super::*;
     use crate::commands;
-    use crate::protocol::ClusterSummary;
+    use crate::protocol::{
+        ClusterLogLine, ClusterLogLinesParams, ClusterSummary, ClusterTimelineEventsParams,
+        TimelineEvent,
+    };
 
     fn radar_cluster(id: &str) -> ClusterSummary {
         ClusterSummary {
@@ -1988,6 +2012,99 @@ mod tests {
         )));
         assert_eq!(state.spine.mode, SpineMode::Intent);
         assert_eq!(state.spine.input.input, "");
+    }
+
+    #[test]
+    fn time_cursor_live_updates() {
+        let mut state = AppState::default();
+        state.time_cursor.mode = TimeCursorMode::Live;
+        state.time_cursor.t_ms = 10;
+
+        let cluster_id = "cluster-1".to_string();
+        let subscription_id = "sub-logs".to_string();
+        state
+            .clusters
+            .entry(cluster_id.clone())
+            .or_default()
+            .log_subscription = Some(subscription_id.clone());
+
+        handle_backend_notification(
+            &mut state,
+            BackendNotification::ClusterLogLines(ClusterLogLinesParams {
+                subscription_id,
+                cluster_id: cluster_id.clone(),
+                lines: vec![
+                    ClusterLogLine {
+                        id: "line-1".to_string(),
+                        timestamp: 100,
+                        text: "hello".to_string(),
+                        agent: None,
+                        role: None,
+                        sender: None,
+                    },
+                    ClusterLogLine {
+                        id: "line-2".to_string(),
+                        timestamp: 150,
+                        text: "world".to_string(),
+                        agent: None,
+                        role: None,
+                        sender: None,
+                    },
+                ],
+                dropped_count: None,
+            }),
+        );
+        assert_eq!(state.time_cursor.t_ms, 150);
+
+        handle_backend_notification(
+            &mut state,
+            BackendNotification::ClusterTimelineEvents(ClusterTimelineEventsParams {
+                subscription_id: "sub-timeline".to_string(),
+                cluster_id,
+                events: vec![TimelineEvent {
+                    id: "event-1".to_string(),
+                    timestamp: 175,
+                    topic: "ISSUE_OPENED".to_string(),
+                    label: "opened".to_string(),
+                    approved: None,
+                    sender: None,
+                }],
+            }),
+        );
+        assert_eq!(state.time_cursor.t_ms, 175);
+    }
+
+    #[test]
+    fn time_cursor_scrub_does_not_update() {
+        let mut state = AppState::default();
+        state.time_cursor.mode = TimeCursorMode::Scrub;
+        state.time_cursor.t_ms = 200;
+
+        let cluster_id = "cluster-2".to_string();
+        let subscription_id = "sub-logs".to_string();
+        state
+            .clusters
+            .entry(cluster_id.clone())
+            .or_default()
+            .log_subscription = Some(subscription_id.clone());
+
+        handle_backend_notification(
+            &mut state,
+            BackendNotification::ClusterLogLines(ClusterLogLinesParams {
+                subscription_id,
+                cluster_id,
+                lines: vec![ClusterLogLine {
+                    id: "line-3".to_string(),
+                    timestamp: 500,
+                    text: "late".to_string(),
+                    agent: None,
+                    role: None,
+                    sender: None,
+                }],
+                dropped_count: None,
+            }),
+        );
+        assert_eq!(state.time_cursor.t_ms, 200);
     }
 
     #[test]

@@ -8,6 +8,7 @@ use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use crate::app::TimeCursor;
 use crate::protocol::{ClusterLogLine, ClusterTopology, TimelineEvent, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::theme;
@@ -216,6 +217,7 @@ pub fn render(
     cluster_id: &str,
     cluster_state: Option<&cluster::State>,
     canvas_state: Option<&State>,
+    time_cursor: &TimeCursor,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -267,6 +269,7 @@ pub fn render(
             focused,
             camera,
             block,
+            time_cursor,
         },
     );
 }
@@ -306,6 +309,7 @@ struct CanvasRenderContext<'a> {
     focused: Option<&'a str>,
     camera: (f64, f64),
     block: Block<'a>,
+    time_cursor: &'a TimeCursor,
 }
 
 fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
@@ -395,6 +399,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
         canvas_ctx.focused,
         &render_bounds,
         canvas_ctx.cluster_state,
+        canvas_ctx.time_cursor,
         None,
     );
 }
@@ -406,6 +411,7 @@ fn render_stream_overlay(
     focused: Option<&str>,
     render_bounds: &LayoutBounds,
     cluster_state: &cluster::State,
+    time_cursor: &TimeCursor,
     spine_area: Option<Rect>,
 ) {
     let Some(focused_id) = focused else {
@@ -431,7 +437,7 @@ fn render_stream_overlay(
         return;
     }
 
-    let (title, lines) = build_overlay_lines(cluster_state, node, max_lines);
+    let (title, lines) = build_overlay_lines(cluster_state, node, time_cursor, max_lines);
     let overlay = StreamOverlay::new(title, lines)
         .placeholder_lines(stream::log_placeholder_lines(
             stream::LogPlaceholderContext::Overlay,
@@ -443,6 +449,7 @@ fn render_stream_overlay(
 fn build_overlay_lines<'a>(
     cluster_state: &'a cluster::State,
     node: &NodeLayout,
+    time_cursor: &TimeCursor,
     max_lines: usize,
 ) -> (Line<'a>, Vec<Line<'a>>) {
     let is_agent = node.kind == NodeKind::Agent;
@@ -457,12 +464,17 @@ fn build_overlay_lines<'a>(
         Line::from("Timeline - cluster")
     };
 
-    let log_lines = collect_log_lines(cluster_state, is_agent.then_some(node.id.as_str()), max_lines);
+    let log_lines = collect_log_lines(
+        cluster_state,
+        time_cursor,
+        is_agent.then_some(node.id.as_str()),
+        max_lines,
+    );
     if !log_lines.is_empty() {
         return (log_title, log_lines);
     }
 
-    let timeline_lines = collect_timeline_lines(cluster_state, max_lines);
+    let timeline_lines = collect_timeline_lines(cluster_state, time_cursor, max_lines);
     if !timeline_lines.is_empty() {
         return (timeline_title, timeline_lines);
     }
@@ -472,6 +484,7 @@ fn build_overlay_lines<'a>(
 
 fn collect_log_lines<'a>(
     cluster_state: &'a cluster::State,
+    time_cursor: &TimeCursor,
     agent_id: Option<&str>,
     max_lines: usize,
 ) -> Vec<Line<'a>> {
@@ -479,7 +492,10 @@ fn collect_log_lines<'a>(
         return Vec::new();
     }
     let mut collected: Vec<&ClusterLogLine> = Vec::new();
-    for line in cluster_state.logs.items.iter().rev() {
+    let windowed = cluster_state
+        .logs_time
+        .window(time_cursor.t_ms, time_cursor.window_ms);
+    for line in windowed.iter().rev() {
         if let Some(agent_id) = agent_id {
             let matches_agent = line.agent.as_deref() == Some(agent_id)
                 || line.sender.as_deref() == Some(agent_id);
@@ -501,19 +517,19 @@ fn collect_log_lines<'a>(
 
 fn collect_timeline_lines<'a>(
     cluster_state: &'a cluster::State,
+    time_cursor: &TimeCursor,
     max_lines: usize,
 ) -> Vec<Line<'a>> {
     if max_lines == 0 {
         return Vec::new();
     }
-    let mut collected: Vec<&TimelineEvent> = Vec::new();
-    for event in cluster_state.timeline.items.iter().rev() {
-        collected.push(event);
-        if collected.len() >= max_lines {
-            break;
-        }
+    let windowed = cluster_state
+        .timeline_time
+        .window(time_cursor.t_ms, time_cursor.window_ms);
+    let mut collected: Vec<&TimelineEvent> = windowed;
+    if collected.len() > max_lines {
+        collected = collected.split_off(collected.len().saturating_sub(max_lines));
     }
-    collected.reverse();
     collected
         .into_iter()
         .map(stream::format_timeline_event_styled)
@@ -1019,6 +1035,7 @@ mod tests {
                     "cluster-1",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1044,6 +1061,7 @@ mod tests {
                     "cluster-2",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1072,6 +1090,7 @@ mod tests {
                     "cluster-3",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1221,6 +1240,7 @@ mod tests {
                     "cluster-4",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1242,6 +1262,7 @@ mod tests {
                     "cluster-4",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1315,6 +1336,7 @@ mod tests {
                     "cluster-5",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
@@ -1322,6 +1344,73 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert!(buffer_contains(buffer, "Logs - agent agent-alpha"));
         assert!(buffer_contains(buffer, "build complete"));
+    }
+
+    #[test]
+    fn cluster_canvas_overlay_respects_time_window() {
+        let backend = TestBackend::new(90, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let topology = sample_topology();
+        let mut cluster_state = cluster::State::default();
+        cluster_state.topology = Some(topology.clone());
+        cluster_state.push_log_lines(
+            vec![
+                ClusterLogLine {
+                    id: "line-old".to_string(),
+                    timestamp: 100,
+                    text: "old".to_string(),
+                    agent: Some("agent-alpha".to_string()),
+                    role: None,
+                    sender: None,
+                },
+                ClusterLogLine {
+                    id: "line-mid".to_string(),
+                    timestamp: 200,
+                    text: "mid".to_string(),
+                    agent: Some("agent-alpha".to_string()),
+                    role: None,
+                    sender: None,
+                },
+                ClusterLogLine {
+                    id: "line-new".to_string(),
+                    timestamp: 300,
+                    text: "new".to_string(),
+                    agent: Some("agent-alpha".to_string()),
+                    role: None,
+                    sender: None,
+                },
+            ],
+            None,
+        );
+
+        let mut canvas_state = State::default();
+        canvas_state.update_layout(&topology);
+        canvas_state.focused_id = Some("agent-alpha".to_string());
+
+        let time_cursor = TimeCursor {
+            mode: crate::app::TimeCursorMode::Scrub,
+            t_ms: 250,
+            window_ms: 120,
+        };
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-5",
+                    Some(&cluster_state),
+                    Some(&canvas_state),
+                    &time_cursor,
+                );
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, "mid"));
+        assert!(!buffer_contains(buffer, "old"));
+        assert!(!buffer_contains(buffer, "new"));
     }
 
     #[test]
@@ -1345,6 +1434,7 @@ mod tests {
                     "cluster-6",
                     Some(&cluster_state),
                     Some(&canvas_state),
+                    &TimeCursor::default(),
                 );
             })
             .expect("draw");
