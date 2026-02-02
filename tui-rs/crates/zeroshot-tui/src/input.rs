@@ -108,7 +108,15 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
             prefill: String::new(),
         })),
         KeyCode::Char('u') if ctrl => Some(Action::Spine(SpineAction::Clear)),
-        KeyCode::Tab => Some(Action::Spine(SpineAction::Complete)),
+        KeyCode::Tab => match state.spine.completion.as_ref() {
+            Some(completion) if completion.candidates.len() > 1 => {
+                Some(Action::Spine(SpineAction::CycleCompletion))
+            }
+            Some(completion) if !completion.ghost.is_empty() => {
+                Some(Action::Spine(SpineAction::AcceptCompletion))
+            }
+            _ => None,
+        },
         KeyCode::Backspace => Some(Action::Spine(SpineAction::Backspace)),
         KeyCode::Delete => Some(Action::Spine(SpineAction::Delete)),
         KeyCode::Left => Some(Action::Spine(SpineAction::MoveCursorLeft)),
