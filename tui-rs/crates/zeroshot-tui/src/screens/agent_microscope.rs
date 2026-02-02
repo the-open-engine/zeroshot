@@ -86,7 +86,7 @@ fn build_metadata_overlay(
         .and_then(|state| state.status.as_deref())
         .unwrap_or("unknown");
 
-    let raw_lines = vec![
+    let raw_lines = [
         format!("Agent: {agent_id}"),
         format!("Role: {role}"),
         format!("Status: {status}"),
