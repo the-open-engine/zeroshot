@@ -98,8 +98,7 @@ impl State {
 
     pub fn ensure_focus(&mut self, topology: &ClusterTopology) {
         let mut needs_focus = self.focused_id.is_none();
-        if !needs_focus {
-            let focused = self.focused_id.as_ref().expect("focused id");
+        if let Some(focused) = self.focused_id.as_ref() {
             let in_agents = topology.agents.iter().any(|agent| agent.id == *focused);
             let in_topics = topology.topics.iter().any(|topic| topic == focused);
             if !in_agents && !in_topics {
@@ -257,14 +256,16 @@ pub fn render(
 
     render_canvas(
         frame,
-        area,
-        cluster_id,
-        cluster_state,
-        topology,
-        layout,
-        focused,
-        camera,
-        block,
+        CanvasRenderContext {
+            area,
+            cluster_id,
+            cluster_state,
+            topology,
+            layout,
+            focused,
+            camera,
+            block,
+        },
     );
 }
 
@@ -294,32 +295,33 @@ fn render_placeholder(
     frame.render_widget(widget, area);
 }
 
-fn render_canvas(
-    frame: &mut Frame<'_>,
+struct CanvasRenderContext<'a> {
     area: Rect,
-    cluster_id: &str,
-    cluster_state: &cluster::State,
-    topology: &ClusterTopology,
-    layout: &LayoutCache,
-    focused: Option<&str>,
+    cluster_id: &'a str,
+    cluster_state: &'a cluster::State,
+    topology: &'a ClusterTopology,
+    layout: &'a LayoutCache,
+    focused: Option<&'a str>,
     camera: (f64, f64),
     block: Block,
-) {
-    let title = format!("Cluster Canvas {cluster_id}");
-    let render_bounds = camera_bounds(layout, camera);
-    let block = block.title(title);
-    let canvas_inner = block.inner(area);
+}
+
+fn render_canvas(frame: &mut Frame<'_>, ctx: CanvasRenderContext<'_>) {
+    let title = format!("Cluster Canvas {}", ctx.cluster_id);
+    let render_bounds = camera_bounds(ctx.layout, ctx.camera);
+    let block = ctx.block.title(title);
+    let canvas_inner = block.inner(ctx.area);
     let canvas = Canvas::default()
         .block(block)
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
         .y_bounds([render_bounds.min_y, render_bounds.max_y])
         .marker(Marker::Braille)
         .paint(|ctx| {
-            for edge in &layout.edges {
-                let Some(from) = layout.nodes.get(&edge.from) else {
+            for edge in &ctx.layout.edges {
+                let Some(from) = ctx.layout.nodes.get(&edge.from) else {
                     continue;
                 };
-                let Some(to) = layout.nodes.get(&edge.to) else {
+                let Some(to) = ctx.layout.nodes.get(&edge.to) else {
                     continue;
                 };
                 ctx.draw(&CanvasLine {
@@ -331,7 +333,7 @@ fn render_canvas(
                 });
             }
 
-            for node in layout.nodes.values() {
+            for node in ctx.layout.nodes.values() {
                 let color = match node.kind {
                     NodeKind::Agent => theme::agent_color(node.id.as_str()),
                     NodeKind::Topic => theme::FG_MUTED,
@@ -341,7 +343,7 @@ fn render_canvas(
                     NodeKind::Topic => TOPIC_ORB_RADIUS,
                 };
 
-                if focused == Some(node.id.as_str()) {
+                if ctx.focused == Some(node.id.as_str()) {
                     ctx.draw(&Circle {
                         x: node.x,
                         y: node.y,
@@ -369,7 +371,7 @@ fn render_canvas(
                 ctx.print(label_x, label_y, line);
             }
 
-            let summary_line = topology_summary(topology);
+            let summary_line = topology_summary(ctx.topology);
             if let Some(summary_line) = summary_line {
                 let line = Line::from(Span::styled(summary_line, theme::dim_style()));
                 ctx.print(
@@ -380,14 +382,14 @@ fn render_canvas(
             }
         });
 
-    frame.render_widget(canvas, area);
+    frame.render_widget(canvas, ctx.area);
     render_stream_overlay(
         frame,
         canvas_inner,
-        layout,
-        focused,
+        ctx.layout,
+        ctx.focused,
         &render_bounds,
-        cluster_state,
+        ctx.cluster_state,
         None,
     );
 }
@@ -643,7 +645,7 @@ fn clamp_rect_to_bounds(rect: Rect, bounds: Rect) -> Rect {
 }
 
 fn rect_intersects_spine(rect: Rect, spine: Option<Rect>) -> bool {
-    spine.map_or(false, |spine| rects_intersect(rect, spine))
+    spine.is_some_and(|spine| rects_intersect(rect, spine))
 }
 
 fn rects_intersect(a: Rect, b: Rect) -> bool {
@@ -662,31 +664,32 @@ fn avoid_spine(rect: Rect, bounds: Rect, spine: Option<Rect>) -> Rect {
         return rect;
     }
 
-    let mut options = Vec::new();
-    options.push(Rect {
-        x: rect.x,
-        y: spine.y.saturating_sub(rect.height.saturating_add(1)),
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: rect.x,
-        y: spine.y.saturating_add(spine.height).saturating_add(1),
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: spine.x.saturating_sub(rect.width.saturating_add(1)),
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: spine.x.saturating_add(spine.width).saturating_add(1),
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    });
+    let options = vec![
+        Rect {
+            x: rect.x,
+            y: spine.y.saturating_sub(rect.height.saturating_add(1)),
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: rect.x,
+            y: spine.y.saturating_add(spine.height).saturating_add(1),
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: spine.x.saturating_sub(rect.width.saturating_add(1)),
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: spine.x.saturating_add(spine.width).saturating_add(1),
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        },
+    ];
 
     for option in options {
         let candidate = clamp_rect_to_bounds(option, bounds);
