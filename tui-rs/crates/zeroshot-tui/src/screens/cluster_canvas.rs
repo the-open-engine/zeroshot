@@ -8,8 +8,8 @@ use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::app::{animation, FocusTarget, TimeCursor};
 use crate::app::animation::AnimClock;
+use crate::app::{animation, FocusTarget, TimeCursor};
 use crate::protocol::{ClusterTopology, TopologyAgent};
 use crate::screens::cluster;
 use crate::ui::shared::calm_empty_state;
@@ -53,7 +53,10 @@ pub enum MoveSpeed {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    MoveFocus { direction: Direction, speed: MoveSpeed },
+    MoveFocus {
+        direction: Direction,
+        speed: MoveSpeed,
+    },
     ZoomIn,
 }
 
@@ -321,15 +324,9 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, context: RenderContext<'_>) {
         }) if *pinned_cluster_id == cluster_id => Some(agent_id.as_str()),
         _ => None,
     };
-    let pinned_overlay = resolve_pinned_overlay(
-        pinned_target,
-        cluster_id,
-        canvas_state,
-        Some(cluster_state),
-    );
-    let camera = canvas_state
-        .map(|state| state.camera)
-        .unwrap_or((0.0, 0.0));
+    let pinned_overlay =
+        resolve_pinned_overlay(pinned_target, cluster_id, canvas_state, Some(cluster_state));
+    let camera = canvas_state.map(|state| state.camera).unwrap_or((0.0, 0.0));
     let focus_pulse = animation::pulse_factor(anim_clock.phase) as f64;
 
     render_canvas(
@@ -473,9 +470,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
                     });
                 }
 
-                if pinned_highlight == Some(node.id.as_str())
-                    && focused != Some(node.id.as_str())
-                {
+                if pinned_highlight == Some(node.id.as_str()) && focused != Some(node.id.as_str()) {
                     ctx.draw(&Circle {
                         x: node.x,
                         y: node.y,
@@ -506,11 +501,7 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
             let summary_line = topology_summary(topology);
             if let Some(summary_line) = summary_line {
                 let line = Line::from(Span::styled(summary_line, theme::dim_style()));
-                ctx.print(
-                    render_bounds.min_x + 1.0,
-                    render_bounds.max_y - 1.0,
-                    line,
-                );
+                ctx.print(render_bounds.min_x + 1.0, render_bounds.max_y - 1.0, line);
             }
         });
 
@@ -593,12 +584,7 @@ fn render_overlay_for_node(
     border_style: Style,
     force_cluster: bool,
 ) {
-    let focus_point = world_to_screen(
-        layout_ctx.area,
-        layout_ctx.render_bounds,
-        node.x,
-        node.y,
-    );
+    let focus_point = world_to_screen(layout_ctx.area, layout_ctx.render_bounds, node.x, node.y);
     let overlay_size = overlay_dimensions(layout_ctx.area);
     if overlay_size.0 == 0 || overlay_size.1 == 0 {
         return;
@@ -616,7 +602,8 @@ fn render_overlay_for_node(
         return;
     }
 
-    let (title, lines) = build_overlay_lines(cluster_state, node, time_cursor, max_lines, force_cluster);
+    let (title, lines) =
+        build_overlay_lines(cluster_state, node, time_cursor, max_lines, force_cluster);
     let overlay = StreamOverlay::new(title, lines)
         .placeholder_lines(stream::log_placeholder_lines(
             stream::LogPlaceholderContext::Overlay,
@@ -675,19 +662,14 @@ fn collect_log_lines<'a>(
     if max_lines == 0 {
         return Vec::new();
     }
-    let collected = stream::select_time_window(
-        &cluster_state.logs_time,
-        time_cursor,
-        max_lines,
-        |line| {
+    let collected =
+        stream::select_time_window(&cluster_state.logs_time, time_cursor, max_lines, |line| {
             if let Some(agent_id) = agent_id {
-                line.agent.as_deref() == Some(agent_id)
-                    || line.sender.as_deref() == Some(agent_id)
+                line.agent.as_deref() == Some(agent_id) || line.sender.as_deref() == Some(agent_id)
             } else {
                 true
             }
-        },
-    );
+        });
     collected
         .into_iter()
         .map(stream::format_log_line_styled)
@@ -702,12 +684,10 @@ fn collect_timeline_lines<'a>(
     if max_lines == 0 {
         return Vec::new();
     }
-    let collected = stream::select_time_window(
-        &cluster_state.timeline_time,
-        time_cursor,
-        max_lines,
-        |_| true,
-    );
+    let collected =
+        stream::select_time_window(&cluster_state.timeline_time, time_cursor, max_lines, |_| {
+            true
+        });
     collected
         .into_iter()
         .map(stream::format_timeline_event_styled)
@@ -763,12 +743,7 @@ fn overlay_rect_near_focus(
 ) -> Rect {
     let width = size.0.min(bounds.width);
     let height = size.1.min(bounds.height);
-    let candidates = [
-        (true, true),
-        (true, false),
-        (false, true),
-        (false, false),
-    ];
+    let candidates = [(true, true), (true, false), (false, true), (false, false)];
 
     for (right, down) in candidates {
         let x = if right {
@@ -821,7 +796,9 @@ fn clamp_rect_to_bounds(rect: Rect, bounds: Rect) -> Rect {
     }
 
     let max_x = bounds.x.saturating_add(bounds.width.saturating_sub(width));
-    let max_y = bounds.y.saturating_add(bounds.height.saturating_sub(height));
+    let max_y = bounds
+        .y
+        .saturating_add(bounds.height.saturating_sub(height));
     let mut x = rect.x;
     let mut y = rect.y;
     if x < bounds.x {
@@ -1044,7 +1021,11 @@ fn agent_label(agent: &TopologyAgent) -> String {
 fn label_position(x: f64, y: f64, id: &str) -> (f64, f64) {
     let hash = stable_hash(id);
     let side = if hash & 1 == 0 { 1.0 } else { -1.0 };
-    let angle = if x == 0.0 && y == 0.0 { 0.0 } else { y.atan2(x) };
+    let angle = if x == 0.0 && y == 0.0 {
+        0.0
+    } else {
+        y.atan2(x)
+    };
     let tangent_x = -angle.sin();
     let tangent_y = angle.cos();
     let radial_x = angle.cos();
@@ -1101,8 +1082,8 @@ fn stable_hash(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::buffer::Buffer;
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
     use crate::app::animation::AnimClock;

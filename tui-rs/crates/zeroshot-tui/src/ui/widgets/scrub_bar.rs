@@ -34,9 +34,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: ScrubBarState<'_>) {
     let mut spans = Vec::new();
     spans.push(Span::styled(label, label_style));
 
-    let bar_width = area
-        .width
-        .saturating_sub(label_len.saturating_add(1)) as usize;
+    let bar_width = area.width.saturating_sub(label_len.saturating_add(1)) as usize;
     if bar_width > 0 {
         spans.push(Span::raw(" "));
         let bar = build_bar(bar_width, &state);

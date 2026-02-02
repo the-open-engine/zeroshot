@@ -31,7 +31,9 @@ describe('Conductor Republish Metadata', function () {
     // Parse and validate logic script
     const script = issueTrigger.logic.script;
     expect(script, 'Logic script should check sender=system').to.include('message.sender === ');
-    expect(script, 'Logic script should exclude _republished').to.include('!message.metadata?._republished');
+    expect(script, 'Logic script should exclude _republished').to.include(
+      '!message.metadata?._republished'
+    );
   });
 
   it('junior conductor transform should set _republished metadata', function () {

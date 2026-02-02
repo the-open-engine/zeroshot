@@ -231,7 +231,11 @@ fn whisper_agent_hint(state: &AppState) -> SpineHint {
     hint
 }
 
-fn guidance_status_hint(state: &AppState, cluster_id: &str, agent_id: &str) -> Option<&'static str> {
+fn guidance_status_hint(
+    state: &AppState,
+    cluster_id: &str,
+    agent_id: &str,
+) -> Option<&'static str> {
     let key = AgentKey::new(cluster_id, agent_id);
     let agent_state = state.agents.get(&key)?;
     let result = agent_state.last_guidance.as_ref()?;
@@ -331,7 +335,10 @@ mod tests {
         let mut state = AppState::default();
         state.spine.mode = SpineMode::Intent;
 
-        let (next, effects) = crate::app::update(state, crate::app::Action::Spine(SpineAction::InsertChar('1')));
+        let (next, effects) = crate::app::update(
+            state,
+            crate::app::Action::Spine(SpineAction::InsertChar('1')),
+        );
 
         assert!(effects.is_empty());
         assert!(next.spine.hint.text.contains("Start cluster from issue"));

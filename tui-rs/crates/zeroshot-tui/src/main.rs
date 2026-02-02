@@ -15,8 +15,8 @@ use zeroshot_tui::app::{
     resolve_ui_variant, Action, AppState, BackendAction, BackendRequest, Effect, InitialScreen,
     StartupOptions,
 };
-use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
 use zeroshot_tui::backend::stdio::StdioBackendClient;
+use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendError, BackendEvent};
 use zeroshot_tui::commands;
 use zeroshot_tui::input;
 use zeroshot_tui::terminal::TerminalGuard;
@@ -104,7 +104,10 @@ fn parse_startup_options() -> io::Result<StartupOptions> {
         match arg.as_str() {
             "--initial-screen" => {
                 let value = args.next().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "--initial-screen requires a value")
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--initial-screen requires a value",
+                    )
                 })?;
                 options.initial_screen = Some(parse_initial_screen(&value)?);
             }
@@ -153,8 +156,7 @@ fn parse_startup_options() -> io::Result<StartupOptions> {
 }
 
 fn parse_initial_screen(value: &str) -> io::Result<InitialScreen> {
-    InitialScreen::parse(value)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+    InitialScreen::parse(value).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
 }
 
 fn app_loop(
@@ -354,9 +356,7 @@ fn execute_backend_request(
         BackendRequest::ListClusterMetrics { cluster_ids } => {
             list_cluster_metrics(client, cluster_ids)
         }
-        BackendRequest::GetClusterSummary { cluster_id } => {
-            get_cluster_summary(client, cluster_id)
-        }
+        BackendRequest::GetClusterSummary { cluster_id } => get_cluster_summary(client, cluster_id),
         BackendRequest::GetClusterTopology { cluster_id } => {
             get_cluster_topology(client, cluster_id)
         }
@@ -375,9 +375,10 @@ fn execute_backend_request(
             reference,
             provider_override,
         } => start_cluster_from_issue(client, reference, provider_override),
-        BackendRequest::SendGuidanceToCluster { cluster_id, message } => {
-            send_guidance_to_cluster(client, cluster_id, message)
-        }
+        BackendRequest::SendGuidanceToCluster {
+            cluster_id,
+            message,
+        } => send_guidance_to_cluster(client, cluster_id, message),
         BackendRequest::SendGuidanceToAgent {
             cluster_id,
             agent_id,
@@ -396,9 +397,8 @@ fn list_cluster_metrics(
     client: &StdioBackendClient,
     cluster_ids: Option<Vec<String>>,
 ) -> Result<Option<BackendAction>, BackendError> {
-    let result = client.list_cluster_metrics(zeroshot_tui::protocol::ListClusterMetricsParams {
-        cluster_ids,
-    })?;
+    let result = client
+        .list_cluster_metrics(zeroshot_tui::protocol::ListClusterMetricsParams { cluster_ids })?;
     Ok(Some(BackendAction::ClusterMetricsListed {
         metrics: result.metrics,
     }))
@@ -408,9 +408,8 @@ fn get_cluster_summary(
     client: &StdioBackendClient,
     cluster_id: String,
 ) -> Result<Option<BackendAction>, BackendError> {
-    let result = client.get_cluster_summary(zeroshot_tui::protocol::GetClusterSummaryParams {
-        cluster_id,
-    })?;
+    let result = client
+        .get_cluster_summary(zeroshot_tui::protocol::GetClusterSummaryParams { cluster_id })?;
     Ok(Some(BackendAction::ClusterSummary {
         summary: result.summary,
     }))
@@ -439,10 +438,11 @@ fn subscribe_cluster_logs(
     cluster_id: String,
     agent_id: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
-    let result = client.subscribe_cluster_logs(zeroshot_tui::protocol::SubscribeClusterLogsParams {
-        cluster_id: cluster_id.clone(),
-        agent_id: agent_id.clone(),
-    })?;
+    let result =
+        client.subscribe_cluster_logs(zeroshot_tui::protocol::SubscribeClusterLogsParams {
+            cluster_id: cluster_id.clone(),
+            agent_id: agent_id.clone(),
+        })?;
     Ok(Some(BackendAction::SubscribedClusterLogs {
         cluster_id,
         agent_id,
@@ -470,11 +470,12 @@ fn start_cluster_from_text(
     text: String,
     provider_override: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
-    let result = client.start_cluster_from_text(zeroshot_tui::protocol::StartClusterFromTextParams {
-        text,
-        provider_override,
-        cluster_id: None,
-    })?;
+    let result =
+        client.start_cluster_from_text(zeroshot_tui::protocol::StartClusterFromTextParams {
+            text,
+            provider_override,
+            cluster_id: None,
+        })?;
     Ok(Some(BackendAction::StartClusterResult {
         cluster_id: result.cluster_id,
     }))
@@ -485,11 +486,12 @@ fn start_cluster_from_issue(
     reference: String,
     provider_override: Option<String>,
 ) -> Result<Option<BackendAction>, BackendError> {
-    let result = client.start_cluster_from_issue(zeroshot_tui::protocol::StartClusterFromIssueParams {
-        r#ref: reference,
-        provider_override,
-        cluster_id: None,
-    })?;
+    let result =
+        client.start_cluster_from_issue(zeroshot_tui::protocol::StartClusterFromIssueParams {
+            r#ref: reference,
+            provider_override,
+            cluster_id: None,
+        })?;
     Ok(Some(BackendAction::StartClusterResult {
         cluster_id: result.cluster_id,
     }))
@@ -544,7 +546,10 @@ fn unsubscribe(
 fn shutdown_backend(mut backend: Option<StdioBackendClient>) -> io::Result<()> {
     if let Some(mut backend) = backend.take() {
         backend.shutdown().map_err(|err| {
-            io::Error::new(io::ErrorKind::Other, format!("backend shutdown failed: {err}"))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("backend shutdown failed: {err}"),
+            )
         })?;
     }
 

@@ -1,7 +1,7 @@
-const constants = require("./constants");
-const validator = require("./validator");
-const dispatcher = require("./dispatcher");
-const framing = require("./stdio-framing");
+const constants = require('./constants');
+const validator = require('./validator');
+const dispatcher = require('./dispatcher');
+const framing = require('./stdio-framing');
 
 export const PROTOCOL_VERSION = constants.PROTOCOL_VERSION;
 export const MAX_FRAME_BYTES = constants.MAX_FRAME_BYTES;

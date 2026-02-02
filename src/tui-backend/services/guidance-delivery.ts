@@ -25,7 +25,7 @@ let orchestratorPromise: Promise<any> | null = null;
 
 async function getOrchestrator() {
   if (!orchestratorPromise) {
-    const Orchestrator = require("../../../src/orchestrator");
+    const Orchestrator = require('../../../src/orchestrator');
     orchestratorPromise = Orchestrator.create({ quiet: true });
   }
   return orchestratorPromise;

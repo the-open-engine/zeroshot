@@ -4,8 +4,8 @@ use ui_snapshot_helpers::render_to_text;
 
 use zeroshot_tui::app::{agent_microscope, TimeCursor, TimeCursorMode};
 use zeroshot_tui::protocol::{ClusterLogLine, TimelineEvent};
-use zeroshot_tui::ui::shared::TimeIndexedBuffer;
 use zeroshot_tui::screens::agent_microscope as microscope_screen;
+use zeroshot_tui::ui::shared::TimeIndexedBuffer;
 
 fn sample_logs() -> TimeIndexedBuffer<ClusterLogLine> {
     let mut buffer = TimeIndexedBuffer::new(32);

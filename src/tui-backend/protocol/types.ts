@@ -13,26 +13,26 @@ export type RpcError = {
 };
 
 export type JsonRpcRequest<TParams = unknown> = {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: JsonRpcId;
   method: string;
   params?: TParams | null;
 };
 
 export type JsonRpcNotification<TParams = unknown> = {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   method: string;
   params?: TParams | null;
 };
 
 export type JsonRpcSuccessResponse<TResult = unknown> = {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: JsonRpcId;
   result: TResult;
 };
 
 export type JsonRpcErrorResponse = {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: JsonRpcId;
   error: RpcError;
 };
@@ -81,7 +81,7 @@ export type TopologyEdge = {
   from: string;
   to: string;
   topic: string;
-  kind: "trigger" | "publish" | "source";
+  kind: 'trigger' | 'publish' | 'source';
   dynamic?: boolean;
 };
 

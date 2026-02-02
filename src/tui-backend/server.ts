@@ -1,8 +1,8 @@
-const MOCK_LAUNCH_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH";
-const MOCK_GUIDANCE_ENV = "ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE";
-const METRICS_PLATFORM_ENV = "ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM";
+const MOCK_LAUNCH_ENV = 'ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH';
+const MOCK_GUIDANCE_ENV = 'ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE';
+const METRICS_PLATFORM_ENV = 'ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM';
 
-const path = require("path");
+const path = require('path');
 const {
   createValidator,
   createDispatcher,
@@ -11,42 +11,33 @@ const {
   RPC_ERROR_CODES,
   RPC_ERROR_MESSAGES,
   PROTOCOL_VERSION,
-} = require("./protocol");
+} = require('./protocol');
 const {
   listClusters,
   getClusterSummary,
   listClusterMetrics,
   ClusterNotFoundError,
-} = require("./services/cluster-registry");
-const { getClusterTopology } = require("./services/cluster-topology");
+} = require('./services/cluster-registry');
+const { getClusterTopology } = require('./services/cluster-topology');
 const {
   launchClusterFromText,
   launchClusterFromIssue,
   InvalidIssueReferenceError,
-} = require("./services/cluster-launcher");
-const {
-  createClusterLogStream,
-  MAX_LOG_LINES,
-} = require("./services/cluster-logs");
-const {
-  createClusterTimelineStream,
-  MAX_TIMELINE_EVENTS,
-} = require("./services/cluster-timeline");
-const {
-  sendAgentGuidance,
-  sendClusterGuidance,
-} = require("./services/guidance-delivery");
-const { createSubscriptionRegistry } = require("./subscriptions");
+} = require('./services/cluster-launcher');
+const { createClusterLogStream, MAX_LOG_LINES } = require('./services/cluster-logs');
+const { createClusterTimelineStream, MAX_TIMELINE_EVENTS } = require('./services/cluster-timeline');
+const { sendAgentGuidance, sendClusterGuidance } = require('./services/guidance-delivery');
+const { createSubscriptionRegistry } = require('./subscriptions');
 
-const isValidId = (value) => typeof value === "string" || typeof value === "number";
+const isValidId = (value) => typeof value === 'string' || typeof value === 'number';
 
-const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === "1";
-const isMockGuidanceEnabled = () => process.env[MOCK_GUIDANCE_ENV] === "1";
+const isMockLaunchEnabled = () => process.env[MOCK_LAUNCH_ENV] === '1';
+const isMockGuidanceEnabled = () => process.env[MOCK_GUIDANCE_ENV] === '1';
 
 const createMockLauncherDeps = () => ({
   getOrchestrator: async () => ({}),
-  loadSettings: () => ({ defaultConfig: "conductor-bootstrap", providerSettings: {} }),
-  resolveConfigPath: () => "mock-config",
+  loadSettings: () => ({ defaultConfig: 'conductor-bootstrap', providerSettings: {} }),
+  resolveConfigPath: () => 'mock-config',
   loadClusterConfig: () => ({}),
   startClusterFromText: async () => {},
   startClusterFromIssue: async () => {},
@@ -55,25 +46,25 @@ const createMockLauncherDeps = () => ({
 const createMockGuidanceDeps = () => ({
   getOrchestrator: async () => ({
     sendGuidanceToAgent: async (clusterId, agentId) => ({
-      status: "injected",
+      status: 'injected',
       reason: null,
-      method: "pty",
+      method: 'pty',
       taskId: `task-${agentId}`,
     }),
     sendGuidanceToCluster: async () => ({
       summary: { injected: 1, queued: 1, total: 2 },
       agents: {
-        "mock-agent-1": {
-          status: "injected",
+        'mock-agent-1': {
+          status: 'injected',
           reason: null,
-          method: "pty",
-          taskId: "task-mock-agent-1",
+          method: 'pty',
+          taskId: 'task-mock-agent-1',
         },
-        "mock-agent-2": {
-          status: "queued",
-          reason: "queued",
+        'mock-agent-2': {
+          status: 'queued',
+          reason: 'queued',
           method: null,
-          taskId: "task-mock-agent-2",
+          taskId: 'task-mock-agent-2',
         },
       },
       timestamp: 1700000000000,
@@ -83,14 +74,14 @@ const createMockGuidanceDeps = () => ({
 
 const loadPackageInfo = () => {
   try {
-    const packagePath = path.resolve(__dirname, "..", "..", "package.json");
+    const packagePath = path.resolve(__dirname, '..', '..', 'package.json');
     const pkg = require(packagePath);
     return {
-      name: typeof pkg.name === "string" ? pkg.name : "zeroshot",
-      version: typeof pkg.version === "string" ? pkg.version : "0.0.0",
+      name: typeof pkg.name === 'string' ? pkg.name : 'zeroshot',
+      version: typeof pkg.version === 'string' ? pkg.version : '0.0.0',
     };
   } catch (error) {
-    return { name: "zeroshot", version: "0.0.0" };
+    return { name: 'zeroshot', version: '0.0.0' };
   }
 };
 
@@ -101,7 +92,7 @@ const writeFrame = (payload) => {
 
 const writeError = (id, error) => {
   writeFrame({
-    jsonrpc: "2.0",
+    jsonrpc: '2.0',
     id,
     error,
   });
@@ -111,13 +102,11 @@ const buildRpcError = (code, message, detail) =>
   detail ? { code, message, data: { detail } } : { code, message };
 
 const logDiagnostic = (message, error) => {
-  const details =
-    error instanceof Error ? `${message}: ${error.stack || error.message}` : message;
+  const details = error instanceof Error ? `${message}: ${error.stack || error.message}` : message;
   process.stderr.write(`${details}\n`);
 };
 
-const isNonEmptyString = (value) =>
-  typeof value === "string" && value.trim().length > 0;
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
 const resolveMetricsPlatformOverride = () => {
   const value = process.env[METRICS_PLATFORM_ENV];
@@ -126,17 +115,16 @@ const resolveMetricsPlatformOverride = () => {
 
 const isRpcError = (error) =>
   error &&
-  typeof error === "object" &&
-  typeof error.code === "number" &&
-  typeof error.message === "string";
+  typeof error === 'object' &&
+  typeof error.code === 'number' &&
+  typeof error.message === 'string';
 
 const isGuidanceInvalidParamsError = (message) =>
-  message.includes("is required") ||
-  message.includes("non-empty string") ||
-  message.includes("agent not found");
+  message.includes('is required') ||
+  message.includes('non-empty string') ||
+  message.includes('agent not found');
 
-const isGuidanceClusterNotFoundError = (message) =>
-  message.includes("cluster not found");
+const isGuidanceClusterNotFoundError = (message) => message.includes('cluster not found');
 
 const isTopologyClusterNotFoundError = (error) =>
   error instanceof Error && /cluster/i.test(error.message) && /not found/i.test(error.message);
@@ -146,7 +134,7 @@ const validateGuidanceText = (text) => {
     throw buildRpcError(
       RPC_ERROR_CODES.INVALID_PARAMS,
       RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_PARAMS],
-      "text must be a non-empty string"
+      'text must be a non-empty string'
     );
   }
 };
@@ -165,7 +153,7 @@ const resolveGuidanceError = (error) => {
   if (isRpcError(error)) {
     return error;
   }
-  const message = error instanceof Error ? error.message : "Guidance delivery error";
+  const message = error instanceof Error ? error.message : 'Guidance delivery error';
   if (isGuidanceClusterNotFoundError(message)) {
     return buildRpcError(
       RPC_ERROR_CODES.CLUSTER_NOT_FOUND,
@@ -200,7 +188,7 @@ const capPayload = (items, maxItems) => {
 
 const startServer = () => {
   const registry = createSubscriptionRegistry();
-  const notifications = ["clusterLogLines", "clusterTimelineEvents"];
+  const notifications = ['clusterLogLines', 'clusterTimelineEvents'];
   let shuttingDown = false;
   const validator = createValidator();
   const dispatcher = createDispatcher({
@@ -237,16 +225,14 @@ const startServer = () => {
             throw buildRpcError(
               RPC_ERROR_CODES.CLUSTER_NOT_FOUND,
               RPC_ERROR_MESSAGES[RPC_ERROR_CODES.CLUSTER_NOT_FOUND],
-              error instanceof Error ? error.message : "Cluster not found"
+              error instanceof Error ? error.message : 'Cluster not found'
             );
           }
           throw error;
         }
       },
       listClusterMetrics: async (params) => {
-        const clusterIds = Array.isArray(params?.clusterIds)
-          ? params.clusterIds
-          : undefined;
+        const clusterIds = Array.isArray(params?.clusterIds) ? params.clusterIds : undefined;
         const platformOverride = resolveMetricsPlatformOverride();
         const metricsById = await listClusterMetrics({
           clusterIds,
@@ -270,7 +256,7 @@ const startServer = () => {
           throw buildRpcError(
             RPC_ERROR_CODES.INTERNAL_ERROR,
             RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
-            error instanceof Error ? error.message : "Launcher error"
+            error instanceof Error ? error.message : 'Launcher error'
           );
         }
       },
@@ -294,14 +280,14 @@ const startServer = () => {
           throw buildRpcError(
             RPC_ERROR_CODES.INTERNAL_ERROR,
             RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INTERNAL_ERROR],
-            error instanceof Error ? error.message : "Launcher error"
+            error instanceof Error ? error.message : 'Launcher error'
           );
         }
       },
       sendGuidanceToAgent: async (params) => {
         try {
-          validateGuidanceId(params?.clusterId, "clusterId");
-          validateGuidanceId(params?.agentId, "agentId");
+          validateGuidanceId(params?.clusterId, 'clusterId');
+          validateGuidanceId(params?.agentId, 'agentId');
           validateGuidanceText(params?.text);
           const result = await sendAgentGuidance({
             clusterId: params.clusterId,
@@ -317,7 +303,7 @@ const startServer = () => {
       },
       sendGuidanceToCluster: async (params) => {
         try {
-          validateGuidanceId(params?.clusterId, "clusterId");
+          validateGuidanceId(params?.clusterId, 'clusterId');
           validateGuidanceText(params?.text);
           const result = await sendClusterGuidance({
             clusterId: params.clusterId,
@@ -333,7 +319,7 @@ const startServer = () => {
       subscribeClusterLogs: async (params) => {
         const clusterId = params.clusterId;
         const agentId = params.agentId ?? null;
-        let subscriptionId = "";
+        let subscriptionId = '';
         const stream = createClusterLogStream({
           clusterId,
           agentId,
@@ -356,28 +342,25 @@ const startServer = () => {
                     lines: items,
                   };
             writeFrame({
-              jsonrpc: "2.0",
-              method: "clusterLogLines",
+              jsonrpc: '2.0',
+              method: 'clusterLogLines',
               params: payload,
             });
           },
         });
-        subscriptionId = registry.add("clusterLogs", () => stream.close());
+        subscriptionId = registry.add('clusterLogs', () => stream.close());
         stream.start();
         return { subscriptionId };
       },
       subscribeClusterTimeline: async (params) => {
         const clusterId = params.clusterId;
-        let subscriptionId = "";
+        let subscriptionId = '';
         const stream = createClusterTimelineStream({
           clusterId,
           maxInitialEvents: MAX_TIMELINE_EVENTS * 5,
           onEvents: (events) => {
             if (!subscriptionId) return;
-            const { items, droppedCount } = capPayload(
-              events,
-              MAX_TIMELINE_EVENTS
-            );
+            const { items, droppedCount } = capPayload(events, MAX_TIMELINE_EVENTS);
             if (!items.length) return;
             const payload =
               droppedCount > 0
@@ -393,13 +376,13 @@ const startServer = () => {
                     events: items,
                   };
             writeFrame({
-              jsonrpc: "2.0",
-              method: "clusterTimelineEvents",
+              jsonrpc: '2.0',
+              method: 'clusterTimelineEvents',
               params: payload,
             });
           },
         });
-        subscriptionId = registry.add("clusterTimeline", () => stream.close());
+        subscriptionId = registry.add('clusterTimeline', () => stream.close());
         stream.start();
         return { subscriptionId };
       },
@@ -424,11 +407,11 @@ const startServer = () => {
         code: RPC_ERROR_CODES.PARSE_ERROR,
         message: RPC_ERROR_MESSAGES[RPC_ERROR_CODES.PARSE_ERROR],
       });
-      logDiagnostic("Invalid JSON payload", error);
+      logDiagnostic('Invalid JSON payload', error);
       return;
     }
 
-    if (!message || typeof message !== "object") {
+    if (!message || typeof message !== 'object') {
       writeError(null, {
         code: RPC_ERROR_CODES.INVALID_REQUEST,
         message: RPC_ERROR_MESSAGES[RPC_ERROR_CODES.INVALID_REQUEST],
@@ -436,11 +419,11 @@ const startServer = () => {
       return;
     }
 
-    const hasId = Object.prototype.hasOwnProperty.call(message, "id");
+    const hasId = Object.prototype.hasOwnProperty.call(message, 'id');
     if (!hasId) {
       const notification = validator.validateNotification(message);
       if (!notification.ok) {
-        logDiagnostic("Invalid notification received", notification.error);
+        logDiagnostic('Invalid notification received', notification.error);
       }
       return;
     }
@@ -459,7 +442,7 @@ const startServer = () => {
     }
 
     writeFrame({
-      jsonrpc: "2.0",
+      jsonrpc: '2.0',
       id: message.id,
       result: dispatchResult.result,
     });
@@ -474,9 +457,9 @@ const startServer = () => {
       writeError(null, {
         code: RPC_ERROR_CODES.PARSE_ERROR,
         message: RPC_ERROR_MESSAGES[RPC_ERROR_CODES.PARSE_ERROR],
-        data: { detail: error instanceof Error ? error.message : "Parse error" },
+        data: { detail: error instanceof Error ? error.message : 'Parse error' },
       });
-      logDiagnostic("Frame parsing failed", error);
+      logDiagnostic('Frame parsing failed', error);
       return;
     }
 
@@ -485,24 +468,24 @@ const startServer = () => {
     }
   };
 
-  process.stdin.on("data", handleChunk);
-  process.stdin.on("end", () => {
+  process.stdin.on('data', handleChunk);
+  process.stdin.on('end', () => {
     shutdown(0);
   });
-  process.stdin.on("error", (error) => {
-    logDiagnostic("Stdin error", error);
+  process.stdin.on('error', (error) => {
+    logDiagnostic('Stdin error', error);
     shutdown(1);
   });
 
-  process.on("uncaughtException", (error) => {
-    logDiagnostic("Uncaught exception", error);
+  process.on('uncaughtException', (error) => {
+    logDiagnostic('Uncaught exception', error);
     shutdown(1);
   });
-  process.on("unhandledRejection", (error) => {
-    logDiagnostic("Unhandled rejection", error);
+  process.on('unhandledRejection', (error) => {
+    logDiagnostic('Unhandled rejection', error);
     shutdown(1);
   });
-  process.on("exit", () => {
+  process.on('exit', () => {
     if (!shuttingDown) {
       shuttingDown = true;
       registry.closeAll();

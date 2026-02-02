@@ -128,12 +128,7 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn route_time_scrub(
-    state: &AppState,
-    key: KeyEvent,
-    ctrl: bool,
-    alt: bool,
-) -> Option<Action> {
+fn route_time_scrub(state: &AppState, key: KeyEvent, ctrl: bool, alt: bool) -> Option<Action> {
     if ctrl || alt {
         return None;
     }
@@ -148,12 +143,12 @@ fn route_time_scrub(
     };
 
     match key.code {
-        KeyCode::Left if focus_active => {
-            Some(Action::TimeCursor(TimeCursorAction::Step { delta_ms: -step }))
-        }
-        KeyCode::Right if focus_active => {
-            Some(Action::TimeCursor(TimeCursorAction::Step { delta_ms: step }))
-        }
+        KeyCode::Left if focus_active => Some(Action::TimeCursor(TimeCursorAction::Step {
+            delta_ms: -step,
+        })),
+        KeyCode::Right if focus_active => Some(Action::TimeCursor(TimeCursorAction::Step {
+            delta_ms: step,
+        })),
         KeyCode::End if focus_active => Some(Action::TimeCursor(TimeCursorAction::JumpToLive)),
         KeyCode::Char(' ') if focus_active || scope_available => {
             Some(Action::TimeCursor(TimeCursorAction::ToggleFollow))
@@ -182,28 +177,22 @@ fn route_disruptive_radar(
     };
 
     let action = match key.code {
-        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => {
-            radar::Action::MoveSelection {
-                direction: radar::Direction::Left,
-                speed,
-            }
-        }
-        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => {
-            radar::Action::MoveSelection {
-                direction: radar::Direction::Right,
-                speed,
-            }
-        }
+        KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('H') => radar::Action::MoveSelection {
+            direction: radar::Direction::Left,
+            speed,
+        },
+        KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('L') => radar::Action::MoveSelection {
+            direction: radar::Direction::Right,
+            speed,
+        },
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => radar::Action::MoveSelection {
             direction: radar::Direction::Up,
             speed,
         },
-        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
-            radar::Action::MoveSelection {
-                direction: radar::Direction::Down,
-                speed,
-            }
-        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => radar::Action::MoveSelection {
+            direction: radar::Direction::Down,
+            speed,
+        },
         KeyCode::Char('g') => radar::Action::CenterOnSelection,
         KeyCode::Char('G') => radar::Action::ResetView,
         _ => return None,
@@ -293,7 +282,9 @@ fn intent_mode_for_context(state: &AppState) -> SpineMode {
 fn zoom_in_action(state: &AppState) -> Option<Action> {
     match state.zoom_stack_context() {
         ZoomStackContext::FleetRadar => selected_cluster_id_for_zoom(state).map(|cluster_id| {
-            Action::Navigate(NavigationAction::Push(ScreenId::ClusterCanvas { id: cluster_id }))
+            Action::Navigate(NavigationAction::Push(ScreenId::ClusterCanvas {
+                id: cluster_id,
+            }))
         }),
         ZoomStackContext::Cluster { id } => selected_agent_id(state, &id).map(|agent_id| {
             Action::Navigate(NavigationAction::Push(ScreenId::AgentMicroscope {
@@ -351,9 +342,7 @@ fn route_command_bar(key: KeyEvent) -> Option<Action> {
 fn route_global(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Navigate(NavigationAction::Pop)),
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(Action::Quit)
-        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
         KeyCode::Char('q') => match screen {
             ScreenId::Launcher | ScreenId::IntentConsole => None,
             _ => Some(Action::Quit),
@@ -364,7 +353,9 @@ fn route_global(screen: &ScreenId, key: KeyEvent) -> Option<Action> {
 
 fn route_launcher(key: KeyEvent) -> Option<Action> {
     match key.code {
-        KeyCode::Enter => Some(Action::Screen(ScreenAction::Launcher(launcher::Action::Submit))),
+        KeyCode::Enter => Some(Action::Screen(ScreenAction::Launcher(
+            launcher::Action::Submit,
+        ))),
         KeyCode::Backspace => Some(Action::Screen(ScreenAction::Launcher(
             launcher::Action::Backspace,
         ))),
@@ -489,10 +480,7 @@ mod tests {
         state.spine.input.cursor = 0;
         state.spine.completion = None;
 
-        let action = route_key(
-            &state,
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-        );
+        let action = route_key(&state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(
             action,
             Some(Action::Navigate(NavigationAction::Pop))

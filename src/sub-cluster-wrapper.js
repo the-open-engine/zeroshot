@@ -466,7 +466,7 @@ class SubClusterWrapper {
           // CRITICAL: Hook failure = cluster failure
           this._publishLifecycle('HOOK_FAILED', {
             error: err.message,
-            hook: 'onComplete'
+            hook: 'onComplete',
           });
 
           this.messageBus.publish({
@@ -478,9 +478,9 @@ class SubClusterWrapper {
               data: {
                 reason: 'onComplete hook failed',
                 error: err.message,
-                stack: err.stack
-              }
-            }
+                stack: err.stack,
+              },
+            },
           });
 
           this.state = 'failed';
@@ -498,7 +498,7 @@ class SubClusterWrapper {
           // CRITICAL: Hook failure = cluster failure
           this._publishLifecycle('HOOK_FAILED', {
             error: err.message,
-            hook: 'onFailed'
+            hook: 'onFailed',
           });
 
           this.messageBus.publish({
@@ -510,9 +510,9 @@ class SubClusterWrapper {
               data: {
                 reason: 'onFailed hook failed',
                 error: err.message,
-                stack: err.stack
-              }
-            }
+                stack: err.stack,
+              },
+            },
           });
 
           this.state = 'failed';

@@ -454,16 +454,16 @@ function generateGitPusherAgent(platform, options = {}) {
       properties: {
         pr_number: {
           type: 'number',
-          description: 'MUST extract from gh pr create output - NOT from git push link'
+          description: 'MUST extract from gh pr create output - NOT from git push link',
         },
         pr_url: { type: 'string' },
         merged: { type: 'boolean' },
         merge_commit_sha: {
           type: 'string',
-          description: 'MUST extract from gh pr merge output'
-        }
+          description: 'MUST extract from gh pr merge output',
+        },
       },
-      required: ['pr_number', 'pr_url', 'merged', 'merge_commit_sha']
+      required: ['pr_number', 'pr_url', 'merged', 'merge_commit_sha'],
     },
   };
 }

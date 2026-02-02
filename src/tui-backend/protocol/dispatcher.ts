@@ -1,4 +1,4 @@
-const { RPC_ERROR_CODES, RPC_ERROR_MESSAGES } = require("./constants");
+const { RPC_ERROR_CODES, RPC_ERROR_MESSAGES } = require('./constants');
 
 const buildError = (code: number, message: string, detail?: string) => {
   const error: any = { code, message };
@@ -10,14 +10,13 @@ const buildError = (code: number, message: string, detail?: string) => {
 
 const isRpcError = (error: any) =>
   error &&
-  typeof error === "object" &&
-  typeof error.code === "number" &&
-  typeof error.message === "string";
+  typeof error === 'object' &&
+  typeof error.code === 'number' &&
+  typeof error.message === 'string';
 
 const createDispatcher = (options: any = {}) => {
-  const serverInfo = options.serverInfo || { name: "zeroshot", version: "0.0.0" };
-  const protocolVersion =
-    typeof options.protocolVersion === "number" ? options.protocolVersion : 1;
+  const serverInfo = options.serverInfo || { name: 'zeroshot', version: '0.0.0' };
+  const protocolVersion = typeof options.protocolVersion === 'number' ? options.protocolVersion : 1;
   const baseHandlers = {
     initialize: async () => ({
       protocolVersion,
@@ -29,9 +28,8 @@ const createDispatcher = (options: any = {}) => {
     }),
     ping: async () => ({ ok: true }),
   };
-  const extraHandlers = options.handlers && typeof options.handlers === "object"
-    ? options.handlers
-    : {};
+  const extraHandlers =
+    options.handlers && typeof options.handlers === 'object' ? options.handlers : {};
   const handlers = { ...baseHandlers, ...extraHandlers };
   const methods = Array.from(new Set(Object.keys(handlers)));
   const notifications = Array.isArray(options.notifications) ? options.notifications : [];
@@ -66,8 +64,7 @@ const createDispatcher = (options: any = {}) => {
         }
         return { ok: false, error: rpcError };
       }
-      const detail =
-        error instanceof Error ? error.message : "Unhandled dispatcher error";
+      const detail = error instanceof Error ? error.message : 'Unhandled dispatcher error';
       return {
         ok: false,
         error: buildError(

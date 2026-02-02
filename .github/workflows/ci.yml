@@ -77,6 +77,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Type check (tui-backend)
+        run: npm run typecheck:tui-backend
+
+      - name: Build tui-backend
+        run: npm run build:tui-backend
+
       - name: Unit tests with coverage (fast)
         run: npm run test:coverage
         timeout-minutes: 3
@@ -85,31 +91,10 @@ jobs:
         run: npm run test:slow
         timeout-minutes: 15
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/lcov.info
-          flags: unittests
-          name: codecov-zeroshot
-          fail_ci_if_error: false
-        continue-on-error: true
-
-  # Rust TUI: build, test, clippy (runs in parallel with JS checks)
-  rust-tui:
-    needs: [enforce-main-pr-source]
-    if: always() && (needs.enforce-main-pr-source.result == 'success' || needs.enforce-main-pr-source.result == 'skipped')
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tui-rs
-    steps:
-      - uses: actions/checkout@v4
-
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Cache cargo registry + build
         uses: actions/cache@v4
@@ -121,17 +106,30 @@ jobs:
           key: rust-${{ runner.os }}-${{ hashFiles('tui-rs/Cargo.lock') }}
           restore-keys: rust-${{ runner.os }}-
 
-      - name: Build
-        run: cargo build --release
+      - name: Rust fmt
+        run: cargo fmt --manifest-path tui-rs/Cargo.toml --all -- --check
 
-      - name: Test
-        run: cargo test
+      - name: Rust build
+        run: cargo build --release --manifest-path tui-rs/Cargo.toml
 
-      - name: Clippy
-        run: cargo clippy -- -D warnings
+      - name: Rust test
+        run: cargo test --manifest-path tui-rs/Cargo.toml
 
-      - name: Smoke test binary
-        run: ./target/release/zeroshot-tui --version
+      - name: Rust clippy
+        run: cargo clippy --manifest-path tui-rs/Cargo.toml -- -D warnings
+
+      - name: Smoke test Rust TUI binary
+        run: ./tui-rs/target/release/zeroshot-tui --version
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-zeroshot
+          fail_ci_if_error: false
+        continue-on-error: true
 
   # Cross-platform/version compatibility (main only)
   # NOTE: macOS runners cost 10x Linux minutes - keep this scoped to main.

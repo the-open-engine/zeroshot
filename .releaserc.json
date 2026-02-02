@@ -12,10 +12,7 @@
     [
       "@semantic-release/github",
       {
-        "assets": [
-          "dist/tui/zeroshot-tui-*.tar.gz",
-          "dist/tui/zeroshot-tui-*.tar.gz.sha256"
-        ]
+        "assets": ["dist/tui/zeroshot-tui-*.tar.gz", "dist/tui/zeroshot-tui-*.tar.gz.sha256"]
       }
     ]
   ]

@@ -13,11 +13,11 @@ use serde_json::Value;
 
 use crate::backend::framing::{FrameDecoder, FrameEncoder};
 use crate::backend::{
-    BackendClient, BackendConfig, BackendError, BackendEvent, BackendExit,
-    BackendNotification, BACKEND_PATH_ENV, DEFAULT_BACKEND_RELATIVE_PATH,
+    BackendClient, BackendConfig, BackendError, BackendEvent, BackendExit, BackendNotification,
+    BACKEND_PATH_ENV, DEFAULT_BACKEND_RELATIVE_PATH,
 };
 use crate::protocol::{
-    ClusterLogLinesParams, ClusterTimelineEventsParams, ClientCapabilities, ClientInfo,
+    ClientCapabilities, ClientInfo, ClusterLogLinesParams, ClusterTimelineEventsParams,
     GetClusterSummaryParams, GetClusterSummaryResult, GetClusterTopologyParams,
     GetClusterTopologyResult, InitializeParams, InitializeResult, JsonRpcId, JsonRpcRequest,
     ListClusterMetricsParams, ListClusterMetricsResult, ListClustersParams, ListClustersResult,
@@ -43,7 +43,6 @@ impl RequestKey {
             _ => None,
         }
     }
-
 }
 
 enum WriterCommand {
@@ -151,7 +150,10 @@ impl StdioBackendClient {
         self.send_request("subscribeClusterTimeline", params)
     }
 
-    pub fn unsubscribe(&self, params: UnsubscribeParams) -> Result<UnsubscribeResult, BackendError> {
+    pub fn unsubscribe(
+        &self,
+        params: UnsubscribeParams,
+    ) -> Result<UnsubscribeResult, BackendError> {
         self.send_request("unsubscribe", params)
     }
 
@@ -407,12 +409,9 @@ fn reader_loop(
                 break;
             }
             Ok(bytes) => {
-                if let Err(err) = handle_reader_bytes(
-                    &buffer[..bytes],
-                    &mut decoder,
-                    &pending,
-                    &event_tx,
-                ) {
+                if let Err(err) =
+                    handle_reader_bytes(&buffer[..bytes], &mut decoder, &pending, &event_tx)
+                {
                     let message = err.to_string();
                     drain_pending(&pending, err);
                     let _ = event_tx.send(BackendEvent::BackendExited(BackendExit {
@@ -510,8 +509,7 @@ fn parse_response_id(value: &Value) -> Result<RequestKey, BackendError> {
     let id_value = value
         .get("id")
         .ok_or_else(|| BackendError::Protocol("Missing id".into()))?;
-    RequestKey::from_value(id_value)
-        .ok_or_else(|| BackendError::Protocol("Invalid id type".into()))
+    RequestKey::from_value(id_value).ok_or_else(|| BackendError::Protocol("Invalid id type".into()))
 }
 
 fn dispatch_response(
@@ -544,12 +542,10 @@ fn dispatch_response(
 }
 
 fn parse_rpc_error(error_value: &Value) -> crate::protocol::RpcError {
-    serde_json::from_value(error_value.clone()).unwrap_or_else(|err| {
-        crate::protocol::RpcError {
-            code: -32603,
-            message: format!("Failed to parse RPC error: {err}"),
-            data: None,
-        }
+    serde_json::from_value(error_value.clone()).unwrap_or_else(|err| crate::protocol::RpcError {
+        code: -32603,
+        message: format!("Failed to parse RPC error: {err}"),
+        data: None,
     })
 }
 
@@ -565,9 +561,8 @@ fn handle_notification(
 
     let notification = match method {
         "clusterLogLines" => {
-            let params_value = params.ok_or_else(|| {
-                BackendError::Protocol("clusterLogLines missing params".into())
-            })?;
+            let params_value = params
+                .ok_or_else(|| BackendError::Protocol("clusterLogLines missing params".into()))?;
             let parsed: ClusterLogLinesParams = serde_json::from_value(params_value)?;
             BackendNotification::ClusterLogLines(parsed)
         }

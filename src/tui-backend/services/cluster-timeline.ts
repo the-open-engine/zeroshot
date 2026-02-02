@@ -1,21 +1,21 @@
-import fs from "fs";
+import fs from 'fs';
 
-const Ledger = require("../../../src/ledger");
+const Ledger = require('../../../src/ledger');
 
-import { resolveClusterDbPath } from "./cluster-logs";
+import { resolveClusterDbPath } from './cluster-logs';
 
 export const MAX_TIMELINE_EVENTS = 40;
 export const TIMELINE_POLL_INTERVAL_MS = 750;
 
 export const WORKFLOW_TRIGGERS = Object.freeze([
-  "ISSUE_OPENED",
-  "PLAN_READY",
-  "IMPLEMENTATION_READY",
-  "VALIDATION_RESULT",
-  "CONDUCTOR_ESCALATE",
+  'ISSUE_OPENED',
+  'PLAN_READY',
+  'IMPLEMENTATION_READY',
+  'VALIDATION_RESULT',
+  'CONDUCTOR_ESCALATE',
 ]);
 
-type ClusterTimelineState = "idle" | "waiting" | "ready" | "error";
+type ClusterTimelineState = 'idle' | 'waiting' | 'ready' | 'error';
 
 export type ClusterTimelineStatus = {
   state: ClusterTimelineState;
@@ -44,10 +44,10 @@ function isWorkflowTopic(topic: string): boolean {
 }
 
 function normalizeApproved(value: unknown): boolean | null {
-  if (value === true || value === "true") {
+  if (value === true || value === 'true') {
     return true;
   }
-  if (value === false || value === "false") {
+  if (value === false || value === 'false') {
     return false;
   }
   return null;
@@ -55,43 +55,42 @@ function normalizeApproved(value: unknown): boolean | null {
 
 function labelForMessage(message: any, approved: boolean | null): string {
   switch (message.topic) {
-    case "ISSUE_OPENED":
-      return "Issue opened";
-    case "PLAN_READY":
-      return "Plan ready";
-    case "IMPLEMENTATION_READY":
-      return "Implementation ready";
-    case "VALIDATION_RESULT":
+    case 'ISSUE_OPENED':
+      return 'Issue opened';
+    case 'PLAN_READY':
+      return 'Plan ready';
+    case 'IMPLEMENTATION_READY':
+      return 'Implementation ready';
+    case 'VALIDATION_RESULT':
       if (approved === true) {
-        return "Validation approved";
+        return 'Validation approved';
       }
       if (approved === false) {
-        return "Validation rejected";
+        return 'Validation rejected';
       }
-      return "Validation result";
-    case "CONDUCTOR_ESCALATE":
-      return "Conductor escalated";
+      return 'Validation result';
+    case 'CONDUCTOR_ESCALATE':
+      return 'Conductor escalated';
     default:
-      return message.topic || "Workflow event";
+      return message.topic || 'Workflow event';
   }
 }
 
 export function normalizeTimelineMessage(message: any): TimelineEvent | null {
-  if (!message || typeof message !== "object") {
+  if (!message || typeof message !== 'object') {
     return null;
   }
 
-  const topic = typeof message.topic === "string" ? message.topic : "";
+  const topic = typeof message.topic === 'string' ? message.topic : '';
   if (!topic || !isWorkflowTopic(topic)) {
     return null;
   }
 
   const data = message.content?.data || {};
   const approved = normalizeApproved(data.approved);
-  const timestamp =
-    typeof message.timestamp === "number" ? message.timestamp : Date.now();
+  const timestamp = typeof message.timestamp === 'number' ? message.timestamp : Date.now();
   const id =
-    typeof message.id === "string"
+    typeof message.id === 'string'
       ? message.id
       : `${timestamp}-${Math.random().toString(16).slice(2)}`;
 
@@ -101,7 +100,7 @@ export function normalizeTimelineMessage(message: any): TimelineEvent | null {
     topic,
     label: labelForMessage(message, approved),
     approved,
-    sender: typeof message.sender === "string" ? message.sender : null,
+    sender: typeof message.sender === 'string' ? message.sender : null,
   };
 }
 
@@ -121,11 +120,7 @@ export function createClusterTimelineStream({
 
   const emitStatus = (status: ClusterTimelineStatus) => {
     if (!onStatus) return;
-    if (
-      lastStatus &&
-      lastStatus.state === status.state &&
-      lastStatus.message === status.message
-    ) {
+    if (lastStatus && lastStatus.state === status.state && lastStatus.message === status.message) {
       return;
     }
     lastStatus = status;
@@ -134,13 +129,9 @@ export function createClusterTimelineStream({
 
   const emitError = (err: unknown, context: string) => {
     const message =
-      err instanceof Error
-        ? err.message
-        : typeof err === "string"
-        ? err
-        : "Unknown error";
+      err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error';
     emitStatus({
-      state: "error",
+      state: 'error',
       message: context ? `${context}: ${message}` : message,
     });
   };
@@ -159,7 +150,7 @@ export function createClusterTimelineStream({
 
   const ensureLedger = () => {
     if (!clusterId) {
-      emitStatus({ state: "idle" });
+      emitStatus({ state: 'idle' });
       return false;
     }
 
@@ -169,7 +160,7 @@ export function createClusterTimelineStream({
 
     const dbPath = resolveClusterDbPath(clusterId);
     if (!fs.existsSync(dbPath)) {
-      emitStatus({ state: "waiting" });
+      emitStatus({ state: 'waiting' });
       return false;
     }
 
@@ -178,10 +169,10 @@ export function createClusterTimelineStream({
       if (!initialized) {
         lastTimestamp = 0;
       }
-      emitStatus({ state: "ready" });
+      emitStatus({ state: 'ready' });
       return true;
     } catch (err) {
-      resetLedger(err, "Failed to open timeline database");
+      resetLedger(err, 'Failed to open timeline database');
       return false;
     }
   };
@@ -191,12 +182,12 @@ export function createClusterTimelineStream({
       return [];
     }
     const messages: any[] = [];
-    const hasSince = typeof since === "number" && Number.isFinite(since);
+    const hasSince = typeof since === 'number' && Number.isFinite(since);
     for (const topic of WORKFLOW_TRIGGERS) {
       const criteria: any = {
         cluster_id: clusterId,
         topic,
-        order: "asc",
+        order: 'asc',
       };
       if (hasSince && since! > 0) {
         criteria.since = since;
@@ -207,7 +198,7 @@ export function createClusterTimelineStream({
           messages.push(...rows);
         }
       } catch (err) {
-        resetLedger(err, "Failed to read timeline entries");
+        resetLedger(err, 'Failed to read timeline entries');
         return [];
       }
     }
@@ -234,7 +225,7 @@ export function createClusterTimelineStream({
       }
 
       const last = messages[messages.length - 1];
-      if (last && typeof last.timestamp === "number") {
+      if (last && typeof last.timestamp === 'number') {
         lastTimestamp = Math.max(lastTimestamp, last.timestamp);
       }
     }
@@ -248,7 +239,7 @@ export function createClusterTimelineStream({
     }
 
     if (!clusterId) {
-      emitStatus({ state: "idle" });
+      emitStatus({ state: 'idle' });
       return;
     }
 
@@ -273,7 +264,7 @@ export function createClusterTimelineStream({
     }
 
     const last = messages[messages.length - 1];
-    if (last && typeof last.timestamp === "number") {
+    if (last && typeof last.timestamp === 'number') {
       lastTimestamp = Math.max(lastTimestamp, last.timestamp);
     }
   };

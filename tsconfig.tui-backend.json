@@ -6,6 +6,7 @@
     "jsx": "react",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "typeRoots": ["./node_modules/@types"],
     "strict": false,
     "skipLibCheck": true,
     "moduleDetection": "force",

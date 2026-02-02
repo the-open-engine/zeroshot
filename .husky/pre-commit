@@ -7,6 +7,15 @@ if [ -n "$BAD_FILES" ]; then
   exit 1
 fi
 
+# Enforce Rust formatting when Rust files are staged
+if git diff --cached --name-only -- '*.rs' | grep -q .; then
+  if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "ERROR: rustfmt is required to format Rust (install Rust toolchain)."
+    exit 1
+  fi
+  git diff --cached --name-only -z -- '*.rs' | xargs -0 rustfmt --edition 2021 --check
+fi
+
 # Lint and format only staged files
 npx lint-staged
 

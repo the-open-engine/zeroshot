@@ -3,7 +3,7 @@ name: Release
 on:
   # Auto-release after CI passes on main
   workflow_run:
-    workflows: ["CI"]
+    workflows: ['CI']
     types: [completed]
     branches: [main]
   # Manual trigger for DRY-RUN ONLY (testing release process)

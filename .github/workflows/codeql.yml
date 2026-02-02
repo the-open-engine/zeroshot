@@ -1,10 +1,10 @@
-name: "CodeQL Security Analysis"
+name: 'CodeQL Security Analysis'
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   schedule:
     # Run at 3 AM UTC every Monday
     - cron: '0 3 * * 1'
@@ -56,4 +56,4 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:javascript"
+          category: '/language:javascript'

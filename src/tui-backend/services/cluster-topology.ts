@@ -11,7 +11,7 @@ export type TopologyEdge = {
   from: string;
   to: string;
   topic: string;
-  kind: "trigger" | "publish" | "source";
+  kind: 'trigger' | 'publish' | 'source';
   dynamic?: boolean;
 };
 
@@ -25,14 +25,14 @@ let orchestratorPromise: Promise<any> | null = null;
 
 async function getOrchestrator() {
   if (!orchestratorPromise) {
-    const Orchestrator = require("../../../src/orchestrator");
+    const Orchestrator = require('../../../src/orchestrator');
     orchestratorPromise = Orchestrator.create({ quiet: true });
   }
   return orchestratorPromise;
 }
 
 function normalizeTopic(value: any): string | null {
-  if (typeof value !== "string") {
+  if (typeof value !== 'string') {
     return null;
   }
   const topic = value.trim();
@@ -40,7 +40,7 @@ function normalizeTopic(value: any): string | null {
 }
 
 function extractTopicsFromScript(script: any): string[] {
-  if (typeof script !== "string") {
+  if (typeof script !== 'string') {
     return [];
   }
   const topics = new Set<string>();
@@ -64,7 +64,7 @@ export function buildTopologyModel(config: any): ClusterTopology {
     from: string,
     to: string,
     topic: string,
-    kind: TopologyEdge["kind"],
+    kind: TopologyEdge['kind'],
     dynamic?: boolean
   ) => {
     if (!from || !to || !topic) {
@@ -78,18 +78,18 @@ export function buildTopologyModel(config: any): ClusterTopology {
     edges.push({ from, to, topic, kind, dynamic });
   };
 
-  topics.add("ISSUE_OPENED");
-  addEdge("system", "ISSUE_OPENED", "ISSUE_OPENED", "source");
+  topics.add('ISSUE_OPENED');
+  addEdge('system', 'ISSUE_OPENED', 'ISSUE_OPENED', 'source');
 
   const agentConfigs = Array.isArray(config?.agents) ? config.agents : [];
   for (const agent of agentConfigs) {
-    const id = typeof agent?.id === "string" ? agent.id : null;
+    const id = typeof agent?.id === 'string' ? agent.id : null;
     if (!id) {
       continue;
     }
     agents.push({
       id,
-      role: typeof agent.role === "string" ? agent.role : null,
+      role: typeof agent.role === 'string' ? agent.role : null,
     });
 
     const triggers = Array.isArray(agent.triggers) ? agent.triggers : [];
@@ -99,25 +99,25 @@ export function buildTopologyModel(config: any): ClusterTopology {
         continue;
       }
       topics.add(topic);
-      addEdge(topic, id, topic, "trigger");
+      addEdge(topic, id, topic, 'trigger');
     }
 
     const outputTopic = normalizeTopic(agent?.hooks?.onComplete?.config?.topic);
     if (outputTopic) {
       topics.add(outputTopic);
-      addEdge(id, outputTopic, outputTopic, "publish");
+      addEdge(id, outputTopic, outputTopic, 'publish');
     }
 
     const hookLogicScript = agent?.hooks?.onComplete?.logic?.script;
     for (const topic of extractTopicsFromScript(hookLogicScript)) {
       topics.add(topic);
-      addEdge(id, topic, topic, "publish", true);
+      addEdge(id, topic, topic, 'publish', true);
     }
 
     const hookTransformScript = agent?.hooks?.onComplete?.transform?.script;
     for (const topic of extractTopicsFromScript(hookTransformScript)) {
       topics.add(topic);
-      addEdge(id, topic, topic, "publish", true);
+      addEdge(id, topic, topic, 'publish', true);
     }
   }
 

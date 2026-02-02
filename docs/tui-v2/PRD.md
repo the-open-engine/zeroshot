@@ -311,14 +311,17 @@ Agent colors (rotating by hash of agent_id):
 ### Global Chrome
 
 **Header (1 line):**
+
 ```
 ◆ ZEROSHOT  <Screen Title>              ● connected    provider: sonnet
 ```
 
 **Status bar (1 line):**
+
 ```
 Enter:start  /:commands  Ctrl+C:quit                    ✓ Cluster started
 ```
+
 Keys in accent+bold, descriptions in dim. Toast right-aligned. Command bar replaces status bar when active.
 
 ### Launcher Wireframe

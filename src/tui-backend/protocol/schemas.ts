@@ -1,69 +1,69 @@
 const idSchema = {
-  anyOf: [{ type: "string" }, { type: "number" }],
+  anyOf: [{ type: 'string' }, { type: 'number' }],
 };
 
 const nullableString = {
-  anyOf: [{ type: "string" }, { type: "null" }],
+  anyOf: [{ type: 'string' }, { type: 'null' }],
 };
 
 const nullableNumber = {
-  anyOf: [{ type: "number" }, { type: "null" }],
+  anyOf: [{ type: 'number' }, { type: 'null' }],
 };
 
 const errorDataSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
   properties: {
-    detail: { type: "string" },
+    detail: { type: 'string' },
     fields: {
-      type: "object",
-      additionalProperties: { type: "string" },
+      type: 'object',
+      additionalProperties: { type: 'string' },
     },
-    supportedVersions: { type: "array", items: { type: "number" } },
+    supportedVersions: { type: 'array', items: { type: 'number' } },
   },
 };
 
 const errorSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["code", "message"],
+  required: ['code', 'message'],
   properties: {
-    code: { type: "number" },
-    message: { type: "string" },
+    code: { type: 'number' },
+    message: { type: 'string' },
     data: errorDataSchema,
   },
 };
 
 const jsonRpcRequestBase = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["jsonrpc", "id", "method"],
+  required: ['jsonrpc', 'id', 'method'],
   properties: {
-    jsonrpc: { const: "2.0" },
+    jsonrpc: { const: '2.0' },
     id: idSchema,
-    method: { type: "string" },
-    params: { type: ["object", "array", "null"] },
+    method: { type: 'string' },
+    params: { type: ['object', 'array', 'null'] },
   },
 };
 
 const jsonRpcNotificationBase = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["jsonrpc", "method"],
+  required: ['jsonrpc', 'method'],
   properties: {
-    jsonrpc: { const: "2.0" },
-    method: { type: "string" },
-    params: { type: ["object", "array", "null"] },
+    jsonrpc: { const: '2.0' },
+    method: { type: 'string' },
+    params: { type: ['object', 'array', 'null'] },
   },
-  not: { required: ["id"] },
+  not: { required: ['id'] },
 };
 
 const jsonRpcResponseBase = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["jsonrpc", "id"],
+  required: ['jsonrpc', 'id'],
   properties: {
-    jsonrpc: { const: "2.0" },
+    jsonrpc: { const: '2.0' },
     id: idSchema,
     // Allow result/error at base layer; method-specific schema handles shape.
     result: {},
@@ -72,55 +72,44 @@ const jsonRpcResponseBase = {
 };
 
 const emptyParamsSchema = {
-  anyOf: [
-    { type: "null" },
-    { type: "object", additionalProperties: false, maxProperties: 0 },
-  ],
+  anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, maxProperties: 0 }],
 };
 
 const clusterSummarySchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: [
-    "id",
-    "state",
-    "provider",
-    "createdAt",
-    "agentCount",
-    "messageCount",
-    "cwd",
-  ],
+  required: ['id', 'state', 'provider', 'createdAt', 'agentCount', 'messageCount', 'cwd'],
   properties: {
-    id: { type: "string" },
-    state: { type: "string" },
+    id: { type: 'string' },
+    state: { type: 'string' },
     provider: nullableString,
-    createdAt: { type: "number" },
-    agentCount: { type: "number" },
-    messageCount: { type: "number" },
+    createdAt: { type: 'number' },
+    agentCount: { type: 'number' },
+    messageCount: { type: 'number' },
     cwd: nullableString,
   },
 };
 
 const clusterMetricsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["id", "supported", "cpuPercent", "memoryMB"],
+  required: ['id', 'supported', 'cpuPercent', 'memoryMB'],
   properties: {
-    id: { type: "string" },
-    supported: { type: "boolean" },
+    id: { type: 'string' },
+    supported: { type: 'boolean' },
     cpuPercent: nullableNumber,
     memoryMB: nullableNumber,
   },
 };
 
 const clusterLogLineSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["id", "timestamp", "text", "agent", "role", "sender"],
+  required: ['id', 'timestamp', 'text', 'agent', 'role', 'sender'],
   properties: {
-    id: { type: "string" },
-    timestamp: { type: "number" },
-    text: { type: "string" },
+    id: { type: 'string' },
+    timestamp: { type: 'number' },
+    text: { type: 'string' },
     agent: nullableString,
     role: nullableString,
     sender: nullableString,
@@ -128,59 +117,59 @@ const clusterLogLineSchema = {
 };
 
 const timelineEventSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["id", "timestamp", "topic", "label", "approved", "sender"],
+  required: ['id', 'timestamp', 'topic', 'label', 'approved', 'sender'],
   properties: {
-    id: { type: "string" },
-    timestamp: { type: "number" },
-    topic: { type: "string" },
-    label: { type: "string" },
-    approved: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+    id: { type: 'string' },
+    timestamp: { type: 'number' },
+    topic: { type: 'string' },
+    label: { type: 'string' },
+    approved: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
     sender: nullableString,
   },
 };
 
 const topologyAgentSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["id", "role"],
+  required: ['id', 'role'],
   properties: {
-    id: { type: "string" },
+    id: { type: 'string' },
     role: nullableString,
   },
 };
 
 const topologyEdgeSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["from", "to", "topic", "kind"],
+  required: ['from', 'to', 'topic', 'kind'],
   properties: {
-    from: { type: "string" },
-    to: { type: "string" },
-    topic: { type: "string" },
-    kind: { enum: ["trigger", "publish", "source"] },
-    dynamic: { type: "boolean" },
+    from: { type: 'string' },
+    to: { type: 'string' },
+    topic: { type: 'string' },
+    kind: { enum: ['trigger', 'publish', 'source'] },
+    dynamic: { type: 'boolean' },
   },
 };
 
 const clusterTopologySchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["agents", "edges", "topics"],
+  required: ['agents', 'edges', 'topics'],
   properties: {
-    agents: { type: "array", items: topologyAgentSchema },
-    edges: { type: "array", items: topologyEdgeSchema },
-    topics: { type: "array", items: { type: "string" } },
+    agents: { type: 'array', items: topologyAgentSchema },
+    edges: { type: 'array', items: topologyEdgeSchema },
+    topics: { type: 'array', items: { type: 'string' } },
   },
 };
 
 const guidanceDeliveryResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["status", "reason", "method"],
+  required: ['status', 'reason', 'method'],
   properties: {
-    status: { type: "string" },
+    status: { type: 'string' },
     reason: nullableString,
     method: nullableString,
     taskId: nullableString,
@@ -188,79 +177,79 @@ const guidanceDeliveryResultSchema = {
 };
 
 const clusterGuidanceSummarySchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["injected", "queued", "total"],
+  required: ['injected', 'queued', 'total'],
   properties: {
-    injected: { type: "number" },
-    queued: { type: "number" },
-    total: { type: "number" },
+    injected: { type: 'number' },
+    queued: { type: 'number' },
+    total: { type: 'number' },
   },
 };
 
 const clusterGuidanceDeliverySchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["summary", "agents", "timestamp"],
+  required: ['summary', 'agents', 'timestamp'],
   properties: {
     summary: clusterGuidanceSummarySchema,
     agents: {
-      type: "object",
+      type: 'object',
       additionalProperties: guidanceDeliveryResultSchema,
     },
-    timestamp: { type: "number" },
+    timestamp: { type: 'number' },
   },
 };
 
 const initializeParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["protocolVersion", "client"],
+  required: ['protocolVersion', 'client'],
   properties: {
-    protocolVersion: { type: "number" },
+    protocolVersion: { type: 'number' },
     client: {
-      type: "object",
+      type: 'object',
       additionalProperties: false,
-      required: ["name", "version"],
+      required: ['name', 'version'],
       properties: {
-        name: { type: "string" },
-        version: { type: "string" },
-        pid: { type: "number" },
+        name: { type: 'string' },
+        version: { type: 'string' },
+        pid: { type: 'number' },
       },
     },
     capabilities: {
-      type: "object",
+      type: 'object',
       additionalProperties: false,
       properties: {
-        wantsMetrics: { type: "boolean" },
-        wantsTopology: { type: "boolean" },
+        wantsMetrics: { type: 'boolean' },
+        wantsTopology: { type: 'boolean' },
       },
     },
   },
 };
 
 const initializeResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["protocolVersion", "server", "capabilities"],
+  required: ['protocolVersion', 'server', 'capabilities'],
   properties: {
-    protocolVersion: { type: "number" },
+    protocolVersion: { type: 'number' },
     server: {
-      type: "object",
+      type: 'object',
       additionalProperties: false,
-      required: ["name", "version"],
+      required: ['name', 'version'],
       properties: {
-        name: { type: "string" },
-        version: { type: "string" },
+        name: { type: 'string' },
+        version: { type: 'string' },
       },
     },
     capabilities: {
-      type: "object",
+      type: 'object',
       additionalProperties: false,
-      required: ["methods", "notifications"],
+      required: ['methods', 'notifications'],
       properties: {
-        methods: { type: "array", items: { type: "string" } },
-        notifications: { type: "array", items: { type: "string" } },
+        methods: { type: 'array', items: { type: 'string' } },
+        notifications: { type: 'array', items: { type: 'string' } },
       },
     },
   },
@@ -269,215 +258,215 @@ const initializeResultSchema = {
 const pingParamsSchema = emptyParamsSchema;
 
 const pingResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["ok"],
+  required: ['ok'],
   properties: {
     ok: { const: true },
   },
 };
 
 const listClustersResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusters"],
+  required: ['clusters'],
   properties: {
-    clusters: { type: "array", items: clusterSummarySchema },
+    clusters: { type: 'array', items: clusterSummarySchema },
   },
 };
 
 const getClusterSummaryParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId"],
+  required: ['clusterId'],
   properties: {
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const getClusterSummaryResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["summary"],
+  required: ['summary'],
   properties: {
     summary: clusterSummarySchema,
   },
 };
 
 const listClusterMetricsParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
   properties: {
-    clusterIds: { type: "array", items: { type: "string" } },
+    clusterIds: { type: 'array', items: { type: 'string' } },
   },
 };
 
 const listClusterMetricsResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["metrics"],
+  required: ['metrics'],
   properties: {
-    metrics: { type: "array", items: clusterMetricsSchema },
+    metrics: { type: 'array', items: clusterMetricsSchema },
   },
 };
 
 const startClusterFromTextParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["text"],
+  required: ['text'],
   properties: {
-    text: { type: "string" },
+    text: { type: 'string' },
     providerOverride: nullableString,
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const startClusterFromIssueParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["ref"],
+  required: ['ref'],
   properties: {
-    ref: { type: "string" },
+    ref: { type: 'string' },
     providerOverride: nullableString,
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const startClusterResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId"],
+  required: ['clusterId'],
   properties: {
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const sendGuidanceToAgentParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId", "agentId", "text"],
+  required: ['clusterId', 'agentId', 'text'],
   properties: {
-    clusterId: { type: "string" },
-    agentId: { type: "string" },
-    text: { type: "string" },
-    timeoutMs: { type: "number" },
+    clusterId: { type: 'string' },
+    agentId: { type: 'string' },
+    text: { type: 'string' },
+    timeoutMs: { type: 'number' },
   },
 };
 
 const sendGuidanceToClusterParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId", "text"],
+  required: ['clusterId', 'text'],
   properties: {
-    clusterId: { type: "string" },
-    text: { type: "string" },
-    timeoutMs: { type: "number" },
+    clusterId: { type: 'string' },
+    text: { type: 'string' },
+    timeoutMs: { type: 'number' },
   },
 };
 
 const sendGuidanceToAgentResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["result"],
+  required: ['result'],
   properties: {
     result: guidanceDeliveryResultSchema,
   },
 };
 
 const sendGuidanceToClusterResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["result"],
+  required: ['result'],
   properties: {
     result: clusterGuidanceDeliverySchema,
   },
 };
 
 const subscribeClusterLogsParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId"],
+  required: ['clusterId'],
   properties: {
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
     agentId: nullableString,
   },
 };
 
 const subscribeClusterTimelineParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId"],
+  required: ['clusterId'],
   properties: {
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const subscribeResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["subscriptionId"],
+  required: ['subscriptionId'],
   properties: {
-    subscriptionId: { type: "string" },
+    subscriptionId: { type: 'string' },
   },
 };
 
 const unsubscribeParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["subscriptionId"],
+  required: ['subscriptionId'],
   properties: {
-    subscriptionId: { type: "string" },
+    subscriptionId: { type: 'string' },
   },
 };
 
 const unsubscribeResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["removed"],
+  required: ['removed'],
   properties: {
-    removed: { type: "boolean" },
+    removed: { type: 'boolean' },
   },
 };
 
 const getClusterTopologyParamsSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["clusterId"],
+  required: ['clusterId'],
   properties: {
-    clusterId: { type: "string" },
+    clusterId: { type: 'string' },
   },
 };
 
 const getClusterTopologyResultSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["topology"],
+  required: ['topology'],
   properties: {
     topology: clusterTopologySchema,
   },
 };
 
 const clusterLogLinesNotificationSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["subscriptionId", "clusterId", "lines"],
+  required: ['subscriptionId', 'clusterId', 'lines'],
   properties: {
-    subscriptionId: { type: "string" },
-    clusterId: { type: "string" },
-    lines: { type: "array", items: clusterLogLineSchema },
-    droppedCount: { type: "number" },
+    subscriptionId: { type: 'string' },
+    clusterId: { type: 'string' },
+    lines: { type: 'array', items: clusterLogLineSchema },
+    droppedCount: { type: 'number' },
   },
 };
 
 const clusterTimelineEventsNotificationSchema = {
-  type: "object",
+  type: 'object',
   additionalProperties: false,
-  required: ["subscriptionId", "clusterId", "events"],
+  required: ['subscriptionId', 'clusterId', 'events'],
   properties: {
-    subscriptionId: { type: "string" },
-    clusterId: { type: "string" },
-    events: { type: "array", items: timelineEventSchema },
-    droppedCount: { type: "number" },
+    subscriptionId: { type: 'string' },
+    clusterId: { type: 'string' },
+    events: { type: 'array', items: timelineEventSchema },
+    droppedCount: { type: 'number' },
   },
 };
 
@@ -493,14 +482,14 @@ const buildRequestSchema = (method, paramsSchema, paramsRequired) => {
     schema.properties.params = paramsSchema;
   }
   if (paramsRequired) {
-    schema.required = [...jsonRpcRequestBase.required, "params"];
+    schema.required = [...jsonRpcRequestBase.required, 'params'];
   }
   return schema;
 };
 
 const buildResponseSchema = (resultSchema) => ({
   ...jsonRpcResponseBase,
-  required: [...jsonRpcResponseBase.required, "result"],
+  required: [...jsonRpcResponseBase.required, 'result'],
   properties: {
     ...jsonRpcResponseBase.properties,
     result: resultSchema,
@@ -509,7 +498,7 @@ const buildResponseSchema = (resultSchema) => ({
 
 const buildErrorResponseSchema = () => ({
   ...jsonRpcResponseBase,
-  required: [...jsonRpcResponseBase.required, "error"],
+  required: [...jsonRpcResponseBase.required, 'error'],
   properties: {
     ...jsonRpcResponseBase.properties,
     error: errorSchema,
@@ -523,56 +512,52 @@ const buildNotificationSchema = (method, paramsSchema) => ({
     method: { const: method },
     params: paramsSchema,
   },
-  required: [...jsonRpcNotificationBase.required, "params"],
+  required: [...jsonRpcNotificationBase.required, 'params'],
 });
 
 const REQUEST_SCHEMAS = {
-  initialize: buildRequestSchema("initialize", initializeParamsSchema, true),
-  ping: buildRequestSchema("ping", pingParamsSchema, true),
-  listClusters: buildRequestSchema("listClusters", emptyParamsSchema, false),
-  getClusterSummary: buildRequestSchema(
-    "getClusterSummary",
-    getClusterSummaryParamsSchema,
-    true
-  ),
+  initialize: buildRequestSchema('initialize', initializeParamsSchema, true),
+  ping: buildRequestSchema('ping', pingParamsSchema, true),
+  listClusters: buildRequestSchema('listClusters', emptyParamsSchema, false),
+  getClusterSummary: buildRequestSchema('getClusterSummary', getClusterSummaryParamsSchema, true),
   listClusterMetrics: buildRequestSchema(
-    "listClusterMetrics",
+    'listClusterMetrics',
     listClusterMetricsParamsSchema,
     false
   ),
   startClusterFromText: buildRequestSchema(
-    "startClusterFromText",
+    'startClusterFromText',
     startClusterFromTextParamsSchema,
     true
   ),
   startClusterFromIssue: buildRequestSchema(
-    "startClusterFromIssue",
+    'startClusterFromIssue',
     startClusterFromIssueParamsSchema,
     true
   ),
   sendGuidanceToAgent: buildRequestSchema(
-    "sendGuidanceToAgent",
+    'sendGuidanceToAgent',
     sendGuidanceToAgentParamsSchema,
     true
   ),
   sendGuidanceToCluster: buildRequestSchema(
-    "sendGuidanceToCluster",
+    'sendGuidanceToCluster',
     sendGuidanceToClusterParamsSchema,
     true
   ),
   subscribeClusterLogs: buildRequestSchema(
-    "subscribeClusterLogs",
+    'subscribeClusterLogs',
     subscribeClusterLogsParamsSchema,
     true
   ),
   subscribeClusterTimeline: buildRequestSchema(
-    "subscribeClusterTimeline",
+    'subscribeClusterTimeline',
     subscribeClusterTimelineParamsSchema,
     true
   ),
-  unsubscribe: buildRequestSchema("unsubscribe", unsubscribeParamsSchema, true),
+  unsubscribe: buildRequestSchema('unsubscribe', unsubscribeParamsSchema, true),
   getClusterTopology: buildRequestSchema(
-    "getClusterTopology",
+    'getClusterTopology',
     getClusterTopologyParamsSchema,
     true
   ),
@@ -595,12 +580,9 @@ const RESPONSE_SCHEMAS = {
 };
 
 const NOTIFICATION_SCHEMAS = {
-  clusterLogLines: buildNotificationSchema(
-    "clusterLogLines",
-    clusterLogLinesNotificationSchema
-  ),
+  clusterLogLines: buildNotificationSchema('clusterLogLines', clusterLogLinesNotificationSchema),
   clusterTimelineEvents: buildNotificationSchema(
-    "clusterTimelineEvents",
+    'clusterTimelineEvents',
     clusterTimelineEventsNotificationSchema
   ),
 };

@@ -29,12 +29,10 @@ describe('Prompt Selection - Static (backward compat)', function () {
   });
 
   it('should return null if no prompt configured', function () {
-    const agent = new AgentWrapper(
-      { id: 'test', timeout: 0 },
-      mockMessageBus,
-      mockCluster,
-      { testMode: true, mockSpawnFn: () => {} }
-    );
+    const agent = new AgentWrapper({ id: 'test', timeout: 0 }, mockMessageBus, mockCluster, {
+      testMode: true,
+      mockSpawnFn: () => {},
+    });
 
     assert.strictEqual(agent._selectPrompt(), null);
   });

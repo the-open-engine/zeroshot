@@ -107,13 +107,7 @@ impl Default for State {
     }
 }
 
-pub fn render(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &State,
-    cluster_id: &str,
-    agent_id: &str,
-) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, state: &State, cluster_id: &str, agent_id: &str) {
     let [header_area, logs_area, guidance_area] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(4),
@@ -188,15 +182,19 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &State) {
             .map(stream::format_log_line_styled)
             .collect()
     };
-    let widget = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let widget = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 
     // Scrollbar
     if !state.logs.is_empty() && height > 0 {
         let total = state.logs.len();
-        let position = total.saturating_sub(height).saturating_sub(state.logs.scroll_offset);
-        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-            .position(position);
+        let position = total
+            .saturating_sub(height)
+            .saturating_sub(state.logs.scroll_offset);
+        let mut scrollbar_state =
+            ScrollbarState::new(total.saturating_sub(height)).position(position);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             inner,

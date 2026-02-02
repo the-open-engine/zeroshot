@@ -11,12 +11,12 @@ fn intent_submit_text_starts_cluster_from_text() {
 
     let (state, effects) = app::update(state, Action::Spine(SpineAction::Submit));
 
-    assert!(effects.contains(&Effect::Backend(
-        BackendRequest::StartClusterFromText {
+    assert!(
+        effects.contains(&Effect::Backend(BackendRequest::StartClusterFromText {
             text: "build".to_string(),
             provider_override: None,
-        }
-    )));
+        }))
+    );
     assert_eq!(state.spine.input.input, "");
     assert_eq!(state.spine.mode, SpineMode::Intent);
 }
@@ -30,12 +30,12 @@ fn intent_submit_issue_starts_cluster_from_issue() {
 
     let (state, effects) = app::update(state, Action::Spine(SpineAction::Submit));
 
-    assert!(effects.contains(&Effect::Backend(
-        BackendRequest::StartClusterFromIssue {
+    assert!(
+        effects.contains(&Effect::Backend(BackendRequest::StartClusterFromIssue {
             reference: "org/repo#42".to_string(),
             provider_override: None,
-        }
-    )));
+        }))
+    );
     assert_eq!(state.spine.input.input, "");
     assert_eq!(state.spine.mode, SpineMode::Intent);
 }
@@ -52,12 +52,12 @@ fn whisper_cluster_submit_sends_guidance_to_cluster() {
 
     let (state, effects) = app::update(state, Action::Spine(SpineAction::Submit));
 
-    assert!(effects.contains(&Effect::Backend(
-        BackendRequest::SendGuidanceToCluster {
+    assert!(
+        effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToCluster {
             cluster_id: "cluster-1".to_string(),
             message: "ping".to_string(),
-        }
-    )));
+        }))
+    );
     assert_eq!(state.spine.input.input, "");
     assert_eq!(state.spine.mode, SpineMode::Intent);
 }
@@ -75,13 +75,13 @@ fn whisper_agent_submit_sends_guidance_to_agent() {
 
     let (state, effects) = app::update(state, Action::Spine(SpineAction::Submit));
 
-    assert!(effects.contains(&Effect::Backend(
-        BackendRequest::SendGuidanceToAgent {
+    assert!(
+        effects.contains(&Effect::Backend(BackendRequest::SendGuidanceToAgent {
             cluster_id: "cluster-1".to_string(),
             agent_id: "agent-1".to_string(),
             message: "ping".to_string(),
-        }
-    )));
+        }))
+    );
     assert_eq!(state.spine.input.input, "");
     assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
 }

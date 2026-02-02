@@ -66,7 +66,8 @@ pub fn render(
     }
 
     let title = stream::overlay_title("Stream", time_cursor);
-    let overlay = StreamOverlay::new(title, content_lines).border_style(theme::focus_border_style());
+    let overlay =
+        StreamOverlay::new(title, content_lines).border_style(theme::focus_border_style());
     frame.render_widget(overlay, area);
 
     if let Some(metadata) = metadata {
@@ -188,8 +189,7 @@ fn build_phase_marker_margin(
         return None;
     }
 
-    let markers =
-        stream::derive_phase_markers(timeline, time_cursor, stream::PHASE_MARKER_LIMIT);
+    let markers = stream::derive_phase_markers(timeline, time_cursor, stream::PHASE_MARKER_LIMIT);
     if markers.is_empty() {
         return None;
     }
@@ -281,11 +281,7 @@ fn apply_phase_marker_margin<'a>(
         .collect()
 }
 
-fn prepend_phase_marker_label<'a>(
-    line: Line<'a>,
-    label: &str,
-    margin_width: usize,
-) -> Line<'a> {
+fn prepend_phase_marker_label<'a>(line: Line<'a>, label: &str, margin_width: usize) -> Line<'a> {
     let mut spans = Vec::with_capacity(line.spans.len() + 2);
     let mut label_text = label.to_string();
     if label_text.chars().count() < margin_width {
@@ -351,15 +347,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                render(
-                    frame,
-                    area,
-                    "cluster-1",
-                    "agent-1",
-                    None,
-                    None,
-                    &cursor,
-                );
+                render(frame, area, "cluster-1", "agent-1", None, None, &cursor);
             })
             .expect("draw");
 
@@ -494,12 +482,7 @@ mod tests {
             },
         ]);
         let mut timeline = TimeIndexedBuffer::new(16);
-        timeline.push_many(vec![sample_timeline_event(
-            "event-1",
-            150,
-            "plan",
-            "start",
-        )]);
+        timeline.push_many(vec![sample_timeline_event("event-1", 150, "plan", "start")]);
 
         let cursor = TimeCursor {
             mode: TimeCursorMode::Live,

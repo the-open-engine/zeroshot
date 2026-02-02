@@ -8,9 +8,9 @@ use ratatui::widgets::canvas::{Canvas, Circle, Points};
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::protocol::ClusterSummary;
 use crate::app::animation::{self, AnimClock};
 use crate::app::Camera;
+use crate::protocol::ClusterSummary;
 use crate::ui::shared::calm_empty_state;
 use crate::ui::theme;
 
@@ -170,12 +170,8 @@ impl FleetRadarState {
                     radius: target_radius,
                     intensity: target_intensity,
                 });
-            entry.radius = animation::smooth_toward_f64(
-                entry.radius,
-                target_radius,
-                dt_ms,
-                ORB_SMOOTH_RATE,
-            );
+            entry.radius =
+                animation::smooth_toward_f64(entry.radius, target_radius, dt_ms, ORB_SMOOTH_RATE);
             entry.intensity = animation::smooth_toward_f64(
                 entry.intensity,
                 target_intensity,
@@ -208,7 +204,10 @@ impl FleetRadarState {
                 .unwrap_or(cluster.message_count);
             let mut activity = prev_activity;
 
-            if prev_count.map(|prev| cluster.message_count > prev).unwrap_or(true) {
+            if prev_count
+                .map(|prev| cluster.message_count > prev)
+                .unwrap_or(true)
+            {
                 activity = Some(now_ms);
             }
 
@@ -237,10 +236,9 @@ impl FleetRadarState {
     fn ensure_orb_states(&mut self, clusters: &[ClusterSummary], now_ms: i64) {
         for cluster in clusters {
             let (radius, intensity) = orb_targets(self, cluster, now_ms);
-            self.orb_states.entry(cluster.id.clone()).or_insert(OrbVisual {
-                radius,
-                intensity,
-            });
+            self.orb_states
+                .entry(cluster.id.clone())
+                .or_insert(OrbVisual { radius, intensity });
         }
         self.orb_states
             .retain(|id, _| clusters.iter().any(|cluster| cluster.id == *id));
@@ -253,11 +251,7 @@ impl FleetRadarState {
         }
 
         if let Some(id) = selected_id {
-            if let Some(index) = self
-                .clusters
-                .iter()
-                .position(|cluster| cluster.id == id)
-            {
+            if let Some(index) = self.clusters.iter().position(|cluster| cluster.id == id) {
                 self.selected = index;
                 return;
             }
@@ -287,10 +281,8 @@ impl FleetRadarState {
             if idx == self.selected {
                 continue;
             }
-            let layout = self.layout_for(
-                cluster.id.as_str(),
-                self.activity_age_ms(cluster, now_ms),
-            );
+            let layout =
+                self.layout_for(cluster.id.as_str(), self.activity_age_ms(cluster, now_ms));
             let dx = layout.x - current_layout.x;
             let dy = layout.y - current_layout.y;
 
@@ -361,11 +353,7 @@ pub fn render(
     let pulse = animation::pulse_factor(anim_clock.phase) as f64;
 
     let canvas = Canvas::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Fleet Radar"),
-        )
+        .block(Block::default().borders(Borders::ALL).title("Fleet Radar"))
         .x_bounds([center_x - half_span, center_x + half_span])
         .y_bounds([center_y - half_span, center_y + half_span])
         .marker(Marker::Braille)
@@ -388,10 +376,7 @@ pub fn render(
                 let intensity = orb.intensity;
                 let is_selected = selected_id == Some(cluster.id.as_str());
                 let is_pinned = pinned_id == Some(cluster.id.as_str());
-                let is_error = matches!(
-                    cluster.state.as_str(),
-                    "error" | "failed" | "failure"
-                );
+                let is_error = matches!(cluster.state.as_str(), "error" | "failed" | "failure");
 
                 if is_error {
                     let intensity_scale = 0.6 + 0.4 * intensity;
@@ -525,11 +510,7 @@ fn orb_intensity(delta: i64, age_ms: i64) -> f64 {
     (0.3 + delta_norm * 0.5 + recency * 0.2).min(1.0)
 }
 
-fn orb_targets(
-    state: &FleetRadarState,
-    cluster: &ClusterSummary,
-    now_ms: i64,
-) -> (f64, f64) {
+fn orb_targets(state: &FleetRadarState, cluster: &ClusterSummary, now_ms: i64) -> (f64, f64) {
     let age_ms = state.activity_age_ms(cluster, now_ms);
     let delta = state.activity_delta(cluster.id.as_str());
     (orb_radius(delta, age_ms), orb_intensity(delta, age_ms))
@@ -577,10 +558,10 @@ fn stable_hash(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::widgets::test_utils::line_text;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
-    use crate::ui::widgets::test_utils::line_text;
 
     fn cluster(id: &str) -> ClusterSummary {
         ClusterSummary {
@@ -667,10 +648,9 @@ mod tests {
         state
             .layout_angles
             .insert("west".to_string(), std::f64::consts::PI);
-        state.layout_angles.insert(
-            "south".to_string(),
-            std::f64::consts::TAU * 0.75,
-        );
+        state
+            .layout_angles
+            .insert("south".to_string(), std::f64::consts::TAU * 0.75);
 
         state.selected = state
             .clusters
@@ -678,32 +658,16 @@ mod tests {
             .position(|cluster| cluster.id == "west")
             .unwrap();
 
-        assert!(state.move_selection_direction(
-            now_ms,
-            Direction::Right,
-            MoveSpeed::Step
-        ));
+        assert!(state.move_selection_direction(now_ms, Direction::Right, MoveSpeed::Step));
         assert_eq!(state.selected_cluster_id().as_deref(), Some("east"));
 
-        assert!(state.move_selection_direction(
-            now_ms,
-            Direction::Up,
-            MoveSpeed::Step
-        ));
+        assert!(state.move_selection_direction(now_ms, Direction::Up, MoveSpeed::Step));
         assert_eq!(state.selected_cluster_id().as_deref(), Some("north"));
 
-        assert!(state.move_selection_direction(
-            now_ms,
-            Direction::Down,
-            MoveSpeed::Step
-        ));
+        assert!(state.move_selection_direction(now_ms, Direction::Down, MoveSpeed::Step));
         assert_eq!(state.selected_cluster_id().as_deref(), Some("south"));
 
-        assert!(!state.move_selection_direction(
-            now_ms,
-            Direction::Down,
-            MoveSpeed::Step
-        ));
+        assert!(!state.move_selection_direction(now_ms, Direction::Down, MoveSpeed::Step));
         assert_eq!(state.selected_cluster_id().as_deref(), Some("south"));
     }
 }

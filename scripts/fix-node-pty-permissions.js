@@ -30,7 +30,7 @@ let fixed = 0;
 let errors = 0;
 
 try {
-  const platforms = fs.readdirSync(prebuildsDir).filter(f => {
+  const platforms = fs.readdirSync(prebuildsDir).filter((f) => {
     try {
       return fs.statSync(path.join(prebuildsDir, f)).isDirectory();
     } catch {

@@ -1,7 +1,7 @@
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::Terminal;
 use ratatui::Frame;
+use ratatui::Terminal;
 
 pub fn buffer_lines(buffer: &Buffer) -> Vec<String> {
     let area = buffer.area;

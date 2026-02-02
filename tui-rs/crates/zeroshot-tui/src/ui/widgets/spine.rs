@@ -28,7 +28,9 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, state: &SpineState) {
         lines.push(build_hint_line(inner.width, hint_text, hint_tone));
     }
 
-    let widget = Paragraph::new(lines).block(block).alignment(Alignment::Left);
+    let widget = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Left);
     frame.render_widget(widget, area);
 }
 
@@ -133,12 +135,7 @@ fn hint_fits(spans: &[Span<'_>], width: u16, hint: &str) -> bool {
     width > used_len + hint_len + 1
 }
 
-fn append_hint<'a>(
-    spans: &mut Vec<Span<'a>>,
-    width: u16,
-    hint: &'a str,
-    tone: SpineHintTone,
-) {
+fn append_hint<'a>(spans: &mut Vec<Span<'a>>, width: u16, hint: &'a str, tone: SpineHintTone) {
     if hint.is_empty() || width == 0 {
         return;
     }
@@ -286,9 +283,7 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let line = line_text(buffer, 1);
         let ghost_start = line.find("vider").expect("ghost text");
-        let cell = buffer
-            .cell((ghost_start as u16, 1))
-            .expect("ghost cell");
+        let cell = buffer.cell((ghost_start as u16, 1)).expect("ghost cell");
         let expected_fg = theme::spine_completion_style().fg.expect("fg");
         assert_eq!(cell.fg, expected_fg);
     }

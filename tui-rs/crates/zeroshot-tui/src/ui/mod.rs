@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
     let size = frame.area();
     let [header_area, content_area, status_area] = Layout::vertical([
         Constraint::Length(1), // header
-        Constraint::Min(1),   // content
+        Constraint::Min(1),    // content
         Constraint::Length(1), // status bar / command bar
     ])
     .areas(size);
@@ -41,9 +41,13 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             state.provider_override.as_deref(),
             &state.monitor.clusters,
         ),
-        ScreenId::Monitor | ScreenId::FleetRadar => {
-            monitor::render(frame, content_area, &state.monitor, &state.metrics, state.now_ms)
-        }
+        ScreenId::Monitor | ScreenId::FleetRadar => monitor::render(
+            frame,
+            content_area,
+            &state.monitor,
+            &state.metrics,
+            state.now_ms,
+        ),
         ScreenId::Cluster { id } => {
             if let Some(cluster_state) = state.clusters.get(id) {
                 let metrics = state.metrics.get(id);
@@ -72,8 +76,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
         ScreenId::Agent {
             cluster_id,
             agent_id,
-        }
-        => {
+        } => {
             let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
             if let Some(agent_state) = state.agents.get(&key) {
                 agent::render(frame, content_area, agent_state, cluster_id, agent_id);
@@ -125,11 +128,8 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
         .areas(size);
         (canvas_area, Some(scrub_area), spine_area)
     } else {
-        let [canvas_area, spine_area] = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(2),
-        ])
-        .areas(size);
+        let [canvas_area, spine_area] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).areas(size);
         (canvas_area, None, spine_area)
     };
 
@@ -219,7 +219,10 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 time_cursor: &state.time_cursor,
                 logs: state
                     .agent_microscopes
-                    .get(&crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone()))
+                    .get(&crate::app::AgentKey::new(
+                        cluster_id.clone(),
+                        agent_id.clone(),
+                    ))
                     .map(|entry| &entry.logs_time),
                 agent_id: None,
             }),
@@ -253,14 +256,8 @@ fn backend_status_hint(status: &BackendStatus) -> Option<SpineHint> {
             "○ Backend disconnected",
             SpineHintTone::Muted,
         )),
-        BackendStatus::Error(_) => Some(SpineHint::new(
-            "✗ Backend error",
-            SpineHintTone::Error,
-        )),
-        BackendStatus::Exited(_) => Some(SpineHint::new(
-            "✗ Backend exited",
-            SpineHintTone::Error,
-        )),
+        BackendStatus::Error(_) => Some(SpineHint::new("✗ Backend error", SpineHintTone::Error)),
+        BackendStatus::Exited(_) => Some(SpineHint::new("✗ Backend exited", SpineHintTone::Error)),
     }
 }
 
@@ -275,10 +272,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         BackendStatus::Exited(_) => ("✗", theme::backend_error_style()),
     };
 
-    let provider_label = state
-        .provider_override
-        .as_deref()
-        .unwrap_or("default");
+    let provider_label = state.provider_override.as_deref().unwrap_or("default");
 
     // Build left side
     let left = Line::from(vec![
@@ -354,19 +348,11 @@ fn screen_breadcrumb(screen: &ScreenId) -> String {
         ScreenId::Agent {
             cluster_id,
             agent_id,
-        } => format!(
-            "Monitor > {} > {}",
-            truncate_id(cluster_id),
-            agent_id
-        ),
+        } => format!("Monitor > {} > {}", truncate_id(cluster_id), agent_id),
         ScreenId::AgentMicroscope {
             cluster_id,
             agent_id,
-        } => format!(
-            "Fleet Radar > {} > {}",
-            truncate_id(cluster_id),
-            agent_id
-        ),
+        } => format!("Fleet Radar > {} > {}", truncate_id(cluster_id), agent_id),
     }
 }
 
@@ -385,16 +371,8 @@ fn truncate_id(id: &str) -> String {
 
 fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
     match screen {
-        ScreenId::Launcher => vec![
-            ("Enter", "start"),
-            ("/", "commands"),
-            ("Ctrl+C", "quit"),
-        ],
-        ScreenId::IntentConsole => vec![
-            ("i", "intent"),
-            ("/", "commands"),
-            ("Esc", "back"),
-        ],
+        ScreenId::Launcher => vec![("Enter", "start"), ("/", "commands"), ("Ctrl+C", "quit")],
+        ScreenId::IntentConsole => vec![("i", "intent"), ("/", "commands"), ("Esc", "back")],
         ScreenId::Monitor => vec![
             ("j/k", "navigate"),
             ("Enter", "open"),
@@ -420,11 +398,7 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("Enter", "zoom"),
             ("Esc", "back"),
         ],
-        ScreenId::Agent { .. } => vec![
-            ("Enter", "send"),
-            ("j/k", "scroll"),
-            ("Esc", "back"),
-        ],
+        ScreenId::Agent { .. } => vec![("Enter", "send"), ("j/k", "scroll"), ("Esc", "back")],
         ScreenId::AgentMicroscope { .. } => vec![("Esc", "back")],
     }
 }
@@ -432,10 +406,10 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::widgets::test_utils::line_text;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
-    use crate::ui::widgets::test_utils::line_text;
 
     fn buffer_contains(buffer: &Buffer, needle: &str) -> bool {
         for y in 0..buffer.area.height {

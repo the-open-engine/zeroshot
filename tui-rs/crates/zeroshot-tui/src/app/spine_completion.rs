@@ -21,7 +21,11 @@ struct CompletionContext {
     candidates: Vec<String>,
 }
 
-pub fn build_spine_completion(mode: SpineMode, input: &str, cursor: usize) -> Option<SpineCompletion> {
+pub fn build_spine_completion(
+    mode: SpineMode,
+    input: &str,
+    cursor: usize,
+) -> Option<SpineCompletion> {
     if cursor != input.chars().count() {
         return None;
     }
@@ -71,9 +75,10 @@ fn command_completion_context(input: &str) -> Option<CompletionContext> {
     }
     let args = parts.collect::<Vec<_>>();
 
-    let (prefix, candidates, allow_empty): (&str, &[&str], bool) =
-        if args.is_empty() && !ends_with_space {
-            (command, &COMMAND_CANDIDATES, false)
+    let (prefix, candidates, allow_empty): (&str, &[&str], bool) = if args.is_empty()
+        && !ends_with_space
+    {
+        (command, &COMMAND_CANDIDATES, false)
     } else if command.eq_ignore_ascii_case("provider") && (!args.is_empty() || ends_with_space) {
         let prefix = if ends_with_space {
             ""
@@ -114,7 +119,11 @@ fn prefix_matches(prefix: &str, candidates: &[&str], allow_empty: bool) -> Vec<S
         .collect()
 }
 
-fn build_completion(prefix: &str, candidates: &[String], selected: usize) -> Option<SpineCompletion> {
+fn build_completion(
+    prefix: &str,
+    candidates: &[String],
+    selected: usize,
+) -> Option<SpineCompletion> {
     if candidates.is_empty() || selected >= candidates.len() {
         return None;
     }
@@ -149,8 +158,8 @@ mod tests {
 
     #[test]
     fn provider_arg_suggests_known_provider() {
-        let completion = build_spine_completion(SpineMode::Command, "provider c", 10)
-            .expect("completion");
+        let completion =
+            build_spine_completion(SpineMode::Command, "provider c", 10).expect("completion");
         assert_eq!(completion.ghost, "laude");
     }
 

@@ -3,8 +3,8 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendEvent};
 use zeroshot_tui::backend::stdio::StdioBackendClient;
+use zeroshot_tui::backend::{BackendClient, BackendConfig, BackendEvent};
 use zeroshot_tui::protocol::{
     GetClusterSummaryParams, SubscribeClusterLogsParams, SubscribeClusterTimelineParams,
     UnsubscribeParams,
@@ -12,6 +12,13 @@ use zeroshot_tui::protocol::{
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static BACKEND_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+fn is_ci() -> bool {
+    match std::env::var("CI") {
+        Ok(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes"),
+        Err(_) => false,
+    }
+}
 
 struct EnvGuard {
     keys: Vec<&'static str>,
@@ -84,10 +91,25 @@ fn resolve_backend_path() -> Option<PathBuf> {
 }
 
 fn build_client() -> Option<StdioBackendClient> {
-    let backend_path = BACKEND_PATH.get_or_init(resolve_backend_path).clone()?;
+    let backend_path = BACKEND_PATH.get_or_init(resolve_backend_path).clone();
+    let Some(backend_path) = backend_path else {
+        if is_ci() {
+            panic!("TUI backend not available. Run `npm ci` and `npm run build:tui-backend` before cargo test.");
+        }
+        return None;
+    };
     let mut config = BackendConfig::with_backend_path(backend_path);
     config.request_timeout = Some(Duration::from_secs(10));
-    StdioBackendClient::connect(config).ok()
+    match StdioBackendClient::connect(config) {
+        Ok(client) => Some(client),
+        Err(err) => {
+            if is_ci() {
+                panic!("Failed to connect to TUI backend: {err}");
+            }
+            eprintln!("Skipping backend integration: {err}");
+            None
+        }
+    }
 }
 
 #[test]
@@ -106,7 +128,6 @@ fn initialize_and_list_clusters() {
     assert!(client.server_capabilities().is_some());
     let result = client.list_clusters().expect("listClusters");
     let _ = result.clusters.len();
-
 }
 
 #[test]
@@ -143,7 +164,9 @@ fn interleaved_notifications_do_not_break_requests() {
         .map(|cluster| cluster.id.clone())
         .unwrap_or_else(|| "unknown-cluster".to_string());
     let _ = client
-        .get_cluster_summary(GetClusterSummaryParams { cluster_id: summary })
+        .get_cluster_summary(GetClusterSummaryParams {
+            cluster_id: summary,
+        })
         .err();
 
     let _ = events.recv_timeout(Duration::from_millis(200));
@@ -153,7 +176,6 @@ fn interleaved_notifications_do_not_break_requests() {
             subscription_id: subscription.subscription_id,
         })
         .expect("unsubscribe");
-
 }
 
 #[test]
@@ -178,5 +200,4 @@ fn backend_exit_and_drop() {
         BackendEvent::BackendExited(_) => {}
         BackendEvent::Notification(_) => panic!("expected BackendExited"),
     }
-
 }

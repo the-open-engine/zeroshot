@@ -80,10 +80,7 @@ fn focus_cycles_and_activate_uses_selected_agent() {
 fn scroll_offset_grows_when_new_lines_arrive() {
     let mut state = cluster::State::default();
     state.focus = ClusterPane::Logs;
-    state.push_log_lines(
-        vec![log_line(0, None, None), log_line(1, None, None)],
-        None,
-    );
+    state.push_log_lines(vec![log_line(0, None, None), log_line(1, None, None)], None);
     state.move_focused(-1);
     assert_eq!(state.logs.scroll_offset, 1);
     state.push_log_lines(vec![log_line(2, None, None)], None);

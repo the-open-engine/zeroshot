@@ -4,7 +4,11 @@
  */
 
 const chalk = require('chalk');
-const { buildClusterPrefix, getColorForSender, parseDataField } = require('./message-formatter-utils');
+const {
+  buildClusterPrefix,
+  getColorForSender,
+  parseDataField,
+} = require('./message-formatter-utils');
 
 /**
  * Format AGENT_ERROR for watch mode

@@ -1,6 +1,4 @@
-use zeroshot_tui::app::animation::{
-    pulse_factor, step_spring_f32, AnimClock, PHASE_TICKS,
-};
+use zeroshot_tui::app::animation::{pulse_factor, step_spring_f32, AnimClock, PHASE_TICKS};
 
 #[test]
 fn anim_clock_advances_and_wraps() {
