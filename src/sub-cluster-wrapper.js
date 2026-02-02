@@ -462,6 +462,29 @@ class SubClusterWrapper {
       if (message.topic === 'CLUSTER_COMPLETE' && message.cluster_id === childId) {
         this._onChildComplete(message).catch((err) => {
           console.error(`Failed to handle child completion: ${err.message}`);
+
+          // CRITICAL: Hook failure = cluster failure
+          this._publishLifecycle('HOOK_FAILED', {
+            error: err.message,
+            hook: 'onComplete'
+          });
+
+          this.messageBus.publish({
+            cluster_id: this.parentCluster.id,
+            topic: 'CLUSTER_FAILED',
+            sender: this.id,
+            content: {
+              text: `Hook failed: ${err.message}`,
+              data: {
+                reason: 'onComplete hook failed',
+                error: err.message,
+                stack: err.stack
+              }
+            }
+          });
+
+          this.state = 'failed';
+          throw err;
         });
       }
     });
@@ -471,6 +494,29 @@ class SubClusterWrapper {
       if (message.topic === 'CLUSTER_FAILED' && message.cluster_id === childId) {
         this._onChildFailed(message).catch((err) => {
           console.error(`Failed to handle child failure: ${err.message}`);
+
+          // CRITICAL: Hook failure = cluster failure
+          this._publishLifecycle('HOOK_FAILED', {
+            error: err.message,
+            hook: 'onFailed'
+          });
+
+          this.messageBus.publish({
+            cluster_id: this.parentCluster.id,
+            topic: 'CLUSTER_FAILED',
+            sender: this.id,
+            content: {
+              text: `Hook failed: ${err.message}`,
+              data: {
+                reason: 'onFailed hook failed',
+                error: err.message,
+                stack: err.stack
+              }
+            }
+          });
+
+          this.state = 'failed';
+          throw err;
         });
       }
     });
@@ -488,13 +534,13 @@ class SubClusterWrapper {
       iteration: this.iteration,
     });
 
-    // Execute onComplete hook
+    // Execute onComplete hook - will throw if verification fails
     await this._executeHook('onComplete', {
       result: message,
       triggeringMessage: null,
     });
 
-    // Clean up child cluster
+    // Only clean up and transition to idle if hook succeeded
     await this._stopChildCluster();
 
     this.state = 'idle';

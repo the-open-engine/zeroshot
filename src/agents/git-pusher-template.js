@@ -410,18 +410,30 @@ function generateGitPusherAgent(platform, options = {}) {
     prompt: generatePrompt(platformConfig),
     hooks: {
       onComplete: {
-        action: 'publish_message',
-        config: {
-          topic: 'CLUSTER_COMPLETE',
-          content: {
-            data: { reason: 'git-pusher-complete' },
-          },
-        },
+        action: 'verify_github_pr',
+        // No config needed - verification reads from result.structured_output
+        // and publishes CLUSTER_COMPLETE only if verification passes
       },
     },
     output: {
       topic: 'PR_CREATED',
       publishAfter: 'CLUSTER_COMPLETE',
+    },
+    structuredOutput: {
+      type: 'object',
+      properties: {
+        pr_number: {
+          type: 'number',
+          description: 'MUST extract from gh pr create output - NOT from git push link'
+        },
+        pr_url: { type: 'string' },
+        merged: { type: 'boolean' },
+        merge_commit_sha: {
+          type: 'string',
+          description: 'MUST extract from gh pr merge output'
+        }
+      },
+      required: ['pr_number', 'pr_url', 'merged', 'merge_commit_sha']
     },
   };
 }

@@ -1,0 +1,163 @@
+{
+  "emerald-prism-4": {
+    "id": "emerald-prism-4",
+    "config": {
+      "agents": [
+        {
+          "id": "test-conductor",
+          "role": "conductor",
+          "modelLevel": "level1",
+          "outputFormat": "json",
+          "jsonSchema": {
+            "type": "object",
+            "properties": {
+              "complexity": {
+                "type": "string",
+                "enum": [
+                  "TRIVIAL",
+                  "SIMPLE",
+                  "STANDARD",
+                  "CRITICAL"
+                ]
+              },
+              "reasoning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "complexity",
+              "reasoning"
+            ]
+          },
+          "prompt": "Classify this task: {{ISSUE_OPENED.content.text}}. Return JSON with complexity and reasoning.",
+          "triggers": [
+            {
+              "topic": "ISSUE_OPENED",
+              "action": "execute_task"
+            }
+          ],
+          "hooks": {
+            "onComplete": {
+              "action": "publish_message",
+              "config": {
+                "topic": "CLASSIFICATION_DONE",
+                "content": {
+                  "text": "Classification complete",
+                  "data": {
+                    "result": "{{result}}"
+                  }
+                }
+              }
+            }
+          },
+          "cwd": "/home/ubuntu/.zeroshot/worktrees/frozen-equinox-32",
+          "strictSchema": true,
+          "timeout": 0
+        },
+        {
+          "id": "git-pusher",
+          "role": "completion-detector",
+          "modelLevel": "level2",
+          "triggers": [
+            {
+              "topic": "VALIDATION_RESULT",
+              "logic": {
+                "engine": "javascript",
+                "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nif (validators.length === 0) return true;\nconst results = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (results.length < validators.length) return false;\nconst allApproved = results.every(r => r.content?.data?.approved === 'true' || r.content?.data?.approved === true);\nif (!allApproved) return false;\nconst hasSufficientEvidence = results.every(r => {\n  const criteria = r.content?.data?.criteriaResults;\n  if (!Array.isArray(criteria) || criteria.length === 0) return true;\n  return criteria.every(c => {\n    const status = String(c.status || '').toUpperCase();\n    if (status === 'CANNOT_VALIDATE') return true;\n    if (status === 'SKIPPED') return true;\n    if (status === 'CANNOT_VALIDATE_YET') return false;\n    const evidence = c.evidence || {};\n    const hasCommand = typeof evidence.command === 'string' && evidence.command.trim().length > 0;\n    const exitCode = evidence.exitCode;\n    const hasExitCode =\n      typeof exitCode === 'number' ||\n      (typeof exitCode === 'string' && exitCode.trim() !== '' && Number.isFinite(Number(exitCode)));\n    const hasOutput = evidence.output === undefined || typeof evidence.output === 'string';\n    return hasCommand && hasExitCode && hasOutput;\n  });\n});\nreturn hasSufficientEvidence;"
+              },
+              "action": "execute_task"
+            }
+          ],
+          "prompt": "🚨 CRITICAL: ALL VALIDATORS APPROVED. YOU MUST CREATE A PR AND GET IT MERGED. DO NOT STOP UNTIL THE PR IS MERGED. 🚨\n\n## MANDATORY STEPS - EXECUTE EACH ONE IN ORDER - DO NOT SKIP ANY STEP\n\n### STEP 1: Stage ALL changes (MANDATORY)\n```bash\ngit add -A\n```\nRun this command. Do not skip it.\n\n### STEP 2: Check what's staged\n```bash\ngit status\n```\nRun this. If nothing to commit, output JSON with pr_url: null and stop.\n\n### STEP 3: Commit the changes (MANDATORY if there are changes)\n```bash\ngit commit -m \"feat: implement #unknown - Manual Input\"\n```\nRun this command. Do not skip it.\n\n### STEP 4: Push to origin (MANDATORY)\n```bash\ngit push -u origin HEAD\n```\nRun this. If it fails, check the error and fix it.\n\n⚠️ AFTER PUSH YOU ARE NOT DONE! CONTINUE TO STEP 5! ⚠️\n\n### STEP 5: CREATE THE PR (MANDATORY - YOU MUST RUN THIS COMMAND)\n```bash\ngh pr create --base dev --title \"feat: Manual Input\" --body \"Closes #unknown\"\n```\n🚨 YOU MUST RUN `gh pr create`! Outputting a link is NOT creating a PR! 🚨\nThe push output shows a \"Create a pull request\" link - IGNORE IT.\nYou MUST run the `gh pr create` command above. Save the actual PR URL from the output.\n\n⚠️ AFTER PR CREATION YOU ARE NOT DONE! CONTINUE TO STEP 6! ⚠️\n\n### STEP 6: MERGE THE PR (MANDATORY - THIS IS NOT OPTIONAL)\n```bash\ngh pr merge --merge --auto\n```\nThis sets auto-merge. If it fails (e.g., no auto-merge enabled), try:\n```bash\ngh pr merge --merge\n```\n\n🚨 IF MERGE FAILS DUE TO CONFLICTS - YOU MUST RESOLVE THEM:\na) Pull latest dev and rebase:\n   ```bash\n   git fetch origin dev\n   git rebase origin/dev\n   ```\nb) If conflicts appear - RESOLVE THEM IMMEDIATELY:\n   - Read the conflicting files\n   - Make intelligent decisions about what code to keep\n   - Edit the files to resolve conflicts\n   - `git add <resolved-files>`\n   - `git rebase --continue`\nc) Force push the resolved branch:\n   ```bash\n   git push --force-with-lease\n   ```\nd) Retry merge:\n   ```bash\ngh pr merge --merge\n```\n\nREPEAT UNTIL MERGED. DO NOT GIVE UP. DO NOT SKIP. THE PR MUST BE MERGED.\nIf merge is blocked by CI, wait and retry. If blocked by reviews, set auto-merge.\n\n\n\n## CRITICAL RULES\n- Execute EVERY step in order (1, 2, 3, 4, 5, 6)\n- Do NOT skip git add -A\n- Do NOT skip git commit\n- Do NOT skip gh pr create - THE TASK IS NOT DONE UNTIL PR EXISTS\n- Do NOT skip gh pr merge --merge - THE TASK IS NOT DONE UNTIL PR IS MERGED\n- If push fails, debug and fix it\n- If PR creation fails, debug and fix it\n- If merge fails, debug and fix it\n- DO NOT OUTPUT JSON UNTIL PR IS MERGED\n- A link from git push is NOT a PR - you must run gh pr create\n\n## Final Output\nONLY after the PR is MERGED, output:\n```json\n{\"pr_url\": \"https://github.com/owner/repo/pull/123\", \"pr_number\": 123, \"merged\": true}\n```\n\nIf truly no changes exist, output:\n```json\n{\"pr_url\": null, \"pr_number\": null, \"merged\": false}\n```",
+          "hooks": {
+            "onComplete": {
+              "action": "verify_github_pr"
+            }
+          },
+          "output": {
+            "topic": "PR_CREATED",
+            "publishAfter": "CLUSTER_COMPLETE"
+          },
+          "structuredOutput": {
+            "type": "object",
+            "properties": {
+              "pr_number": {
+                "type": "number",
+                "description": "MUST extract from gh pr create output - NOT from git push link"
+              },
+              "pr_url": {
+                "type": "string"
+              },
+              "merged": {
+                "type": "boolean"
+              },
+              "merge_commit_sha": {
+                "type": "string",
+                "description": "MUST extract from gh pr merge output"
+              }
+            },
+            "required": [
+              "pr_number",
+              "pr_url",
+              "merged",
+              "merge_commit_sha"
+            ]
+          },
+          "cwd": "/home/ubuntu/.zeroshot/worktrees/frozen-equinox-32",
+          "outputFormat": "json",
+          "jsonSchema": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "Brief summary of what was done"
+              },
+              "result": {
+                "type": "string",
+                "description": "Detailed result or output"
+              }
+            },
+            "required": [
+              "summary",
+              "result"
+            ]
+          },
+          "strictSchema": true,
+          "timeout": 0
+        }
+      ]
+    },
+    "state": "running",
+    "createdAt": 1770023875452,
+    "pid": 3049126,
+    "failureInfo": null,
+    "autoPr": true,
+    "prOptions": null,
+    "modelOverride": null,
+    "issue": null,
+    "isolation": {
+      "enabled": true,
+      "containerId": "e900d72bbf07",
+      "image": "zeroshot-cluster-base",
+      "workDir": "/home/ubuntu/.zeroshot/worktrees/frozen-equinox-32"
+    },
+    "agentStates": [
+      {
+        "id": "test-conductor",
+        "state": "executing_task",
+        "iteration": 3,
+        "currentTask": false,
+        "currentTaskId": null,
+        "processPid": 3051855
+      },
+      {
+        "id": "git-pusher",
+        "state": "idle",
+        "iteration": 0,
+        "currentTask": false,
+        "currentTaskId": null,
+        "processPid": null
+      }
+    ]
+  }
+}
