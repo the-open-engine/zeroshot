@@ -83,5 +83,5 @@ fn whisper_agent_submit_sends_guidance_to_agent() {
         }
     )));
     assert_eq!(state.spine.input.input, "");
-    assert_eq!(state.spine.mode, SpineMode::Intent);
+    assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
 }
