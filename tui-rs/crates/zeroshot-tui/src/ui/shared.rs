@@ -162,6 +162,10 @@ impl<T: HasTimestamp> TimeIndexedBuffer<T> {
         self.items.iter()
     }
 
+    pub fn iter_rev(&self) -> impl Iterator<Item = &T> {
+        self.items.iter().rev()
+    }
+
     fn lower_bound(&self, target: i64) -> usize {
         let mut left = 0usize;
         let mut right = self.items.len();
