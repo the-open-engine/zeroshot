@@ -236,10 +236,32 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             spine_state.hint = SpineHint::from_toast(toast_text, toast_state.level.clone());
         }
     } else if spine_state.hint.is_empty() {
-        spine_state.hint = SpineHint::new(DISRUPTIVE_SPINE_HINT, SpineHintTone::Muted);
+        if let Some(hint) = backend_status_hint(&state.backend_status) {
+            spine_state.hint = hint;
+        } else {
+            spine_state.hint = SpineHint::new(DISRUPTIVE_SPINE_HINT, SpineHintTone::Muted);
+        }
     }
     spine::render(frame, spine_area, &spine_state);
     spine::set_cursor(frame, spine_area, &spine_state);
+}
+
+fn backend_status_hint(status: &BackendStatus) -> Option<SpineHint> {
+    match status {
+        BackendStatus::Connected => None,
+        BackendStatus::Disconnected => Some(SpineHint::new(
+            "○ Backend disconnected",
+            SpineHintTone::Muted,
+        )),
+        BackendStatus::Error(_) => Some(SpineHint::new(
+            "✗ Backend error",
+            SpineHintTone::Error,
+        )),
+        BackendStatus::Exited(_) => Some(SpineHint::new(
+            "✗ Backend exited",
+            SpineHintTone::Error,
+        )),
+    }
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
@@ -404,5 +426,44 @@ fn screen_hints(screen: &ScreenId) -> Vec<(&'static str, &'static str)> {
             ("Esc", "back"),
         ],
         ScreenId::AgentMicroscope { .. } => vec![("Esc", "back")],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+    use crate::ui::widgets::test_utils::line_text;
+
+    fn buffer_contains(buffer: &Buffer, needle: &str) -> bool {
+        for y in 0..buffer.area.height {
+            if line_text(buffer, y).contains(needle) {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn disruptive_spine_shows_backend_disconnected() {
+        let backend = TestBackend::new(80, 8);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = AppState::default();
+        state.ui_variant = UiVariant::Disruptive;
+        state.screen_stack = vec![ScreenId::IntentConsole, ScreenId::FleetRadar];
+        state.backend_status = BackendStatus::Disconnected;
+        state.spine.hint = SpineHint::empty();
+        state.toast = None;
+
+        terminal
+            .draw(|frame| {
+                render(frame, &state);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, "Backend disconnected"));
     }
 }

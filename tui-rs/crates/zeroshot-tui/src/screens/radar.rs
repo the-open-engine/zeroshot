@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Circle, Points};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::protocol::ClusterSummary;
 use crate::app::animation::{self, AnimClock};
 use crate::app::Camera;
+use crate::ui::shared::calm_empty_state;
 use crate::ui::theme;
 
 const POLL_INTERVAL_MS: i64 = 1000;
@@ -445,25 +446,12 @@ pub fn render(
 }
 
 fn render_empty(frame: &mut Frame<'_>, area: Rect) {
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            "No clusters on the radar",
-            theme::muted_style(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Start a cluster from the Launcher (Esc)",
-            theme::dim_style(),
-        )),
-    ];
-    let widget = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Fleet Radar"),
-        );
+    let widget = calm_empty_state(
+        "Fleet Radar",
+        "No clusters yet.",
+        Some("Type an intent in the spine to start a cluster."),
+        None,
+    );
     frame.render_widget(widget, area);
 }
 
@@ -589,6 +577,10 @@ fn stable_hash(input: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+    use crate::ui::widgets::test_utils::line_text;
 
     fn cluster(id: &str) -> ClusterSummary {
         ClusterSummary {
@@ -600,6 +592,38 @@ mod tests {
             message_count: 0,
             cwd: None,
         }
+    }
+
+    fn buffer_contains(buffer: &Buffer, needle: &str) -> bool {
+        for y in 0..buffer.area.height {
+            if line_text(buffer, y).contains(needle) {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn fleet_radar_renders_empty_state() {
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let state = FleetRadarState::default();
+        let camera = Camera::default();
+        let anim_clock = AnimClock::default();
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &state, &camera, 0, &anim_clock, None);
+            })
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        assert!(buffer_contains(buffer, "No clusters yet."));
+        assert!(buffer_contains(
+            buffer,
+            "Type an intent in the spine to start a cluster."
+        ));
     }
 
     #[test]

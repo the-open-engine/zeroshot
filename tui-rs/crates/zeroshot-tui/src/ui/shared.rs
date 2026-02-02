@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 
-use ratatui::text::Line;
-use ratatui::widgets::{Block, BorderType, Borders};
+use ratatui::layout::Alignment;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use crate::ui::theme;
 
@@ -313,6 +314,30 @@ pub fn pane_block<'a>(title: impl Into<Line<'a>>, focused: bool) -> Block<'a> {
             .borders(Borders::ALL)
             .border_style(theme::unfocus_border_style())
     }
+}
+
+/// Builds a calm, centered empty-state card with optional detail + footer.
+pub fn calm_empty_state<'a>(
+    title: impl Into<Line<'a>>,
+    headline: &'a str,
+    detail: Option<&'a str>,
+    footer: Option<&'a str>,
+) -> Paragraph<'a> {
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(headline, theme::muted_style())));
+    if let Some(detail) = detail {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(detail, theme::dim_style())));
+    }
+    if let Some(footer) = footer {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(footer, theme::dim_style())));
+    }
+
+    Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL).title(title))
 }
 
 #[cfg(test)]
