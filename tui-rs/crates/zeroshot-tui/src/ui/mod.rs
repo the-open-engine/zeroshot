@@ -5,7 +5,7 @@ use ratatui::Frame;
 
 use crate::app::{AppState, BackendStatus, ScreenId, SpineHint, SpineHintTone, UiVariant};
 use crate::screens::{agent, agent_microscope, cluster, cluster_canvas, monitor, radar};
-use crate::ui::widgets::{command_bar, spine, toast};
+use crate::ui::widgets::{command_bar, scrub_bar, spine, toast};
 
 pub mod launcher;
 pub mod scene;
@@ -99,11 +99,22 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
 
 fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
     let size = frame.area();
-    let [canvas_area, spine_area] = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(2),
-    ])
-    .areas(size);
+    let (canvas_area, scrub_area, spine_area) = if size.height >= 4 {
+        let [canvas_area, scrub_area, spine_area] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
+        .areas(size);
+        (canvas_area, Some(scrub_area), spine_area)
+    } else {
+        let [canvas_area, spine_area] = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .areas(size);
+        (canvas_area, None, spine_area)
+    };
 
     match state.active_screen() {
         ScreenId::FleetRadar | ScreenId::Launcher | ScreenId::IntentConsole | ScreenId::Monitor => {
@@ -153,6 +164,28 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             agent_id,
         } => {
             agent_microscope::render(frame, canvas_area, cluster_id, agent_id);
+        }
+    }
+
+    if let Some(scrub_area) = scrub_area {
+        let scrub_state = match state.active_screen() {
+            ScreenId::ClusterCanvas { id } => Some(scrub_bar::ScrubBarState {
+                time_cursor: &state.time_cursor,
+                logs: state.clusters.get(id).map(|entry| &entry.logs_time),
+                agent_id: None,
+            }),
+            ScreenId::AgentMicroscope {
+                cluster_id,
+                agent_id,
+            } => Some(scrub_bar::ScrubBarState {
+                time_cursor: &state.time_cursor,
+                logs: state.clusters.get(cluster_id).map(|entry| &entry.logs_time),
+                agent_id: Some(agent_id.as_str()),
+            }),
+            _ => None,
+        };
+        if let Some(scrub_state) = scrub_state {
+            scrub_bar::render(frame, scrub_area, scrub_state);
         }
     }
 

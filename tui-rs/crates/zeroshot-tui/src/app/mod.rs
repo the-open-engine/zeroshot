@@ -64,6 +64,20 @@ pub enum ZoomStackContext {
     Agent { cluster_id: String, agent_id: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum TemporalFocus {
+    #[default]
+    None,
+    Cluster { id: String },
+    Agent { cluster_id: String, agent_id: String },
+}
+
+impl TemporalFocus {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, TemporalFocus::None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InitialScreen {
     Launcher,
@@ -143,6 +157,8 @@ pub enum TimeCursorMode {
 }
 
 const DEFAULT_TIME_WINDOW_MS: i64 = 60_000;
+pub const TIME_SCRUB_STEP_MS: i64 = 1000;
+pub const TIME_SCRUB_STEP_LARGE_MS: i64 = 5000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeCursor {
@@ -309,6 +325,7 @@ pub struct AppState {
     pub ui_variant: UiVariant,
     pub camera: Camera,
     pub time_cursor: TimeCursor,
+    pub temporal_focus: TemporalFocus,
     pub spine: SpineState,
     pub command_bar: CommandBarState,
     pub toast: Option<ToastState>,
@@ -336,6 +353,7 @@ impl Default for AppState {
             ui_variant: UiVariant::Classic,
             camera: Camera::default(),
             time_cursor: TimeCursor::default(),
+            temporal_focus: TemporalFocus::default(),
             spine: SpineState::default(),
             command_bar: CommandBarState::default(),
             toast: None,
@@ -377,6 +395,20 @@ impl AppState {
         self.screen_stack
             .last()
             .unwrap_or(&ScreenId::Launcher)
+    }
+
+    pub fn temporal_focus_scope(&self) -> Option<TemporalFocus> {
+        match self.active_screen() {
+            ScreenId::ClusterCanvas { id } => Some(TemporalFocus::Cluster { id: id.clone() }),
+            ScreenId::AgentMicroscope {
+                cluster_id,
+                agent_id,
+            } => Some(TemporalFocus::Agent {
+                cluster_id: cluster_id.clone(),
+                agent_id: agent_id.clone(),
+            }),
+            _ => None,
+        }
     }
 
     pub fn zoom_stack_context(&self) -> ZoomStackContext {
@@ -537,6 +569,7 @@ pub enum Action {
     Backend(BackendAction),
     CommandBar(CommandBarAction),
     Spine(SpineAction),
+    TimeCursor(TimeCursorAction),
     Command(CommandAction),
 }
 
@@ -610,6 +643,13 @@ pub enum SpineAction {
     MoveCursorHome,
     MoveCursorEnd,
     Clear,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimeCursorAction {
+    Step { delta_ms: i64 },
+    JumpToLive,
+    ToggleFollow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -692,6 +732,9 @@ pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
         Action::Spine(spine_action) => {
             handle_spine_action(&mut state, spine_action, &mut effects);
         }
+        Action::TimeCursor(time_action) => {
+            handle_time_cursor_action(&mut state, time_action);
+        }
         Action::Command(command_action) => {
             handle_command_action(&mut state, command_action, &mut effects);
         }
@@ -754,6 +797,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
     }
 
     refresh_spine_hint(state);
+    sync_temporal_focus(state);
 }
 
 fn ensure_cluster_canvas_focus(state: &mut AppState, id: &str) {
@@ -1479,6 +1523,15 @@ fn refresh_spine_hint(state: &mut AppState) {
     state.spine.hint = compute_spine_hint(state);
 }
 
+fn sync_temporal_focus(state: &mut AppState) {
+    if !state.temporal_focus.is_active() {
+        return;
+    }
+    state.temporal_focus = state
+        .temporal_focus_scope()
+        .unwrap_or(TemporalFocus::None);
+}
+
 fn detect_issue_reference(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -1692,6 +1745,103 @@ fn handle_spine_action(state: &mut AppState, action: SpineAction, effects: &mut 
 
     if should_refresh_hint {
         refresh_spine_hint(state);
+    }
+}
+
+fn handle_time_cursor_action(state: &mut AppState, action: TimeCursorAction) {
+    if !state.temporal_focus.is_active() {
+        match action {
+            TimeCursorAction::ToggleFollow => {
+                let Some(scope) = state.temporal_focus_scope() else {
+                    return;
+                };
+                state.temporal_focus = scope;
+            }
+            _ => return,
+        }
+    }
+
+    let bounds = time_bounds_for_focus(state);
+    match action {
+        TimeCursorAction::Step { delta_ms } => {
+            let Some((min, max)) = bounds else {
+                return;
+            };
+            let next = state.time_cursor.t_ms.saturating_add(delta_ms);
+            state.time_cursor.t_ms = next.clamp(min, max);
+            state.time_cursor.mode = TimeCursorMode::Scrub;
+        }
+        TimeCursorAction::JumpToLive => {
+            state.time_cursor.mode = TimeCursorMode::Live;
+            if let Some((_, max)) = bounds {
+                state.time_cursor.t_ms = max;
+            }
+        }
+        TimeCursorAction::ToggleFollow => {
+            if matches!(state.time_cursor.mode, TimeCursorMode::Live) {
+                state.time_cursor.mode = TimeCursorMode::Scrub;
+            } else {
+                state.time_cursor.mode = TimeCursorMode::Live;
+                if let Some((_, max)) = bounds {
+                    state.time_cursor.t_ms = max;
+                }
+            }
+        }
+    }
+
+    if let Some((min, max)) = bounds {
+        state.time_cursor.t_ms = state.time_cursor.t_ms.clamp(min, max);
+    }
+
+    if matches!(state.time_cursor.mode, TimeCursorMode::Live) {
+        state.temporal_focus = TemporalFocus::None;
+    }
+}
+
+fn time_bounds_for_focus(state: &AppState) -> Option<(i64, i64)> {
+    match &state.temporal_focus {
+        TemporalFocus::None => None,
+        TemporalFocus::Cluster { id } => time_bounds_for_cluster(state, id, None),
+        TemporalFocus::Agent {
+            cluster_id,
+            agent_id,
+        } => time_bounds_for_cluster(state, cluster_id, Some(agent_id.as_str())),
+    }
+}
+
+fn time_bounds_for_cluster(
+    state: &AppState,
+    cluster_id: &str,
+    agent_id: Option<&str>,
+) -> Option<(i64, i64)> {
+    let cluster_state = state.clusters.get(cluster_id)?;
+    let mut min: Option<i64> = None;
+    let mut max: Option<i64> = None;
+    let update = |ts: i64, min: &mut Option<i64>, max: &mut Option<i64>| {
+        *min = Some(min.map_or(ts, |value| value.min(ts)));
+        *max = Some(max.map_or(ts, |value| value.max(ts)));
+    };
+
+    for line in cluster_state.logs_time.iter() {
+        if let Some(agent_id) = agent_id {
+            let matches_agent = line.agent.as_deref() == Some(agent_id)
+                || line.sender.as_deref() == Some(agent_id);
+            if !matches_agent {
+                continue;
+            }
+        }
+        update(line.timestamp, &mut min, &mut max);
+    }
+
+    if agent_id.is_none() {
+        for event in cluster_state.timeline_time.iter() {
+            update(event.timestamp, &mut min, &mut max);
+        }
+    }
+
+    match (min, max) {
+        (Some(min), Some(max)) => Some((min, max)),
+        _ => None,
     }
 }
 
@@ -2105,6 +2255,105 @@ mod tests {
             }),
         );
         assert_eq!(state.time_cursor.t_ms, 200);
+    }
+
+    fn sample_log_line(id: &str, timestamp: i64) -> ClusterLogLine {
+        ClusterLogLine {
+            id: id.to_string(),
+            timestamp,
+            text: "log".to_string(),
+            agent: None,
+            role: None,
+            sender: None,
+        }
+    }
+
+    #[test]
+    fn time_cursor_step_clamps_and_enters_scrub() {
+        let mut state = AppState::default();
+        state.temporal_focus = TemporalFocus::Cluster {
+            id: "cluster-1".to_string(),
+        };
+        state.time_cursor.mode = TimeCursorMode::Live;
+        state.time_cursor.t_ms = 200;
+
+        let mut cluster_state = cluster::State::default();
+        cluster_state.push_log_lines(
+            vec![sample_log_line("l1", 100), sample_log_line("l2", 200)],
+            None,
+        );
+        state
+            .clusters
+            .insert("cluster-1".to_string(), cluster_state);
+
+        let (state, _) = update(
+            state,
+            Action::TimeCursor(TimeCursorAction::Step {
+                delta_ms: -TIME_SCRUB_STEP_MS,
+            }),
+        );
+        assert_eq!(state.time_cursor.mode, TimeCursorMode::Scrub);
+        assert_eq!(state.time_cursor.t_ms, 100);
+    }
+
+    #[test]
+    fn time_cursor_jump_and_toggle_follow() {
+        let mut state = AppState::default();
+        state.screen_stack = vec![ScreenId::ClusterCanvas {
+            id: "cluster-2".to_string(),
+        }];
+        state.temporal_focus = TemporalFocus::Cluster {
+            id: "cluster-2".to_string(),
+        };
+        state.time_cursor.mode = TimeCursorMode::Scrub;
+        state.time_cursor.t_ms = 120;
+
+        let mut cluster_state = cluster::State::default();
+        cluster_state.push_log_lines(
+            vec![sample_log_line("l1", 100), sample_log_line("l2", 250)],
+            None,
+        );
+        state
+            .clusters
+            .insert("cluster-2".to_string(), cluster_state);
+
+        let (state, _) = update(state, Action::TimeCursor(TimeCursorAction::JumpToLive));
+        assert_eq!(state.time_cursor.mode, TimeCursorMode::Live);
+        assert_eq!(state.time_cursor.t_ms, 250);
+
+        let (state, _) = update(state, Action::TimeCursor(TimeCursorAction::ToggleFollow));
+        assert_eq!(state.time_cursor.mode, TimeCursorMode::Scrub);
+
+        let (state, _) = update(state, Action::TimeCursor(TimeCursorAction::ToggleFollow));
+        assert_eq!(state.time_cursor.mode, TimeCursorMode::Live);
+        assert_eq!(state.time_cursor.t_ms, 250);
+    }
+
+    #[test]
+    fn time_cursor_large_step_clamps_to_max() {
+        let mut state = AppState::default();
+        state.temporal_focus = TemporalFocus::Cluster {
+            id: "cluster-3".to_string(),
+        };
+        state.time_cursor.mode = TimeCursorMode::Scrub;
+        state.time_cursor.t_ms = 150;
+
+        let mut cluster_state = cluster::State::default();
+        cluster_state.push_log_lines(
+            vec![sample_log_line("l1", 100), sample_log_line("l2", 220)],
+            None,
+        );
+        state
+            .clusters
+            .insert("cluster-3".to_string(), cluster_state);
+
+        let (state, _) = update(
+            state,
+            Action::TimeCursor(TimeCursorAction::Step {
+                delta_ms: TIME_SCRUB_STEP_LARGE_MS,
+            }),
+        );
+        assert_eq!(state.time_cursor.t_ms, 220);
     }
 
     #[test]
