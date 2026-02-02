@@ -73,6 +73,7 @@ Ratatui is the only supported TUI; legacy UI removed. centralized key routing in
 TUI v2 (Rust) command flow: `Effect::Command(CommandRequest)` is emitted by `app::update()` and executed in `src/main.rs` via `commands::dispatch()`, with failures surfaced through `BackendAction::Error`.
 TUI v2 (Rust) provider override lives in `AppState.provider_override` and is forwarded when launching clusters (e.g. `StartClusterFromText`).
 TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
+TUI v2 (Rust) Agent Microscope renders phase markers derived from cluster timeline events (deduped, capped) in a left margin when space allows.
 TUI v2 (Rust) Disruptive zoom stack: `ScreenId::IntentConsole` (root), `FleetRadar`, `ClusterCanvas { id }`, `AgentMicroscope { cluster_id, agent_id }`; zoom stack context drives spine whisper targets.
 TUI v2 (Rust) Cluster Canvas overlays: use `ui/widgets/stream.rs` StreamOverlay + placement helper in `screens/cluster_canvas.rs` to render bounded log/timeline slices near focus, clamped to canvas bounds and never intersecting the spine; render after the canvas draw.
 TUI v2 (Rust) Disruptive stream windowing: `TimeCursor` (mode, `t_ms`, `window_ms`) plus `TimeIndexedBuffer` in `ui/shared.rs` back logs/timeline window queries; cluster canvas overlay renders windowed slices from time-indexed buffers.
