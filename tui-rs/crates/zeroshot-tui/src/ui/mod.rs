@@ -80,13 +80,14 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState) {
             cluster_id,
             agent_id,
         } => {
-            let cluster_state = state.clusters.get(cluster_id);
+            let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
+            let microscope_state = state.agent_microscopes.get(&key);
             agent_microscope::render(
                 frame,
                 content_area,
                 cluster_id,
                 agent_id,
-                cluster_state,
+                microscope_state,
                 &state.time_cursor,
             );
         }
@@ -171,13 +172,14 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
             cluster_id,
             agent_id,
         } => {
-            let cluster_state = state.clusters.get(cluster_id);
+            let key = crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone());
+            let microscope_state = state.agent_microscopes.get(&key);
             agent_microscope::render(
                 frame,
                 canvas_area,
                 cluster_id,
                 agent_id,
-                cluster_state,
+                microscope_state,
                 &state.time_cursor,
             );
         }
@@ -195,8 +197,11 @@ fn render_disruptive(frame: &mut Frame<'_>, state: &AppState) {
                 agent_id,
             } => Some(scrub_bar::ScrubBarState {
                 time_cursor: &state.time_cursor,
-                logs: state.clusters.get(cluster_id).map(|entry| &entry.logs_time),
-                agent_id: Some(agent_id.as_str()),
+                logs: state
+                    .agent_microscopes
+                    .get(&crate::app::AgentKey::new(cluster_id.clone(), agent_id.clone()))
+                    .map(|entry| &entry.logs_time),
+                agent_id: None,
             }),
             _ => None,
         };

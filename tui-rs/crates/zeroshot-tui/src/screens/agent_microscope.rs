@@ -1,10 +1,10 @@
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::TimeCursor;
-use crate::screens::cluster;
+use crate::app::{agent_microscope, TimeCursor};
 use crate::ui::theme;
 use crate::ui::widgets::stream::{self, StreamOverlay};
 
@@ -13,68 +13,145 @@ pub fn render(
     area: Rect,
     cluster_id: &str,
     agent_id: &str,
-    cluster_state: Option<&cluster::State>,
+    microscope_state: Option<&agent_microscope::State>,
     time_cursor: &TimeCursor,
 ) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Agent Microscope");
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if inner.width == 0 || inner.height == 0 {
+    if area.width == 0 || area.height == 0 {
         return;
     }
 
-    let [header_area, log_area] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).areas(inner);
+    let metadata = build_metadata_overlay(area, cluster_id, agent_id, microscope_state);
+    let reserved_lines = metadata
+        .as_ref()
+        .map(|overlay| overlay.reserved_lines)
+        .unwrap_or(0);
 
-    let header_lines = vec![
-        Line::from(Span::styled(agent_id, theme::title_style())),
-        Line::from(Span::styled(
-            format!("Cluster {cluster_id}"),
-            theme::muted_style(),
-        )),
-        Line::from(Span::styled("Press Esc to return", theme::dim_style())),
-    ];
-    let header = Paragraph::new(header_lines).alignment(Alignment::Center);
-    frame.render_widget(header, header_area);
-
-    if log_area.width == 0 || log_area.height == 0 {
-        return;
-    }
-
-    let inner = Block::default().borders(Borders::ALL).inner(log_area);
-    let max_lines = inner.height as usize;
-    if max_lines == 0 {
-        return;
-    }
-
-    let log_lines = cluster_state
+    let max_lines = area.height.saturating_sub(2) as usize;
+    let window_max = max_lines.saturating_sub(reserved_lines);
+    let log_lines = microscope_state
         .map(|state| {
-            stream::select_time_window(
-                &state.logs_time,
-                time_cursor,
-                max_lines,
-                |line| {
-                    line.agent.as_deref() == Some(agent_id)
-                        || line.sender.as_deref() == Some(agent_id)
-                },
-            )
+            stream::select_time_window(&state.logs_time, time_cursor, window_max, |_| true)
         })
         .unwrap_or_default()
         .into_iter()
         .map(stream::format_log_line_styled)
-        .collect();
+        .collect::<Vec<_>>();
 
-    let title = stream::overlay_title(format!("Logs - agent {agent_id}"), time_cursor);
-    let overlay = StreamOverlay::new(title, log_lines)
-        .placeholder_lines(stream::log_placeholder_lines(
-            stream::LogPlaceholderContext::Agent,
-        ))
-        .border_style(theme::focus_border_style());
-    frame.render_widget(overlay, log_area);
+    let mut content_lines = if log_lines.is_empty() {
+        stream::log_placeholder_lines(stream::LogPlaceholderContext::Agent)
+    } else {
+        log_lines
+    };
+
+    if reserved_lines > 0 {
+        let mut padded = Vec::with_capacity(reserved_lines + content_lines.len());
+        for _ in 0..reserved_lines {
+            padded.push(Line::from(""));
+        }
+        padded.extend(content_lines);
+        content_lines = padded;
+    }
+
+    let title = stream::overlay_title("Stream", time_cursor);
+    let overlay = StreamOverlay::new(title, content_lines).border_style(theme::focus_border_style());
+    frame.render_widget(overlay, area);
+
+    if let Some(metadata) = metadata {
+        render_metadata_overlay(frame, metadata);
+    }
+}
+
+struct MetadataOverlay {
+    area: Rect,
+    lines: Vec<Line<'static>>,
+    reserved_lines: usize,
+}
+
+fn build_metadata_overlay(
+    area: Rect,
+    cluster_id: &str,
+    agent_id: &str,
+    microscope_state: Option<&agent_microscope::State>,
+) -> Option<MetadataOverlay> {
+    let available_width = area.width.saturating_sub(2);
+    let available_height = area.height.saturating_sub(2);
+    if available_width < 6 || available_height < 4 {
+        return None;
+    }
+
+    let role = microscope_state
+        .and_then(|state| state.role.as_deref())
+        .unwrap_or("unknown");
+    let status = microscope_state
+        .and_then(|state| state.status.as_deref())
+        .unwrap_or("unknown");
+
+    let raw_lines = vec![
+        format!("Agent: {agent_id}"),
+        format!("Role: {role}"),
+        format!("Status: {status}"),
+        format!("Cluster: {cluster_id}"),
+    ];
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("Agent: ", theme::muted_style()),
+            Span::styled(
+                agent_id.to_string(),
+                Style::default().fg(theme::agent_color(agent_id)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Role: ", theme::muted_style()),
+            Span::styled(role.to_string(), theme::dim_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Status: ", theme::muted_style()),
+            Span::styled(status.to_string(), theme::status_style(status)),
+        ]),
+        Line::from(vec![
+            Span::styled("Cluster: ", theme::muted_style()),
+            Span::styled(cluster_id.to_string(), theme::muted_style()),
+        ]),
+    ];
+
+    let max_line_len = raw_lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0) as u16;
+
+    let overlay_width = (max_line_len + 2).min(available_width);
+    let overlay_height = (lines.len() as u16 + 2).min(available_height);
+    if overlay_width < 4 || overlay_height < 3 || overlay_height >= available_height {
+        return None;
+    }
+
+    let max_lines = overlay_height.saturating_sub(2) as usize;
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+    }
+
+    let overlay_area = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: overlay_width,
+        height: overlay_height,
+    };
+
+    Some(MetadataOverlay {
+        area: overlay_area,
+        lines,
+        reserved_lines: overlay_height as usize,
+    })
+}
+
+fn render_metadata_overlay(frame: &mut Frame<'_>, metadata: MetadataOverlay) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::unfocus_border_style());
+    let widget = Paragraph::new(metadata.lines).block(block);
+    frame.render_widget(widget, metadata.area);
 }
 
 #[cfg(test)]
@@ -97,48 +174,109 @@ mod tests {
         false
     }
 
+    fn sample_state(lines: Vec<ClusterLogLine>) -> agent_microscope::State {
+        let mut state = agent_microscope::State::default();
+        state.push_log_lines(lines, None);
+        state
+    }
+
     #[test]
-    fn agent_microscope_renders_windowed_logs() {
+    fn agent_microscope_renders_empty_state() {
+        let backend = TestBackend::new(70, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let cursor = TimeCursor {
+            mode: TimeCursorMode::Live,
+            t_ms: 0,
+            window_ms: 60,
+        };
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, "cluster-1", "agent-1", None, &cursor);
+            })
+            .expect("draw");
+
+        assert!(buffer_contains(&terminal, "No logs yet."));
+        assert!(buffer_contains(&terminal, "Agent: agent-1"));
+    }
+
+    #[test]
+    fn agent_microscope_renders_live_mode() {
+        let backend = TestBackend::new(70, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let state = sample_state(vec![
+            ClusterLogLine {
+                id: "old".to_string(),
+                timestamp: 100,
+                text: "old-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+            ClusterLogLine {
+                id: "new".to_string(),
+                timestamp: 300,
+                text: "new-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+        ]);
+
+        let cursor = TimeCursor {
+            mode: TimeCursorMode::Live,
+            t_ms: 300,
+            window_ms: 60,
+        };
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(
+                    frame,
+                    area,
+                    "cluster-1",
+                    "agent-1",
+                    Some(&state),
+                    &cursor,
+                );
+            })
+            .expect("draw");
+
+        assert!(buffer_contains(&terminal, "new-line"));
+    }
+
+    #[test]
+    fn agent_microscope_renders_scrub_window() {
         let backend = TestBackend::new(70, 14);
         let mut terminal = Terminal::new(backend).expect("terminal");
-        let mut cluster_state = cluster::State::default();
-        cluster_state.push_log_lines(
-            vec![
-                ClusterLogLine {
-                    id: "old".to_string(),
-                    timestamp: 100,
-                    text: "old-line".to_string(),
-                    agent: Some("agent-1".to_string()),
-                    role: None,
-                    sender: None,
-                },
-                ClusterLogLine {
-                    id: "other".to_string(),
-                    timestamp: 180,
-                    text: "other-agent".to_string(),
-                    agent: Some("agent-2".to_string()),
-                    role: None,
-                    sender: None,
-                },
-                ClusterLogLine {
-                    id: "mid".to_string(),
-                    timestamp: 220,
-                    text: "mid-line".to_string(),
-                    agent: Some("agent-1".to_string()),
-                    role: None,
-                    sender: None,
-                },
-                ClusterLogLine {
-                    id: "new".to_string(),
-                    timestamp: 400,
-                    text: "new-line".to_string(),
-                    agent: Some("agent-1".to_string()),
-                    role: None,
-                    sender: None,
-                },
-            ],
-            None,
-        );
+        let state = sample_state(vec![
+            ClusterLogLine {
+                id: "old".to_string(),
+                timestamp: 100,
+                text: "old-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+            ClusterLogLine {
+                id: "mid".to_string(),
+                timestamp: 220,
+                text: "mid-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+            ClusterLogLine {
+                id: "new".to_string(),
+                timestamp: 400,
+                text: "new-line".to_string(),
+                agent: Some("agent-1".to_string()),
+                role: None,
+                sender: None,
+            },
+        ]);
 
         let cursor = TimeCursor {
             mode: TimeCursorMode::Scrub,
@@ -154,7 +292,7 @@ mod tests {
                     area,
                     "cluster-1",
                     "agent-1",
-                    Some(&cluster_state),
+                    Some(&state),
                     &cursor,
                 );
             })
@@ -163,6 +301,5 @@ mod tests {
         assert!(buffer_contains(&terminal, "mid-line"));
         assert!(!buffer_contains(&terminal, "old-line"));
         assert!(!buffer_contains(&terminal, "new-line"));
-        assert!(!buffer_contains(&terminal, "other-agent"));
     }
 }

@@ -5,6 +5,7 @@ use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
+pub mod agent_microscope;
 mod spine_hint;
 pub use spine_hint::{compute_spine_hint, SpineHint, SpineHintTone};
 
@@ -315,6 +316,7 @@ pub struct AppState {
     pub clusters: HashMap<String, cluster::State>,
     pub cluster_canvases: HashMap<String, cluster_canvas::State>,
     pub agents: HashMap<AgentKey, agent::State>,
+    pub agent_microscopes: HashMap<AgentKey, agent_microscope::State>,
     pub last_size: Option<(u16, u16)>,
     pub tick_count: u64,
     pub now_ms: i64,
@@ -343,6 +345,7 @@ impl Default for AppState {
             clusters: HashMap::new(),
             cluster_canvases: HashMap::new(),
             agents: HashMap::new(),
+            agent_microscopes: HashMap::new(),
             last_size: None,
             tick_count: 0,
             now_ms: 0,
@@ -474,15 +477,17 @@ impl AppState {
             ScreenId::Agent {
                 cluster_id,
                 agent_id,
+            } => {
+                let key = AgentKey::new(cluster_id.clone(), agent_id.clone());
+                self.agents.entry(key).or_default();
             }
-            | ScreenId::AgentMicroscope {
+            ScreenId::AgentMicroscope {
                 cluster_id,
                 agent_id,
             } => {
                 let key = AgentKey::new(cluster_id.clone(), agent_id.clone());
-                self.agents
-                    .entry(key)
-                    .or_default();
+                self.agents.entry(key.clone()).or_default();
+                self.agent_microscopes.entry(key).or_default();
             }
         }
     }
@@ -796,6 +801,7 @@ fn apply_navigation(state: &mut AppState, nav: NavigationAction, effects: &mut V
         }
     }
 
+    apply_spine_defaults_for_screen(state);
     refresh_spine_hint(state);
     sync_temporal_focus(state);
 }
@@ -1105,12 +1111,13 @@ fn seed_agent_role(
 ) {
     if let Some(role) = role {
         let key = AgentKey::new(cluster_id.to_string(), agent_id.to_string());
-        let entry = state
-            .agents
-            .entry(key)
-            .or_default();
+        let entry = state.agents.entry(key.clone()).or_default();
         if entry.role.is_none() {
-            entry.role = Some(role);
+            entry.role = Some(role.clone());
+        }
+        let microscope_entry = state.agent_microscopes.entry(key).or_default();
+        if microscope_entry.role.is_none() {
+            microscope_entry.role = Some(role);
         }
     }
 }
@@ -1231,25 +1238,54 @@ fn handle_backend_notification(state: &mut AppState, notification: BackendNotifi
     match notification {
         BackendNotification::ClusterLogLines(params) => {
             let latest_ts = params.lines.iter().map(|line| line.timestamp).max();
-            if let Some(entry) = state
-                .agents
-                .values_mut()
-                .find(|agent| agent.log_subscription.as_deref() == Some(params.subscription_id.as_str()))
+            let lines = params.lines;
+            let dropped_count = params.dropped_count;
+            let role_from_lines = lines.iter().find_map(|line| line.role.clone());
+            if let Some((key, entry)) = state
+                .agent_microscopes
+                .iter_mut()
+                .find(|(_, entry)| {
+                    entry.log_subscription.as_deref()
+                        == Some(params.subscription_id.as_str())
+                })
             {
                 if entry.role.is_none() {
-                    let role = params.lines.iter().find_map(|line| line.role.clone());
-                    if let Some(role) = role {
+                    if let Some(role) = role_from_lines.clone() {
                         entry.role = Some(role);
                     }
                 }
-                entry.push_log_lines(params.lines, params.dropped_count);
+                entry.push_log_lines(lines, dropped_count);
+                if let Some(role) = role_from_lines {
+                    let entry = state.agents.entry(key.clone()).or_default();
+                    if entry.role.is_none() {
+                        entry.role = Some(role);
+                    }
+                }
+                advance_time_cursor_if_live(state, latest_ts);
+                return;
+            }
+
+            if let Some(entry) = state
+                .agents
+                .values_mut()
+                .find(|agent| {
+                    agent.log_subscription.as_deref()
+                        == Some(params.subscription_id.as_str())
+                })
+            {
+                if entry.role.is_none() {
+                    if let Some(role) = role_from_lines.clone() {
+                        entry.role = Some(role);
+                    }
+                }
+                entry.push_log_lines(lines, dropped_count);
                 advance_time_cursor_if_live(state, latest_ts);
                 return;
             }
 
             if let Some(entry) = state.clusters.get_mut(&params.cluster_id) {
                 if entry.log_subscription.as_deref() == Some(params.subscription_id.as_str()) {
-                    entry.push_log_lines(params.lines, params.dropped_count);
+                    entry.push_log_lines(lines, dropped_count);
                     advance_time_cursor_if_live(state, latest_ts);
                 }
             }
@@ -1359,11 +1395,18 @@ fn handle_log_subscription(
     match agent_id {
         Some(agent_id) => {
             let key = AgentKey::new(cluster_id, agent_id);
-            let entry = state
-                .agents
-                .entry(key)
-                .or_default();
-            entry.log_subscription = Some(subscription_id);
+            let active_is_microscope = matches!(
+                state.active_screen(),
+                ScreenId::AgentMicroscope { cluster_id, agent_id }
+                    if cluster_id == &key.cluster_id && agent_id == &key.agent_id
+            );
+            if active_is_microscope {
+                let entry = state.agent_microscopes.entry(key).or_default();
+                entry.log_subscription = Some(subscription_id);
+            } else {
+                let entry = state.agents.entry(key).or_default();
+                entry.log_subscription = Some(subscription_id);
+            }
         }
         None => {
             let entry = state
@@ -1506,6 +1549,7 @@ fn reset_spine_state(state: &mut AppState) {
     state.spine.input.clear();
     state.spine.completion = None;
     state.spine.hint = SpineHint::default();
+    apply_spine_defaults_for_screen(state);
 }
 
 fn set_disruptive_spine_toast(state: &mut AppState, level: ToastLevel, message: String) {
@@ -1517,6 +1561,19 @@ fn set_disruptive_spine_toast(state: &mut AppState, level: ToastLevel, message: 
         level,
         expires_at_ms: state.now_ms.saturating_add(TOAST_DURATION_MS),
     });
+}
+
+fn spine_idle(state: &SpineState) -> bool {
+    matches!(state.mode, SpineMode::Intent)
+        && state.input.input.is_empty()
+        && state.completion.is_none()
+}
+
+fn apply_spine_defaults_for_screen(state: &mut AppState) {
+    if matches!(state.active_screen(), ScreenId::AgentMicroscope { .. }) && spine_idle(&state.spine)
+    {
+        state.spine.mode = SpineMode::WhisperAgent;
+    }
 }
 
 fn refresh_spine_hint(state: &mut AppState) {
@@ -1805,7 +1862,27 @@ fn time_bounds_for_focus(state: &AppState) -> Option<(i64, i64)> {
         TemporalFocus::Agent {
             cluster_id,
             agent_id,
-        } => time_bounds_for_cluster(state, cluster_id, Some(agent_id.as_str())),
+        } => time_bounds_for_agent_microscope(state, cluster_id, agent_id)
+            .or_else(|| time_bounds_for_cluster(state, cluster_id, Some(agent_id.as_str()))),
+    }
+}
+
+fn time_bounds_for_agent_microscope(
+    state: &AppState,
+    cluster_id: &str,
+    agent_id: &str,
+) -> Option<(i64, i64)> {
+    let key = AgentKey::new(cluster_id.to_string(), agent_id.to_string());
+    let entry = state.agent_microscopes.get(&key)?;
+    let mut min: Option<i64> = None;
+    let mut max: Option<i64> = None;
+    for line in entry.logs_time.iter() {
+        min = Some(min.map_or(line.timestamp, |value| value.min(line.timestamp)));
+        max = Some(max.map_or(line.timestamp, |value| value.max(line.timestamp)));
+    }
+    match (min, max) {
+        (Some(min), Some(max)) => Some((min, max)),
+        _ => None,
     }
 }
 
@@ -1911,11 +1988,19 @@ fn cleanup_agent_subscriptions(
     effects: &mut Vec<Effect>,
 ) {
     let key = AgentKey::new(cluster_id.to_string(), agent_id.to_string());
-    let Some(entry) = state.agents.get_mut(&key) else {
-        return;
-    };
-    if let Some(subscription_id) = entry.log_subscription.take() {
-        effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+    let mut unsubscribed: HashSet<String> = HashSet::new();
+    if let Some(entry) = state.agents.get_mut(&key) {
+        if let Some(subscription_id) = entry.log_subscription.take() {
+            unsubscribed.insert(subscription_id.clone());
+            effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+        }
+    }
+    if let Some(entry) = state.agent_microscopes.get_mut(&key) {
+        if let Some(subscription_id) = entry.log_subscription.take() {
+            if !unsubscribed.contains(&subscription_id) {
+                effects.push(Effect::Backend(BackendRequest::Unsubscribe { subscription_id }));
+            }
+        }
     }
 }
 
@@ -2161,6 +2246,42 @@ mod tests {
             }
         )));
         assert_eq!(state.spine.mode, SpineMode::Intent);
+        assert_eq!(state.spine.input.input, "");
+    }
+
+    #[test]
+    fn navigation_to_microscope_sets_spine_mode() {
+        let state = AppState::default();
+        let (state, _) = update(
+            state,
+            Action::Navigate(NavigationAction::Push(ScreenId::AgentMicroscope {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+            })),
+        );
+        assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
+    }
+
+    #[test]
+    fn spine_submit_whisper_agent_sends_guidance_from_microscope() {
+        let mut state = AppState::default();
+        state.screen_stack = vec![ScreenId::AgentMicroscope {
+            cluster_id: "cluster-1".to_string(),
+            agent_id: "agent-1".to_string(),
+        }];
+        state.spine.mode = SpineMode::WhisperAgent;
+        state.spine.input.input = "ping".to_string();
+        state.spine.input.cursor = 4;
+
+        let (state, effects) = update(state, Action::Spine(SpineAction::Submit));
+        assert!(effects.contains(&Effect::Backend(
+            BackendRequest::SendGuidanceToAgent {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                message: "ping".to_string(),
+            }
+        )));
+        assert_eq!(state.spine.mode, SpineMode::WhisperAgent);
         assert_eq!(state.spine.input.input, "");
     }
 

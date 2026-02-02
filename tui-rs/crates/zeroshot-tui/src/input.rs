@@ -259,6 +259,9 @@ fn route_disruptive_cluster_canvas(
 }
 
 fn spine_active(state: &AppState) -> bool {
+    if matches!(state.active_screen(), ScreenId::AgentMicroscope { .. }) {
+        return !state.spine.input.input.is_empty() || state.spine.completion.is_some();
+    }
     !state.spine.input.input.is_empty()
         || !matches!(state.spine.mode, SpineMode::Intent)
         || state.spine.completion.is_some()
@@ -454,4 +457,37 @@ fn route_agent(cluster_id: &str, agent_id: &str, key: KeyEvent) -> Option<Action
         agent_id: agent_id.to_string(),
         action,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disruptive_esc_pops_microscope() {
+        let mut state = AppState::default();
+        state.ui_variant = UiVariant::Disruptive;
+        state.screen_stack = vec![
+            ScreenId::ClusterCanvas {
+                id: "cluster-1".to_string(),
+            },
+            ScreenId::AgentMicroscope {
+                cluster_id: "cluster-1".to_string(),
+                agent_id: "agent-1".to_string(),
+            },
+        ];
+        state.spine.mode = SpineMode::WhisperAgent;
+        state.spine.input.input.clear();
+        state.spine.input.cursor = 0;
+        state.spine.completion = None;
+
+        let action = route_key(
+            &state,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        );
+        assert!(matches!(
+            action,
+            Some(Action::Navigate(NavigationAction::Pop))
+        ));
+    }
 }
