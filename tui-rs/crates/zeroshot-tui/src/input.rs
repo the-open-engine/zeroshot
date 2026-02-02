@@ -2,7 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
     Action, AppState, CommandBarAction, NavigationAction, ScreenAction, ScreenId, SpineAction,
-    SpineMode, UiVariant, ZoomStackContext,
+    SpineMode, TimeCursorAction, UiVariant, ZoomStackContext, TIME_SCRUB_STEP_LARGE_MS,
+    TIME_SCRUB_STEP_MS,
 };
 use crate::screens::{agent, cluster, cluster_canvas, launcher, monitor, radar};
 
@@ -66,6 +67,9 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
     }
 
     if !spine_active(state) {
+        if let Some(action) = route_time_scrub(state, key, ctrl, alt) {
+            return Some(action);
+        }
         if let Some(action) = route_disruptive_radar(state, key, ctrl, alt) {
             return Some(action);
         }
@@ -112,6 +116,40 @@ fn route_disruptive(state: &AppState, key: KeyEvent) -> Option<Action> {
         KeyCode::Home => Some(Action::Spine(SpineAction::MoveCursorHome)),
         KeyCode::End => Some(Action::Spine(SpineAction::MoveCursorEnd)),
         KeyCode::Char(ch) if !ctrl && !alt => Some(Action::Spine(SpineAction::InsertChar(ch))),
+        _ => None,
+    }
+}
+
+fn route_time_scrub(
+    state: &AppState,
+    key: KeyEvent,
+    ctrl: bool,
+    alt: bool,
+) -> Option<Action> {
+    if ctrl || alt {
+        return None;
+    }
+    let scope_available = state.temporal_focus_scope().is_some();
+    let focus_active = state.temporal_focus.is_active();
+
+    let large = key.modifiers.contains(KeyModifiers::SHIFT);
+    let step = if large {
+        TIME_SCRUB_STEP_LARGE_MS
+    } else {
+        TIME_SCRUB_STEP_MS
+    };
+
+    match key.code {
+        KeyCode::Left if focus_active => {
+            Some(Action::TimeCursor(TimeCursorAction::Step { delta_ms: -step }))
+        }
+        KeyCode::Right if focus_active => {
+            Some(Action::TimeCursor(TimeCursorAction::Step { delta_ms: step }))
+        }
+        KeyCode::End if focus_active => Some(Action::TimeCursor(TimeCursorAction::JumpToLive)),
+        KeyCode::Char(' ') if focus_active || scope_available => {
+            Some(Action::TimeCursor(TimeCursorAction::ToggleFollow))
+        }
         _ => None,
     }
 }
