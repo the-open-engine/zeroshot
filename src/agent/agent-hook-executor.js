@@ -139,6 +139,72 @@ async function executeHook(params) {
     throw new Error('execute_system_command not implemented');
   }
 
+  if (hook.action === 'verify_github_pr') {
+    const { extractJsonFromOutput } = require('./output-extraction');
+    const structuredOutput = extractJsonFromOutput(result.output) || {};
+    const prNumber = structuredOutput.pr_number;
+
+    // Skip actual gh CLI verification if explicitly disabled (for integration tests)
+    // Unit tests mock execSync, so they still test the verification logic
+    if (process.env.ZEROSHOT_SKIP_GH_VERIFY === '1') {
+      agent._log(`✅ VERIFICATION SKIPPED (ZEROSHOT_SKIP_GH_VERIFY=1): PR #${prNumber}`);
+      agent._publish({
+        topic: 'CLUSTER_COMPLETE',
+        content: { data: { reason: 'git-pusher-complete-verified', pr_number: prNumber, pr_url: structuredOutput.pr_url } }
+      });
+      return;
+    }
+
+    if (!prNumber) {
+      throw new Error(
+        `VERIFICATION FAILED: git-pusher must provide pr_number in structured output. ` +
+        `Got: ${JSON.stringify(structuredOutput)}`
+      );
+    }
+
+    let prData;
+    try {
+      prData = JSON.parse(
+        execSync(`gh pr view ${prNumber} --json state,mergedAt,url,number`, {
+          encoding: 'utf8',
+          cwd: agent.workingDirectory,
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      );
+    } catch (err) {
+      if (err.message.includes('Could not resolve to a PullRequest')) {
+        throw new Error(
+          `VERIFICATION FAILED: Agent claimed PR #${prNumber} exists, ` +
+          `but GitHub says it DOES NOT EXIST. Agent HALLUCINATED.`
+        );
+      }
+      throw err;
+    }
+
+    if (!prData.mergedAt) {
+      throw new Error(
+        `VERIFICATION FAILED: Agent claimed PR #${prNumber} is merged, ` +
+        `but GitHub says state="${prData.state}". Agent LIED.`
+      );
+    }
+
+    agent._log(`✅ VERIFICATION PASSED: PR #${prNumber} actually merged`);
+
+    // Publish CLUSTER_COMPLETE only after verification passes
+    agent._publish({
+      topic: 'CLUSTER_COMPLETE',
+      content: {
+        data: {
+          reason: 'git-pusher-complete-verified',
+          pr_number: prNumber,
+          pr_url: prData.url,
+        }
+      }
+    });
+
+    return;
+  }
+
   throw new Error(`Unknown hook action: ${hook.action}`);
 }
 
