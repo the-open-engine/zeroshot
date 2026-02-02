@@ -392,45 +392,62 @@ fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
         });
 
     frame.render_widget(canvas, canvas_ctx.area);
+    let overlay_layout = StreamOverlayLayout {
+        area: canvas_inner,
+        layout: canvas_ctx.layout,
+        focused: canvas_ctx.focused,
+        render_bounds: &render_bounds,
+        spine_area: None,
+    };
     render_stream_overlay(
         frame,
-        canvas_inner,
-        canvas_ctx.layout,
-        canvas_ctx.focused,
-        &render_bounds,
+        overlay_layout,
         canvas_ctx.cluster_state,
         canvas_ctx.time_cursor,
-        None,
     );
+}
+
+struct StreamOverlayLayout<'a> {
+    area: Rect,
+    layout: &'a LayoutCache,
+    focused: Option<&'a str>,
+    render_bounds: &'a LayoutBounds,
+    spine_area: Option<Rect>,
 }
 
 fn render_stream_overlay(
     frame: &mut Frame<'_>,
-    area: Rect,
-    layout: &LayoutCache,
-    focused: Option<&str>,
-    render_bounds: &LayoutBounds,
+    layout_ctx: StreamOverlayLayout<'_>,
     cluster_state: &cluster::State,
     time_cursor: &TimeCursor,
-    spine_area: Option<Rect>,
 ) {
-    let Some(focused_id) = focused else {
+    let Some(focused_id) = layout_ctx.focused else {
         return;
     };
-    let Some(node) = layout.nodes.get(focused_id) else {
+    let Some(node) = layout_ctx.layout.nodes.get(focused_id) else {
         return;
     };
-    if area.width < 6 || area.height < 4 {
+    if layout_ctx.area.width < 6 || layout_ctx.area.height < 4 {
         return;
     }
 
-    let focus_point = world_to_screen(area, render_bounds, node.x, node.y);
-    let overlay_size = overlay_dimensions(area);
+    let focus_point = world_to_screen(
+        layout_ctx.area,
+        layout_ctx.render_bounds,
+        node.x,
+        node.y,
+    );
+    let overlay_size = overlay_dimensions(layout_ctx.area);
     if overlay_size.0 == 0 || overlay_size.1 == 0 {
         return;
     }
 
-    let overlay_rect = overlay_rect_near_focus(area, focus_point, overlay_size, spine_area);
+    let overlay_rect = overlay_rect_near_focus(
+        layout_ctx.area,
+        focus_point,
+        overlay_size,
+        layout_ctx.spine_area,
+    );
     let inner = Block::default().borders(Borders::ALL).inner(overlay_rect);
     let max_lines = inner.height as usize;
     if max_lines == 0 {
