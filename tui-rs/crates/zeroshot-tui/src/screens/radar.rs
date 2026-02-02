@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::protocol::ClusterSummary;
+use crate::app::animation::{self, AnimClock};
 use crate::app::Camera;
 use crate::ui::theme;
 
@@ -22,6 +23,7 @@ const ERROR_PULSE_RADIUS: f64 = 1.6;
 const SELECTION_RING_RADIUS: f64 = 1.2;
 const PIN_RING_RADIUS: f64 = 2.2;
 const MIN_CAMERA_ZOOM: f32 = 0.2;
+const ORB_SMOOTH_RATE: f64 = 0.25;
 
 const ACTIVITY_BANDS_MS: [i64; 4] = [5_000, 30_000, 120_000, 600_000];
 const RING_RADII: [f64; 5] = [10.0, 20.0, 30.0, 40.0, 46.0];
@@ -31,6 +33,12 @@ pub struct LayoutPosition {
     pub x: f64,
     pub y: f64,
     pub ring_radius: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OrbVisual {
+    pub radius: f64,
+    pub intensity: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +74,7 @@ pub struct FleetRadarState {
     pub last_activity_at: HashMap<String, i64>,
     pub last_message_deltas: HashMap<String, i64>,
     pub layout_angles: HashMap<String, f64>,
+    pub orb_states: HashMap<String, OrbVisual>,
 }
 
 impl FleetRadarState {
@@ -73,6 +82,7 @@ impl FleetRadarState {
         let selected_id = self.selected_cluster_id();
         self.update_activity(&clusters, now_ms);
         self.ensure_angles(&clusters);
+        self.ensure_orb_states(&clusters, now_ms);
         self.clusters = clusters;
         self.reconcile_selection(selected_id);
     }
@@ -146,6 +156,44 @@ impl FleetRadarState {
         layout_with_angle(angle, activity_age_ms)
     }
 
+    pub fn tick_orb_smoothing(&mut self, now_ms: i64, dt_ms: i64) {
+        if self.clusters.is_empty() {
+            return;
+        }
+        for cluster in &self.clusters {
+            let (target_radius, target_intensity) = orb_targets(self, cluster, now_ms);
+            let entry = self
+                .orb_states
+                .entry(cluster.id.clone())
+                .or_insert(OrbVisual {
+                    radius: target_radius,
+                    intensity: target_intensity,
+                });
+            entry.radius = animation::smooth_toward_f64(
+                entry.radius,
+                target_radius,
+                dt_ms,
+                ORB_SMOOTH_RATE,
+            );
+            entry.intensity = animation::smooth_toward_f64(
+                entry.intensity,
+                target_intensity,
+                dt_ms,
+                ORB_SMOOTH_RATE,
+            );
+        }
+    }
+
+    pub fn orb_visual(&self, cluster: &ClusterSummary, now_ms: i64) -> OrbVisual {
+        self.orb_states
+            .get(&cluster.id)
+            .copied()
+            .unwrap_or_else(|| {
+                let (radius, intensity) = orb_targets(self, cluster, now_ms);
+                OrbVisual { radius, intensity }
+            })
+    }
+
     fn update_activity(&mut self, clusters: &[ClusterSummary], now_ms: i64) {
         let mut next_counts = HashMap::new();
         let mut next_activity = HashMap::new();
@@ -182,6 +230,18 @@ impl FleetRadarState {
                 .or_insert_with(|| stable_angle(cluster.id.as_str()));
         }
         self.layout_angles
+            .retain(|id, _| clusters.iter().any(|cluster| cluster.id == *id));
+    }
+
+    fn ensure_orb_states(&mut self, clusters: &[ClusterSummary], now_ms: i64) {
+        for cluster in clusters {
+            let (radius, intensity) = orb_targets(self, cluster, now_ms);
+            self.orb_states.entry(cluster.id.clone()).or_insert(OrbVisual {
+                radius,
+                intensity,
+            });
+        }
+        self.orb_states
             .retain(|id, _| clusters.iter().any(|cluster| cluster.id == *id));
     }
 
@@ -282,6 +342,7 @@ pub fn render(
     state: &FleetRadarState,
     camera: &Camera,
     now_ms: i64,
+    anim_clock: &AnimClock,
     pinned_cluster_id: Option<&str>,
 ) {
     if state.clusters.is_empty() {
@@ -296,6 +357,7 @@ pub fn render(
     let half_span = WORLD_RADIUS / zoom as f64;
     let center_x = camera.position.0 as f64;
     let center_y = camera.position.1 as f64;
+    let pulse = animation::pulse_factor(anim_clock.phase) as f64;
 
     let canvas = Canvas::default()
         .block(
@@ -318,10 +380,11 @@ pub fn render(
 
             for cluster in &state.clusters {
                 let age_ms = state.activity_age_ms(cluster, now_ms);
-                let delta = state.activity_delta(cluster.id.as_str());
                 let layout = state.layout_for(cluster.id.as_str(), age_ms);
                 let color = cluster_color(cluster);
-                let orb_radius = orb_radius(delta, age_ms);
+                let orb = state.orb_visual(cluster, now_ms);
+                let orb_radius = orb.radius;
+                let intensity = orb.intensity;
                 let is_selected = selected_id == Some(cluster.id.as_str());
                 let is_pinned = pinned_id == Some(cluster.id.as_str());
                 let is_error = matches!(
@@ -330,10 +393,12 @@ pub fn render(
                 );
 
                 if is_error {
+                    let intensity_scale = 0.6 + 0.4 * intensity;
+                    let pulse_scale = 0.7 + 0.6 * pulse;
                     ctx.draw(&Circle {
                         x: layout.x,
                         y: layout.y,
-                        radius: orb_radius + ERROR_PULSE_RADIUS,
+                        radius: orb_radius + ERROR_PULSE_RADIUS * intensity_scale * pulse_scale,
                         color: theme::STATUS_ERROR,
                     });
                 }
@@ -458,6 +523,28 @@ fn orb_radius(delta: i64, age_ms: i64) -> f64 {
         0.0
     };
     (BASE_ORB_RADIUS + delta_boost + recency_boost).min(MAX_ORB_RADIUS)
+}
+
+fn orb_intensity(delta: i64, age_ms: i64) -> f64 {
+    let delta_norm = (delta.max(0) as f64).min(6.0) / 6.0;
+    let recency = if age_ms <= 5_000 {
+        1.0
+    } else if age_ms <= 30_000 {
+        0.6
+    } else {
+        0.3
+    };
+    (0.3 + delta_norm * 0.5 + recency * 0.2).min(1.0)
+}
+
+fn orb_targets(
+    state: &FleetRadarState,
+    cluster: &ClusterSummary,
+    now_ms: i64,
+) -> (f64, f64) {
+    let age_ms = state.activity_age_ms(cluster, now_ms);
+    let delta = state.activity_delta(cluster.id.as_str());
+    (orb_radius(delta, age_ms), orb_intensity(delta, age_ms))
 }
 
 fn truncate_label(id: &str) -> String {

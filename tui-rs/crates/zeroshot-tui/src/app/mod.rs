@@ -6,8 +6,10 @@ use crate::protocol::ClusterMetrics;
 use crate::ui::shared::InputState;
 
 pub mod agent_microscope;
+pub mod animation;
 mod spine_completion;
 mod spine_hint;
+use animation::{clamp_tick_delta, step_spring_f32, AnimClock};
 use spine_completion::{build_spine_completion, select_spine_completion};
 pub use spine_hint::{compute_spine_hint, SpineHint, SpineHintTone};
 
@@ -341,12 +343,16 @@ pub struct AppState {
     pub last_size: Option<(u16, u16)>,
     pub tick_count: u64,
     pub now_ms: i64,
+    pub anim_clock: AnimClock,
+    pub last_tick_ms: Option<i64>,
     pub should_quit: bool,
     pub backend_status: BackendStatus,
     pub last_error: Option<String>,
     pub provider_override: Option<String>,
     pub ui_variant: UiVariant,
     pub camera: Camera,
+    pub camera_target: (f32, f32),
+    pub camera_velocity: (f32, f32),
     pub time_cursor: TimeCursor,
     pub temporal_focus: TemporalFocus,
     pub pinned_target: Option<FocusTarget>,
@@ -371,12 +377,16 @@ impl Default for AppState {
             last_size: None,
             tick_count: 0,
             now_ms: 0,
+            anim_clock: AnimClock::default(),
+            last_tick_ms: None,
             should_quit: false,
             backend_status: BackendStatus::Disconnected,
             last_error: None,
             provider_override: None,
             ui_variant: UiVariant::Classic,
             camera: Camera::default(),
+            camera_target: (0.0, 0.0),
+            camera_velocity: (0.0, 0.0),
             time_cursor: TimeCursor::default(),
             temporal_focus: TemporalFocus::default(),
             pinned_target: None,
@@ -698,17 +708,28 @@ pub enum CommandAction {
 
 const TOAST_DURATION_MS: i64 = 5000;
 const METRICS_POLL_INTERVAL_MS: i64 = 2000;
+const CAMERA_ACCEL: f32 = 0.16;
+const CAMERA_FRICTION: f32 = 0.82;
+const CAMERA_SNAP_EPSILON: f32 = 0.08;
 
 pub fn update(mut state: AppState, action: Action) -> (AppState, Vec<Effect>) {
     let mut effects = Vec::new();
     match action {
         Action::Tick { now_ms } => {
+            let dt_ms = clamp_tick_delta(state.last_tick_ms, now_ms);
+            state.last_tick_ms = Some(now_ms);
             state.tick_count = state.tick_count.saturating_add(1);
             state.now_ms = now_ms;
+            state.anim_clock.advance(now_ms);
             if let Some(toast) = &state.toast {
                 if toast.expires_at_ms <= state.now_ms {
                     state.toast = None;
                 }
+            }
+            state.fleet_radar.tick_orb_smoothing(state.now_ms, dt_ms);
+            update_radar_camera_smoothing(&mut state, dt_ms);
+            for canvas_state in state.cluster_canvases.values_mut() {
+                canvas_state.tick_camera(dt_ms);
             }
             let should_poll = if matches!(state.ui_variant, UiVariant::Disruptive) {
                 state.fleet_radar.poll_due(now_ms)
@@ -1017,6 +1038,8 @@ fn handle_radar_action(state: &mut AppState, action: radar::Action, _effects: &m
         }
         radar::Action::ResetView => {
             state.camera = Camera::default();
+            state.camera_target = state.camera.position;
+            state.camera_velocity = (0.0, 0.0);
         }
     }
 }
@@ -1374,7 +1397,28 @@ fn handle_clusters_listed(
 
 fn sync_camera_to_selection(state: &mut AppState) {
     if let Some(layout) = state.fleet_radar.selected_layout(state.now_ms) {
-        state.camera.position = (layout.x as f32, layout.y as f32);
+        state.camera_target = (layout.x as f32, layout.y as f32);
+        state.camera_velocity = (0.0, 0.0);
+    }
+}
+
+fn update_radar_camera_smoothing(state: &mut AppState, dt_ms: i64) {
+    let (position, velocity) = step_spring_f32(
+        state.camera.position,
+        state.camera_velocity,
+        state.camera_target,
+        dt_ms,
+        CAMERA_ACCEL,
+        CAMERA_FRICTION,
+    );
+    state.camera.position = position;
+    state.camera_velocity = velocity;
+
+    let dx = state.camera.position.0 - state.camera_target.0;
+    let dy = state.camera.position.1 - state.camera_target.1;
+    if dx.abs() <= CAMERA_SNAP_EPSILON && dy.abs() <= CAMERA_SNAP_EPSILON {
+        state.camera.position = state.camera_target;
+        state.camera_velocity = (0.0, 0.0);
     }
 }
 
@@ -2821,7 +2865,7 @@ mod tests {
             state,
             Action::Screen(ScreenAction::FleetRadar(radar::Action::CenterOnSelection)),
         );
-        assert!(state.camera.position.0 < 0.0);
+        assert!(state.camera_target.0 < 0.0);
 
         let (state, _) = update(
             state,
@@ -2831,12 +2875,14 @@ mod tests {
             })),
         );
         assert_eq!(state.fleet_radar.selected_cluster_id().as_deref(), Some("east"));
-        assert!(state.camera.position.0 > 0.0);
+        assert!(state.camera_target.0 > 0.0);
 
         let (state, _) = update(
             state,
             Action::Screen(ScreenAction::FleetRadar(radar::Action::ResetView)),
         );
         assert_eq!(state.camera, Camera::default());
+        assert_eq!(state.camera_target, (0.0, 0.0));
+        assert_eq!(state.camera_velocity, (0.0, 0.0));
     }
 }
