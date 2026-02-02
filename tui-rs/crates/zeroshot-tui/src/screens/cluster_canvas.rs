@@ -98,8 +98,7 @@ impl State {
 
     pub fn ensure_focus(&mut self, topology: &ClusterTopology) {
         let mut needs_focus = self.focused_id.is_none();
-        if !needs_focus {
-            let focused = self.focused_id.as_ref().expect("focused id");
+        if let Some(focused) = self.focused_id.as_ref() {
             let in_agents = topology.agents.iter().any(|agent| agent.id == *focused);
             let in_topics = topology.topics.iter().any(|topic| topic == focused);
             if !in_agents && !in_topics {
@@ -115,14 +114,16 @@ impl State {
         if self.layout.is_none() {
             return;
         }
-        if self.focused_id.is_none() {
-            if let Some(layout) = self.layout.as_ref() {
-                self.focused_id = default_focus_id_from_layout(layout);
-            }
-        } else if let Some(layout) = self.layout.as_ref() {
-            let focused = self.focused_id.as_ref().expect("focused id");
-            if !layout.nodes.contains_key(focused) {
-                self.focused_id = default_focus_id_from_layout(layout);
+        if let Some(layout) = self.layout.as_ref() {
+            match self.focused_id.as_ref() {
+                Some(focused) => {
+                    if !layout.nodes.contains_key(focused) {
+                        self.focused_id = default_focus_id_from_layout(layout);
+                    }
+                }
+                None => {
+                    self.focused_id = default_focus_id_from_layout(layout);
+                }
             }
         }
         if self.focused_id.is_none() {
@@ -257,14 +258,16 @@ pub fn render(
 
     render_canvas(
         frame,
-        area,
-        cluster_id,
-        cluster_state,
-        topology,
-        layout,
-        focused,
-        camera,
-        block,
+        CanvasRenderContext {
+            area,
+            cluster_id,
+            cluster_state,
+            topology,
+            layout,
+            focused,
+            camera,
+            block,
+        },
     );
 }
 
@@ -294,21 +297,25 @@ fn render_placeholder(
     frame.render_widget(widget, area);
 }
 
-fn render_canvas(
-    frame: &mut Frame<'_>,
+struct CanvasRenderContext<'a> {
     area: Rect,
-    cluster_id: &str,
-    cluster_state: &cluster::State,
-    topology: &ClusterTopology,
-    layout: &LayoutCache,
-    focused: Option<&str>,
+    cluster_id: &'a str,
+    cluster_state: &'a cluster::State,
+    topology: &'a ClusterTopology,
+    layout: &'a LayoutCache,
+    focused: Option<&'a str>,
     camera: (f64, f64),
-    block: Block,
-) {
-    let title = format!("Cluster Canvas {cluster_id}");
-    let render_bounds = camera_bounds(layout, camera);
-    let block = block.title(title);
-    let canvas_inner = block.inner(area);
+    block: Block<'a>,
+}
+
+fn render_canvas(frame: &mut Frame<'_>, canvas_ctx: CanvasRenderContext<'_>) {
+    let title = format!("Cluster Canvas {}", canvas_ctx.cluster_id);
+    let render_bounds = camera_bounds(canvas_ctx.layout, canvas_ctx.camera);
+    let block = canvas_ctx.block.title(title);
+    let canvas_inner = block.inner(canvas_ctx.area);
+    let layout = canvas_ctx.layout;
+    let focused = canvas_ctx.focused;
+    let topology = canvas_ctx.topology;
     let canvas = Canvas::default()
         .block(block)
         .x_bounds([render_bounds.min_x, render_bounds.max_x])
@@ -380,14 +387,14 @@ fn render_canvas(
             }
         });
 
-    frame.render_widget(canvas, area);
+    frame.render_widget(canvas, canvas_ctx.area);
     render_stream_overlay(
         frame,
         canvas_inner,
-        layout,
-        focused,
+        canvas_ctx.layout,
+        canvas_ctx.focused,
         &render_bounds,
-        cluster_state,
+        canvas_ctx.cluster_state,
         None,
     );
 }
@@ -643,7 +650,7 @@ fn clamp_rect_to_bounds(rect: Rect, bounds: Rect) -> Rect {
 }
 
 fn rect_intersects_spine(rect: Rect, spine: Option<Rect>) -> bool {
-    spine.map_or(false, |spine| rects_intersect(rect, spine))
+    spine.is_some_and(|spine| rects_intersect(rect, spine))
 }
 
 fn rects_intersect(a: Rect, b: Rect) -> bool {
@@ -662,31 +669,32 @@ fn avoid_spine(rect: Rect, bounds: Rect, spine: Option<Rect>) -> Rect {
         return rect;
     }
 
-    let mut options = Vec::new();
-    options.push(Rect {
-        x: rect.x,
-        y: spine.y.saturating_sub(rect.height.saturating_add(1)),
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: rect.x,
-        y: spine.y.saturating_add(spine.height).saturating_add(1),
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: spine.x.saturating_sub(rect.width.saturating_add(1)),
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    });
-    options.push(Rect {
-        x: spine.x.saturating_add(spine.width).saturating_add(1),
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    });
+    let options = vec![
+        Rect {
+            x: rect.x,
+            y: spine.y.saturating_sub(rect.height.saturating_add(1)),
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: rect.x,
+            y: spine.y.saturating_add(spine.height).saturating_add(1),
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: spine.x.saturating_sub(rect.width.saturating_add(1)),
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        },
+        Rect {
+            x: spine.x.saturating_add(spine.width).saturating_add(1),
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        },
+    ];
 
     for option in options {
         let candidate = clamp_rect_to_bounds(option, bounds);
