@@ -142,59 +142,64 @@ async function executeHook(params) {
   if (hook.action === 'verify_github_pr') {
     const { extractJsonFromOutput } = require('./output-extraction');
     const structuredOutput = extractJsonFromOutput(result.output) || {};
-    const prNumber = structuredOutput.pr_number;
+    const claimedPrUrl = structuredOutput.pr_url || null;
 
     // Skip actual gh CLI verification if explicitly disabled (for integration tests)
     // Unit tests mock execSync, so they still test the verification logic
     if (process.env.ZEROSHOT_SKIP_GH_VERIFY === '1') {
-      agent._log(`✅ VERIFICATION SKIPPED (ZEROSHOT_SKIP_GH_VERIFY=1): PR #${prNumber}`);
+      agent._log(`✅ VERIFICATION SKIPPED (ZEROSHOT_SKIP_GH_VERIFY=1)`);
       agent._publish({
         topic: 'CLUSTER_COMPLETE',
         content: {
           data: {
             reason: 'git-pusher-complete-verified',
-            pr_number: prNumber,
-            pr_url: structuredOutput.pr_url,
+            pr_number: structuredOutput.pr_number || null,
+            pr_url: claimedPrUrl,
           },
         },
       });
       return;
     }
 
-    if (!prNumber) {
-      throw new Error(
-        `VERIFICATION FAILED: git-pusher must provide pr_number in structured output. ` +
-          `Got: ${JSON.stringify(structuredOutput)}`
-      );
-    }
-
     let prData;
     try {
       prData = JSON.parse(
-        execSync(`gh pr view ${prNumber} --json state,mergedAt,url,number`, {
+        // IMPORTANT:
+        // Do NOT require pr_number in the agent output. GitHub CLI can infer the PR from the current branch.
+        // Agents sometimes wrap the PR JSON in a text field (summary/result) which is hard to parse reliably.
+        execSync(`gh pr view --json state,mergedAt,url,number`, {
           encoding: 'utf8',
           cwd: agent.workingDirectory,
           stdio: ['pipe', 'pipe', 'pipe'],
         })
       );
     } catch (err) {
-      if (err.message.includes('Could not resolve to a PullRequest')) {
+      if (
+        err.message.includes('Could not resolve to a PullRequest') ||
+        err.message.toLowerCase().includes('no pull requests found')
+      ) {
         throw new Error(
-          `VERIFICATION FAILED: Agent claimed PR #${prNumber} exists, ` +
+          `VERIFICATION FAILED: Agent claimed a PR exists for this branch, ` +
             `but GitHub says it DOES NOT EXIST. Agent HALLUCINATED.`
         );
       }
       throw err;
     }
 
+    if (claimedPrUrl && prData.url && claimedPrUrl !== prData.url) {
+      throw new Error(
+        `VERIFICATION FAILED: Agent claimed PR URL ${claimedPrUrl}, but GitHub CLI reports ${prData.url}.`
+      );
+    }
+
     if (!prData.mergedAt) {
       throw new Error(
-        `VERIFICATION FAILED: Agent claimed PR #${prNumber} is merged, ` +
+        `VERIFICATION FAILED: Agent claimed PR is merged, ` +
           `but GitHub says state="${prData.state}". Agent LIED.`
       );
     }
 
-    agent._log(`✅ VERIFICATION PASSED: PR #${prNumber} actually merged`);
+    agent._log(`✅ VERIFICATION PASSED: PR #${prData.number} actually merged`);
 
     // Publish CLUSTER_COMPLETE only after verification passes
     agent._publish({
@@ -202,7 +207,7 @@ async function executeHook(params) {
       content: {
         data: {
           reason: 'git-pusher-complete-verified',
-          pr_number: prNumber,
+          pr_number: prData.number,
           pr_url: prData.url,
         },
       },

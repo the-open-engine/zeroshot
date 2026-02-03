@@ -57,22 +57,29 @@ describe('verify_github_pr hook action', function () {
     mockExecSyncFn = null;
   });
 
-  it('should throw when pr_number missing from output', async function () {
+  it('should not require pr_number in structured output', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_url: 'https://github.com/org/repo/pull/123',
-        merged: true,
+        summary: 'Merged',
+        result:
+          'PR merged: {"pr_url":"https://github.com/org/repo/pull/123","pr_number":123,"merged":true}',
       }),
     };
 
-    try {
-      await executeHook({ hook, agent, result });
-      assert.fail('Expected error to be thrown');
-    } catch (err) {
-      assert.match(err.message, /VERIFICATION FAILED.*pr_number/i);
-    }
+    mockExecSyncFn = () => {
+      return JSON.stringify({
+        number: 123,
+        state: 'MERGED',
+        mergedAt: '2026-01-15T10:30:00Z',
+        url: 'https://github.com/org/repo/pull/123',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert(agent.lastPublished, 'Expected message to be published');
+    assert.strictEqual(agent.lastPublished.topic, 'CLUSTER_COMPLETE');
   });
 
   it('should throw when PR does not exist in GitHub', async function () {
@@ -80,7 +87,6 @@ describe('verify_github_pr hook action', function () {
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_number: 9999,
         pr_url: 'https://github.com/org/repo/pull/9999',
         merged: true,
       }),
@@ -106,7 +112,6 @@ describe('verify_github_pr hook action', function () {
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_number: 123,
         pr_url: 'https://github.com/org/repo/pull/123',
         merged: true,
       }),
@@ -134,7 +139,6 @@ describe('verify_github_pr hook action', function () {
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_number: 456,
         pr_url: 'https://github.com/org/repo/pull/456',
         merged: true,
       }),
@@ -161,7 +165,6 @@ describe('verify_github_pr hook action', function () {
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_number: 789,
         pr_url: 'https://github.com/org/repo/pull/789',
         merged: true,
       }),
@@ -187,7 +190,6 @@ describe('verify_github_pr hook action', function () {
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        pr_number: 999,
         pr_url: 'https://github.com/org/repo/pull/999',
         merged: true,
       }),
@@ -203,5 +205,27 @@ describe('verify_github_pr hook action', function () {
     } catch (err) {
       assert.match(err.message, /Network error: timeout/);
     }
+  });
+
+  it('should throw when claimed pr_url does not match the branch PR', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        pr_url: 'https://github.com/org/repo/pull/111',
+        merged: true,
+      }),
+    };
+
+    mockExecSyncFn = () => {
+      return JSON.stringify({
+        number: 222,
+        state: 'MERGED',
+        mergedAt: '2026-01-15T10:30:00Z',
+        url: 'https://github.com/org/repo/pull/222',
+      });
+    };
+
+    await assert.rejects(() => executeHook({ hook, agent, result }), /claimed PR URL/i);
   });
 });
