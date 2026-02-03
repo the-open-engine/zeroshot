@@ -334,6 +334,16 @@ function defineLifecycleStartTests() {
         /issue.*or text/i,
         'Should reject missing input'
       );
+
+      // Regression: startup failures must be persisted for supervisor visibility (no "invisible" clusters).
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      assert.ok(fs.existsSync(clustersFile), 'clusters.json should exist after failed start');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      const ids = Object.keys(persisted);
+      assert.equal(ids.length, 1, 'Expected exactly one persisted cluster entry');
+      const c = persisted[ids[0]];
+      assert.equal(c.state, 'failed', 'Failed start should persist state=failed');
+      assert.equal(c.pid, null, 'Failed start should persist pid=null');
     });
 
     it('should auto-generate unique cluster IDs', async function () {
