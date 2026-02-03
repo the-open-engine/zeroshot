@@ -142,8 +142,12 @@ function parseEvent(line, options = {}) {
       return null;
 
     case 'item.started':
+      if (!event.item || event.item.type !== 'command_execution') return null;
+      return parseItem(event.item, event.type);
+
     case 'item.created':
     case 'item.completed':
+      if (!event.item) return null;
       return parseItem(event.item, event.type);
 
     case 'turn.completed': {
