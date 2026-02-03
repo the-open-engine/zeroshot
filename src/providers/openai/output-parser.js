@@ -47,8 +47,47 @@ function parseFunctionCallOutput(item) {
   };
 }
 
-function parseItem(item) {
+function parseCommandExecutionItem(item, phase) {
+  // Codex CLI (newer) emits `command_execution` items for bash-like tool runs.
+  // Map them into the shared schema expected by the logs renderer.
+  const toolId = item.id;
+  const command = item.command || item.cmd || item.input?.command || item.input?.cmd;
+
+  if (phase === 'started') {
+    return {
+      type: 'tool_call',
+      toolName: 'Bash',
+      toolId,
+      input: command ? { command } : {},
+    };
+  }
+
+  const output = item.aggregated_output ?? item.output ?? item.result ?? '';
+  const exitCode =
+    typeof item.exit_code === 'number'
+      ? item.exit_code
+      : typeof item.exitCode === 'number'
+        ? item.exitCode
+        : null;
+
+  return {
+    type: 'tool_result',
+    toolId,
+    content: output,
+    isError: exitCode !== null ? exitCode !== 0 : !!item.error,
+  };
+}
+
+function parseReasoningItem(item) {
+  const text = item.text || item.content || '';
+  if (!text) return null;
+  return { type: 'thinking', text };
+}
+
+function parseItem(item, eventType) {
   const events = [];
+  const phase =
+    eventType === 'item.started' ? 'started' : eventType === 'item.completed' ? 'completed' : null;
 
   // Handle assistant messages (Claude-style: type=message, role=assistant)
   if (item.type === 'message' && item.role === 'assistant') {
@@ -58,6 +97,15 @@ function parseItem(item) {
   // Handle agent messages (Codex-style: type=agent_message, text=string)
   if (item.type === 'agent_message' && item.text) {
     events.push({ type: 'text', text: item.text });
+  }
+
+  if (item.type === 'reasoning') {
+    const reasoning = parseReasoningItem(item);
+    if (reasoning) events.push(reasoning);
+  }
+
+  if (item.type === 'command_execution' && phase) {
+    events.push(parseCommandExecutionItem(item, phase));
   }
 
   if (item.type === 'function_call') {
@@ -82,14 +130,25 @@ function parseEvent(line, options = {}) {
   }
 
   switch (event.type) {
+    case 'error':
+      return {
+        type: 'result',
+        success: false,
+        error: event.error?.message || event.message || event.error || 'Error',
+      };
+
     case 'thread.started':
     case 'turn.started':
-    case 'item.started':
       return null;
+
+    case 'item.started':
+      if (!event.item || event.item.type !== 'command_execution') return null;
+      return parseItem(event.item, event.type);
 
     case 'item.created':
     case 'item.completed':
-      return parseItem(event.item);
+      if (!event.item) return null;
+      return parseItem(event.item, event.type);
 
     case 'turn.completed': {
       const usage = event.usage || event.response?.usage || {};

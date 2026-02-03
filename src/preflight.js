@@ -76,33 +76,45 @@ function getClaudeVersion(claudeCommand = 'claude') {
   const command = parts[0];
   const extraArgs = parts.slice(1);
 
+  // Determine CLI presence without depending on `claude --version` working.
+  // Some environments can have Claude installed but a broken/unwritable config dir,
+  // which should NOT block preflight.
+  if (!commandExists(command)) {
+    return {
+      installed: false,
+      version: null,
+      error: `Command '${command}' not installed`,
+    };
+  }
+
   try {
     const versionArgs = [...extraArgs, '--version'];
     const versionCmd = [command, ...versionArgs].join(' ');
-    const safeEnv = {
-      ...process.env,
-      // Avoid failures when CLAUDE_CONFIG_DIR points to an unwritable path.
-      CLAUDE_CONFIG_DIR: path.join(os.tmpdir(), 'claude-config'),
-    };
-    const output = execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe', env: safeEnv });
+    const tmpConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-claude-version-'));
+    const output = execSync(versionCmd, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        // Avoid failures when CLAUDE_CONFIG_DIR points to an unwritable path.
+        // Some Claude CLI builds try to create subdirs under this path even for `--version`.
+        CLAUDE_CONFIG_DIR: tmpConfigDir,
+      },
+    });
     const match = output.match(/(\d+\.\d+\.\d+)/);
     return {
       installed: true,
       version: match ? match[1] : 'unknown',
       error: null,
     };
-  } catch (err) {
-    if (err.message.includes('command not found') || err.message.includes('not found')) {
-      return {
-        installed: false,
-        version: null,
-        error: `Command '${command}' not installed`,
-      };
-    }
+  } catch {
+    // The CLI exists, but the version command can still fail due to local environment
+    // (e.g. config-dir permissions). Treat this as installed with unknown version so
+    // preflight doesn't block on non-essential metadata.
     return {
-      installed: false,
-      version: null,
-      error: err.message,
+      installed: true,
+      version: 'unknown',
+      error: null,
     };
   }
 }
