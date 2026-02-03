@@ -18,6 +18,7 @@ ARG HELM_VERSION=3.13.3
 ARG INFRACOST_VERSION=0.10.32
 ARG TFLINT_VERSION=0.50.0
 ARG TFSEC_VERSION=1.28.4
+ARG CLAUDE_CODE_VERSION=2.1.20
 
 # Install system dependencies for e2e testing and development
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -127,8 +128,8 @@ COPY docker/zeroshot-cluster/pre-baked-deps.json /pre-baked-deps/package.json
 RUN cd /pre-baked-deps && npm install --ignore-scripts \
     && chown -R node:node /pre-baked-deps
 
-# Install Claude CLI globally
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude CLI globally (version pinned via ARG)
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Install Playwright (uses system Chromium)
 RUN npx playwright install-deps chromium 2>/dev/null || true
