@@ -6,12 +6,37 @@ Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @co
 
 ## 🔴 CRITICAL RULES
 
-| Rule                               | Why                          | Forbidden                                   | Required                                         |
-| ---------------------------------- | ---------------------------- | ------------------------------------------- | ------------------------------------------------ |
-| **Never spawn without permission** | Consumes API credits         | "I'll run zeroshot on 123"                  | User says "run zeroshot"                         |
-| **Never use git in validators**    | Git state unreliable         | `git diff`, `git status` in prompts         | Validate files directly                          |
-| **Never ask questions**            | Agents run non-interactively | `AskUserQuestion`, waiting for confirmation | Make autonomous decisions                        |
-| **Never edit CLAUDE.md**           | Context file for Claude Code | Editing this file                           | Read-only unless explicitly asked to update docs |
+| Rule                               | Why                          | Forbidden                                    | Required                                         |
+| ---------------------------------- | ---------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| **GENERAL PURPOSE ONLY**           | Zeroshot runs on ANY repo    | Hardcoded paths, scripts, languages, domains | Discover from target repo's CLAUDE.md/README     |
+| **Never spawn without permission** | Consumes API credits         | "I'll run zeroshot on 123"                   | User says "run zeroshot"                         |
+| **Never use git in validators**    | Git state unreliable         | `git diff`, `git status` in prompts          | Validate files directly                          |
+| **Never ask questions**            | Agents run non-interactively | `AskUserQuestion`, waiting for confirmation  | Make autonomous decisions                        |
+| **Never edit CLAUDE.md**           | Context file for Claude Code | Editing this file                            | Read-only unless explicitly asked to update docs |
+
+### 🔴 GENERAL PURPOSE REQUIREMENT (CRITICAL)
+
+**Zeroshot is a GENERAL-PURPOSE multi-agent orchestrator. It MUST work on ANY repository, ANY programming language, ANY domain.**
+
+**FORBIDDEN in templates/prompts:**
+
+- Hardcoded script names (`check-all.sh`, `validate.sh`)
+- Hardcoded test commands (`npm test`, `pytest`, `cargo test`)
+- Hardcoded file paths (`server/`, `src/`, `tests/`)
+- Hardcoded context file names (`CLAUDE.md` - other providers use different files)
+- Language-specific assumptions (TypeScript, Python, Rust)
+- Domain-specific assumptions (web, CLI, mobile)
+- Provider-specific assumptions (Claude, Codex, Gemini)
+- Covibes-specific patterns
+
+**REQUIRED:**
+
+- Discover validation commands from target repo's context files (README, Makefile, package.json, pyproject.toml, Cargo.toml, etc.)
+- Discover test runners from target repo's build system
+- Use generic examples in prompts (e.g., "the repo's validation script" NOT "./scripts/check-all.sh")
+- Use generic terms for context files ("repo context files" NOT "CLAUDE.md")
+- Work correctly on: Python projects, Rust crates, Go modules, Ruby gems, Java/Kotlin, C/C++, etc.
+- Work correctly with: Claude, Codex, Gemini, OpenAI, and any future providers
 
 **Worker git operations:** Allowed with isolation (`--worktree`, `--docker`, `--pr`, `--ship`). Forbidden without isolation (auto-injected restriction).
 
