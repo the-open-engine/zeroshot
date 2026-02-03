@@ -124,12 +124,13 @@ class GitHubProvider extends IssueProvider {
     return {};
   }
 
-  fetchIssue(identifier, _settings) {
+  fetchIssue(identifier, _settings, gitContext = null) {
     try {
-      const issueNumber = this._extractIssueNumber(identifier);
+      const { repo, number } = this._parseIdentifier(identifier, gitContext);
 
-      // Fetch issue using gh CLI
-      const cmd = `gh issue view ${issueNumber} --json number,title,body,labels,assignees,comments,url`;
+      // ALWAYS use -R flag when repo is known - never rely on CWD git remote
+      const repoFlag = repo ? `-R ${repo}` : '';
+      const cmd = `gh issue view ${number} ${repoFlag} --json number,title,body,labels,assignees,comments,url`;
       const output = execSync(cmd, { encoding: 'utf8' });
       const issue = JSON.parse(output);
 
@@ -140,24 +141,32 @@ class GitHubProvider extends IssueProvider {
   }
 
   /**
-   * Extract issue number from URL or return as-is
+   * Parse identifier into repo and issue number
    * @private
+   * @returns {{ repo: string|null, number: string }}
    */
-  _extractIssueNumber(issueRef) {
-    // If it's a URL, extract the number
-    const urlMatch = issueRef.match(/\/issues\/(\d+)/);
+  _parseIdentifier(identifier, gitContext = null) {
+    // GitHub URL: https://github.com/org/repo/issues/123
+    const urlMatch = identifier.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
     if (urlMatch) {
-      return urlMatch[1];
+      return { repo: urlMatch[1], number: urlMatch[2] };
     }
 
     // org/repo#123 format
-    const repoMatch = issueRef.match(/^[\w-]+\/[\w-]+#(\d+)$/);
+    const repoMatch = identifier.match(/^([\w.-]+\/[\w.-]+)#(\d+)$/);
     if (repoMatch) {
-      return repoMatch[1];
+      return { repo: repoMatch[1], number: repoMatch[2] };
     }
 
-    // Otherwise assume it's already a number
-    return issueRef;
+    // Bare number - use gitContext if available
+    if (/^\d+$/.test(identifier)) {
+      const repo =
+        gitContext?.owner && gitContext?.repo ? `${gitContext.owner}/${gitContext.repo}` : null;
+      return { repo, number: identifier };
+    }
+
+    // Fallback: assume it's a number, no repo
+    return { repo: null, number: identifier };
   }
 
   /**
