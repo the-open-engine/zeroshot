@@ -2560,28 +2560,33 @@ Continue from where you left off. Review your previous output to understand what
         throw new Error('Agent config missing required field: id');
       }
 
-      // Check for duplicate agent ID - MERGE triggers instead of skipping
-      const existingAgent = cluster.agents.find((a) => a.id === agentConfig.id);
-      if (existingAgent) {
-        // Merge new triggers into existing agent (avoid duplicates)
-        const newTriggers = agentConfig.triggers || [];
-        const existingTriggers = existingAgent.config.triggers || [];
+      // Check for duplicate agent ID - REPLACE agent entirely
+      // Previous behavior merged triggers but kept old hooks, causing bugs when
+      // loading templates with same agent IDs but different hooks (e.g., quick-validation
+      // and heavy-validation both have consensus-coordinator with different onComplete hooks)
+      const existingAgentIndex = cluster.agents.findIndex((a) => a.id === agentConfig.id);
+      if (existingAgentIndex !== -1) {
+        const existingAgent = cluster.agents[existingAgentIndex];
+        this._log(
+          `    🔄 Replacing agent ${agentConfig.id} (old role: ${existingAgent.config.role})`
+        );
 
-        for (const newTrigger of newTriggers) {
-          const isDuplicate = existingTriggers.some(
-            (t) => t.topic === newTrigger.topic && t.action === newTrigger.action
-          );
-          if (!isDuplicate) {
-            existingTriggers.push(newTrigger);
-            this._log(`    ✅ Merged trigger ${newTrigger.topic} into agent ${agentConfig.id}`);
+        // Stop the existing agent (cluster.agents contains AgentWrapper instances directly)
+        if (existingAgent.stop) {
+          existingAgent.stop();
+        }
+
+        // Remove from cluster.agents array
+        cluster.agents.splice(existingAgentIndex, 1);
+
+        // Remove from cluster.config.agents if present
+        if (cluster.config.agents) {
+          const configIndex = cluster.config.agents.findIndex((a) => a.id === agentConfig.id);
+          if (configIndex !== -1) {
+            cluster.config.agents.splice(configIndex, 1);
           }
         }
-        existingAgent.config.triggers = existingTriggers;
-
-        this._log(
-          `    ℹ️ Agent ${agentConfig.id} already exists, merged ${newTriggers.length} triggers`
-        );
-        continue;
+        // Continue to add the new agent below
       }
 
       // Add to config agents array (for persistence)
