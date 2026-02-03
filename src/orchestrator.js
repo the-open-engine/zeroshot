@@ -452,6 +452,51 @@ class Orchestrator {
   }
 
   /**
+   * Find active clusters for a given issue number
+   * Used to prevent duplicate runs on the same issue
+   * @param {number|string} issueNumber - Issue number to check
+   * @returns {Array<{id: string, state: string, createdAt: number}>} Active clusters for this issue
+   * @private
+   */
+  _getActiveClustersForIssue(issueNumber, excludeClusterId = null) {
+    const activeClusters = [];
+    const issueNum = Number(issueNumber);
+
+    for (const [clusterId, cluster] of this.clusters) {
+      if (excludeClusterId && clusterId === excludeClusterId) continue;
+      // Skip clusters without issue numbers
+      if (!cluster.issue) continue;
+
+      // Check if same issue number
+      if (Number(cluster.issue) !== issueNum) continue;
+
+      // Check if cluster is still active (not completed/failed/stopped)
+      const inactiveStates = ['completed', 'failed', 'stopped', 'corrupted'];
+      if (inactiveStates.includes(cluster.state)) continue;
+
+      // Check if process is still running (zombie detection)
+      if (cluster.pid) {
+        try {
+          // process.kill with signal 0 checks if process exists
+          process.kill(cluster.pid, 0);
+          // Process exists - cluster is active
+          activeClusters.push({
+            id: clusterId,
+            state: cluster.state,
+            createdAt: cluster.createdAt,
+            pid: cluster.pid,
+          });
+        } catch {
+          // Process doesn't exist - cluster is a zombie (stale entry)
+          // Don't include in active list
+        }
+      }
+    }
+
+    return activeClusters;
+  }
+
+  /**
    * Save clusters to persistent storage
    * Uses file locking to prevent race conditions with other processes
    * @private
@@ -700,6 +745,7 @@ class Orchestrator {
       clusterId: options.clusterId, // Explicit ID from CLI/daemon parent
       settings: options.settings, // User settings for issue provider detection
       forceProvider: options.forceProvider, // Force specific issue provider
+      force: options.force || false, // Skip duplicate issue check
     });
   }
 
@@ -794,6 +840,13 @@ class Orchestrator {
     this.clusters.set(clusterId, cluster);
     this._startSnapshotter(cluster);
 
+    // Persist the cluster immediately so detached runs can't create "invisible" initializing clusters.
+    // Without this, an early startup failure (before ISSUE_OPENED / TASK_STARTED) may never be saved,
+    // and external supervisors (e.g., heroshot) can't detect/cleanup the stuck state.
+    await this._saveClusters().catch((err) => {
+      console.warn(`[Orchestrator] Failed to persist initial cluster state for ${clusterId}:`, err);
+    });
+
     try {
       // Fetch input (issue from provider, file, or text)
       let inputData;
@@ -816,6 +869,28 @@ class Orchestrator {
 
         // Store issue number for heroshot/external tools (avoids log parsing)
         cluster.issue = inputData.number || null;
+
+        // Persist issue number early so supervisors can associate this cluster with the issue even if start fails.
+        await this._saveClusters().catch((err) => {
+          console.warn(`[Orchestrator] Failed to persist issue number for ${clusterId}:`, err);
+        });
+
+        // Check for duplicate active runs on same issue (unless --force)
+        if (cluster.issue && !options.force) {
+          const activeClusters = this._getActiveClustersForIssue(cluster.issue, clusterId);
+          if (activeClusters.length > 0) {
+            const existing = activeClusters[0];
+            const age = Math.round((Date.now() - existing.createdAt) / 1000 / 60);
+            throw new Error(
+              `Issue #${cluster.issue} already has an active cluster:\n` +
+                `  Cluster: ${existing.id} (state: ${existing.state}, running for ${age}min, pid: ${existing.pid})\n\n` +
+                `Options:\n` +
+                `  1. Kill existing: zeroshot kill ${existing.id}\n` +
+                `  2. Override check: zeroshot run ${input.issue} --force\n` +
+                `  3. View status:    zeroshot status ${existing.id}`
+            );
+          }
+        }
 
         // Log clickable issue link
         if (inputData.url) {
@@ -949,6 +1024,58 @@ class Orchestrator {
       if (cluster._resolveInitComplete) {
         cluster._resolveInitComplete();
       }
+      // Persist the failure state (prevents "invisible" failures that supervisors can't detect/cleanup).
+      await this._saveClusters().catch((err) => {
+        console.warn(
+          `[Orchestrator] Failed to persist failed cluster state for ${clusterId}:`,
+          err
+        );
+      });
+
+      // Best-effort cleanup of partially initialized resources (prevents orphaned worktrees/containers).
+      try {
+        if (cluster.snapshotter) {
+          cluster.snapshotter.stop();
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        for (const agent of cluster.agents || []) {
+          // Agent start may have partially succeeded.
+          // Stop is best-effort and must not mask the original error.
+          // eslint-disable-next-line no-await-in-loop
+          await agent.stop();
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        if (cluster.isolation?.manager) {
+          // Preserve workspace for inspection; callers can `zeroshot kill` for full cleanup.
+          // eslint-disable-next-line no-await-in-loop
+          await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        if (cluster.worktree?.manager) {
+          cluster.worktree.manager.cleanupWorktreeIsolation(clusterId, { preserveBranch: true });
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        cluster.messageBus?.close?.();
+      } catch {
+        // ignore
+      }
+      try {
+        cluster.ledger?.close?.();
+      } catch {
+        // ignore
+      }
       console.error(`Cluster ${clusterId} failed to start:`, error);
       throw error;
     }
@@ -1050,16 +1177,27 @@ class Orchestrator {
     this._subscribeToClusterTopic(messageBus, clusterId, 'AGENT_ERROR', async (message) => {
       const agentRole = message.content?.data?.role;
       const attempts = message.content?.data?.attempts || 1;
+      const hookFailure = message.content?.data?.hookFailure === true;
 
       await this._saveClusters();
 
-      if (agentRole === 'implementation' && attempts >= 3) {
+      const shouldStopForRole =
+        agentRole === 'implementation' ||
+        agentRole === 'coordinator' ||
+        message.sender === 'consensus-coordinator';
+      const shouldStop = shouldStopForRole && (hookFailure || attempts >= 3);
+
+      if (shouldStop) {
         this._log(`\n${'='.repeat(80)}`);
-        this._log(`❌ WORKER AGENT FAILED: ${clusterId}`);
+        this._log(`❌ CRITICAL AGENT FAILED: ${clusterId}`);
         this._log(`${'='.repeat(80)}`);
-        this._log(`Worker agent ${message.sender} failed after ${attempts} attempts`);
+        this._log(
+          `${message.sender} (${agentRole || 'unknown role'}) failed` +
+            (hookFailure ? ` (hookFailure=true)` : ``) +
+            ` after ${attempts} attempts`
+        );
         this._log(`Error: ${message.content?.data?.error || 'unknown'}`);
-        this._log(`Stopping cluster - worker cannot continue`);
+        this._log(`Stopping cluster - critical agent cannot continue`);
         this._log(`${'='.repeat(80)}\n`);
 
         this.stop(clusterId).catch((err) => {
@@ -2921,7 +3059,15 @@ Continue from where you left off. Review your previous output to understand what
       pid: cluster.pid || null,
       createdAt: cluster.createdAt,
       agents: cluster.agents.map((a) => a.getState()),
-      messageCount: cluster.messageBus.count({ cluster_id: clusterId }),
+      messageCount: (() => {
+        try {
+          return cluster.messageBus.count({ cluster_id: clusterId });
+        } catch {
+          // Cluster may have closed its ledger during startup failure cleanup.
+          // Status/list should remain safe to call for visibility + supervisor cleanup.
+          return 0;
+        }
+      })(),
     };
   }
 
@@ -2950,7 +3096,15 @@ Continue from where you left off. Review your previous output to understand what
         createdAt: cluster.createdAt,
         issue: cluster.issue || null,
         agentCount: cluster.agents.length,
-        messageCount: cluster.messageBus.getAll(cluster.id).length,
+        messageCount: (() => {
+          try {
+            return cluster.messageBus.count({ cluster_id: cluster.id });
+          } catch {
+            // Cluster may have closed its ledger during startup failure cleanup.
+            // List should remain safe to call for cleanup routines.
+            return 0;
+          }
+        })(),
       };
     });
   }

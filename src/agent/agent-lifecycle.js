@@ -27,6 +27,16 @@ const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-back
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
 
+class HookExecutionError extends Error {
+  constructor(message, options) {
+    super(message);
+    this.name = 'HookExecutionError';
+    this.hookFailure = true;
+    this.hookRetries = options?.hookRetries;
+    this.originalHookError = options?.originalHookError;
+  }
+}
+
 function resolveValidatorIsolationConfig(agent) {
   const config = agent.config?.isolation || {};
   if (config.type && config.type !== 'docker') {
@@ -477,11 +487,13 @@ ${'='.repeat(80)}`);
       } else {
         console.error(`${'='.repeat(80)}
 `);
-        // All hook retries exhausted - throw to trigger task-level handling
-        throw new Error(
+        // All hook retries exhausted - FAIL THE CLUSTER (do NOT rerun the whole task).
+        // Retrying the task wastes tokens and cannot fix a deterministic hook/config bug.
+        throw new HookExecutionError(
           `Hook execution failed after ${hookMaxRetries} attempts. ` +
             `Task completed successfully but hook could not publish result. ` +
-            `Original error: ${hookError.message}`
+            `Original error: ${hookError.message}`,
+          { hookRetries: hookMaxRetries, originalHookError: hookError.message }
         );
       }
     }
@@ -622,6 +634,25 @@ ${'='.repeat(80)}`);
   // Non-validator agents: publish error and stop
   agent.state = 'error';
 
+  // Hook failure: fail the whole cluster so it gets stopped + persisted (prevents deadlocked "running" clusters).
+  if (error?.hookFailure) {
+    agent._publish({
+      topic: 'CLUSTER_FAILED',
+      receiver: 'broadcast',
+      content: {
+        text: `Cluster failed: onComplete hook failed for ${agent.id} - ${error.message}`,
+        data: {
+          reason: 'on_complete_hook_failed',
+          agentId: agent.id,
+          role: agent.role,
+          hookRetries: error.hookRetries ?? null,
+          originalHookError: error.originalHookError ?? null,
+          error: error.message,
+        },
+      },
+    });
+  }
+
   // Save failure info to cluster for resume capability
   agent.cluster.failureInfo = {
     agentId: agent.id,
@@ -641,6 +672,9 @@ ${'='.repeat(80)}`);
       data: {
         error: error.message,
         stack: error.stack,
+        hookFailure: error?.hookFailure === true,
+        hookRetries: error?.hookRetries ?? undefined,
+        originalHookError: error?.originalHookError ?? undefined,
         agent: agent.id,
         role: agent.role,
         iteration: agent.iteration,
@@ -762,6 +796,11 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
+      if (error instanceof HookExecutionError) {
+        // Hook failures are deterministic; do not waste tokens retrying the provider task.
+        await handleFinalFailure(agent, triggeringMessage, error, 1);
+        return;
+      }
       const isSigterm = error.message && error.message.includes('SIGTERM');
       const isNoMessages =
         error.message && error.message.toLowerCase().includes('no messages returned');
