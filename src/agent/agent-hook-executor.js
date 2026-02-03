@@ -286,15 +286,68 @@ async function parseTransformResultData({ context, agent, script, scriptUsesResu
 }
 
 function buildTransformSandbox({ resultData, context, agent }) {
+  const clusterId = agent.cluster_id;
+  const messageBus = agent.messageBus;
+  const cluster = context.cluster || agent.cluster;
+
+  // Ledger API wrapper (auto-scoped to cluster) - mirrors logic-engine.js
+  const ledgerAPI = {
+    query: (criteria) => {
+      return messageBus.query({ ...criteria, cluster_id: clusterId });
+    },
+    findLast: (criteria) => {
+      return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+    },
+    count: (criteria) => {
+      return messageBus.count({ ...criteria, cluster_id: clusterId });
+    },
+    since: (timestamp) => {
+      return messageBus.since({ cluster_id: clusterId, timestamp });
+    },
+  };
+
+  // Cluster API wrapper - mirrors logic-engine.js
+  const clusterAPI = {
+    id: clusterId,
+    getAgents: () => {
+      return cluster ? cluster.agents || [] : [];
+    },
+    getAgentsByRole: (role) => {
+      return cluster ? (cluster.agents || []).filter((a) => a.role === role) : [];
+    },
+    getAgent: (id) => {
+      return cluster ? (cluster.agents || []).find((a) => a.id === id) : null;
+    },
+  };
+
+  // Helper functions - mirrors logic-engine.js
   const helpers = {
     getConfig: require('../config-router').getConfig,
+    allResponded: (agents, topic, since) => {
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+    hasConsensus: (topic, since) => {
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
   };
 
   return {
     result: resultData,
     triggeringMessage: context.triggeringMessage,
+    // APIs - now matching logic-engine.js
+    ledger: ledgerAPI,
+    cluster: clusterAPI,
     helpers,
+    // Safe built-ins
     JSON,
+    Set,
+    Map,
+    Array,
+    Object,
     console: {
       log: (...args) => agent._log('[transform]', ...args),
       error: (...args) => console.error('[transform]', ...args),
