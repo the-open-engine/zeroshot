@@ -214,15 +214,70 @@ async function parseTransformResultData({ context, agent, script, scriptUsesResu
 }
 
 function buildTransformSandbox({ resultData, context, agent }) {
+  const clusterId = agent.cluster?.id || context.cluster?.id || agent.cluster_id || 'unknown';
+  const messageBus = agent.messageBus;
+  const cluster = context.cluster || agent.cluster || null;
+
+  // Ledger API wrapper (auto-scoped to cluster) - mirrors logic-engine.js
+  const ledgerAPI = messageBus
+    ? {
+        query: (criteria) => {
+          return messageBus.query({ ...criteria, cluster_id: clusterId });
+        },
+        findLast: (criteria) => {
+          return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+        },
+        count: (criteria) => {
+          return messageBus.count({ ...criteria, cluster_id: clusterId });
+        },
+        since: (timestamp) => {
+          return messageBus.since({ cluster_id: clusterId, timestamp });
+        },
+      }
+    : null;
+
+  // Cluster API wrapper - mirrors logic-engine.js
+  const clusterAPI = {
+    id: clusterId,
+    getAgents: () => {
+      return cluster ? cluster.agents || [] : [];
+    },
+    getAgentsByRole: (role) => {
+      return cluster ? (cluster.agents || []).filter((a) => a.role === role) : [];
+    },
+    getAgent: (id) => {
+      return cluster ? (cluster.agents || []).find((a) => a.id === id) : null;
+    },
+  };
+
+  // Helper functions - mirrors logic-engine.js
   const helpers = {
     getConfig: require('../config-router').getConfig,
+    allResponded: (agents, topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+    hasConsensus: (topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
   };
 
   return {
     result: resultData,
     triggeringMessage: context.triggeringMessage,
+    ledger: ledgerAPI,
+    cluster: clusterAPI,
     helpers,
     JSON,
+    Set,
+    Map,
+    Array,
+    Object,
     console: {
       log: (...args) => agent._log('[transform]', ...args),
       error: (...args) => console.error('[transform]', ...args),
@@ -530,6 +585,59 @@ function evaluateHookLogic(params) {
     throw new Error(`Unsupported hook logic engine: ${logic.engine}`);
   }
 
+  const clusterId = agent.cluster?.id || context.cluster?.id || agent.cluster_id || 'unknown';
+  const messageBus = agent.messageBus;
+  const cluster = context.cluster || agent.cluster || null;
+
+  // Ledger API wrapper (auto-scoped to cluster) - mirrors logic-engine.js
+  const ledgerAPI = messageBus
+    ? {
+        query: (criteria) => {
+          return messageBus.query({ ...criteria, cluster_id: clusterId });
+        },
+        findLast: (criteria) => {
+          return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+        },
+        count: (criteria) => {
+          return messageBus.count({ ...criteria, cluster_id: clusterId });
+        },
+        since: (timestamp) => {
+          return messageBus.since({ cluster_id: clusterId, timestamp });
+        },
+      }
+    : null;
+
+  // Cluster API wrapper - mirrors logic-engine.js
+  const clusterAPI = {
+    id: clusterId,
+    getAgents: () => {
+      return cluster ? cluster.agents || [] : [];
+    },
+    getAgentsByRole: (role) => {
+      return cluster ? (cluster.agents || []).filter((a) => a.role === role) : [];
+    },
+    getAgent: (id) => {
+      return cluster ? (cluster.agents || []).find((a) => a.id === id) : null;
+    },
+  };
+
+  // Helper functions - mirrors logic-engine.js
+  const helpers = {
+    getConfig: require('../config-router').getConfig,
+    allResponded: (agents, topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+    hasConsensus: (topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
+  };
+
   // Build sandbox context - similar to LogicEngine but focused on result data
   const sandbox = {
     // The parsed result from agent output - this is the main input
@@ -544,6 +652,11 @@ function evaluateHookLogic(params) {
 
     // Triggering message (if available)
     message: context.triggeringMessage || null,
+
+    // APIs
+    ledger: ledgerAPI,
+    cluster: clusterAPI,
+    helpers,
 
     // Safe built-ins
     Set,

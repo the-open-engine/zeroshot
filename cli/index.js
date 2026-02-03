@@ -2389,6 +2389,11 @@ program
     'Override all agents to use a provider (claude, codex, gemini, opencode)'
   )
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
+  .option(
+    '--sim <mode>',
+    'Token-free simulation gate for templates (off|fast|deep). Default: fast',
+    'fast'
+  )
   .option('-G, --github', 'Force GitHub as issue source')
   .option('-L, --gitlab', 'Force GitLab as issue source')
   .option('-J, --jira', 'Force Jira as issue source')
@@ -2446,6 +2451,30 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 
       // Preflight checks
       runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
+
+      // Secondary preflight: token-free template simulation/validation
+      const simMode = String(options.sim || 'fast').toLowerCase();
+      if (simMode !== 'off') {
+        const { validateTemplates } = require('../src/template-validation');
+        const templatesDir = path.join(PACKAGE_ROOT, 'cluster-templates');
+        const deep = simMode === 'deep';
+        const report = await validateTemplates({ templatesDir, deep });
+        if (!report.valid) {
+          console.error('\n' + '='.repeat(60));
+          console.error(`TEMPLATE VALIDATION FAILED (sim=${simMode})`);
+          console.error('='.repeat(60));
+          for (const { filePath, result } of report.results) {
+            if (result.valid) continue;
+            const rel = path.relative(process.cwd(), filePath);
+            console.error(`\n❌ ${rel}`);
+            for (const err of result.errors) {
+              console.error(`   ERROR: ${err}`);
+            }
+          }
+          console.error('\nFix template errors before running to avoid token burn.\n');
+          process.exit(1);
+        }
+      }
 
       const { generateName } = require('../src/name-generator');
 

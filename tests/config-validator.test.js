@@ -184,7 +184,9 @@ describe('modelRules validation', function () {
         },
       ],
     });
-    assert.ok(result.warnings.some((w) => w.includes('model "gpt4"') && w.includes('claude')));
+    assert.ok(
+      result.warnings.some((w) => w.includes('model "gpt4"') && w.includes('not valid for'))
+    );
   });
 });
 
