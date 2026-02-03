@@ -90,15 +90,20 @@ function getClaudeVersion(claudeCommand = 'claude') {
   try {
     const versionArgs = [...extraArgs, '--version'];
     const versionCmd = [command, ...versionArgs].join(' ');
-    const tmpConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-claude-version-'));
+    // Claude Code may try to write debug output under CLAUDE_CONFIG_DIR even for `--version`.
+    // Preflight should detect installation, not fail due to an unwritable/invalid config dir.
+    const preflightConfigDir = path.join(os.tmpdir(), 'zeroshot-claude-preflight');
+    try {
+      fs.mkdirSync(preflightConfigDir, { recursive: true });
+    } catch {
+      // If we can't create it, fall back to current env.
+    }
     const output = execSync(versionCmd, {
       encoding: 'utf8',
       stdio: 'pipe',
       env: {
         ...process.env,
-        // Avoid failures when CLAUDE_CONFIG_DIR points to an unwritable path.
-        // Some Claude CLI builds try to create subdirs under this path even for `--version`.
-        CLAUDE_CONFIG_DIR: tmpConfigDir,
+        CLAUDE_CONFIG_DIR: preflightConfigDir,
       },
     });
     const match = output.match(/(\d+\.\d+\.\d+)/);
