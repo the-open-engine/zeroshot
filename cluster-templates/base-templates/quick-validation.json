@@ -259,7 +259,7 @@
           "topic": "QUICK_VALIDATION_RESULT",
           "logic": {
             "engine": "javascript",
-            "script": "const results = ledger.query({ topic: 'QUICK_VALIDATION_RESULT', since: ledger.findLast({ topic: 'IMPLEMENTATION_READY' })?.timestamp || 0 }); return results.length === 2;"
+            "script": "const lastImpl = ledger.findLast({ topic: 'IMPLEMENTATION_READY' }); const since = lastImpl?.timestamp || 0; return helpers.allResponded(['validator-requirements', 'validator-code'], 'QUICK_VALIDATION_RESULT', since);"
           },
           "action": "execute_task"
         }
