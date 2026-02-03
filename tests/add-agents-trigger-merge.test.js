@@ -1,11 +1,14 @@
 /**
- * Regression test: add_agents should merge triggers for duplicate agent IDs
+ * Test: add_agents should REPLACE agents with duplicate IDs entirely
  *
- * BUG: When heavy-validation template adds consensus-coordinator (which already
- * exists from quick-validation), the HEAVY_VALIDATION_RESULT trigger was lost
- * because add_agents skipped duplicate agent IDs entirely.
+ * HISTORY:
+ * - Original behavior: Merged triggers but kept old hooks → BUG
+ * - Bug manifestation: heavy-validation consensus-coordinator used quick-validation's
+ *   hooks, publishing QUICK_VALIDATION_PASSED instead of VALIDATION_RESULT → infinite loop
+ * - Fix: Replace agent entirely when same ID encountered
  *
- * FIX: Merge triggers from new config into existing agent instead of skipping.
+ * DESIGN DECISION: Same ID = same agent = full replacement
+ * If you need different behavior, use different agent IDs.
  */
 
 const assert = require('assert');
@@ -26,7 +29,7 @@ function createTempDir() {
   if (!fs.existsSync(tmpBase)) {
     fs.mkdirSync(tmpBase, { recursive: true });
   }
-  return fs.mkdtempSync(path.join(tmpBase, 'trigger-merge-'));
+  return fs.mkdtempSync(path.join(tmpBase, 'agent-replace-'));
 }
 
 function cleanupTempDir(tmpDir) {
@@ -35,7 +38,7 @@ function cleanupTempDir(tmpDir) {
   }
 }
 
-describe('add_agents trigger merge', function () {
+describe('add_agents duplicate ID handling', function () {
   this.timeout(10000);
 
   let tmpDir;
@@ -55,47 +58,43 @@ describe('add_agents trigger merge', function () {
     cleanupTempDir(tmpDir);
   });
 
-  it('should merge triggers when adding agent with duplicate ID', async function () {
-    // Create orchestrator with mock task runner
+  it('should REPLACE agent entirely when adding agent with duplicate ID', async function () {
     orchestrator = new Orchestrator({
       dataDir: tmpDir,
       taskRunner: mockRunner,
       quiet: true,
     });
 
-    // Create initial config with consensus-coordinator that has QUICK trigger
+    // Initial agent with QUICK trigger and quick-specific hooks
     const initialConfig = {
       agents: [
         {
           id: 'consensus-coordinator',
           role: 'coordinator',
           modelLevel: 'level2',
-          triggers: [
-            {
-              topic: 'QUICK_VALIDATION_RESULT',
-              action: 'execute_task',
+          triggers: [{ topic: 'QUICK_VALIDATION_RESULT', action: 'execute_task' }],
+          prompt: 'Quick validation coordinator.',
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'QUICK_VALIDATION_PASSED', content: { text: 'Stage 1 passed' } },
             },
-          ],
-          prompt: 'You are the consensus coordinator.',
+          },
         },
       ],
     };
 
-    // Start cluster
     const result = await orchestrator.start(initialConfig, { text: 'Test task' });
     const clusterId = result.id;
-
-    // Get cluster to access agents directly (getStatus doesn't include triggers)
     const cluster = orchestrator.getCluster(clusterId);
 
-    // Verify initial state - only QUICK trigger (triggers are in agent.config.triggers)
+    // Verify initial state
     const agentBefore = cluster.agents.find((a) => a.id === 'consensus-coordinator');
     assert.ok(agentBefore, 'consensus-coordinator should exist');
-    assert.strictEqual(
-      agentBefore.config.triggers?.length || 0,
-      1,
-      'Should have 1 trigger initially'
-    );
+    assert.strictEqual(agentBefore.config.triggers.length, 1);
+    assert.strictEqual(agentBefore.config.hooks.onComplete.config.topic, 'QUICK_VALIDATION_PASSED');
+
+    // Add agent with SAME ID but DIFFERENT triggers and hooks (simulating heavy-validation)
     await orchestrator._opAddAgents(
       cluster,
       {
@@ -104,40 +103,104 @@ describe('add_agents trigger merge', function () {
             id: 'consensus-coordinator', // Same ID!
             role: 'coordinator',
             modelLevel: 'level2',
-            triggers: [
-              {
-                topic: 'HEAVY_VALIDATION_RESULT', // Different trigger
-                action: 'execute_task',
+            triggers: [{ topic: 'HEAVY_VALIDATION_RESULT', action: 'execute_task' }],
+            prompt: 'Heavy validation coordinator.',
+            hooks: {
+              onComplete: {
+                action: 'publish_message',
+                config: { topic: 'VALIDATION_RESULT', content: { text: 'All validations passed' } },
               },
-            ],
-            prompt: 'You are the consensus coordinator for heavy validation.',
+            },
           },
         ],
       },
       {}
     );
 
-    // Verify triggers were MERGED, not skipped
-    // Re-fetch cluster to get updated agent state
+    // Verify REPLACEMENT occurred (not merge)
     const clusterAfter = orchestrator.getCluster(clusterId);
     const agentAfter = clusterAfter.agents.find((a) => a.id === 'consensus-coordinator');
 
     assert.ok(agentAfter, 'consensus-coordinator should still exist');
 
-    // THE CRITICAL ASSERTION: Should now have BOTH triggers (triggers in agent.config.triggers)
-    const triggers = agentAfter.config.triggers || [];
-    assert.strictEqual(triggers.length, 2, 'Should have 2 triggers after merge');
+    // CRITICAL: Should have ONLY the new trigger (not merged)
+    assert.strictEqual(
+      agentAfter.config.triggers.length,
+      1,
+      'Should have 1 trigger (replaced, not merged)'
+    );
+    assert.strictEqual(
+      agentAfter.config.triggers[0].topic,
+      'HEAVY_VALIDATION_RESULT',
+      'Should have the NEW trigger'
+    );
 
-    const hasQuickTrigger = triggers.some((t) => t.topic === 'QUICK_VALIDATION_RESULT');
-    const hasHeavyTrigger = triggers.some((t) => t.topic === 'HEAVY_VALIDATION_RESULT');
+    // CRITICAL: Should have NEW hooks (the bug was keeping old hooks)
+    assert.strictEqual(
+      agentAfter.config.hooks.onComplete.config.topic,
+      'VALIDATION_RESULT',
+      'Should have NEW hooks (not old QUICK_VALIDATION_PASSED)'
+    );
 
-    assert.ok(hasQuickTrigger, 'Should still have QUICK_VALIDATION_RESULT trigger');
-    assert.ok(hasHeavyTrigger, 'Should have merged HEAVY_VALIDATION_RESULT trigger');
+    // Verify prompt was also replaced
+    assert.strictEqual(agentAfter.config.prompt, 'Heavy validation coordinator.');
 
     await orchestrator.stop(clusterId);
   });
 
-  it('should not duplicate identical triggers', async function () {
+  it('should allow adding agents with different IDs', async function () {
+    orchestrator = new Orchestrator({
+      dataDir: tmpDir,
+      taskRunner: mockRunner,
+      quiet: true,
+    });
+
+    const initialConfig = {
+      agents: [
+        {
+          id: 'quick-consensus',
+          role: 'coordinator',
+          triggers: [{ topic: 'QUICK_RESULT', action: 'execute_task' }],
+          prompt: 'Quick coordinator.',
+        },
+      ],
+    };
+
+    const result = await orchestrator.start(initialConfig, { text: 'Test task' });
+    const clusterId = result.id;
+    const cluster = orchestrator.getCluster(clusterId);
+
+    // Add a DIFFERENT agent (different ID)
+    await orchestrator._opAddAgents(
+      cluster,
+      {
+        agents: [
+          {
+            id: 'heavy-consensus', // Different ID
+            role: 'coordinator',
+            triggers: [{ topic: 'HEAVY_RESULT', action: 'execute_task' }],
+            prompt: 'Heavy coordinator.',
+          },
+        ],
+      },
+      {}
+    );
+
+    const clusterAfter = orchestrator.getCluster(clusterId);
+
+    // Should have BOTH agents
+    assert.strictEqual(clusterAfter.agents.length, 2, 'Should have 2 agents');
+
+    const quickAgent = clusterAfter.agents.find((a) => a.id === 'quick-consensus');
+    const heavyAgent = clusterAfter.agents.find((a) => a.id === 'heavy-consensus');
+
+    assert.ok(quickAgent, 'quick-consensus should exist');
+    assert.ok(heavyAgent, 'heavy-consensus should exist');
+
+    await orchestrator.stop(clusterId);
+  });
+
+  it('should replace agent instance entirely when same ID added', async function () {
     orchestrator = new Orchestrator({
       dataDir: tmpDir,
       taskRunner: mockRunner,
@@ -149,13 +212,7 @@ describe('add_agents trigger merge', function () {
         {
           id: 'test-agent',
           role: 'validator',
-          modelLevel: 'level2',
-          triggers: [
-            {
-              topic: 'TEST_TOPIC',
-              action: 'execute_task',
-            },
-          ],
+          triggers: [{ topic: 'TEST', action: 'execute_task' }],
           prompt: 'Test agent.',
         },
       ],
@@ -163,10 +220,13 @@ describe('add_agents trigger merge', function () {
 
     const result = await orchestrator.start(initialConfig, { text: 'Test task' });
     const clusterId = result.id;
-
     const cluster = orchestrator.getCluster(clusterId);
 
-    // Try to add agent with SAME trigger (should not duplicate)
+    // cluster.agents contains AgentWrapper instances directly
+    const agentBefore = cluster.agents.find((a) => a.id === 'test-agent');
+    assert.ok(agentBefore, 'Agent should exist before replacement');
+
+    // Replace the agent
     await orchestrator._opAddAgents(
       cluster,
       {
@@ -174,26 +234,23 @@ describe('add_agents trigger merge', function () {
           {
             id: 'test-agent',
             role: 'validator',
-            triggers: [
-              {
-                topic: 'TEST_TOPIC', // Same trigger
-                action: 'execute_task',
-              },
-            ],
-            prompt: 'Test agent duplicate.',
+            triggers: [{ topic: 'TEST2', action: 'execute_task' }],
+            prompt: 'Replaced agent.',
           },
         ],
       },
       {}
     );
 
-    // Re-fetch cluster to get updated agent state (triggers in agent.config.triggers)
     const clusterAfter = orchestrator.getCluster(clusterId);
-    const agent = clusterAfter.agents.find((a) => a.id === 'test-agent');
-    const triggers = agent.config.triggers || [];
+    const agentAfter = clusterAfter.agents.find((a) => a.id === 'test-agent');
 
-    // Should still have only 1 trigger (no duplication)
-    assert.strictEqual(triggers.length, 1, 'Should not duplicate identical triggers');
+    // Should be a DIFFERENT AgentWrapper instance (not the same object)
+    assert.notStrictEqual(agentAfter, agentBefore, 'Should be new AgentWrapper instance');
+
+    // Verify the new config was applied
+    assert.strictEqual(agentAfter.config.triggers[0].topic, 'TEST2');
+    assert.strictEqual(agentAfter.config.prompt, 'Replaced agent.');
 
     await orchestrator.stop(clusterId);
   });
