@@ -15,6 +15,7 @@
 const LogicEngine = require('./logic-engine');
 const MessageBusBridge = require('./message-bus-bridge');
 const { DEFAULT_MAX_ITERATIONS } = require('./agent/agent-config');
+const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('./message-buffer');
 
 function normalizeParentTopicConfig(entry) {
   if (typeof entry === 'string') {
@@ -179,8 +180,17 @@ class SubClusterWrapper {
       return;
     }
     if (this.state !== 'idle') {
+      bufferMessage(this, message);
       console.warn(
-        `[${this.id}] ⚠️ DROPPING message (busy, state=${this.state}): ${message.topic}`
+        `[${this.id}] ⏸️ BUFFERING message (busy, state=${this.state}): ${message.topic}`
+      );
+      scheduleDrain(
+        this,
+        () =>
+          drainBufferedMessages(this, (next) => this._handleMessage(next), {
+            label: 'SubCluster',
+          }),
+        { label: 'SubCluster' }
       );
       return;
     }
