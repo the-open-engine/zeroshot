@@ -3059,7 +3059,15 @@ Continue from where you left off. Review your previous output to understand what
       pid: cluster.pid || null,
       createdAt: cluster.createdAt,
       agents: cluster.agents.map((a) => a.getState()),
-      messageCount: cluster.messageBus.count({ cluster_id: clusterId }),
+      messageCount: (() => {
+        try {
+          return cluster.messageBus.count({ cluster_id: clusterId });
+        } catch {
+          // Cluster may have closed its ledger during startup failure cleanup.
+          // Status/list should remain safe to call for visibility + supervisor cleanup.
+          return 0;
+        }
+      })(),
     };
   }
 
@@ -3088,7 +3096,15 @@ Continue from where you left off. Review your previous output to understand what
         createdAt: cluster.createdAt,
         issue: cluster.issue || null,
         agentCount: cluster.agents.length,
-        messageCount: cluster.messageBus.count({ cluster_id: cluster.id }),
+        messageCount: (() => {
+          try {
+            return cluster.messageBus.count({ cluster_id: cluster.id });
+          } catch {
+            // Cluster may have closed its ledger during startup failure cleanup.
+            // List should remain safe to call for cleanup routines.
+            return 0;
+          }
+        })(),
       };
     });
   }
