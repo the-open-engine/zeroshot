@@ -12,7 +12,7 @@ const LIMITS = {
 
 const TEXT_LIMITS = {
   task: 2000,
-  plan: 2000,
+  plan: 2500, // Slightly increased for actionable plans with embedded patterns (was 2000)
   fixPlan: 1200,
   summary: 300,
   listItem: 200,
