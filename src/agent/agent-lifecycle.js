@@ -15,6 +15,8 @@
 const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
 const { executeHook } = require('./agent-hook-executor');
 const IsolationManager = require('../isolation-manager');
+const crypto = require('crypto');
+const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('../message-buffer');
 const {
   analyzeProcessHealth,
   isPlatformSupported,
@@ -254,8 +256,16 @@ async function handleMessage(agent, message) {
     return;
   }
   if (agent.state !== 'idle') {
+    // IMPORTANT: Never drop a message that matches a trigger.
+    // Dropping validation/coordinator signals can wedge clusters in "running" state.
+    bufferMessage(agent, message);
     console.warn(
-      `[${agent.id}] ⚠️ DROPPING message (busy, state=${agent.state}): ${message.topic}`
+      `[${agent.id}] ⏸️ BUFFERING message (busy, state=${agent.state}): ${message.topic}`
+    );
+    scheduleDrain(
+      agent,
+      () => drainBufferedMessages(agent, (next) => handleMessage(agent, next), { label: 'Agent' }),
+      { label: 'Agent' }
     );
     return;
   }
@@ -387,7 +397,7 @@ async function applyValidatorJitter(agent) {
     return;
   }
 
-  const jitterMs = Math.floor(Math.random() * 15000); // 0-15 seconds
+  const jitterMs = crypto.randomInt(0, 15000); // 0-15 seconds
   if (!agent.quiet) {
     agent._log(
       `[Agent ${agent.id}] Adding ${Math.round(jitterMs / 1000)}s jitter to prevent lock contention`
@@ -570,7 +580,7 @@ ${'='.repeat(80)}`);
 
 async function handleLockContention() {
   // Lock contention - add significant jittered delay
-  const lockDelay = 10000 + Math.floor(Math.random() * 20000); // 10-30 seconds
+  const lockDelay = 10000 + crypto.randomInt(0, 20000); // 10-30 seconds
   console.error(
     `⚠️ Lock contention detected - waiting ${Math.round(lockDelay / 1000)}s before retry`
   );
@@ -765,6 +775,29 @@ async function handleTaskAttemptFailure({
   return false;
 }
 
+function maybeExtendMaxRetries({
+  error,
+  attempt,
+  maxRetries,
+  sigtermRetryGranted,
+  noMessagesRetryGranted,
+}) {
+  const message = error?.message || '';
+  if (!message || attempt < maxRetries) {
+    return { maxRetries, sigtermRetryGranted, noMessagesRetryGranted };
+  }
+
+  if (message.includes('SIGTERM') && !sigtermRetryGranted) {
+    return { maxRetries: maxRetries + 1, sigtermRetryGranted: true, noMessagesRetryGranted };
+  }
+
+  if (message.toLowerCase().includes('no messages returned') && !noMessagesRetryGranted) {
+    return { maxRetries: maxRetries + 1, sigtermRetryGranted, noMessagesRetryGranted: true };
+  }
+
+  return { maxRetries, sigtermRetryGranted, noMessagesRetryGranted };
+}
+
 /**
  * Execute claude-zeroshots with built context
  * Default: uses settings.maxRetries (default 3) for exponential backoff retries.
@@ -801,17 +834,16 @@ async function executeTask(agent, triggeringMessage) {
         await handleFinalFailure(agent, triggeringMessage, error, 1);
         return;
       }
-      const isSigterm = error.message && error.message.includes('SIGTERM');
-      const isNoMessages =
-        error.message && error.message.toLowerCase().includes('no messages returned');
-      if (isSigterm && !sigtermRetryGranted && attempt >= maxRetries) {
-        sigtermRetryGranted = true;
-        maxRetries += 1;
-      }
-      if (isNoMessages && !noMessagesRetryGranted && attempt >= maxRetries) {
-        noMessagesRetryGranted = true;
-        maxRetries += 1;
-      }
+      const updated = maybeExtendMaxRetries({
+        error,
+        attempt,
+        maxRetries,
+        sigtermRetryGranted,
+        noMessagesRetryGranted,
+      });
+      maxRetries = updated.maxRetries;
+      sigtermRetryGranted = updated.sigtermRetryGranted;
+      noMessagesRetryGranted = updated.noMessagesRetryGranted;
       const shouldStop = await handleTaskAttemptFailure({
         agent,
         triggeringMessage,
