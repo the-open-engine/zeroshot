@@ -2,12 +2,13 @@ const MODEL_CATALOG = {
   haiku: { rank: 1 },
   sonnet: { rank: 2 },
   opus: { rank: 3 },
+  'opus-4.6': { rank: 3 },
 };
 
 const LEVEL_MAPPING = {
   level1: { rank: 1, model: 'haiku' },
   level2: { rank: 2, model: 'sonnet' },
-  level3: { rank: 3, model: 'opus' },
+  level3: { rank: 3, model: 'opus-4.6' },
 };
 
 const DEFAULT_LEVEL = 'level2';

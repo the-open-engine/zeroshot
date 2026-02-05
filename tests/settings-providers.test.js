@@ -90,4 +90,10 @@ describe('Provider settings', function () {
     const modelSpec = codex.resolveModelSpec(codex.getDefaultLevel(), {});
     assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
   });
+
+  it('maps claude level3 to opus-4.6', function () {
+    const claude = getProvider('claude');
+    const modelSpec = claude.resolveModelSpec('level3', {});
+    assert.strictEqual(modelSpec.model, 'opus-4.6');
+  });
 });
