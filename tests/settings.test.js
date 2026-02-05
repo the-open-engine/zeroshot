@@ -82,7 +82,7 @@ function registerSettingsDefaultTests() {
     assert.strictEqual(DEFAULT_SETTINGS.defaultDocker, false);
     assert.strictEqual(DEFAULT_SETTINGS.strictSchema, true);
     assert.strictEqual(DEFAULT_SETTINGS.logLevel, 'normal');
-    assert.strictEqual(DEFAULT_SETTINGS.defaultProvider, 'codex');
+    assert.strictEqual(DEFAULT_SETTINGS.defaultProvider, 'claude');
     assert.ok(DEFAULT_SETTINGS.providerSettings);
   });
 
