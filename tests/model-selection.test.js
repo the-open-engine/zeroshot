@@ -26,6 +26,7 @@ function registerModelSelectionHooks() {
     }
     const testSettings = {
       maxModel: 'opus',
+      defaultProvider: 'claude',
       defaultConfig: 'conductor-bootstrap',
       defaultDocker: false,
       strictSchema: true,

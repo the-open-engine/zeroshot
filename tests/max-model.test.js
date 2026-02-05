@@ -219,7 +219,7 @@ function registerDynamicModelRulesTests() {
 function registerDefaultModelTests() {
   describe('Default model when unspecified', function () {
     it('should use maxModel ceiling when it constrains default', function () {
-      saveTestSettings({ maxModel: 'haiku' });
+      saveTestSettings({ maxModel: 'haiku', defaultProvider: 'claude' });
 
       const agentConfig = { id: 'default-model-agent', timeout: 0 };
 
@@ -251,12 +251,12 @@ function registerDefaultModelTests() {
         mockSpawnFn: () => {},
       });
 
-      // Default provider level is level2 (sonnet for claude)
-      assert.strictEqual(agent._selectModel(), 'sonnet');
+      // Default provider level is level2 (gpt-5.3-codex for codex)
+      assert.strictEqual(agent._selectModel(), 'gpt-5.3-codex');
     });
 
     it('should use provider default level even when maxModel allows higher', function () {
-      saveTestSettings({ maxModel: 'opus' });
+      saveTestSettings({ maxModel: 'opus', defaultProvider: 'claude' });
 
       const agentConfig = { id: 'premium-default-agent', timeout: 0 };
 

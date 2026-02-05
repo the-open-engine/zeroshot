@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const { loadSettings, validateSetting } = require('../lib/settings');
 const { validateProviderSettings, validateProviderLevel } = require('../src/config-validator');
+const { getProvider } = require('../src/providers');
 
 describe('Provider settings', function () {
   const testDir = path.join(os.tmpdir(), `zeroshot-provider-settings-${Date.now()}`);
@@ -82,5 +83,11 @@ describe('Provider settings', function () {
     const settings = loadSettings();
     assert.strictEqual(settings.providerSettings.claude.maxLevel, 'level1');
     assert.strictEqual(settings.providerSettings.claude.defaultLevel, 'level1');
+  });
+
+  it('uses gpt-5.3-codex as the default codex model', function () {
+    const codex = getProvider('codex');
+    const modelSpec = codex.resolveModelSpec(codex.getDefaultLevel(), {});
+    assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
   });
 });
