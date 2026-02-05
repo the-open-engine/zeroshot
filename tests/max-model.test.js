@@ -251,8 +251,8 @@ function registerDefaultModelTests() {
         mockSpawnFn: () => {},
       });
 
-      // Default provider level is level2 (gpt-5.3-codex for codex)
-      assert.strictEqual(agent._selectModel(), 'gpt-5.3-codex');
+      // Default provider level is level2 (sonnet for claude)
+      assert.strictEqual(agent._selectModel(), 'sonnet');
     });
 
     it('should use provider default level even when maxModel allows higher', function () {
