@@ -301,6 +301,8 @@ let dangerousGitHookInstalled = false;
 /**
  * Extract token usage from NDJSON output.
  * Looks for the 'result' event line which contains usage data.
+ * Falls back to summing 'turn.completed' events for cache metrics
+ * when the result event doesn't include them.
  *
  * @param {string} output - Full NDJSON output from Claude CLI
  * @returns {Object|null} Token usage data or null if not found
@@ -316,11 +318,34 @@ function extractTokenUsage(output, providerName = 'claude') {
     return null;
   }
 
+  let cacheReadInputTokens = resultEvent.cacheReadInputTokens || 0;
+  let cacheCreationInputTokens = resultEvent.cacheCreationInputTokens || 0;
+
+  // Fallback: if result event has no cache data, extract from raw turn.completed events.
+  // Claude CLI emits turn.completed with cached_input_tokens but the result event may omit them.
+  if (cacheReadInputTokens === 0) {
+    const lines = output.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const raw = JSON.parse(trimmed);
+        if (raw.type === 'turn.completed' && raw.usage) {
+          const usage = raw.usage;
+          cacheReadInputTokens += usage.cached_input_tokens || usage.cache_read_input_tokens || 0;
+          cacheCreationInputTokens += usage.cache_creation_input_tokens || 0;
+        }
+      } catch {
+        // skip non-JSON lines
+      }
+    }
+  }
+
   return {
     inputTokens: resultEvent.inputTokens || 0,
     outputTokens: resultEvent.outputTokens || 0,
-    cacheReadInputTokens: resultEvent.cacheReadInputTokens || 0,
-    cacheCreationInputTokens: resultEvent.cacheCreationInputTokens || 0,
+    cacheReadInputTokens,
+    cacheCreationInputTokens,
     totalCostUsd: resultEvent.cost || null,
     durationMs: resultEvent.duration || null,
     modelUsage: resultEvent.modelUsage || null,

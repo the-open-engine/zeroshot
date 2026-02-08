@@ -33,6 +33,13 @@ function applyOutputDefaults(config) {
     config.outputFormat = 'json';
   }
 
+  // Map structuredOutput → jsonSchema (structuredOutput is the user-facing API name,
+  // jsonSchema is the internal key used by task executor and CLI args).
+  // Explicit jsonSchema takes precedence over structuredOutput.
+  if (config.structuredOutput && !config.jsonSchema) {
+    config.jsonSchema = config.structuredOutput;
+  }
+
   // If outputFormat is json but no schema defined, use a minimal default schema
   if (config.outputFormat === 'json' && !config.jsonSchema) {
     config.jsonSchema = {

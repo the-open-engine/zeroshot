@@ -168,6 +168,10 @@ class SubClusterWrapper {
    * @private
    */
   async _handleMessage(message) {
+    if (!this._bufferedMessages) {
+      this._bufferedMessages = [];
+    }
+
     // Check if any trigger matches
     const matchingTrigger = this._findMatchingTrigger(message);
     if (!matchingTrigger) {

@@ -240,6 +240,10 @@ async function stop(agent) {
  * @param {Object} message - Incoming message
  */
 async function handleMessage(agent, message) {
+  if (!agent._bufferedMessages) {
+    agent._bufferedMessages = [];
+  }
+
   // Check if any trigger matches FIRST (before state check)
   const matchingTrigger = findMatchingTrigger({
     triggers: agent.config.triggers,
