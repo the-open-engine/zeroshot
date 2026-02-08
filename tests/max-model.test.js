@@ -219,7 +219,7 @@ function registerDynamicModelRulesTests() {
 function registerDefaultModelTests() {
   describe('Default model when unspecified', function () {
     it('should use maxModel ceiling when it constrains default', function () {
-      saveTestSettings({ maxModel: 'haiku' });
+      saveTestSettings({ maxModel: 'haiku', defaultProvider: 'claude' });
 
       const agentConfig = { id: 'default-model-agent', timeout: 0 };
 
@@ -256,7 +256,7 @@ function registerDefaultModelTests() {
     });
 
     it('should use provider default level even when maxModel allows higher', function () {
-      saveTestSettings({ maxModel: 'opus' });
+      saveTestSettings({ maxModel: 'opus', defaultProvider: 'claude' });
 
       const agentConfig = { id: 'premium-default-agent', timeout: 0 };
 

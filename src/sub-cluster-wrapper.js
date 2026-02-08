@@ -15,6 +15,7 @@
 const LogicEngine = require('./logic-engine');
 const MessageBusBridge = require('./message-bus-bridge');
 const { DEFAULT_MAX_ITERATIONS } = require('./agent/agent-config');
+const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('./message-buffer');
 
 function normalizeParentTopicConfig(entry) {
   if (typeof entry === 'string') {
@@ -183,15 +184,18 @@ class SubClusterWrapper {
       return;
     }
     if (this.state !== 'idle') {
-      const MAX_BUFFERED = 200;
-      if (this._bufferedMessages.length >= MAX_BUFFERED) {
-        this._bufferedMessages.shift();
-      }
-      this._bufferedMessages.push(message);
+      bufferMessage(this, message);
       console.warn(
         `[${this.id}] ⏸️ BUFFERING message (busy, state=${this.state}): ${message.topic}`
       );
-      this._scheduleBufferedDrain();
+      scheduleDrain(
+        this,
+        () =>
+          drainBufferedMessages(this, (next) => this._handleMessage(next), {
+            label: 'SubCluster',
+          }),
+        { label: 'SubCluster' }
+      );
       return;
     }
 
@@ -206,48 +210,6 @@ class SubClusterWrapper {
 
     // Execute trigger action (spawn child cluster)
     await this._handleTrigger(message);
-  }
-
-  _scheduleBufferedDrain() {
-    if (this._bufferDrainScheduled) {
-      return;
-    }
-    this._bufferDrainScheduled = true;
-
-    setImmediate(() => {
-      this._bufferDrainScheduled = false;
-      this._drainBufferedMessages().catch((err) => {
-        console.error(`\n${'='.repeat(80)}`);
-        console.error(`🔴 FATAL: SubCluster ${this.id} buffered drain crashed`);
-        console.error(`${'='.repeat(80)}`);
-        console.error(`Error: ${err.message}`);
-        console.error(`Stack: ${err.stack}`);
-        console.error(`${'='.repeat(80)}\n`);
-        setImmediate(() => {
-          throw err;
-        });
-      });
-    });
-  }
-
-  async _drainBufferedMessages() {
-    if (!this.running) {
-      return;
-    }
-
-    if (!this._bufferedMessages || this._bufferedMessages.length === 0) {
-      return;
-    }
-
-    if (this.state !== 'idle') {
-      this._scheduleBufferedDrain();
-      return;
-    }
-
-    while (this.running && this.state === 'idle' && this._bufferedMessages.length > 0) {
-      const next = this._bufferedMessages.shift();
-      await this._handleMessage(next);
-    }
   }
 
   /**
