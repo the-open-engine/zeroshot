@@ -18,7 +18,8 @@ function parseResultEvent(event) {
     duration: event.duration_ms,
     inputTokens: usage.input_tokens || 0,
     outputTokens: usage.output_tokens || 0,
-    cacheReadInputTokens: usage.cache_read_input_tokens || 0,
+    // Claude CLI uses 'cached_input_tokens'; Anthropic API uses 'cache_read_input_tokens'
+    cacheReadInputTokens: usage.cache_read_input_tokens || usage.cached_input_tokens || 0,
     cacheCreationInputTokens: usage.cache_creation_input_tokens || 0,
     modelUsage: event.modelUsage || null,
   };

@@ -238,6 +238,10 @@ async function stop(agent) {
  * @param {Object} message - Incoming message
  */
 async function handleMessage(agent, message) {
+  if (!agent._bufferedMessages) {
+    agent._bufferedMessages = [];
+  }
+
   // Check if any trigger matches FIRST (before state check)
   const matchingTrigger = findMatchingTrigger({
     triggers: agent.config.triggers,
@@ -254,9 +258,17 @@ async function handleMessage(agent, message) {
     return;
   }
   if (agent.state !== 'idle') {
+    // IMPORTANT: Never drop a message that matches a trigger.
+    // Dropping validation/coordinator signals can wedge clusters in "running" state.
+    const MAX_BUFFERED = 200;
+    if (agent._bufferedMessages.length >= MAX_BUFFERED) {
+      agent._bufferedMessages.shift();
+    }
+    agent._bufferedMessages.push(message);
     console.warn(
-      `[${agent.id}] ⚠️ DROPPING message (busy, state=${agent.state}): ${message.topic}`
+      `[${agent.id}] ⏸️ BUFFERING message (busy, state=${agent.state}): ${message.topic}`
     );
+    scheduleBufferedDrain(agent);
     return;
   }
 
@@ -293,6 +305,59 @@ async function handleMessage(agent, message) {
     if (agent._currentExecution === executionPromise) {
       agent._currentExecution = null;
     }
+  }
+}
+
+function scheduleBufferedDrain(agent) {
+  if (agent._bufferDrainScheduled) {
+    return;
+  }
+
+  agent._bufferDrainScheduled = true;
+
+  const run = () => {
+    agent._bufferDrainScheduled = false;
+    drainBufferedMessages(agent).catch((error) => {
+      console.error(`\n${'='.repeat(80)}`);
+      console.error(`🔴 FATAL: Agent ${agent.id} buffered drain crashed`);
+      console.error(`${'='.repeat(80)}`);
+      console.error(`Error: ${error.message}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`${'='.repeat(80)}\n`);
+      setImmediate(() => {
+        throw error;
+      });
+    });
+  };
+
+  // Prefer draining after the current execution completes to avoid _currentExecution clobbering.
+  const current = agent._currentExecution;
+  if (current && typeof current.finally === 'function') {
+    current.finally(() => setImmediate(run));
+    return;
+  }
+
+  setImmediate(run);
+}
+
+async function drainBufferedMessages(agent) {
+  if (!agent.running) {
+    return;
+  }
+
+  if (!agent._bufferedMessages || agent._bufferedMessages.length === 0) {
+    return;
+  }
+
+  if (agent.state !== 'idle') {
+    // Still busy - try again after the in-flight execution completes.
+    scheduleBufferedDrain(agent);
+    return;
+  }
+
+  while (agent.running && agent.state === 'idle' && agent._bufferedMessages.length > 0) {
+    const next = agent._bufferedMessages.shift();
+    await handleMessage(agent, next);
   }
 }
 

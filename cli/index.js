@@ -4412,6 +4412,8 @@ function formatTokenUsage(tokensByRole) {
   // Total line
   const inputTokens = total.inputTokens || 0;
   const outputTokens = total.outputTokens || 0;
+  const cacheReadTokens = total.cacheReadInputTokens || 0;
+  const uncachedInputTokens = inputTokens - cacheReadTokens;
   const totalTokens = inputTokens + outputTokens;
   const cost = total.totalCostUsd || 0;
 
@@ -4424,6 +4426,17 @@ function formatTokenUsage(tokensByRole) {
       chalk.yellow(fmt(outputTokens)) +
       chalk.dim(' out)')
   );
+
+  // Cache breakdown (if cache data available)
+  if (cacheReadTokens > 0) {
+    const cachePercent = Math.round((cacheReadTokens / inputTokens) * 100);
+    lines.push(
+      chalk.dim('Cache: ') +
+        chalk.green(fmt(cacheReadTokens) + ' cached') +
+        chalk.dim(' (' + cachePercent + '%) + ') +
+        chalk.yellow(fmt(uncachedInputTokens) + ' new')
+    );
+  }
 
   // Cost line (if available)
   if (cost > 0) {
