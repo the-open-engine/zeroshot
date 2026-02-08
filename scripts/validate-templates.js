@@ -28,6 +28,16 @@ function findJsonFiles(dir) {
   return files;
 }
 
+function substituteTemplateParams(config) {
+  if (!config.params) return config;
+  let json = JSON.stringify(config);
+  for (const [name, param] of Object.entries(config.params)) {
+    const value = param.default !== undefined ? param.default : param.type === 'number' ? 0 : '';
+    json = json.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), String(value));
+  }
+  return JSON.parse(json);
+}
+
 function validateTemplate(filePath) {
   const relativePath = path.relative(process.cwd(), filePath);
 
@@ -40,7 +50,8 @@ function validateTemplate(filePath) {
       return { valid: true, skipped: true };
     }
 
-    const result = validateConfig(config);
+    const configToValidate = substituteTemplateParams(config);
+    const result = validateConfig(configToValidate);
 
     if (!result.valid) {
       console.error(`\n❌ ${relativePath}`);

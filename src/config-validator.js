@@ -145,9 +145,12 @@ function validateTrigger(trigger, triggerPrefix, errors) {
     errors.push(`${triggerPrefix}.topic is required`);
   }
 
-  if (trigger.action && !['execute_task', 'stop_cluster'].includes(trigger.action)) {
+  if (
+    trigger.action &&
+    !['execute_task', 'stop_cluster', 'execute_system_command'].includes(trigger.action)
+  ) {
     errors.push(
-      `${triggerPrefix}.action must be 'execute_task' or 'stop_cluster', got '${trigger.action}'`
+      `${triggerPrefix}.action must be 'execute_task', 'stop_cluster', or 'execute_system_command', got '${trigger.action}'`
     );
   }
 

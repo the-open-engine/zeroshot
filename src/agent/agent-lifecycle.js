@@ -23,6 +23,8 @@ const {
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
+const { execSync } = require('../lib/safe-exec');
+const path = require('path');
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
 
@@ -311,6 +313,46 @@ async function executeTriggerAction(agent, trigger, message) {
     });
     agent.state = 'completed';
     agent._log(`Agent ${agent.id}: Cluster completion triggered`);
+  } else if (action === 'execute_system_command') {
+    const config = trigger.config || {};
+    if (!config.command) {
+      throw new Error(`Agent ${agent.id}: execute_system_command requires config.command`);
+    }
+
+    const stdinData = message.content ? JSON.stringify(message.content) : '';
+    const packageRoot = path.join(__dirname, '..', '..');
+    agent._log(`Executing system command: ${config.command}`);
+
+    const output = execSync(config.command, {
+      input: stdinData,
+      encoding: 'utf-8',
+      timeout: config.timeout || 30000,
+      cwd: agent.cwd || process.cwd(),
+      env: {
+        ...process.env,
+        ZEROSHOT_ROOT: packageRoot,
+        CLUSTER_ID: agent.cluster?.id || '',
+      },
+    });
+
+    if (output && output.trim()) {
+      agent._log(`System command output: ${output.trim()}`);
+    }
+
+    if (config.stopClusterAfter) {
+      agent._publish({
+        topic: 'CLUSTER_COMPLETE',
+        receiver: 'system',
+        content: {
+          text: 'System command completed. Cluster completing successfully.',
+          data: { reason: 'system_command_complete', timestamp: Date.now() },
+        },
+      });
+      agent.state = 'completed';
+      agent._log(`Agent ${agent.id}: Cluster completion triggered after system command`);
+    } else {
+      agent.state = 'idle';
+    }
   } else {
     console.warn(`Unknown action: ${action}`);
     agent.state = 'idle';
