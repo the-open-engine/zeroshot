@@ -12,7 +12,7 @@
 
 const LogicEngine = require('./logic-engine');
 const { validateAgentConfig } = require('./agent/agent-config');
-const { loadSettings, validateModelAgainstMax } = require('../lib/settings');
+const { loadSettings, validateModelAgainstMax, VALID_MODELS } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const { buildContext } = require('./agent/agent-context-builder');
@@ -250,17 +250,17 @@ class AgentWrapper {
 
   /**
    * Select model based on current iteration and agent config
-   * Enforces legacy maxModel/minModel for Claude's haiku/sonnet/opus
+   * Enforces legacy maxModel/minModel aliases for Claude compatibility
    * @returns {string|null}
    * @private
    */
   _selectModel() {
     const spec = this._resolveModelSpec();
     const settings = loadSettings();
-    const maxModel = settings.maxModel || 'sonnet';
+    const maxModel = settings.maxModel;
     const minModel = settings.minModel || null;
 
-    if (spec.model && ['opus', 'sonnet', 'haiku'].includes(spec.model)) {
+    if (spec.model && maxModel && VALID_MODELS.includes(spec.model)) {
       return validateModelAgainstMax(spec.model, maxModel, minModel);
     }
 

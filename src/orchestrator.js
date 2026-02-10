@@ -46,6 +46,7 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const crypto = require('crypto');
 
@@ -131,6 +132,35 @@ class Orchestrator {
     if (!this.quiet) {
       console.log(...args);
     }
+  }
+
+  /**
+   * Resolve provider for a cluster config using the standard precedence.
+   * @param {Object} clusterConfig
+   * @param {Object} settings
+   * @returns {string}
+   * @private
+   */
+  _resolveClusterProvider(clusterConfig = {}, settings = loadSettings()) {
+    const resolved =
+      clusterConfig.forceProvider || clusterConfig.defaultProvider || settings.defaultProvider || 'claude';
+    return normalizeProviderName(resolved) || 'claude';
+  }
+
+  /**
+   * Resolve the model level for internal completion agents.
+   * Uses provider minLevel when configured, otherwise provider default min level.
+   * @param {Object} clusterConfig
+   * @returns {string}
+   * @private
+   */
+  _resolveCompletionDetectorLevel(clusterConfig = {}) {
+    const settings = loadSettings();
+    const providerName = this._resolveClusterProvider(clusterConfig, settings);
+    const provider = getProvider(providerName);
+    const providerSettings = settings.providerSettings?.[providerName] || {};
+
+    return providerSettings.minLevel || provider.getDefaultMinLevel();
   }
 
   /**
@@ -1402,9 +1432,7 @@ class Orchestrator {
       this._log(`[Orchestrator] Starting cluster in isolation mode (image: ${image})`);
 
       const workDir = options.cwd || process.cwd();
-      const providerName = normalizeProviderName(
-        config.forceProvider || config.defaultProvider || loadSettings().defaultProvider || 'claude'
-      );
+      const providerName = this._resolveClusterProvider(config);
       containerId = await isolationManager.createContainer(clusterId, {
         workDir,
         image,
@@ -2128,12 +2156,7 @@ class Orchestrator {
       );
     }
 
-    const providerName = normalizeProviderName(
-      cluster.config?.forceProvider ||
-        cluster.config?.defaultProvider ||
-        loadSettings().defaultProvider ||
-        'claude'
-    );
+    const providerName = this._resolveClusterProvider(cluster.config);
     const newContainerId = await cluster.isolation.manager.createContainer(clusterId, {
       workDir,
       image: cluster.isolation.image,
@@ -2980,7 +3003,7 @@ Continue from where you left off. Review your previous output to understand what
       const completionDetector = {
         id: 'completion-detector',
         role: 'orchestrator',
-        model: 'haiku',
+        modelLevel: this._resolveCompletionDetectorLevel(cluster.config),
         timeout: 0,
         triggers: [
           {

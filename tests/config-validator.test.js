@@ -137,6 +137,7 @@ describe('modelRules validation', function () {
       ],
     });
     assert.ok(result.errors.some((e) => e.includes('Add catch-all rule')));
+    assert.ok(result.errors.some((e) => e.includes('"modelLevel": "level2"')));
   });
 
   it('should accept modelRules with "all" catch-all', function () {
