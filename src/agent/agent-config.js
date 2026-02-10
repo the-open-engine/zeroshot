@@ -212,7 +212,7 @@ function validateAgentConfig(config, options = {}) {
   // COST CEILING/FLOOR ENFORCEMENT: Validate model(s) against maxModel and minModel at config time
   // Catches violations EARLY (config load) instead of at runtime (iteration N)
   const settings = loadSettings();
-  const maxModel = settings.maxModel || 'sonnet';
+  const maxModel = settings.maxModel;
   const minModel = settings.minModel || null;
 
   // STRICT SCHEMA PROPAGATION: Issue #52 fix

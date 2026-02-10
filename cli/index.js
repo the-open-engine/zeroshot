@@ -355,8 +355,11 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
     );
   }
 
-  if (providerName === 'claude' && ['opus', 'sonnet', 'haiku'].includes(modelOverride)) {
-    const { validateModelAgainstMax } = require('../lib/settings');
+  if (providerName === 'claude') {
+    const { validateModelAgainstMax, VALID_MODELS } = require('../lib/settings');
+    if (!VALID_MODELS.includes(modelOverride)) {
+      return;
+    }
     try {
       validateModelAgainstMax(modelOverride, settings.maxModel);
     } catch (err) {

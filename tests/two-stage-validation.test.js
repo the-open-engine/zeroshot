@@ -6,6 +6,9 @@ const assert = require('assert');
 const path = require('path');
 const TemplateResolver = require('../src/template-resolver');
 const { validateConfig } = require('../src/config-validator');
+const LogicEngine = require('../src/logic-engine');
+const MessageBus = require('../src/message-bus');
+const Ledger = require('../src/ledger');
 
 describe('Two-Stage Validation Pipeline', function () {
   let resolver;
@@ -115,6 +118,118 @@ describe('Two-Stage Validation Pipeline', function () {
 
       assert.ok(contextSource, 'validator-security should have QUICK_VALIDATION_PASSED context');
       assert.strictEqual(contextSource.priority, 'required');
+    });
+
+    it('should not retrigger consensus on a late single-validator update after heavy result is published', function () {
+      const resolved = resolver.resolve('heavy-validation', {});
+      const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
+      const triggerScript = coordinator?.triggers?.find(
+        (t) => t.topic === 'HEAVY_VALIDATION_RESULT'
+      )?.logic?.script;
+      assert.ok(triggerScript, 'heavy consensus trigger script should exist');
+
+      const cluster = {
+        id: 'heavy-regression',
+        agents: [
+          { id: 'validator-security', role: 'validator' },
+          { id: 'validator-tester', role: 'validator' },
+          { id: 'consensus-coordinator', role: 'coordinator' },
+        ],
+      };
+
+      const ledger = new Ledger(':memory:');
+      const messageBus = new MessageBus(ledger);
+      const logicEngine = new LogicEngine(messageBus, cluster);
+
+      try {
+        let ts = Date.now();
+        const nextTs = () => ++ts;
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'QUICK_VALIDATION_PASSED',
+          sender: 'consensus-coordinator',
+          timestamp: nextTs(),
+        });
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-security',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        let shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(shouldTrigger, false, 'must wait for both validators');
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-tester',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(shouldTrigger, true, 'should trigger once both validators respond');
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'VALIDATION_RESULT',
+          sender: 'consensus-coordinator',
+          timestamp: nextTs(),
+          content: { data: { approved: true, stage: 'heavy' } },
+        });
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-security',
+          timestamp: nextTs(),
+          content: { data: { approved: false } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          false,
+          'late update from one validator must not retrigger heavy consensus'
+        );
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-tester',
+          timestamp: nextTs(),
+          content: { data: { approved: false } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          true,
+          'should trigger again only after both validators publish a fresh cycle'
+        );
+      } finally {
+        ledger.close();
+      }
     });
   });
 

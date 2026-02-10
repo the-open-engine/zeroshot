@@ -1218,7 +1218,7 @@ function validateRuleCoverage(config) {
         agent,
         4,
         'Model rules',
-        'Add catch-all rule { "iterations": "all", "model": "sonnet" } or extend existing ranges.',
+        'Add catch-all rule { "iterations": "all", "modelLevel": "level2" } or extend existing ranges.',
         uncoveredIterations
       );
     }
