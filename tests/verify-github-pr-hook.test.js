@@ -23,7 +23,7 @@ function createMockAgent(workingDirectory = process.cwd()) {
 }
 
 describe('verify_github_pr hook action', function () {
-  this.timeout(10000);
+  this.timeout(60000);
 
   let executeHook;
   let mockExecSyncFn;
@@ -107,16 +107,18 @@ describe('verify_github_pr hook action', function () {
     }
   });
 
-  it('should throw when PR exists but not merged', async function () {
+  it('should throw when PR exists but genuinely not merged after all polls', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/123',
+        pr_number: 123,
         merged: true,
       }),
     };
 
+    // Always returns OPEN — genuinely not merged
     mockExecSyncFn = () => {
       return JSON.stringify({
         number: 123,
@@ -130,8 +132,102 @@ describe('verify_github_pr hook action', function () {
       await executeHook({ hook, agent, result });
       assert.fail('Expected error to be thrown');
     } catch (err) {
-      assert.match(err.message, /not merged|LIED/i);
+      assert.match(err.message, /LIED/i);
+      assert.match(err.message, /polls/i);
     }
+  });
+
+  // REGRESSION: gentle-hydra-56 (2026-02-11)
+  // GitHub API returned state="OPEN" immediately after gh pr merge, but PR was actually merged.
+  // Old code had no merge propagation polling — killed the cluster after 3s.
+  it('should succeed when GitHub API shows OPEN initially then MERGED after propagation delay', async function () {
+    const agent = createMockAgent();
+    agent._log = () => {}; // suppress log noise
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        pr_url: 'https://github.com/org/repo/pull/1411',
+        pr_number: 1411,
+        merged: true,
+      }),
+    };
+
+    // Simulate GitHub eventual consistency: OPEN for first 3 calls, then MERGED
+    let callCount = 0;
+    mockExecSyncFn = () => {
+      callCount++;
+      if (callCount <= 3) {
+        return JSON.stringify({
+          number: 1411,
+          state: 'OPEN',
+          mergedAt: null,
+          url: 'https://github.com/org/repo/pull/1411',
+        });
+      }
+      return JSON.stringify({
+        number: 1411,
+        state: 'MERGED',
+        mergedAt: '2026-02-11T10:08:37Z',
+        url: 'https://github.com/org/repo/pull/1411',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+
+    assert(agent.lastPublished, 'Expected CLUSTER_COMPLETE to be published');
+    assert.strictEqual(agent.lastPublished.topic, 'CLUSTER_COMPLETE');
+    assert.strictEqual(agent.lastPublished.content.data.pr_number, 1411);
+    assert(callCount >= 4, `Expected at least 4 gh calls (got ${callCount})`);
+  });
+
+  it('should use explicit PR number in gh command when available in agent output', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        pr_url: 'https://github.com/org/repo/pull/555',
+        pr_number: 555,
+        merged: true,
+      }),
+    };
+
+    let capturedCmd;
+    mockExecSyncFn = (cmd) => {
+      capturedCmd = cmd;
+      return JSON.stringify({
+        number: 555,
+        state: 'MERGED',
+        mergedAt: '2026-02-11T10:00:00Z',
+        url: 'https://github.com/org/repo/pull/555',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert(capturedCmd.includes('gh pr view 555'), `Expected PR number in command, got: ${capturedCmd}`);
+  });
+
+  it('should fall back to branch-based resolution when pr_number not in output', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        summary: 'Done',
+      }),
+    };
+
+    let capturedCmd;
+    mockExecSyncFn = (cmd) => {
+      capturedCmd = cmd;
+      return JSON.stringify({
+        number: 100,
+        state: 'MERGED',
+        mergedAt: '2026-02-11T10:00:00Z',
+        url: 'https://github.com/org/repo/pull/100',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert.strictEqual(capturedCmd, 'gh pr view --json state,mergedAt,url,number');
   });
 
   it('should publish CLUSTER_COMPLETE when PR verified merged', async function () {

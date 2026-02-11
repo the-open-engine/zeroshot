@@ -143,6 +143,7 @@ async function executeHook(params) {
     const { extractJsonFromOutput } = require('./output-extraction');
     const structuredOutput = extractJsonFromOutput(result.output) || {};
     const claimedPrUrl = structuredOutput.pr_url || null;
+    const claimedPrNumber = structuredOutput.pr_number || null;
 
     // Skip actual gh CLI verification if explicitly disabled (for integration tests)
     // Unit tests mock execSync, so they still test the verification logic
@@ -153,7 +154,7 @@ async function executeHook(params) {
         content: {
           data: {
             reason: 'git-pusher-complete-verified',
-            pr_number: structuredOutput.pr_number || null,
+            pr_number: claimedPrNumber,
             pr_url: claimedPrUrl,
           },
         },
@@ -161,13 +162,22 @@ async function executeHook(params) {
       return;
     }
 
+    // Use explicit PR number when available (deterministic).
+    // Branch-based resolution can fail after merge when branch is deleted/transitional.
+    const ghPrViewCmd = claimedPrNumber
+      ? `gh pr view ${claimedPrNumber} --json state,mergedAt,url,number`
+      : `gh pr view --json state,mergedAt,url,number`;
+
+    // GitHub API is eventually consistent after `gh pr merge`.
+    // Merge state can take 5-30s to propagate. Poll with backoff before concluding agent lied.
+    // POSTMORTEM 2026-02-11: 3s retry window killed cluster gentle-hydra-56 — PR was actually merged.
+    const MERGE_POLL_ATTEMPTS = 6;
+    const MERGE_POLL_INTERVAL_MS = 5000;
+
     let prData;
     try {
       prData = JSON.parse(
-        // IMPORTANT:
-        // Do NOT require pr_number in the agent output. GitHub CLI can infer the PR from the current branch.
-        // Agents sometimes wrap the PR JSON in a text field (summary/result) which is hard to parse reliably.
-        execSync(`gh pr view --json state,mergedAt,url,number`, {
+        execSync(ghPrViewCmd, {
           encoding: 'utf8',
           cwd: agent.workingDirectory,
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -192,10 +202,44 @@ async function executeHook(params) {
       );
     }
 
+    // Poll for merge propagation if not yet showing as merged
+    if (!prData.mergedAt) {
+      const prNumber = prData.number;
+      const pollCmd = `gh pr view ${prNumber} --json state,mergedAt,url,number`;
+      agent._log(
+        `⏳ PR #${prNumber} not yet showing as merged (state="${prData.state}"). ` +
+          `Polling for GitHub API propagation (up to ${MERGE_POLL_ATTEMPTS} attempts, ${MERGE_POLL_INTERVAL_MS / 1000}s apart)...`
+      );
+
+      for (let attempt = 1; attempt <= MERGE_POLL_ATTEMPTS; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, MERGE_POLL_INTERVAL_MS));
+        try {
+          prData = JSON.parse(
+            execSync(pollCmd, {
+              encoding: 'utf8',
+              cwd: agent.workingDirectory,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            })
+          );
+        } catch {
+          // gh CLI error during poll — keep trying
+          continue;
+        }
+        if (prData.mergedAt) {
+          agent._log(`✅ PR #${prNumber} merge confirmed on poll attempt ${attempt}`);
+          break;
+        }
+        agent._log(
+          `⏳ Poll ${attempt}/${MERGE_POLL_ATTEMPTS}: PR #${prNumber} still state="${prData.state}"`
+        );
+      }
+    }
+
     if (!prData.mergedAt) {
       throw new Error(
         `VERIFICATION FAILED: Agent claimed PR is merged, ` +
-          `but GitHub says state="${prData.state}". Agent LIED.`
+          `but GitHub says state="${prData.state}" after ${MERGE_POLL_ATTEMPTS} polls ` +
+          `over ${(MERGE_POLL_ATTEMPTS * MERGE_POLL_INTERVAL_MS) / 1000}s. Agent LIED.`
       );
     }
 
