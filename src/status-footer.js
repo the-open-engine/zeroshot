@@ -18,6 +18,7 @@
  */
 
 const { getProcessMetrics } = require('./process-metrics');
+const { SubagentTracker } = require('./subagent-tracker');
 
 // ANSI escape codes
 const ESC = '\x1b';
@@ -374,6 +375,7 @@ class StatusFooter {
    */
   setCluster(clusterId) {
     this.clusterId = clusterId;
+    this.subagentTracker = new SubagentTracker(clusterId);
   }
 
   /**
@@ -590,10 +592,18 @@ class StatusFooter {
         .filter(([, agent]) => ACTIVE_STATES.has(agent.state))
         .slice(0, this.maxAgentRows);
 
-      // Calculate dynamic footer height: header + agent rows + summary
+      // Count subagent rows for each executing agent
+      let subagentRowCount = 0;
+      if (this.subagentTracker) {
+        for (const [agentId] of executingAgents) {
+          subagentRowCount += this.subagentTracker.getActiveSubagents(agentId).length;
+        }
+      }
+
+      // Calculate dynamic footer height: header + agent rows + subagent rows + summary
       // Minimum 3 lines (header + "no agents" message + summary)
       const agentRowCount = Math.max(1, executingAgents.length);
-      const newHeight = 2 + agentRowCount + 1; // header + agents + summary
+      const newHeight = 2 + agentRowCount + subagentRowCount + 1; // header + agents + subagents + summary
 
       // Update scroll region if height changed
       if (newHeight !== this.footerHeight) {
@@ -740,6 +750,23 @@ class StatusFooter {
       const contentLen = this.stripAnsi(content).length;
       const padding = Math.max(0, width - contentLen - 1);
       rows.push(content + ' '.repeat(padding) + `${COLORS.gray}│${COLORS.reset}`);
+
+      // Append subagent rows (tree-prefixed, no metrics)
+      if (this.subagentTracker) {
+        const subagents = this.subagentTracker.getActiveSubagents(agentId);
+        for (let i = 0; i < subagents.length; i++) {
+          const isLast = i === subagents.length - 1;
+          const prefix = isLast ? '└─' : '├─';
+          const desc = subagents[i].description;
+          const subIcon = this.blinkState
+            ? `${COLORS.green}●${COLORS.reset}`
+            : `${COLORS.dim}○${COLORS.reset}`;
+          const subContent = `${COLORS.gray}│${COLORS.reset}    ${COLORS.dim}${prefix}${COLORS.reset} ${subIcon} ${COLORS.dim}${desc}${COLORS.reset}`;
+          const subLen = this.stripAnsi(subContent).length;
+          const subPad = Math.max(0, width - subLen - 1);
+          rows.push(subContent + ' '.repeat(subPad) + `${COLORS.gray}│${COLORS.reset}`);
+        }
+      }
     }
 
     return rows;
@@ -918,6 +945,11 @@ class StatusFooter {
     // Initial metrics sample (async, don't block startup)
     this._sampleMetrics().catch(() => {});
 
+    // Start subagent event polling (every 1s — lighter than metrics sampling)
+    this.subagentPollId = setInterval(() => {
+      this.subagentTracker?.poll();
+    }, 1000);
+
     // Start display refresh interval (every 100ms - 10 fps)
     // Interpolates current values toward targets for smooth visual updates
     this.intervalId = setInterval(() => {
@@ -943,6 +975,13 @@ class StatusFooter {
       clearInterval(this.samplingIntervalId);
       this.samplingIntervalId = null;
     }
+
+    // Stop subagent polling and cleanup temp files
+    if (this.subagentPollId) {
+      clearInterval(this.subagentPollId);
+      this.subagentPollId = null;
+    }
+    this.subagentTracker?.cleanup();
 
     // Remove resize listener
     process.stdout.removeListener('resize', this._debouncedResize);

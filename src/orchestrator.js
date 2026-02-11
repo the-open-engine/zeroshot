@@ -1456,6 +1456,9 @@ class Orchestrator {
       // Don't cleanup worktree - it will be reused on resume
     }
 
+    // Clean up subagent tracking temp files
+    this._cleanupSubagentEvents(clusterId);
+
     cluster.state = 'stopped';
     cluster.pid = null; // Clear PID - cluster is no longer running
     this._log(`Cluster ${clusterId} stopped`);
@@ -1513,6 +1516,9 @@ class Orchestrator {
     // Close message bus and ledger
     cluster.messageBus.close();
 
+    // Clean up subagent tracking temp files
+    this._cleanupSubagentEvents(clusterId);
+
     cluster.state = 'killed';
     cluster.pid = null; // Clear PID - cluster is no longer running
     // DON'T delete from memory - keep it so it gets saved with 'killed' state
@@ -1547,6 +1553,20 @@ class Orchestrator {
     }
 
     return results;
+  }
+
+  /**
+   * Remove subagent tracking temp files for a cluster.
+   * @param {string} clusterId
+   * @private
+   */
+  _cleanupSubagentEvents(clusterId) {
+    try {
+      const dir = path.join(os.tmpdir(), 'zeroshot-subagents', clusterId);
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Already gone or never created
+    }
   }
 
   /**

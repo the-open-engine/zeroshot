@@ -686,6 +686,15 @@ function buildSpawnEnv(agent, providerName, modelSpec) {
     if (agent.worktree?.enabled) {
       spawnEnv.ZEROSHOT_WORKTREE = '1';
     }
+
+    // SUBAGENT TRACKING: Activate hook that writes JSONL events for StatusFooter display
+    spawnEnv.ZEROSHOT_TRACK_SUBAGENTS = '1';
+    spawnEnv.ZEROSHOT_SUBAGENT_EVENTS_FILE = path.join(
+      os.tmpdir(),
+      'zeroshot-subagents',
+      agent.cluster?.id || 'unknown',
+      `${agent.id}.jsonl`
+    );
   }
 
   return spawnEnv;
