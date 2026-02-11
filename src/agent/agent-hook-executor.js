@@ -139,6 +139,127 @@ async function executeHook(params) {
     throw new Error('execute_system_command not implemented');
   }
 
+  if (hook.action === 'verify_github_pr') {
+    const { extractJsonFromOutput } = require('./output-extraction');
+    const structuredOutput = extractJsonFromOutput(result.output) || {};
+    const claimedPrUrl = structuredOutput.pr_url || null;
+    const claimedPrNumber = structuredOutput.pr_number || null;
+
+    // Skip actual gh CLI verification if explicitly disabled (for integration tests)
+    // Unit tests mock execSync, so they still test the verification logic
+    if (process.env.ZEROSHOT_SKIP_GH_VERIFY === '1') {
+      agent._log(`✅ VERIFICATION SKIPPED (ZEROSHOT_SKIP_GH_VERIFY=1)`);
+      agent._publish({
+        topic: 'CLUSTER_COMPLETE',
+        content: {
+          data: {
+            reason: 'git-pusher-complete-verified',
+            pr_number: claimedPrNumber,
+            pr_url: claimedPrUrl,
+          },
+        },
+      });
+      return;
+    }
+
+    // Use explicit PR number when available (deterministic).
+    // Branch-based resolution can fail after merge when branch is deleted/transitional.
+    const ghPrViewCmd = claimedPrNumber
+      ? `gh pr view ${claimedPrNumber} --json state,mergedAt,url,number`
+      : `gh pr view --json state,mergedAt,url,number`;
+
+    // GitHub API is eventually consistent after `gh pr merge`.
+    // Merge state can take 5-30s to propagate. Poll with backoff before concluding agent lied.
+    // POSTMORTEM 2026-02-11: 3s retry window killed cluster gentle-hydra-56 — PR was actually merged.
+    const MERGE_POLL_ATTEMPTS = 6;
+    const MERGE_POLL_INTERVAL_MS = 5000;
+
+    let prData;
+    try {
+      prData = JSON.parse(
+        execSync(ghPrViewCmd, {
+          encoding: 'utf8',
+          cwd: agent.workingDirectory,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      );
+    } catch (err) {
+      if (
+        err.message.includes('Could not resolve to a PullRequest') ||
+        err.message.toLowerCase().includes('no pull requests found')
+      ) {
+        throw new Error(
+          `VERIFICATION FAILED: Agent claimed a PR exists for this branch, ` +
+            `but GitHub says it DOES NOT EXIST. Agent HALLUCINATED.`
+        );
+      }
+      throw err;
+    }
+
+    if (claimedPrUrl && prData.url && claimedPrUrl !== prData.url) {
+      throw new Error(
+        `VERIFICATION FAILED: Agent claimed PR URL ${claimedPrUrl}, but GitHub CLI reports ${prData.url}.`
+      );
+    }
+
+    // Poll for merge propagation if not yet showing as merged
+    if (!prData.mergedAt) {
+      const prNumber = prData.number;
+      const pollCmd = `gh pr view ${prNumber} --json state,mergedAt,url,number`;
+      agent._log(
+        `⏳ PR #${prNumber} not yet showing as merged (state="${prData.state}"). ` +
+          `Polling for GitHub API propagation (up to ${MERGE_POLL_ATTEMPTS} attempts, ${MERGE_POLL_INTERVAL_MS / 1000}s apart)...`
+      );
+
+      for (let attempt = 1; attempt <= MERGE_POLL_ATTEMPTS; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, MERGE_POLL_INTERVAL_MS));
+        try {
+          prData = JSON.parse(
+            execSync(pollCmd, {
+              encoding: 'utf8',
+              cwd: agent.workingDirectory,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            })
+          );
+        } catch {
+          // gh CLI error during poll — keep trying
+          continue;
+        }
+        if (prData.mergedAt) {
+          agent._log(`✅ PR #${prNumber} merge confirmed on poll attempt ${attempt}`);
+          break;
+        }
+        agent._log(
+          `⏳ Poll ${attempt}/${MERGE_POLL_ATTEMPTS}: PR #${prNumber} still state="${prData.state}"`
+        );
+      }
+    }
+
+    if (!prData.mergedAt) {
+      throw new Error(
+        `VERIFICATION FAILED: Agent claimed PR is merged, ` +
+          `but GitHub says state="${prData.state}" after ${MERGE_POLL_ATTEMPTS} polls ` +
+          `over ${(MERGE_POLL_ATTEMPTS * MERGE_POLL_INTERVAL_MS) / 1000}s. Agent LIED.`
+      );
+    }
+
+    agent._log(`✅ VERIFICATION PASSED: PR #${prData.number} actually merged`);
+
+    // Publish CLUSTER_COMPLETE only after verification passes
+    agent._publish({
+      topic: 'CLUSTER_COMPLETE',
+      content: {
+        data: {
+          reason: 'git-pusher-complete-verified',
+          pr_number: prData.number,
+          pr_url: prData.url,
+        },
+      },
+    });
+
+    return;
+  }
+
   throw new Error(`Unknown hook action: ${hook.action}`);
 }
 
@@ -214,15 +335,71 @@ async function parseTransformResultData({ context, agent, script, scriptUsesResu
 }
 
 function buildTransformSandbox({ resultData, context, agent }) {
+  const clusterId = agent.cluster?.id || context.cluster?.id || agent.cluster_id || 'unknown';
+  const messageBus = agent.messageBus;
+  const cluster = context.cluster || agent.cluster || null;
+
+  // Ledger API wrapper (auto-scoped to cluster) - mirrors logic-engine.js
+  const ledgerAPI = messageBus
+    ? {
+        query: (criteria) => {
+          return messageBus.query({ ...criteria, cluster_id: clusterId });
+        },
+        findLast: (criteria) => {
+          return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+        },
+        count: (criteria) => {
+          return messageBus.count({ ...criteria, cluster_id: clusterId });
+        },
+        since: (timestamp) => {
+          return messageBus.since({ cluster_id: clusterId, timestamp });
+        },
+      }
+    : null;
+
+  // Cluster API wrapper - mirrors logic-engine.js
+  const clusterAPI = {
+    id: clusterId,
+    getAgents: () => {
+      return cluster ? cluster.agents || [] : [];
+    },
+    getAgentsByRole: (role) => {
+      return cluster ? (cluster.agents || []).filter((a) => a.role === role) : [];
+    },
+    getAgent: (id) => {
+      return cluster ? (cluster.agents || []).find((a) => a.id === id) : null;
+    },
+  };
+
+  // Helper functions - mirrors logic-engine.js
   const helpers = {
     getConfig: require('../config-router').getConfig,
+    allResponded: (agents, topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+    hasConsensus: (topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
   };
 
   return {
     result: resultData,
     triggeringMessage: context.triggeringMessage,
+    ledger: ledgerAPI,
+    cluster: clusterAPI,
     helpers,
+    // Safe built-ins
     JSON,
+    Set,
+    Map,
+    Array,
+    Object,
     console: {
       log: (...args) => agent._log('[transform]', ...args),
       error: (...args) => console.error('[transform]', ...args),
@@ -530,6 +707,59 @@ function evaluateHookLogic(params) {
     throw new Error(`Unsupported hook logic engine: ${logic.engine}`);
   }
 
+  const clusterId = agent.cluster?.id || context.cluster?.id || agent.cluster_id || 'unknown';
+  const messageBus = agent.messageBus;
+  const cluster = context.cluster || agent.cluster || null;
+
+  // Ledger API wrapper (auto-scoped to cluster) - mirrors logic-engine.js
+  const ledgerAPI = messageBus
+    ? {
+        query: (criteria) => {
+          return messageBus.query({ ...criteria, cluster_id: clusterId });
+        },
+        findLast: (criteria) => {
+          return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+        },
+        count: (criteria) => {
+          return messageBus.count({ ...criteria, cluster_id: clusterId });
+        },
+        since: (timestamp) => {
+          return messageBus.since({ cluster_id: clusterId, timestamp });
+        },
+      }
+    : null;
+
+  // Cluster API wrapper - mirrors logic-engine.js
+  const clusterAPI = {
+    id: clusterId,
+    getAgents: () => {
+      return cluster ? cluster.agents || [] : [];
+    },
+    getAgentsByRole: (role) => {
+      return cluster ? (cluster.agents || []).filter((a) => a.role === role) : [];
+    },
+    getAgent: (id) => {
+      return cluster ? (cluster.agents || []).find((a) => a.id === id) : null;
+    },
+  };
+
+  // Helper functions - mirrors logic-engine.js
+  const helpers = {
+    getConfig: require('../config-router').getConfig,
+    allResponded: (agents, topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+    hasConsensus: (topic, since) => {
+      if (!ledgerAPI) return false;
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
+  };
+
   // Build sandbox context - similar to LogicEngine but focused on result data
   const sandbox = {
     // The parsed result from agent output - this is the main input
@@ -544,6 +774,11 @@ function evaluateHookLogic(params) {
 
     // Triggering message (if available)
     message: context.triggeringMessage || null,
+
+    // APIs
+    ledger: ledgerAPI,
+    cluster: clusterAPI,
+    helpers,
 
     // Safe built-ins
     Set,
