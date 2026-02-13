@@ -164,6 +164,26 @@ function validateTrigger(trigger, triggerPrefix, errors) {
       );
     }
   }
+
+  if (trigger.action === 'execute_system_command') {
+    if (!trigger.config) {
+      errors.push(`${triggerPrefix}.config is required for execute_system_command`);
+    } else {
+      if (!trigger.config.command || typeof trigger.config.command !== 'string') {
+        errors.push(`${triggerPrefix}.config.command is required for execute_system_command`);
+      }
+      if (trigger.config.onSuccess) {
+        if (!trigger.config.onSuccess.topic || typeof trigger.config.onSuccess.topic !== 'string') {
+          errors.push(`${triggerPrefix}.config.onSuccess.topic must be a non-empty string`);
+        }
+      }
+      if (trigger.config.onFailure) {
+        if (!trigger.config.onFailure.topic || typeof trigger.config.onFailure.topic !== 'string') {
+          errors.push(`${triggerPrefix}.config.onFailure.topic must be a non-empty string`);
+        }
+      }
+    }
+  }
 }
 
 function validateAgentTriggers(agent, prefix, errors) {
@@ -393,6 +413,8 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) 
     'CLUSTER_RESUMED',
     'QUICK_VALIDATION_PASSED',
     'IMPLEMENTATION_READY',
+    'QUALITY_GATE_PASSED',
+    'QUALITY_GATE_FAILED',
   ];
   const isSubTemplate = config.params && Object.keys(config.params).length > 0;
 

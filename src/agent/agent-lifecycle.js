@@ -323,6 +323,13 @@ async function executeTriggerAction(agent, trigger, message) {
     const packageRoot = path.join(__dirname, '..', '..');
     agent._log(`Executing system command: ${config.command}`);
 
+    const truncate = (s, max) => {
+      if (!s) return '';
+      if (s.length <= max) return s;
+      const half = Math.floor(max / 2);
+      return s.slice(0, half) + '\n...(truncated)...\n' + s.slice(-half);
+    };
+
     let output;
     try {
       output = execSync(config.command, {
@@ -337,6 +344,24 @@ async function executeTriggerAction(agent, trigger, message) {
         },
       });
     } catch (execError) {
+      if (config.onFailure) {
+        agent._log(`System command failed (exit ${execError.status})`);
+        agent._publish({
+          topic: config.onFailure.topic,
+          content: {
+            text: `System command failed: ${config.command}`,
+            data: {
+              command: config.command,
+              exitCode: execError.status || 1,
+              stdout: truncate(execError.stdout, 5000),
+              stderr: truncate(execError.stderr, 5000),
+            },
+          },
+        });
+        agent.state = 'idle';
+        return;
+      }
+
       agent._log(`System command failed: ${execError.message}`);
       agent._publish({
         topic: 'CLUSTER_FAILED',
@@ -352,6 +377,22 @@ async function executeTriggerAction(agent, trigger, message) {
 
     if (output && output.trim()) {
       agent._log(`System command output: ${output.trim()}`);
+    }
+
+    if (config.onSuccess) {
+      agent._publish({
+        topic: config.onSuccess.topic,
+        content: {
+          text: `System command passed: ${config.command}`,
+          data: {
+            command: config.command,
+            exitCode: 0,
+            output: truncate((output || '').trim(), 5000),
+          },
+        },
+      });
+      agent.state = 'idle';
+      return;
     }
 
     if (config.stopClusterAfter) {
