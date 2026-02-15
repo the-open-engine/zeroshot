@@ -949,7 +949,8 @@ class IsolationManager {
     fs.mkdirSync(configDir, { recursive: true });
     const hooksDir = path.join(configDir, 'hooks');
     fs.mkdirSync(hooksDir, { recursive: true });
-    // CRITICAL: Claude CLI writes session files to projects/ subdirectory
+    // CRITICAL: Claude CLI writes session files to projects/ subdirectory (issue #2)
+    // Without this directory, Claude CLI fails to save session state, causing errors.
     const projectsDir = path.join(configDir, 'projects');
     fs.mkdirSync(projectsDir, { recursive: true });
 

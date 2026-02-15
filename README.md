@@ -122,6 +122,17 @@ Single-agent sessions degrade. Context gets buried under thousands of tokens. Th
 
 Zeroshot fixes this with isolated agents that check each other's work. Validators can't lie about code they didn't write. Fail the check? Fix and retry until it actually works.
 
+### Test Quality Enforcement
+
+Validators reject weak tests through antipattern detection:
+
+- **Verification theater**: Existence checks without assertions (`expect(x).toBeDefined()`)
+- **Mocking expected results**: Circular testing (mock returns test input)
+- **Timing dependencies**: Arbitrary sleeps instead of proper sync
+- **Missing isolation**: Shared state, real network calls
+
+Workers must write tests for new functionality. Validators execute tests (not just read them) and verify quality. See [Validation Workflow](#validation-workflow) for details.
+
 ## What Makes It Different
 
 - **Blind validation** - Validators never see the worker's context or code history
@@ -214,6 +225,18 @@ zeroshot run https://dev.azure.com/org/project/_workitems/edit/999
 **Requires**: CLI tools ([`gh`](https://cli.github.com/), [`glab`](https://gitlab.com/gitlab-org/cli), [`jira`](https://github.com/go-jira/jira), or [`az`](https://docs.microsoft.com/cli/azure/)) for the platform you use. See [issue-providers README](src/issue-providers/README.md) for setup and self-hosted instances.
 
 **Important for `--pr` mode**: Run zeroshot from the target repository directory. PRs are created on the git remote of your current directory. If you run from a different repo, zeroshot will warn you and skip the "Closes #X" reference (the PR is still created, but won't auto-close the issue).
+
+### Validation Workflow
+
+```
+PLANNER → Acceptance Criteria (testable, verifiable)
+            ↓
+WORKER → Implementation + Tests
+            ↓
+VALIDATOR-TESTER → Execute tests (npm test / pytest)
+                 → Reject on antipatterns (verification theater, etc.)
+                 → Approve only if all tests pass
+```
 
 ## Architecture
 

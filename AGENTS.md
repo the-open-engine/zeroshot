@@ -377,6 +377,65 @@ npm run test
 
 Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as non-negotiable law before typing again. Failing to read and address each validator complaint before claiming completion will be rejected automatically.
 
+## Test Quality Enforcement
+
+### Overview
+
+Zeroshot enforces test quality through antipattern detection in validators. Tests must verify behavior, not just existence.
+
+### Antipattern Detection Rules
+
+Validators reject weak tests that pass for wrong reasons:
+
+| Antipattern              | Description                                  | Example                                |
+| ------------------------ | -------------------------------------------- | -------------------------------------- |
+| verification theater     | Existence checks without assertions          | `expect(result).toBeDefined()` only    |
+| mocking expected results | Circular testing (mock returns test input)   | `mock.resolve(expected); assert equal` |
+| timing dependencies      | Arbitrary sleeps instead of proper sync      | `await sleep(1000); expect(done)`      |
+| missing isolation        | Shared state, real network calls             | Tests depend on previous test state    |
+
+### Planner Acceptance Criteria System
+
+Planners specify test requirements via `acceptanceCriteria` array (minItems: 3):
+
+```json
+{
+  "id": "AC1",
+  "criterion": "TESTABLE statement",
+  "verification": "grep test-name tests/; npm test -- test-name",
+  "priority": "MUST"
+}
+```
+
+**Priorities:**
+- `MUST`: Blocks completion if fails
+- `SHOULD`: Important, warn if missing
+- `NICE`: Bonus feature
+
+**Good vs Vague Criteria:**
+
+❌ Vague: "Tests pass"
+✅ Testable: "npm test exits 0, coverage >80% on new files"
+
+❌ Vague: "Feature works"
+✅ Testable: "curl /api/health returns 200 + {status: 'ok'}"
+
+### Validator-Tester Enforcement
+
+The `validator-tester` agent enforces test execution (not code reading):
+
+- **RUN THE TESTS** (required): Execute `npm test` / `pytest` / etc via Bash
+- Record actual output in `testResults` field
+- If tests fail → instant REJECT
+- Reading test files ≠ verification
+
+**Forbidden:**
+- "Tests appear correct" without running
+- "Test file exists" as evidence
+- Approving without `testResults` containing actual test output
+
+See `cluster-templates/base-templates/full-workflow.json` lines 636-721 for full validator-tester prompt.
+
 ## CI Failure Diagnosis
 
 Multiple CI jobs fail → Diagnose each independently.

@@ -220,6 +220,32 @@ zeroshot run 123 --docker --no-mounts
 4. Try to break it → edge cases
 5. Verify each requirement → evidence (command + output)
 
+## Test Quality Requirements
+
+Validators enforce test quality via antipattern detection. Weak tests are rejected:
+
+| Antipattern             | Why Rejected                                 | Fix                                         |
+| ----------------------- | -------------------------------------------- | ------------------------------------------- |
+| Verification theater    | Only checks existence, not correctness       | Assert actual behavior with specific values |
+| Mocking expected results| Circular logic (test input = mocked output)  | Mock dependencies, not expected results     |
+| Timing dependencies     | Flaky (arbitrary sleeps)                     | Proper sync primitives (events, callbacks)  |
+| Missing isolation       | Tests pollute each other's state             | Reset state between tests, avoid shared DB  |
+
+**Example - Bad Test (Verification Theater):**
+```javascript
+expect(result).toBeDefined();
+expect(result.data).toBeTruthy();
+```
+
+**Example - Good Test:**
+```javascript
+expect(result.status).toBe(200);
+expect(result.data.user.email).toBe('test@example.com');
+expect(result.data.user.role).toBe('admin');
+```
+
+See AGENTS.md for full antipattern detection rules and planner acceptance criteria format.
+
 ## Persistence
 
 | File                        | Content               |
