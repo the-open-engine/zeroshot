@@ -143,7 +143,10 @@ class Orchestrator {
    */
   _resolveClusterProvider(clusterConfig = {}, settings = loadSettings()) {
     const resolved =
-      clusterConfig.forceProvider || clusterConfig.defaultProvider || settings.defaultProvider || 'claude';
+      clusterConfig.forceProvider ||
+      clusterConfig.defaultProvider ||
+      settings.defaultProvider ||
+      'claude';
     return normalizeProviderName(resolved) || 'claude';
   }
 
@@ -1625,6 +1628,31 @@ class Orchestrator {
   }
 
   /**
+   * Tear down Docker Compose services in a worktree directory to free host ports.
+   * Best-effort — silently ignores failures (compose may not have been started, Docker may not be running).
+   * @param {string} worktreePath - Path to the worktree directory
+   * @private
+   */
+  _teardownWorktreeCompose(worktreePath) {
+    const { execSync } = require('./lib/safe-exec');
+    const composePath = path.join(worktreePath, 'docker-compose.yml');
+    if (!fs.existsSync(composePath)) return;
+
+    try {
+      this._log(`[Orchestrator] Tearing down Docker Compose services in ${worktreePath}...`);
+      execSync('docker compose down --remove-orphans --volumes --timeout 10', {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: 30000,
+      });
+      this._log(`[Orchestrator] Docker Compose services torn down`);
+    } catch {
+      // Best-effort: compose project may not have been started
+    }
+  }
+
+  /**
    * Signal a remote daemon that owns the cluster and wait for exit
    * @param {Object} cluster - Cluster object
    * @param {Object} options - { action, timeoutMs, killTimeoutMs, signal }
@@ -1742,10 +1770,16 @@ class Orchestrator {
 
     // Worktree cleanup on stop: preserve for resume capability
     // Branch stays, worktree stays - can resume work later
+    // BUT: tear down Docker Compose services to free host ports
     if (cluster.worktree?.manager) {
       this._log(`[Orchestrator] Worktree preserved at ${cluster.worktree.path} for resume`);
       this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
-      // Don't cleanup worktree - it will be reused on resume
+      // Tear down Docker Compose services in the worktree to free host ports.
+      // Without this, stopped worktrees hold ports (5433, 6379, etc.) indefinitely.
+      if (cluster.worktree.path) {
+        this._teardownWorktreeCompose(cluster.worktree.path);
+      }
+      // Don't cleanup worktree itself - it will be reused on resume
     }
 
     cluster.state = 'stopped';
