@@ -79,6 +79,19 @@ Runs a shell command when a trigger fires. Message content is piped to stdin as 
 }
 ```
 
+Optional `onSuccess`/`onFailure` fields route the outcome to custom topics instead of the defaults (`CLUSTER_FAILED` on error, idle on success). Agent state is set to `idle` (not `failed`) when `onFailure` is configured, allowing re-trigger loops. Output is truncated to 5 000 chars.
+
+```json
+{
+  "config": {
+    "command": "node $ZEROSHOT_ROOT/scripts/quality-gate-runner.js",
+    "timeout": 120000,
+    "onSuccess": { "topic": "QUALITY_GATE_PASSED" },
+    "onFailure": { "topic": "QUALITY_GATE_FAILED" }
+  }
+}
+```
+
 Implementation: `src/agent/agent-lifecycle.js:316`
 
 ### Parameterised templates
@@ -130,6 +143,62 @@ Live display of Claude Code subagents (spawned via Task tool) in the StatusFoote
 | `src/status-footer.js`             | Renders subagent tree rows (lines ~750-770)    |
 | `src/agent/agent-task-executor.js` | Sets env vars in `buildSpawnEnv()` (line ~679) |
 | `src/orchestrator.js`              | Cleans up temp files on stop/kill              |
+
+## Quality Gate
+
+Zero-cost automated checks (lint, typecheck, tests) inserted between worker completion and validator start. Catches basic failures before spending API credits on validators.
+
+### Message Flow
+
+```
+Worker done → IMPLEMENTATION_READY → quality-gate agent (execute_system_command)
+  ├─ pass (or no .zeroshot-quality file) → QUALITY_GATE_PASSED → Validators trigger
+  └─ fail → QUALITY_GATE_FAILED (stdout/stderr) → Worker re-triggers, fixes, loops
+```
+
+When `quality_gate=false` (or the quality-gate agent is absent), validators trigger directly on `IMPLEMENTATION_READY` — existing behaviour preserved.
+
+### `.zeroshot-quality` convention
+
+A one-liner in the project root containing the quality check command:
+
+```
+npm run lint && npm run typecheck && npm test
+```
+
+If missing: auto-pass with warning. Generated once per project via `scripts/zeroshot-init.sh`.
+
+### Setup
+
+```bash
+# AI-assisted (uses claude/codex/gemini CLI to analyse the project)
+scripts/zeroshot-init.sh /path/to/repo
+
+# Manual
+echo 'npm run lint && npm test' > .zeroshot-quality
+```
+
+The init script falls back to heuristic detection (package.json scripts, Cargo.toml, go.mod, pyproject.toml, etc.) when no AI CLI is available. Multi-ecosystem projects (e.g. Laravel + Vite, Tauri) detect both backends.
+
+### Template param
+
+Both `worker-validator` and `full-workflow` templates accept `quality_gate` (boolean, default: `true`). Disable with:
+
+```json
+{ "params": { "quality_gate": false } }
+```
+
+### Files
+
+| File                                                     | Purpose                                              |
+| -------------------------------------------------------- | ---------------------------------------------------- |
+| `scripts/quality-gate-runner.js`                         | Reads `.zeroshot-quality`, runs command, JSON output |
+| `scripts/zeroshot-init.sh`                               | One-time setup, generates `.zeroshot-quality`        |
+| `cluster-templates/base-templates/worker-validator.json` | quality-gate agent + dual validator triggers         |
+| `cluster-templates/base-templates/full-workflow.json`    | Same for STANDARD/CRITICAL templates                 |
+| `src/agent/agent-lifecycle.js`                           | `onSuccess`/`onFailure` in execute_system_command    |
+| `src/config-validator.js`                                | Validates onSuccess/onFailure topic fields           |
+| `tests/quality-gate.test.js`                             | 17 tests covering all paths                          |
 
 ## Model Auto-Upgrade
 

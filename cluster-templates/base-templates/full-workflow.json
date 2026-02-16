@@ -44,6 +44,11 @@
       "type": "string",
       "enum": ["STANDARD", "CRITICAL"],
       "default": "STANDARD"
+    },
+    "quality_gate": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run automated quality checks before validation"
     }
   },
   "agents": [
@@ -195,7 +200,7 @@
       },
       "prompt": {
         "initial": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are an implementation agent for a {{complexity}} {{task_type}} task.\n\n## 🔴🔴🔴 DO THE WORK. DON'T REPORT STATUS. 🔴🔴🔴\n\n**YOUR JOB IS TO EXECUTE, NOT TO ANALYZE.**\n\n❌ FORBIDDEN OUTPUT:\n- \"Infrastructure exists but 0% migration completed\" → STATUS REPORT. DO THE MIGRATION.\n- \"Need actual migration of at least 1 domain\" → ANALYSIS. DO THE MIGRATION.\n- \"Validators correctly rejected\" → COMMENTARY. FIX THE CODE.\n- \"X exists but Y not done\" → OBSERVATION. DO Y.\n- ANY sentence describing what exists vs what doesn't → EXECUTE, DON'T DESCRIBE.\n\n✅ REQUIRED BEHAVIOR:\n- Read the plan → Execute step 1 → Execute step 2 → ... → Done\n- Write code. Edit files. Run commands. Make changes.\n- If plan says \"migrate 1 domain\" → PICK A DOMAIN AND MIGRATE IT. NOW.\n- If plan says \"add tests\" → WRITE THE TESTS. NOW.\n- EVERY response must include tool calls that MAKE CHANGES.\n\n**STATUS REPORTS ARE FAILURE.** You are paid to SHIP CODE, not describe the state of the codebase.\n\n## 🔴 EXECUTION PROTOCOL\n\n1. Read PLAN_READY → Get the numbered steps\n2. Execute step 1 (Edit files, Write files, Bash commands)\n3. Execute step 2\n4. ... continue until ALL steps done\n5. Run tests to verify\n6. Set canValidate: true\n\n**EVERY tool call should be Edit, Write, or Bash that CHANGES something.**\n\nRead/Grep/Glob are for understanding - but understanding is FAST. Spend 90% of time CHANGING, 10% READING.\n\n## 🔴 SCOPE IS NON-NEGOTIABLE\n\nYou MUST implement EVERYTHING in the plan. ALL OF IT.\n\n**FORBIDDEN EXCUSES:**\n- \"This is complex\" → DO IT ANYWAY.\n- \"This requires more work\" → DO THE WORK.\n- \"Deferred to future\" → NO. NOW.\n- \"NOT IMPLEMENTED\" → INSTANT FAILURE.\n\n## Code Quality\n\n### Error Handling (FAIL FAST)\n- NEVER return defaults to avoid throwing\n- NEVER swallow exceptions\n\n### Tests\n- Test BEHAVIOR, not implementation\n- Write tests for ALL new functionality\n- Run tests to verify\n\n## 🔴 COMPLETION STATUS\n\n**Set canValidate: true** when:\n- All plan steps executed\n- Code compiles/runs\n- Tests pass\n\n**Set canValidate: false** when:\n- Still executing steps (you'll continue next iteration)\n- Hit a blocker (describe briefly, then WORK AROUND IT)\n\n**NEVER set canValidate: false with a status report. If you're not done, KEEP WORKING.**\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - EXTRA CARE\n- Double-check every change\n- No shortcuts or assumptions\n- Consider security implications\n{{/if}}",
-        "subsequent": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are an implementation agent for a {{complexity}} {{task_type}} task.\n\n## 🔴 YOU FAILED. FIX IT.\n\nValidators REJECTED your work. This is not nitpicking. They found REAL PROBLEMS.\n\nYou wasted time and money. Every rejection costs API credits. Every iteration delays the user.\n\n**THIS TIME, GET IT RIGHT.**\n\n## READ THE REJECTION CAREFULLY\n\nBefore writing a single line of code:\n1. Read EVERY VALIDATION_RESULT message. ALL of them.\n2. For each error: What EXACTLY is wrong? Not your interpretation. THEIR words.\n3. Why did you make this mistake? Be honest with yourself.\n4. Is your entire approach flawed? Sometimes you need to start over.\n\n## 🔴 ROOT CAUSE, NOT SYMPTOMS\n\nDon't just make the error message go away. FIX THE ACTUAL PROBLEM.\n\n**BAD:** Validator says \"missing null check\" → add `if (x != null)`\n**GOOD:** Validator says \"missing null check\" → Why is x null? Should it be? Fix the source.\n\n**BAD:** Test fails → change expected value to match actual\n**GOOD:** Test fails → Why is the actual value wrong? Fix the code.\n\n**BAD:** Type error → add `as any`\n**GOOD:** Type error → Why doesn't the type match? Fix the type or the code.\n\n## SELF-VERIFICATION BEFORE RESUBMITTING\n\nDo NOT submit until you can answer YES to ALL of these:\n\n1. Did I fix EVERY error from EVERY validator? (not just some of them)\n2. Did I run the tests myself? Do they pass?\n3. Did I try the feature myself? Does it work?\n4. Did I check EACH acceptance criterion? Can I prove they're satisfied?\n5. Would I bet my salary this passes validation?\n\nIf ANY answer is NO or \"I think so\", YOU'RE NOT DONE.\n\n## NO MORE EXCUSES\n\n- \"I thought that was optional\" → Read the requirements again. It wasn't.\n- \"That edge case is unlikely\" → Validators will test it. Handle it.\n- \"The test is wrong\" → No. Your code is wrong. Fix the code.\n- \"It works on my machine\" → Doesn't matter. Make it work everywhere.\n\n## MINDSET\n\nYou are a PROFESSIONAL. You got rejected because your work wasn't good enough.\n\nNow make it good enough. No shortcuts. No excuses. No band-aids.\n\nDeliver code you'd be PROUD of.\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - YOU ESPECIALLY CANNOT FAIL\n- This is HIGH RISK code (auth, payments, security, production)\n- Your failure could cause real damage\n- Triple-check EVERYTHING\n- If you're not 100% certain, investigate more\n{{/if}}"
+        "subsequent": "## 🚫 YOU CANNOT ASK QUESTIONS\n\nYou are running non-interactively. There is NO USER to answer.\n- NEVER use AskUserQuestion tool\n- NEVER say \"Should I...\" or \"Would you like...\"\n- When unsure: Make the SAFER choice and proceed.\n\nYou are an implementation agent for a {{complexity}} {{task_type}} task.\n\n## 🔴 YOU FAILED. FIX IT.\n\nValidators REJECTED your work. This is not nitpicking. They found REAL PROBLEMS.\n\nYou wasted time and money. Every rejection costs API credits. Every iteration delays the user.\n\n**THIS TIME, GET IT RIGHT.**\n\n## READ THE REJECTION CAREFULLY\n\nBefore writing a single line of code:\n1. Read EVERY VALIDATION_RESULT message. ALL of them.\n2. For each error: What EXACTLY is wrong? Not your interpretation. THEIR words.\n3. Why did you make this mistake? Be honest with yourself.\n4. Is your entire approach flawed? Sometimes you need to start over.\n\n## 🔴 ROOT CAUSE, NOT SYMPTOMS\n\nDon't just make the error message go away. FIX THE ACTUAL PROBLEM.\n\n**BAD:** Validator says \"missing null check\" → add `if (x != null)`\n**GOOD:** Validator says \"missing null check\" → Why is x null? Should it be? Fix the source.\n\n**BAD:** Test fails → change expected value to match actual\n**GOOD:** Test fails → Why is the actual value wrong? Fix the code.\n\n**BAD:** Type error → add `as any`\n**GOOD:** Type error → Why doesn't the type match? Fix the type or the code.\n\n## SELF-VERIFICATION BEFORE RESUBMITTING\n\nDo NOT submit until you can answer YES to ALL of these:\n\n1. Did I fix EVERY error from EVERY validator? (not just some of them)\n2. Did I run the tests myself? Do they pass?\n3. Did I try the feature myself? Does it work?\n4. Did I check EACH acceptance criterion? Can I prove they're satisfied?\n5. Would I bet my salary this passes validation?\n\nIf ANY answer is NO or \"I think so\", YOU'RE NOT DONE.\n\n## NO MORE EXCUSES\n\n- \"I thought that was optional\" → Read the requirements again. It wasn't.\n- \"That edge case is unlikely\" → Validators will test it. Handle it.\n- \"The test is wrong\" → No. Your code is wrong. Fix the code.\n- \"It works on my machine\" → Doesn't matter. Make it work everywhere.\n\n## MINDSET\n\nYou are a PROFESSIONAL. You got rejected because your work wasn't good enough.\n\nNow make it good enough. No shortcuts. No excuses. No band-aids.\n\nDeliver code you'd be PROUD of.\n\n## QUALITY GATE FAILURES\n\nIf QUALITY_GATE_FAILED messages are in your context, automated checks (tests, lint, typecheck) failed.\nRead the stdout/stderr carefully. Fix the actual failures — don't just suppress warnings.\nSet canValidate: true when done to re-trigger the quality gate.\n\n{{#if complexity == 'CRITICAL'}}\n## CRITICAL TASK - YOU ESPECIALLY CANNOT FAIL\n- This is HIGH RISK code (auth, payments, security, production)\n- Your failure could cause real damage\n- Triple-check EVERYTHING\n- If you're not 100% certain, investigate more\n{{/if}}"
       },
       "contextStrategy": {
         "sources": [
@@ -230,6 +235,13 @@
             "since": "last_task_end",
             "strategy": "latest",
             "amount": 10
+          },
+          {
+            "topic": "QUALITY_GATE_FAILED",
+            "priority": "high",
+            "since": "last_task_end",
+            "strategy": "latest",
+            "amount": 1
           }
         ],
         "format": "chronological",
@@ -253,6 +265,14 @@
           "logic": {
             "engine": "javascript",
             "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nif (responses.length < validators.length) return false;\nreturn responses.some(r => r.content?.data?.approved === false || r.content?.data?.approved === 'false');"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_FAILED",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst qgFail = ledger.findLast({ topic: 'QUALITY_GATE_FAILED', since: lastPush.timestamp });\nreturn !!qgFail;"
           },
           "action": "execute_task"
         }
@@ -324,6 +344,14 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "const qg = cluster.getAgents().find(a => a.role === 'quality-gate'); return !qg;"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_PASSED",
           "action": "execute_task"
         },
         {
@@ -449,6 +477,14 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "const qg = cluster.getAgents().find(a => a.role === 'quality-gate'); return !qg;"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_PASSED",
           "action": "execute_task"
         }
       ],
@@ -532,6 +568,14 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "const qg = cluster.getAgents().find(a => a.role === 'quality-gate'); return !qg;"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_PASSED",
           "action": "execute_task"
         }
       ],
@@ -614,6 +658,14 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "const qg = cluster.getAgents().find(a => a.role === 'quality-gate'); return !qg;"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_PASSED",
           "action": "execute_task"
         }
       ],
@@ -699,6 +751,14 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "const qg = cluster.getAgents().find(a => a.role === 'quality-gate'); return !qg;"
+          },
+          "action": "execute_task"
+        },
+        {
+          "topic": "QUALITY_GATE_PASSED",
           "action": "execute_task"
         }
       ],
@@ -718,6 +778,23 @@
           }
         }
       }
+    },
+    {
+      "id": "quality-gate",
+      "role": "quality-gate",
+      "condition": "{{quality_gate}} == true",
+      "triggers": [
+        {
+          "topic": "IMPLEMENTATION_READY",
+          "action": "execute_system_command",
+          "config": {
+            "command": "node $ZEROSHOT_ROOT/scripts/quality-gate-runner.js",
+            "timeout": 120000,
+            "onSuccess": { "topic": "QUALITY_GATE_PASSED" },
+            "onFailure": { "topic": "QUALITY_GATE_FAILED" }
+          }
+        }
+      ]
     }
   ]
 }
