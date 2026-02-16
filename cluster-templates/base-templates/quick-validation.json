@@ -5,7 +5,7 @@
     "validator_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
-      "default": "level2"
+      "default": "level3"
     },
     "max_tokens": {
       "type": "number",
