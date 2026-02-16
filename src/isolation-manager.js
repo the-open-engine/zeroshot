@@ -1460,6 +1460,29 @@ class IsolationManager {
       }
     }
 
+    // Run repo-level setup command if configured (e.g., "npm ci", "pip install -r requirements.txt")
+    // This ensures all agents have dependencies available from the start.
+    try {
+      const repoSettingsResult = readRepoSettings(repoRoot);
+      const setupCmd = repoSettingsResult.settings?.worktree?.setup;
+      if (typeof setupCmd === 'string' && setupCmd.trim()) {
+        console.log(`[IsolationManager] Running worktree setup: ${setupCmd}`);
+        execSync(setupCmd, {
+          cwd: worktreePath,
+          encoding: 'utf8',
+          stdio: 'inherit',
+          timeout: 300_000, // 5 minutes max for dep install
+        });
+        console.log(`[IsolationManager] Worktree setup completed`);
+      }
+    } catch (setupErr) {
+      throw new Error(
+        `Worktree setup command failed in ${worktreePath}. ` +
+          `Check .zeroshot/settings.json "worktree.setup" value. ` +
+          `Error: ${setupErr.message}`
+      );
+    }
+
     return {
       path: worktreePath,
       branch: branchName,

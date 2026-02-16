@@ -57,14 +57,14 @@ describe('verify_github_pr hook action', function () {
     mockExecSyncFn = null;
   });
 
-  it('should not require pr_number in structured output', async function () {
+  it('should verify PR when pr_url present but pr_number missing', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
         summary: 'Merged',
-        result:
-          'PR merged: {"pr_url":"https://github.com/org/repo/pull/123","pr_number":123,"merged":true}',
+        pr_url: 'https://github.com/org/repo/pull/123',
+        merged: true,
       }),
     };
 
@@ -206,12 +206,41 @@ describe('verify_github_pr hook action', function () {
     assert(capturedCmd.includes('gh pr view 555'), `Expected PR number in command, got: ${capturedCmd}`);
   });
 
-  it('should fall back to branch-based resolution when pr_number not in output', async function () {
+  // REGRESSION: flying-jungle-51 (2026-02-16)
+  // Agent failed to create PR (type errors blocked commit). Structured output had no pr_number/pr_url.
+  // Old code fell through to `gh pr view` which found an unrelated open PR → "Agent LIED" error.
+  it('should throw when structured output has no PR data (agent failed to create PR)', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
       output: JSON.stringify({
-        summary: 'Done',
+        summary: 'PR creation blocked - TypeScript compilation errors',
+        result: 'Failed to create PR due to pre-commit errors',
+      }),
+    };
+
+    // Should NOT reach gh pr view at all
+    mockExecSyncFn = () => {
+      assert.fail('gh pr view should not be called when no PR data in output');
+    };
+
+    try {
+      await executeHook({ hook, agent, result });
+      assert.fail('Expected error to be thrown');
+    } catch (err) {
+      assert.match(err.message, /without creating a PR/);
+      assert.match(err.message, /no pr_number or pr_url/);
+      assert.match(err.message, /compilation errors/i);
+    }
+  });
+
+  it('should use branch-based resolution when pr_url present but pr_number missing', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        pr_url: 'https://github.com/org/repo/pull/100',
+        merged: true,
       }),
     };
 
@@ -227,6 +256,7 @@ describe('verify_github_pr hook action', function () {
     };
 
     await executeHook({ hook, agent, result });
+    // No pr_number → branch-based resolution
     assert.strictEqual(capturedCmd, 'gh pr view --json state,mergedAt,url,number');
   });
 

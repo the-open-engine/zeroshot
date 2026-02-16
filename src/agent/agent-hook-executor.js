@@ -162,6 +162,16 @@ async function executeHook(params) {
       return;
     }
 
+    // If structured output has no PR data, the agent failed to create a PR.
+    // Don't fall through to `gh pr view` which would pick up an unrelated open PR.
+    if (!claimedPrNumber && !claimedPrUrl) {
+      const reason = structuredOutput.summary || structuredOutput.result || 'no details provided';
+      throw new Error(
+        `git-pusher completed without creating a PR (no pr_number or pr_url in output). ` +
+          `Reason: ${typeof reason === 'string' ? reason.slice(0, 200) : JSON.stringify(reason).slice(0, 200)}`
+      );
+    }
+
     // Use explicit PR number when available (deterministic).
     // Branch-based resolution can fail after merge when branch is deleted/transitional.
     const ghPrViewCmd = claimedPrNumber
