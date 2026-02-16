@@ -168,6 +168,10 @@ function extractDirectJson(text) {
   try {
     const parsed = JSON.parse(trimmed);
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      // Reject CLI result envelopes — these are never agent output.
+      // Without this guard, when a model bypasses --json-schema and returns plain text,
+      // the CLI envelope itself gets mistaken for structured agent output.
+      if (parsed.type === 'result') return null;
       return parsed;
     }
   } catch {

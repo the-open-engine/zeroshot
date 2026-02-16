@@ -251,6 +251,12 @@ function defineDirectJsonExtractionTests() {
       assert.deepStrictEqual(result, { foo: 'bar' });
     });
 
+    it('should reject CLI result envelopes', function () {
+      const text = '{"type":"result","subtype":"success","result":"some text","cost_usd":1.33}';
+      const result = extractDirectJson(text);
+      assert.strictEqual(result, null);
+    });
+
     it('should return null for arrays', function () {
       const text = '[1, 2, 3]';
       const result = extractDirectJson(text);
@@ -492,6 +498,27 @@ Done.`;
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result.complexity, 'TRIVIAL');
       assert.strictEqual(result.taskType, 'TASK');
+    });
+
+    it('REGRESSION: CLI envelope returned as agent output when model bypasses --json-schema', function () {
+      // crimson-comet-58: validator-code returned plain text despite --json-schema.
+      // Claude CLI envelope (type:"result" with string result, no structured_output)
+      // was parsed by Strategy 4 (extractDirectJson) as valid JSON and treated as
+      // the agent's structured output, failing schema validation with misleading errors.
+      const output = JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        duration_ms: 3942,
+        num_turns: 1,
+        result:
+          'Validation already completed. The structured output was submitted rejecting the change.',
+        session_id: 'b1ce8167-c79b-4a99-98a0-1f4152773c1a',
+        cost_usd: 1.33,
+        usage: { input_tokens: 3, output_tokens: 56 },
+      });
+      const result = extractJsonFromOutput(output, 'claude');
+      assert.strictEqual(result, null);
     });
   });
 }
