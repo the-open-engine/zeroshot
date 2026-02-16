@@ -1474,6 +1474,23 @@ class IsolationManager {
    * @param {boolean} [options.deleteBranch=false] - Also delete the branch
    */
   removeWorktree(worktreeInfo, _options = {}) {
+    // Tear down any Docker Compose services that may have been started in this worktree.
+    // Without this, containers keep running with host port mappings after the worktree is deleted,
+    // blocking port allocation for the main project or other worktrees.
+    const composePath = path.join(worktreeInfo.path, 'docker-compose.yml');
+    if (fs.existsSync(composePath)) {
+      try {
+        execSync('docker compose down --remove-orphans --volumes --timeout 10', {
+          cwd: worktreeInfo.path,
+          encoding: 'utf8',
+          stdio: 'pipe',
+          timeout: 30000,
+        });
+      } catch {
+        // Best-effort: compose project may not have been started, or Docker may not be running
+      }
+    }
+
     // Remove the worktree (prefer git so metadata is cleaned up).
     try {
       execSync(`git worktree remove --force ${escapeShell(worktreeInfo.path)}`, {
