@@ -28,35 +28,11 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo ""
     echo "❌ ERROR: You cannot push directly to 'main' branch"
     echo ""
-    echo "Releases flow:  dev → PR → main → semantic-release"
-    echo ""
-    echo "To release:"
-    echo "  gh pr create --base main --head dev --title \"Release\""
-    echo ""
-    exit 1
-  fi
-
-  # Block pushes to dev
-  if [ "$remote_branch" = "dev" ]; then
-    echo ""
-    echo "╔═══════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                   ║"
-    echo "║  ❌ BLOCKED: Direct push to 'dev' branch                          ║"
-    echo "║                                                                   ║"
-    echo "╚═══════════════════════════════════════════════════════════════════╝"
-    echo ""
-    echo "❌ ERROR: You cannot push directly to 'dev' branch"
-    echo ""
     echo "Required workflow:"
     echo "  1. Create feature branch: git switch -c feat/my-feature"
     echo "  2. Push feature branch:   git push -u origin feat/my-feature"
-    echo "  3. Create PR:             gh pr create --base dev"
+    echo "  3. Create PR:             gh pr create --base main"
     echo "  4. Enable auto-merge:     gh pr merge --auto --squash"
-    echo ""
-    echo "Merge queue will:"
-    echo "  • Rebase your PR on latest dev"
-    echo "  • Re-run CI on rebased code"
-    echo "  • Merge only if CI passes"
     echo ""
     exit 1
   fi
