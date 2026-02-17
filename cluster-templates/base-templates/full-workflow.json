@@ -5,7 +5,7 @@
     "planner_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
-      "default": "level2"
+      "default": "level3"
     },
     "worker_level": {
       "type": "string",
