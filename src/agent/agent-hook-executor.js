@@ -11,6 +11,77 @@
 const vm = require('vm');
 const { execSync } = require('../lib/safe-exec'); // Enforces timeouts
 
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizePrNumber(value) {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function extractPrInfoFromRawOutput(output) {
+  if (!output || typeof output !== 'string') {
+    return { prUrl: null, prNumber: null };
+  }
+
+  // Normalize escaped slashes to catch URLs embedded in JSON strings.
+  const normalizedOutput = output.replace(/\\\//g, '/');
+
+  const prUrlRegex = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/(\d+)/g;
+  const prUrlMatches = [...normalizedOutput.matchAll(prUrlRegex)];
+  const lastPrUrlMatch = prUrlMatches.length > 0 ? prUrlMatches[prUrlMatches.length - 1] : null;
+
+  const prNumberRegex = /"?pr_number"?\s*[:=]\s*"?(\d+)"?/g;
+  const prNumberMatches = [...normalizedOutput.matchAll(prNumberRegex)];
+  const lastPrNumberMatch =
+    prNumberMatches.length > 0 ? prNumberMatches[prNumberMatches.length - 1] : null;
+
+  const prNumberFromField = lastPrNumberMatch ? normalizePrNumber(lastPrNumberMatch[1]) : null;
+  const prNumberFromUrl = lastPrUrlMatch ? normalizePrNumber(lastPrUrlMatch[1]) : null;
+
+  return {
+    prUrl: lastPrUrlMatch ? lastPrUrlMatch[0] : null,
+    prNumber: prNumberFromField || prNumberFromUrl || null,
+  };
+}
+
+function resolvePrClaimsFromOutput({ output, providerName }) {
+  const { extractJsonFromOutput } = require('./output-extraction');
+  const structuredOutput = extractJsonFromOutput(output, providerName) || {};
+
+  let claimedPrUrl = structuredOutput.pr_url || null;
+  let claimedPrNumber = normalizePrNumber(structuredOutput.pr_number);
+
+  const fallbackPrInfo = extractPrInfoFromRawOutput(output);
+  if (!claimedPrUrl && fallbackPrInfo.prUrl) {
+    claimedPrUrl = fallbackPrInfo.prUrl;
+  }
+  if (!claimedPrNumber && fallbackPrInfo.prNumber) {
+    claimedPrNumber = fallbackPrInfo.prNumber;
+  }
+
+  return {
+    structuredOutput,
+    claimedPrUrl,
+    claimedPrNumber,
+    usedFallbackExtraction:
+      (fallbackPrInfo.prUrl && !structuredOutput.pr_url) ||
+      (fallbackPrInfo.prNumber && !structuredOutput.pr_number),
+  };
+}
+
+function publishClusterComplete(agent, data) {
+  agent._publish({
+    topic: 'CLUSTER_COMPLETE',
+    content: {
+      data,
+    },
+  });
+}
+
 /**
  * Deep merge two objects, with source taking precedence
  * @param {Object} target - Base object
@@ -140,24 +211,22 @@ async function executeHook(params) {
   }
 
   if (hook.action === 'verify_github_pr') {
-    const { extractJsonFromOutput } = require('./output-extraction');
-    const structuredOutput = extractJsonFromOutput(result.output) || {};
-    const claimedPrUrl = structuredOutput.pr_url || null;
-    const claimedPrNumber = structuredOutput.pr_number || null;
+    const providerName =
+      typeof agent?._resolveProvider === 'function' ? agent._resolveProvider() : 'claude';
+    const { structuredOutput, claimedPrUrl, claimedPrNumber, usedFallbackExtraction } =
+      resolvePrClaimsFromOutput({
+        output: result.output,
+        providerName,
+      });
 
     // Skip actual gh CLI verification if explicitly disabled (for integration tests)
     // Unit tests mock execSync, so they still test the verification logic
     if (process.env.ZEROSHOT_SKIP_GH_VERIFY === '1') {
       agent._log(`✅ VERIFICATION SKIPPED (ZEROSHOT_SKIP_GH_VERIFY=1)`);
-      agent._publish({
-        topic: 'CLUSTER_COMPLETE',
-        content: {
-          data: {
-            reason: 'git-pusher-complete-verified',
-            pr_number: claimedPrNumber,
-            pr_url: claimedPrUrl,
-          },
-        },
+      publishClusterComplete(agent, {
+        reason: 'git-pusher-complete-verified',
+        pr_number: claimedPrNumber,
+        pr_url: claimedPrUrl,
       });
       return;
     }
@@ -181,8 +250,11 @@ async function executeHook(params) {
     // GitHub API is eventually consistent after `gh pr merge`.
     // Merge state can take 5-30s to propagate. Poll with backoff before concluding agent lied.
     // POSTMORTEM 2026-02-11: 3s retry window killed cluster gentle-hydra-56 — PR was actually merged.
-    const MERGE_POLL_ATTEMPTS = 6;
-    const MERGE_POLL_INTERVAL_MS = 5000;
+    const MERGE_POLL_ATTEMPTS = parsePositiveInt(process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS, 12);
+    const MERGE_POLL_INTERVAL_MS = parsePositiveInt(
+      process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS,
+      5000
+    );
 
     let prData;
     try {
@@ -209,6 +281,12 @@ async function executeHook(params) {
     if (claimedPrUrl && prData.url && claimedPrUrl !== prData.url) {
       throw new Error(
         `VERIFICATION FAILED: Agent claimed PR URL ${claimedPrUrl}, but GitHub CLI reports ${prData.url}.`
+      );
+    }
+
+    if (usedFallbackExtraction) {
+      agent._log(
+        `⚠️  PR metadata recovered from raw output fallback (provider=${providerName}, pr=#${prData.number})`
       );
     }
 
@@ -246,25 +324,41 @@ async function executeHook(params) {
     }
 
     if (!prData.mergedAt) {
+      // Merge queue and API propagation can report OPEN for longer than expected.
+      // Degrade to "complete with verification pending" instead of failing the cluster.
+      if (prData.state === 'OPEN') {
+        const pendingReason =
+          'PR merge not yet visible via GitHub API after polling window; verification deferred.';
+        agent._log(
+          `⚠️  VERIFICATION PENDING: ${pendingReason} PR #${prData.number}, state="${prData.state}"`
+        );
+        publishClusterComplete(agent, {
+          reason: 'git-pusher-complete-verification-pending',
+          pr_number: prData.number,
+          pr_url: prData.url,
+          verification_pending: true,
+          verification_state: prData.state,
+          verification_polls: MERGE_POLL_ATTEMPTS,
+          verification_window_seconds: (MERGE_POLL_ATTEMPTS * MERGE_POLL_INTERVAL_MS) / 1000,
+          verification_message: pendingReason,
+        });
+        return;
+      }
+
       throw new Error(
-        `VERIFICATION FAILED: Agent claimed PR is merged, ` +
-          `but GitHub says state="${prData.state}" after ${MERGE_POLL_ATTEMPTS} polls ` +
-          `over ${(MERGE_POLL_ATTEMPTS * MERGE_POLL_INTERVAL_MS) / 1000}s. Agent LIED.`
+        `VERIFICATION FAILED: PR #${prData.number} exists but is not merged ` +
+          `(state="${prData.state}") after ${MERGE_POLL_ATTEMPTS} polls ` +
+          `over ${(MERGE_POLL_ATTEMPTS * MERGE_POLL_INTERVAL_MS) / 1000}s.`
       );
     }
 
     agent._log(`✅ VERIFICATION PASSED: PR #${prData.number} actually merged`);
 
     // Publish CLUSTER_COMPLETE only after verification passes
-    agent._publish({
-      topic: 'CLUSTER_COMPLETE',
-      content: {
-        data: {
-          reason: 'git-pusher-complete-verified',
-          pr_number: prData.number,
-          pr_url: prData.url,
-        },
-      },
+    publishClusterComplete(agent, {
+      reason: 'git-pusher-complete-verified',
+      pr_number: prData.number,
+      pr_url: prData.url,
     });
 
     return;

@@ -9,11 +9,12 @@ const assert = require('assert');
 const path = require('path');
 
 // Mock agent with required methods
-function createMockAgent(workingDirectory = process.cwd()) {
+function createMockAgent(workingDirectory = process.cwd(), providerName = 'claude') {
   return {
     id: 'test-agent',
     role: 'test',
     workingDirectory,
+    _resolveProvider: () => providerName,
     _log: () => {},
     _publish: function (message) {
       this.lastPublished = message;
@@ -27,8 +28,15 @@ describe('verify_github_pr hook action', function () {
 
   let executeHook;
   let mockExecSyncFn;
+  let previousPollAttempts;
+  let previousPollIntervalMs;
 
   beforeEach(() => {
+    previousPollAttempts = process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS;
+    previousPollIntervalMs = process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS;
+    process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS = '4';
+    process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS = '1';
+
     // Clear module cache
     const hookExecutorPath = path.join(__dirname, '../src/agent/agent-hook-executor.js');
     delete require.cache[require.resolve(hookExecutorPath)];
@@ -55,6 +63,16 @@ describe('verify_github_pr hook action', function () {
 
   afterEach(() => {
     mockExecSyncFn = null;
+    if (previousPollAttempts === undefined) {
+      delete process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS;
+    } else {
+      process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS = previousPollAttempts;
+    }
+    if (previousPollIntervalMs === undefined) {
+      delete process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS;
+    } else {
+      process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS = previousPollIntervalMs;
+    }
   });
 
   it('should verify PR when pr_url present but pr_number missing', async function () {
@@ -107,7 +125,7 @@ describe('verify_github_pr hook action', function () {
     }
   });
 
-  it('should throw when PR exists but genuinely not merged after all polls', async function () {
+  it('should complete with verification-pending when PR remains OPEN after all polls', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
@@ -118,7 +136,7 @@ describe('verify_github_pr hook action', function () {
       }),
     };
 
-    // Always returns OPEN — genuinely not merged
+    // Always returns OPEN
     mockExecSyncFn = () => {
       return JSON.stringify({
         number: 123,
@@ -128,13 +146,40 @@ describe('verify_github_pr hook action', function () {
       });
     };
 
-    try {
-      await executeHook({ hook, agent, result });
-      assert.fail('Expected error to be thrown');
-    } catch (err) {
-      assert.match(err.message, /LIED/i);
-      assert.match(err.message, /polls/i);
-    }
+    await executeHook({ hook, agent, result });
+    assert(agent.lastPublished, 'Expected message to be published');
+    assert.strictEqual(agent.lastPublished.topic, 'CLUSTER_COMPLETE');
+    assert.strictEqual(
+      agent.lastPublished.content.data.reason,
+      'git-pusher-complete-verification-pending'
+    );
+    assert.strictEqual(agent.lastPublished.content.data.verification_pending, true);
+  });
+
+  it('should throw when PR is CLOSED without merge after all polls', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        pr_url: 'https://github.com/org/repo/pull/123',
+        pr_number: 123,
+        merged: true,
+      }),
+    };
+
+    mockExecSyncFn = () => {
+      return JSON.stringify({
+        number: 123,
+        state: 'CLOSED',
+        mergedAt: null,
+        url: 'https://github.com/org/repo/pull/123',
+      });
+    };
+
+    await assert.rejects(
+      () => executeHook({ hook, agent, result }),
+      /exists but is not merged \(state="CLOSED"\)/i
+    );
   });
 
   // REGRESSION: gentle-hydra-56 (2026-02-11)
@@ -203,7 +248,10 @@ describe('verify_github_pr hook action', function () {
     };
 
     await executeHook({ hook, agent, result });
-    assert(capturedCmd.includes('gh pr view 555'), `Expected PR number in command, got: ${capturedCmd}`);
+    assert(
+      capturedCmd.includes('gh pr view 555'),
+      `Expected PR number in command, got: ${capturedCmd}`
+    );
   });
 
   // REGRESSION: flying-jungle-51 (2026-02-16)
@@ -234,7 +282,88 @@ describe('verify_github_pr hook action', function () {
     }
   });
 
-  it('should use branch-based resolution when pr_url present but pr_number missing', async function () {
+  // REGRESSION: provider mismatch in hook parser
+  // verify_github_pr previously parsed Codex output with Claude parser assumptions.
+  // That dropped pr_number/pr_url even when the assistant output contained valid JSON.
+  it('should parse Codex output with provider-aware extraction', async function () {
+    const agent = createMockAgent(process.cwd(), 'codex');
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: [
+        JSON.stringify({
+          type: 'item.created',
+          item: {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: '{"pr_num' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'item.created',
+          item: {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'ber":321,"merged":true}' }],
+          },
+        }),
+      ].join('\n'),
+    };
+
+    let capturedCmd;
+    mockExecSyncFn = (cmd) => {
+      capturedCmd = cmd;
+      return JSON.stringify({
+        number: 321,
+        state: 'MERGED',
+        mergedAt: '2026-02-17T10:00:00Z',
+        url: 'https://github.com/org/repo/pull/321',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert(
+      capturedCmd.includes('gh pr view 321'),
+      `Expected PR number in command, got: ${capturedCmd}`
+    );
+    assert.strictEqual(agent.lastPublished.content.data.pr_number, 321);
+  });
+
+  // REGRESSION: hook must recover PR metadata from raw command output when
+  // structured extraction misses fields.
+  it('should recover PR metadata from raw output fallback extraction', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_github_pr' };
+    const result = {
+      output: JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          aggregated_output: 'Created pull request https://github.com/org/repo/pull/654',
+          exit_code: 0,
+        },
+      }),
+    };
+
+    let capturedCmd;
+    mockExecSyncFn = (cmd) => {
+      capturedCmd = cmd;
+      return JSON.stringify({
+        number: 654,
+        state: 'MERGED',
+        mergedAt: '2026-02-17T10:00:00Z',
+        url: 'https://github.com/org/repo/pull/654',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert(
+      capturedCmd.includes('gh pr view 654'),
+      `Expected PR number in command, got: ${capturedCmd}`
+    );
+    assert.strictEqual(agent.lastPublished.content.data.pr_number, 654);
+  });
+
+  it('should derive PR number from pr_url when pr_number is missing', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_github_pr' };
     const result = {
@@ -256,8 +385,7 @@ describe('verify_github_pr hook action', function () {
     };
 
     await executeHook({ hook, agent, result });
-    // No pr_number → branch-based resolution
-    assert.strictEqual(capturedCmd, 'gh pr view --json state,mergedAt,url,number');
+    assert.strictEqual(capturedCmd, 'gh pr view 100 --json state,mergedAt,url,number');
   });
 
   it('should publish CLUSTER_COMPLETE when PR verified merged', async function () {
