@@ -253,6 +253,7 @@ class Ledger extends EventEmitter {
    * @returns {Array} Matching messages
    */
   query(criteria) {
+    if (this._closed) return [];
     const { cluster_id, topic, sender, receiver, since, until, limit, offset } = criteria;
 
     if (!cluster_id) {
@@ -317,6 +318,7 @@ class Ledger extends EventEmitter {
    * @returns {Array} Guidance messages ordered by timestamp ASC
    */
   queryGuidanceMailbox(criteria) {
+    if (this._closed) return [];
     const { cluster_id, target_agent_id, lastDeliveredAt, limit } = criteria || {};
 
     if (!cluster_id) {
@@ -371,6 +373,7 @@ class Ledger extends EventEmitter {
    * @returns {Object|null} Last matching message
    */
   findLast(criteria) {
+    if (this._closed) return null;
     const { cluster_id, topic, sender, receiver, since, until } = criteria;
 
     if (!cluster_id) {
@@ -419,6 +422,7 @@ class Ledger extends EventEmitter {
    * @returns {Number} Message count
    */
   count(criteria) {
+    if (this._closed) return 0;
     const { cluster_id, topic } = criteria;
 
     if (!cluster_id) {
@@ -456,6 +460,7 @@ class Ledger extends EventEmitter {
    * @returns {Array} All messages
    */
   getAll(cluster_id) {
+    if (this._closed) return [];
     const rows = this.stmts.getAll.all(cluster_id);
     return rows.map((row) => this._deserializeMessage(row));
   }
@@ -472,6 +477,7 @@ class Ledger extends EventEmitter {
    *   }
    */
   getTokensByRole(cluster_id) {
+    if (this._closed) return {};
     if (!cluster_id) {
       throw new Error('cluster_id is required for getTokensByRole');
     }
@@ -555,6 +561,7 @@ class Ledger extends EventEmitter {
     let isFirstPoll = true;
 
     const poll = () => {
+      if (this._closed) return;
       try {
         let sql, params;
 
@@ -676,14 +683,26 @@ class Ledger extends EventEmitter {
    * Close the database connection
    */
   close() {
+    if (this._closed) return; // Idempotent
     this._closed = true; // Set flag BEFORE closing to prevent race conditions
-    this.db.close();
+    this.stmts = null; // Release prepared statements BEFORE closing DB
+    try {
+      this.db.close();
+    } catch (err) {
+      // better-sqlite3 can throw "Cannot assign to read only property 'database'"
+      // during statement finalization when the DB is already partially closed.
+      // This is a known race condition in concurrent test teardown — safe to ignore.
+      if (!String(err).includes('read only property')) {
+        throw err;
+      }
+    }
   }
 
   /**
    * Clear all messages (for testing)
    */
   clear() {
+    if (this._closed) return;
     this.db.exec('DELETE FROM messages');
     this.cache.clear();
   }

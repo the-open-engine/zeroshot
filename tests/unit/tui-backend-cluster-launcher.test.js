@@ -88,4 +88,36 @@ describe('tui-backend cluster launcher', function () {
     assert.strictEqual(calls[0].providerOverride, 'codex');
     assert.strictEqual(calls[0].clusterId, 'cluster-789');
   });
+
+  it('resolves config path using repo-local selection baseDir', async function () {
+    const resolveConfigPathCalls = [];
+    const deps = {
+      getOrchestrator: () => ({ id: 'orch' }),
+      loadSettings: () => ({ defaultConfig: 'conductor-bootstrap', providerSettings: {} }),
+      resolveConfigSelection: () => ({
+        configName: './.zeroshot/topologies/security-review.json',
+        baseDir: '/repo-root',
+        source: 'repo',
+      }),
+      resolveConfigPath: (configName, baseDir) => {
+        resolveConfigPathCalls.push({ configName, baseDir });
+        return '/repo-root/.zeroshot/topologies/security-review.json';
+      },
+      loadClusterConfig: () => ({ name: 'config' }),
+      detectRunInput: () => ({ issue: '123' }),
+      startClusterFromIssue: () => {},
+      generateClusterId: () => 'generated',
+    };
+
+    await launchClusterFromIssue({
+      ref: '123',
+      deps,
+    });
+
+    assert.strictEqual(resolveConfigPathCalls.length, 1);
+    assert.deepStrictEqual(resolveConfigPathCalls[0], {
+      configName: './.zeroshot/topologies/security-review.json',
+      baseDir: '/repo-root',
+    });
+  });
 });

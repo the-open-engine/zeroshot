@@ -3,6 +3,7 @@ import {
   detectRunInput,
   loadClusterConfig,
   resolveConfigPath,
+  resolveConfigSelection,
   startClusterFromIssue,
   startClusterFromText,
 } from '../../../lib/start-cluster';
@@ -13,6 +14,7 @@ type ClusterLauncherDeps = {
   getOrchestrator?: () => Promise<any>;
   loadSettings?: typeof loadSettings;
   resolveConfigPath?: typeof resolveConfigPath;
+  resolveConfigSelection?: typeof resolveConfigSelection;
   loadClusterConfig?: typeof loadClusterConfig;
   startClusterFromText?: typeof startClusterFromText;
   startClusterFromIssue?: typeof startClusterFromIssue;
@@ -58,14 +60,15 @@ export async function launchClusterFromText({
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
   const loadSettingsImpl = deps.loadSettings ?? loadSettings;
   const resolveConfigPathImpl = deps.resolveConfigPath ?? resolveConfigPath;
+  const resolveConfigSelectionImpl = deps.resolveConfigSelection ?? resolveConfigSelection;
   const loadClusterConfigImpl = deps.loadClusterConfig ?? loadClusterConfig;
   const startClusterFromTextImpl = deps.startClusterFromText ?? startClusterFromText;
   const generateClusterIdImpl = deps.generateClusterId ?? generateClusterId;
 
   const orchestrator = await getOrchestratorImpl();
   const settings = loadSettingsImpl();
-  const configName = settings.defaultConfig || 'conductor-bootstrap';
-  const configPath = resolveConfigPathImpl(configName);
+  const configSelection = resolveConfigSelectionImpl({}, settings, process.cwd());
+  const configPath = resolveConfigPathImpl(configSelection.configName, configSelection.baseDir);
   const config = loadClusterConfigImpl(orchestrator, configPath, settings, providerOverride);
   const resolvedClusterId = clusterId || generateClusterIdImpl();
 
@@ -97,6 +100,7 @@ export async function launchClusterFromIssue({
   const getOrchestratorImpl = deps.getOrchestrator ?? getOrchestrator;
   const loadSettingsImpl = deps.loadSettings ?? loadSettings;
   const resolveConfigPathImpl = deps.resolveConfigPath ?? resolveConfigPath;
+  const resolveConfigSelectionImpl = deps.resolveConfigSelection ?? resolveConfigSelection;
   const loadClusterConfigImpl = deps.loadClusterConfig ?? loadClusterConfig;
   const startClusterFromIssueImpl = deps.startClusterFromIssue ?? startClusterFromIssue;
   const detectRunInputImpl = deps.detectRunInput ?? detectRunInput;
@@ -109,8 +113,8 @@ export async function launchClusterFromIssue({
 
   const orchestrator = await getOrchestratorImpl();
   const settings = loadSettingsImpl();
-  const configName = settings.defaultConfig || 'conductor-bootstrap';
-  const configPath = resolveConfigPathImpl(configName);
+  const configSelection = resolveConfigSelectionImpl({}, settings, process.cwd());
+  const configPath = resolveConfigPathImpl(configSelection.configName, configSelection.baseDir);
   const config = loadClusterConfigImpl(orchestrator, configPath, settings, providerOverride);
   const resolvedClusterId = clusterId || generateClusterIdImpl();
 

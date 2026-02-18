@@ -55,6 +55,7 @@ const {
   detectRunInput,
   loadClusterConfig,
   resolveConfigPath,
+  resolveConfigSelection,
   resolveProviderOverride,
   startClusterFromFile,
   startClusterFromIssue,
@@ -291,10 +292,6 @@ function resolveClusterId(generateName) {
   const clusterId = process.env.ZEROSHOT_CLUSTER_ID || generateName('cluster');
   process.env.ZEROSHOT_CLUSTER_ID = clusterId;
   return clusterId;
-}
-
-function resolveConfigName(options, settings) {
-  return options.config || settings.defaultConfig;
 }
 
 function trackActiveCluster(clusterId, orchestrator) {
@@ -2388,9 +2385,9 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       const clusterId = resolveClusterId(generateName);
 
       // === LOAD CONFIG ===
-      // Priority: CLI --config > settings.defaultConfig
-      const configName = resolveConfigName(options, settings);
-      const configPath = resolveConfigPath(configName);
+      const configSelection = resolveConfigSelection(options, settings, process.cwd());
+      const configName = configSelection.configName;
+      const configPath = resolveConfigPath(configName, configSelection.baseDir);
       const orchestrator = await getOrchestrator();
       const config = loadClusterConfig(orchestrator, configPath, settings, providerOverride);
       trackActiveCluster(clusterId, orchestrator);
