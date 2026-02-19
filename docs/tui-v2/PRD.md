@@ -1,4 +1,4 @@
-# Zeroshot TUI v2 (Ratatui) - PRD
+# Zeroshot TUI v2 (Ink) - PRD
 
 Date: 2026-01-25
 Owner: Zeroshot CLI
@@ -6,7 +6,7 @@ Status: Draft
 
 ## Summary
 
-Build a new terminal UI (TUI) for Zeroshot with **Ratatui (Rust)** as the UI renderer/input layer, backed by the existing Zeroshot Node runtime (TypeScript/JavaScript orchestration). This fully replaces the legacy `zeroshot watch` TUI with a single interactive experience launched by running `zeroshot` (no args).
+Build a new terminal UI (TUI) for Zeroshot using Ink + TypeScript. This fully replaces the current `zeroshot watch` dashboard (blessed-based) with a single interactive experience launched by running `zeroshot` (no args).
 
 Core workflow:
 
@@ -14,14 +14,14 @@ Core workflow:
 - Type a task description into a central input box
 - Press Enter to launch a cluster
 - Immediately switch to the focused cluster view (topology + logs + progress)
-- Use `/monitor` to see a high-level monitor view of all clusters, then drill down via Enter
+- Use `/monitor` to see a high-level dashboard of all clusters, then drill down via Enter
 - Navigate back with Esc (Esc always steps back until the launcher view)
 
 Provider selection is session-scoped and can be chosen at launch (`zeroshot codex|claude|gemini|opencode`) or switched in-TUI.
 
 ## Goals
 
-1. Replace the legacy `zeroshot watch` TUI with a Ratatui-based experience.
+1. Replace the current dashboard feature with an Ink-based TUI.
 2. Make `zeroshot` (no args) a first-class interactive mode for:
    - launching clusters from free-form text
    - monitoring all running clusters
@@ -29,7 +29,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 3. Add a command palette/input model:
    - plain text launches a cluster
    - `/`-prefixed commands run zeroshot operations without re-typing `zeroshot`
-4. Establish a stable, typed boundary between the Rust UI and the Zeroshot Node runtime (backend adapters + protocol), without refactoring unrelated JS.
+4. Establish the first production TypeScript surface in the Zeroshot codebase (TUI + required adapters), without refactoring unrelated JS.
 
 ## Non-Goals (for v2 MVP)
 
@@ -38,7 +38,7 @@ Provider selection is session-scoped and can be chosen at launch (`zeroshot code
 - No remote multi-user UI; TUI is local-only.
 - No promise of message delivery for providers/modes that do not support interactive stdin injection.
   - In those cases, guidance is queued and applied at the next safe point.
-- No replacement of non-TUI CLI commands; existing subcommands remain supported.
+- No replacement of non-dashboard CLI commands; existing subcommands remain supported.
 
 ## Users / Personas
 
@@ -78,9 +78,9 @@ Notes:
 
 ### `zeroshot watch`
 
-`zeroshot watch` remains as a convenience alias that opens the new TUI directly in Monitor view.
+`zeroshot watch` remains as a convenience alias that opens the new Ink TUI directly in Monitor view.
 
-The legacy watch TUI implementation is removed (no parallel legacy UI).
+The existing blessed-based TUI implementation is removed (no parallel legacy dashboard).
 
 ## Core Navigation / Views
 
@@ -105,7 +105,7 @@ On Enter with non-command input:
 - Start cluster
 - Transition to Cluster Focused View for that cluster
 
-### 2) Monitor View
+### 2) Monitor View (Dashboard)
 
 Opened by `/monitor` from anywhere.
 
@@ -279,127 +279,12 @@ Qualitative:
 - Users can launch, monitor, and drill down without remembering command syntax.
 - Navigation feels consistent (Esc always goes back).
 
-## Visual Design (v2 Polish Pass)
-
-Date: 2026-02-01
-
-Architecture is stable (Issues 1-22 complete). The UI polish pass focuses entirely on `ui/` and render code — no backend or state changes.
-
-### Design Principles
-
-- **Modern dark aesthetic:** Catppuccin Mocha palette, inspired by lazygit, k9s, gitui
-- **Minimal chrome:** 2 lines total (1 header + 1 status bar), maximize content area
-- **Color as information:** Status colors, per-agent coloring, focus indicators
-- **Progressive disclosure:** Launcher shows quick actions, Monitor shows state at a glance, Cluster shows detail
-
-### Color Palette
-
-```
-Accent (blue):    #89b4fa    Accent2 (green):  #a6e3a1
-FG primary:       #cdd6f4    FG dim:           DarkGray
-FG muted:         #6c7086    Focus border:     #89b4fa
-Unfocus border:   #45475a
-
-Status running:   Green      Status done:      #a6e3a1
-Status error:     #f38ba8    Status pending:   Yellow
-
-Agent colors (rotating by hash of agent_id):
-  #89b4fa (blue), #a6e3a1 (green), #f9e2af (yellow),
-  #cba6f7 (mauve), #94e2d5 (teal), #f2cdcd (flamingo)
-```
-
-### Global Chrome
-
-**Header (1 line):**
-
-```
-◆ ZEROSHOT  <Screen Title>              ● connected    provider: sonnet
-```
-
-**Status bar (1 line):**
-
-```
-Enter:start  /:commands  Ctrl+C:quit                    ✓ Cluster started
-```
-
-Keys in accent+bold, descriptions in dim. Toast right-aligned. Command bar replaces status bar when active.
-
-### Launcher Wireframe
-
-```
-                    ◆  Z E R O S H O T
-                 Multi-Agent Orchestrator
-
-       ┌───────────────────────────────────────┐
-       │ Describe a task or paste an issue...  │
-       └───────────────────────────────────────┘
-
-       ╭─ Quick Actions ───────────────────────╮
-       │  /issue org/repo#123  Start from issue│
-       │  /monitor             View active runs│
-       │  /provider <name>     Switch AI model │
-       ╰───────────────────────────────────────╯
-
-       Recent
-       (no recent clusters)
-```
-
-Centered content, max 60 columns wide.
-
-### Monitor Wireframe
-
-```
- ID                STATE      AGENTS  MSGS   CPU%  MEM    DURATION  LAST
- ─────────────────────────────────────────────────────────────────────────
->cluster-a8f2c     running    3/3     142    12%   256MB  4m        12s
- cluster-7b91e     done       5/5     891     -      -    2h        1h
- cluster-c3d4f     error      2/3      47     -      -    15m       14m
-```
-
-Borderless table. Selected row: accent bg + dark fg. State-colored text per row.
-
-### Cluster Wireframe
-
-```
-┌─ Topology (40%) ─────────────┬─ Agents (60%) ──────────────────────┐
-│ State: running | sonnet      │ > worker      (implementation)      │
-│ worker → validator-1         │   validator-1 (validation)          │
-│ worker → validator-2         │   validator-2 (validation)          │
-├─ [Logs] (50%) ───────────────┼─ Timeline (50%) ───────────────────┤
-│ [worker]    Editing file...  │ ▶ ISSUE_OPENED      started  (co..)│
-│ [worker]    Running tests    │ ● IMPL_READY        done     (wor.)│
-│ [valid..]   Reviewing code   │ ◆ VALIDATION        approved (v-1) │
-└──────────────────────────────┴─────────────────────────────────────┘
-```
-
-Focused pane: double border in accent. Log prefixes colored per-agent. Timeline icons by topic.
-
-### Agent Wireframe
-
-```
- Agent: worker  Role: implementation  Status: ● executing
- Cluster: cluster-a8f2c
-──────────────────────────────────────────────────────────
- 14:23:01  Reading issue description...
- 14:23:05  Planning implementation approach
- 14:23:12  Editing src/lib.rs - adding new function
- 14:23:18  Running cargo test...
- 14:23:25  All 42 tests passing
-──────────────────────────────────────────────────────────
- Guidance: ✓ Last: injected via pty
- │ Type guidance here...                                 │
-```
-
-### Implementation Issues
-
-See IMPLEMENTATION_PLAN.md Issues 23–28 for the step-by-step breakdown.
-
 ## Out of Scope / Deferred
 
 - Full parity with all CLI flags (`--docker`, `--ship`, `--worktree`, etc) in the launcher input.
   - These can be added incrementally via `/run --docker ...` style.
 - Rich graphs (true layout engine). MVP uses simplified ASCII representation.
-- Mouse support (keyboard-only for now).
+- Advanced UX (themes, mouse, split panes, persistent layouts).
 - AI summary panel (provider/model choice + cost controls TBD).
 
 ## Resolved Decisions (from product feedback)
