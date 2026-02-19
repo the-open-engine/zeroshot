@@ -138,7 +138,7 @@ jobs:
     if: |
       github.ref == 'refs/heads/main' ||
       (github.event_name == 'pull_request' && github.base_ref == 'main') ||
-      (github.event_name == 'merge_group' && github.event.merge_group.base_ref == 'refs/heads/main')
+      github.event_name == 'merge_group'
     strategy:
       fail-fast: false
       matrix:
