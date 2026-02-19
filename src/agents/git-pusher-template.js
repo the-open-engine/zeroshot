@@ -437,16 +437,12 @@ function generateGitPusherAgent(platform, options = {}) {
         action: 'execute_task',
       },
     ],
-    prompt: generatePrompt(resolvedConfig),
+    prompt: generatePrompt(platformConfig),
     hooks: {
       onComplete: {
-        action: 'publish_message',
-        config: {
-          topic: 'CLUSTER_COMPLETE',
-          content: {
-            data: { reason: 'git-pusher-complete' },
-          },
-        },
+        action: 'verify_github_pr',
+        // No config needed - verification reads from result.structured_output
+        // and publishes CLUSTER_COMPLETE only if verification passes
       },
     },
     output: {

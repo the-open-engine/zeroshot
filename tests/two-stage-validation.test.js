@@ -5,6 +5,10 @@
 const assert = require('assert');
 const path = require('path');
 const TemplateResolver = require('../src/template-resolver');
+const { validateConfig } = require('../src/config-validator');
+const LogicEngine = require('../src/logic-engine');
+const MessageBus = require('../src/message-bus');
+const Ledger = require('../src/ledger');
 
 describe('Two-Stage Validation Pipeline', function () {
   let resolver;
@@ -115,6 +119,118 @@ describe('Two-Stage Validation Pipeline', function () {
       assert.ok(contextSource, 'validator-security should have QUICK_VALIDATION_PASSED context');
       assert.strictEqual(contextSource.priority, 'required');
     });
+
+    it('should not retrigger consensus on a late single-validator update after heavy result is published', function () {
+      const resolved = resolver.resolve('heavy-validation', {});
+      const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
+      const triggerScript = coordinator?.triggers?.find(
+        (t) => t.topic === 'HEAVY_VALIDATION_RESULT'
+      )?.logic?.script;
+      assert.ok(triggerScript, 'heavy consensus trigger script should exist');
+
+      const cluster = {
+        id: 'heavy-regression',
+        agents: [
+          { id: 'validator-security', role: 'validator' },
+          { id: 'validator-tester', role: 'validator' },
+          { id: 'consensus-coordinator', role: 'coordinator' },
+        ],
+      };
+
+      const ledger = new Ledger(':memory:');
+      const messageBus = new MessageBus(ledger);
+      const logicEngine = new LogicEngine(messageBus, cluster);
+
+      try {
+        let ts = Date.now();
+        const nextTs = () => ++ts;
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'QUICK_VALIDATION_PASSED',
+          sender: 'consensus-coordinator',
+          timestamp: nextTs(),
+        });
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-security',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        let shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(shouldTrigger, false, 'must wait for both validators');
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-tester',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(shouldTrigger, true, 'should trigger once both validators respond');
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'VALIDATION_RESULT',
+          sender: 'consensus-coordinator',
+          timestamp: nextTs(),
+          content: { data: { approved: true, stage: 'heavy' } },
+        });
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-security',
+          timestamp: nextTs(),
+          content: { data: { approved: false } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          false,
+          'late update from one validator must not retrigger heavy consensus'
+        );
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-tester',
+          timestamp: nextTs(),
+          content: { data: { approved: false } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          true,
+          'should trigger again only after both validators publish a fresh cycle'
+        );
+      } finally {
+        ledger.close();
+      }
+    });
   });
 
   describe('full-workflow integration', function () {
@@ -136,6 +252,51 @@ describe('Two-Stage Validation Pipeline', function () {
       // Inline validators should be filtered out
       const validators = resolved.agents.filter((a) => a.role === 'validator');
       assert.strictEqual(validators.length, 0, 'No inline validators for CRITICAL tasks');
+
+      // Regression: config-validator should NOT raise Gap 15 role-reference errors when validators are absent.
+      const validation = validateConfig(resolved);
+      const roleErrors = validation.errors.filter(
+        (e) =>
+          e.includes('[Gap 15]') ||
+          e.includes("Logic references role 'validator'") ||
+          e.includes('Logic references role "validator"')
+      );
+      assert.strictEqual(roleErrors.length, 0, `Unexpected role reference errors: ${roleErrors}`);
+    });
+
+    it('meta-coordinator should republish trigger topic after load_config (prevents validator deadlock)', function () {
+      const resolved = resolver.resolve('full-workflow', {
+        task_type: 'TASK',
+        complexity: 'CRITICAL',
+        max_tokens: 150000,
+        max_iterations: 25,
+        planner_level: 'level3',
+        worker_level: 'level2',
+        validator_level: 'level2',
+        validator_count: 0,
+      });
+
+      const metaCoordinator = resolved.agents.find((a) => a.id === 'meta-coordinator');
+      assert.ok(metaCoordinator, 'meta-coordinator should be present for CRITICAL tasks');
+
+      const hookTransformScript = metaCoordinator.hooks?.onComplete?.transform?.script || '';
+      assert.ok(
+        hookTransformScript.includes("action: 'publish'") ||
+          hookTransformScript.includes('action: "publish"'),
+        'meta-coordinator should publish a republished trigger topic after load_config'
+      );
+      assert.ok(
+        hookTransformScript.includes('_republished'),
+        'meta-coordinator republish should include _republished metadata'
+      );
+
+      const implTrigger = metaCoordinator.triggers?.find((t) => t.topic === 'IMPLEMENTATION_READY');
+      assert.ok(implTrigger?.logic?.script?.includes('_republished'));
+
+      const stage2Trigger = metaCoordinator.triggers?.find(
+        (t) => t.topic === 'QUICK_VALIDATION_PASSED'
+      );
+      assert.ok(stage2Trigger?.logic?.script?.includes('_republished'));
     });
 
     it('should NOT load meta-coordinator for STANDARD tasks', function () {

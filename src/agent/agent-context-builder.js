@@ -389,7 +389,7 @@ function buildContext({
   lastAgentStartTime,
   triggeringMessage,
   selectedPrompt,
-  queuedGuidance: _queuedGuidance,
+  queuedGuidance,
   worktree,
   isolation,
 }) {
@@ -399,6 +399,7 @@ function buildContext({
   const header = buildHeaderContext({ id, role, iteration, isIsolated });
   const instructions = buildInstructionsSection({ config, selectedPrompt, id });
   const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
+  const queuedGuidanceSection = queuedGuidance || '';
   const jsonSchema = buildJsonSchemaSection(config);
   const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster, isolation });
   const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
@@ -420,6 +421,7 @@ function buildContext({
 
   pushStaticPack('header', 'header', header);
   pushStaticPack('instructions', 'instructions', instructions);
+  pushStaticPack('queuedGuidance', 'queuedGuidance', queuedGuidanceSection);
   pushStaticPack('legacyOutputSchema', 'legacyOutputSchema', legacyOutputSchema);
   pushStaticPack('jsonSchema', 'jsonSchema', jsonSchema);
 

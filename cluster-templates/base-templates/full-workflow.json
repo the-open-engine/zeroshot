@@ -324,10 +324,18 @@
       "triggers": [
         {
           "topic": "IMPLEMENTATION_READY",
+          "logic": {
+            "engine": "javascript",
+            "script": "return !(message && message.metadata && message.metadata._republished);"
+          },
           "action": "execute_task"
         },
         {
           "topic": "QUICK_VALIDATION_PASSED",
+          "logic": {
+            "engine": "javascript",
+            "script": "return !(message && message.metadata && message.metadata._republished);"
+          },
           "action": "execute_task"
         }
       ],
@@ -339,7 +347,7 @@
           },
           "transform": {
             "engine": "javascript",
-            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ operation: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }] } } };"
+            "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; const republishTopic = result.action === 'load_quick' ? 'IMPLEMENTATION_READY' : 'QUICK_VALIDATION_PASSED'; const republishContent = triggeringMessage && triggeringMessage.content ? triggeringMessage.content : { text: '', data: {} }; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ action: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }, { action: 'publish', topic: republishTopic, content: republishContent, metadata: { _republished: true } }] } } };"
           },
           "logic": {
             "engine": "javascript",

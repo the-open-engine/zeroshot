@@ -4,9 +4,9 @@ const MODEL_CATALOG = {
 };
 
 const LEVEL_MAPPING = {
-  level1: { rank: 1, model: null, reasoningEffort: 'medium' },
-  level2: { rank: 2, model: null, reasoningEffort: 'high' },
-  level3: { rank: 3, model: null, reasoningEffort: 'xhigh' },
+  level1: { rank: 1, model: 'gpt-5.3-codex', reasoningEffort: 'medium' },
+  level2: { rank: 2, model: 'gpt-5.3-codex', reasoningEffort: 'high' },
+  level3: { rank: 3, model: 'gpt-5.3-codex', reasoningEffort: 'xhigh' },
 };
 
 const DEFAULT_LEVEL = 'level2';
