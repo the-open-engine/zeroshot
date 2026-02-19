@@ -178,47 +178,6 @@ function normalizeRunOptions(options) {
   }
 }
 
-function detectRunInput(inputArg) {
-  const input = {};
-
-  // Check if it looks like an issue URL or key
-  const isGitHubUrl = /^https?:\/\/github\.com\/[\w-]+\/[\w-]+\/issues\/\d+/.test(inputArg);
-  const isGitLabUrl = /gitlab\.(com|[\w.-]+)\/[\w-]+\/[\w-]+\/-\/issues\/\d+/.test(inputArg);
-  const isJiraUrl = /(atlassian\.net|jira\.[\w.-]+)\/browse\/[A-Z][A-Z0-9]+-\d+/.test(inputArg);
-  const isAzureUrl =
-    /dev\.azure\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg) ||
-    /visualstudio\.com\/.*\/_workitems\/edit\/\d+/.test(inputArg);
-  const isJiraKey = /^[A-Z][A-Z0-9]+-\d+$/.test(inputArg);
-  const isIssueNumber = /^\d+$/.test(inputArg);
-  const isRepoIssue = /^[\w-]+\/[\w-]+#\d+$/.test(inputArg);
-  const isMarkdownFile = /\.(md|markdown)$/i.test(inputArg);
-
-  if (
-    isGitHubUrl ||
-    isGitLabUrl ||
-    isJiraUrl ||
-    isAzureUrl ||
-    isJiraKey ||
-    isIssueNumber ||
-    isRepoIssue
-  ) {
-    input.issue = inputArg;
-  } else if (isMarkdownFile) {
-    input.file = inputArg;
-  } else {
-    input.text = inputArg;
-  }
-  return input;
-}
-
-function resolveProviderOverride(options) {
-  const override = options.provider || process.env.ZEROSHOT_PROVIDER;
-  if (!override || (typeof override === 'string' && !override.trim())) {
-    return null;
-  }
-  return normalizeProviderName(override);
-}
-
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
   // Detect which issue provider tool is needed
   let issueProvider = null;

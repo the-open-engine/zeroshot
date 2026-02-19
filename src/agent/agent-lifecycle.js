@@ -14,6 +14,8 @@
 
 const { findMatchingTrigger, evaluateTrigger } = require('./agent-trigger-evaluator');
 const { executeHook } = require('./agent-hook-executor');
+const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('../message-buffer');
+const { calculateRateLimitDelay, isRateLimitError } = require('./rate-limit-backoff');
 const IsolationManager = require('../isolation-manager');
 const {
   analyzeProcessHealth,
@@ -23,6 +25,7 @@ const {
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
+const crypto = require('crypto');
 
 const DEFAULT_VALIDATOR_IMAGE = 'zeroshot-cluster-base';
 
@@ -490,12 +493,15 @@ ${'='.repeat(80)}`);
 `);
         // All hook retries exhausted - FAIL THE CLUSTER (do NOT rerun the whole task).
         // Retrying the task wastes tokens and cannot fix a deterministic hook/config bug.
-        throw new HookExecutionError(
+        const wrapped = new Error(
           `Hook execution failed after ${hookMaxRetries} attempts. ` +
             `Task completed successfully but hook could not publish result. ` +
-            `Original error: ${hookError.message}`,
-          { hookRetries: hookMaxRetries, originalHookError: hookError.message }
+            `Original error: ${hookError.message}`
         );
+        wrapped.hookFailure = true;
+        wrapped.hookRetries = hookMaxRetries;
+        wrapped.originalHookError = hookError.message;
+        throw wrapped;
       }
     }
   }
@@ -766,7 +772,7 @@ async function handleTaskAttemptFailure({
   return false;
 }
 
-function maybeExtendMaxRetries({
+function _maybeExtendMaxRetries({
   error,
   attempt,
   maxRetries,

@@ -46,6 +46,7 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const crypto = require('crypto');
 

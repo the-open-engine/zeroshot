@@ -49,38 +49,6 @@ function selectParentTopicMessages(messageBus, clusterId, topicConfig) {
   return messages;
 }
 
-function normalizeParentTopicConfig(entry) {
-  if (typeof entry === 'string') {
-    return { topic: entry, amount: 10, strategy: 'latest' };
-  }
-  if (!entry || typeof entry !== 'object') {
-    return null;
-  }
-  const amount = entry.amount ?? entry.limit;
-  const strategy = entry.strategy ?? (amount !== undefined ? 'latest' : 'all');
-  return { ...entry, amount, strategy };
-}
-
-function selectParentTopicMessages(messageBus, clusterId, topicConfig) {
-  const { topic, sender, since, until, amount, strategy } = topicConfig;
-  const order = strategy === 'latest' ? 'desc' : 'asc';
-  const messages = messageBus.query({
-    cluster_id: clusterId,
-    topic,
-    sender,
-    since,
-    until,
-    limit: amount,
-    order,
-  });
-
-  if (strategy === 'latest' && messages.length > 1) {
-    return messages.slice().reverse();
-  }
-
-  return messages;
-}
-
 class SubClusterWrapper {
   constructor(config, messageBus, parentCluster, options = {}) {
     this.id = config.id;

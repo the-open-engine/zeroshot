@@ -293,7 +293,6 @@ function extractJsonFromOutput(output, providerName = 'claude') {
 
 module.exports = {
   extractJsonFromOutput,
-  extractCliError,
   extractFromResultWrapper,
   extractFromTextEvents,
   extractFromMarkdown,

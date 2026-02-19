@@ -15,7 +15,6 @@ const { loadSettings } = require('../lib/settings');
 const { VALID_PROVIDERS, normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const { CAPABILITIES } = require('./providers/capabilities');
-const { GUIDANCE_TOPICS } = require('./guidance-topics');
 
 /**
  * Check if config is a conductor-bootstrap style config
