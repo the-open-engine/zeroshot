@@ -100,7 +100,7 @@
     "CHANGELOG.md"
   ],
   "dependencies": {
-    "ajv": "^8.17.1",
+    "ajv": "^8.18.0",
     "ansi-to-html": "^0.7.2",
     "better-sqlite3": "^12.5.0",
     "blessed": "^0.1.81",
@@ -146,8 +146,9 @@
   "overrides": {
     "xml2js": "^0.5.0",
     "diff": ">=8.0.3",
-    "tar": "^7.5.3",
-    "undici": ">=7.18.2"
+    "tar": ">=7.5.8",
+    "undici": ">=7.18.2",
+    "minimatch": ">=10.2.1"
   },
   "lint-staged": {
     "*.{js,mjs,cjs}": [
