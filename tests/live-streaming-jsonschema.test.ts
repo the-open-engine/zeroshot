@@ -1,4 +1,5 @@
 // Jest unit tests run in CommonJS; use global require for CJS modules.
+import test, { describe } from "node:test"; // Module to run tests, available in Node 18+. If using Jest, this would be `import { describe, test } from '@jest/globals';` 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AgentWrapper = require('../../../zeroshot/cluster/src/agent-wrapper.js');
 // eslint-disable-next-line @typescript-eslint/no-var-requires

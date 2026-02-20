@@ -3,6 +3,8 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import securityPlugin from 'eslint-plugin-security';
 import sonarPlugin from 'eslint-plugin-sonarjs';
 import prettierConfig from 'eslint-config-prettier';
+import tsParser from '@typescript-eslint/parser'
+import tsPlugin from '@typescript-eslint/eslint-plugin'
 
 export default [
   {
@@ -167,6 +169,35 @@ export default [
       // Style (keep existing)
       'no-console': 'off',
       'no-case-declarations': 'off',
+    },
+  },
+  {
+    files: ['tests/*.ts'], // Apply TypeScript rules to test files for better type safety in tests fix issue #158
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        sourceType: 'module',
+        ecmaVersion: 'latest',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
+    rules: {
+      // Base TS recommended rules
+      ...tsPlugin.configs.recommended.rules,
+
+      // Disable JS rules replaced by TS
+      'no-unused-vars': 'off',
+      'no-undef': 'off',
+      'no-shadow': 'off',
+      'no-use-before-define': 'off',
+
+      // Custom adjustments
+      '@typescript-eslint/no-unused-vars': 'error',
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/explicit-module-boundary-types': 'off',
     },
   },
   {
