@@ -2,13 +2,13 @@ const assert = require('assert');
 
 const { startClusterFromText, startClusterFromIssue } = require('../../lib/start-cluster');
 
-function createOrchestrator() {
+function createOrchestrator(configFactory = () => ({ agents: [] })) {
   const calls = { loadConfig: [], start: [] };
   return {
     calls,
     loadConfig(configPath) {
       calls.loadConfig.push(configPath);
-      return { agents: [] };
+      return configFactory();
     },
     start(config, input, options) {
       calls.start.push({ config, input, options });
@@ -78,5 +78,35 @@ describe('TUI start cluster helper', function () {
     assert.deepStrictEqual(call.input, { issue: '123' });
     assert.strictEqual(call.options.providerOverride, 'codex');
     assert.strictEqual(call.options.clusterId, 'cluster-456');
+  });
+
+  it('providerOverride sets provider without forcing model level', async function () {
+    process.env.ZEROSHOT_CWD = '/tmp';
+    const orchestrator = createOrchestrator(() => ({
+      defaultLevel: 'level3',
+      agents: [{ id: 'worker', modelLevel: 'level3' }],
+    }));
+    const settings = {
+      defaultProvider: 'claude',
+      providerSettings: { codex: { defaultLevel: 'level1' } },
+    };
+    const configPath = '/tmp/config.json';
+
+    await startClusterFromText({
+      orchestrator,
+      text: 'Launch cluster',
+      configPath,
+      settings,
+      providerOverride: 'codex',
+      clusterId: 'cluster-789',
+      options: { docker: false, worktree: false, pr: false },
+    });
+
+    const call = orchestrator.calls.start[0];
+    assert.strictEqual(call.config.forceProvider, 'codex');
+    assert.strictEqual(call.config.defaultProvider, 'codex');
+    assert.strictEqual(call.config.forceLevel, undefined);
+    assert.strictEqual(call.config.defaultLevel, 'level3');
+    assert.strictEqual(call.config.agents[0].modelLevel, 'level3');
   });
 });
