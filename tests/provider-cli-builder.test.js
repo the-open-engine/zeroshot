@@ -206,6 +206,17 @@ describe('Claude CLI Builder', function () {
 
     assert.ok(!result.args.includes('--json-schema'));
   });
+
+  it('passes model value through without alias normalization', function () {
+    const result = buildCommand('test context', {
+      modelSpec: { model: 'opus-4.6' },
+      cliFeatures: { supportsModel: true },
+    });
+
+    const modelFlagIndex = result.args.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0);
+    assert.strictEqual(result.args[modelFlagIndex + 1], 'opus-4.6');
+  });
 });
 
 // ============================================================================

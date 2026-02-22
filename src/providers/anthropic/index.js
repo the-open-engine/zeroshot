@@ -95,6 +95,11 @@ class AnthropicProvider extends BaseProvider {
   buildCommand(context, options) {
     const { command, args } = getClaudeCommand();
     const cliFeatures = options.cliFeatures || {};
+    const model = options.modelSpec?.model;
+
+    if (model) {
+      this.validateModelId(model);
+    }
 
     if (options.jsonSchema && options.outputFormat !== 'json' && !options.strictSchema) {
       this._warnOnce(
@@ -149,6 +154,21 @@ class AnthropicProvider extends BaseProvider {
 
   getDefaultMinLevel() {
     return DEFAULT_MIN_LEVEL;
+  }
+
+  validateModelId(modelId) {
+    try {
+      return super.validateModelId(modelId);
+    } catch (error) {
+      if (modelId && ['opus-4.6', 'claude-opus-4-6'].includes(modelId)) {
+        const err = new Error(
+          `Invalid model "${modelId}" for provider "claude". Use canonical model ids: haiku, sonnet, opus.`
+        );
+        err.permanent = true;
+        throw err;
+      }
+      throw error;
+    }
   }
 
   _warnOnce(key, message) {

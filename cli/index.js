@@ -345,14 +345,11 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
     providerOverride || config.defaultProvider || settings.defaultProvider || 'claude'
   );
   const provider = getProvider(providerName);
-  const catalog = provider.getModelCatalog();
-
-  if (catalog && !catalog[modelOverride]) {
-    console.warn(
-      chalk.yellow(
-        `Warning: model override "${modelOverride}" is not in the ${providerName} catalog`
-      )
-    );
+  try {
+    provider.validateModelId(modelOverride);
+  } catch (err) {
+    console.error(chalk.red(`Error: ${err.message}`));
+    process.exit(1);
   }
 
   if (providerName === 'claude') {

@@ -162,6 +162,7 @@ class AgentWrapper {
       for (const rule of this.modelConfig.rules) {
         if (this._matchesIterationRange(rule.iterations)) {
           if (rule.model) {
+            provider.validateModelId(rule.model);
             return {
               level: 'custom',
               model: rule.model,
@@ -186,6 +187,7 @@ class AgentWrapper {
     }
 
     if (this.modelConfig.model) {
+      provider.validateModelId(this.modelConfig.model);
       return {
         level: 'custom',
         model: this.modelConfig.model,

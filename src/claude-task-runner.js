@@ -131,10 +131,14 @@ class ClaudeTaskRunner extends TaskRunner {
     levelOverrides,
   }) {
     if (explicitModelSpec) {
+      if (explicitModelSpec.model) {
+        providerModule.validateModelId(explicitModelSpec.model);
+      }
       return explicitModelSpec;
     }
 
     if (model) {
+      providerModule.validateModelId(model);
       return { model, reasoningEffort };
     }
 

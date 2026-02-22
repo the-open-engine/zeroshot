@@ -833,6 +833,14 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
+      if (!agent.running || agent.state === 'stopped') {
+        agent._log(`[${agent.id}] Task interrupted during shutdown; skipping retry`);
+        return;
+      }
+      if (error?.permanent) {
+        await handleFinalFailure(agent, triggeringMessage, error, attempt);
+        return;
+      }
       if (error instanceof HookExecutionError) {
         // Hook failures are deterministic; do not waste tokens retrying the provider task.
         await handleFinalFailure(agent, triggeringMessage, error, 1);

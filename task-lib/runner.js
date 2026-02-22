@@ -97,6 +97,7 @@ function resolveJsonSchema(options, outputFormat) {
 
 function resolveModelSpec(options, provider, providerSettings, levelOverrides) {
   if (options.model) {
+    provider.validateModelId(options.model);
     return {
       model: options.model,
       reasoningEffort: options.reasoningEffort,

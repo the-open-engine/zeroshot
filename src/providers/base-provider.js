@@ -218,9 +218,10 @@ class BaseProvider {
       throw new Error(`Unknown level "${level}" for provider "${this.name}"`);
     }
     const override = overrides[level] || {};
+    const resolvedModel = this.validateModelId(override.model || base.model);
     return {
       level,
-      model: override.model || base.model,
+      model: resolvedModel,
       reasoningEffort: override.reasoningEffort || base.reasoningEffort,
     };
   }
@@ -265,7 +266,13 @@ class BaseProvider {
   validateModelId(modelId) {
     const catalog = this.getModelCatalog();
     if (modelId && !catalog[modelId]) {
-      throw new Error(`Invalid model "${modelId}" for provider "${this.name}"`);
+      const err = new Error(
+        `Invalid model "${modelId}" for provider "${this.name}". ` +
+          `Use a model listed in provider settings/catalog.`
+      );
+      // Permanent misconfiguration/user input error - retries cannot fix this.
+      err.permanent = true;
+      throw err;
     }
     return modelId;
   }
