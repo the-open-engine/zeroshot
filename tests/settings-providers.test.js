@@ -48,7 +48,7 @@ describe('Provider settings', function () {
         maxLevel: 'level3',
         defaultLevel: 'level2',
         levelOverrides: {
-          level1: { model: 'codex-model-main', reasoningEffort: 'low' },
+          level1: { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
         },
       });
     });
@@ -91,9 +91,38 @@ describe('Provider settings', function () {
     assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
   });
 
-  it('maps claude level3 to opus-4.6', function () {
+  it('maps claude level3 to opus alias', function () {
     const claude = getProvider('claude');
     const modelSpec = claude.resolveModelSpec('level3', {});
-    assert.strictEqual(modelSpec.model, 'opus-4.6');
+    assert.strictEqual(modelSpec.model, 'opus');
+  });
+
+  it('rejects legacy claude model aliases as invalid input', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      claude.validateModelId('opus-4.6');
+    }, /Use canonical model ids: haiku, sonnet, opus/);
+  });
+
+  it('marks invalid model errors as permanent', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      try {
+        claude.validateModelId('not-a-model');
+      } catch (error) {
+        assert.strictEqual(error.permanent, true);
+        throw error;
+      }
+    }, /Invalid model "not-a-model"/);
+  });
+
+  it('fails before command build when model override is invalid', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      claude.buildCommand('test context', {
+        modelSpec: { model: 'opus-4.6' },
+        cliFeatures: { supportsModel: true },
+      });
+    }, /Use canonical model ids: haiku, sonnet, opus/);
   });
 });

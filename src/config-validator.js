@@ -1772,6 +1772,9 @@ function validateProviderSettings(provider, providerSettings) {
         `Invalid model override (must be non-empty string) for provider "${provider}"`
       );
     }
+    if (override?.model) {
+      providerModule.validateModelId(override.model);
+    }
     if (override?.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
       throw new Error(`reasoningEffort overrides are only supported for Codex and Opencode`);
     }
