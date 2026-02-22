@@ -233,7 +233,10 @@ function createDaemonLogFile(clusterId) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
   const logPath = path.join(storageDir, `${clusterId}-daemon.log`);
-  return fs.openSync(logPath, 'w');
+  return {
+    logPath,
+    logFd: fs.openSync(logPath, 'w'),
+  };
 }
 
 function serializeRunOptions(options) {
@@ -272,19 +275,78 @@ function buildDaemonEnv(options, clusterId, targetCwd) {
   };
 }
 
-function spawnDetachedCluster(options, clusterId) {
+function readDaemonLogTail(logPath, maxBytes = 3000) {
+  try {
+    if (!fs.existsSync(logPath)) {
+      return '';
+    }
+    const content = fs.readFileSync(logPath, 'utf8');
+    if (!content) {
+      return '';
+    }
+    return content.length > maxBytes ? content.slice(-maxBytes) : content;
+  } catch {
+    return '';
+  }
+}
+
+function buildDetachedStartupError(clusterId, logPath, code, signal, spawnError) {
+  const reason = spawnError
+    ? `spawn error: ${spawnError.message}`
+    : signal
+      ? `signal ${signal}`
+      : `exit code ${code}`;
+  const logTail = readDaemonLogTail(logPath);
+  const details = logTail ? `\n\nDaemon log tail:\n${logTail}` : '';
+  return new Error(`Detached cluster ${clusterId} failed during startup (${reason}).${details}`);
+}
+
+async function spawnDetachedCluster(options, clusterId) {
   const { spawn } = require('child_process');
-  printDetachedClusterStart(options, clusterId);
-  const logFd = createDaemonLogFile(clusterId);
+  const { logFd, logPath } = createDaemonLogFile(clusterId);
   const targetCwd = detectGitRepoRoot();
-  const daemon = spawn(process.execPath, process.argv.slice(1), {
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-    cwd: targetCwd,
-    env: buildDaemonEnv(options, clusterId, targetCwd),
+
+  await new Promise((resolve, reject) => {
+    const daemon = spawn(process.execPath, process.argv.slice(1), {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      cwd: targetCwd,
+      env: buildDaemonEnv(options, clusterId, targetCwd),
+    });
+
+    let settled = false;
+    const STARTUP_GRACE_MS = 4000;
+
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(startupTimer);
+      try {
+        fs.closeSync(logFd);
+      } catch {
+        // ignore close failures
+      }
+
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      daemon.unref();
+      printDetachedClusterStart(options, clusterId);
+      resolve();
+    };
+
+    const startupTimer = setTimeout(() => finish(null), STARTUP_GRACE_MS);
+
+    daemon.once('error', (error) => {
+      finish(buildDetachedStartupError(clusterId, logPath, null, null, error));
+    });
+
+    daemon.once('exit', (code, signal) => {
+      finish(buildDetachedStartupError(clusterId, logPath, code, signal));
+    });
   });
-  daemon.unref();
-  fs.closeSync(logFd);
 }
 
 function resolveClusterId(generateName) {
@@ -2378,7 +2440,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 
       if (shouldRunDetached(options)) {
         const clusterId = generateName('cluster');
-        spawnDetachedCluster(options, clusterId);
+        await spawnDetachedCluster(options, clusterId);
         return;
       }
 
