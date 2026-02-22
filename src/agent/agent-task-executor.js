@@ -1881,33 +1881,106 @@ async function parseResultOutput(agent, output) {
   return parsed;
 }
 
+function isProcessRunning(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ESRCH') {
+      return false;
+    }
+    if (error && typeof error === 'object' && error.code === 'EPERM') {
+      return true;
+    }
+    return true;
+  }
+}
+
+async function waitForProcessExit(pid, timeoutMs, intervalMs = 100) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return !isProcessRunning(pid);
+}
+
+async function killTaskById(agent, taskId) {
+  const ctPath = getClaudeTasksPath();
+  await new Promise((resolve) => {
+    exec(`${ctPath} task kill ${taskId}`, { timeout: 10000 }, (error) => {
+      if (error) {
+        agent._log(`Note: Could not kill task ${taskId}: ${error.message}`);
+      } else {
+        agent._log(`Killed task ${taskId}`);
+      }
+      resolve();
+    });
+  });
+}
+
+async function terminatePid(agent, pid) {
+  if (!isProcessRunning(pid)) return;
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if (!error || typeof error !== 'object' || error.code !== 'ESRCH') {
+      agent._log(`Note: failed to send SIGTERM to PID ${pid}: ${error?.message || String(error)}`);
+    }
+  }
+
+  const exitedAfterTerm = await waitForProcessExit(pid, 3000);
+  if (exitedAfterTerm) return;
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if (!error || typeof error !== 'object' || error.code !== 'ESRCH') {
+      agent._log(`Note: failed to send SIGKILL to PID ${pid}: ${error?.message || String(error)}`);
+    }
+  }
+
+  const exitedAfterKill = await waitForProcessExit(pid, 2000);
+  if (!exitedAfterKill) {
+    agent._log(`Warning: PID ${pid} still running after SIGKILL escalation`);
+  }
+}
+
 /**
  * Kill current task
  * @param {Object} agent - Agent instance
  */
-function killTask(agent) {
-  if (agent.currentTask) {
-    // currentTask may be either a ChildProcess or our custom { kill } object
-    if (typeof agent.currentTask.kill === 'function') {
-      agent.currentTask.kill('SIGTERM');
+async function killTask(agent) {
+  const taskHandle = agent.currentTask;
+  const taskId = agent.currentTaskId;
+  const processPid = agent.processPid;
+
+  // Resolve any in-flight follower immediately so stop() can proceed.
+  if (taskHandle && typeof taskHandle.kill === 'function') {
+    try {
+      taskHandle.kill('SIGTERM');
+    } catch (error) {
+      agent._log(`Note: failed to signal in-memory task handle: ${error?.message || String(error)}`);
     }
-    agent.currentTask = null;
   }
 
-  // Also kill the underlying zeroshot task if we have a task ID
-  // This ensures the task process is stopped, not just our polling intervals
-  if (agent.currentTaskId) {
-    const ctPath = getClaudeTasksPath();
-    exec(`${ctPath} task kill ${agent.currentTaskId}`, { timeout: 10000 }, (error) => {
-      if (error) {
-        // Task may have already completed or been killed, ignore errors
-        agent._log(`Note: Could not kill task ${agent.currentTaskId}: ${error.message}`);
-      } else {
-        agent._log(`Killed task ${agent.currentTaskId}`);
-      }
-    });
-    agent.currentTaskId = null;
+  // Also kill the underlying zeroshot task if we have a task ID.
+  if (typeof taskId === 'string' && taskId.length > 0) {
+    await killTaskById(agent, taskId);
   }
+
+  // Defensive hard-kill by PID in case task kill did not fully terminate descendants.
+  if (typeof processPid === 'number' && processPid > 0) {
+    await terminatePid(agent, processPid);
+  }
+
+  agent.currentTask = null;
+  agent.currentTaskId = null;
+  agent.processPid = null;
 }
 
 module.exports = {

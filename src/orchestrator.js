@@ -2463,7 +2463,7 @@ class Orchestrator {
 
     // Kill current task
     try {
-      agent._killTask();
+      await agent._killTask();
     } catch (err) {
       this._log(`⚠️  Failed to kill agent ${agentId} task:`, err.message);
     }

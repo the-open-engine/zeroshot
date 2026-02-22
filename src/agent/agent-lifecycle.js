@@ -214,7 +214,7 @@ async function stop(agent) {
 
   // Kill current task if any
   if (agent.currentTask) {
-    agent._killTask();
+    await agent._killTask();
   }
 
   // Wait for in-flight execution to complete (up to 5 seconds)
@@ -833,6 +833,10 @@ async function executeTask(agent, triggeringMessage) {
       await runTaskAttempt(agent, triggeringMessage);
       return;
     } catch (error) {
+      if (!agent.running || agent.state === 'stopped') {
+        agent._log(`[${agent.id}] Task interrupted during shutdown; skipping retry`);
+        return;
+      }
       if (error instanceof HookExecutionError) {
         // Hook failures are deterministic; do not waste tokens retrying the provider task.
         await handleFinalFailure(agent, triggeringMessage, error, 1);
