@@ -764,6 +764,38 @@ describe('Orchestrator - Concurrent Operations (Race Conditions)', function () {
     assert.ok(persisted[clusterId], 'Cluster should exist in file');
   });
 
+  it('should persist failed state even when pid is already cleared', async function () {
+    const config = loadFixture('single-worker.json');
+    mockRunner.when('worker').delays(2000, { done: true });
+
+    const result = await orchestrator.start(config, { text: 'Task' });
+    const clusterId = result.id;
+    const cluster = orchestrator.getCluster(clusterId);
+    assert.ok(cluster, 'Cluster should exist');
+
+    // Simulate fatal cleanup path in detached daemon:
+    // cluster marked failed and pid cleared before saving.
+    cluster.state = 'failed';
+    cluster.pid = null;
+    cluster.failureInfo = {
+      type: 'Unhandled Promise Rejection',
+      error: 'Hook uses result.* variables but result.output is empty',
+      timestamp: Date.now(),
+    };
+
+    await orchestrator._saveClusters();
+
+    const clustersFile = path.join(storageDir, 'clusters.json');
+    const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    assert.ok(persisted[clusterId], 'Cluster should still be persisted');
+    assert.strictEqual(persisted[clusterId].state, 'failed', 'State should persist as failed');
+    assert.strictEqual(persisted[clusterId].pid, null, 'PID should remain cleared');
+    assert.strictEqual(
+      persisted[clusterId].failureInfo.error,
+      'Hook uses result.* variables but result.output is empty'
+    );
+  });
+
   it('should handle file locking during concurrent reads', async function () {
     const config = loadFixture('single-worker.json');
     mockRunner.when('worker').returns({ done: true });

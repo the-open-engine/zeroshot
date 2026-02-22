@@ -15,6 +15,8 @@ const createMockAgent = (overrides = {}) => ({
   role: 'implementation',
   iteration: 1,
   cluster_id: 'test-cluster',
+  _publish: () => {},
+  _getClaudeTasksPath: () => 'claude',
   _parseResultOutput: (output) => {
     // Extract JSON block from output
     const match = output.match(/```json\s*([\s\S]*?)\s*```/);
@@ -96,6 +98,80 @@ function defineKnownVariableTests() {
 
       assert.strictEqual(result.content.text, 'Step 1');
       assert.strictEqual(result.content.data.summary, 'Test summary');
+    });
+
+    it('should substitute {{result.error.message}} from context.result without output', async () => {
+      const config = {
+        topic: 'CLUSTER_FAILED',
+        content: {
+          text: '{{result.error.message}}',
+        },
+      };
+      const context = {
+        result: {
+          error: {
+            message: 'No messages returned after 120s',
+          },
+        },
+      };
+      const agent = createMockAgent();
+
+      const result = await substituteTemplate({
+        config,
+        context,
+        agent,
+        cluster: mockCluster,
+      });
+
+      assert.strictEqual(result.content.text, 'No messages returned after 120s');
+    });
+
+    it('should substitute {{error.message}} from context.error', async () => {
+      const config = {
+        topic: 'CLUSTER_FAILED',
+        content: {
+          text: 'Failure: {{error.message}}',
+        },
+      };
+      const context = {
+        error: new Error('Planner exhausted retries'),
+      };
+      const agent = createMockAgent();
+
+      const result = await substituteTemplate({
+        config,
+        context,
+        agent,
+        cluster: mockCluster,
+      });
+
+      assert.strictEqual(result.content.text, 'Failure: Planner exhausted retries');
+    });
+
+    it('should fail when unresolved {{result.*}} variables have no output fallback', async () => {
+      const config = {
+        topic: 'PLAN_READY',
+        content: { text: '{{result.plan}}' },
+      };
+      const context = {
+        result: {
+          error: {
+            message: 'No output available',
+          },
+        },
+      };
+      const agent = createMockAgent();
+
+      await assert.rejects(
+        () =>
+          substituteTemplate({
+            config,
+            context,
+            agent,
+            cluster: mockCluster,
+          }),
+        /result\.output is empty/
+      );
     });
 
     it('should fail on unsubstituted known variables', async () => {

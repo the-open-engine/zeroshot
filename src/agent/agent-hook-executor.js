@@ -117,6 +117,7 @@ async function executeHook(params) {
   // Build context for hook execution
   const context = {
     result,
+    error: result?.error || null,
     triggeringMessage: message,
     agent,
     cluster,
@@ -524,10 +525,20 @@ async function substituteTemplate(params) {
   }
 
   const json = JSON.stringify(config);
+  const getValueByPath = (obj, path) => {
+    if (!obj || typeof obj !== 'object') return undefined;
+    return path.split('.').reduce((acc, key) => {
+      if (acc === null || acc === undefined) return undefined;
+      if (typeof acc !== 'object') return undefined;
+      return acc[key];
+    }, obj);
+  };
 
   // Check if ANY result.* variables are used BEFORE parsing
   // Generic pattern - no hardcoded field names, works with any agent config
-  const usesResultVars = /\{\{result\.[^}]+\}\}/.test(json);
+  const resultVariablePaths = [...json.matchAll(/\{\{result\.([^}]+)\}\}/g)].map((m) => m[1]);
+  const uniqueResultVariablePaths = [...new Set(resultVariablePaths)];
+  const usesResultVars = uniqueResultVariablePaths.length > 0;
 
   let resultData = null;
   if (usesResultVars) {
@@ -537,7 +548,11 @@ async function substituteTemplate(params) {
           `Agent: ${agent.id}, TaskID: ${agent.currentTaskId}, Iteration: ${agent.iteration}`
       );
     }
-    if (!context.result.output) {
+    const unresolvedResultPaths = uniqueResultVariablePaths.filter(
+      (path) => getValueByPath(context.result, path) === undefined
+    );
+
+    if (unresolvedResultPaths.length > 0 && !context.result.output) {
       // Log detailed context for debugging
       const taskId = context.result.taskId || agent.currentTaskId || 'UNKNOWN';
       console.error(`\n${'='.repeat(80)}`);
@@ -549,6 +564,7 @@ async function substituteTemplate(params) {
       console.error(`Result success: ${context.result.success}`);
       console.error(`Result error: ${context.result.error || 'none'}`);
       console.error(`Output length: ${(context.result.output || '').length}`);
+      console.error(`Unresolved result variables: ${unresolvedResultPaths.join(', ')}`);
       console.error(`Hook config: ${JSON.stringify(config, null, 2)}`);
 
       // Auto-fetch and publish task logs for debugging
@@ -588,12 +604,14 @@ async function substituteTemplate(params) {
         `Hook uses result.* variables but result.output is empty. ` +
           `Agent: ${agent.id}, TaskID: ${taskId}, ` +
           `Iteration: ${context.result.iteration || agent.iteration}, ` +
-          `Success: ${context.result.success}. ` +
+          `Success: ${context.result.success}. Missing variables: ${unresolvedResultPaths.join(', ')}. ` +
           `Task logs posted to message bus.`
       );
     }
-    // Parse result output - WILL THROW if no JSON block
-    resultData = await agent._parseResultOutput(context.result.output);
+    if (unresolvedResultPaths.length > 0) {
+      // Parse result output ONLY when needed for unresolved result.* substitutions.
+      resultData = await agent._parseResultOutput(context.result.output);
+    }
   }
 
   // Helper to escape a value for JSON string substitution
@@ -630,34 +648,36 @@ async function substituteTemplate(params) {
       escapeTemplatePatterns(escapeForJsonString(context.result?.output ?? ''))
     );
 
-  // Substitute ALL result.* variables dynamically from parsed resultData
-  if (resultData) {
-    // Generic substitution - replace {{result.fieldName}} with resultData[fieldName]
-    // No hardcoded field names - works with any agent output schema
-    // CRITICAL: For booleans/nulls/numbers, we need to match and remove surrounding quotes
-    // to produce valid JSON (e.g., "{{result.approved}}" -> true, not "true")
-    substituted = substituted.replace(/"?\{\{result\.([^}]+)\}\}"?/g, (match, fieldName) => {
-      const value = resultData[fieldName];
-      if (value === undefined) {
-        // Missing fields should gracefully default to null or empty values
-        // This allows optional schema fields without hardcoding field names
-        // If a field is truly required, the schema validation will catch it
-        console.warn(
-          `⚠️  Agent ${agent.id}: Template variable {{result.${fieldName}}} not found in output. ` +
-            `If this field is required by the schema, the agent violated its own schema. ` +
-            `Defaulting to null. Agent output keys: ${Object.keys(resultData).join(', ')}`
-        );
-        return 'null';
-      }
-      // Booleans, numbers, and null should be unquoted JSON primitives
-      if (typeof value === 'boolean' || typeof value === 'number' || value === null) {
-        return String(value);
-      }
-      // Strings need to be quoted and escaped for JSON
-      // Also escape any template-like patterns in the content to prevent false positives
-      return escapeTemplatePatterns(JSON.stringify(value));
-    });
-  }
+  // Substitute ALL result.* variables dynamically from context.result and parsed output.
+  // CRITICAL: For booleans/nulls/numbers, we need to match and remove surrounding quotes
+  // to produce valid JSON (e.g., "{{result.approved}}" -> true, not "true")
+  substituted = substituted.replace(/"?\{\{result\.([^}]+)\}\}"?/g, (match, fieldPath) => {
+    let value = getValueByPath(context.result, fieldPath);
+    if (value === undefined && resultData) {
+      value = getValueByPath(resultData, fieldPath);
+    }
+
+    if (value === undefined) {
+      const resultKeys =
+        context.result && typeof context.result === 'object'
+          ? Object.keys(context.result).join(', ')
+          : '';
+      const parsedKeys = resultData ? Object.keys(resultData).join(', ') : '';
+      console.warn(
+        `⚠️  Agent ${agent.id}: Template variable {{result.${fieldPath}}} not found. ` +
+          `Defaulting to null. context.result keys: [${resultKeys}] parsed result keys: [${parsedKeys}]`
+      );
+      return 'null';
+    }
+
+    // Booleans, numbers, and null should be unquoted JSON primitives
+    if (typeof value === 'boolean' || typeof value === 'number' || value === null) {
+      return String(value);
+    }
+    // Strings need to be quoted and escaped for JSON
+    // Also escape any template-like patterns in the content to prevent false positives
+    return escapeTemplatePatterns(JSON.stringify(value));
+  });
 
   // Check for unsubstituted KNOWN template variables only
   // KNOWN patterns: {{cluster.X}}, {{iteration}}, {{error.X}}, {{result.X}}

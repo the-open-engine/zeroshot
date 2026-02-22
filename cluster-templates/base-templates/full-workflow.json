@@ -155,11 +155,11 @@
           "config": {
             "topic": "CLUSTER_FAILED",
             "content": {
-              "text": "Cluster failed: planner exhausted retries - {{result.error.message}}",
+              "text": "Cluster failed: planner exhausted retries - {{error.message}}",
               "data": {
                 "reason": "planning_agent_failed",
                 "agentId": "planner",
-                "error": "{{result.error.message}}"
+                "error": "{{error.message}}"
               }
             }
           }
@@ -293,11 +293,11 @@
           "config": {
             "topic": "CLUSTER_FAILED",
             "content": {
-              "text": "Cluster failed: implementation exhausted retries - {{result.error.message}}",
+              "text": "Cluster failed: implementation exhausted retries - {{error.message}}",
               "data": {
                 "reason": "implementation_agent_failed",
                 "agentId": "worker",
-                "error": "{{result.error.message}}"
+                "error": "{{error.message}}"
               }
             }
           }

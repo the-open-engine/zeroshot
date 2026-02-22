@@ -579,7 +579,11 @@ class Orchestrator {
         // CRITICAL: Only update clusters this process actually owns or has modified
         // A process owns a cluster if: it started it (pid matches) OR it explicitly stopped/killed it
         const isOwnedByThisProcess = cluster.pid === process.pid;
-        const wasModifiedByThisProcess = cluster.state === 'stopped' || cluster.state === 'killed';
+        const wasModifiedByThisProcess =
+          cluster.state === 'stopped' ||
+          cluster.state === 'killed' ||
+          cluster.state === 'failed' ||
+          cluster.state === 'corrupted';
 
         // Skip clusters we don't own and haven't modified - prevents race condition
         // where a running cluster overwrites another process's stop/kill operation

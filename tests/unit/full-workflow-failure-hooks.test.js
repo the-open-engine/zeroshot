@@ -23,10 +23,15 @@ describe('Full workflow fatal failure hooks', () => {
     assert.ok(planner.hooks?.onError, 'planner must define onError hook');
     assert.strictEqual(planner.hooks.onError.action, 'publish_message');
     assert.strictEqual(planner.hooks.onError.config?.topic, 'CLUSTER_FAILED');
+    assert.ok(
+      planner.hooks.onError.config?.content?.text?.includes('{{error.message}}'),
+      'planner onError text should use {{error.message}}'
+    );
     assert.strictEqual(
       planner.hooks.onError.config?.content?.data?.reason,
       'planning_agent_failed'
     );
+    assert.strictEqual(planner.hooks.onError.config?.content?.data?.error, '{{error.message}}');
   });
 
   it('worker publishes CLUSTER_FAILED on final task failure', () => {
@@ -35,9 +40,14 @@ describe('Full workflow fatal failure hooks', () => {
     assert.ok(worker.hooks?.onError, 'worker must define onError hook');
     assert.strictEqual(worker.hooks.onError.action, 'publish_message');
     assert.strictEqual(worker.hooks.onError.config?.topic, 'CLUSTER_FAILED');
+    assert.ok(
+      worker.hooks.onError.config?.content?.text?.includes('{{error.message}}'),
+      'worker onError text should use {{error.message}}'
+    );
     assert.strictEqual(
       worker.hooks.onError.config?.content?.data?.reason,
       'implementation_agent_failed'
     );
+    assert.strictEqual(worker.hooks.onError.config?.content?.data?.error, '{{error.message}}');
   });
 });
