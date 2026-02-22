@@ -25,28 +25,34 @@ describe('Agent no-output timeout fail-fast', () => {
   });
 
   it('publishes AGENT_ERROR with no_output_timeout code', () => {
-    const fnMatch = sourceCode.match(/function handleNoOutputTimeout\([^)]*\)\s*{[\s\S]*?^}/m);
-    assert.ok(fnMatch, 'Expected to find handleNoOutputTimeout function body');
-
-    const fnBody = fnMatch[0];
-    assert.ok(fnBody.includes("'AGENT_ERROR'"), 'Expected AGENT_ERROR publication');
-    assert.ok(fnBody.includes("'no_output_timeout'"), 'Expected no_output_timeout error code');
+    assert.ok(sourceCode.includes("'AGENT_ERROR'"), 'Expected AGENT_ERROR publication');
+    assert.ok(sourceCode.includes("'no_output_timeout'"), 'Expected no_output_timeout error code');
   });
 
   it('kills task and resolves failure when timeout is exceeded', () => {
-    const fnMatch = sourceCode.match(/function handleNoOutputTimeout\([^)]*\)\s*{[\s\S]*?^}/m);
-    assert.ok(fnMatch, 'Expected to find handleNoOutputTimeout function body');
-
-    const fnBody = fnMatch[0];
-    assert.ok(fnBody.includes('task kill'), 'Expected task kill command for stuck task');
-    assert.ok(fnBody.includes('success: false'), 'Expected failure resolution on timeout');
-    assert.ok(fnBody.includes('No messages returned'), 'Expected explicit no-output error text');
+    assert.ok(sourceCode.includes('task kill'), 'Expected task kill command for stuck task');
+    assert.ok(sourceCode.includes('success: false'), 'Expected failure resolution on timeout');
+    assert.ok(
+      sourceCode.includes('No messages returned'),
+      'Expected explicit no-output error text'
+    );
   });
 
   it('wires no-output timeout check into log follower loop', () => {
     assert.ok(
-      sourceCode.includes('if (handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutputTimeoutMs }))'),
+      sourceCode.includes('handleNoOutputTimeout({'),
       'Expected createLogFollower to call handleNoOutputTimeout before status polling'
+    );
+  });
+
+  it('uses process health analysis to defer false timeouts', () => {
+    assert.ok(
+      sourceCode.includes('analyzeProcessHealth'),
+      'Expected no-output timeout path to run process-health analysis'
+    );
+    assert.ok(
+      sourceCode.includes("'no_output_timeout_deferred'"),
+      'Expected defer signal when process appears active'
     );
   });
 });

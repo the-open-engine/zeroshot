@@ -19,6 +19,7 @@ const { getProvider, parseChunkWithProvider } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
 const { loadSettings } = require('../../lib/settings.js');
 const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
+const { analyzeProcessHealth, isPlatformSupported } = require('./agent-stuck-detector');
 
 // Schema utilities for normalizing LLM output
 const { normalizeEnumValues } = require('./schema-utils');
@@ -838,6 +839,10 @@ async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
 }
 
 const MAX_STATUS_FAILURES = 30;
+const NO_OUTPUT_HEALTH_SAMPLE_MS = 5000;
+const NO_OUTPUT_GRACE_EXTENSION_MS = 60000;
+const NO_OUTPUT_HARD_TIMEOUT_MULTIPLIER = 6;
+const NO_OUTPUT_MIN_HARD_TIMEOUT_MS = 10 * 60 * 1000;
 
 function createLogFollowState() {
   return {
@@ -851,6 +856,11 @@ function createLogFollowState() {
     resolved: false,
     lineBuffer: '',
     consecutiveExecFailures: 0,
+    noOutputDeadlineAt: 0,
+    noOutputHardDeadlineAt: 0,
+    noOutputAnalysisInFlight: false,
+    noOutputHealthProbeCount: 0,
+    statusExecInFlight: false,
   };
 }
 
@@ -1125,35 +1135,162 @@ function handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutput
     return false;
   }
 
-  const elapsedMs = Date.now() - state.startedAt;
-  if (elapsedMs < noOutputTimeoutMs) {
+  const nowMs = Date.now();
+  if (nowMs < state.noOutputDeadlineAt) {
     return false;
   }
 
+  if (state.noOutputAnalysisInFlight) {
+    return true;
+  }
+
+  const elapsedMs = nowMs - state.startedAt;
+  if (nowMs >= state.noOutputHardDeadlineAt) {
+    return failNoOutputTimeout({
+      agent,
+      state,
+      ctPath,
+      taskId,
+      resolve,
+      noOutputTimeoutMs,
+      elapsedMs,
+      reason: 'hard_timeout_reached',
+    });
+  }
+
+  const timeoutAction = determineNoOutputTimeoutAction({
+    processPid: agent.processPid,
+    platformSupported: isPlatformSupported(),
+  });
+
+  if (timeoutAction === 'fail') {
+    return failNoOutputTimeout({
+      agent,
+      state,
+      ctPath,
+      taskId,
+      resolve,
+      noOutputTimeoutMs,
+      elapsedMs,
+      reason: 'health_probe_unavailable',
+    });
+  }
+
+  state.noOutputAnalysisInFlight = true;
+  (async () => {
+    let analysis;
+    try {
+      analysis = await analyzeProcessHealth(agent.processPid, NO_OUTPUT_HEALTH_SAMPLE_MS);
+    } catch (error) {
+      analysis = {
+        isLikelyStuck: null,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      state.noOutputAnalysisInFlight = false;
+    }
+
+    if (state.resolved || state.hasOutput) {
+      return;
+    }
+
+    const latestElapsedMs = Date.now() - state.startedAt;
+    if (analysis && analysis.isLikelyStuck === false) {
+      const now = Date.now();
+      const remainingBeforeHardStop = Math.max(0, state.noOutputHardDeadlineAt - now);
+      if (remainingBeforeHardStop <= 0) {
+        failNoOutputTimeout({
+          agent,
+          state,
+          ctPath,
+          taskId,
+          resolve,
+          noOutputTimeoutMs,
+          elapsedMs: latestElapsedMs,
+          reason: 'hard_timeout_reached',
+          analysis,
+        });
+        return;
+      }
+
+      const extensionMs = Math.min(NO_OUTPUT_GRACE_EXTENSION_MS, remainingBeforeHardStop);
+      state.noOutputDeadlineAt = now + extensionMs;
+      state.noOutputHealthProbeCount += 1;
+      agent._log(
+        `[Agent ${agent.id}] No output for ${Math.round(latestElapsedMs / 1000)}s, but PID ${agent.processPid} appears active (score=${analysis.stuckScore}). Extending timeout by ${Math.round(extensionMs / 1000)}s (probe #${state.noOutputHealthProbeCount}).`
+      );
+      agent._publish({
+        topic: 'AGENT_STALE_WARNING',
+        receiver: 'broadcast',
+        content: {
+          text: `Task ${taskId} has no output but process appears active; extending timeout by ${Math.round(extensionMs / 1000)}s`,
+          data: {
+            taskId,
+            error: 'no_output_timeout_deferred',
+            elapsedMs: latestElapsedMs,
+            extensionMs,
+            hardTimeoutMs: state.noOutputHardDeadlineAt - state.startedAt,
+            role: agent.role,
+            iteration: agent.iteration,
+            ...(analysis.stuckScore !== undefined ? { stuckScore: analysis.stuckScore } : {}),
+            ...(analysis.confidence !== undefined ? { confidence: analysis.confidence } : {}),
+          },
+        },
+      });
+      return;
+    }
+
+    failNoOutputTimeout({
+      agent,
+      state,
+      ctPath,
+      taskId,
+      resolve,
+      noOutputTimeoutMs,
+      elapsedMs: latestElapsedMs,
+      reason: analysis?.reason || 'health_probe_flagged_stuck',
+      analysis,
+    });
+  })();
+
+  return true;
+}
+
+function failNoOutputTimeout({
+  agent,
+  state,
+  ctPath,
+  taskId,
+  resolve,
+  noOutputTimeoutMs,
+  elapsedMs,
+  reason,
+  analysis,
+}) {
   console.error(
-    `[Agent ${agent.id}] ⚠️ Task ${taskId} produced no output after ${Math.round(
-      noOutputTimeoutMs / 1000
-    )}s - failing fast`
+    `[Agent ${agent.id}] ⚠️ Task ${taskId} produced no output for ${Math.round(elapsedMs / 1000)}s - failing (${reason})`
   );
 
   state.resolved = true;
   finalizeLogFollow(agent, state);
-
-  exec(`${ctPath} task kill ${taskId}`, { timeout: 10000 }, () => {
-    // Best effort: task may already be dead or detached.
-  });
+  bestEffortKillTask({ ctPath, taskId, pid: agent.processPid });
 
   agent._publish({
     topic: 'AGENT_ERROR',
     receiver: 'broadcast',
     content: {
-      text: `Task ${taskId} produced no output after ${Math.round(noOutputTimeoutMs / 1000)}s`,
+      text: `Task ${taskId} produced no output after ${Math.round(elapsedMs / 1000)}s`,
       data: {
         taskId,
         error: 'no_output_timeout',
         timeoutMs: noOutputTimeoutMs,
+        elapsedMs,
+        hardTimeoutMs: state.noOutputHardDeadlineAt - state.startedAt,
+        probeCount: state.noOutputHealthProbeCount,
+        reason,
         role: agent.role,
         iteration: agent.iteration,
+        ...(analysis && typeof analysis === 'object' ? { analysis } : {}),
       },
     },
   });
@@ -1161,10 +1298,63 @@ function handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutput
   resolve({
     success: false,
     output: state.output,
-    error: `No messages returned after ${Math.round(noOutputTimeoutMs / 1000)}s`,
+    error: `No messages returned after ${Math.round(elapsedMs / 1000)}s`,
   });
 
   return true;
+}
+
+function bestEffortKillTask({ ctPath, taskId, pid }) {
+  exec(`${ctPath} task kill ${taskId}`, { timeout: 10000 }, () => {
+    // Best effort: task may already be dead or detached.
+  });
+
+  if (!isAlivePid(pid)) {
+    return;
+  }
+
+  // If detached watcher ignored SIGTERM, escalate to SIGKILL after short grace.
+  setTimeout(() => {
+    if (!isAlivePid(pid)) {
+      return;
+    }
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Process may have exited between liveness check and kill signal.
+    }
+  }, 3000);
+}
+
+function isAlivePid(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function determineNoOutputTimeoutAction({ processPid, platformSupported }) {
+  if (!platformSupported) {
+    return 'fail';
+  }
+
+  if (!Number.isFinite(processPid) || processPid <= 0) {
+    return 'fail';
+  }
+
+  return 'probe';
+}
+
+function calculateNoOutputHardTimeoutMs(noOutputTimeoutMs) {
+  return Math.max(
+    NO_OUTPUT_MIN_HARD_TIMEOUT_MS,
+    noOutputTimeoutMs * NO_OUTPUT_HARD_TIMEOUT_MULTIPLIER
+  );
 }
 
 function handleStatusCompletion({
@@ -1250,6 +1440,9 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
       Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs >= 1000
         ? configuredTimeoutMs
         : 120000;
+    const noOutputHardTimeoutMs = calculateNoOutputHardTimeoutMs(noOutputTimeoutMs);
+    state.noOutputDeadlineAt = state.startedAt + noOutputTimeoutMs;
+    state.noOutputHardDeadlineAt = state.startedAt + noOutputHardTimeoutMs;
 
     state.logFilePath = lookupLogFilePath(ctPath, taskId);
     if (state.logFilePath) {
@@ -1272,29 +1465,59 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
 
     state.pollInterval = setInterval(pollLogFile, 300);
 
-    state.statusCheckInterval = setInterval(() => {
-      if (handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutputTimeoutMs })) {
+    const runStatusCheckTick = async () => {
+      if (state.resolved || state.statusExecInFlight) {
         return;
       }
 
-      exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
-        if (state.resolved) return;
-
-        if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
+      state.statusExecInFlight = true;
+      try {
+        if (
+          handleNoOutputTimeout({
+            agent,
+            state,
+            ctPath,
+            taskId,
+            resolve,
+            noOutputTimeoutMs,
+            noOutputHardTimeoutMs,
+          })
+        ) {
           return;
         }
 
-        state.consecutiveExecFailures = 0;
-        handleStatusCompletion({
-          agent,
-          taskId,
-          providerName,
-          state,
-          stdout,
-          pollLogFile,
-          resolve,
+        await new Promise((pollResolved) => {
+          exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
+            if (state.resolved) {
+              pollResolved();
+              return;
+            }
+
+            if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
+              pollResolved();
+              return;
+            }
+
+            state.consecutiveExecFailures = 0;
+            handleStatusCompletion({
+              agent,
+              taskId,
+              providerName,
+              state,
+              stdout,
+              pollLogFile,
+              resolve,
+            });
+            pollResolved();
+          });
         });
-      });
+      } finally {
+        state.statusExecInFlight = false;
+      }
+    };
+
+    state.statusCheckInterval = setInterval(() => {
+      void runStatusCheckTick();
     }, 1000);
 
     agent.currentTask = buildKillHandler({ agent, state, providerName, resolve });
@@ -1979,4 +2202,7 @@ module.exports = {
   getClaudeTasksPath,
   parseResultOutput,
   killTask,
+  // Exported for unit tests
+  determineNoOutputTimeoutAction,
+  calculateNoOutputHardTimeoutMs,
 };
