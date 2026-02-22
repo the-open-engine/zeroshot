@@ -841,6 +841,8 @@ const MAX_STATUS_FAILURES = 30;
 
 function createLogFollowState() {
   return {
+    startedAt: Date.now(),
+    hasOutput: false,
     output: '',
     logFilePath: null,
     lastSize: 0,
@@ -907,6 +909,7 @@ function broadcastAgentLine({ agent, providerName, state, line }) {
   }
 
   const isValidJson = isValidJsonLine(content);
+  state.hasOutput = true;
   state.output += content + '\n';
 
   agent.lastOutputTime = Date.now();
@@ -1117,6 +1120,53 @@ function handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, re
   return true;
 }
 
+function handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutputTimeoutMs }) {
+  if (state.resolved || state.hasOutput) {
+    return false;
+  }
+
+  const elapsedMs = Date.now() - state.startedAt;
+  if (elapsedMs < noOutputTimeoutMs) {
+    return false;
+  }
+
+  console.error(
+    `[Agent ${agent.id}] ⚠️ Task ${taskId} produced no output after ${Math.round(
+      noOutputTimeoutMs / 1000
+    )}s - failing fast`
+  );
+
+  state.resolved = true;
+  finalizeLogFollow(agent, state);
+
+  exec(`${ctPath} task kill ${taskId}`, { timeout: 10000 }, () => {
+    // Best effort: task may already be dead or detached.
+  });
+
+  agent._publish({
+    topic: 'AGENT_ERROR',
+    receiver: 'broadcast',
+    content: {
+      text: `Task ${taskId} produced no output after ${Math.round(noOutputTimeoutMs / 1000)}s`,
+      data: {
+        taskId,
+        error: 'no_output_timeout',
+        timeoutMs: noOutputTimeoutMs,
+        role: agent.role,
+        iteration: agent.iteration,
+      },
+    },
+  });
+
+  resolve({
+    success: false,
+    output: state.output,
+    error: `No messages returned after ${Math.round(noOutputTimeoutMs / 1000)}s`,
+  });
+
+  return true;
+}
+
 function handleStatusCompletion({
   agent,
   taskId,
@@ -1194,6 +1244,12 @@ function buildKillHandler({ agent, state, providerName, resolve }) {
 function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
   return new Promise((resolve) => {
     const state = createLogFollowState();
+    const settings = loadSettings();
+    const configuredTimeoutMs = settings.noOutputTimeoutMs;
+    const noOutputTimeoutMs =
+      Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs >= 1000
+        ? configuredTimeoutMs
+        : 120000;
 
     state.logFilePath = lookupLogFilePath(ctPath, taskId);
     if (state.logFilePath) {
@@ -1217,6 +1273,10 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
     state.pollInterval = setInterval(pollLogFile, 300);
 
     state.statusCheckInterval = setInterval(() => {
+      if (handleNoOutputTimeout({ agent, state, ctPath, taskId, resolve, noOutputTimeoutMs })) {
+        return;
+      }
+
       exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
         if (state.resolved) return;
 

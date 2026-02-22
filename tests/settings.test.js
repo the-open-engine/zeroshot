@@ -83,6 +83,7 @@ function registerSettingsDefaultTests() {
     assert.strictEqual(DEFAULT_SETTINGS.strictSchema, true);
     assert.strictEqual(DEFAULT_SETTINGS.logLevel, 'normal');
     assert.strictEqual(DEFAULT_SETTINGS.defaultProvider, 'claude');
+    assert.strictEqual(DEFAULT_SETTINGS.noOutputTimeoutMs, 120000);
     assert.ok(DEFAULT_SETTINGS.providerSettings);
   });
 
@@ -144,6 +145,20 @@ function registerSettingsValidationTests() {
     const error = validateSetting('logLevel', 'debug');
     assert.ok(error !== null);
     assert.ok(error.includes('Invalid log level'));
+  });
+
+  it('should validate noOutputTimeoutMs values', function () {
+    const { validateSetting } = settingsModule;
+
+    assert.strictEqual(validateSetting('noOutputTimeoutMs', 60000), null);
+
+    const notIntegerError = validateSetting('noOutputTimeoutMs', 1200.5);
+    assert.ok(notIntegerError !== null);
+    assert.ok(notIntegerError.includes('integer'));
+
+    const tooSmallError = validateSetting('noOutputTimeoutMs', 999);
+    assert.ok(tooSmallError !== null);
+    assert.ok(tooSmallError.includes('>= 1000'));
   });
 }
 

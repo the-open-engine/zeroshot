@@ -9,13 +9,17 @@ const os = require('os');
 describe('getClaudeCommand', () => {
   let originalEnv;
   let settingsFile;
+  let tempHome;
 
   beforeEach(() => {
     // Save original env
     originalEnv = { ...process.env };
     // Use temp settings file
     settingsFile = path.join(os.tmpdir(), `test-settings-${Date.now()}.json`);
+    tempHome = path.join(os.tmpdir(), `test-home-${Date.now()}`);
+    fs.mkdirSync(tempHome, { recursive: true });
     process.env.ZEROSHOT_SETTINGS_FILE = settingsFile;
+    process.env.HOME = tempHome;
     delete process.env.ZEROSHOT_CLAUDE_COMMAND;
   });
 
@@ -25,6 +29,9 @@ describe('getClaudeCommand', () => {
     // Cleanup temp file
     if (fs.existsSync(settingsFile)) {
       fs.unlinkSync(settingsFile);
+    }
+    if (fs.existsSync(tempHome)) {
+      fs.rmSync(tempHome, { recursive: true, force: true });
     }
   });
 
@@ -81,6 +88,20 @@ describe('getClaudeCommand', () => {
     const result = getClaudeCommand();
     expect(result.command).to.equal('trimmed');
     expect(result.args).to.deep.equal(['cmd']);
+  });
+
+  it('prefers ~/.local/bin/claude when command is bare claude', () => {
+    const localBinDir = path.join(tempHome, '.local', 'bin');
+    fs.mkdirSync(localBinDir, { recursive: true });
+    const localClaude = path.join(localBinDir, 'claude');
+    fs.writeFileSync(localClaude, '#!/bin/sh\necho local-claude\n');
+
+    delete require.cache[require.resolve('../lib/settings.js')];
+    const { getClaudeCommand } = require('../lib/settings.js');
+
+    const result = getClaudeCommand();
+    expect(result.command).to.equal(localClaude);
+    expect(result.args).to.deep.equal([]);
   });
 });
 
