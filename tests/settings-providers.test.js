@@ -91,10 +91,10 @@ describe('Provider settings', function () {
     assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
   });
 
-  it('maps claude level3 to opus-4.6', function () {
+  it('maps claude level3 to opus alias', function () {
     const claude = getProvider('claude');
     const modelSpec = claude.resolveModelSpec('level3', {});
-    assert.strictEqual(modelSpec.model, 'opus-4.6');
+    assert.strictEqual(modelSpec.model, 'opus');
   });
 
   it('rejects legacy claude model aliases as invalid input', function () {
