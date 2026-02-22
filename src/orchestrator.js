@@ -1071,7 +1071,9 @@ class Orchestrator {
       } else {
         // Deterministic pre-start failure (e.g., duplicate active issue) should not
         // leave a phantom 0-message cluster entry that later appears as "corrupted".
-        this.clusters.delete(clusterId);
+        // Mark as killed so _saveClusters removes this entry from clusters.json.
+        cluster.state = 'killed';
+        cluster.pid = null;
       }
 
       // CRITICAL: Resolve the promise on failure too, so stop() doesn't hang
@@ -1091,6 +1093,7 @@ class Orchestrator {
         await this._saveClusters().catch((err) => {
           console.warn(`[Orchestrator] Failed to persist startup cleanup for ${clusterId}:`, err);
         });
+        this.clusters.delete(clusterId);
       }
 
       // Best-effort cleanup of partially initialized resources (prevents orphaned worktrees/containers).
