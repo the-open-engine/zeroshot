@@ -50,5 +50,9 @@ describe('Orchestrator startup failure cleanup', () => {
       sourceCode.includes('if (shouldPersistFailureState)'),
       'Expected conditional persistence of failed startup state'
     );
+    assert.ok(
+      sourceCode.includes('Failed to persist startup cleanup'),
+      'Expected explicit persistence path for removing phantom startup failures'
+    );
   });
 });

@@ -1087,6 +1087,10 @@ class Orchestrator {
             err
           );
         });
+      } else {
+        await this._saveClusters().catch((err) => {
+          console.warn(`[Orchestrator] Failed to persist startup cleanup for ${clusterId}:`, err);
+        });
       }
 
       // Best-effort cleanup of partially initialized resources (prevents orphaned worktrees/containers).
