@@ -234,11 +234,13 @@ class Orchestrator {
         this._log(`[Orchestrator] Loading cluster: ${clusterId}`);
         const cluster = this._loadSingleCluster(clusterId, clusterData);
 
-        // VALIDATION: Detect 0-message clusters (corrupted from SIGINT during initialization)
-        // These clusters were created before the initCompletePromise fix was applied
+        // VALIDATION: Detect 0-message clusters that were interrupted mid-startup.
+        // Do NOT mark deterministic startup failures as corrupted (e.g., duplicate active issue).
         if (cluster && cluster.messageBus) {
           const messageCount = cluster.messageBus.count({ cluster_id: clusterId });
-          if (messageCount === 0) {
+          const inactiveStates = new Set(['failed', 'stopped', 'completed', 'corrupted']);
+          const currentState = String(cluster.state || '').toLowerCase();
+          if (messageCount === 0 && !inactiveStates.has(currentState)) {
             console.warn(`[Orchestrator] ⚠️  Cluster ${clusterId} has 0 messages (corrupted)`);
             console.warn(
               `[Orchestrator]    This likely occurred from SIGINT during initialization.`
@@ -1052,18 +1054,40 @@ class Orchestrator {
         messageBus: cluster.messageBus, // Expose messageBus for testing
       };
     } catch (error) {
-      cluster.state = 'failed';
+      let initialMessageCount = 0;
+      try {
+        initialMessageCount = cluster.messageBus?.count({ cluster_id: clusterId }) || 0;
+      } catch {
+        initialMessageCount = 0;
+      }
+
+      const isDuplicateActiveIssueError =
+        typeof error?.message === 'string' &&
+        error.message.includes('already has an active cluster');
+      const shouldPersistFailureState = !(isDuplicateActiveIssueError && initialMessageCount === 0);
+
+      if (shouldPersistFailureState) {
+        cluster.state = 'failed';
+      } else {
+        // Deterministic pre-start failure (e.g., duplicate active issue) should not
+        // leave a phantom 0-message cluster entry that later appears as "corrupted".
+        this.clusters.delete(clusterId);
+      }
+
       // CRITICAL: Resolve the promise on failure too, so stop() doesn't hang
       if (cluster._resolveInitComplete) {
         cluster._resolveInitComplete();
       }
-      // Persist the failure state (prevents "invisible" failures that supervisors can't detect/cleanup).
-      await this._saveClusters().catch((err) => {
-        console.warn(
-          `[Orchestrator] Failed to persist failed cluster state for ${clusterId}:`,
-          err
-        );
-      });
+      // Persist failure state for recoverable startup errors.
+      // Skip persistence for deterministic pre-start validation failures.
+      if (shouldPersistFailureState) {
+        await this._saveClusters().catch((err) => {
+          console.warn(
+            `[Orchestrator] Failed to persist failed cluster state for ${clusterId}:`,
+            err
+          );
+        });
+      }
 
       // Best-effort cleanup of partially initialized resources (prevents orphaned worktrees/containers).
       try {
