@@ -316,11 +316,14 @@ async function spawnDetachedCluster(options, clusterId) {
 
     let settled = false;
     const STARTUP_GRACE_MS = 4000;
+    let startupTimer = null;
 
     const finish = (error = null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(startupTimer);
+      if (startupTimer) {
+        clearTimeout(startupTimer);
+      }
       try {
         fs.closeSync(logFd);
       } catch {
@@ -337,7 +340,7 @@ async function spawnDetachedCluster(options, clusterId) {
       resolve();
     };
 
-    const startupTimer = setTimeout(() => finish(null), STARTUP_GRACE_MS);
+    startupTimer = setTimeout(() => finish(null), STARTUP_GRACE_MS);
 
     daemon.once('error', (error) => {
       finish(buildDetachedStartupError(clusterId, logPath, null, null, error));
