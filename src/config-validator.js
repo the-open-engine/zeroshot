@@ -996,7 +996,8 @@ function validateHookAction(hook, prefix, errors) {
   if (!hook.action) {
     errors.push(
       `[Gap 1] ${prefix}: Missing 'action' field. ` +
-        `Fix: Add "action": "publish_message", "action": "execute_system_command", or "action": "verify_github_pr"`
+        `Fix: Add "action": "publish_message", "action": "execute_system_command", ` +
+        `or "action": "verify_pull_request"`
     );
   }
 }
@@ -1771,9 +1772,6 @@ function validateProviderSettings(provider, providerSettings) {
       throw new Error(
         `Invalid model override (must be non-empty string) for provider "${provider}"`
       );
-    }
-    if (override?.model) {
-      providerModule.validateModelId(override.model);
     }
     if (override?.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
       throw new Error(`reasoningEffort overrides are only supported for Codex and Opencode`);

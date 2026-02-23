@@ -5,7 +5,7 @@
  * git-pusher-template.js uses `structuredOutput` as the config key,
  * but agent-config.js only recognizes `jsonSchema`.
  * The structuredOutput key was silently ignored → default schema applied →
- * agent never told to output pr_number → verify_github_pr hook fails with
+ * agent never told to output pr_number → verify_pull_request hook fails with
  * "VERIFICATION FAILED: git-pusher must provide pr_number in structured output"
  *
  * The PR was actually created and merged, but the hook couldn't extract
