@@ -29,12 +29,18 @@ describe('verify_pull_request hook action', () => {
   let mockPlatformResolver;
   let previousPollAttempts;
   let previousPollIntervalMs;
+  let previousFetchRetryAttempts;
+  let previousFetchRetryIntervalMs;
 
   beforeEach(() => {
     previousPollAttempts = process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS;
     previousPollIntervalMs = process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS;
+    previousFetchRetryAttempts = process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS;
+    previousFetchRetryIntervalMs = process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS;
     process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS = '4';
     process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS = '1';
+    process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS = '2';
+    process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS = '1';
 
     // Clear module cache for modules in the dependency chain
     const safeExecPath = require.resolve('../src/lib/safe-exec.js');
@@ -89,6 +95,16 @@ describe('verify_pull_request hook action', () => {
       delete process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS;
     } else {
       process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS = previousPollIntervalMs;
+    }
+    if (previousFetchRetryAttempts === undefined) {
+      delete process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS;
+    } else {
+      process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS = previousFetchRetryAttempts;
+    }
+    if (previousFetchRetryIntervalMs === undefined) {
+      delete process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS;
+    } else {
+      process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS = previousFetchRetryIntervalMs;
     }
   });
 

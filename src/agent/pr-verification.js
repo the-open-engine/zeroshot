@@ -261,8 +261,13 @@ function normalizeFetchedPrData(prData, adapter) {
 }
 
 async function fetchPrDataWithRetry({ adapter, cwd, prNumber, agent }) {
-  const attempts = prNumber ? 6 : 1;
-  const intervalMs = 5000;
+  const attempts = prNumber
+    ? parsePositiveInt(process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS, 6)
+    : 1;
+  const intervalMs = parsePositiveInt(
+    process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS,
+    5000
+  );
   const itemLabel = adapter.itemName;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
