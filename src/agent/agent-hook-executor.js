@@ -5,14 +5,14 @@
  * - hook-transform.js: Transform script execution
  * - hook-template.js: Template variable substitution
  * - hook-logic.js: Logic scripts for conditional config
- * - pr-verification.js: GitHub PR verification
+ * - pr-verification.js: PR/MR verification
  * - hook-sandbox.js: Shared VM sandbox builder
  */
 
 const { executeTransform } = require('./hook-transform');
 const { substituteTemplate } = require('./hook-template');
 const { evaluateHookLogic } = require('./hook-logic');
-const { verifyGithubPr } = require('./pr-verification');
+const { verifyPullRequest } = require('./pr-verification');
 
 function isPlainObject(val) {
   return val !== null && typeof val === 'object' && !Array.isArray(val);
@@ -99,8 +99,8 @@ async function executeHook(params) {
     throw new Error('execute_system_command not implemented');
   }
 
-  if (hook.action === 'verify_github_pr') {
-    await verifyGithubPr({ result, agent });
+  if (hook.action === 'verify_pull_request') {
+    await verifyPullRequest({ result, agent });
     return;
   }
 

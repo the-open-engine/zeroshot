@@ -440,7 +440,7 @@ function generateGitPusherAgent(platform, options = {}) {
     prompt: generatePrompt(platformConfig),
     hooks: {
       onComplete: {
-        action: 'verify_github_pr',
+        action: 'verify_pull_request',
         // No config needed - verification reads from result.structured_output
         // and publishes CLUSTER_COMPLETE only if verification passes
       },

@@ -1,12 +1,12 @@
 /**
- * verify_github_pr Hook Action Test Suite
+ * verify_pull_request Hook Action Test Suite
  *
- * Tests for the verify_github_pr hook action that validates PR existence and merge status
+ * Tests for the verify_pull_request hook action that validates PR existence and merge status
  * Part of issue #340 - Prevent git-pusher hallucination
  */
 
+/* global describe, beforeEach, afterEach, it */
 const assert = require('assert');
-const path = require('path');
 
 // Mock agent with required methods
 function createMockAgent(workingDirectory = process.cwd(), providerName = 'claude') {
@@ -23,11 +23,10 @@ function createMockAgent(workingDirectory = process.cwd(), providerName = 'claud
   };
 }
 
-describe('verify_github_pr hook action', function () {
-  this.timeout(60000);
-
+describe('verify_pull_request hook action', () => {
   let executeHook;
   let mockExecSyncFn;
+  let mockPlatformResolver;
   let previousPollAttempts;
   let previousPollIntervalMs;
 
@@ -37,15 +36,30 @@ describe('verify_github_pr hook action', function () {
     process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS = '4';
     process.env.ZEROSHOT_PR_MERGE_POLL_INTERVAL_MS = '1';
 
-    // Clear module cache
-    const hookExecutorPath = path.join(__dirname, '../src/agent/agent-hook-executor.js');
-    delete require.cache[require.resolve(hookExecutorPath)];
+    // Clear module cache for ALL modules in the dependency chain
+    const safeExecPath = require.resolve('../src/lib/safe-exec.js');
+    const prVerificationPath = require.resolve('../src/agent/pr-verification.js');
+    const hookTemplatePath = require.resolve('../src/agent/hook-template.js');
+    const hookTransformPath = require.resolve('../src/agent/hook-transform.js');
+    const hookLogicPath = require.resolve('../src/agent/hook-logic.js');
+    const hookSandboxPath = require.resolve('../src/agent/hook-sandbox.js');
+    const issueProvidersPath = require.resolve('../src/issue-providers/index.js');
+    const hookExecutorPath = require.resolve('../src/agent/agent-hook-executor.js');
 
-    const safeExecPath = path.join(__dirname, '../src/lib/safe-exec.js');
-    delete require.cache[require.resolve(safeExecPath)];
+    delete require.cache[hookExecutorPath];
+    delete require.cache[prVerificationPath];
+    delete require.cache[hookTemplatePath];
+    delete require.cache[hookTransformPath];
+    delete require.cache[hookLogicPath];
+    delete require.cache[hookSandboxPath];
+    delete require.cache[issueProvidersPath];
+    delete require.cache[safeExecPath];
 
-    // Mock safe-exec module
-    require.cache[require.resolve(safeExecPath)] = {
+    // Mock safe-exec module BEFORE reloading any modules that depend on it
+    require.cache[safeExecPath] = {
+      id: safeExecPath,
+      filename: safeExecPath,
+      loaded: true,
       exports: {
         execSync: function (...args) {
           if (mockExecSyncFn) {
@@ -56,13 +70,24 @@ describe('verify_github_pr hook action', function () {
       },
     };
 
-    // Reload executeHook with mocked safe-exec
+    mockPlatformResolver = null;
+    require.cache[issueProvidersPath] = {
+      id: issueProvidersPath,
+      filename: issueProvidersPath,
+      loaded: true,
+      exports: {
+        getPlatformForPR: (cwd) => (mockPlatformResolver ? mockPlatformResolver(cwd) : 'github'),
+      },
+    };
+
+    // Reload executeHook — pr-verification.js will pick up mocked safe-exec
     executeHook = require('../src/agent/agent-hook-executor').executeHook;
     mockExecSyncFn = null;
   });
 
   afterEach(() => {
     mockExecSyncFn = null;
+    mockPlatformResolver = null;
     if (previousPollAttempts === undefined) {
       delete process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS;
     } else {
@@ -77,7 +102,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should verify PR when pr_url present but pr_number missing', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         summary: 'Merged',
@@ -102,7 +127,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should throw when PR does not exist in GitHub', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/9999',
@@ -127,7 +152,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should complete with verification-pending when PR remains OPEN after all polls', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/123',
@@ -158,7 +183,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should throw when PR is CLOSED without merge after all polls', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/123',
@@ -188,7 +213,7 @@ describe('verify_github_pr hook action', function () {
   it('should succeed when GitHub API shows OPEN initially then MERGED after propagation delay', async function () {
     const agent = createMockAgent();
     agent._log = () => {}; // suppress log noise
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/1411',
@@ -227,7 +252,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should use explicit PR number in gh command when available in agent output', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/555',
@@ -259,7 +284,7 @@ describe('verify_github_pr hook action', function () {
   // Old code fell through to `gh pr view` which found an unrelated open PR → "Agent LIED" error.
   it('should throw when structured output has no PR data (agent failed to create PR)', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         summary: 'PR creation blocked - TypeScript compilation errors',
@@ -277,17 +302,17 @@ describe('verify_github_pr hook action', function () {
       assert.fail('Expected error to be thrown');
     } catch (err) {
       assert.match(err.message, /without creating a PR/);
-      assert.match(err.message, /no pr_number or pr_url/);
+      assert.match(err.message, /no pr_number, mr_number, pr_url, or mr_url/i);
       assert.match(err.message, /compilation errors/i);
     }
   });
 
   // REGRESSION: provider mismatch in hook parser
-  // verify_github_pr previously parsed Codex output with Claude parser assumptions.
+  // verify_pull_request previously parsed Codex output with Claude parser assumptions.
   // That dropped pr_number/pr_url even when the assistant output contained valid JSON.
   it('should parse Codex output with provider-aware extraction', async function () {
     const agent = createMockAgent(process.cwd(), 'codex');
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: [
         JSON.stringify({
@@ -332,7 +357,7 @@ describe('verify_github_pr hook action', function () {
   // structured extraction misses fields.
   it('should recover PR metadata from raw output fallback extraction', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         type: 'item.completed',
@@ -365,7 +390,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should derive PR number from pr_url when pr_number is missing', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/100',
@@ -390,7 +415,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should publish CLUSTER_COMPLETE when PR verified merged', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/456',
@@ -416,7 +441,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should pass correct workingDirectory to gh CLI', async function () {
     const agent = createMockAgent('/custom/work/dir');
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/789',
@@ -441,7 +466,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should propagate non-hallucination errors', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/999',
@@ -463,7 +488,7 @@ describe('verify_github_pr hook action', function () {
 
   it('should throw when claimed pr_url does not match the branch PR', async function () {
     const agent = createMockAgent();
-    const hook = { action: 'verify_github_pr' };
+    const hook = { action: 'verify_pull_request' };
     const result = {
       output: JSON.stringify({
         pr_url: 'https://github.com/org/repo/pull/111',
@@ -480,6 +505,36 @@ describe('verify_github_pr hook action', function () {
       });
     };
 
-    await assert.rejects(() => executeHook({ hook, agent, result }), /claimed PR URL/i);
+    await assert.rejects(() => executeHook({ hook, agent, result }), /claimed URL/i);
+  });
+
+  it('should verify GitLab merge requests when platform is gitlab', async function () {
+    mockPlatformResolver = () => 'gitlab';
+    const agent = createMockAgent();
+    const hook = { action: 'verify_pull_request' };
+    const result = {
+      output: JSON.stringify({
+        mr_url: 'https://gitlab.com/org/repo/-/merge_requests/42',
+        mr_number: 42,
+        merged: true,
+      }),
+    };
+
+    let capturedCmd;
+    mockExecSyncFn = (cmd) => {
+      capturedCmd = cmd;
+      return JSON.stringify({
+        iid: 42,
+        state: 'merged',
+        merged_at: '2026-02-23T12:00:00Z',
+        web_url: 'https://gitlab.com/org/repo/-/merge_requests/42',
+      });
+    };
+
+    await executeHook({ hook, agent, result });
+    assert.strictEqual(capturedCmd, 'glab mr view 42 --output json');
+    assert.strictEqual(agent.lastPublished.content.data.pr_number, 42);
+    assert.strictEqual(agent.lastPublished.content.data.mr_number, 42);
+    assert.strictEqual(agent.lastPublished.content.data.verification_platform, 'gitlab');
   });
 });

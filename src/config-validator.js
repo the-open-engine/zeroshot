@@ -996,7 +996,8 @@ function validateHookAction(hook, prefix, errors) {
   if (!hook.action) {
     errors.push(
       `[Gap 1] ${prefix}: Missing 'action' field. ` +
-        `Fix: Add "action": "publish_message", "action": "execute_system_command", or "action": "verify_github_pr"`
+        `Fix: Add "action": "publish_message", "action": "execute_system_command", ` +
+        `or "action": "verify_pull_request"`
     );
   }
 }
