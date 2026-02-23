@@ -577,7 +577,10 @@ class Orchestrator {
         // CRITICAL: Only update clusters this process actually owns or has modified
         // A process owns a cluster if: it started it (pid matches) OR it explicitly stopped/killed it
         const isOwnedByThisProcess = cluster.pid === process.pid;
-        const wasModifiedByThisProcess = cluster.state === 'stopped' || cluster.state === 'killed';
+        const wasModifiedByThisProcess =
+          cluster.state === 'stopped' ||
+          cluster.state === 'killed' ||
+          cluster.state === 'completed';
 
         // Skip clusters we don't own and haven't modified - prevents race condition
         // where a running cluster overwrites another process's stop/kill operation
@@ -1799,24 +1802,19 @@ class Orchestrator {
       // Don't cleanup worktree itself - it will be reused on resume
     }
 
-    cluster.state = shouldAutoCleanWorktree ? 'killed' : 'stopped';
+    cluster.state = options.completedSuccessfully ? 'completed' : 'stopped';
     cluster.pid = null; // Clear PID - cluster is no longer running
 
     if (shouldAutoCleanWorktree) {
-      // Close message bus and ledger (same as kill() path)
+      // Close message bus and ledger — worktree is cleaned up, no resume possible
       cluster.messageBus.close();
     }
 
     this._log(`Cluster ${clusterId} ${cluster.state}`);
 
-    // Save updated state
-    // Note: 'killed' state causes _saveClusters to DELETE from disk (no stale entries)
+    // Save updated state — completed clusters are persisted (not deleted) so
+    // orchestrators like heroshot can see them in `zeroshot list`.
     await this._saveClusters();
-
-    if (shouldAutoCleanWorktree) {
-      // Remove from memory after persisting (same as kill() path)
-      this.clusters.delete(clusterId);
-    }
   }
 
   /**
@@ -1947,6 +1945,10 @@ class Orchestrator {
       throw new Error(
         `Cluster ${clusterId} is still running. Use 'zeroshot stop' first if you want to restart it.`
       );
+    }
+
+    if (cluster.state === 'completed') {
+      throw new Error(`Cluster ${clusterId} completed successfully. Nothing to resume.`);
     }
 
     const failureInfo = this._resolveFailureInfo(cluster, clusterId);

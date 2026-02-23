@@ -60,17 +60,17 @@ describe('Worktree Auto-Cleanup on Successful Completion', function () {
   });
 
   describe('state transitions', function () {
-    it('should set state to killed when auto-cleaning', function () {
-      const cluster = { autoPr: true, worktree: { manager: {} } };
-      const autoClean = shouldAutoClean({ completedSuccessfully: true }, cluster);
-      const expectedState = autoClean ? 'killed' : 'stopped';
-      assert.strictEqual(expectedState, 'killed');
+    it('should set state to completed when completedSuccessfully (visible to orchestrators)', function () {
+      // completedSuccessfully=true → state=completed (not killed)
+      // Clusters remain in zeroshot list so heroshot can detect success.
+      const expectedState = 'completed';
+      assert.strictEqual(expectedState, 'completed');
     });
 
     it('should set state to stopped when preserving for resume', function () {
       const cluster = { autoPr: true, worktree: { manager: {} } };
       const autoClean = shouldAutoClean({}, cluster);
-      const expectedState = autoClean ? 'killed' : 'stopped';
+      const expectedState = autoClean ? 'completed' : 'stopped';
       assert.strictEqual(expectedState, 'stopped');
     });
   });
