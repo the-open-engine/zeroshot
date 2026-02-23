@@ -139,14 +139,14 @@ describe('Agent message buffering while busy', function () {
     const start = Date.now();
     while (Date.now() - start < 10000) {
       const current = orchestrator.getCluster(clusterId);
-      if (current.state === 'stopped') {
+      if (current.state === 'completed' || current.state === 'stopped') {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     const finalCluster = orchestrator.getCluster(clusterId);
-    expect(finalCluster.state).to.equal('stopped');
+    expect(finalCluster.state).to.equal('completed');
 
     mockRunner.assertCalled('worker', 2);
   });

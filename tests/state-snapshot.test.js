@@ -322,7 +322,7 @@ describe('Snapshotter orchestration integration', () => {
     };
 
     const result = await orchestrator.start(config, { text: 'Do the thing' });
-    await waitForClusterState(orchestrator, result.id, 'stopped', 5000);
+    await waitForClusterState(orchestrator, result.id, 'completed', 5000);
 
     mockRunner.assertContextIncludes('worker', 'STATE_SNAPSHOT');
   });

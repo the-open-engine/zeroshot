@@ -79,7 +79,7 @@ async function waitForStoppedCluster(orchestratorInstance, clusterIdToCheck, max
   const start = Date.now();
   while (Date.now() - start < maxWait) {
     const cluster = orchestratorInstance.getCluster(clusterIdToCheck);
-    if (cluster.state === 'stopped') {
+    if (cluster.state === 'completed' || cluster.state === 'stopped') {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -136,8 +136,8 @@ function registerImmediateCompletionTest() {
     // Verify cluster stopped (not hung in 'running' state)
     const finalCluster = orchestrator.getCluster(clusterId);
     expect(finalCluster.state).to.equal(
-      'stopped',
-      'Cluster should have stopped automatically after receiving CLUSTER_COMPLETE'
+      'completed',
+      'Cluster should have completed automatically after receiving CLUSTER_COMPLETE'
     );
 
     // Verify worker was actually called
@@ -245,8 +245,8 @@ function registerRapidCompletionTest() {
 
     const finalCluster = orchestrator.getCluster(clusterId);
     expect(finalCluster.state).to.equal(
-      'stopped',
-      'Cluster should stop after all workers complete'
+      'completed',
+      'Cluster should complete after all workers complete'
     );
 
     // Verify all workers were called
