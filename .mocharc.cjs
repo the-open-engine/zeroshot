@@ -3,10 +3,12 @@ const hasCliTestFile = process.argv
   .some((arg) => typeof arg === 'string' && /\.test\.[jt]s$/.test(arg));
 
 const config = {
+  require: ['./tests/mocha-setup.js'],
   parallel: true,
   jobs: 4,
   timeout: 10000,
   slow: 1000,
+  exit: true,
 };
 
 if (!hasCliTestFile) {

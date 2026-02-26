@@ -1184,7 +1184,7 @@ class Orchestrator {
       this._log(`Initiated by: ${message.sender}`);
       this._log(`${'='.repeat(80)}\n`);
 
-      this.stop(clusterId).catch((err) => {
+      this.stop(clusterId, { completedSuccessfully: true }).catch((err) => {
         console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
       });
     });
@@ -1719,8 +1719,10 @@ class Orchestrator {
   /**
    * Stop a cluster
    * @param {String} clusterId - Cluster ID
+   * @param {Object} [options] - Stop options
+   * @param {boolean} [options.completedSuccessfully=false] - Whether cluster completed successfully (vs user-initiated stop)
    */
-  async stop(clusterId) {
+  async stop(clusterId, options = {}) {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
@@ -1768,10 +1770,25 @@ class Orchestrator {
       cluster.validatorIsolation = null;
     }
 
-    // Worktree cleanup on stop: preserve for resume capability
-    // Branch stays, worktree stays - can resume work later
-    // BUT: tear down Docker Compose services to free host ports
-    if (cluster.worktree?.manager) {
+    // Worktree cleanup: auto-remove if completed successfully with --pr/--ship
+    // (no reason to resume after PR is created/merged), otherwise preserve for resume
+    const shouldAutoCleanWorktree =
+      options.completedSuccessfully && cluster.autoPr && cluster.worktree?.manager;
+
+    if (shouldAutoCleanWorktree) {
+      this._log(`[Orchestrator] Auto-cleaning worktree (completed successfully with --pr/--ship)`);
+      // Tear down Docker Compose first, then remove worktree entirely
+      if (cluster.worktree.path) {
+        this._teardownWorktreeCompose(cluster.worktree.path);
+      }
+      try {
+        cluster.worktree.manager.cleanupWorktreeIsolation(clusterId, { preserveBranch: true });
+        this._log(`[Orchestrator] Worktree removed, branch ${cluster.worktree.branch} preserved`);
+      } catch (err) {
+        // Best-effort cleanup — don't fail the stop operation
+        this._log(`[Orchestrator] Warning: worktree cleanup failed: ${err.message}`);
+      }
+    } else if (cluster.worktree?.manager) {
       this._log(`[Orchestrator] Worktree preserved at ${cluster.worktree.path} for resume`);
       this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
       // Tear down Docker Compose services in the worktree to free host ports.
@@ -1782,12 +1799,24 @@ class Orchestrator {
       // Don't cleanup worktree itself - it will be reused on resume
     }
 
-    cluster.state = 'stopped';
+    cluster.state = shouldAutoCleanWorktree ? 'killed' : 'stopped';
     cluster.pid = null; // Clear PID - cluster is no longer running
-    this._log(`Cluster ${clusterId} stopped`);
+
+    if (shouldAutoCleanWorktree) {
+      // Close message bus and ledger (same as kill() path)
+      cluster.messageBus.close();
+    }
+
+    this._log(`Cluster ${clusterId} ${cluster.state}`);
 
     // Save updated state
+    // Note: 'killed' state causes _saveClusters to DELETE from disk (no stale entries)
     await this._saveClusters();
+
+    if (shouldAutoCleanWorktree) {
+      // Remove from memory after persisting (same as kill() path)
+      this.clusters.delete(clusterId);
+    }
   }
 
   /**

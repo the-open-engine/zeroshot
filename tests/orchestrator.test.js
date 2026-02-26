@@ -414,6 +414,98 @@ function defineLifecycleStopTests() {
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
       ledger.assertPublished('ISSUE_OPENED');
     });
+
+    it('should auto-cleanup when completedSuccessfully + autoPr (--ship mode)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr/--ship mode by setting autoPr on the cluster
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      await lifecycleOrchestrator.stop(clusterId, { completedSuccessfully: true });
+
+      // Verify: Cluster removed from memory (same as kill behavior)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.strictEqual(
+        afterStop,
+        undefined,
+        'Cluster should be removed from memory after auto-cleanup'
+      );
+
+      // Verify: Cluster deleted from disk (not persisted as stopped)
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.strictEqual(
+        persisted[clusterId],
+        undefined,
+        'Cluster should be deleted from disk after auto-cleanup'
+      );
+    });
+
+    it('should preserve worktree when stop is user-initiated (no completedSuccessfully)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr mode
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      // User-initiated stop (Ctrl+C) — no completedSuccessfully flag
+      await lifecycleOrchestrator.stop(clusterId);
+
+      // Verify: Cluster still in memory (preserved for resume)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Cluster should be preserved in memory for resume');
+      assert.strictEqual(afterStop.state, 'stopped', 'State should be stopped');
+
+      // Verify: Cluster persisted to disk
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.ok(persisted[clusterId], 'Cluster should exist on disk for resume');
+    });
+
+    it('should preserve worktree when cluster fails (not completedSuccessfully)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr mode
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      // Failed cluster stop — no completedSuccessfully
+      await lifecycleOrchestrator.stop(clusterId);
+
+      // Verify: Cluster preserved for debugging/resume
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Failed cluster should be preserved for resume');
+      assert.strictEqual(afterStop.state, 'stopped');
+    });
+
+    it('should NOT auto-cleanup when completedSuccessfully but no autoPr', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // No autoPr — plain `zeroshot run` without --pr/--ship
+      await lifecycleOrchestrator.stop(clusterId, { completedSuccessfully: true });
+
+      // Verify: Cluster preserved (might want to inspect results)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Cluster without autoPr should be preserved');
+      assert.strictEqual(afterStop.state, 'stopped');
+    });
   });
 }
 

@@ -11,8 +11,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
-    "test:unit": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
+    "test": "node tests/run-tests.js",
+    "test:unit": "node tests/run-tests.js",
     "test:slow": "mocha 'tests/integration/**/*.test.js' --timeout 180000",
     "test:all": "npm run test && npm run test:slow",
     "test:coverage": "c8 npm run test:unit",
@@ -102,7 +102,7 @@
   "dependencies": {
     "ajv": "^8.18.0",
     "ansi-to-html": "^0.7.2",
-    "better-sqlite3": "^12.5.0",
+    "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "chalk": "^4.1.2",
