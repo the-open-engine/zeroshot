@@ -11,8 +11,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
-    "test:unit": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
+    "test": "node tests/run-tests.js",
+    "test:unit": "node tests/run-tests.js",
     "test:slow": "mocha 'tests/integration/**/*.test.js' --timeout 180000",
     "test:all": "npm run test && npm run test:slow",
     "test:coverage": "c8 npm run test:unit",
