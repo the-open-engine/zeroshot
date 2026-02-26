@@ -7,6 +7,7 @@ const config = {
   jobs: 4,
   timeout: 10000,
   slow: 1000,
+  exit: true,
 };
 
 if (!hasCliTestFile) {
