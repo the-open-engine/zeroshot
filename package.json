@@ -102,7 +102,7 @@
   "dependencies": {
     "ajv": "^8.18.0",
     "ansi-to-html": "^0.7.2",
-    "better-sqlite3": "^12.5.0",
+    "better-sqlite3": "^12.6.2",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "chalk": "^4.1.2",
