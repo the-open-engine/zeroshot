@@ -402,6 +402,21 @@
           }
         }
       }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const approved = message?.content?.data?.approved; return approved === true || approved === 'true';"
+          },
+          "action": "stop_cluster"
+        }
+      ]
     }
   ]
 }
