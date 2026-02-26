@@ -411,6 +411,10 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) 
     'CLUSTER_RESUMED',
     'QUICK_VALIDATION_PASSED',
     'IMPLEMENTATION_READY',
+    // Produced conditionally by conductor/orchestrator fallback paths.
+    // These should not fail static flow validation when absent in the happy path.
+    'CONDUCTOR_ESCALATE',
+    'CLUSTER_OPERATIONS_VALIDATION_FAILED',
     ...GUIDANCE_TOPICS,
   ];
   const isSubTemplate = config.params && Object.keys(config.params).length > 0;
