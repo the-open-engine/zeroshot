@@ -157,14 +157,14 @@ function getPlatformConfig(platform, config = {}) {
       prNameLower: 'pull request',
       createCmd: `gh pr create${prBase ? ` --base ${prBase}` : ''} --title "feat: {{issue_title}}" --body "Closes #{{issue_number}}"`,
       mergeCmd: useMergeQueue
-        ? `PR_ID="$(gh pr view --json id --jq .id)"
+        ? `PR_ID="$(timeout 30 gh pr view --json id --jq .id)"
 gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{state}}}' -f id="$PR_ID"
 echo "Waiting for merge..."
-until gh pr view --json mergedAt --jq .mergedAt | grep -q .; do
-  sleep 20
-done`
-        : 'gh pr merge --merge --auto',
-      mergeFallbackCmd: useMergeQueue ? 'gh pr merge --merge --auto' : 'gh pr merge --merge',
+for i in $(seq 1 90); do if timeout 30 gh pr view --json mergedAt --jq .mergedAt | grep -q .; then break; fi; sleep 20; done`
+        : 'gh pr merge --merge --delete-branch',
+      mergeFallbackCmd: useMergeQueue
+        ? 'gh pr merge --merge --delete-branch'
+        : 'gh pr merge --merge',
       prUrlExample: 'https://github.com/owner/repo/pull/123',
       outputFields: { urlField: 'pr_url', numberField: 'pr_number', mergedField: 'merged' },
       rebaseBranch: prBase || 'main',
@@ -254,7 +254,7 @@ If auto-complete is not available or you need to merge immediately:`
       ? `This enqueues the ${prName} into GitHub's merge queue and waits until it is merged.
 
 If enqueue fails (merge queue not enabled, missing permissions, etc.), fall back to auto-merge:`
-      : `This sets auto-merge. If it fails (e.g., no auto-merge enabled), try:`;
+      : `This merges the ${prName} directly and deletes the remote branch. If it fails, try without branch deletion:`;
 
   const postMergeStatus = requiresPrIdExtraction
     ? 'PR IS CREATED AND AUTO-COMPLETE IS SET'
@@ -463,7 +463,7 @@ function generateGitPusherAgent(platform, options = {}) {
           description: 'MUST extract from gh pr merge output',
         },
       },
-      required: ['pr_number', 'pr_url', 'merged', 'merge_commit_sha'],
+      required: ['pr_number', 'pr_url', 'merged'],
     },
   };
 }
