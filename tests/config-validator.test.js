@@ -429,6 +429,180 @@ describe('analyzeMessageFlow - validator flows', function () {
   });
 });
 
+describe('analyzeMessageFlow - resolved topology regression checks', function () {
+  it('should not skip flow validation when conductor config already has runtime agents', function () {
+    const result = validateConfig({
+      agents: [
+        {
+          id: 'junior-conductor',
+          role: 'conductor',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'CLUSTER_OPERATIONS',
+                content: {
+                  data: {
+                    operations: [{ action: 'load_config', config: 'worker-validator' }],
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'PLAN_READY', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'IMPLEMENTATION_READY' },
+            },
+          },
+        },
+        {
+          id: 'completion-detector',
+          role: 'orchestrator',
+          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'stop_cluster' }],
+        },
+      ],
+    });
+
+    assert.ok(
+      result.errors.some((e) => e.includes('PLAN_READY') && e.includes('never produced')),
+      `Expected unproduced PLAN_READY error, got: ${result.errors.join(' | ')}`
+    );
+  });
+
+  it('should flag dead-end flows that cannot reach completion', function () {
+    const result = analyzeMessageFlow({
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: { topic: 'WORKER_PROGRESS' },
+            },
+          },
+        },
+        {
+          id: 'completion',
+          role: 'orchestrator',
+          triggers: [{ topic: 'DONE', action: 'stop_cluster' }],
+        },
+      ],
+    });
+
+    assert.ok(
+      result.errors.some((e) =>
+        e.includes('No reachable path from ISSUE_OPENED to terminal signal')
+      ),
+      `Expected missing completion path error, got: ${result.errors.join(' | ')}`
+    );
+  });
+});
+
+describe('analyzeMessageFlow - schema contract regression checks', function () {
+  it('should flag trigger scripts that require missing content.data keys', function () {
+    const result = analyzeMessageFlow({
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: {
+                  data: {
+                    approved: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          id: 'downstream-consumer',
+          role: 'implementation',
+          triggers: [
+            {
+              topic: 'VALIDATION_RESULT',
+              logic: {
+                script: 'return message.content.data.errors.length === 0;',
+              },
+              action: 'execute_task',
+            },
+          ],
+        },
+        {
+          id: 'completion',
+          role: 'orchestrator',
+          triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+        },
+      ],
+    });
+
+    assert.ok(
+      result.errors.some(
+        (e) => e.includes('expects content.data.errors') && e.includes('VALIDATION_RESULT')
+      ),
+      `Expected schema contract error, got: ${result.errors.join(' | ')}`
+    );
+  });
+
+  it('should not treat optional chained content.data access as required', function () {
+    const result = analyzeMessageFlow({
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+          hooks: {
+            onComplete: {
+              action: 'publish_message',
+              config: {
+                topic: 'VALIDATION_RESULT',
+                content: {
+                  data: {
+                    approved: true,
+                    errors: [],
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          id: 'completion',
+          role: 'orchestrator',
+          triggers: [
+            {
+              topic: 'VALIDATION_RESULT',
+              action: 'stop_cluster',
+              logic: {
+                script: 'return message?.content?.data?.criteriaResults?.length > 0;',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.ok(
+      !result.errors.some((e) => e.includes('criteriaResults') && e.includes('no producer for')),
+      `Expected no criteriaResults schema error, got: ${result.errors.join(' | ')}`
+    );
+  });
+});
+
 // === AGENT VALIDATION TESTS ===
 
 describe('validateAgents', function () {

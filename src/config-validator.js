@@ -24,7 +24,8 @@ const { GUIDANCE_TOPICS } = require('./guidance-topics');
  * @returns {boolean}
  */
 function isConductorConfig(config) {
-  return config.agents?.some(
+  const agents = Array.isArray(config?.agents) ? config.agents : [];
+  const hasConductorOps = agents.some(
     (a) =>
       a.role === 'conductor' &&
       // Old style: static topic in config
@@ -32,6 +33,25 @@ function isConductorConfig(config) {
         // New style: topic set in transform script (check for CLUSTER_OPERATIONS in script)
         a.hooks?.onComplete?.transform?.script?.includes('CLUSTER_OPERATIONS'))
   );
+
+  if (!hasConductorOps) {
+    return false;
+  }
+
+  // Once runtime agents are present (after load_config/add_agents), we should NOT
+  // skip message-flow validation. Skipping here caused proposed runtime topologies
+  // to bypass dead-topic checks.
+  const runtimeRoles = new Set([
+    'implementation',
+    'worker',
+    'planner',
+    'validator',
+    'tester',
+    'coordinator',
+  ]);
+  const hasRuntimeAgents = agents.some((a) => runtimeRoles.has(a.role));
+
+  return !hasRuntimeAgents;
 }
 
 /**
@@ -514,6 +534,204 @@ function reportMissingContextTopics(config, warnings) {
   }
 }
 
+function hasDynamicLoadConfigPath(config) {
+  for (const agent of config.agents || []) {
+    const onComplete = agent?.hooks?.onComplete;
+    if (!onComplete) continue;
+
+    const configOps = onComplete.config?.content?.data?.operations;
+    if (Array.isArray(configOps) && configOps.some((op) => op?.action === 'load_config')) {
+      return true;
+    }
+
+    const script = onComplete.transform?.script;
+    if (typeof script === 'string' && script.includes('load_config')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasReachableCompletionPath(config, topicConsumers, agentOutputTopics) {
+  const agentsById = new Map((config.agents || []).map((agent) => [agent.id, agent]));
+  const queue = ['ISSUE_OPENED'];
+  const visitedTopics = new Set(queue);
+
+  while (queue.length > 0) {
+    const topic = queue.shift();
+    if (topic === 'CLUSTER_COMPLETE') {
+      return true;
+    }
+
+    const consumers = topicConsumers.get(topic) || [];
+    for (const agentId of consumers) {
+      const agent = agentsById.get(agentId);
+      if (!agent) continue;
+
+      const stopTrigger = (agent.triggers || []).some(
+        (trigger) => trigger.topic === topic && trigger.action === 'stop_cluster'
+      );
+      if (stopTrigger) {
+        return true;
+      }
+
+      const outputs = agentOutputTopics.get(agentId) || [];
+      for (const nextTopic of outputs) {
+        if (!visitedTopics.has(nextTopic)) {
+          visitedTopics.add(nextTopic);
+          queue.push(nextTopic);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, errors, warnings) {
+  const hasPath = hasReachableCompletionPath(config, topicConsumers, agentOutputTopics);
+  if (hasPath) {
+    return;
+  }
+
+  const message =
+    'No reachable path from ISSUE_OPENED to terminal signal (stop_cluster or CLUSTER_COMPLETE). ' +
+    'Cluster may run until timeout even when validation appears to pass.';
+  const isDynamic = hasDynamicLoadConfigPath(config);
+  if (isDynamic) {
+    warnings.push(
+      `${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`
+    );
+    return;
+  }
+
+  const isSubTemplate = config.params && Object.keys(config.params).length > 0;
+  if (isSubTemplate) {
+    warnings.push(`${message} Template mode may rely on orchestrator completion injection.`);
+    return;
+  }
+
+  errors.push(message);
+}
+
+function extractPublishedDataKeys(hook) {
+  if (hook?.action !== 'publish_message') {
+    return null;
+  }
+  if (hook?.config?.topic && hook?.config?.content) {
+    const data = hook.config.content.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return new Set(Object.keys(data));
+    }
+    return new Set();
+  }
+  return null;
+}
+
+function extractHookTopics(hook) {
+  const topics = new Set();
+  if (hook?.config?.topic) {
+    topics.add(String(hook.config.topic));
+  }
+
+  const script = hook?.transform?.script;
+  if (typeof script === 'string') {
+    const matches = script.match(/topic:\s*['"]([A-Za-z0-9_-]+)['"]/g) || [];
+    for (const match of matches) {
+      const topic = match.match(/['"]([A-Za-z0-9_-]+)['"]/)?.[1];
+      if (topic) topics.add(topic);
+    }
+  }
+
+  return topics;
+}
+
+function collectTopicContracts(config) {
+  const contracts = new Map(); // topic -> [{ agentId, keys: Set<string>|null }]
+
+  const addContract = (topic, contract) => {
+    if (!contracts.has(topic)) {
+      contracts.set(topic, []);
+    }
+    contracts.get(topic).push(contract);
+  };
+
+  for (const agent of config.agents || []) {
+    const hook = agent?.hooks?.onComplete;
+    if (!hook) continue;
+
+    const topics = extractHookTopics(hook);
+    const staticKeys = extractPublishedDataKeys(hook);
+
+    for (const topic of topics) {
+      const isStaticTopic = hook?.config?.topic === topic;
+      if (isStaticTopic) {
+        addContract(topic, { agentId: agent.id, keys: staticKeys ?? new Set() });
+      } else {
+        // Topic inferred from transform script. Treat as dynamic payload shape.
+        addContract(topic, { agentId: agent.id, keys: null });
+      }
+    }
+  }
+
+  return contracts;
+}
+
+function extractRequiredDataKeys(script) {
+  if (typeof script !== 'string') return new Set();
+  const required = new Set();
+  // Only treat direct `content.data.key` access as required contract keys.
+  // Optional-chained access (`content?.data?.key`) is intentionally excluded.
+  const regex = /\.content\.data\.([A-Za-z_][A-Za-z0-9_]*)/g;
+  let match;
+  while ((match = regex.exec(script)) !== null) {
+    required.add(match[1]);
+  }
+  return required;
+}
+
+function reportSchemaContractMismatches(config, errors, warnings) {
+  const contracts = collectTopicContracts(config);
+  const seen = new Set();
+
+  for (const agent of config.agents || []) {
+    for (const trigger of agent.triggers || []) {
+      if (!trigger?.topic || !trigger?.logic?.script) continue;
+
+      const requiredKeys = extractRequiredDataKeys(trigger.logic.script);
+      if (requiredKeys.size === 0) continue;
+
+      const producers = contracts.get(trigger.topic) || [];
+      if (producers.length === 0) continue;
+
+      const staticProducers = producers.filter((producer) => producer.keys instanceof Set);
+      const hasDynamicProducers = producers.some((producer) => producer.keys === null);
+      if (staticProducers.length === 0) continue;
+
+      for (const key of requiredKeys) {
+        const token = `${agent.id}:${trigger.topic}:${key}`;
+        if (seen.has(token)) continue;
+        seen.add(token);
+
+        const hasStaticKey = staticProducers.some((producer) => producer.keys.has(key));
+        if (hasStaticKey) continue;
+
+        if (hasDynamicProducers) {
+          warnings.push(
+            `Agent '${agent.id}' trigger on '${trigger.topic}' expects content.data.${key}, ` +
+              `but static producers for '${trigger.topic}' do not publish it (dynamic producers present).`
+          );
+        } else {
+          errors.push(
+            `Agent '${agent.id}' trigger on '${trigger.topic}' expects content.data.${key}, ` +
+              `but no producer for '${trigger.topic}' publishes that data key.`
+          );
+        }
+      }
+    }
+  }
+}
+
 function analyzeMessageFlow(config) {
   const errors = [];
   const warnings = [];
@@ -529,6 +747,8 @@ function analyzeMessageFlow(config) {
   reportTwoAgentCycles(config, agentInputTopics, agentOutputTopics, warnings);
   reportMissingValidationTriggers(config, errors);
   reportMissingContextTopics(config, warnings);
+  reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, errors, warnings);
+  reportSchemaContractMismatches(config, errors, warnings);
 
   return { errors, warnings };
 }
