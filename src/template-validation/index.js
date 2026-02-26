@@ -7,6 +7,7 @@ const TemplateResolver = require('../template-resolver');
 const { SHARED_TRIGGER_SCRIPT } = require('../agents/git-pusher-template');
 const { simulateConsensusGates } = require('./simulate-consensus-gates');
 const { simulateTwoStageValidation } = require('./simulate-two-stage-validation');
+const { simulateRandomTopology } = require('./simulate-random-topology');
 
 const CONDUCTOR_COMPLEXITIES = ['TRIVIAL', 'SIMPLE', 'STANDARD', 'CRITICAL'];
 const CONDUCTOR_TASK_TYPES = ['TASK', 'DEBUG', 'INQUIRY'];
@@ -31,7 +32,14 @@ function inferTemplateIdFromPath(filePath) {
   return base || 'unknown';
 }
 
-async function validateTemplateConfig({ config, templateId, deep }) {
+async function validateTemplateConfig({
+  config,
+  templateId,
+  deep,
+  randomSampling = false,
+  templatesDir,
+  randomOptions = {},
+}) {
   const result = validateConfig(config);
 
   if (result.valid) {
@@ -39,6 +47,16 @@ async function validateTemplateConfig({ config, templateId, deep }) {
     simErrors.push(...simulateConsensusGates(config));
     if (deep) {
       simErrors.push(...(await simulateTwoStageValidation({ templateId, config })));
+    }
+    if (randomSampling) {
+      simErrors.push(
+        ...(await simulateRandomTopology({
+          config,
+          templateId,
+          templatesDir,
+          ...randomOptions,
+        }))
+      );
     }
     if (simErrors.length > 0) {
       result.valid = false;
@@ -150,7 +168,13 @@ function buildResolvedConductorRoutes(templatesDir) {
   return routeConfigs;
 }
 
-async function validateTemplates({ templatesDir, deep = false }) {
+async function validateTemplates({
+  templatesDir,
+  deep = false,
+  randomSampling = false,
+  randomScope = 'resolved',
+  randomOptions = {},
+}) {
   const templateFiles = [...findJsonFiles(templatesDir)];
   const resolvedConductorRoutes = buildResolvedConductorRoutes(templatesDir);
 
@@ -171,7 +195,14 @@ async function validateTemplates({ templatesDir, deep = false }) {
       }
 
       const templateId = inferTemplateIdFromPath(filePath);
-      const result = await validateTemplateConfig({ config, templateId, deep });
+      const result = await validateTemplateConfig({
+        config,
+        templateId,
+        deep,
+        randomSampling: randomSampling && randomScope === 'all',
+        templatesDir,
+        randomOptions,
+      });
 
       results.push({ filePath, result });
       validated++;
@@ -189,6 +220,9 @@ async function validateTemplates({ templatesDir, deep = false }) {
         config: resolvedRoute.config,
         templateId: resolvedRoute.templateId,
         deep,
+        randomSampling,
+        templatesDir,
+        randomOptions,
       });
       results.push({ filePath: resolvedRoute.filePath, result });
       validated++;
