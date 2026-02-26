@@ -2695,8 +2695,69 @@ Continue from where you left off. Review your previous output to understand what
     return loadedConfig.agents;
   }
 
+  _hasCompletionHandler(agentConfigs) {
+    return (agentConfigs || []).some(
+      (agent) =>
+        agent.id === 'completion-detector' ||
+        agent.id === 'git-pusher' ||
+        agent.hooks?.onComplete?.config?.topic === 'CLUSTER_COMPLETE' ||
+        agent.triggers?.some((trigger) => trigger.action === 'stop_cluster')
+    );
+  }
+
+  _injectCriticalValidationResultProducer(agentConfigs) {
+    const hasMetaCoordinator = agentConfigs.some((agent) => agent.id === 'meta-coordinator');
+    const hasRuntimeValidator = agentConfigs.some((agent) => agent.role === 'validator');
+    const hasSimulator = agentConfigs.some((agent) => agent.id === '__validation-result-simulator');
+
+    // CRITICAL flow loads quick/heavy validators dynamically; simulate stage-1 producer
+    // for static validation so we don't reject legitimate staged topologies.
+    if (hasMetaCoordinator && !hasRuntimeValidator && !hasSimulator) {
+      agentConfigs.push({
+        id: '__validation-result-simulator',
+        role: 'validator',
+        triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+        hooks: {
+          onComplete: {
+            action: 'publish_message',
+            config: {
+              topic: 'VALIDATION_RESULT',
+              content: {
+                data: {
+                  approved: true,
+                  errors: [],
+                  criteriaResults: [],
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+  }
+
+  _prepareValidationAgentConfigs(proposedAgentConfigs) {
+    const validationAgents = JSON.parse(JSON.stringify(proposedAgentConfigs || []));
+
+    this._injectCriticalValidationResultProducer(validationAgents);
+
+    // Operation-chain validation runs before _injectCompletionAgent executes.
+    // Add a synthetic completion handler so transient missing completion detectors
+    // don't invalidate otherwise-correct topology changes.
+    if (!this._hasCompletionHandler(validationAgents)) {
+      validationAgents.push({
+        id: '__completion-validator',
+        role: 'orchestrator',
+        triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+      });
+    }
+
+    return validationAgents;
+  }
+
   _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
-    const mockConfig = { agents: proposedAgentConfigs };
+    const validationAgents = this._prepareValidationAgentConfigs(proposedAgentConfigs);
+    const mockConfig = { agents: validationAgents };
     const validation = configValidator.validateConfig(mockConfig);
 
     if (!validation.valid) {
