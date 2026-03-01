@@ -296,6 +296,30 @@ function recordAgentTriggers(agent, topicConsumers, agentInputTopics) {
   }
 }
 
+function extractDynamicTopicsFromScript(script, ctx) {
+  if (!script || typeof script !== 'string') {
+    return;
+  }
+
+  const topicMatches = script.match(/topic:\s*['"]([A-Z_]+)['"]/g) || [];
+  for (const match of topicMatches) {
+    const dynamicTopic = match.match(/['"]([A-Z_]+)['"]/)?.[1];
+    if (!dynamicTopic || dynamicTopic === ctx.outputTopic) {
+      continue;
+    }
+
+    const producers = ensureTopicList(ctx.topicProducers, dynamicTopic);
+    if (!producers.includes(ctx.agentId)) {
+      producers.push(`${ctx.agentId}*`);
+    }
+
+    const outputs = ctx.agentOutputTopics.get(ctx.agentId);
+    if (!outputs.includes(dynamicTopic)) {
+      outputs.push(dynamicTopic);
+    }
+  }
+}
+
 function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
   const outputTopic = agent.hooks?.onComplete?.config?.topic;
   if (outputTopic) {
@@ -303,28 +327,10 @@ function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
     agentOutputTopics.get(agent.id).push(outputTopic);
   }
 
-  const hookLogicScript = agent.hooks?.onComplete?.logic?.script;
-  if (!hookLogicScript || typeof hookLogicScript !== 'string') {
-    return;
-  }
-
-  const topicMatches = hookLogicScript.match(/topic:\s*['"]([A-Z_]+)['"]/g) || [];
-  for (const match of topicMatches) {
-    const dynamicTopic = match.match(/['"]([A-Z_]+)['"]/)?.[1];
-    if (!dynamicTopic || dynamicTopic === outputTopic) {
-      continue;
-    }
-
-    const producers = ensureTopicList(topicProducers, dynamicTopic);
-    if (!producers.includes(agent.id)) {
-      producers.push(`${agent.id}*`);
-    }
-
-    const outputs = agentOutputTopics.get(agent.id);
-    if (!outputs.includes(dynamicTopic)) {
-      outputs.push(dynamicTopic);
-    }
-  }
+  const ctx = { outputTopic, agentId: agent.id, topicProducers, agentOutputTopics };
+  const hook = agent.hooks?.onComplete;
+  extractDynamicTopicsFromScript(hook?.logic?.script, ctx);
+  extractDynamicTopicsFromScript(hook?.transform?.script, ctx);
 }
 
 function buildMessageFlowGraph(config) {
@@ -372,13 +378,15 @@ function reportCompletionHandlers(config, errors, warnings) {
       a.hooks?.onComplete?.config?.topic === 'CLUSTER_COMPLETE'
   );
   const isTemplateConfig = config.params && Object.keys(config.params).length > 0;
+  // Conductor-driven configs (merged conductor + template agents) rely on idle timeout
+  const hasConductorAgents = config.agents.some((a) => a.role === 'conductor');
 
   if (completionHandlers.length === 0) {
     const message =
       'No completion handler found. Cluster will run until idle timeout (2 min). ' +
       'Add an agent with trigger action: "stop_cluster"';
-    if (isTemplateConfig) {
-      warnings.push(`${message} (template will rely on orchestrator injection)`);
+    if (isTemplateConfig || hasConductorAgents) {
+      warnings.push(`${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`);
     } else {
       errors.push(message);
     }
@@ -411,10 +419,7 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) 
     'CLUSTER_RESUMED',
     'QUICK_VALIDATION_PASSED',
     'IMPLEMENTATION_READY',
-    // Produced conditionally by conductor/orchestrator fallback paths.
-    // These should not fail static flow validation when absent in the happy path.
-    'CONDUCTOR_ESCALATE',
-    'CLUSTER_OPERATIONS_VALIDATION_FAILED',
+    'CLUSTER_OPERATIONS_VALIDATION_FAILED', // Produced by orchestrator at runtime
     ...GUIDANCE_TOPICS,
   ];
   const isSubTemplate = config.params && Object.keys(config.params).length > 0;
@@ -603,9 +608,7 @@ function reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, 
     'Cluster may run until timeout even when validation appears to pass.';
   const isDynamic = hasDynamicLoadConfigPath(config);
   if (isDynamic) {
-    warnings.push(
-      `${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`
-    );
+    warnings.push(`${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`);
     return;
   }
 
