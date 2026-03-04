@@ -3539,6 +3539,25 @@ Continue from where you left off. Review your previous output to understand what
 
     return config;
   }
+
+  /**
+   * Garbage-collect orphaned worktree directories and database files.
+   *
+   * Delegates to the standalone gc module, passing in-memory cluster IDs
+   * as additional known IDs (clusters.json may not reflect recently spawned clusters).
+   *
+   * @param {object} [options]
+   * @param {boolean} [options.dryRun=false] - If true, report but don't delete
+   * @returns {{ orphanedWorktrees: string[], orphanedDbs: string[], errors: string[] }}
+   */
+  gcWorktrees(options = {}) {
+    const { gcOrphanedWorktrees } = require('./lib/gc');
+    return gcOrphanedWorktrees({
+      storageDir: this.storageDir,
+      extraKnownIds: new Set(this.clusters.keys()),
+      dryRun: options.dryRun || false,
+    });
+  }
 }
 
 module.exports = Orchestrator;

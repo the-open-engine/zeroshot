@@ -3185,6 +3185,51 @@ program
     }
   });
 
+// Garbage-collect orphaned worktrees and database files
+function printGcResult(result, dryRun) {
+  const verb = dryRun ? 'Would remove' : 'Removed';
+  if (result.orphanedWorktrees.length === 0 && result.orphanedDbs.length === 0) {
+    console.log(chalk.dim('No orphaned worktrees or database files found.'));
+    return;
+  }
+  if (result.orphanedWorktrees.length > 0) {
+    console.log(chalk.bold(`\n${verb} ${result.orphanedWorktrees.length} orphaned worktree(s):`));
+    result.orphanedWorktrees.forEach((n) => console.log(chalk.dim(`  ~/.zeroshot/worktrees/${n}/`)));
+  }
+  if (result.orphanedDbs.length > 0) {
+    console.log(chalk.bold(`\n${verb} ${result.orphanedDbs.length} orphaned database file(s):`));
+    result.orphanedDbs.forEach((n) => console.log(chalk.dim(`  ~/.zeroshot/${n}`)));
+  }
+  if (result.errors.length > 0) {
+    console.log(chalk.yellow(`\n${result.errors.length} error(s):`));
+    result.errors.forEach((e) => console.log(chalk.yellow(`  ${e}`)));
+  }
+  if (!dryRun) console.log(chalk.green('\n✓ Garbage collection complete.'));
+}
+
+async function runGc(dryRun) {
+  try {
+    const orchestrator = await getOrchestrator();
+    return orchestrator.gcWorktrees({ dryRun });
+  } catch {
+    const { gcOrphanedWorktrees } = await import('../src/lib/gc.js');
+    return gcOrphanedWorktrees({ dryRun });
+  }
+}
+
+program
+  .command('gc')
+  .description('Clean up orphaned worktree directories and stale database files')
+  .option('--dry-run', 'Show what would be removed without deleting')
+  .action(async (options) => {
+    try {
+      printGcResult(await runGc(options.dryRun), options.dryRun);
+    } catch (error) {
+      console.error('Error during garbage collection:', error.message);
+      process.exit(1);
+    }
+  });
+
 // Purge all runs (clusters + tasks) - NUCLEAR option
 program
   .command('purge')
