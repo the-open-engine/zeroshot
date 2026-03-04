@@ -65,6 +65,7 @@ function registerCreateWorktreeIsolationTests() {
     registerWorktreeIsolationTest();
     registerWorktreeNonGitTest();
     registerWorktreeCleanupBeforeCreateTest();
+    registerWorktreeSetupCommandTest();
   });
 }
 
@@ -207,6 +208,29 @@ function registerWorktreeCleanupBeforeCreateTest() {
     assert(
       !fs.existsSync(path.join(info2.path, 'marker.txt')),
       'Old marker should be removed (fresh worktree)'
+    );
+  });
+}
+
+function registerWorktreeSetupCommandTest() {
+  it('should run worktree.setup command from repo settings', function () {
+    const settingsDir = path.join(testRepoDir, '.zeroshot');
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(settingsDir, 'settings.json'),
+      JSON.stringify({ worktree: { setup: 'touch setup-ran.marker' } })
+    );
+    execSync('git add -A && git commit -m "Add zeroshot settings"', {
+      cwd: testRepoDir,
+      stdio: 'pipe',
+    });
+
+    const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
+
+    const markerPath = path.join(info.path, 'setup-ran.marker');
+    assert(
+      fs.existsSync(markerPath),
+      'Setup command should have created marker file in worktree'
     );
   });
 }

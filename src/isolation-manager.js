@@ -1348,10 +1348,12 @@ class IsolationManager {
 
     // Priority: 1) options.baseRef, 2) repo settings, 3) HEAD (default)
     let worktreeBaseRef = options.baseRef || null;
+    let worktreeSetupCommand = null;
     try {
       const repoSettingsResult = readRepoSettings(repoRoot);
       const repoSettings = repoSettingsResult.settings || {};
       const candidate = repoSettings.worktree?.baseRef;
+      worktreeSetupCommand = repoSettings.worktree?.setup || null;
       if (
         !worktreeBaseRef &&
         typeof candidate === 'string' &&
@@ -1458,6 +1460,17 @@ class IsolationManager {
         }
         throw err;
       }
+    }
+
+    // Run repo-configured setup command (e.g. npm ci)
+    if (worktreeSetupCommand && typeof worktreeSetupCommand === "string") {
+      console.log(`[IsolationManager] Running worktree setup: ${worktreeSetupCommand}`);
+      execSync(worktreeSetupCommand, {
+        cwd: worktreePath,
+        encoding: "utf8",
+        stdio: "inherit",
+      });
+      console.log(`[IsolationManager] ✓ Worktree setup complete`);
     }
 
     return {
