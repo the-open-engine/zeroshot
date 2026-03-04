@@ -1,0 +1,174 @@
+/**
+ * Garbage collection for orphaned zeroshot worktrees and database files.
+ *
+ * Standalone module with ZERO dependencies on Orchestrator or IsolationManager.
+ * All operations are synchronous so it can be called from any context
+ * (CLI, createWorktree pre-flight, etc.) without async concerns.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const DEFAULT_STORAGE_DIR = path.join(os.homedir(), '.zeroshot');
+
+/** Cluster ID pattern: adjective-noun-number (e.g., "flying-jungle-51") */
+const CLUSTER_ID_PATTERN = /^[a-z]+-[a-z]+-\d+$/;
+
+function isClusterDir(entry) {
+  return entry.isDirectory() && CLUSTER_ID_PATTERN.test(entry.name);
+}
+
+/**
+ * Read known cluster IDs from clusters.json (synchronous, no locking).
+ * @param {string} storageDir
+ * @returns {Set<string>}
+ */
+function readKnownClusterIds(storageDir) {
+  const ids = new Set();
+  const clustersFile = path.join(storageDir, 'clusters.json');
+  try {
+    if (!fs.existsSync(clustersFile)) return ids;
+    const raw = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    for (const id of Object.keys(raw)) ids.add(id);
+  } catch {
+    // Corrupt/missing — treat as empty (safe: nothing deleted incorrectly)
+  }
+  return ids;
+}
+
+/** Count orphaned worktree directories (for error messages). */
+function countOrphanedWorktrees(storageDir = DEFAULT_STORAGE_DIR) {
+  const worktreeDir = path.join(storageDir, 'worktrees');
+  if (!fs.existsSync(worktreeDir)) return 0;
+  const knownIds = readKnownClusterIds(storageDir);
+  try {
+    return fs.readdirSync(worktreeDir, { withFileTypes: true })
+      .filter(e => isClusterDir(e) && !knownIds.has(e.name))
+      .length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Try to remove a single file. Returns error string or null. */
+function tryUnlink(filePath) {
+  try { fs.unlinkSync(filePath); return null; } catch (err) { return err.message; }
+}
+
+/** Try to remove a directory tree. Returns error string or null. */
+function tryRmdir(dirPath) {
+  try { fs.rmSync(dirPath, { recursive: true, force: true }); return null; } catch (err) { return err.message; }
+}
+
+/** Find repo root from a worktree's .git file (gitdir pointer). */
+function findRepoRootFromWorktree(worktreeDir) {
+  let entries;
+  try { entries = fs.readdirSync(worktreeDir, { withFileTypes: true }); } catch { return null; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dotGit = path.join(worktreeDir, entry.name, '.git');
+    try {
+      const content = fs.readFileSync(dotGit, 'utf8').trim();
+      const match = content.match(/^gitdir:\s*(.+)/);
+      if (!match) continue;
+      // gitdir: /repo/.git/worktrees/<name> → resolve to /repo
+      const repoRoot = path.resolve(match[1].trim(), '..', '..', '..');
+      if (fs.existsSync(path.join(repoRoot, '.git'))) return repoRoot;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Best-effort git worktree prune. */
+function pruneGitWorktrees(worktreeDir) {
+  const repoRoot = findRepoRootFromWorktree(worktreeDir);
+  if (!repoRoot) return;
+  try {
+    require('child_process').execSync('git worktree prune', {
+      cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 10000,
+    });
+  } catch {
+    // Best effort
+  }
+}
+
+/**
+ * Garbage-collect orphaned worktree directories and database files.
+ *
+ * @param {object} [options]
+ * @param {string} [options.storageDir]
+ * @param {Set<string>} [options.extraKnownIds]
+ * @param {boolean} [options.dryRun=false]
+ * @returns {{ orphanedWorktrees: string[], orphanedDbs: string[], errors: string[] }}
+ */
+function gcOrphanedWorktrees(options = {}) {
+  const storageDir = options.storageDir || DEFAULT_STORAGE_DIR;
+  const dryRun = options.dryRun || false;
+  const worktreeDir = path.join(storageDir, 'worktrees');
+  const result = { orphanedWorktrees: [], orphanedDbs: [], errors: [] };
+
+  const knownIds = readKnownClusterIds(storageDir);
+  if (options.extraKnownIds) {
+    for (const id of options.extraKnownIds) knownIds.add(id);
+  }
+
+  collectOrphanedWorktrees(worktreeDir, knownIds, dryRun, result);
+  collectOrphanedDbFiles(storageDir, knownIds, dryRun, result);
+
+  if (!dryRun && result.orphanedWorktrees.length > 0) {
+    pruneGitWorktrees(worktreeDir);
+  }
+
+  return result;
+}
+
+function collectOrphanedWorktrees(worktreeDir, knownIds, dryRun, result) {
+  if (!fs.existsSync(worktreeDir)) return;
+  let entries;
+  try { entries = fs.readdirSync(worktreeDir, { withFileTypes: true }); } catch (err) {
+    result.errors.push(`Failed to read worktree dir: ${err.message}`);
+    return;
+  }
+  for (const entry of entries) {
+    if (!isClusterDir(entry) || knownIds.has(entry.name)) continue;
+    result.orphanedWorktrees.push(entry.name);
+    if (dryRun) continue;
+    const err = tryRmdir(path.join(worktreeDir, entry.name));
+    if (err) result.errors.push(`Failed to remove worktree ${entry.name}: ${err}`);
+  }
+}
+
+function collectOrphanedDbFiles(storageDir, knownIds, dryRun, result) {
+  let entries;
+  try { entries = fs.readdirSync(storageDir); } catch { return; }
+  for (const entry of entries) {
+    const match = entry.match(/^(.+)\.(db|db-wal|db-shm)$/);
+    if (!match || knownIds.has(match[1])) continue;
+    result.orphanedDbs.push(entry);
+    if (dryRun) continue;
+    const err = tryUnlink(path.join(storageDir, entry));
+    if (err) result.errors.push(`Failed to remove db file ${entry}: ${err}`);
+  }
+}
+
+/**
+ * Get disk space info for a path.
+ * @param {string} dirPath
+ * @returns {{ available: number, total: number, usagePercent: number } | null}
+ */
+function getDiskSpace(dirPath) {
+  try {
+    const stats = fs.statfsSync(dirPath);
+    const available = stats.bavail * stats.bsize;
+    const total = stats.blocks * stats.bsize;
+    const usagePercent = total > 0 ? ((total - available) / total) * 100 : 0;
+    return { available, total, usagePercent };
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { gcOrphanedWorktrees, countOrphanedWorktrees, getDiskSpace, CLUSTER_ID_PATTERN };

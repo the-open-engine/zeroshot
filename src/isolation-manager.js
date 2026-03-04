@@ -1346,6 +1346,49 @@ class IsolationManager {
       throw new Error(`Cannot find git root for ${workDir}`);
     }
 
+    // Disk space guard: prevent worktree creation when disk is critically low.
+    // Uses standalone gc module (no Orchestrator dependency — avoids circular require).
+    const { gcOrphanedWorktrees, getDiskSpace, countOrphanedWorktrees } = require('./lib/gc');
+    const MIN_DISK_GB = 10;
+    const AUTO_GC_THRESHOLD_PERCENT = 80;
+
+    const diskCheck = getDiskSpace(os.homedir());
+    if (diskCheck) {
+      // Auto-GC when disk usage exceeds threshold
+      if (diskCheck.usagePercent > AUTO_GC_THRESHOLD_PERCENT) {
+        const orphanCount = countOrphanedWorktrees();
+        if (orphanCount > 0) {
+          console.log(
+            `[IsolationManager] Disk at ${diskCheck.usagePercent.toFixed(0)}% usage, ` +
+            `running auto-GC on ${orphanCount} orphaned worktree(s)...`
+          );
+          const gcResult = gcOrphanedWorktrees();
+          if (gcResult.orphanedWorktrees.length > 0 || gcResult.orphanedDbs.length > 0) {
+            console.log(
+              `[IsolationManager] Auto-GC: removed ${gcResult.orphanedWorktrees.length} worktree(s), ` +
+              `${gcResult.orphanedDbs.length} db file(s)`
+            );
+          }
+        }
+
+        // Re-check disk after GC
+        const afterGc = getDiskSpace(os.homedir());
+        if (afterGc && afterGc.available < MIN_DISK_GB * 1e9) {
+          throw new Error(
+            `Insufficient disk space: ${(afterGc.available / 1e9).toFixed(1)}GB available, ` +
+            `need ${MIN_DISK_GB}GB minimum. Run 'zeroshot gc' to clean up orphaned worktrees, ` +
+            `or 'zeroshot purge' to remove all cluster data.`
+          );
+        }
+      } else if (diskCheck.available < MIN_DISK_GB * 1e9) {
+        throw new Error(
+          `Insufficient disk space: ${(diskCheck.available / 1e9).toFixed(1)}GB available, ` +
+          `need ${MIN_DISK_GB}GB minimum. Run 'zeroshot gc' to clean up orphaned worktrees, ` +
+          `or 'zeroshot purge' to remove all cluster data.`
+        );
+      }
+    }
+
     // Priority: 1) options.baseRef, 2) repo settings, 3) HEAD (default)
     let worktreeBaseRef = options.baseRef || null;
     let worktreeSetupCommand = null;
