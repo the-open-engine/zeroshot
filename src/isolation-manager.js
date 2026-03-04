@@ -1512,6 +1512,7 @@ class IsolationManager {
         cwd: worktreePath,
         encoding: "utf8",
         stdio: "inherit",
+        timeout: 300000, // 5 minutes — npm ci on large repos (2000+ packages) can take 60-120s
       });
       console.log(`[IsolationManager] ✓ Worktree setup complete`);
     }
