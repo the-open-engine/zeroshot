@@ -1,5 +1,4 @@
 const fs = require('fs');
-const chalk = require('chalk');
 const Orchestrator = require('../../src/orchestrator');
 const { detectIdType } = require('../../lib/id-detector');
 const { getTask } = require('../../task-lib/store.js');
@@ -12,6 +11,10 @@ const {
   analyzeProcessHealth,
   isPlatformSupported: stuckDetectorPlatformSupported,
 } = require('../../src/agent/agent-stuck-detector');
+const {
+  printClusterInspectionHuman,
+  printTaskInspectionHuman,
+} = require('./inspect-render');
 
 const DEFAULT_SAMPLE_MS = 1000;
 const TASK_STALE_WARNING_MS = 5 * 60 * 1000;
@@ -107,20 +110,31 @@ function buildTaskWarnings(task, details) {
   return warnings;
 }
 
-function summarizeTaskRecord(task, now = Date.now(), existsSync = fs.existsSync) {
-  if (!task) {
-    return null;
-  }
+function getOptionalPathState(filePath, existsSync) {
+  return {
+    path: filePath || null,
+    exists: Boolean(filePath && existsSync(filePath)),
+  };
+}
 
+function buildTaskDetails(task, now, existsSync) {
   const updatedAt = safeDate(task.updatedAt);
-  const details = {
+  const logFile = getOptionalPathState(task.logFile, existsSync);
+  const socketPath = getOptionalPathState(task.socketPath, existsSync);
+
+  return {
     updatedAgeMs: updatedAt ? now - updatedAt.getTime() : null,
     processRunning: task.pid ? isProcessRunning(task.pid) : false,
-    logFileExists: Boolean(task.logFile && existsSync(task.logFile)),
-    socketPathExists: Boolean(task.socketPath && existsSync(task.socketPath)),
+    logFile,
+    socketPath,
   };
-  const warnings = buildTaskWarnings(task, details);
+}
 
+function formatUpdatedAgeHuman(updatedAgeMs) {
+  return updatedAgeMs === null ? 'unknown' : formatAgeMs(updatedAgeMs);
+}
+
+function buildTaskSummary(task, details) {
   return {
     id: task.id,
     status: task.status,
@@ -130,18 +144,29 @@ function summarizeTaskRecord(task, now = Date.now(), existsSync = fs.existsSync)
     cwd: task.cwd || null,
     sessionId: task.sessionId || null,
     attachable: Boolean(task.attachable),
-    socketPath: task.socketPath || null,
-    socketPathExists: details.socketPathExists,
-    logFile: task.logFile || null,
-    logFileExists: details.logFileExists,
+    socketPath: details.socketPath.path,
+    socketPathExists: details.socketPath.exists,
+    logFile: details.logFile.path,
+    logFileExists: details.logFile.exists,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     updatedAgeMs: details.updatedAgeMs,
-    updatedAgeHuman:
-      details.updatedAgeMs === null ? 'unknown' : formatAgeMs(details.updatedAgeMs),
+    updatedAgeHuman: formatUpdatedAgeHuman(details.updatedAgeMs),
     processRunning: details.processRunning,
-    warnings,
+    warnings: buildTaskWarnings(task, {
+      ...details,
+      logFileExists: details.logFile.exists,
+      socketPathExists: details.socketPath.exists,
+    }),
   };
+}
+
+function summarizeTaskRecord(task, now = Date.now(), existsSync = fs.existsSync) {
+  if (!task) {
+    return null;
+  }
+
+  return buildTaskSummary(task, buildTaskDetails(task, now, existsSync));
 }
 
 async function inspectProcess(pid, sampleMs, options = {}) {
@@ -231,106 +256,6 @@ async function buildTaskInspection(taskId, options = {}, deps = {}) {
     task: summarizeTaskRecord(task, Date.now(), existsSync),
     process: await inspectProcess(task.pid, sampleMs),
   };
-}
-
-function printProcessSection(label, processInfo, indent = '') {
-  if (!processInfo) {
-    console.log(`${indent}${chalk.dim(label)}: N/A`);
-    return;
-  }
-
-  if (!processInfo.metrics?.exists) {
-    console.log(`${indent}${chalk.dim(label)}: PID ${processInfo.pid} not running`);
-    return;
-  }
-
-  const metrics = processInfo.metrics;
-  console.log(
-    `${indent}${chalk.dim(label)}: PID ${processInfo.pid} · activity ${processInfo.activity}`
-  );
-  console.log(
-    `${indent}  state=${metrics.state} cpu=${metrics.cpuPercent}% mem=${metrics.memoryMB}MB threads=${metrics.threads} children=${metrics.childCount}`
-  );
-
-  const established = metrics.network?.established || 0;
-  if (established > 0 || metrics.network?.hasActivity) {
-    console.log(
-      `${indent}  net=${established} conn sendQ=${metrics.network.sendQueueBytes} recvQ=${metrics.network.recvQueueBytes} activity=${metrics.network.hasActivity ? 'yes' : 'no'}`
-    );
-  }
-
-  if (processInfo.health?.analysis) {
-    console.log(`${indent}  health=${processInfo.health.analysis}`);
-  }
-}
-
-function printWarnings(warnings, indent = '') {
-  if (!warnings || warnings.length === 0) {
-    return;
-  }
-
-  for (const warning of warnings) {
-    console.log(`${indent}${chalk.yellow(`warning: ${warning}`)}`);
-  }
-}
-
-function printTaskSection(task, indent = '') {
-  if (!task) {
-    return;
-  }
-
-  console.log(
-    `${indent}${chalk.dim('Task')}: ${task.id} · ${task.status} · updated ${task.updatedAgeHuman} ago`
-  );
-  console.log(
-    `${indent}  pid=${task.pid || 'N/A'} exit=${task.exitCode ?? 'N/A'} attachable=${task.attachable ? 'yes' : 'no'}`
-  );
-  console.log(
-    `${indent}  log=${task.logFile || 'N/A'} (${task.logFileExists ? 'present' : 'missing'})`
-  );
-  if (task.socketPath) {
-    console.log(
-      `${indent}  socket=${task.socketPath} (${task.socketPathExists ? 'present' : 'missing'})`
-    );
-  }
-  printWarnings(task.warnings, `${indent}  `);
-}
-
-function printClusterInspectionHuman(inspection) {
-  console.log(`\nCluster Inspect: ${inspection.id}`);
-  console.log(`State: ${inspection.cluster.state}`);
-  console.log(`PID: ${inspection.cluster.pid || 'N/A'}`);
-  console.log(`Created: ${new Date(inspection.cluster.createdAt).toLocaleString()}`);
-  console.log(`Messages: ${inspection.cluster.messageCount}`);
-  console.log(`Sample: ${inspection.sampleMs}ms`);
-
-  console.log('\nCluster Process:');
-  printProcessSection('process', inspection.process, '  ');
-
-  console.log('\nAgents:');
-  for (const agent of inspection.agents) {
-    const modelLabel = agent.model ? ` [${agent.model}]` : '';
-    console.log(`  - ${agent.id} (${agent.role})${modelLabel}`);
-    console.log(
-      `    state=${agent.state} iteration=${agent.iteration} runningTask=${agent.currentTask ? 'yes' : 'no'}`
-    );
-    if (agent.currentTaskId) {
-      console.log(`    taskId=${agent.currentTaskId}`);
-    }
-    printProcessSection('process', agent.process, '    ');
-    printTaskSection(agent.task, '    ');
-    printWarnings(agent.warnings, '    ');
-  }
-  console.log('');
-}
-
-function printTaskInspectionHuman(inspection) {
-  console.log(`\nTask Inspect: ${inspection.id}`);
-  console.log(`Sample: ${inspection.sampleMs}ms`);
-  printTaskSection(inspection.task);
-  console.log('');
-  printProcessSection('Process', inspection.process);
-  console.log('');
 }
 
 async function runInspectCommand(id, options = {}, deps = {}) {
