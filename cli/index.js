@@ -62,6 +62,7 @@ const {
 } = require('../lib/start-cluster');
 const { requirePreflight } = require('../src/preflight');
 const { providersCommand, setDefaultCommand, setupCommand } = require('./commands/providers');
+const { runInspectCommand } = require('./commands/inspect');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates } = require('./lib/update-checker');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
@@ -2597,6 +2598,24 @@ program
         console.log(JSON.stringify({ error: error.message }, null, 2));
       } else {
         console.error('Error getting status:', error.message);
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('inspect <id>')
+  .description('Inspect live process activity for a task or cluster')
+  .option('--json', 'Output as JSON')
+  .option('--sample-ms <ms>', 'Sampling period for process activity checks', '1000')
+  .action(async (id, options) => {
+    try {
+      await runInspectCommand(id, options);
+    } catch (error) {
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }, null, 2));
+      } else {
+        console.error('Error inspecting:', error.message);
       }
       process.exit(1);
     }
