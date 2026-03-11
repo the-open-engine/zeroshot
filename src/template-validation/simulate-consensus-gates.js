@@ -2,24 +2,42 @@ const Ledger = require('../ledger');
 const MessageBus = require('../message-bus');
 const LogicEngine = require('../logic-engine');
 
-function maybePublishStageStart({ messageBus, clusterId, logicScript }) {
-  const now = Date.now();
+const STAGE_START_TOPICS = ['IMPLEMENTATION_READY', 'QUICK_VALIDATION_PASSED'];
+const EXTERNAL_STAGE_SENDERS = {
+  IMPLEMENTATION_READY: 'worker',
+  QUICK_VALIDATION_PASSED: 'consensus-coordinator',
+};
 
-  if (logicScript.includes('IMPLEMENTATION_READY')) {
+function scriptReferencesTopic(logicScript, topic) {
+  return logicScript.includes(`topic: '${topic}'`) || logicScript.includes(`topic: "${topic}"`);
+}
+
+function getRequiredStageTopics(logicScript) {
+  return STAGE_START_TOPICS.filter((topic) => scriptReferencesTopic(logicScript, topic));
+}
+
+function publishStageStartMessages({
+  messageBus,
+  clusterId,
+  producersByTopic,
+  requiredStageTopics,
+  allowExternalTopics,
+}) {
+  let timestamp = Date.now();
+
+  for (const topic of requiredStageTopics) {
+    const producers = Array.from(producersByTopic.get(topic) || []);
+    const sender =
+      producers[0] || (allowExternalTopics.includes(topic) ? EXTERNAL_STAGE_SENDERS[topic] : null);
+    if (!sender) {
+      continue;
+    }
+
     messageBus.publish({
       cluster_id: clusterId,
-      topic: 'IMPLEMENTATION_READY',
-      sender: 'worker',
-      timestamp: now,
-    });
-  }
-
-  if (logicScript.includes('QUICK_VALIDATION_PASSED')) {
-    messageBus.publish({
-      cluster_id: clusterId,
-      topic: 'QUICK_VALIDATION_PASSED',
-      sender: 'consensus-coordinator',
-      timestamp: now,
+      topic,
+      sender,
+      timestamp: timestamp++,
     });
   }
 }
@@ -28,22 +46,216 @@ function collectTopicProducers(config) {
   const producersByTopic = new Map();
 
   for (const agent of config.agents || []) {
-    const hooks = agent?.hooks;
-    if (!hooks) continue;
-
-    const onComplete = hooks.onComplete;
-    if (!onComplete) continue;
-
-    if (onComplete.action === 'publish_message' && onComplete.config?.topic) {
-      const topic = String(onComplete.config.topic);
-      if (!producersByTopic.has(topic)) {
-        producersByTopic.set(topic, new Set());
-      }
-      producersByTopic.get(topic).add(agent.id);
+    const topic = getPublishedTopic(agent);
+    if (!topic) continue;
+    if (!producersByTopic.has(topic)) {
+      producersByTopic.set(topic, new Set());
     }
+    producersByTopic.get(topic).add(agent.id);
   }
 
   return producersByTopic;
+}
+
+function getPublishedTopic(agent) {
+  const onComplete = agent?.hooks?.onComplete;
+  if (!onComplete) return null;
+  if (onComplete.action !== 'publish_message') return null;
+  if (!onComplete.config?.topic) return null;
+  return String(onComplete.config.topic);
+}
+
+function hasConsensusLikeId(agentId) {
+  return agentId.includes('consensus') || agentId.includes('coordinator');
+}
+
+function hasStopClusterTrigger(agent) {
+  return agent?.triggers?.some((trigger) => trigger.action === 'stop_cluster');
+}
+
+function isConsensusLikeAgent(agent) {
+  const agentId = String(agent?.id || '');
+  const explicitIds = ['git-pusher', 'completion-detector'];
+
+  return (
+    agent?.role === 'coordinator' ||
+    explicitIds.includes(agentId) ||
+    hasConsensusLikeId(agentId) ||
+    hasStopClusterTrigger(agent)
+  );
+}
+
+function getMissingStageTopics(requiredStageTopics, producersByTopic, allowExternalTopics) {
+  return requiredStageTopics.filter((stageTopic) => {
+    const producers = producersByTopic.get(stageTopic);
+    return (!producers || producers.size === 0) && !allowExternalTopics.includes(stageTopic);
+  });
+}
+
+function createSimulationContext(config, options = {}) {
+  const agents = Array.isArray(config.agents) ? config.agents : [];
+
+  return {
+    agents,
+    producersByTopic: collectTopicProducers(config),
+    allowExternalTopics: Array.isArray(options.allowExternalTopics)
+      ? options.allowExternalTopics
+      : [],
+    cluster: {
+      id: 'template-sim',
+      agents: agents.map((a) => ({ id: a.id, role: a.role })),
+    },
+  };
+}
+
+function evaluateScenario({
+  agentId,
+  cluster,
+  topic,
+  script,
+  producers,
+  producersByTopic,
+  requiredStageTopics,
+  allowExternalTopics,
+  publishMessages,
+}) {
+  const ledger = new Ledger(':memory:');
+  const messageBus = new MessageBus(ledger);
+  const logicEngine = new LogicEngine(messageBus, cluster);
+
+  publishStageStartMessages({
+    messageBus,
+    clusterId: cluster.id,
+    producersByTopic,
+    requiredStageTopics,
+    allowExternalTopics,
+  });
+
+  publishMessages(messageBus, producers, cluster.id);
+
+  const result = logicEngine.evaluate(script, { id: agentId, cluster_id: cluster.id }, { topic });
+  ledger.close();
+  return result;
+}
+
+function checkDuplicateProducerScenario(context) {
+  return evaluateScenario({
+    ...context,
+    publishMessages(messageBus, producers, clusterId) {
+      messageBus.publish({
+        cluster_id: clusterId,
+        topic: context.topic,
+        sender: producers[0],
+        content: { data: { approved: true } },
+      });
+      messageBus.publish({
+        cluster_id: clusterId,
+        topic: context.topic,
+        sender: producers[0],
+        content: { data: { approved: true } },
+      });
+    },
+  });
+}
+
+function checkDistinctProducerScenario(context) {
+  return evaluateScenario({
+    ...context,
+    publishMessages(messageBus, producers, clusterId) {
+      for (const producer of producers) {
+        messageBus.publish({
+          cluster_id: clusterId,
+          topic: context.topic,
+          sender: producer,
+          content: { data: { approved: true } },
+        });
+      }
+    },
+  });
+}
+
+function getMissingStageFailure(agentId, topic, missingStageTopics) {
+  if (missingStageTopics.length === 0) {
+    return null;
+  }
+
+  return (
+    `Agent "${agentId}" trigger on "${topic}" depends on missing stage topic(s): ${missingStageTopics.join(', ')}. ` +
+    'Preflight must validate real producers, not synthesize stage-start messages.'
+  );
+}
+
+function getConsensusScenarioContext(agent, trigger, simulation) {
+  const topic = trigger?.topic;
+  const script = trigger?.logic?.script;
+  if (!topic || !script) {
+    return null;
+  }
+
+  const requiredStageTopics = getRequiredStageTopics(script);
+  const missingStageTopics = getMissingStageTopics(
+    requiredStageTopics,
+    simulation.producersByTopic,
+    simulation.allowExternalTopics
+  );
+  const missingStageFailure = getMissingStageFailure(agent.id, topic, missingStageTopics);
+  if (missingStageFailure) {
+    return { failure: missingStageFailure };
+  }
+
+  const producers = Array.from(simulation.producersByTopic.get(topic) || []);
+  if (producers.length < 2) {
+    return { failure: null };
+  }
+
+  return {
+    context: {
+      agentId: agent.id,
+      cluster: simulation.cluster,
+      topic,
+      script,
+      producers,
+      producersByTopic: simulation.producersByTopic,
+      requiredStageTopics,
+      allowExternalTopics: simulation.allowExternalTopics,
+    },
+    failure: null,
+  };
+}
+
+function validateConsensusTrigger(agent, trigger, simulation) {
+  const scenario = getConsensusScenarioContext(agent, trigger, simulation);
+  if (!scenario) {
+    return [];
+  }
+
+  if (scenario.failure) {
+    return [scenario.failure];
+  }
+
+  if (!scenario.context) {
+    return [];
+  }
+
+  const { context } = scenario;
+  const { producers, topic } = context;
+
+  const failures = [];
+  if (checkDuplicateProducerScenario(context)) {
+    failures.push(
+      `Agent "${agent.id}" trigger on "${topic}" fires early on duplicate sender (${producers[0]}). ` +
+        `Gate must require distinct producers: ${producers.join(', ')}`
+    );
+  }
+
+  if (!checkDistinctProducerScenario(context)) {
+    failures.push(
+      `Agent "${agent.id}" trigger on "${topic}" did not fire after all producers published. ` +
+        `Expected producers: ${producers.join(', ')}`
+    );
+  }
+
+  return failures;
 }
 
 /**
@@ -52,101 +264,14 @@ function collectTopicProducers(config) {
  *
  * Returns an array of error strings.
  */
-function simulateConsensusGates(config) {
-  const agents = Array.isArray(config.agents) ? config.agents : [];
-  const producersByTopic = collectTopicProducers(config);
-
-  const cluster = {
-    id: 'template-sim',
-    agents: agents.map((a) => ({ id: a.id, role: a.role })),
-  };
-
+function simulateConsensusGates(config, options = {}) {
+  const simulation = createSimulationContext(config, options);
   const failures = [];
 
-  for (const agent of agents) {
-    const isConsensusLike =
-      agent?.role === 'coordinator' ||
-      String(agent?.id || '').includes('consensus') ||
-      String(agent?.id || '').includes('coordinator');
-
-    if (!isConsensusLike) continue;
-
+  for (const agent of simulation.agents) {
+    if (!isConsensusLikeAgent(agent)) continue;
     for (const trigger of agent.triggers || []) {
-      const topic = trigger?.topic;
-      const script = trigger?.logic?.script;
-      if (!topic || !script) continue;
-
-      const producers = Array.from(producersByTopic.get(topic) || []);
-      if (producers.length < 2) continue;
-
-      // Scenario A: Duplicate publishes from one producer MUST NOT satisfy the gate.
-      {
-        const ledger = new Ledger(':memory:');
-        const messageBus = new MessageBus(ledger);
-        const logicEngine = new LogicEngine(messageBus, cluster);
-
-        maybePublishStageStart({ messageBus, clusterId: cluster.id, logicScript: script });
-
-        messageBus.publish({
-          cluster_id: cluster.id,
-          topic,
-          sender: producers[0],
-          content: { data: { approved: true } },
-        });
-        messageBus.publish({
-          cluster_id: cluster.id,
-          topic,
-          sender: producers[0],
-          content: { data: { approved: true } },
-        });
-
-        const shouldTriggerEarly = logicEngine.evaluate(
-          script,
-          { id: agent.id, cluster_id: cluster.id },
-          { topic }
-        );
-        ledger.close();
-
-        if (shouldTriggerEarly) {
-          failures.push(
-            `Agent "${agent.id}" trigger on "${topic}" fires early on duplicate sender (${producers[0]}). ` +
-              `Gate must require distinct producers: ${producers.join(', ')}`
-          );
-          continue;
-        }
-      }
-
-      // Scenario B: One publish from each producer SHOULD satisfy the gate.
-      {
-        const ledger = new Ledger(':memory:');
-        const messageBus = new MessageBus(ledger);
-        const logicEngine = new LogicEngine(messageBus, cluster);
-
-        maybePublishStageStart({ messageBus, clusterId: cluster.id, logicScript: script });
-
-        for (const producer of producers) {
-          messageBus.publish({
-            cluster_id: cluster.id,
-            topic,
-            sender: producer,
-            content: { data: { approved: true } },
-          });
-        }
-
-        const shouldTrigger = logicEngine.evaluate(
-          script,
-          { id: agent.id, cluster_id: cluster.id },
-          { topic }
-        );
-        ledger.close();
-
-        if (!shouldTrigger) {
-          failures.push(
-            `Agent "${agent.id}" trigger on "${topic}" did not fire after all producers published. ` +
-              `Expected producers: ${producers.join(', ')}`
-          );
-        }
-      }
+      failures.push(...validateConsensusTrigger(agent, trigger, simulation));
     }
   }
 
