@@ -41,10 +41,17 @@ async function validateTemplateConfig({
   randomOptions = {},
 }) {
   const result = validateConfig(config);
+  const isParameterizedTemplate = !!(config?.params && Object.keys(config.params).length > 0);
 
   if (result.valid) {
     const simErrors = [];
-    simErrors.push(...simulateConsensusGates(config));
+    simErrors.push(
+      ...simulateConsensusGates(config, {
+        allowExternalTopics: isParameterizedTemplate
+          ? ['IMPLEMENTATION_READY', 'QUICK_VALIDATION_PASSED']
+          : [],
+      })
+    );
     if (deep) {
       simErrors.push(...(await simulateTwoStageValidation({ templateId, config })));
     }

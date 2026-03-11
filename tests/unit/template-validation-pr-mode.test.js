@@ -21,4 +21,15 @@ describe('template validation pr mode', function () {
         .join('\n')
     );
   });
+
+  it('keeps STANDARD DEBUG autoPr route valid end-to-end', async function () {
+    const templatesDir = path.join(__dirname, '..', '..', 'cluster-templates');
+    const report = await validateTemplates({ templatesDir, deep: false });
+    const route = report.results.find((entry) =>
+      entry.filePath.includes('conductor-bootstrap.json#resolved-autopr:STANDARD-DEBUG')
+    );
+
+    assert.ok(route, 'expected resolved autoPr STANDARD DEBUG route');
+    assert.strictEqual(route.result.valid, true, route.result.errors.join(' | '));
+  });
 });
