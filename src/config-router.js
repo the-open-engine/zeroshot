@@ -11,12 +11,19 @@ const { DEFAULT_MAX_ITERATIONS } = require('./agent/agent-config');
  * Get cluster config based on complexity and task type
  * @param {string} complexity - TRIVIAL, SIMPLE, STANDARD, CRITICAL
  * @param {string} taskType - INQUIRY, TASK, DEBUG
+ * @param {object} [options]
+ * @param {boolean} [options.autoPr] - Whether the cluster will inject git-pusher/PR flow
  * @returns {{ base: string, params: object }}
  */
-function getConfig(complexity, taskType) {
+function getConfig(complexity, taskType, options = {}) {
+  const isPrMode = options.autoPr === true || process.env.ZEROSHOT_PR === '1';
+
   const getBase = () => {
     if (taskType === 'DEBUG' && complexity !== 'TRIVIAL') {
       return 'debug-workflow';
+    }
+    if (complexity === 'TRIVIAL' && isPrMode && taskType !== 'INQUIRY') {
+      return 'worker-validator';
     }
     if (complexity === 'TRIVIAL') {
       return 'single-worker';
