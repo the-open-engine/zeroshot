@@ -109,32 +109,77 @@ function augmentCriticalResolvedConfig({ resolver, config, params }) {
   return mergeAgentsById(config, quickValidationConfig);
 }
 
-function ensureCompletionHandler(config) {
-  if (hasCompletionHandler(config)) {
-    return config;
-  }
-
+function buildSyntheticGitPusher() {
   return {
-    ...config,
-    agents: [
-      ...(config.agents || []),
+    id: 'git-pusher',
+    role: 'completion-detector',
+    modelLevel: 'level1',
+    triggers: [
       {
-        id: 'completion-detector',
-        role: 'orchestrator',
-        modelLevel: 'level1',
-        triggers: [
-          {
-            topic: 'VALIDATION_RESULT',
-            logic: {
-              engine: 'javascript',
-              script: SHARED_TRIGGER_SCRIPT,
-            },
-            action: 'stop_cluster',
+        topic: 'VALIDATION_RESULT',
+        logic: {
+          engine: 'javascript',
+          script: SHARED_TRIGGER_SCRIPT,
+        },
+        action: 'execute_task',
+      },
+    ],
+    hooks: {
+      onComplete: {
+        action: 'publish_message',
+        config: {
+          topic: 'CLUSTER_COMPLETE',
+          content: {
+            text: 'PR flow completed.',
           },
-        ],
+        },
+      },
+    },
+  };
+}
+
+function buildSyntheticCompletionDetector() {
+  return {
+    id: 'completion-detector',
+    role: 'orchestrator',
+    modelLevel: 'level1',
+    triggers: [
+      {
+        topic: 'VALIDATION_RESULT',
+        logic: {
+          engine: 'javascript',
+          script: SHARED_TRIGGER_SCRIPT,
+        },
+        action: 'stop_cluster',
       },
     ],
   };
+}
+
+function buildResolvedRoute({ conductorTemplatePath, resolver, complexity, taskType, autoPr }) {
+  const { base, params } = getConfig(complexity, taskType, { autoPr });
+  const resolved = resolver.resolve(base, params);
+  const augmented = augmentCriticalResolvedConfig({
+    resolver,
+    config: resolved,
+    params,
+  });
+  const configWithCompletion = ensureCompletionHandler(augmented, { autoPr });
+  const modeSuffix = autoPr ? '-autopr' : '';
+
+  return {
+    filePath: `${conductorTemplatePath}#resolved${modeSuffix}:${complexity}-${taskType}`,
+    templateId: `resolved-${base}${modeSuffix}`,
+    config: configWithCompletion,
+  };
+}
+
+function getRouteModes(taskType) {
+  if (taskType === 'INQUIRY') {
+    return [false];
+  }
+
+  return [false, true];
 }
 
 function buildResolvedConductorRoutes(templatesDir) {
@@ -148,24 +193,61 @@ function buildResolvedConductorRoutes(templatesDir) {
 
   for (const complexity of CONDUCTOR_COMPLEXITIES) {
     for (const taskType of CONDUCTOR_TASK_TYPES) {
-      const { base, params } = getConfig(complexity, taskType);
-      const resolved = resolver.resolve(base, params);
-      const augmented = augmentCriticalResolvedConfig({
-        resolver,
-        config: resolved,
-        params,
-      });
-      const configWithCompletion = ensureCompletionHandler(augmented);
-
-      routeConfigs.push({
-        filePath: `${conductorTemplatePath}#resolved:${complexity}-${taskType}`,
-        templateId: `resolved-${base}`,
-        config: configWithCompletion,
-      });
+      for (const autoPr of getRouteModes(taskType)) {
+        routeConfigs.push(
+          buildResolvedRoute({
+            conductorTemplatePath,
+            resolver,
+            complexity,
+            taskType,
+            autoPr,
+          })
+        );
+      }
     }
   }
 
   return routeConfigs;
+}
+
+function shouldSkipConfig(config) {
+  return !config.agents && !config.name;
+}
+
+function updateValidationSummary(summary, result) {
+  summary.results.push(result);
+  summary.validated++;
+  if (!result.result.valid) {
+    summary.hasErrors = true;
+  }
+}
+
+async function validateConfigEntry({
+  filePath,
+  config,
+  templateId,
+  deep,
+  randomSampling,
+  templatesDir,
+  randomOptions,
+}) {
+  try {
+    const result = await validateTemplateConfig({
+      config,
+      templateId,
+      deep,
+      randomSampling,
+      templatesDir,
+      randomOptions,
+    });
+
+    return { filePath, result };
+  } catch (err) {
+    return {
+      filePath,
+      result: { valid: false, errors: [err.message], warnings: [] },
+    };
+  }
 }
 
 async function validateTemplates({
@@ -178,70 +260,68 @@ async function validateTemplates({
   const templateFiles = [...findJsonFiles(templatesDir)];
   const resolvedConductorRoutes = buildResolvedConductorRoutes(templatesDir);
 
-  let hasErrors = false;
-  let validated = 0;
-  let skipped = 0;
-  const results = [];
+  const summary = {
+    hasErrors: false,
+    validated: 0,
+    skipped: 0,
+    results: [],
+  };
 
   for (const filePath of templateFiles) {
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const config = JSON.parse(content);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const config = JSON.parse(content);
 
-      // Skip non-cluster configs (like package.json)
-      if (!config.agents && !config.name) {
-        skipped++;
-        continue;
-      }
-
-      const templateId = inferTemplateIdFromPath(filePath);
-      const result = await validateTemplateConfig({
-        config,
-        templateId,
-        deep,
-        randomSampling: randomSampling && randomScope === 'all',
-        templatesDir,
-        randomOptions,
-      });
-
-      results.push({ filePath, result });
-      validated++;
-      if (!result.valid) hasErrors = true;
-    } catch (err) {
-      results.push({ filePath, result: { valid: false, errors: [err.message], warnings: [] } });
-      validated++;
-      hasErrors = true;
+    if (shouldSkipConfig(config)) {
+      summary.skipped++;
+      continue;
     }
+
+    const result = await validateConfigEntry({
+      filePath,
+      config,
+      templateId: inferTemplateIdFromPath(filePath),
+      deep,
+      randomSampling: randomSampling && randomScope === 'all',
+      templatesDir,
+      randomOptions,
+    });
+    updateValidationSummary(summary, result);
   }
 
   for (const resolvedRoute of resolvedConductorRoutes) {
-    try {
-      const result = await validateTemplateConfig({
-        config: resolvedRoute.config,
-        templateId: resolvedRoute.templateId,
-        deep,
-        randomSampling,
-        templatesDir,
-        randomOptions,
-      });
-      results.push({ filePath: resolvedRoute.filePath, result });
-      validated++;
-      if (!result.valid) hasErrors = true;
-    } catch (err) {
-      results.push({
-        filePath: resolvedRoute.filePath,
-        result: { valid: false, errors: [err.message], warnings: [] },
-      });
-      validated++;
-      hasErrors = true;
-    }
+    const result = await validateConfigEntry({
+      filePath: resolvedRoute.filePath,
+      config: resolvedRoute.config,
+      templateId: resolvedRoute.templateId,
+      deep,
+      randomSampling,
+      templatesDir,
+      randomOptions,
+    });
+    updateValidationSummary(summary, result);
   }
 
   return {
-    valid: !hasErrors,
-    validated,
-    skipped,
-    results,
+    valid: !summary.hasErrors,
+    validated: summary.validated,
+    skipped: summary.skipped,
+    results: summary.results,
+  };
+}
+
+function ensureCompletionHandler(config, options = {}) {
+  const { autoPr = false } = options;
+
+  if (hasCompletionHandler(config)) {
+    return config;
+  }
+
+  return {
+    ...config,
+    agents: [
+      ...(config.agents || []),
+      autoPr ? buildSyntheticGitPusher() : buildSyntheticCompletionDetector(),
+    ],
   };
 }
 
