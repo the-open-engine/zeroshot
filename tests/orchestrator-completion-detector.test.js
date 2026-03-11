@@ -84,4 +84,74 @@ describe('Orchestrator completion-detector injection', function () {
     assert.strictEqual(injectedAgent.modelLevel, 'level3');
     assert.strictEqual(injectedAgent.model, undefined);
   });
+
+  it('removes template completion-detector during PR-mode validation when git-pusher already exists', function () {
+    const orchestrator = new Orchestrator({ quiet: true, skipLoad: true });
+    const cluster = {
+      autoPr: true,
+      agents: [{ id: 'git-pusher', config: { id: 'git-pusher' } }],
+      config: {
+        agents: [{ id: 'git-pusher', role: 'completion-detector' }],
+      },
+    };
+
+    const validationAgents = orchestrator._prepareValidationAgentConfigs(cluster, [
+      { id: 'git-pusher', role: 'completion-detector' },
+      {
+        id: 'completion-detector',
+        role: 'orchestrator',
+        triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+      },
+      { id: 'worker', role: 'implementation', triggers: [] },
+    ]);
+
+    assert.ok(
+      validationAgents.some((agent) => agent.id === 'git-pusher'),
+      'git-pusher should remain the completion handler in PR mode'
+    );
+    assert.ok(
+      !validationAgents.some((agent) => agent.id === 'completion-detector'),
+      'template completion-detector should be removed before validation'
+    );
+  });
+
+  it('skips adding a completion-detector to a PR-mode cluster that already has git-pusher', async function () {
+    const orchestrator = new Orchestrator({ quiet: true, skipLoad: true });
+    const cluster = {
+      id: 'cluster-pr',
+      autoPr: true,
+      agents: [{ id: 'git-pusher', config: { id: 'git-pusher', role: 'completion-detector' } }],
+      config: {
+        agents: [{ id: 'git-pusher', role: 'completion-detector' }],
+      },
+      messageBus: {
+        subscribe: () => {},
+      },
+    };
+
+    await orchestrator._opAddAgents(
+      cluster,
+      {
+        agents: [
+          {
+            id: 'completion-detector',
+            role: 'orchestrator',
+            triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+          },
+        ],
+      },
+      {}
+    );
+
+    assert.deepStrictEqual(
+      cluster.config.agents.map((agent) => agent.id),
+      ['git-pusher'],
+      'completion-detector should not be persisted into PR-mode cluster config'
+    );
+    assert.deepStrictEqual(
+      cluster.agents.map((agent) => agent.id),
+      ['git-pusher'],
+      'completion-detector should not be added to the live PR-mode cluster'
+    );
+  });
 });
