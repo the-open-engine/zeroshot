@@ -157,8 +157,8 @@ describe('Two-Stage Validation Pipeline', function () {
       const triggerScript = coordinator.triggers.find((t) => t.topic === 'HEAVY_VALIDATION_RESULT')
         ?.logic?.script;
       assert.ok(
-        triggerScript.includes('validator-runtime'),
-        'heavy consensus should include validator-runtime in the validator set'
+        triggerScript.includes("cluster.getAgentsByRole('validator')"),
+        'heavy consensus should derive the active validator set from cluster state'
       );
     });
 
