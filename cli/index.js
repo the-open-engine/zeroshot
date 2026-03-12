@@ -21,6 +21,7 @@ const os = require('os');
 const { URL } = require('url');
 const chalk = require('chalk');
 const Orchestrator = require('../src/orchestrator');
+const { listRunSummaries } = require('../src/run-catalog');
 const { setupCompletion } = require('../lib/completion');
 const { formatWatchMode } = require('./message-formatters-watch');
 const {
@@ -643,18 +644,46 @@ function enrichClustersWithTokens(clusters, orchestrator) {
   });
 }
 
+function formatTimestamp(ts) {
+  if (!ts) {
+    return '-';
+  }
+  return new Date(ts).toLocaleString();
+}
+
+function formatRunTaskSummary(summary, maxLength = 44) {
+  if (typeof summary !== 'string' || summary.trim().length === 0) {
+    return '-';
+  }
+  const compact = summary.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, maxLength - 3)}...`;
+}
+
 function formatClusterRow(cluster) {
-  const created = new Date(cluster.createdAt).toLocaleString();
+  const created = formatTimestamp(cluster.createdAt);
+  const lastActivity = formatTimestamp(cluster.lastActivityAt);
   const tokenDisplay = cluster.totalTokens > 0 ? cluster.totalTokens.toLocaleString() : '-';
   const costDisplay = cluster.totalCostUsd > 0 ? '$' + cluster.totalCostUsd.toFixed(3) : '-';
+  const currentAgent = cluster.currentAgent || '-';
+  const taskSummary = formatRunTaskSummary(cluster.taskSummary);
 
   const stateDisplay =
     cluster.state === 'zombie' ? chalk.red(cluster.state.padEnd(12)) : cluster.state.padEnd(12);
-  const rowColor = cluster.state === 'zombie' ? chalk.red : (text) => text;
+  const rowColor =
+    cluster.state === 'zombie'
+      ? chalk.red
+      : cluster.orphaned
+        ? chalk.yellow
+        : (text) => text;
 
   return `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount
     .toString()
-    .padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${created}`;
+    .padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${currentAgent.padEnd(
+    18
+  )} ${lastActivity.padEnd(22)} ${created.padEnd(22)} ${taskSummary}`;
 }
 
 function printClusterTable(enrichedClusters) {
@@ -668,9 +697,11 @@ function printClusterTable(enrichedClusters) {
   console.log(
     `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(
       12
-    )} ${'Cost'.padEnd(8)} Created`
+    )} ${'Cost'.padEnd(8)} ${'Current'.padEnd(18)} ${'Last Activity'.padEnd(22)} ${'Created'.padEnd(
+      22
+    )} Task`
   );
-  console.log('-'.repeat(100));
+  console.log('-'.repeat(180));
   for (const cluster of enrichedClusters) {
     console.log(formatClusterRow(cluster));
   }
@@ -708,6 +739,88 @@ function reportMissingId(id, options) {
     console.error('Not found in tasks or clusters');
   }
   process.exit(1);
+}
+
+function printRunRow(run) {
+  const state = run.state.padEnd(12);
+  const created = formatTimestamp(run.createdAt).padEnd(22);
+  const lastActivity = formatTimestamp(run.lastActivityAt).padEnd(22);
+  const currentAgent = (run.currentAgent || '-').padEnd(18);
+  const issue = run.issue ? `#${String(run.issue)}` : '-';
+  const task = formatRunTaskSummary(run.taskSummary, 52);
+  const stateDisplay =
+    run.state === 'setup_failed'
+      ? chalk.red(state)
+      : run.orphaned
+        ? chalk.yellow(state)
+        : state;
+  return `${run.id.padEnd(25)} ${stateDisplay} ${issue.padEnd(8)} ${currentAgent} ${lastActivity} ${created} ${task}`;
+}
+
+function printRunTable(runs, heading = '\n=== Runs ===') {
+  console.log(chalk.bold(heading));
+  if (runs.length === 0) {
+    console.log('No matching runs');
+    return;
+  }
+  console.log(
+    `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Issue'.padEnd(8)} ${'Current'.padEnd(
+      18
+    )} ${'Last Activity'.padEnd(22)} ${'Created'.padEnd(22)} Task`
+  );
+  console.log('-'.repeat(170));
+  for (const run of runs) {
+    console.log(printRunRow(run));
+  }
+}
+
+function printHistoricalRunStatus(run) {
+  console.log(`\nRun: ${run.id}`);
+  console.log(`State: ${run.state}`);
+  console.log(`Created: ${formatTimestamp(run.createdAt)}`);
+  console.log(`Last Activity: ${formatTimestamp(run.lastActivityAt)}`);
+  if (run.issue) {
+    console.log(`Issue: #${String(run.issue)}`);
+  }
+  if (run.currentAgent) {
+    console.log(`Current Agent: ${run.currentAgent}`);
+  }
+  if (run.taskSummary) {
+    console.log(`Task: ${run.taskSummary}`);
+  }
+  console.log(`Messages: ${run.messageCount}`);
+  if (run.orphaned) {
+    console.log(chalk.yellow('Orphaned: yes'));
+  }
+  if (run.failureReason) {
+    console.log(`Failure: ${run.failureReason}`);
+  }
+  console.log('');
+}
+
+function parseSinceOption(raw) {
+  if (!raw) {
+    return null;
+  }
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) {
+    console.error(`Invalid --since value: ${raw}`);
+    process.exit(1);
+  }
+  return parsed;
+}
+
+function buildRunsQueryOptions(options) {
+  return {
+    today: options.today === true,
+    since: parseSinceOption(options.since),
+    activeOnly: options.running === true,
+    limit: Number.isInteger(options.limit) ? options.limit : undefined,
+  };
+}
+
+function loadRuns(options) {
+  return listRunSummaries(buildRunsQueryOptions(options));
 }
 
 function getClusterTokensByRole(orchestrator, clusterId) {
@@ -756,7 +869,22 @@ function printClusterStatusHeader(status, clusterId) {
   if (status.pid) {
     console.log(`PID: ${status.pid}`);
   }
+  if (status.daemonPid && status.daemonPid !== status.pid) {
+    console.log(`Daemon PID: ${status.daemonPid}`);
+  }
+  if (status.orphaned) {
+    console.log(chalk.yellow('Orphaned: yes (terminal cluster still has a live detached daemon)'));
+  }
   console.log(`Created: ${new Date(status.createdAt).toLocaleString()}`);
+  if (status.lastActivityAt) {
+    console.log(`Last Activity: ${new Date(status.lastActivityAt).toLocaleString()}`);
+  }
+  if (status.taskSummary) {
+    console.log(`Task: ${status.taskSummary}`);
+  }
+  if (status.currentAgent) {
+    console.log(`Current Agent: ${status.currentAgent}`);
+  }
   console.log(`Messages: ${status.messageCount}`);
 }
 
@@ -2222,12 +2350,14 @@ Examples:
   ${chalk.cyan('zeroshot watch')}                      Open TUI Monitor view
   ${chalk.cyan('zeroshot task run "Fix the bug"')}     Run single-agent background task
   ${chalk.cyan('zeroshot list')}                       List all tasks and clusters
+  ${chalk.cyan('zeroshot runs --today')}               List cluster runs launched today
   ${chalk.cyan('zeroshot task list')}                  List tasks only
   ${chalk.cyan('zeroshot task watch')}                 Interactive TUI - navigate tasks, view logs
   ${chalk.cyan('zeroshot attach <id>')}                Attach to running task (Ctrl+B d to detach)
   ${chalk.cyan('zeroshot logs -f')}                    Stream logs in real-time (like tail -f)
   ${chalk.cyan('zeroshot logs -w')}                    Interactive watch mode (for tasks)
   ${chalk.cyan('zeroshot logs <id> -f')}               Stream logs for specific cluster/task
+  ${chalk.cyan('zeroshot status')}                     Show active runs
   ${chalk.cyan('zeroshot status <id>')}                Detailed status of task or cluster
   ${chalk.cyan('zeroshot finish <id>')}                Convert cluster to completion task (creates and merges PR)
   ${chalk.cyan('zeroshot kill <id>')}                  Kill a running task or cluster
@@ -2565,18 +2695,59 @@ program
     }
   });
 
+program
+  .command('runs')
+  .description('List cluster runs, including completed history and setup failures')
+  .option('-n, --limit <n>', 'Limit number of results', parseInt)
+  .option('--today', 'Show only runs created today')
+  .option('--since <when>', 'Show runs created since ISO date/time (for example 2026-03-12)')
+  .option('--running', 'Show only active runs')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    try {
+      const runs = loadRuns(options);
+      if (options.json) {
+        console.log(JSON.stringify({ runs }, null, 2));
+        return;
+      }
+      printRunTable(runs);
+    } catch (error) {
+      console.error('Error listing runs:', error.message);
+      process.exit(1);
+    }
+  });
+
 // Status command - smart (works for both tasks and clusters)
 program
-  .command('status <id>')
-  .description('Get detailed status of a task or cluster')
+  .command('status [id]')
+  .description('Get detailed status of a task or cluster (omit ID to show active runs)')
   .option('--json', 'Output as JSON')
   .action(async (id, options) => {
     try {
+      if (!id) {
+        const activeRuns = loadRuns({ running: true });
+        if (options.json) {
+          console.log(JSON.stringify({ type: 'cluster-list', clusters: activeRuns }, null, 2));
+          return;
+        }
+        printRunTable(activeRuns, '\n=== Active Runs ===');
+        return;
+      }
+
       const { detectIdType } = require('../lib/id-detector');
       const type = detectIdType(id);
 
       if (!type) {
-        reportMissingId(id, options);
+        const historicalRun = loadRuns({}).find((run) => run.id === id);
+        if (!historicalRun) {
+          reportMissingId(id, options);
+          return;
+        }
+        if (options.json) {
+          console.log(JSON.stringify({ type: 'cluster-history', ...historicalRun }, null, 2));
+          return;
+        }
+        printHistoricalRunStatus(historicalRun);
         return;
       }
 

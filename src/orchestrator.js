@@ -50,6 +50,7 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const { exec } = require('./lib/safe-exec');
+const { buildRunSummary } = require('./run-catalog');
 const {
   VALIDATION_RUNTIME_STATUS,
   getValidationRuntimePortKeys,
@@ -408,6 +409,7 @@ class Orchestrator {
       autoPr: clusterData.autoPr || false,
       prOptions: clusterData.prOptions || null,
       issue: clusterData.issue || null,
+      daemonPid: clusterData.daemonPid || clusterData.pid || null,
       cwd: clusterData.cwd || this._getClusterWorkDir(clusterContext),
     };
 
@@ -679,6 +681,7 @@ class Orchestrator {
           cwd: cluster.cwd || this._getClusterWorkDir(cluster),
           state: cluster.state,
           createdAt: cluster.createdAt,
+          daemonPid: cluster.daemonPid || cluster.pid || null,
           // Track PID for zombie detection (null if cluster is stopped/killed)
           pid: cluster.state === 'running' ? cluster.pid : null,
           // Persist failure info for resume capability
@@ -920,6 +923,7 @@ class Orchestrator {
       ledger,
       agents: [],
       createdAt: Date.now(),
+      daemonPid: process.pid,
       // Track PID for zombie detection (this process owns the cluster)
       pid: process.pid,
       // Initialization completion tracking (for safe SIGINT handling)
@@ -3632,47 +3636,41 @@ Continue from where you left off. Review your previous output to understand what
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
     }
-
-    // Detect zombie clusters: state=running but no backing process
-    let state = cluster.state;
-    let isZombie = false;
-    if (state === 'running') {
-      if (cluster.pid) {
-        // PID recorded - check if process is running
-        if (!this._isProcessRunning(cluster.pid)) {
-          state = 'zombie';
-          isZombie = true;
-          this._log(
-            `[Orchestrator] Detected zombie cluster ${clusterId} (PID ${cluster.pid} not running)`
-          );
-        }
-      } else {
-        // No PID recorded (legacy cluster or bug) - definitely a zombie
-        // New code always records PID for running clusters
-        state = 'zombie';
-        isZombie = true;
-        this._log(
-          `[Orchestrator] Detected zombie cluster ${clusterId} (no PID recorded - legacy or killed cluster)`
-        );
-      }
-    }
+    const registryEntry = {
+      state: cluster.state,
+      createdAt: cluster.createdAt,
+      issue: cluster.issue || null,
+      agentStates: cluster.agents.map((agent) => agent.getState()),
+      pid: cluster.pid || null,
+      daemonPid: cluster.daemonPid || cluster.pid || null,
+    };
+    const summary = buildRunSummary({
+      clusterId,
+      storageDir: this.storageDir,
+      registryEntry,
+      isProcessRunning: this._isProcessRunning.bind(this),
+    });
+    const statusState = summary?.state || cluster.state;
 
     return {
       id: clusterId,
-      state: state,
-      isZombie: isZombie,
+      state: statusState,
+      isZombie: statusState === 'zombie',
       pid: cluster.pid || null,
+      daemonPid: cluster.daemonPid || cluster.pid || null,
       createdAt: cluster.createdAt,
       agents: cluster.agents.map((a) => a.getState()),
-      messageCount: (() => {
+      messageCount: summary?.messageCount ?? (() => {
         try {
           return cluster.messageBus.count({ cluster_id: clusterId });
         } catch {
-          // Cluster may have closed its ledger during startup failure cleanup.
-          // Status/list should remain safe to call for visibility + supervisor cleanup.
           return 0;
         }
       })(),
+      taskSummary: summary?.taskSummary || null,
+      lastActivityAt: summary?.lastActivityAt || null,
+      currentAgent: summary?.currentAgent || null,
+      orphaned: summary?.orphaned === true,
     };
   }
 
@@ -3682,34 +3680,39 @@ Continue from where you left off. Review your previous output to understand what
    */
   listClusters() {
     return Array.from(this.clusters.values()).map((cluster) => {
-      // Detect zombie clusters (state=running but no backing process)
-      let state = cluster.state;
-      if (state === 'running') {
-        if (cluster.pid) {
-          if (!this._isProcessRunning(cluster.pid)) {
-            state = 'zombie';
-          }
-        } else {
-          // No PID recorded - definitely a zombie
-          state = 'zombie';
-        }
-      }
+      const registryEntry = {
+        state: cluster.state,
+        createdAt: cluster.createdAt,
+        issue: cluster.issue || null,
+        agentStates: cluster.agents.map((agent) => agent.getState()),
+        pid: cluster.pid || null,
+        daemonPid: cluster.daemonPid || cluster.pid || null,
+      };
+      const summary = buildRunSummary({
+        clusterId: cluster.id,
+        storageDir: this.storageDir,
+        registryEntry,
+        isProcessRunning: this._isProcessRunning.bind(this),
+      });
 
       return {
         id: cluster.id,
-        state: state,
+        state: summary?.state || cluster.state,
         createdAt: cluster.createdAt,
         issue: cluster.issue || null,
         agentCount: cluster.agents.length,
-        messageCount: (() => {
+        messageCount: summary?.messageCount ?? (() => {
           try {
             return cluster.messageBus.count({ cluster_id: cluster.id });
           } catch {
-            // Cluster may have closed its ledger during startup failure cleanup.
-            // List should remain safe to call for cleanup routines.
             return 0;
           }
         })(),
+        taskSummary: summary?.taskSummary || null,
+        lastActivityAt: summary?.lastActivityAt || null,
+        currentAgent: summary?.currentAgent || null,
+        orphaned: summary?.orphaned === true,
+        daemonPid: cluster.daemonPid || cluster.pid || null,
       };
     });
   }
