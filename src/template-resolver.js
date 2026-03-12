@@ -149,6 +149,14 @@ class TemplateResolver {
    * @returns {any}
    */
   _resolveString(str, params) {
+    const exactMatch = str.match(/^\{\{(\w+)\}\}$/);
+    if (exactMatch) {
+      const exactParam = exactMatch[1];
+      if (params[exactParam] !== undefined) {
+        return params[exactParam];
+      }
+    }
+
     // Handle simple {{param}} substitutions
     let result = str.replace(
       /\{\{(\w+)\}\}/g,

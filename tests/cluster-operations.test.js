@@ -144,6 +144,31 @@ describe('CLUSTER_OPERATIONS', function () {
         'Expected load_config to add validator-code'
       );
     });
+
+    it('should add validator-runtime only when heavy-validation is loaded for runtime-enabled clusters', function () {
+      const ops = [
+        {
+          action: 'load_config',
+          config: { base: 'heavy-validation', params: {} },
+        },
+      ];
+
+      const withoutRuntime = orchestrator._buildProposedAgentConfigs([], ops, {
+        validationRuntime: { enabled: false },
+      });
+      assert(
+        !withoutRuntime.some((agent) => agent.id === 'validator-runtime'),
+        'validator-runtime should be omitted when runtime support is disabled'
+      );
+
+      const withRuntime = orchestrator._buildProposedAgentConfigs([], ops, {
+        validationRuntime: { enabled: true },
+      });
+      assert(
+        withRuntime.some((agent) => agent.id === 'validator-runtime'),
+        'validator-runtime should be added when runtime support is enabled'
+      );
+    });
   });
 
   describe('VALID_OPERATIONS constant', function () {

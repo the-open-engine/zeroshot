@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const net = require('net');
 const lockfile = require('proper-lockfile');
 
 // Stale lock timeout in ms - if lock file is older than this, delete it
@@ -48,6 +49,14 @@ const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
+const { exec } = require('./lib/safe-exec');
+const {
+  VALIDATION_RUNTIME_STATUS,
+  getValidationRuntimePortKeys,
+  getValidationRuntimeTemplateParams,
+  readValidationRuntimeSettings,
+  resolveValidationRuntimeEnv,
+} = require('./validation-runtime');
 const crypto = require('crypto');
 
 function applyModelOverride(agentConfig, modelOverride) {
@@ -176,6 +185,69 @@ class Orchestrator {
     if (input.issue) return 'github';
     if (input.file) return 'file';
     return 'text';
+  }
+
+  _getClusterWorkDir(cluster) {
+    return cluster?.worktree?.path || cluster?.isolation?.workDir || cluster?.cwd || process.cwd();
+  }
+
+  _buildValidationRuntimeState(startDir, persistedState = null) {
+    const runtimeSettings = readValidationRuntimeSettings(startDir);
+    const baseState = {
+      enabled: runtimeSettings.enabled,
+      repoRoot: runtimeSettings.repoRoot || null,
+      settingsPath: runtimeSettings.settingsPath || null,
+      config: runtimeSettings.config || null,
+      status: runtimeSettings.enabled
+        ? VALIDATION_RUNTIME_STATUS.NOT_STARTED
+        : VALIDATION_RUNTIME_STATUS.DISABLED,
+      env: null,
+      allocatedPorts: null,
+      lastError: null,
+      startedAt: null,
+      promise: null,
+    };
+
+    if (!persistedState) {
+      return baseState;
+    }
+
+    if (!runtimeSettings.enabled) {
+      return baseState;
+    }
+
+    return {
+      ...baseState,
+      status:
+        persistedState.status === VALIDATION_RUNTIME_STATUS.READY
+          ? VALIDATION_RUNTIME_STATUS.READY
+          : persistedState.status === VALIDATION_RUNTIME_STATUS.FAILED
+            ? VALIDATION_RUNTIME_STATUS.FAILED
+            : VALIDATION_RUNTIME_STATUS.NOT_STARTED,
+      env:
+        persistedState.env && typeof persistedState.env === 'object' ? persistedState.env : null,
+      allocatedPorts:
+        persistedState.allocatedPorts && typeof persistedState.allocatedPorts === 'object'
+          ? persistedState.allocatedPorts
+          : null,
+      lastError: persistedState.lastError || null,
+      startedAt: persistedState.startedAt || null,
+    };
+  }
+
+  _getValidationRuntimeTemplateParams(cluster) {
+    return getValidationRuntimeTemplateParams(Boolean(cluster?.validationRuntime?.enabled));
+  }
+
+  _mergeParameterizedTemplateParams(base, params, cluster) {
+    if (base !== 'heavy-validation') {
+      return params || {};
+    }
+
+    return {
+      ...(params || {}),
+      ...this._getValidationRuntimeTemplateParams(cluster),
+    };
   }
 
   /**
@@ -310,7 +382,13 @@ class Orchestrator {
       ...clusterData,
       id: clusterId,
       isolation,
+      orchestrator: this,
     };
+
+    clusterContext.validationRuntime = this._buildValidationRuntimeState(
+      this._getClusterWorkDir(clusterContext),
+      clusterData.validationRuntime || null
+    );
 
     // Reconstruct agent metadata from config (processes are ephemeral)
     // CRITICAL: Pass isolation context to agents if cluster was running in isolation
@@ -330,6 +408,7 @@ class Orchestrator {
       autoPr: clusterData.autoPr || false,
       prOptions: clusterData.prOptions || null,
       issue: clusterData.issue || null,
+      cwd: clusterData.cwd || this._getClusterWorkDir(clusterContext),
     };
 
     Object.assign(clusterContext, cluster);
@@ -379,6 +458,7 @@ class Orchestrator {
       id: clusterId,
       quiet: this.quiet,
       modelOverride: clusterData.modelOverride || null,
+      orchestrator: this,
     };
 
     if (isolation?.enabled && isolationManager) {
@@ -596,6 +676,7 @@ class Orchestrator {
         existingClusters[clusterId] = {
           id: cluster.id,
           config: cluster.config,
+          cwd: cluster.cwd || this._getClusterWorkDir(cluster),
           state: cluster.state,
           createdAt: cluster.createdAt,
           // Track PID for zombie detection (null if cluster is stopped/killed)
@@ -610,6 +691,19 @@ class Orchestrator {
           modelOverride: cluster.modelOverride || null,
           // Persist issue number for heroshot/external tools
           issue: cluster.issue || null,
+          validationRuntime: cluster.validationRuntime
+            ? {
+                enabled: cluster.validationRuntime.enabled,
+                repoRoot: cluster.validationRuntime.repoRoot || null,
+                settingsPath: cluster.validationRuntime.settingsPath || null,
+                config: cluster.validationRuntime.config || null,
+                status: cluster.validationRuntime.status,
+                env: cluster.validationRuntime.env || null,
+                allocatedPorts: cluster.validationRuntime.allocatedPorts || null,
+                lastError: cluster.validationRuntime.lastError || null,
+                startedAt: cluster.validationRuntime.startedAt || null,
+              }
+            : null,
           // Persist isolation info (excluding manager instance which can't be serialized)
           // CRITICAL: workDir is required for resume() to recreate container with same workspace
           isolation: cluster.isolation
@@ -820,6 +914,7 @@ class Orchestrator {
     const cluster = {
       id: clusterId,
       config,
+      cwd: options.cwd || process.cwd(),
       state: 'initializing',
       messageBus,
       ledger,
@@ -846,6 +941,7 @@ class Orchestrator {
       issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops)
       // Git platform tracking (where PR/MR will be created - independent of issue provider)
       gitPlatform: null, // Set when --pr mode is active
+      orchestrator: this,
       // Isolation state (only if enabled)
       // CRITICAL: Store workDir for resume capability - without this, resume() can't recreate container
       isolation: options.isolation
@@ -869,6 +965,8 @@ class Orchestrator {
           }
         : null,
     };
+
+    cluster.validationRuntime = this._buildValidationRuntimeState(this._getClusterWorkDir(cluster));
 
     this.clusters.set(clusterId, cluster);
     this._startSnapshotter(cluster);
@@ -1077,7 +1175,6 @@ class Orchestrator {
         for (const agent of cluster.agents || []) {
           // Agent start may have partially succeeded.
           // Stop is best-effort and must not mask the original error.
-          // eslint-disable-next-line no-await-in-loop
           await agent.stop();
         }
       } catch {
@@ -1086,7 +1183,6 @@ class Orchestrator {
       try {
         if (cluster.isolation?.manager) {
           // Preserve workspace for inspection; callers can `zeroshot kill` for full cleanup.
-          // eslint-disable-next-line no-await-in-loop
           await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
         }
       } catch {
@@ -1131,6 +1227,7 @@ class Orchestrator {
         testMode: options.testMode || !!this.taskRunner,
         quiet: this.quiet,
         modelOverride: options.modelOverride || null,
+        orchestrator: this,
       };
 
       if (options.mockExecutor) {
@@ -1652,6 +1749,320 @@ class Orchestrator {
     }
   }
 
+  _ensureValidationRuntimePortsFile() {
+    const portsFile = path.join(this.storageDir, 'validation-runtime-ports.json');
+    if (!fs.existsSync(portsFile)) {
+      fs.writeFileSync(portsFile, '{}');
+    }
+    return portsFile;
+  }
+
+  _readPersistedClusterRegistry() {
+    const clustersFile = path.join(this.storageDir, 'clusters.json');
+    if (!fs.existsSync(clustersFile)) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
+  _pruneValidationRuntimePortRegistry(registry) {
+    const persistedClusters = this._readPersistedClusterRegistry();
+
+    for (const clusterId of Object.keys(registry)) {
+      const cluster = this.clusters.get(clusterId);
+      const persisted = persistedClusters[clusterId];
+      const inMemoryActive = cluster && !['stopped', 'killed', 'corrupted'].includes(cluster.state);
+      const persistedActive =
+        persisted && !['stopped', 'killed', 'corrupted'].includes(persisted.state);
+
+      if (!inMemoryActive && !persistedActive) {
+        delete registry[clusterId];
+      }
+    }
+  }
+
+  async _withValidationRuntimePortsLock(handler) {
+    const portsFile = this._ensureValidationRuntimePortsFile();
+    const lockfilePath = path.join(this.storageDir, 'validation-runtime-ports.json.lock');
+    let release;
+
+    try {
+      cleanStaleLock(lockfilePath);
+      release = await lockfile.lock(portsFile, {
+        lockfilePath,
+        stale: LOCK_STALE_MS,
+        retries: {
+          retries: 50,
+          minTimeout: 50,
+          maxTimeout: 200,
+          randomize: true,
+        },
+      });
+
+      let registry = {};
+      try {
+        registry = JSON.parse(fs.readFileSync(portsFile, 'utf8'));
+      } catch {
+        registry = {};
+      }
+
+      this._pruneValidationRuntimePortRegistry(registry);
+      const result = await handler(registry);
+      fs.writeFileSync(portsFile, JSON.stringify(registry, null, 2));
+      return result;
+    } finally {
+      if (release) {
+        await release();
+      }
+    }
+  }
+
+  async _findAvailableHostPort(usedPorts) {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const port = await new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+          const address = server.address();
+          const resolvedPort = address && typeof address === 'object' ? address.port : null;
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve(resolvedPort);
+          });
+        });
+      });
+
+      if (typeof port === 'number' && !usedPorts.has(port)) {
+        return port;
+      }
+    }
+
+    throw new Error('Unable to allocate a free host port for validation runtime');
+  }
+
+  _allocateValidationRuntimePorts(clusterId, portKeys) {
+    if (!Array.isArray(portKeys) || portKeys.length === 0) {
+      return {};
+    }
+
+    return this._withValidationRuntimePortsLock(async (registry) => {
+      const existing = registry[clusterId] || {};
+      const usedPorts = new Set();
+
+      for (const [otherClusterId, reserved] of Object.entries(registry)) {
+        if (otherClusterId === clusterId || !reserved || typeof reserved !== 'object') {
+          continue;
+        }
+        for (const value of Object.values(reserved)) {
+          if (Number.isInteger(value)) {
+            usedPorts.add(value);
+          }
+        }
+      }
+
+      const allocated = { ...existing };
+      for (const portKey of portKeys) {
+        if (Number.isInteger(allocated[portKey])) {
+          usedPorts.add(allocated[portKey]);
+          continue;
+        }
+
+        const port = await this._findAvailableHostPort(usedPorts);
+        allocated[portKey] = port;
+        usedPorts.add(port);
+      }
+
+      registry[clusterId] = allocated;
+      return allocated;
+    });
+  }
+
+  async _releaseValidationRuntimePorts(clusterId) {
+    await this._withValidationRuntimePortsLock((registry) => {
+      delete registry[clusterId];
+    });
+  }
+
+  _buildValidationRuntimeExecEnv(runtimeState) {
+    return {
+      ...process.env,
+      ...(runtimeState.env || {}),
+    };
+  }
+
+  async _waitForValidationRuntimeReady(cluster, runtimeState, execEnv) {
+    const startedAt = Date.now();
+    const workDir = this._getClusterWorkDir(cluster);
+
+    for (const readyCommand of runtimeState.config.ready) {
+      let lastError = null;
+
+      while (Date.now() - startedAt < runtimeState.config.readyTimeoutMs) {
+        try {
+          await exec(readyCommand, {
+            cwd: workDir,
+            env: execEnv,
+            timeout: Math.min(runtimeState.config.readyIntervalMs, 5000),
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) =>
+            setTimeout(resolve, runtimeState.config.readyIntervalMs)
+          );
+        }
+      }
+
+      if (lastError) {
+        throw new Error(
+          `Validation runtime readiness check failed: ${readyCommand} :: ${lastError.message}`
+        );
+      }
+    }
+  }
+
+  async _startValidationRuntime(cluster) {
+    const runtimeState = cluster.validationRuntime;
+    if (!runtimeState?.enabled || !runtimeState.config) {
+      throw new Error(`Cluster ${cluster.id} does not declare validationRuntime`);
+    }
+
+    const workDir = this._getClusterWorkDir(cluster);
+    const portKeys = getValidationRuntimePortKeys(runtimeState.config);
+
+    runtimeState.status = VALIDATION_RUNTIME_STATUS.STARTING;
+    runtimeState.lastError = null;
+    runtimeState.startedAt = null;
+    await this._saveClusters().catch(() => {});
+
+    try {
+      runtimeState.allocatedPorts = await this._allocateValidationRuntimePorts(cluster.id, portKeys);
+      runtimeState.env = resolveValidationRuntimeEnv({
+        envConfig: runtimeState.config.env,
+        clusterId: cluster.id,
+        allocatedPorts: runtimeState.allocatedPorts,
+      });
+
+      const execEnv = this._buildValidationRuntimeExecEnv(runtimeState);
+      this._log(`[Orchestrator] Starting validation runtime for ${cluster.id} in ${workDir}...`);
+
+      await exec(runtimeState.config.boot, {
+        cwd: workDir,
+        env: execEnv,
+        timeout: runtimeState.config.bootTimeoutMs,
+      });
+
+      await this._waitForValidationRuntimeReady(cluster, runtimeState, execEnv);
+
+      runtimeState.status = VALIDATION_RUNTIME_STATUS.READY;
+      runtimeState.startedAt = Date.now();
+      await this._saveClusters().catch(() => {});
+      this._log(`[Orchestrator] Validation runtime ready for ${cluster.id}`);
+      return runtimeState;
+    } catch (error) {
+      runtimeState.lastError = error.message;
+      await this._teardownValidationRuntime(cluster, {
+        finalStatus: VALIDATION_RUNTIME_STATUS.FAILED,
+        clearLastError: false,
+      });
+      throw error;
+    }
+  }
+
+  ensureClusterValidationRuntime(clusterId) {
+    const cluster = this.clusters.get(clusterId);
+    if (!cluster) {
+      throw new Error(`Cluster ${clusterId} not found`);
+    }
+
+    const runtimeState = cluster.validationRuntime;
+    if (!runtimeState?.enabled) {
+      throw new Error(`Cluster ${clusterId} does not have validationRuntime configured`);
+    }
+
+    if (runtimeState.status === VALIDATION_RUNTIME_STATUS.READY && runtimeState.env) {
+      return runtimeState;
+    }
+
+    if (runtimeState.promise) {
+      return runtimeState.promise;
+    }
+
+    runtimeState.promise = this._startValidationRuntime(cluster).finally(() => {
+      runtimeState.promise = null;
+    });
+
+    return runtimeState.promise;
+  }
+
+  async _teardownValidationRuntime(
+    cluster,
+    {
+      finalStatus = VALIDATION_RUNTIME_STATUS.NOT_STARTED,
+      clearLastError = true,
+      bestEffort = true,
+    } = {}
+  ) {
+    const runtimeState = cluster.validationRuntime;
+    if (!runtimeState?.enabled || !runtimeState.config) {
+      return;
+    }
+
+    const workDir = this._getClusterWorkDir(cluster);
+    const execEnv = this._buildValidationRuntimeExecEnv(runtimeState);
+    const shouldRunTeardownCommand = Boolean(runtimeState.env);
+
+    runtimeState.status = VALIDATION_RUNTIME_STATUS.STOPPING;
+    await this._saveClusters().catch(() => {});
+
+    try {
+      if (shouldRunTeardownCommand) {
+        await exec(runtimeState.config.teardown, {
+          cwd: workDir,
+          env: execEnv,
+          timeout: runtimeState.config.teardownTimeoutMs,
+        });
+      }
+    } catch (error) {
+      if (!bestEffort) {
+        throw error;
+      }
+    } finally {
+      await this._releaseValidationRuntimePorts(cluster.id).catch(() => {});
+      runtimeState.status = finalStatus;
+      runtimeState.env = null;
+      runtimeState.allocatedPorts = null;
+      runtimeState.startedAt = null;
+      if (clearLastError) {
+        runtimeState.lastError = null;
+      }
+      await this._saveClusters().catch(() => {});
+    }
+  }
+
+  async stopClusterValidationRuntime(clusterId, options = {}) {
+    const cluster = this.clusters.get(clusterId);
+    if (!cluster?.validationRuntime?.enabled) {
+      return;
+    }
+
+    await this._teardownValidationRuntime(cluster, {
+      finalStatus: VALIDATION_RUNTIME_STATUS.NOT_STARTED,
+      clearLastError: true,
+      bestEffort: options.bestEffort !== false,
+    });
+  }
+
   /**
    * Signal a remote daemon that owns the cluster and wait for exit
    * @param {Object} cluster - Cluster object
@@ -1770,6 +2181,11 @@ class Orchestrator {
       cluster.validatorIsolation = null;
     }
 
+    if (cluster.validationRuntime?.enabled) {
+      this._log(`[Orchestrator] Tearing down validation runtime for ${clusterId}...`);
+      await this.stopClusterValidationRuntime(clusterId, { bestEffort: true });
+    }
+
     // Worktree cleanup: auto-remove if completed successfully with --pr/--ship
     // (no reason to resume after PR is created/merged), otherwise preserve for resume
     const shouldAutoCleanWorktree =
@@ -1857,6 +2273,11 @@ class Orchestrator {
         preserveWorkspace: false,
       });
       cluster.validatorIsolation = null;
+    }
+
+    if (cluster.validationRuntime?.enabled) {
+      this._log(`[Orchestrator] Force tearing down validation runtime for ${clusterId}...`);
+      await this.stopClusterValidationRuntime(clusterId, { bestEffort: true });
     }
 
     // Force remove worktree (full cleanup, no resume)
@@ -2562,7 +2983,11 @@ Continue from where you left off. Review your previous output to understand what
     // Phase 2: Build mock cluster config with proposed agents
     // Collect all agents that would exist after operations complete
     const existingAgentConfigs = cluster.config.agents || [];
-    const proposedAgentConfigs = this._buildProposedAgentConfigs(existingAgentConfigs, operations);
+    const proposedAgentConfigs = this._buildProposedAgentConfigs(
+      existingAgentConfigs,
+      operations,
+      cluster
+    );
 
     // Phase 3: Validate proposed cluster config
     const validation = this._validateProposedConfig(
@@ -2624,7 +3049,7 @@ Continue from where you left off. Review your previous output to understand what
     return validationErrors;
   }
 
-  _buildProposedAgentConfigs(existingAgentConfigs, operations) {
+  _buildProposedAgentConfigs(existingAgentConfigs, operations, cluster = null) {
     const proposedAgentConfigs = [...existingAgentConfigs];
 
     for (const op of operations) {
@@ -2636,7 +3061,7 @@ Continue from where you left off. Review your previous output to understand what
           }
         }
       } else if (op.action === 'load_config' && op.config) {
-        const loadedAgentConfigs = this._resolveLoadConfigAgents(op.config);
+        const loadedAgentConfigs = this._resolveLoadConfigAgents(op.config, cluster);
         for (const agentConfig of loadedAgentConfigs) {
           const existingIdx = proposedAgentConfigs.findIndex((a) => a.id === agentConfig.id);
           if (existingIdx === -1) {
@@ -2661,7 +3086,7 @@ Continue from where you left off. Review your previous output to understand what
     return proposedAgentConfigs;
   }
 
-  _resolveLoadConfigAgents(config) {
+  _resolveLoadConfigAgents(config, cluster = null) {
     if (!config) {
       throw new Error('load_config operation missing config');
     }
@@ -2673,7 +3098,7 @@ Continue from where you left off. Review your previous output to understand what
     if (typeof config === 'object' && config.base) {
       const { base, params } = config;
       const resolver = new TemplateResolver(templatesDir);
-      loadedConfig = resolver.resolve(base, params || {});
+      loadedConfig = resolver.resolve(base, this._mergeParameterizedTemplateParams(base, params, cluster));
     } else if (typeof config === 'string') {
       // Static config - load directly from file
       const configPath = path.join(templatesDir, `${config}.json`);
@@ -2916,6 +3341,7 @@ Continue from where you left off. Review your previous output to understand what
         testMode: !!this.taskRunner, // Enable testMode if taskRunner provided
         quiet: this.quiet,
         modelOverride: cluster.modelOverride || null,
+        orchestrator: this,
       };
 
       // TaskRunner DI - propagate to dynamically spawned agents
@@ -3055,11 +3481,12 @@ Continue from where you left off. Review your previous output to understand what
     if (typeof config === 'object' && config.base) {
       // Parameterized template - resolve with TemplateResolver
       const { base, params } = config;
+      const mergedParams = this._mergeParameterizedTemplateParams(base, params, cluster);
       this._log(`    Loading parameterized template: ${base}`);
-      this._log(`    Params: ${JSON.stringify(params)}`);
+      this._log(`    Params: ${JSON.stringify(mergedParams)}`);
 
       const resolver = new TemplateResolver(templatesDir);
-      loadedConfig = resolver.resolve(base, params);
+      loadedConfig = resolver.resolve(base, mergedParams);
 
       this._log(`    ✓ Resolved template: ${base} → ${loadedConfig.agents?.length || 0} agent(s)`);
     } else if (typeof config === 'string') {

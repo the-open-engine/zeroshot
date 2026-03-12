@@ -361,6 +361,42 @@ function buildTriggeringMessageSection(triggeringMessage) {
   return context;
 }
 
+function buildValidationRuntimeSection(config, cluster) {
+  if (!config.requiresValidationRuntime) {
+    return '';
+  }
+
+  const runtime = cluster.validationRuntime;
+  if (!runtime || runtime.status !== 'ready' || !runtime.env) {
+    return '';
+  }
+
+  const envEntries = Object.entries(runtime.env).sort(([a], [b]) => a.localeCompare(b));
+  let context = `\n## Validation Runtime\n\n`;
+  context += `A live runtime has already been prepared by orchestration.\n`;
+  context += `Do NOT run boot commands. Do NOT run teardown. Use the provided env values exactly.\n\n`;
+
+  if (envEntries.length > 0) {
+    context += `Resolved runtime env:\n`;
+    for (const [key, value] of envEntries) {
+      context += `- ${key}=${value}\n`;
+    }
+    context += `\n`;
+  }
+
+  if (runtime.allocatedPorts && Object.keys(runtime.allocatedPorts).length > 0) {
+    context += `Allocated host ports:\n`;
+    for (const [key, value] of Object.entries(runtime.allocatedPorts).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )) {
+      context += `- ${key}: ${value}\n`;
+    }
+    context += `\n`;
+  }
+
+  return context;
+}
+
 /**
  * Build execution context for an agent
  * @param {object} params - Context building parameters
@@ -401,6 +437,7 @@ function buildContext({
   const legacyOutputSchema = buildLegacyOutputSchemaSection(config);
   const queuedGuidanceSection = queuedGuidance || '';
   const jsonSchema = buildJsonSchemaSection(config);
+  const validationRuntimeSection = buildValidationRuntimeSection(config, cluster);
   const validatorSkip = buildValidatorSkipSection({ role, messageBus, cluster, isolation });
   const triggeringMessageSection = buildTriggeringMessageSection(triggeringMessage);
 
@@ -424,6 +461,7 @@ function buildContext({
   pushStaticPack('queuedGuidance', 'queuedGuidance', queuedGuidanceSection);
   pushStaticPack('legacyOutputSchema', 'legacyOutputSchema', legacyOutputSchema);
   pushStaticPack('jsonSchema', 'jsonSchema', jsonSchema);
+  pushStaticPack('validationRuntime', 'validationRuntime', validationRuntimeSection);
 
   if (Array.isArray(strategy.sources)) {
     strategy.sources.forEach((source, index) => {

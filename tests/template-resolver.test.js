@@ -158,6 +158,22 @@ describe('TemplateResolver', function () {
     it('should fail on non-existent template', function () {
       assert.throws(() => resolver.resolve('does-not-exist', {}), /Base template not found/);
     });
+
+    it('should preserve param types for exact placeholders', function () {
+      const resolved = resolver.resolve('heavy-validation', {
+        include_runtime_validator: true,
+        heavy_validator_count: 3,
+        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
+      });
+
+      const coordinator = resolved.agents.find((agent) => agent.id === 'consensus-coordinator');
+      const source = coordinator.contextStrategy.sources.find(
+        (entry) => entry.topic === 'HEAVY_VALIDATION_RESULT'
+      );
+
+      assert.strictEqual(typeof source.amount, 'number');
+      assert.strictEqual(source.amount, 3);
+    });
   });
 });
 

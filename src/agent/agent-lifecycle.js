@@ -410,6 +410,21 @@ async function applyValidatorJitter(agent) {
   await new Promise((resolve) => setTimeout(resolve, jitterMs));
 }
 
+function ensureRequiredValidationRuntime(agent) {
+  if (!agent.config.requiresValidationRuntime) {
+    return null;
+  }
+
+  const orchestrator = agent.orchestrator || agent.cluster?.orchestrator;
+  if (!orchestrator || typeof orchestrator.ensureClusterValidationRuntime !== 'function') {
+    throw new Error(
+      `Agent ${agent.id} requires validation runtime, but orchestrator runtime manager is unavailable`
+    );
+  }
+
+  return orchestrator.ensureClusterValidationRuntime(agent.cluster.id);
+}
+
 function publishTaskStarted(agent, triggeringMessage) {
   const modelSpec = agent._resolveModelSpec ? agent._resolveModelSpec() : null;
   agent._publishLifecycle('TASK_STARTED', {
@@ -544,6 +559,7 @@ async function runTaskAttempt(agent, triggeringMessage) {
   // Spawn provider task
   agent.state = 'executing_task';
   await applyValidatorJitter(agent);
+  await ensureRequiredValidationRuntime(agent);
   publishTaskStarted(agent, triggeringMessage);
 
   const result = await agent._spawnClaudeTask(context);

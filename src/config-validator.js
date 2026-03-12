@@ -1924,12 +1924,28 @@ function validateConfigSemantics(config) {
     // === GAP 13: Task executor config invalid ===
     validateTaskExecutor(prefix, agent, errors);
 
+    // === GAP 14: Validation runtime flag misuse ===
+    validateValidationRuntimeRequirement(prefix, agent, errors);
+
     // === GAP 15: Stricter role reference validation ===
     // Upgrade from WARNING to ERROR when role is used in critical logic
     validateRoleReferences(prefix, agent, roles, errors);
   }
 
   return { errors, warnings };
+}
+
+function validateValidationRuntimeRequirement(prefix, agent, errors) {
+  if (!agent.requiresValidationRuntime) {
+    return;
+  }
+
+  if (agent.role !== 'validator') {
+    errors.push(
+      `${prefix}: requiresValidationRuntime is only valid for validator agents. ` +
+        `Fix: move the flag to a validator or remove it.`
+    );
+  }
 }
 
 function resolveProviderName(agent, config, settings) {

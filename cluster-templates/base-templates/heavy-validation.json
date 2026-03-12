@@ -15,6 +15,18 @@
       "type": "number",
       "default": 0,
       "description": "Task timeout in milliseconds (0 = no timeout)"
+    },
+    "include_runtime_validator": {
+      "type": "boolean",
+      "default": false
+    },
+    "heavy_validator_count": {
+      "type": "number",
+      "default": 2
+    },
+    "heavy_validator_ids_js": {
+      "type": "string",
+      "default": "[\"validator-security\",\"validator-tester\"]"
     }
   },
   "agents": [
@@ -216,6 +228,115 @@
       }
     },
     {
+      "id": "validator-runtime",
+      "role": "validator",
+      "condition": "include_runtime_validator == true",
+      "requiresValidationRuntime": true,
+      "modelLevel": "{{validator_level}}",
+      "timeout": "{{timeout}}",
+      "maxRetries": 3,
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["PASS", "FAIL", "CANNOT_VALIDATE"]
+                },
+                "evidence": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "status"]
+            }
+          }
+        },
+        "required": ["approved", "summary"]
+      },
+      "prompt": {
+        "system": "## 🔴 OUTPUT FORMAT (CRITICAL - READ FIRST)\n\nYour output MUST be MINIMAL and STRUCTURED:\n- Output ONLY the required JSON schema fields\n- NO preambles\n- NO explanations before or after the JSON\n\n## ROLE\nYou are a runtime validator.\nYour job is to validate behavior against a live environment that has already been prepared by orchestration.\n\n## RULES\n- NEVER run boot commands\n- NEVER run teardown commands\n- NEVER allocate ports or infer missing runtime values\n- Use the provided runtime env and context exactly as given\n- Prefer the cheapest direct proof of behavior\n\n## WHAT TO VERIFY\n- the changed behavior actually works in the live runtime\n- API/UI behavior, not just static code shape\n- runtime regressions that tests or static review may miss\n\n## OUTPUT\n- approved: true only if runtime behavior is verified\n- errors: concrete runtime failures\n- checks: concise PASS/FAIL evidence"
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "ISSUE_OPENED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "STATE_SNAPSHOT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "PLAN_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "IMPLEMENTATION_READY",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": "{{max_tokens}}"
+      },
+      "triggers": [
+        {
+          "topic": "QUICK_VALIDATION_PASSED",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "HEAVY_VALIDATION_RESULT",
+            "content": {
+              "text": "{{result.summary}}",
+              "data": {
+                "approved": "{{result.approved}}",
+                "errors": "{{result.errors}}",
+                "checks": "{{result.checks}}",
+                "validatorId": "validator-runtime"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "id": "consensus-coordinator",
       "role": "coordinator",
       "modelLevel": "level1",
@@ -242,7 +363,7 @@
             "topic": "HEAVY_VALIDATION_RESULT",
             "priority": "required",
             "strategy": "latest",
-            "amount": 2
+            "amount": "{{heavy_validator_count}}"
           }
         ],
         "format": "chronological",
@@ -253,7 +374,7 @@
           "topic": "HEAVY_VALIDATION_RESULT",
           "logic": {
             "engine": "javascript",
-            "script": "const validators = ['validator-security', 'validator-tester']; const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
+            "script": "const validators = {{heavy_validator_ids_js}}; const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
           },
           "action": "execute_task"
         }

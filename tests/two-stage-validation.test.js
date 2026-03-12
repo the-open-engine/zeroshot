@@ -68,7 +68,7 @@ describe('Two-Stage Validation Pipeline', function () {
   });
 
   describe('heavy-validation template', function () {
-    it('should contain validator-security and validator-tester', function () {
+    it('should contain validator-security and validator-tester by default', function () {
       const resolved = resolver.resolve('heavy-validation', {});
       assert.ok(resolved.agents, 'Template should have agents');
 
@@ -77,6 +77,9 @@ describe('Two-Stage Validation Pipeline', function () {
 
       const tester = resolved.agents.find((a) => a.id === 'validator-tester');
       assert.ok(tester, 'validator-tester should exist');
+
+      const runtime = resolved.agents.find((a) => a.id === 'validator-runtime');
+      assert.ok(!runtime, 'validator-runtime should be omitted when runtime validation is disabled');
     });
 
     it('should trigger on QUICK_VALIDATION_PASSED', function () {
@@ -118,6 +121,45 @@ describe('Two-Stage Validation Pipeline', function () {
 
       assert.ok(contextSource, 'validator-security should have QUICK_VALIDATION_PASSED context');
       assert.strictEqual(contextSource.priority, 'required');
+    });
+
+    it('should add validator-runtime when runtime validation is enabled', function () {
+      const resolved = resolver.resolve('heavy-validation', {
+        include_runtime_validator: true,
+        heavy_validator_count: 3,
+        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
+      });
+
+      const runtime = resolved.agents.find((a) => a.id === 'validator-runtime');
+      assert.ok(runtime, 'validator-runtime should exist when enabled');
+      assert.strictEqual(runtime.requiresValidationRuntime, true);
+
+      const trigger = runtime.triggers.find((t) => t.topic === 'QUICK_VALIDATION_PASSED');
+      assert.ok(trigger, 'validator-runtime should trigger on QUICK_VALIDATION_PASSED');
+
+      const hookTopic = runtime.hooks?.onComplete?.config?.topic;
+      assert.strictEqual(hookTopic, 'HEAVY_VALIDATION_RESULT');
+    });
+
+    it('should update heavy consensus to wait for validator-runtime when enabled', function () {
+      const resolved = resolver.resolve('heavy-validation', {
+        include_runtime_validator: true,
+        heavy_validator_count: 3,
+        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
+      });
+
+      const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
+      const source = coordinator.contextStrategy.sources.find(
+        (entry) => entry.topic === 'HEAVY_VALIDATION_RESULT'
+      );
+      assert.strictEqual(source.amount, 3, 'heavy consensus should expect 3 validator results');
+
+      const triggerScript = coordinator.triggers.find((t) => t.topic === 'HEAVY_VALIDATION_RESULT')
+        ?.logic?.script;
+      assert.ok(
+        triggerScript.includes('validator-runtime'),
+        'heavy consensus should include validator-runtime in the validator set'
+      );
     });
 
     it('should not retrigger consensus on a late single-validator update after heavy result is published', function () {

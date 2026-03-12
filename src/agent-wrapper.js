@@ -109,6 +109,7 @@ class AgentWrapper {
 
     this.testMode = options.testMode || false;
     this.quiet = options.quiet || false;
+    this.orchestrator = options.orchestrator || cluster?.orchestrator || null;
 
     // ISOLATION SUPPORT - Run tasks inside Docker container
     this.isolation = options.isolation || null;

@@ -700,6 +700,10 @@ function ensureProviderHooks(agent, providerName) {
 
 function buildSpawnEnv(agent, providerName, modelSpec) {
   const spawnEnv = { ...process.env };
+  const runtimeEnv =
+    agent.config.requiresValidationRuntime && agent.cluster?.validationRuntime?.env
+      ? agent.cluster.validationRuntime.env
+      : null;
 
   if (providerName === 'claude') {
     Object.assign(spawnEnv, buildClaudeEnv(modelSpec));
@@ -708,6 +712,12 @@ function buildSpawnEnv(agent, providerName, modelSpec) {
     if (agent.worktree?.enabled) {
       spawnEnv.ZEROSHOT_WORKTREE = '1';
     }
+  }
+
+  if (runtimeEnv) {
+    Object.assign(spawnEnv, runtimeEnv, {
+      ZEROSHOT_VALIDATION_RUNTIME_STATUS: agent.cluster.validationRuntime.status || 'ready',
+    });
   }
 
   return spawnEnv;
@@ -1368,8 +1378,15 @@ async function spawnClaudeTaskIsolated(agent, context) {
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
   const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
   // Note: Auth env vars are injected by IsolationManager, we only need model mapping here
-  const isolatedEnv =
-    providerName === 'claude' ? buildClaudeEnv(modelSpec, { includeAuth: false }) : {};
+  const isolatedEnv = {
+    ...(providerName === 'claude' ? buildClaudeEnv(modelSpec, { includeAuth: false }) : {}),
+  };
+
+  if (agent.config.requiresValidationRuntime && agent.cluster?.validationRuntime?.env) {
+    Object.assign(isolatedEnv, agent.cluster.validationRuntime.env, {
+      ZEROSHOT_VALIDATION_RUNTIME_STATUS: agent.cluster.validationRuntime.status || 'ready',
+    });
+  }
 
   const taskId = await new Promise((resolve, reject) => {
     const proc = manager.spawnInContainer(clusterId, command, {

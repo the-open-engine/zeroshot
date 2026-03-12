@@ -189,6 +189,31 @@ describe('modelRules validation', function () {
   });
 });
 
+describe('validation runtime semantics', function () {
+  it('should reject requiresValidationRuntime on non-validator agents', function () {
+    const result = validateConfig({
+      agents: [
+        {
+          id: 'worker',
+          role: 'implementation',
+          requiresValidationRuntime: true,
+          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+        },
+        {
+          id: 'completion-detector',
+          role: 'orchestrator',
+          triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+        },
+      ],
+    });
+
+    assert.ok(
+      result.errors.some((error) => error.includes('requiresValidationRuntime is only valid')),
+      'Expected validation runtime misuse error'
+    );
+  });
+});
+
 // === MESSAGE FLOW TESTS ===
 
 describe('analyzeMessageFlow - kickoff requirements', function () {
