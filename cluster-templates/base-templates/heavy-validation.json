@@ -374,7 +374,7 @@
           "topic": "HEAVY_VALIDATION_RESULT",
           "logic": {
             "engine": "javascript",
-            "script": "const validators = {{heavy_validator_ids_js}}; const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
+            "script": "const validators = JSON.parse('{{heavy_validator_ids_js}}'); const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
           },
           "action": "execute_task"
         }
