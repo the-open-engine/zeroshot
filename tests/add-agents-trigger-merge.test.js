@@ -58,102 +58,18 @@ describe('add_agents duplicate ID handling', function () {
     cleanupTempDir(tmpDir);
   });
 
-  it('should REPLACE agent entirely when adding agent with duplicate ID', async function () {
-    orchestrator = new Orchestrator({
-      dataDir: tmpDir,
-      taskRunner: mockRunner,
-      quiet: true,
-    });
-
-    // Initial agent with QUICK trigger and quick-specific hooks
-    const initialConfig = {
-      agents: [
-        {
-          id: 'consensus-coordinator',
-          role: 'coordinator',
-          modelLevel: 'level2',
-          triggers: [{ topic: 'QUICK_VALIDATION_RESULT', action: 'execute_task' }],
-          prompt: 'Quick validation coordinator.',
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: { topic: 'QUICK_VALIDATION_PASSED', content: { text: 'Stage 1 passed' } },
-            },
-          },
-        },
-      ],
-    };
-
-    const result = await orchestrator.start(initialConfig, { text: 'Test task' });
-    const clusterId = result.id;
-    const cluster = orchestrator.getCluster(clusterId);
-
-    // Verify initial state
-    const agentBefore = cluster.agents.find((a) => a.id === 'consensus-coordinator');
-    assert.ok(agentBefore, 'consensus-coordinator should exist');
-    assert.strictEqual(agentBefore.config.triggers.length, 1);
-    assert.strictEqual(agentBefore.config.hooks.onComplete.config.topic, 'QUICK_VALIDATION_PASSED');
-
-    // Add agent with SAME ID but DIFFERENT triggers and hooks (simulating heavy-validation)
-    await orchestrator._opAddAgents(
-      cluster,
-      {
-        agents: [
-          {
-            id: 'consensus-coordinator', // Same ID!
-            role: 'coordinator',
-            modelLevel: 'level2',
-            triggers: [{ topic: 'HEAVY_VALIDATION_RESULT', action: 'execute_task' }],
-            prompt: 'Heavy validation coordinator.',
-            hooks: {
-              onComplete: {
-                action: 'publish_message',
-                config: { topic: 'VALIDATION_RESULT', content: { text: 'All validations passed' } },
-              },
-            },
-          },
-        ],
-      },
-      {}
-    );
-
-    // Verify REPLACEMENT occurred (not merge)
-    const clusterAfter = orchestrator.getCluster(clusterId);
-    const agentAfter = clusterAfter.agents.find((a) => a.id === 'consensus-coordinator');
-
-    assert.ok(agentAfter, 'consensus-coordinator should still exist');
-
-    // CRITICAL: Should have ONLY the new trigger (not merged)
-    assert.strictEqual(
-      agentAfter.config.triggers.length,
-      1,
-      'Should have 1 trigger (replaced, not merged)'
-    );
-    assert.strictEqual(
-      agentAfter.config.triggers[0].topic,
-      'HEAVY_VALIDATION_RESULT',
-      'Should have the NEW trigger'
-    );
-
-    // CRITICAL: Should have NEW hooks (the bug was keeping old hooks)
-    assert.strictEqual(
-      agentAfter.config.hooks.onComplete.config.topic,
-      'VALIDATION_RESULT',
-      'Should have NEW hooks (not old QUICK_VALIDATION_PASSED)'
-    );
-
-    // Verify prompt was also replaced
-    assert.strictEqual(agentAfter.config.prompt, 'Heavy validation coordinator.');
-
-    await orchestrator.stop(clusterId);
-  });
 
   it('should allow adding agents with different IDs', async function () {
     orchestrator = new Orchestrator({
-      dataDir: tmpDir,
+      storageDir: tmpDir,
+      skipLoad: true,
       taskRunner: mockRunner,
       quiet: true,
     });
+
+    // Configure mock behaviors
+    mockRunner.when('quick-consensus').returns(JSON.stringify({ result: 'ok' }));
+    mockRunner.when('heavy-consensus').returns(JSON.stringify({ result: 'ok' }));
 
     const initialConfig = {
       agents: [
@@ -202,10 +118,14 @@ describe('add_agents duplicate ID handling', function () {
 
   it('should replace agent instance entirely when same ID added', async function () {
     orchestrator = new Orchestrator({
-      dataDir: tmpDir,
+      storageDir: tmpDir,
+      skipLoad: true,
       taskRunner: mockRunner,
       quiet: true,
     });
+
+    // Configure mock behavior for test-agent
+    mockRunner.when('test-agent').returns({ result: 'ok' });
 
     const initialConfig = {
       agents: [

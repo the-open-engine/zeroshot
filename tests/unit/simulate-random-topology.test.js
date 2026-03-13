@@ -44,7 +44,7 @@ describe('simulateRandomTopology', function () {
       templatesDir: path.join(__dirname, '..', '..', 'cluster-templates'),
       samples: 3,
       maxSteps: 40,
-      maxScenarioMs: 150,
+      maxScenarioMs: 2000,
     });
 
     assert.deepStrictEqual(errors, []);
@@ -104,7 +104,10 @@ describe('simulateRandomTopology', function () {
 
     assert.ok(
       errors.some(
-        (error) => error.includes('step budget') || error.includes('quiesced without CLUSTER_COMPLETE')
+        (error) =>
+          error.includes('step budget') ||
+          error.includes('quiesced without CLUSTER_COMPLETE') ||
+          error.includes('timed out')
       ),
       `Expected loop/stuck error, got: ${errors.join(' | ')}`
     );

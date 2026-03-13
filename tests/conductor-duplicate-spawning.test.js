@@ -77,7 +77,18 @@ describe('Conductor Duplicate Spawning Prevention', function () {
     );
 
     // Worker agent is dynamically spawned via CLUSTER_OPERATIONS from worker-validator template
-    mockRunner.when('worker').returns('Implementation complete. All tests pass.');
+    // Worker template now requires JSON with summary and completionStatus
+    mockRunner.when('worker').returns(
+      JSON.stringify({
+        summary: 'Implementation complete. All tests pass.',
+        completionStatus: {
+          canValidate: true,
+          percentComplete: 100,
+          blockers: [],
+          nextSteps: [],
+        },
+      })
+    );
 
     // Validator agent is dynamically spawned via CLUSTER_OPERATIONS from worker-validator template
     // It has outputFormat: "json" with jsonSchema requiring approved, summary, errors
@@ -222,5 +233,8 @@ describe('Conductor Duplicate Spawning Prevention', function () {
       publishOp.metadata,
       'Publish operation: should have metadata with _republished flag'
     ).to.deep.equal({ _republished: true });
+
+    // Stop cluster to allow test to complete
+    await orchestrator.stop(clusterId);
   });
 });

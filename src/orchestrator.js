@@ -415,7 +415,18 @@ class Orchestrator {
 
     Object.assign(clusterContext, cluster);
 
+    // Transfer PID ownership to current process on resume
+    // CRITICAL: Prevents "orphaned" detection when daemon restarts
+    cluster.pid = process.pid;
+    cluster.daemonPid = process.pid;
+
     this.clusters.set(clusterId, clusterContext);
+    this._registerClusterSubscriptions({
+      messageBus,
+      clusterId,
+      isolationManager,
+      containerId: isolation?.containerId || null,
+    });
     this._startSnapshotter(clusterContext);
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
@@ -973,7 +984,6 @@ class Orchestrator {
     cluster.validationRuntime = this._buildValidationRuntimeState(this._getClusterWorkDir(cluster));
 
     this.clusters.set(clusterId, cluster);
-    this._startSnapshotter(cluster);
 
     // Persist the cluster immediately so detached runs can't create "invisible" initializing clusters.
     // Without this, an early startup failure (before ISSUE_OPENED / TASK_STARTED) may never be saved,
@@ -1082,8 +1092,9 @@ class Orchestrator {
       //
       // ORDER:
       //   1. Register subscriptions (lines below)
-      //   2. Start agents
-      //   3. Publish ISSUE_OPENED
+      //   2. Start snapshotter (publishes STATE_SNAPSHOT if legacy messages exist)
+      //   3. Start agents (so they can subscribe to STATE_SNAPSHOT)
+      //   4. Publish ISSUE_OPENED
       //
       // DO NOT move subscriptions after agent.start() - this will reintroduce
       // the race condition fixed in issue #31.
@@ -1094,6 +1105,9 @@ class Orchestrator {
         isolationManager,
         containerId,
       });
+
+      // Start snapshotter BEFORE agents so STATE_SNAPSHOT is available when agents subscribe
+      this._startSnapshotter(cluster);
 
       // Start all agents
       for (const agent of cluster.agents) {
@@ -1119,6 +1133,14 @@ class Orchestrator {
           source: this._getInputSource(input),
         },
       });
+
+      // CRITICAL: Snapshotter must process ISSUE_OPENED and publish STATE_SNAPSHOT
+      // BEFORE agents can execute. The 'message' event fires before 'topic:X' events,
+      // so agents (subscribed to 'message') would receive ISSUE_OPENED before the
+      // snapshotter (subscribed to 'topic:ISSUE_OPENED'). To prevent agents from
+      // executing without STATE_SNAPSHOT context, we must yield to the event loop
+      // to allow the snapshotter to process ISSUE_OPENED first.
+      await new Promise((resolve) => setImmediate(resolve));
 
       // CRITICAL: Mark initialization complete AFTER ISSUE_OPENED is published
       // This ensures stop() waits for at least 1 message before stopping
@@ -2378,8 +2400,23 @@ class Orchestrator {
 
     await this._ensureIsolationForResume(clusterId, cluster);
     this._ensureWorktreeForResume(clusterId, cluster);
+
+    // Re-register subscriptions (completion handlers, lifecycle, operations)
+    // so resumed clusters can respond to agent events and complete properly
+    this._registerClusterSubscriptions({
+      messageBus: cluster.messageBus,
+      clusterId,
+      isolationManager: cluster.isolationManager,
+      containerId: cluster.isolation?.containerId || null,
+    });
+
     this._startSnapshotter(cluster);
     await this._restartClusterAgents(cluster);
+
+    // Transfer PID ownership to resuming process
+    cluster.pid = process.pid;
+    cluster.daemonPid = process.pid;
+    cluster.state = 'running';
 
     const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);
 
@@ -3318,7 +3355,7 @@ Continue from where you left off. Review your previous output to understand what
 
         // Stop the existing agent (cluster.agents contains AgentWrapper instances directly)
         if (existingAgent.stop) {
-          existingAgent.stop();
+          await existingAgent.stop();
         }
 
         // Remove from cluster.agents array
@@ -3649,6 +3686,7 @@ Continue from where you left off. Review your previous output to understand what
       storageDir: this.storageDir,
       registryEntry,
       isProcessRunning: this._isProcessRunning.bind(this),
+      inMemory: true,
     });
     const statusState = summary?.state || cluster.state;
 

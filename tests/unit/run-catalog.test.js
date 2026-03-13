@@ -55,6 +55,21 @@ function createMessagesDb(storageDir, clusterId, rows) {
   }
 }
 
+function createNonClusterDb(storageDir, fileName) {
+  const dbPath = path.join(storageDir, fileName);
+  const db = new Database(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE runs (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  } finally {
+    db.close();
+  }
+}
+
 describe('run-catalog', function () {
   it('classifies completed history runs and extracts task summary', function () {
     const storageDir = createTempStorageDir();
@@ -195,6 +210,81 @@ describe('run-catalog', function () {
       assert.strictEqual(runs.length, 1);
       assert.strictEqual(runs[0].id, 'electric-galaxy-25');
       assert.strictEqual(runs[0].state, 'running');
+    } finally {
+      cleanupDir(storageDir);
+    }
+  });
+
+  it('ignores sqlite files that do not contain cluster messages', function () {
+    const storageDir = createTempStorageDir();
+    try {
+      createMessagesDb(storageDir, 'electric-galaxy-25', [
+        {
+          id: 'msg-1',
+          timestamp: Date.now() - 1000,
+          topic: 'ISSUE_OPENED',
+          sender: 'system',
+          contentText: '# Manual Input\n\nFix it',
+        },
+      ]);
+      createNonClusterDb(storageDir, 'runs.db');
+
+      const runs = listRunSummaries({
+        storageDir,
+        isProcessRunning: () => false,
+      });
+
+      assert.strictEqual(runs.length, 1);
+      assert.strictEqual(runs[0].id, 'electric-galaxy-25');
+    } finally {
+      cleanupDir(storageDir);
+    }
+  });
+
+  it('prefers live running registry state over historical failure markers after resume', function () {
+    const storageDir = createTempStorageDir();
+    try {
+      createMessagesDb(storageDir, 'electric-galaxy-25', [
+        {
+          id: 'msg-1',
+          timestamp: 1773313422000,
+          topic: 'ISSUE_OPENED',
+          sender: 'system',
+          contentText: '# Manual Input\n\nEliminate all current robustness-engine violations.',
+        },
+        {
+          id: 'msg-2',
+          timestamp: 1773315107000,
+          topic: 'AGENT_ERROR',
+          sender: 'fixer',
+          contentText: 'Task violet-aegis-73 polling failed after 30 consecutive failures',
+        },
+        {
+          id: 'msg-3',
+          timestamp: 1773332772000,
+          topic: 'AGENT_LIFECYCLE',
+          sender: 'fixer',
+          contentText: 'fixer: TASK_STARTED',
+        },
+      ]);
+
+      const summary = buildRunSummary({
+        clusterId: 'electric-galaxy-25',
+        storageDir,
+        registryEntry: {
+          state: 'running',
+          createdAt: 1773313422000,
+          daemonPid: 7777,
+          issue: null,
+          agentStates: [{ id: 'fixer', state: 'executing_task', currentTask: true }],
+        },
+        isProcessRunning: (pid) => pid === 7777,
+      });
+
+      assert(summary);
+      assert.strictEqual(summary.state, 'running');
+      assert.strictEqual(summary.currentAgent, 'fixer');
+      assert.strictEqual(summary.orphaned, false);
     } finally {
       cleanupDir(storageDir);
     }

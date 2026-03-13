@@ -201,7 +201,7 @@ describe('Worktree Docker Compose Cleanup', function () {
 
     it('should tear down compose services during stop (Ctrl+C path)', function () {
       const Orchestrator = require('../src/orchestrator');
-      const orchestrator = new Orchestrator({ dataDir: tmpDir });
+      const orchestrator = new Orchestrator({ storageDir: tmpDir, skipLoad: true });
 
       const fakeWorktreePath = path.join(tmpDir, 'stop-test-worktree');
       fs.mkdirSync(fakeWorktreePath, { recursive: true });
@@ -224,7 +224,7 @@ describe('Worktree Docker Compose Cleanup', function () {
 
     it('should skip when no docker-compose.yml exists', function () {
       const Orchestrator = require('../src/orchestrator');
-      const orchestrator = new Orchestrator({ dataDir: tmpDir });
+      const orchestrator = new Orchestrator({ storageDir: tmpDir, skipLoad: true });
 
       const fakeWorktreePath = path.join(tmpDir, 'no-compose-worktree');
       fs.mkdirSync(fakeWorktreePath, { recursive: true });
@@ -245,7 +245,7 @@ describe('Worktree Docker Compose Cleanup', function () {
 
     it('should not throw when docker compose down fails', function () {
       const Orchestrator = require('../src/orchestrator');
-      const orchestrator = new Orchestrator({ dataDir: tmpDir });
+      const orchestrator = new Orchestrator({ storageDir: tmpDir, skipLoad: true });
 
       const fakeWorktreePath = path.join(tmpDir, 'fail-compose-worktree');
       fs.mkdirSync(fakeWorktreePath, { recursive: true });
