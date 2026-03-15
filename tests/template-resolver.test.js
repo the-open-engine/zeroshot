@@ -78,7 +78,7 @@ const TASK_TYPES = ['INQUIRY', 'TASK', 'DEBUG'];
 describe('TemplateResolver', function () {
   let resolver;
 
-  beforeAll(function () {
+  before(function () {
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     resolver = new TemplateResolver(templatesDir);
   });
@@ -183,7 +183,7 @@ describe('TemplateResolver', function () {
 describe('2D Classification Routing', function () {
   let resolver;
 
-  beforeAll(function () {
+  before(function () {
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     resolver = new TemplateResolver(templatesDir);
   });

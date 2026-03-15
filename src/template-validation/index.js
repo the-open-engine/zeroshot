@@ -320,7 +320,9 @@ async function validateTemplates({
       } catch (resolutionError) {
         // Resolution failed - likely missing required params without defaults
         // Skip deep validation for this template
-        logger.debug(`Skipping deep validation for ${templateId}: ${resolutionError.message}`);
+        console.debug(
+          `Skipping deep validation for ${templateId}: ${resolutionError.message}`
+        );
         summary.skipped++;
         continue;
       }
