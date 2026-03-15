@@ -42,7 +42,6 @@ describe('validation-runtime helpers', function () {
     assert.deepStrictEqual(getValidationRuntimeTemplateParams(true), {
       include_runtime_validator: true,
       heavy_validator_count: 3,
-      heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
     });
   });
 
@@ -50,7 +49,6 @@ describe('validation-runtime helpers', function () {
     assert.deepStrictEqual(getValidationRuntimeTemplateParams(false), {
       include_runtime_validator: false,
       heavy_validator_count: 2,
-      heavy_validator_ids_js: '["validator-security","validator-tester"]',
     });
   });
 });

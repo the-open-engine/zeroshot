@@ -2,6 +2,11 @@
   "name": "Heavy Validation",
   "description": "Stage 2: Security + Adversarial testing. Expensive (120-180s). Only runs after Stage 1 passes.",
   "params": {
+    "task_type": {
+      "type": "string",
+      "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "default": "TASK"
+    },
     "validator_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
@@ -23,10 +28,6 @@
     "heavy_validator_count": {
       "type": "number",
       "default": 2
-    },
-    "heavy_validator_ids_js": {
-      "type": "string",
-      "default": "[\"validator-security\",\"validator-tester\"]"
     }
   },
   "agents": [

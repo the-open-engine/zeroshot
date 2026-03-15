@@ -208,6 +208,7 @@ function runClusterPreflight({ input, options, providerOverride, settings, force
     requireGh: issueProvider === 'github', // gh CLI required for GitHub
     requireDocker: options.docker,
     requireGit: options.worktree,
+    autoPr: options.pr || options.ship, // Check PR/MR CLI tools if --pr or --ship mode
     quiet: process.env.ZEROSHOT_DAEMON === '1',
     provider: providerOverride,
     issueProvider, // Pass detected issue provider for tool checking

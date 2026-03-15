@@ -321,6 +321,9 @@ async function executeTriggerAction(agent, trigger, message) {
 
   if (action === 'execute_task') {
     await executeTask(agent, message);
+  } else if (action === 'evaluate_logic') {
+    // Similar to execute_task, but logic already evaluated in trigger
+    await executeTask(agent, message);
   } else if (action === 'stop_cluster') {
     // Publish CLUSTER_COMPLETE message to signal successful completion
     agent._publish({

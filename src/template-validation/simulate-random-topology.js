@@ -228,7 +228,10 @@ function parseOperations(raw) {
 
 function resolveConfigOperation({ configOp, templatesDir }) {
   if (typeof configOp === 'object' && configOp?.base) {
-    const resolver = new TemplateResolver(templatesDir);
+    // TemplateResolver expects parent directory (cluster-templates), not base-templates
+    const isBaseTemplatesDir = path.basename(templatesDir) === 'base-templates';
+    const resolverDir = isBaseTemplatesDir ? path.dirname(templatesDir) : templatesDir;
+    const resolver = new TemplateResolver(resolverDir);
     return resolver.resolve(configOp.base, configOp.params || {});
   }
   if (typeof configOp === 'string') {

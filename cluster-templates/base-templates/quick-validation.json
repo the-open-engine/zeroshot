@@ -2,6 +2,11 @@
   "name": "Quick Validation",
   "description": "Stage 1: Requirements + Code validation. Fast feedback (30-60s).",
   "params": {
+    "task_type": {
+      "type": "string",
+      "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "default": "TASK"
+    },
     "validator_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],

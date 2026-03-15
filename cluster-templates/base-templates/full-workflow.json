@@ -38,6 +38,7 @@
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "default": "TASK",
       "description": "Type of work"
     },
     "complexity": {
@@ -722,6 +723,51 @@
           }
         }
       }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["COMPLETE", "WAIT"]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["decision", "reason"]
+      },
+      "prompt": {
+        "system": "Cluster completion detector.\n\nCheck if ALL validators approved the implementation.\n\nLook at VALIDATION_RESULT messages in context:\n- If ALL have approved:true → Return {\"decision\": \"COMPLETE\", \"reason\": \"All validators approved\"}\n- If ANY have approved:false → Return {\"decision\": \"WAIT\", \"reason\": \"Validation failed - worker must fix issues\"}\n\nDO NOT stop cluster until ALL validators have approved."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "VALIDATION_RESULT",
+            "priority": "required",
+            "since": "last_agent_start",
+            "strategy": "latest",
+            "amount": 10
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": 5000
+      },
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\n\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nconst validatorIds = new Set(validators.map((v) => v.id));\nconst validatorResponses = responses.filter((r) => validatorIds.has(r.sender));\n\nconst latestByValidator = new Map();\nfor (const msg of validatorResponses) {\n  latestByValidator.set(msg.sender, msg);\n}\n\nconst allApproved = Array.from(latestByValidator.values()).every(msg => msg.content?.data?.approved === true || msg.content?.data?.approved === 'true');\n\nreturn latestByValidator.size >= validators.length && allApproved;"
+          },
+          "action": "stop_cluster"
+        }
+      ]
     }
   ]
 }

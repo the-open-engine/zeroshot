@@ -200,8 +200,9 @@ function readDbHistory(clusterId, dbPath) {
     return null;
   }
 
-  const db = new Database(dbPath, { readonly: true, timeout: 5000 });
+  let db;
   try {
+    db = new Database(dbPath, { readonly: true, timeout: 5000 });
     const hasMessagesTable = db
       .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'messages'")
       .get();
@@ -217,7 +218,13 @@ function readDbHistory(clusterId, dbPath) {
 
     return buildHistorySummary(clusterId, queries);
   } finally {
-    db.close();
+    if (db) {
+      try {
+        db.close();
+      } catch {
+        // Ignore close errors - database may already be closed
+      }
+    }
   }
 }
 

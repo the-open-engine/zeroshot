@@ -135,14 +135,12 @@ function getValidationRuntimeTemplateParams(enabled) {
     return {
       include_runtime_validator: true,
       heavy_validator_count: 3,
-      heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
     };
   }
 
   return {
     include_runtime_validator: false,
     heavy_validator_count: 2,
-    heavy_validator_ids_js: '["validator-security","validator-tester"]',
   };
 }
 

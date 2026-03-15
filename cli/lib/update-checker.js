@@ -125,7 +125,10 @@ function canWriteToNpmGlobal() {
 
   try {
     // Get npm global prefix (e.g., /usr/lib or /home/user/.nvm/versions/node/...)
-    const prefix = execSync('npm config get prefix', { encoding: 'utf8' }).trim();
+    const prefix = execSync('npm config get prefix', {
+      encoding: 'utf8',
+      timeout: 2000
+    }).trim();
     const globalModulesDir = require('path').join(prefix, 'lib', 'node_modules');
 
     // Check if directory exists and is writable

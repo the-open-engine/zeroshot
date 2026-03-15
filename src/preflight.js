@@ -56,9 +56,11 @@ function formatError(title, detail, recovery) {
  */
 function commandExists(cmd) {
   try {
-    // Windows uses 'where', Unix uses 'which'
-    const checkCmd = process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`;
-    execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe' });
+    // Use absolute path to which/where to avoid dependency on PATH
+    // which is typically in /usr/bin on Unix systems
+    const whichCmd = process.platform === 'win32' ? 'where' : '/usr/bin/which';
+    const checkCmd = `${whichCmd} ${cmd}`;
+    execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe', timeout: 2000 });
     return true;
   } catch {
     return false;
@@ -101,6 +103,7 @@ function getClaudeVersion(claudeCommand = 'claude') {
     const output = execSync(versionCmd, {
       encoding: 'utf8',
       stdio: 'pipe',
+      timeout: 5000, // 5 second timeout for version check
       env: {
         ...process.env,
         CLAUDE_CONFIG_DIR: preflightConfigDir,
@@ -245,7 +248,7 @@ function checkGhAuth() {
   // Check auth status with timeout to prevent hangs
   // gh auth status: exit 0 = authenticated, exit 1 = not authenticated
   // Note: gh outputs to stderr even on success
-  const AUTH_CHECK_TIMEOUT_MS = 10000;
+  const AUTH_CHECK_TIMEOUT_MS = 5000;
   try {
     execSync('gh auth status', {
       encoding: 'utf8',
@@ -309,10 +312,10 @@ function checkGhAuth() {
  */
 function checkDocker() {
   try {
-    execSync('docker --version', { encoding: 'utf8', stdio: 'pipe' });
+    execSync('docker --version', { encoding: 'utf8', stdio: 'pipe', timeout: 2000 });
 
     // Also check if Docker daemon is running
-    execSync('docker info', { encoding: 'utf8', stdio: 'pipe' });
+    execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
 
     return {
       available: true,
@@ -491,7 +494,7 @@ function validateDockerRequirement() {
 
 function isGitRepository() {
   try {
-    execSync('git rev-parse --git-dir', { stdio: 'pipe' });
+    execSync('git rev-parse --git-dir', { stdio: 'pipe', timeout: 2000 });
     return true;
   } catch {
     return false;

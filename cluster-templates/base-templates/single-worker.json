@@ -19,6 +19,7 @@
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "default": "TASK",
       "description": "Type of work"
     }
   },

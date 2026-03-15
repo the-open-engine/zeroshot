@@ -136,7 +136,7 @@ describe('Orchestrator resume persistence', function () {
       const originalStop = resumedOrchestrator.stop.bind(resumedOrchestrator);
       resumedOrchestrator.stop = async (id, options = {}) => {
         stopCall = { id, options };
-        return originalStop(id, options);
+        await originalStop(id, options);
       };
 
       const loadedCluster = resumedOrchestrator.getCluster(clusterId);

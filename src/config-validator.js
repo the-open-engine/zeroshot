@@ -166,9 +166,9 @@ function validateTrigger(trigger, triggerPrefix, errors) {
     errors.push(`${triggerPrefix}.topic is required`);
   }
 
-  if (trigger.action && !['execute_task', 'stop_cluster'].includes(trigger.action)) {
+  if (trigger.action && !['execute_task', 'stop_cluster', 'evaluate_logic'].includes(trigger.action)) {
     errors.push(
-      `${triggerPrefix}.action must be 'execute_task' or 'stop_cluster', got '${trigger.action}'`
+      `${triggerPrefix}.action must be 'execute_task', 'stop_cluster', or 'evaluate_logic', got '${trigger.action}'`
     );
   }
 
@@ -1299,7 +1299,8 @@ function validateHookLogic(hook, prefix, errors) {
     }
   }
 
-  if (!hook.config && !hook.transform) {
+  // stop_cluster action doesn't need config/transform - logic provides conditional execution
+  if (!hook.config && !hook.transform && hook.action !== 'stop_cluster') {
     errors.push(
       `${prefix}: Hook with logic block must also have 'config' or 'transform'. ` +
         `Logic provides overrides, not the full message.`

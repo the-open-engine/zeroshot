@@ -78,7 +78,7 @@ const TASK_TYPES = ['INQUIRY', 'TASK', 'DEBUG'];
 describe('TemplateResolver', function () {
   let resolver;
 
-  before(function () {
+  beforeAll(function () {
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     resolver = new TemplateResolver(templatesDir);
   });
@@ -151,8 +151,12 @@ describe('TemplateResolver', function () {
       assert.ok(metaCoordinator, 'meta-coordinator should be present for CRITICAL tasks');
     });
 
-    it('should fail on missing required params', function () {
-      assert.throws(() => resolver.resolve('single-worker', {}), /Missing required params/);
+    it('should apply defaults when params not provided', function () {
+      // All base templates have defaults for all params, so empty params should work
+      const resolved = resolver.resolve('single-worker', {});
+      assert.ok(resolved);
+      assert.strictEqual(resolved.agents.length, 1);
+      assert.strictEqual(resolved.agents[0].id, 'worker');
     });
 
     it('should fail on non-existent template', function () {
@@ -163,7 +167,6 @@ describe('TemplateResolver', function () {
       const resolved = resolver.resolve('heavy-validation', {
         include_runtime_validator: true,
         heavy_validator_count: 3,
-        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
       });
 
       const coordinator = resolved.agents.find((agent) => agent.id === 'consensus-coordinator');
@@ -180,7 +183,7 @@ describe('TemplateResolver', function () {
 describe('2D Classification Routing', function () {
   let resolver;
 
-  before(function () {
+  beforeAll(function () {
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     resolver = new TemplateResolver(templatesDir);
   });

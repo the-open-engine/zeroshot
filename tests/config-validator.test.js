@@ -73,7 +73,7 @@ describe('validateBasicStructure', function () {
         },
       ],
     });
-    assert.ok(result.errors.some((e) => e.includes("must be 'execute_task' or 'stop_cluster'")));
+    assert.ok(result.errors.some((e) => e.includes("must be 'execute_task', 'stop_cluster', or 'evaluate_logic'")));
   });
 
   it('should reject logic without script', function () {

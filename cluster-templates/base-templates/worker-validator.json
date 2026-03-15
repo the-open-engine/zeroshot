@@ -28,6 +28,7 @@
     "task_type": {
       "type": "string",
       "enum": ["INQUIRY", "TASK", "DEBUG"],
+      "default": "TASK",
       "description": "Type of work"
     }
   },
@@ -222,6 +223,65 @@
                 "errors": "{{result.errors}}"
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["COMPLETE", "WAIT"]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["decision", "reason"]
+      },
+      "prompt": {
+        "system": "Cluster completion detector.\n\nCheck if implementation passed validation.\n\nReturn {\"decision\": \"COMPLETE\", \"reason\": \"...\"} if approved.\nReturn {\"decision\": \"WAIT\", \"reason\": \"...\"} otherwise."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "VALIDATION_RESULT",
+            "priority": "required",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": 5000
+      },
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "return message.content?.data?.approved === true || message.content?.data?.approved === 'true';"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_COMPLETE",
+            "content": {
+              "text": "{{result.reason}}"
+            }
+          },
+          "logic": {
+            "engine": "javascript",
+            "script": "if (result.decision !== 'COMPLETE') return null;"
           }
         }
       }

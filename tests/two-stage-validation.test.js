@@ -13,7 +13,7 @@ const Ledger = require('../src/ledger');
 describe('Two-Stage Validation Pipeline', function () {
   let resolver;
 
-  before(function () {
+  beforeAll(function () {
     const templatesDir = path.join(__dirname, '..', 'cluster-templates');
     resolver = new TemplateResolver(templatesDir);
   });
@@ -127,7 +127,6 @@ describe('Two-Stage Validation Pipeline', function () {
       const resolved = resolver.resolve('heavy-validation', {
         include_runtime_validator: true,
         heavy_validator_count: 3,
-        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
       });
 
       const runtime = resolved.agents.find((a) => a.id === 'validator-runtime');
@@ -145,7 +144,6 @@ describe('Two-Stage Validation Pipeline', function () {
       const resolved = resolver.resolve('heavy-validation', {
         include_runtime_validator: true,
         heavy_validator_count: 3,
-        heavy_validator_ids_js: '["validator-security","validator-tester","validator-runtime"]',
       });
 
       const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
