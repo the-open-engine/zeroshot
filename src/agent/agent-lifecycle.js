@@ -573,6 +573,12 @@ async function runTaskAttempt(agent, triggeringMessage) {
     throw new Error(result.error || 'Task execution failed');
   }
 
+  // Parse successful output before hooks run so malformed structured output
+  // fails as a task error instead of surfacing later as a hook failure.
+  if (!result.result && result.output) {
+    result.result = await agent._parseResultOutput(result.output);
+  }
+
   const fallbackReason = await maybeRetryValidatorInDocker(agent, result);
   if (fallbackReason) {
     throw new Error(

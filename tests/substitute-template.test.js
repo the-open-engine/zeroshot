@@ -98,6 +98,39 @@ function defineKnownVariableTests() {
       assert.strictEqual(result.content.data.summary, 'Test summary');
     });
 
+    it('should reuse pre-parsed result data without reparsing output', async () => {
+      const config = {
+        topic: 'PLAN_READY',
+        content: {
+          text: '{{result.plan}}',
+          data: { summary: '{{result.summary}}' },
+        },
+      };
+      const context = {
+        result: {
+          result: {
+            plan: 'Step 1',
+            summary: 'Pre-parsed summary',
+          },
+        },
+      };
+      const agent = createMockAgent({
+        _parseResultOutput: () => {
+          throw new Error('should not reparse');
+        },
+      });
+
+      const result = await substituteTemplate({
+        config,
+        context,
+        agent,
+        cluster: mockCluster,
+      });
+
+      assert.strictEqual(result.content.text, 'Step 1');
+      assert.strictEqual(result.content.data.summary, 'Pre-parsed summary');
+    });
+
     it('should fail on unsubstituted known variables', async () => {
       const config = {
         topic: 'TEST',

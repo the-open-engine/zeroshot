@@ -41,6 +41,9 @@ function deepMerge(target, source) {
 }
 
 async function parseResultDataForHookLogic({ agent, result }) {
+  if (result?.result && typeof result.result === 'object') {
+    return result.result;
+  }
   if (!result?.output) return null;
   try {
     return await agent._parseResultOutput(result.output);
@@ -177,11 +180,21 @@ function logMissingResultFields({ agent, context, accessedFields, missingFields,
   console.error(`${'='.repeat(80)}\n`);
 }
 
+function getResultData({ context, agent }) {
+  if (context.result?.result && typeof context.result.result === 'object') {
+    return context.result.result;
+  }
+  if (!context.result?.output) {
+    return null;
+  }
+  return agent._parseResultOutput(context.result.output);
+}
+
 async function parseTransformResultData({ context, agent, script, scriptUsesResult }) {
-  if (context.result?.output) {
+  if (context.result?.output || context.result?.result) {
     let resultData = null;
     try {
-      resultData = await agent._parseResultOutput(context.result.output);
+      resultData = await getResultData({ context, agent });
     } catch (parseError) {
       logTransformParseFailure({ agent, context, parseError });
       throw new Error(
@@ -422,7 +435,7 @@ async function substituteTemplate(params) {
           `Agent: ${agent.id}, TaskID: ${agent.currentTaskId}, Iteration: ${agent.iteration}`
       );
     }
-    if (!context.result.output) {
+    if (!context.result.output && !context.result.result) {
       // Log detailed context for debugging
       const taskId = context.result.taskId || agent.currentTaskId || 'UNKNOWN';
       console.error(`\n${'='.repeat(80)}`);
@@ -477,8 +490,9 @@ async function substituteTemplate(params) {
           `Task logs posted to message bus.`
       );
     }
-    // Parse result output - WILL THROW if no JSON block
-    resultData = await agent._parseResultOutput(context.result.output);
+    // Use the already-parsed task result when available so hooks do not
+    // re-parse raw provider transcripts and fail after task completion.
+    resultData = await getResultData({ context, agent });
   }
 
   // Helper to escape a value for JSON string substitution
