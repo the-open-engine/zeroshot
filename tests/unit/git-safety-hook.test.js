@@ -39,6 +39,7 @@ function runHook(command) {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ZEROSHOT_WORKTREE: '1' },
+      timeout: 10000, // 10 second timeout (Python startup + hook execution)
     });
 
     // Hook exits 0 with no output when allowing - normalize to { decision: 'allow' }

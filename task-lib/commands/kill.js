@@ -1,8 +1,9 @@
 import chalk from 'chalk';
 import { getTask, updateTask } from '../store.js';
-import { killTask as killProcess, isProcessRunning } from '../runner.js';
+import { getTaskRuntimeState, reconcileTasks, terminateTask } from '../runner.js';
 
-export function killTaskCommand(taskId) {
+export async function killTaskCommand(taskId) {
+  await reconcileTasks();
   const task = getTask(taskId);
 
   if (!task) {
@@ -15,17 +16,28 @@ export function killTaskCommand(taskId) {
     return;
   }
 
-  if (!isProcessRunning(task.pid)) {
+  const runtime = getTaskRuntimeState(task);
+  if (!runtime.running) {
     console.log(chalk.yellow('Process already dead, updating status...'));
-    updateTask(taskId, { status: 'stale', error: 'Process died unexpectedly' });
+    updateTask(taskId, {
+      status: 'stale',
+      pid: null,
+      watcherPid: null,
+      error: 'Process died unexpectedly',
+    });
     return;
   }
 
-  const killed = killProcess(task.pid);
+  const killed = await terminateTask(task);
 
-  if (killed) {
-    console.log(chalk.green(`✓ Sent SIGTERM to task ${taskId} (PID: ${task.pid})`));
-    updateTask(taskId, { status: 'killed', error: 'Killed by user' });
+  if (killed.signaled && killed.exited) {
+    console.log(chalk.green(`✓ Stopped task ${taskId}`));
+    updateTask(taskId, {
+      status: 'killed',
+      pid: null,
+      watcherPid: null,
+      error: 'Killed by user',
+    });
   } else {
     console.log(chalk.red(`Failed to kill task ${taskId}`));
   }

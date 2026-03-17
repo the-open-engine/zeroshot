@@ -10,6 +10,78 @@ const LogicEngine = require('../src/logic-engine');
 const MessageBus = require('../src/message-bus');
 const Ledger = require('../src/ledger');
 
+/**
+ * Helper: create mock cluster with validators having different hook topics
+ */
+function createMixedValidatorCluster() {
+  return {
+    id: 'heavy-regression',
+    agents: [
+      {
+        id: 'validator-requirements',
+        role: 'validator',
+        hooks: {
+          onComplete: { action: 'publish_message', config: { topic: 'QUICK_VALIDATION_RESULT' } },
+        },
+      },
+      {
+        id: 'validator-code',
+        role: 'validator',
+        hooks: {
+          onComplete: { action: 'publish_message', config: { topic: 'QUICK_VALIDATION_RESULT' } },
+        },
+      },
+      {
+        id: 'validator-security',
+        role: 'validator',
+        hooks: {
+          onComplete: { action: 'publish_message', config: { topic: 'HEAVY_VALIDATION_RESULT' } },
+        },
+      },
+      {
+        id: 'validator-tester',
+        role: 'validator',
+        hooks: {
+          onComplete: { action: 'publish_message', config: { topic: 'HEAVY_VALIDATION_RESULT' } },
+        },
+      },
+      {
+        id: 'validator-context',
+        role: 'validator',
+        hooks: {
+          onComplete: { action: 'publish_message', config: { topic: 'VALIDATION_RESULT' } },
+        },
+      },
+      { id: 'consensus-coordinator', role: 'coordinator' },
+    ],
+  };
+}
+
+/**
+ * Helper: publish sequence of validation messages for regression test
+ */
+function publishRegressionSequence(messageBus, cluster) {
+  let ts = Date.now();
+  const nextTs = () => ++ts;
+
+  messageBus.publish({
+    cluster_id: cluster.id,
+    topic: 'QUICK_VALIDATION_PASSED',
+    sender: 'consensus-coordinator',
+    timestamp: nextTs(),
+  });
+
+  messageBus.publish({
+    cluster_id: cluster.id,
+    topic: 'HEAVY_VALIDATION_RESULT',
+    sender: 'validator-security',
+    timestamp: nextTs(),
+    content: { data: { approved: true } },
+  });
+
+  return { messageBus, cluster, nextTs };
+}
+
 describe('Two-Stage Validation Pipeline', function () {
   let resolver;
 
@@ -79,7 +151,10 @@ describe('Two-Stage Validation Pipeline', function () {
       assert.ok(tester, 'validator-tester should exist');
 
       const runtime = resolved.agents.find((a) => a.id === 'validator-runtime');
-      assert.ok(!runtime, 'validator-runtime should be omitted when runtime validation is disabled');
+      assert.ok(
+        !runtime,
+        'validator-runtime should be omitted when runtime validation is disabled'
+      );
     });
 
     it('should trigger on QUICK_VALIDATION_PASSED', function () {
@@ -155,12 +230,16 @@ describe('Two-Stage Validation Pipeline', function () {
       const triggerScript = coordinator.triggers.find((t) => t.topic === 'HEAVY_VALIDATION_RESULT')
         ?.logic?.script;
       assert.ok(
-        triggerScript.includes("cluster.getAgentsByRole('validator')"),
-        'heavy consensus should derive the active validator set from cluster state'
+        triggerScript.includes('HEAVY_VALIDATION_RESULT'),
+        'heavy consensus should derive the active validator set from heavy validator outputs'
+      );
+      assert.ok(
+        triggerScript.includes('candidate?.config?.hooks?.onComplete?.config?.topic'),
+        'heavy consensus should inspect agent hook topics so stage-1 validators do not block stage 2'
       );
     });
 
-    it('should not retrigger consensus on a late single-validator update after heavy result is published', function () {
+    it('should ignore stage-1 validators when waiting for heavy validation results', function () {
       const resolved = resolver.resolve('heavy-validation', {});
       const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
       const triggerScript = coordinator?.triggers?.find(
@@ -168,37 +247,13 @@ describe('Two-Stage Validation Pipeline', function () {
       )?.logic?.script;
       assert.ok(triggerScript, 'heavy consensus trigger script should exist');
 
-      const cluster = {
-        id: 'heavy-regression',
-        agents: [
-          { id: 'validator-security', role: 'validator' },
-          { id: 'validator-tester', role: 'validator' },
-          { id: 'consensus-coordinator', role: 'coordinator' },
-        ],
-      };
-
+      const cluster = createMixedValidatorCluster();
       const ledger = new Ledger(':memory:');
       const messageBus = new MessageBus(ledger);
       const logicEngine = new LogicEngine(messageBus, cluster);
 
       try {
-        let ts = Date.now();
-        const nextTs = () => ++ts;
-
-        messageBus.publish({
-          cluster_id: cluster.id,
-          topic: 'QUICK_VALIDATION_PASSED',
-          sender: 'consensus-coordinator',
-          timestamp: nextTs(),
-        });
-
-        messageBus.publish({
-          cluster_id: cluster.id,
-          topic: 'HEAVY_VALIDATION_RESULT',
-          sender: 'validator-security',
-          timestamp: nextTs(),
-          content: { data: { approved: true } },
-        });
+        const { nextTs } = publishRegressionSequence(messageBus, cluster);
 
         let shouldTrigger = logicEngine.evaluate(
           triggerScript,
@@ -266,6 +321,72 @@ describe('Two-Stage Validation Pipeline', function () {
           shouldTrigger,
           true,
           'should trigger again only after both validators publish a fresh cycle'
+        );
+      } finally {
+        ledger.close();
+      }
+    });
+
+    it('should ignore stage-1 quick validators when evaluating heavy validation completion', function () {
+      const resolved = resolver.resolve('heavy-validation', {});
+      const coordinator = resolved.agents.find((a) => a.id === 'consensus-coordinator');
+      const triggerScript = coordinator?.triggers?.find(
+        (t) => t.topic === 'HEAVY_VALIDATION_RESULT'
+      )?.logic?.script;
+      assert.ok(triggerScript, 'heavy consensus trigger script should exist');
+
+      const cluster = createMixedValidatorCluster();
+      const ledger = new Ledger(':memory:');
+      const messageBus = new MessageBus(ledger);
+      const logicEngine = new LogicEngine(messageBus, cluster);
+
+      try {
+        const { nextTs } = publishRegressionSequence(messageBus, cluster);
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'QUICK_VALIDATION_RESULT',
+          sender: 'validator-requirements',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'QUICK_VALIDATION_RESULT',
+          sender: 'validator-code',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        let shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          false,
+          'quick validation results should NOT count toward heavy validation completion'
+        );
+
+        messageBus.publish({
+          cluster_id: cluster.id,
+          topic: 'HEAVY_VALIDATION_RESULT',
+          sender: 'validator-tester',
+          timestamp: nextTs(),
+          content: { data: { approved: true } },
+        });
+
+        shouldTrigger = logicEngine.evaluate(
+          triggerScript,
+          { id: 'consensus-coordinator', cluster_id: cluster.id },
+          { topic: 'HEAVY_VALIDATION_RESULT' }
+        );
+        assert.strictEqual(
+          shouldTrigger,
+          true,
+          'should trigger once both HEAVY validators respond (ignoring quick validators)'
         );
       } finally {
         ledger.close();

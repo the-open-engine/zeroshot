@@ -156,7 +156,11 @@ describe('run-catalog', function () {
     try {
       fs.writeFileSync(
         path.join(storageDir, 'fierce-canyon-56-daemon.log'),
-        ['Provider override: claude (all agents)', './scripts/setup-worktree.sh: not found', 'Error: Command failed: ./scripts/setup-worktree.sh'].join('\n'),
+        [
+          'Provider override: claude (all agents)',
+          './scripts/setup-worktree.sh: not found',
+          'Error: Command failed: ./scripts/setup-worktree.sh',
+        ].join('\n'),
         'utf8'
       );
 
@@ -285,6 +289,70 @@ describe('run-catalog', function () {
       assert.strictEqual(summary.state, 'running');
       assert.strictEqual(summary.currentAgent, 'fixer');
       assert.strictEqual(summary.orphaned, false);
+    } finally {
+      cleanupDir(storageDir);
+    }
+  });
+
+  it('falls back to registry metadata when SQLite runtime is unavailable', function () {
+    const storageDir = createTempStorageDir();
+    try {
+      fs.writeFileSync(path.join(storageDir, 'runtime-fracture-12.db'), '');
+
+      const summary = buildRunSummary({
+        clusterId: 'runtime-fracture-12',
+        storageDir,
+        registryEntry: {
+          state: 'running',
+          createdAt: 1773313422000,
+          daemonPid: 5151,
+          issue: 1234,
+          agentStates: [{ id: 'planner', state: 'executing_task', currentTask: true }],
+        },
+        isProcessRunning: (pid) => pid === 5151,
+        readDbHistoryFn: () => ({
+          sqliteUnavailable: true,
+          sqliteWarning:
+            'SQLite runtime unavailable for read-only run history. Rebuild SQLite bindings.',
+        }),
+      });
+
+      assert(summary);
+      assert.strictEqual(summary.state, 'running');
+      assert.strictEqual(summary.issue, 1234);
+      assert.strictEqual(summary.currentAgent, 'planner');
+      assert.strictEqual(summary.messageCount, null);
+      assert.match(summary.warning, /SQLite runtime unavailable/);
+    } finally {
+      cleanupDir(storageDir);
+    }
+  });
+
+  it('falls back to setup log summary when SQLite runtime is unavailable without registry data', function () {
+    const storageDir = createTempStorageDir();
+    try {
+      fs.writeFileSync(path.join(storageDir, 'runtime-fracture-13.db'), '');
+      fs.writeFileSync(
+        path.join(storageDir, 'runtime-fracture-13-daemon.log'),
+        'Error: Command failed: ./scripts/setup-worktree.sh',
+        'utf8'
+      );
+
+      const summary = buildRunSummary({
+        clusterId: 'runtime-fracture-13',
+        storageDir,
+        readDbHistoryFn: () => ({
+          sqliteUnavailable: true,
+          sqliteWarning:
+            'SQLite runtime unavailable for read-only run history. Rebuild SQLite bindings.',
+        }),
+      });
+
+      assert(summary);
+      assert.strictEqual(summary.state, 'setup_failed');
+      assert.strictEqual(summary.messageCount, null);
+      assert.match(summary.warning, /SQLite runtime unavailable/);
+      assert.match(summary.failureReason, /Command failed/);
     } finally {
       cleanupDir(storageDir);
     }

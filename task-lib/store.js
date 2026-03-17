@@ -75,7 +75,17 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
   `);
 
+  ensureTaskColumn(db, 'watcher_pid', 'INTEGER');
+
   return db;
+}
+
+function ensureTaskColumn(database, columnName, columnType) {
+  const columns = database.prepare('PRAGMA table_info(tasks)').all();
+  const hasColumn = columns.some((column) => column.name === columnName);
+  if (!hasColumn) {
+    database.exec(`ALTER TABLE tasks ADD COLUMN ${columnName} ${columnType}`);
+  }
 }
 
 export function ensureDirs() {
@@ -99,6 +109,7 @@ function rowToTask(row) {
     cwd: row.cwd,
     status: row.status,
     pid: row.pid,
+    watcherPid: row.watcher_pid,
     sessionId: row.session_id,
     logFile: row.log_file,
     createdAt: row.created_at,
@@ -135,11 +146,11 @@ export function saveTasks(tasks) {
   const database = getDb();
   const insert = database.prepare(`
     INSERT OR REPLACE INTO tasks (
-      id, prompt, full_prompt, cwd, status, pid, session_id, log_file,
+      id, prompt, full_prompt, cwd, status, pid, watcher_pid, session_id, log_file,
       created_at, updated_at, exit_code, error, provider, model,
       schedule_id, socket_path, attachable
     ) VALUES (
-      @id, @prompt, @fullPrompt, @cwd, @status, @pid, @sessionId, @logFile,
+      @id, @prompt, @fullPrompt, @cwd, @status, @pid, @watcherPid, @sessionId, @logFile,
       @createdAt, @updatedAt, @exitCode, @error, @provider, @model,
       @scheduleId, @socketPath, @attachable
     )
@@ -157,6 +168,7 @@ export function saveTasks(tasks) {
         cwd: task.cwd || null,
         status: task.status || 'pending',
         pid: task.pid || null,
+        watcherPid: task.watcherPid || null,
         sessionId: task.sessionId || null,
         logFile: task.logFile || null,
         createdAt: task.createdAt || new Date().toISOString(),
@@ -223,6 +235,7 @@ export function updateTask(id, updates) {
       cwd = @cwd,
       status = @status,
       pid = @pid,
+      watcher_pid = @watcherPid,
       session_id = @sessionId,
       log_file = @logFile,
       updated_at = @updatedAt,
@@ -243,6 +256,7 @@ export function updateTask(id, updates) {
       cwd: updated.cwd || null,
       status: updated.status || 'pending',
       pid: updated.pid || null,
+      watcherPid: updated.watcherPid || null,
       sessionId: updated.sessionId || null,
       logFile: updated.logFile || null,
       updatedAt: updated.updatedAt,
@@ -275,11 +289,11 @@ export function addTask(task) {
     .prepare(
       `
     INSERT INTO tasks (
-      id, prompt, full_prompt, cwd, status, pid, session_id, log_file,
+      id, prompt, full_prompt, cwd, status, pid, watcher_pid, session_id, log_file,
       created_at, updated_at, exit_code, error, provider, model,
       schedule_id, socket_path, attachable
     ) VALUES (
-      @id, @prompt, @fullPrompt, @cwd, @status, @pid, @sessionId, @logFile,
+      @id, @prompt, @fullPrompt, @cwd, @status, @pid, @watcherPid, @sessionId, @logFile,
       @createdAt, @updatedAt, @exitCode, @error, @provider, @model,
       @scheduleId, @socketPath, @attachable
     )
@@ -292,6 +306,7 @@ export function addTask(task) {
       cwd: fullTask.cwd || null,
       status: fullTask.status || 'pending',
       pid: fullTask.pid || null,
+      watcherPid: fullTask.watcherPid || null,
       sessionId: fullTask.sessionId || null,
       logFile: fullTask.logFile || null,
       createdAt: fullTask.createdAt,

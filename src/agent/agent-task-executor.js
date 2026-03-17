@@ -17,6 +17,7 @@ const os = require('os');
 const { exec, execSync } = require('../lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
 const { getProvider, parseChunkWithProvider } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
+const { isProcessRunning } = require('../../task-lib/runner.js');
 const { loadSettings } = require('../../lib/settings.js');
 const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
 
@@ -547,8 +548,6 @@ async function spawnClaudeTask(agent, context) {
     runOutputFormat,
   });
 
-  args.push(finalContext);
-
   // MOCK SUPPORT: Use injected mock function if provided
   if (agent.mockSpawnFn) {
     return agent.mockSpawnFn(args, { context });
@@ -579,6 +578,7 @@ async function spawnClaudeTask(agent, context) {
     args,
     cwd,
     spawnEnv,
+    input: finalContext,
   });
 
   agent._log(`📋 Agent ${agent.id}: Following zeroshot logs for ${taskId}`);
@@ -633,7 +633,15 @@ function resolveOutputFormatConfig(agent) {
 }
 
 function buildTaskRunArgs({ agent, providerName, modelSpec, runOutputFormat }) {
-  const args = ['task', 'run', '--output-format', runOutputFormat, '--provider', providerName];
+  const args = [
+    'task',
+    'run',
+    '--stdin',
+    '--output-format',
+    runOutputFormat,
+    '--provider',
+    providerName,
+  ];
 
   if (modelSpec?.model) {
     args.push('--model', modelSpec.model);
@@ -728,14 +736,14 @@ function parseTaskIdFromOutput(stdout) {
   return match ? match[1] : null;
 }
 
-function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
+function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv, input }) {
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
   const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
 
   return new Promise((resolve, reject) => {
     const proc = spawn(ctPath, args, {
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: spawnEnv,
     });
 
@@ -810,6 +818,12 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
       resolved = true;
       reject(error);
     });
+
+    if (typeof input === 'string' && proc.stdin) {
+      proc.stdin.end(input, 'utf8');
+    } else if (proc.stdin) {
+      proc.stdin.end();
+    }
   });
 }
 
@@ -822,18 +836,8 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
  * @returns {Promise<void>}
  */
 async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
-  const ctPath = getClaudeTasksPath();
-
   for (let i = 0; i < maxRetries; i++) {
-    let exists = false;
-    try {
-      const { stdout } = await exec(`${ctPath} status ${taskId}`, { timeout: 5000 });
-      exists = !stdout.includes('Task not found');
-    } catch {
-      // Timeout or error - task not ready yet
-    }
-
-    if (exists) return;
+    if (getTask(taskId)) return;
 
     // Wait before retry
     await new Promise((r) => setTimeout(r, delayMs));
@@ -862,15 +866,31 @@ function createLogFollowState() {
   };
 }
 
-function lookupLogFilePath(ctPath, taskId) {
+function lookupLogFilePath(taskId) {
   try {
-    return execSync(`${ctPath} get-log-path ${taskId}`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    }).trim();
+    return getTask(taskId)?.logFile || null;
   } catch {
     return null;
   }
+}
+
+function readTaskMonitorState(taskId) {
+  const task = getTask(taskId);
+  if (!task) {
+    return null;
+  }
+
+  let status = task.status;
+  if (status === 'running' && !isProcessRunning(task.pid)) {
+    status = 'stale (process died)';
+  }
+
+  let statusOutput = `Task: ${task.id}\nStatus:     ${status}\n`;
+  if (task.error) {
+    statusOutput += `Error: ${task.error}\n`;
+  }
+
+  return { task, statusOutput };
 }
 
 function parseTimestampedLine(line) {
@@ -950,9 +970,9 @@ function appendContentToBuffer(state, content, onLine) {
   state.lineBuffer = lines[lines.length - 1];
 }
 
-function pollLogFileForUpdates({ agent, fsModule, ctPath, taskId, state, onNewContent }) {
+function pollLogFileForUpdates({ agent, fsModule, taskId, state, onNewContent }) {
   if (!state.logFilePath) {
-    const logFilePath = lookupLogFilePath(ctPath, taskId);
+    const logFilePath = lookupLogFilePath(taskId);
     if (!logFilePath) {
       return;
     }
@@ -1201,11 +1221,11 @@ function buildKillHandler({ agent, state, providerName, resolve }) {
   };
 }
 
-function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
+function createLogFollower({ agent, taskId, fsModule, providerName }) {
   return new Promise((resolve) => {
     const state = createLogFollowState();
 
-    state.logFilePath = lookupLogFilePath(ctPath, taskId);
+    state.logFilePath = lookupLogFilePath(taskId);
     if (state.logFilePath) {
       agent._log(`📋 Agent ${agent.id}: Following ct logs for ${taskId}`);
     } else {
@@ -1218,7 +1238,6 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
       pollLogFileForUpdates({
         agent,
         fsModule,
-        ctPath,
         taskId,
         state,
         onNewContent: processNewContent,
@@ -1227,10 +1246,20 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
     state.pollInterval = setInterval(pollLogFile, 300);
 
     state.statusCheckInterval = setInterval(() => {
-      exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
-        if (state.resolved) return;
+      if (state.resolved) return;
 
-        if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
+      try {
+        const taskState = readTaskMonitorState(taskId);
+        if (!taskState) {
+          handleStatusExecError({
+            agent,
+            state,
+            ctPath: 'task-store',
+            taskId,
+            error: new Error('Not found in tasks'),
+            stderr: '',
+            resolve,
+          });
           return;
         }
 
@@ -1240,11 +1269,21 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
           taskId,
           providerName,
           state,
-          stdout,
+          stdout: taskState.statusOutput,
           pollLogFile,
           resolve,
         });
-      });
+      } catch (error) {
+        handleStatusExecError({
+          agent,
+          state,
+          ctPath: 'task-store',
+          taskId,
+          error,
+          stderr: '',
+          resolve,
+        });
+      }
     }, 1000);
 
     agent.currentTask = buildKillHandler({ agent, state, providerName, resolve });
@@ -1260,10 +1299,9 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
  */
 function followClaudeTaskLogs(agent, taskId) {
   const fsModule = require('fs');
-  const ctPath = getClaudeTasksPath();
   const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
 
-  return createLogFollower({ agent, taskId, fsModule, ctPath, providerName });
+  return createLogFollower({ agent, taskId, fsModule, providerName });
 }
 
 // Cache zeroshot path at module load time (when PATH is correct)
@@ -1325,6 +1363,7 @@ async function spawnClaudeTaskIsolated(agent, context) {
     'zeroshot',
     'task',
     'run',
+    '--stdin',
     '--output-format',
     runOutputFormat,
     '--provider',
@@ -1371,8 +1410,6 @@ async function spawnClaudeTaskIsolated(agent, context) {
       2
     )}\n\`\`\`\n`;
   }
-
-  command.push(finalContext);
 
   // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
@@ -1464,6 +1501,10 @@ async function spawnClaudeTaskIsolated(agent, context) {
       resolved = true;
       reject(error);
     });
+
+    if (proc.stdin) {
+      proc.stdin.end(finalContext, 'utf8');
+    }
   });
 
   agent._log(`📋 Agent ${agent.id}: Following zeroshot logs for ${taskId} in container...`);

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 -u
 """
 PreToolUse hook to block dangerous git commands in zeroshot worktree mode.
 
@@ -98,15 +98,16 @@ def check_command(command: str) -> tuple[bool, str, str] | None:
 
 
 def main():
-    # Only activate in zeroshot worktree mode
-    if os.environ.get("ZEROSHOT_WORKTREE") != "1":
-        # Not in worktree mode - pass through without decision
-        sys.exit(0)
-
+    # Read stdin FIRST (before any checks) to avoid blocking the pipe
     try:
         input_data = json.load(sys.stdin)
     except json.JSONDecodeError:
         # Invalid input - let it through
+        sys.exit(0)
+
+    # Only activate in zeroshot worktree mode
+    if os.environ.get("ZEROSHOT_WORKTREE") != "1":
+        # Not in worktree mode - pass through without decision
         sys.exit(0)
 
     tool_name = input_data.get("tool_name", "")

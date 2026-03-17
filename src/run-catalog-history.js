@@ -1,5 +1,5 @@
 const fs = require('fs');
-const Database = require('better-sqlite3');
+const { isSqliteRuntimeError, tryLoadBetterSqlite3 } = require('../lib/sqlite-runtime');
 
 const TERMINAL_MESSAGE_TOPICS = {
   completed: 'CLUSTER_COMPLETE',
@@ -19,7 +19,9 @@ function safeJsonParse(text) {
 }
 
 function clip(text, maxLength = 96) {
-  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  const compact = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (compact.length <= maxLength) {
     return compact;
   }
@@ -175,7 +177,9 @@ function readTerminalState(clusterId, queries) {
     TERMINAL_MESSAGE_TOPICS.agentError
   );
   return {
-    hasComplete: Boolean(queries.hasTerminalTopic.get(clusterId, TERMINAL_MESSAGE_TOPICS.completed)),
+    hasComplete: Boolean(
+      queries.hasTerminalTopic.get(clusterId, TERMINAL_MESSAGE_TOPICS.completed)
+    ),
     hasClusterFailed: Boolean(
       queries.hasTerminalTopic.get(clusterId, TERMINAL_MESSAGE_TOPICS.failed)
     ),
@@ -195,9 +199,23 @@ function buildHistorySummary(clusterId, queries) {
   };
 }
 
-function readDbHistory(clusterId, dbPath) {
+function buildSqliteUnavailableHistory(error) {
+  return {
+    sqliteUnavailable: true,
+    sqliteWarning: error.message,
+    messageCount: null,
+  };
+}
+
+function readDbHistory(clusterId, dbPath, options = {}) {
   if (!fs.existsSync(dbPath)) {
     return null;
+  }
+
+  const loadSqlite = options.loadSqlite || tryLoadBetterSqlite3;
+  const { Database, error: loadError } = loadSqlite('read-only run history');
+  if (!Database) {
+    return buildSqliteUnavailableHistory(loadError);
   }
 
   let db;
@@ -217,6 +235,11 @@ function readDbHistory(clusterId, dbPath) {
     }
 
     return buildHistorySummary(clusterId, queries);
+  } catch (error) {
+    if (isSqliteRuntimeError(error)) {
+      return buildSqliteUnavailableHistory(error);
+    }
+    throw error;
   } finally {
     if (db) {
       try {

@@ -53,7 +53,7 @@ describe('Guidance queue collection', () => {
     const clusterId = 'guidance-queue-1';
     const now = Date.now();
 
-    ledger.append({
+    const appended = ledger.append({
       cluster_id: clusterId,
       topic: USER_GUIDANCE_CLUSTER,
       sender: 'user',
@@ -69,7 +69,7 @@ describe('Guidance queue collection', () => {
     });
 
     assert.strictEqual(first.messages.length, 1);
-    assert.strictEqual(first.latestTimestamp, now + 5);
+    assert.strictEqual(first.latestTimestamp, appended.timestamp);
     assert(first.guidanceBlock.includes('Initial'));
 
     const second = collectQueuedGuidance({

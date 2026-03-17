@@ -8,9 +8,9 @@
  * - Subscription mechanism for real-time updates
  */
 
-const Database = require('better-sqlite3');
 const EventEmitter = require('events');
 const crypto = require('crypto');
+const { loadBetterSqlite3OrThrow } = require('../lib/sqlite-runtime');
 const {
   GUIDANCE_TOPICS,
   USER_GUIDANCE_AGENT,
@@ -21,6 +21,7 @@ class Ledger extends EventEmitter {
   constructor(dbPath = ':memory:') {
     super();
     this.dbPath = dbPath;
+    const Database = loadBetterSqlite3OrThrow('live cluster execution');
     const busyTimeoutMs = (() => {
       const raw = process.env.ZEROSHOT_SQLITE_BUSY_TIMEOUT_MS;
       if (!raw) return 5000;
@@ -676,8 +677,24 @@ class Ledger extends EventEmitter {
    * Close the database connection
    */
   close() {
+    if (this._closed) {
+      return; // Already closed
+    }
     this._closed = true; // Set flag BEFORE closing to prevent race conditions
-    this.db.close();
+
+    // Remove all event listeners to prevent memory leaks
+    this.removeAllListeners();
+
+    try {
+      this.db.close();
+    } catch {
+      // Silently ignore errors during close - database is shutting down anyway
+      // better-sqlite3 may throw errors when cleaning up prepared statements
+    }
+
+    // Clear statement references AFTER closing (prevents write-after-close)
+    // Don't attempt to null out this.stmts - prepared statements have readonly properties
+    // The _closed flag already prevents further writes
   }
 
   /**

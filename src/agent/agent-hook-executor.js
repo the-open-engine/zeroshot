@@ -276,6 +276,7 @@ function buildTransformSandbox({ resultData, context, agent }) {
   return {
     result: resultData,
     triggeringMessage: context.triggeringMessage,
+    cluster_id: clusterId, // For ledger.query({ cluster_id, topic: ... })
     ledger: ledgerAPI,
     cluster: clusterAPI,
     helpers,

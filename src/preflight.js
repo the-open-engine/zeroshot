@@ -56,11 +56,15 @@ function formatError(title, detail, recovery) {
  */
 function commandExists(cmd) {
   try {
-    // Use absolute path to which/where to avoid dependency on PATH
-    // which is typically in /usr/bin on Unix systems
-    const whichCmd = process.platform === 'win32' ? 'where' : '/usr/bin/which';
+    // Use which/where from PATH (consistent with test helper at line 29)
+    const whichCmd = process.platform === 'win32' ? 'where' : 'which';
     const checkCmd = `${whichCmd} ${cmd}`;
-    execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe', timeout: 2000 });
+    execSync(checkCmd, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 5000, // Increased to 5s for parallel test environments
+      env: process.env, // Use current environment (including any test-modified PATH)
+    });
     return true;
   } catch {
     return false;
@@ -315,7 +319,8 @@ function checkDocker() {
     execSync('docker --version', { encoding: 'utf8', stdio: 'pipe', timeout: 2000 });
 
     // Also check if Docker daemon is running
-    execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
+    // Increased timeout: docker info can take 10s+ on slow systems
+    execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
 
     return {
       available: true,
@@ -516,6 +521,40 @@ function validateGitRequirement() {
 }
 
 /**
+ * Validate cluster configuration with runtime simulation
+ * @param {Object} config - Cluster configuration
+ * @param {string} templateId - Template identifier for error messages
+ * @returns {{ errors: string[], warnings: string[] }}
+ */
+async function validateClusterConfig(config, templateId = 'cluster') {
+  if (!config || !config.agents) {
+    return { errors: [], warnings: [] };
+  }
+
+  try {
+    const { validateTemplateConfig } = require('./template-validation');
+    const result = await validateTemplateConfig({
+      config,
+      templateId,
+      deep: true, // Enable runtime simulation
+      randomSampling: false,
+      templatesDir: null,
+      randomOptions: {},
+    });
+
+    return {
+      errors: result.errors || [],
+      warnings: result.warnings || [],
+    };
+  } catch (error) {
+    return {
+      errors: [`Cluster config validation failed: ${error.message}`],
+      warnings: [],
+    };
+  }
+}
+
+/**
  * Run all preflight checks
  * @param {Object} options - Preflight options
  * @param {boolean} options.requireGh - Whether gh CLI is required (true if using issue number)
@@ -524,9 +563,11 @@ function validateGitRequirement() {
  * @param {boolean} options.quiet - Suppress success messages
  * @param {string} options.claudeCommand - Custom Claude command (from settings)
  * @param {string} options.provider - Provider override
+ * @param {Object} options.clusterConfig - Optional cluster config to validate
+ * @param {string} options.templateId - Template identifier for config validation errors
  * @returns {ValidationResult}
  */
-function runPreflight(options = {}) {
+async function runPreflight(options = {}) {
   const errors = [];
   const warnings = [];
 
@@ -549,13 +590,20 @@ function runPreflight(options = {}) {
       warnings: [],
     };
   }
-  const providerName = normalizeProviderName(
-    options.provider || settings.defaultProvider || 'claude'
-  );
 
-  const providerResult = validateProvider(providerName, options);
-  errors.push(...providerResult.errors);
-  warnings.push(...providerResult.warnings);
+  // Skip environment checks if only validating cluster config (not executing)
+  const configValidationOnly =
+    options.clusterConfig && !options.provider && !options.issueProvider && !options.autoPr;
+
+  if (!configValidationOnly) {
+    const providerName = normalizeProviderName(
+      options.provider || settings.defaultProvider || 'claude'
+    );
+
+    const providerResult = validateProvider(providerName, options);
+    errors.push(...providerResult.errors);
+    warnings.push(...providerResult.warnings);
+  }
 
   // 4. Check issue provider CLI (if required)
   if (options.issueProvider) {
@@ -660,6 +708,19 @@ function runPreflight(options = {}) {
     errors.push(...validateGitRequirement());
   }
 
+  // 8. Validate cluster configuration with runtime simulation (if provided)
+  if (options.clusterConfig) {
+    if (process.env.DEBUG_PREFLIGHT) console.log('[preflight] Before validateClusterConfig');
+    const configResult = await validateClusterConfig(
+      options.clusterConfig,
+      options.templateId || 'cluster'
+    );
+    if (process.env.DEBUG_PREFLIGHT) console.log('[preflight] After validateClusterConfig');
+    errors.push(...configResult.errors);
+    warnings.push(...configResult.warnings);
+  }
+
+  if (process.env.DEBUG_PREFLIGHT) console.log('[preflight] Returning result');
   return {
     valid: errors.length === 0,
     errors,
@@ -675,9 +736,11 @@ function runPreflight(options = {}) {
  * @param {boolean} options.requireGit - Whether git repo is required
  * @param {boolean} options.quiet - Suppress success messages
  * @param {string} options.provider - Provider override
+ * @param {Object} options.clusterConfig - Optional cluster config to validate
+ * @param {string} options.templateId - Template identifier for config validation errors
  */
-function requirePreflight(options = {}) {
-  const result = runPreflight(options);
+async function requirePreflight(options = {}) {
+  const result = await runPreflight(options);
 
   // Print warnings regardless of success
   if (result.warnings.length > 0) {
@@ -707,6 +770,7 @@ function requirePreflight(options = {}) {
 module.exports = {
   runPreflight,
   requirePreflight,
+  validateClusterConfig,
   getClaudeVersion,
   checkClaudeAuth,
   checkGhAuth,

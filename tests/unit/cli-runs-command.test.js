@@ -26,4 +26,32 @@ describe('CLI runs/status commands', function () {
       'status without an id should print active runs'
     );
   });
+
+  it('waits for detached clusters to register before printing success', function () {
+    const cliPath = path.join(__dirname, '..', '..', 'cli', 'index.js');
+    const cliCode = fs.readFileSync(cliPath, 'utf8');
+
+    assert(
+      cliCode.includes('await waitForClusterRegistration({'),
+      'detached run path should wait for cluster registration before reporting success'
+    );
+    assert(
+      cliCode.includes('printDetachedClusterStart(options, clusterId);'),
+      'detached run path should still print start info after registration succeeds'
+    );
+  });
+
+  it('falls back to historical run status when live cluster status fails', function () {
+    const cliPath = path.join(__dirname, '..', '..', 'cli', 'index.js');
+    const cliCode = fs.readFileSync(cliPath, 'utf8');
+
+    assert(
+      cliCode.includes('const historicalRun = findHistoricalRun(id);'),
+      'cluster status path should look up historical runs on live status failure'
+    );
+    assert(
+      cliCode.includes("JSON.stringify({ type: 'cluster-history', ...historicalRun }, null, 2)"),
+      'cluster status JSON output should fall back to historical run summaries'
+    );
+  });
 });

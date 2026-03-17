@@ -174,6 +174,15 @@ describe('Opencode CLI Builder', function () {
 describe('Claude CLI Builder', function () {
   const { buildCommand } = require('../src/providers/anthropic/cli-builder');
 
+  it('uses stdin prompt transport to avoid argv size limits', function () {
+    const result = buildCommand('test context', {
+      cliFeatures: { supportsJsonSchema: true },
+    });
+
+    assert.strictEqual(result.promptTransport, 'stdin');
+    assert.ok(!result.args.includes('test context'));
+  });
+
   it('should pass --json-schema when CLI supports it', function () {
     const schema = { type: 'object', properties: { foo: { type: 'string' } } };
     const result = buildCommand('test context', {

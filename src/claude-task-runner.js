@@ -6,12 +6,32 @@
  */
 
 const { spawn } = require('child_process');
-const { exec, execSync } = require('./lib/safe-exec'); // Enforces timeouts
 const fs = require('fs');
 const TaskRunner = require('./task-runner');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
+const { getTask } = require('../task-lib/store.js');
+const { isProcessRunning } = require('../task-lib/runner.js');
+
+function readTaskMonitorState(taskId) {
+  const task = getTask(taskId);
+  if (!task) {
+    return null;
+  }
+
+  let status = task.status;
+  if (status === 'running' && !isProcessRunning(task.pid)) {
+    status = 'stale (process died)';
+  }
+
+  let statusOutput = `Task: ${task.id}\nStatus:     ${status}\n`;
+  if (task.error) {
+    statusOutput += `Error: ${task.error}\n`;
+  }
+
+  return { task, statusOutput };
+}
 
 class ClaudeTaskRunner extends TaskRunner {
   /**
@@ -93,7 +113,6 @@ class ClaudeTaskRunner extends TaskRunner {
       strictSchema,
     });
     const args = this._buildRunArgs({
-      context,
       providerName,
       runOutputFormat,
       resolvedModelSpec,
@@ -103,7 +122,7 @@ class ClaudeTaskRunner extends TaskRunner {
     // Spawn and get task ID
     const spawnEnv = this._buildSpawnEnv(providerName, resolvedModelSpec);
 
-    const taskId = await this._spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, agentId);
+    const taskId = await this._spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, agentId, context);
 
     this._log(`📋 [${agentId}]: Following zeroshot logs for ${taskId}`);
 
@@ -158,8 +177,16 @@ class ClaudeTaskRunner extends TaskRunner {
     return jsonSchema && outputFormat === 'json' && !strictSchema ? 'stream-json' : outputFormat;
   }
 
-  _buildRunArgs({ context, providerName, runOutputFormat, resolvedModelSpec, jsonSchema }) {
-    const args = ['task', 'run', '--output-format', runOutputFormat, '--provider', providerName];
+  _buildRunArgs({ providerName, runOutputFormat, resolvedModelSpec, jsonSchema }) {
+    const args = [
+      'task',
+      'run',
+      '--stdin',
+      '--output-format',
+      runOutputFormat,
+      '--provider',
+      providerName,
+    ];
 
     if (resolvedModelSpec?.model) {
       args.push('--model', resolvedModelSpec.model);
@@ -173,8 +200,6 @@ class ClaudeTaskRunner extends TaskRunner {
     if (jsonSchema && runOutputFormat === 'json') {
       args.push('--json-schema', JSON.stringify(jsonSchema));
     }
-
-    args.push(context);
 
     return args;
   }
@@ -198,11 +223,11 @@ class ClaudeTaskRunner extends TaskRunner {
    * @param {string} _agentId
    * @returns {Promise<string>}
    */
-  _spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, _agentId) {
+  _spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, _agentId, input) {
     return new Promise((resolve, reject) => {
       const proc = spawn(ctPath, args, {
         cwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         env: spawnEnv,
       });
 
@@ -233,6 +258,12 @@ class ClaudeTaskRunner extends TaskRunner {
       proc.on('error', (error) => {
         reject(error);
       });
+
+      if (typeof input === 'string' && proc.stdin) {
+        proc.stdin.end(input, 'utf8');
+      } else if (proc.stdin) {
+        proc.stdin.end();
+      }
     });
   }
 
@@ -245,13 +276,7 @@ class ClaudeTaskRunner extends TaskRunner {
    */
   async _waitForTaskReady(ctPath, taskId, maxRetries = 10, delayMs = 200) {
     for (let i = 0; i < maxRetries; i++) {
-      const exists = await new Promise((resolve) => {
-        exec(`${ctPath} status ${taskId}`, (error, stdout) => {
-          resolve(!error && !stdout.includes('Task not found'));
-        });
-      });
-
-      if (exists) return;
+      if (getTask(taskId)) return;
       await new Promise((r) => setTimeout(r, delayMs));
     }
     console.warn(
@@ -279,11 +304,8 @@ class ClaudeTaskRunner extends TaskRunner {
       let lineBuffer = '';
 
       // Get log file path
-      try {
-        logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
-          encoding: 'utf-8',
-        }).trim();
-      } catch {
+      logFilePath = getTask(taskId)?.logFile || null;
+      if (!logFilePath) {
         this._log(`⏳ [${agentId}]: Waiting for log file...`);
       }
 
@@ -340,13 +362,8 @@ class ClaudeTaskRunner extends TaskRunner {
 
       const pollLogFile = () => {
         if (!logFilePath) {
-          try {
-            logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
-              encoding: 'utf-8',
-            }).trim();
-          } catch {
-            return;
-          }
+          logFilePath = getTask(taskId)?.logFile || null;
+          if (!logFilePath) return;
         }
 
         if (!fs.existsSync(logFilePath)) return;
@@ -410,35 +427,38 @@ class ClaudeTaskRunner extends TaskRunner {
       };
 
       statusCheckInterval = setInterval(() => {
-        exec(`${ctPath} status ${taskId}`, (error, stdout) => {
+        if (resolved) return;
+
+        const taskState = readTaskMonitorState(taskId);
+        if (!taskState) {
+          return;
+        }
+
+        const stdout = taskState.statusOutput;
+        if (!stdout.includes('Status:     completed') && !stdout.includes('Status:     failed')) {
+          return;
+        }
+
+        const success = stdout.includes('Status:     completed');
+
+        pollLogFile();
+
+        setTimeout(() => {
           if (resolved) return;
+          resolved = true;
 
-          if (
-            !error &&
-            (stdout.includes('Status:     completed') || stdout.includes('Status:     failed'))
-          ) {
-            const success = stdout.includes('Status:     completed');
+          if (pollInterval) clearInterval(pollInterval);
+          if (statusCheckInterval) clearInterval(statusCheckInterval);
 
-            pollLogFile();
+          const errorContext = extractErrorContext(success, stdout);
 
-            setTimeout(() => {
-              if (resolved) return;
-              resolved = true;
-
-              if (pollInterval) clearInterval(pollInterval);
-              if (statusCheckInterval) clearInterval(statusCheckInterval);
-
-              const errorContext = extractErrorContext(success, stdout);
-
-              resolve({
-                success,
-                output,
-                error: errorContext,
-                taskId,
-              });
-            }, 500);
-          }
-        });
+          resolve({
+            success,
+            output,
+            error: errorContext,
+            taskId,
+          });
+        }, 500);
       }, 1000);
 
       // Timeout
@@ -485,6 +505,7 @@ class ClaudeTaskRunner extends TaskRunner {
       'zeroshot',
       'task',
       'run',
+      '--stdin',
       '--output-format',
       runOutputFormat,
       '--provider',
@@ -511,8 +532,6 @@ class ClaudeTaskRunner extends TaskRunner {
         2
       )}\n\`\`\`\n`;
     }
-
-    command.push(finalContext);
 
     return new Promise((resolve, reject) => {
       let output = '';
@@ -557,6 +576,10 @@ class ClaudeTaskRunner extends TaskRunner {
         resolved = true;
         reject(error);
       });
+
+      if (proc.stdin) {
+        proc.stdin.end(finalContext, 'utf8');
+      }
 
       setTimeout(() => {
         if (resolved) return;

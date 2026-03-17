@@ -2,7 +2,7 @@ import { fork } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { LOGS_DIR } from './config.js';
-import { addTask, generateId, ensureDirs } from './store.js';
+import { addTask, generateId, ensureDirs, loadTasks, saveTasks, updateTask } from './store.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -11,9 +11,12 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('../src/providers');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'stale', 'killed']);
+const DEFAULT_RECONCILE_GRACE_MS = 15000;
 
 export async function spawnTask(prompt, options = {}) {
   ensureDirs();
+  await reconcileTasks();
 
   const id = generateId();
   const logFile = join(LOGS_DIR, `${id}.log`);
@@ -59,7 +62,10 @@ export async function spawnTask(prompt, options = {}) {
     providerName,
     commandSpec
   );
-  const watcherScript = resolveWatcherScript(options);
+  const watcherScript = resolveWatcherScript({
+    ...options,
+    promptTransport: commandSpec.promptTransport || 'argv',
+  });
   spawnWatcher({
     watcherScript,
     id,
@@ -115,11 +121,12 @@ function resolveModelSpec(options, provider, providerSettings, levelOverrides) {
 function resolveFinalArgs(commandSpec, providerName, options) {
   const finalArgs = [...commandSpec.args];
   if (providerName === 'claude') {
-    const promptIndex = finalArgs.length - 1;
+    const insertIndex =
+      commandSpec.promptTransport === 'stdin' ? finalArgs.length : finalArgs.length - 1;
     if (options.resume) {
-      finalArgs.splice(promptIndex, 0, '--resume', options.resume);
+      finalArgs.splice(insertIndex, 0, '--resume', options.resume);
     } else if (options.continue) {
-      finalArgs.splice(promptIndex, 0, '--continue');
+      finalArgs.splice(insertIndex, 0, '--continue');
     }
   } else if (options.resume || options.continue) {
     console.warn('Warning: resume/continue is only supported for Claude CLI; ignoring.');
@@ -135,6 +142,7 @@ function buildTaskRecord({ id, prompt, cwd, options, logFile, providerName, mode
     cwd,
     status: 'running',
     pid: null,
+    watcherPid: null,
     sessionId: options.resume || options.sessionId || null,
     logFile,
     createdAt: new Date().toISOString(),
@@ -159,11 +167,13 @@ function buildWatcherConfig(outputFormat, jsonSchema, options, providerName, com
     provider: providerName,
     command: commandSpec.binary,
     env: commandSpec.env || {},
+    promptTransport: commandSpec.promptTransport || 'argv',
   };
 }
 
 function resolveWatcherScript(options) {
-  const useAttachable = options.attachable !== false && !options.jsonSchema;
+  const useAttachable =
+    options.attachable !== false && !options.jsonSchema && options.promptTransport !== 'stdin';
   return useAttachable ? join(__dirname, 'attachable-watcher.js') : join(__dirname, 'watcher.js');
 }
 
@@ -177,12 +187,17 @@ function spawnWatcher({ watcherScript, id, cwd, logFile, finalArgs, watcherConfi
     }
   );
 
+  updateTask(id, { watcherPid: watcher.pid || null });
   watcher.unref();
   watcher.disconnect(); // Close IPC channel so parent can exit
 }
 
+function normalizePid(pid) {
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
 export function isProcessRunning(pid) {
-  if (!pid) return false;
+  if (!normalizePid(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -191,12 +206,195 @@ export function isProcessRunning(pid) {
   }
 }
 
-export function killTask(pid) {
-  if (!pid) return false;
+export function getTaskRuntimeState(task) {
+  const childPid = normalizePid(task?.pid);
+  const watcherPid = normalizePid(task?.watcherPid);
+  const ownerPid = watcherPid ?? childPid;
+  const ownerRunning = ownerPid !== null && isProcessRunning(ownerPid);
+  const childRunning =
+    childPid !== null ? (childPid === ownerPid ? ownerRunning : isProcessRunning(childPid)) : false;
+
+  return {
+    ownerPid,
+    watcherPid,
+    childPid,
+    ownerRunning,
+    childRunning,
+    running: ownerRunning || childRunning,
+  };
+}
+
+export function isTaskProcessRunning(task) {
+  return getTaskRuntimeState(task).running;
+}
+
+function signalPid(pid, signal) {
+  if (!normalizePid(pid)) return false;
   try {
-    process.kill(pid, 'SIGTERM');
+    process.kill(pid, signal);
     return true;
   } catch {
     return false;
   }
+}
+
+function signalProcessGroup(groupLeaderPid, signal) {
+  if (!normalizePid(groupLeaderPid)) return false;
+  try {
+    process.kill(-groupLeaderPid, signal);
+    return true;
+  } catch (error) {
+    if (error && ['ESRCH', 'EINVAL', 'EPERM'].includes(error.code)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function signalTaskRuntime(runtime, signal) {
+  let signaled = false;
+
+  if (runtime.ownerPid !== null) {
+    signaled = signalProcessGroup(runtime.ownerPid, signal) || signaled;
+    signaled = signalPid(runtime.ownerPid, signal) || signaled;
+  }
+
+  if (runtime.childPid !== null && runtime.childPid !== runtime.ownerPid) {
+    signaled = signalPid(runtime.childPid, signal) || signaled;
+  }
+
+  return signaled;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function terminateTask(taskOrPid, options = {}) {
+  if (typeof taskOrPid === 'number') {
+    return {
+      signaled: signalPid(taskOrPid, 'SIGTERM'),
+      exited: !isProcessRunning(taskOrPid),
+      forced: false,
+    };
+  }
+
+  const timeoutMs = options.timeoutMs ?? 1000;
+  const forceKillTimeoutMs = options.forceKillTimeoutMs ?? 1000;
+  const runtime = getTaskRuntimeState(taskOrPid);
+
+  if (!runtime.running) {
+    return { signaled: false, exited: true, forced: false };
+  }
+
+  const signaled = signalTaskRuntime(runtime, 'SIGTERM');
+  if (!signaled) {
+    return { signaled: false, exited: !getTaskRuntimeState(taskOrPid).running, forced: false };
+  }
+
+  const softDeadline = Date.now() + timeoutMs;
+  while (Date.now() < softDeadline) {
+    if (!getTaskRuntimeState(taskOrPid).running) {
+      return { signaled: true, exited: true, forced: false };
+    }
+    await sleep(50);
+  }
+
+  signalTaskRuntime(runtime, 'SIGKILL');
+
+  const hardDeadline = Date.now() + forceKillTimeoutMs;
+  while (Date.now() < hardDeadline) {
+    if (!getTaskRuntimeState(taskOrPid).running) {
+      return { signaled: true, exited: true, forced: true };
+    }
+    await sleep(50);
+  }
+
+  return { signaled: true, exited: false, forced: true };
+}
+
+export async function reconcileTasks(options = {}) {
+  const tasks = loadTasks();
+  const reconcileGraceMs = options.runningTaskGraceMs ?? DEFAULT_RECONCILE_GRACE_MS;
+  const report = { updated: [], reaped: [] };
+  let changed = false;
+
+  for (const task of Object.values(tasks)) {
+    const runtime = getTaskRuntimeState(task);
+    const nowIso = new Date().toISOString();
+    const ageMs = Date.now() - new Date(task.updatedAt || task.createdAt || nowIso).getTime();
+
+    if (TERMINAL_TASK_STATUSES.has(task.status)) {
+      if (runtime.running) {
+        const termination = await terminateTask(task);
+        report.reaped.push({ id: task.id, exited: termination.exited });
+      }
+
+      if (!getTaskRuntimeState(task).running && (task.pid || task.watcherPid)) {
+        task.pid = null;
+        task.watcherPid = null;
+        task.updatedAt = nowIso;
+        changed = true;
+        report.updated.push(task.id);
+      }
+      continue;
+    }
+
+    if (task.status !== 'running') {
+      continue;
+    }
+
+    if (!runtime.running) {
+      task.status = 'stale';
+      task.error = task.error || 'Process died unexpectedly';
+      task.pid = null;
+      task.watcherPid = null;
+      task.updatedAt = nowIso;
+      changed = true;
+      report.updated.push(task.id);
+      continue;
+    }
+
+    if (runtime.watcherPid !== null && !runtime.ownerRunning && runtime.childRunning) {
+      await terminateTask(task);
+      task.status = 'stale';
+      task.error = 'Watcher died unexpectedly; killed orphaned child process';
+      task.pid = null;
+      task.watcherPid = null;
+      task.updatedAt = nowIso;
+      changed = true;
+      report.updated.push(task.id);
+      continue;
+    }
+
+    if (
+      runtime.watcherPid !== null &&
+      runtime.ownerRunning &&
+      !runtime.childRunning &&
+      ageMs > reconcileGraceMs
+    ) {
+      await terminateTask(task);
+      task.status = 'stale';
+      task.error = 'Detached watcher outlived its child process';
+      task.pid = null;
+      task.watcherPid = null;
+      task.updatedAt = nowIso;
+      changed = true;
+      report.updated.push(task.id);
+    }
+  }
+
+  if (changed) {
+    saveTasks(tasks);
+  }
+
+  return report;
+}
+
+export function killTask(taskOrPid) {
+  if (typeof taskOrPid === 'number') {
+    return signalPid(taskOrPid, 'SIGTERM');
+  }
+
+  return signalTaskRuntime(getTaskRuntimeState(taskOrPid), 'SIGTERM');
 }

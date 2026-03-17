@@ -285,6 +285,71 @@
           }
         }
       }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "outputFormat": "json",
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["COMPLETE", "WAIT"]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["decision", "reason"]
+      },
+      "prompt": {
+        "system": "Cluster completion detector.\n\nCheck if validation completed (QUICK_VALIDATION_PASSED) OR rejected (VALIDATION_RESULT with approved=false).\n\nReturn {\"decision\": \"COMPLETE\", \"reason\": \"...\"} if cluster should stop.\nReturn {\"decision\": \"WAIT\", \"reason\": \"...\"} otherwise."
+      },
+      "contextStrategy": {
+        "sources": [
+          {
+            "topic": "QUICK_VALIDATION_PASSED",
+            "priority": "high",
+            "strategy": "latest",
+            "amount": 1
+          },
+          {
+            "topic": "VALIDATION_RESULT",
+            "priority": "high",
+            "strategy": "latest",
+            "amount": 1
+          }
+        ],
+        "format": "chronological",
+        "maxTokens": 5000
+      },
+      "triggers": [
+        {
+          "topic": "QUICK_VALIDATION_PASSED",
+          "action": "execute_task"
+        },
+        {
+          "topic": "VALIDATION_RESULT",
+          "action": "execute_task"
+        }
+      ],
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_COMPLETE",
+            "content": {
+              "text": "{{result.reason}}"
+            }
+          },
+          "logic": {
+            "engine": "javascript",
+            "script": "if (result.decision !== 'COMPLETE') return null;"
+          }
+        }
+      }
     }
   ]
 }

@@ -1,8 +1,9 @@
 import chalk from 'chalk';
 import { loadTasks } from '../store.js';
-import { isProcessRunning } from '../runner.js';
+import { getTaskRuntimeState, reconcileTasks } from '../runner.js';
 
-export function listEpisodes(options = {}) {
+export async function listEpisodes(options = {}) {
+  await reconcileTasks();
   const tasks = loadTasks();
   const taskList = Object.values(tasks);
 
@@ -32,7 +33,7 @@ export function listEpisodes(options = {}) {
     for (const task of filtered) {
       // Verify running status
       let status = task.status;
-      if (status === 'running' && !isProcessRunning(task.pid)) {
+      if (status === 'running' && !getTaskRuntimeState(task).running) {
         status = 'stale';
       }
 
@@ -69,7 +70,7 @@ export function listEpisodes(options = {}) {
     for (const task of filtered) {
       // Verify running status
       let status = task.status;
-      if (status === 'running' && !isProcessRunning(task.pid)) {
+      if (status === 'running' && !getTaskRuntimeState(task).running) {
         status = 'stale';
       }
 

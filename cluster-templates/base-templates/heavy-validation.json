@@ -364,7 +364,8 @@
             "topic": "HEAVY_VALIDATION_RESULT",
             "priority": "required",
             "strategy": "latest",
-            "amount": "{{heavy_validator_count}}"
+            "amount": "{{heavy_validator_count}}",
+            "description": "Dynamic validator count based on include_runtime_validator param"
           }
         ],
         "format": "chronological",
@@ -375,7 +376,7 @@
           "topic": "HEAVY_VALIDATION_RESULT",
           "logic": {
             "engine": "javascript",
-            "script": "const validators = cluster.getAgentsByRole('validator').map((validator) => validator.id); const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
+            "script": "const validators = cluster.getAgents().filter((candidate) => { const hookTopic = candidate?.config?.hooks?.onComplete?.config?.topic || candidate?.hooks?.onComplete?.config?.topic; return candidate?.role === 'validator' && hookTopic === 'HEAVY_VALIDATION_RESULT'; }).map((validator) => validator.id); if (validators.length === 0) return false; const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); if (!stageStart) return false; const lastHeavyConsensus = ledger.findLast({ topic: 'VALIDATION_RESULT', since: stageStart.timestamp }); const since = Math.max(stageStart.timestamp, lastHeavyConsensus?.timestamp || 0); const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const latestByValidator = new Map(); for (const response of responses) { if (validators.includes(response.sender)) { latestByValidator.set(response.sender, response); } } return validators.every((validatorId) => latestByValidator.has(validatorId));"
           },
           "action": "execute_task"
         }
@@ -385,10 +386,21 @@
           "action": "publish_message",
           "transform": {
             "engine": "javascript",
-            "script": "return { topic: 'VALIDATION_RESULT', content: { text: result.allApproved ? 'All validations passed' : 'Stage 2 rejected', data: { approved: result.allApproved, stage: 'heavy', summary: result.summary, errors: ledger.query({ topic: 'HEAVY_VALIDATION_RESULT' }).flatMap(r => r.content?.data?.errors || []) } } };"
+            "script": "const validators = cluster.getAgents().filter((candidate) => { const hookTopic = candidate?.config?.hooks?.onComplete?.config?.topic || candidate?.hooks?.onComplete?.config?.topic; return candidate?.role === 'validator' && hookTopic === 'HEAVY_VALIDATION_RESULT'; }).map((v) => v.id); const stageStart = ledger.findLast({ topic: 'QUICK_VALIDATION_PASSED' }); const since = stageStart?.timestamp || 0; const responses = ledger.query({ topic: 'HEAVY_VALIDATION_RESULT', since }); const relevantResponses = responses.filter(r => validators.includes(r.sender)); return { topic: 'VALIDATION_RESULT', content: { text: result.allApproved ? 'All validations passed' : 'Stage 2 rejected', data: { approved: result.allApproved, stage: 'heavy', summary: result.summary, errors: relevantResponses.flatMap(r => r.content?.data?.errors || []) } } };"
           }
         }
       }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "action": "stop_cluster"
+        }
+      ]
     }
   ]
 }

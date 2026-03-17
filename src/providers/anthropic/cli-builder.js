@@ -1,4 +1,4 @@
-function buildCommand(context, options = {}, commandConfig = {}) {
+function buildCommand(_context, options = {}, commandConfig = {}) {
   const {
     modelSpec,
     outputFormat,
@@ -18,12 +18,11 @@ function buildCommand(context, options = {}, commandConfig = {}) {
   addModelArgs(args, modelSpec, cliFeatures);
   addAutoApproveArgs(args, autoApprove, cliFeatures);
 
-  args.push(context);
-
   return {
     binary: command,
     args,
     env: authEnv,
+    promptTransport: 'stdin',
   };
 }
 

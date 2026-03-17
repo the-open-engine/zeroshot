@@ -252,7 +252,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 1);
 
     assert.strictEqual(response.id, 1);
     assert.strictEqual(response.jsonrpc, '2.0');
@@ -281,7 +281,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 2);
 
     assert.strictEqual(response.id, 2);
     assert.deepStrictEqual(response.result, { ok: true });
@@ -296,7 +296,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 7);
 
     assert.strictEqual(response.id, 7);
     assert.strictEqual(response.jsonrpc, '2.0');
@@ -317,7 +317,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 8);
 
     assert.strictEqual(response.id, 8);
     assert.strictEqual(response.error.code, -32002);
@@ -332,7 +332,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(listRequest));
-    const listResponse = await queue.next();
+    const listResponse = await waitForMessage((msg) => msg.id === 9);
     const clusters = listResponse.result?.clusters ?? [];
     if (clusters.length === 0) {
       return;
@@ -346,7 +346,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 10);
 
     assert.strictEqual(response.id, 10);
     assert.strictEqual(response.result.summary.id, clusters[0].id);
@@ -363,7 +363,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 17);
 
     assert.strictEqual(response.id, 17);
     assert.ok(response.result.topology);
@@ -400,7 +400,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 18);
 
     assert.strictEqual(response.id, 18);
     assert.ok(Array.isArray(response.result.metrics));
@@ -423,7 +423,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 11);
 
     assert.strictEqual(response.id, 11);
     assert.deepStrictEqual(response.result, { clusterId: 'cluster-stdio' });
@@ -438,7 +438,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 12);
 
     assert.strictEqual(response.id, 12);
     assert.strictEqual(response.error.code, -32602);
@@ -459,7 +459,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 13);
 
     assert.strictEqual(response.id, 13);
     assert.strictEqual(response.result.result.status, 'injected');
@@ -481,7 +481,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 14);
 
     assert.strictEqual(response.id, 14);
     assert.strictEqual(response.result.result.summary.total, 2);
@@ -505,7 +505,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 15);
 
     assert.strictEqual(response.id, 15);
     assert.strictEqual(response.error.code, -32602);
@@ -523,7 +523,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 16);
 
     assert.strictEqual(response.id, 16);
     assert.strictEqual(response.error.code, -32602);
@@ -531,7 +531,7 @@ describe('tui-backend stdio JSON-RPC', function () {
 
   it('returns parse error for invalid JSON', async function () {
     server.stdin.write(encodeFrame('{ not-json'));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.error && msg.error.code === -32700);
 
     assert.strictEqual(response.id, null);
     assert.strictEqual(response.error.code, -32700);
@@ -546,7 +546,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     };
 
     server.stdin.write(encodeFrame(request));
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 3);
 
     assert.strictEqual(response.id, 3);
     assert.strictEqual(response.error.code, -32601);
@@ -598,7 +598,7 @@ describe('tui-backend stdio JSON-RPC', function () {
     server.stdin.write(frame.slice(0, splitIndex));
     server.stdin.write(frame.slice(splitIndex));
 
-    const response = await queue.next();
+    const response = await waitForMessage((msg) => msg.id === 6);
     assert.strictEqual(response.id, 6);
     assert.deepStrictEqual(response.result, { ok: true });
   });

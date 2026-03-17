@@ -4,7 +4,6 @@ const Ledger = require('../ledger');
 const MessageBus = require('../message-bus');
 const LogicEngine = require('../logic-engine');
 const { executeHook } = require('../agent/agent-hook-executor');
-const { parseResultOutput } = require('../agent/agent-task-executor');
 
 function createSimAgent({ agentConfig, cluster, messageBus }) {
   const simAgent = {
@@ -18,7 +17,26 @@ function createSimAgent({ agentConfig, cluster, messageBus }) {
     workingDirectory: process.cwd(),
     _log: () => {},
     _resolveProvider: () => 'claude',
-    _parseResultOutput: (output) => parseResultOutput(simAgent, output),
+    _parseResultOutput: (output) => {
+      // Simulation: parse JSON directly without LLM reformatting
+      // (parseResultOutput is async and calls reformatOutput which hangs in tests)
+      if (!output || !output.trim()) {
+        throw new Error('Task execution failed - no output');
+      }
+      const { extractJsonFromOutput } = require('../agent/output-extraction');
+      const providerName = 'claude';
+      const parsed = extractJsonFromOutput(output, providerName);
+      if (!parsed) {
+        // In simulation, output is always valid JSON from simulated agents
+        // If extraction fails, try direct JSON.parse
+        try {
+          return JSON.parse(output);
+        } catch {
+          throw new Error(`Simulated agent output is not valid JSON: ${output.substring(0, 100)}`);
+        }
+      }
+      return parsed;
+    },
     _publish: (message) => {
       const receiver = message.receiver || 'broadcast';
       return messageBus.publish({
@@ -33,7 +51,12 @@ function createSimAgent({ agentConfig, cluster, messageBus }) {
 }
 
 function createCluster(id, config) {
-  const agents = config.agents.map((agent) => ({ id: agent.id, role: agent.role }));
+  const agents = config.agents.map((agent) => ({
+    ...agent,
+    // Mirror runtime AgentWrapper shape so trigger scripts can inspect either
+    // `candidate.hooks` (resolved config) or `candidate.config.hooks` (live cluster).
+    config: agent,
+  }));
   return {
     id,
     agents,
@@ -83,8 +106,8 @@ function publishValidatorResults({ messageBus, clusterId, topic, now, results })
 function ensureGateOpened({ logicEngine, script, clusterId, topic, templateName }) {
   const gateOk = logicEngine.evaluate(
     script,
-    { id: 'consensus-coordinator', cluster_id: clusterId },
-    { topic }
+    { id: 'consensus-coordinator', cluster_id: clusterId, iteration: 1 },
+    { topic, cluster_id: clusterId }
   );
   return gateOk ? null : `${templateName}: gate did not open after both validators`;
 }
@@ -149,7 +172,6 @@ function validateQuickScenarioOutcome({ allApproved, messageBus, clusterId }) {
     'quick-validation'
   );
 }
-
 
 async function runValidationScenario({
   cluster,
@@ -221,20 +243,38 @@ async function collectScenarioFailures(runScenario) {
   return failures;
 }
 
-function simulateQuickValidation({ config }) {
+async function simulateQuickValidation({ config }) {
   const cluster = createCluster('quick-sim', config);
   const { coordinator, trigger } = getCoordinator(
     config,
     'quick-validation',
     'QUICK_VALIDATION_RESULT'
   );
-  const validatorResults = [
-    { sender: 'validator-requirements', data: { approved: true, errors: ['req-error'] } },
-    { sender: 'validator-code', data: { approved: true, errors: ['code-error'] } },
-  ];
 
-  return collectScenarioFailures((allApproved) =>
-    runValidationScenario({
+  const validators = cluster.agents
+    .filter((agent) => {
+      const hookTopic =
+        agent?.config?.hooks?.onComplete?.config?.topic || agent?.hooks?.onComplete?.config?.topic;
+      return agent.role === 'validator' && hookTopic === 'QUICK_VALIDATION_RESULT';
+    })
+    .map((agent) => agent.id);
+
+  const errorsByValidator = {
+    'validator-requirements': ['req-error'],
+    'validator-code': ['code-error'],
+  };
+
+  const baseValidatorResults = validators
+    .filter((id) => errorsByValidator[id])
+    .map((id) => ({ sender: id, errors: errorsByValidator[id] }));
+
+  const failures = await collectScenarioFailures((allApproved) => {
+    const validatorResults = baseValidatorResults.map((result) => ({
+      sender: result.sender,
+      data: { approved: allApproved, errors: allApproved ? [] : result.errors },
+    }));
+
+    return runValidationScenario({
       cluster,
       coordinator,
       trigger,
@@ -244,11 +284,13 @@ function simulateQuickValidation({ config }) {
       templateName: 'quick-validation',
       allApproved,
       validateOutcome: validateQuickScenarioOutcome,
-    })
-  );
+    });
+  });
+
+  return { failures, validators };
 }
 
-function simulateHeavyValidation({ config }) {
+async function simulateHeavyValidation({ config }) {
   const cluster = createCluster('heavy-sim', config);
   const { coordinator, trigger } = getCoordinator(
     config,
@@ -257,29 +299,43 @@ function simulateHeavyValidation({ config }) {
   );
 
   const validators = cluster.agents
-    .filter((agent) => agent.role === 'validator')
+    .filter((agent) => {
+      const hookTopic =
+        agent?.config?.hooks?.onComplete?.config?.topic || agent?.hooks?.onComplete?.config?.topic;
+      return agent.role === 'validator' && hookTopic === 'HEAVY_VALIDATION_RESULT';
+    })
     .map((agent) => agent.id);
 
-  const allPossibleResults = [
-    { sender: 'validator-security', data: { approved: true, errors: ['sec-error'] } },
-    { sender: 'validator-tester', data: { approved: true, errors: ['test-error'] } },
-    { sender: 'validator-runtime', data: { approved: true, errors: ['runtime-error'] } },
-  ];
+  // Build error map only for validators actually present in the resolved config
+  const errorsByValidator = {};
+  for (const validatorId of validators) {
+    if (validatorId === 'validator-security') {
+      errorsByValidator[validatorId] = ['sec-error'];
+    } else if (validatorId === 'validator-tester') {
+      errorsByValidator[validatorId] = ['test-error'];
+    } else if (validatorId === 'validator-runtime') {
+      errorsByValidator[validatorId] = ['runtime-error'];
+    }
+  }
 
-  const validatorResults = allPossibleResults.filter((result) =>
-    validators.includes(result.sender)
-  );
+  const validatorResults = validators
+    .filter((id) => errorsByValidator[id])
+    .map((id) => ({ sender: id, errors: errorsByValidator[id] }));
 
-  const expectedErrors = validatorResults.map((result) => result.data.errors).flat();
+  const failures = await collectScenarioFailures((allApproved) => {
+    const scenarioResults = validatorResults.map((result) => ({
+      sender: result.sender,
+      data: { approved: allApproved, errors: allApproved ? [] : result.errors },
+    }));
+    const expectedErrors = allApproved ? [] : validatorResults.map((r) => r.errors).flat();
 
-  return collectScenarioFailures((allApproved) =>
-    runValidationScenario({
+    return runValidationScenario({
       cluster,
       coordinator,
       trigger,
       triggerTopic: 'HEAVY_VALIDATION_RESULT',
       startMessage: { topic: 'QUICK_VALIDATION_PASSED', sender: 'consensus-coordinator' },
-      validatorResults,
+      validatorResults: scenarioResults,
       templateName: 'heavy-validation',
       allApproved,
       validateOutcome: ({ messageBus, clusterId }) => {
@@ -289,22 +345,63 @@ function simulateHeavyValidation({ config }) {
         }
         return validateAggregatedErrors(validationResult, expectedErrors, 'heavy-validation');
       },
-    })
-  );
+    });
+  });
+
+  return { failures, validators };
+}
+
+/**
+ * Detect if config is a quick-validation structure by checking for consensus-coordinator
+ * with trigger on QUICK_VALIDATION_RESULT
+ */
+function isQuickValidationConfig(config) {
+  const agents = config?.agents || [];
+  const coordinator = agents.find((a) => a.id === 'consensus-coordinator');
+  if (!coordinator) return false;
+
+  const triggers = coordinator.triggers || [];
+  return triggers.some((t) => t.topic === 'QUICK_VALIDATION_RESULT');
+}
+
+/**
+ * Detect if config is a heavy-validation structure by checking for consensus-coordinator
+ * with trigger on HEAVY_VALIDATION_RESULT
+ */
+function isHeavyValidationConfig(config) {
+  const agents = config?.agents || [];
+  const coordinator = agents.find((a) => a.id === 'consensus-coordinator');
+  if (!coordinator) return false;
+
+  const triggers = coordinator.triggers || [];
+  return triggers.some((t) => t.topic === 'HEAVY_VALIDATION_RESULT');
 }
 
 /**
  * Deep sim: run deterministic two-stage validation scenarios for base templates.
- * Returns an array of error strings.
+ * Detects validation configs by structure (presence of consensus-coordinator with
+ * specific triggers), not just by templateId.
+ * Returns Promise<{ failures: string[], validators?: string[] }>
  */
 function simulateTwoStageValidation({ templateId, config }) {
+  // Check templateId first for exact matches (fastest path)
   if (templateId === 'quick-validation') {
     return simulateQuickValidation({ config });
   }
   if (templateId === 'heavy-validation') {
     return simulateHeavyValidation({ config });
   }
-  return Promise.resolve([]);
+
+  // Fall back to structural detection for configs that follow the pattern
+  // but have different template IDs (e.g., 'quick-validation-test')
+  if (isQuickValidationConfig(config)) {
+    return simulateQuickValidation({ config });
+  }
+  if (isHeavyValidationConfig(config)) {
+    return simulateHeavyValidation({ config });
+  }
+
+  return Promise.resolve({ failures: [], validators: [] });
 }
 
 module.exports = {

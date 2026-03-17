@@ -44,44 +44,54 @@ async function validateTemplateConfig({
   const isParameterizedTemplate = !!(config?.params && Object.keys(config.params).length > 0);
 
   // Composition templates lack ISSUE_OPENED/completion by design (get injected at runtime)
-  const isCompositionTemplate = ['quick-validation', 'heavy-validation', 'full-workflow', 'worker-validator'].includes(templateId);
+  const isCompositionTemplate = [
+    'quick-validation',
+    'heavy-validation',
+    'full-workflow',
+    'worker-validator',
+  ].includes(templateId);
 
-  if (result.valid || (deep && isCompositionTemplate)) {
-    const simErrors = [];
+  // Runtime simulation errors (collect from all sources)
+  const simErrors = [];
 
-    // Skip consensus gates for composition templates (incomplete by design)
-    if (result.valid) {
-      simErrors.push(
-        ...simulateConsensusGates(config, {
-          allowExternalTopics: isParameterizedTemplate
-            ? ['IMPLEMENTATION_READY', 'QUICK_VALIDATION_PASSED']
-            : [],
-        })
-      );
-    }
+  // Consensus gate simulation (unconditional for complete coverage)
+  // Skip only for composition templates (incomplete by design)
+  if (!isCompositionTemplate) {
+    simErrors.push(
+      ...simulateConsensusGates(config, {
+        allowExternalTopics: isParameterizedTemplate
+          ? ['IMPLEMENTATION_READY', 'QUICK_VALIDATION_PASSED']
+          : [],
+      })
+    );
+  }
 
-    if (deep) {
-      simErrors.push(...(await simulateTwoStageValidation({ templateId, config })));
-    }
-    if (randomSampling) {
-      simErrors.push(
-        ...(await simulateRandomTopology({
-          config,
-          templateId,
-          templatesDir,
-          ...randomOptions,
-        }))
-      );
-    }
+  // Deep runtime simulation (if requested)
+  if (deep) {
+    const { failures = [] } = await simulateTwoStageValidation({ templateId, config });
+    simErrors.push(...failures);
+  }
 
-    if (simErrors.length > 0) {
-      result.valid = false;
-      result.errors.push(...simErrors);
-    } else if (isCompositionTemplate && deep) {
-      // Deep simulation passed - mark composition template as valid
-      result.valid = true;
-      result.errors = [];
-    }
+  // Random topology simulation (if requested)
+  if (randomSampling) {
+    simErrors.push(
+      ...(await simulateRandomTopology({
+        config,
+        templateId,
+        templatesDir,
+        ...randomOptions,
+      }))
+    );
+  }
+
+  // Merge simulation errors into result
+  if (simErrors.length > 0) {
+    result.valid = false;
+    result.errors.push(...simErrors);
+  } else if (isCompositionTemplate && deep) {
+    // Deep simulation passed - mark composition template as valid
+    result.valid = true;
+    result.errors = [];
   }
 
   return result;
@@ -320,9 +330,7 @@ async function validateTemplates({
       } catch (resolutionError) {
         // Resolution failed - likely missing required params without defaults
         // Skip deep validation for this template
-        console.debug(
-          `Skipping deep validation for ${templateId}: ${resolutionError.message}`
-        );
+        console.debug(`Skipping deep validation for ${templateId}: ${resolutionError.message}`);
         summary.skipped++;
         continue;
       }

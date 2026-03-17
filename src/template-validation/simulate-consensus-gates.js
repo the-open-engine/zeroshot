@@ -103,7 +103,12 @@ function createSimulationContext(config, options = {}) {
       : [],
     cluster: {
       id: 'template-sim',
-      agents: agents.map((a) => ({ id: a.id, role: a.role })),
+      agents: agents.map((a) => ({
+        ...a,
+        // Mirror runtime AgentWrapper shape so trigger scripts can inspect either
+        // `candidate.hooks` (resolved config) or `candidate.config.hooks` (live cluster).
+        config: a,
+      })),
     },
   };
 }
@@ -123,19 +128,25 @@ function evaluateScenario({
   const messageBus = new MessageBus(ledger);
   const logicEngine = new LogicEngine(messageBus, cluster);
 
-  publishStageStartMessages({
-    messageBus,
-    clusterId: cluster.id,
-    producersByTopic,
-    requiredStageTopics,
-    allowExternalTopics,
-  });
+  try {
+    publishStageStartMessages({
+      messageBus,
+      clusterId: cluster.id,
+      producersByTopic,
+      requiredStageTopics,
+      allowExternalTopics,
+    });
 
-  publishMessages(messageBus, producers, cluster.id);
+    publishMessages(messageBus, producers, cluster.id);
 
-  const result = logicEngine.evaluate(script, { id: agentId, cluster_id: cluster.id }, { topic });
-  ledger.close();
-  return result;
+    return logicEngine.evaluate(
+      script,
+      { id: agentId, cluster_id: cluster.id },
+      { topic, cluster_id: cluster.id }
+    );
+  } finally {
+    ledger.close();
+  }
 }
 
 function checkDuplicateProducerScenario(context) {

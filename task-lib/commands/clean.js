@@ -1,8 +1,10 @@
 import { unlinkSync, existsSync } from 'fs';
 import chalk from 'chalk';
 import { loadTasks, saveTasks } from '../store.js';
+import { getTaskRuntimeState, reconcileTasks, terminateTask } from '../runner.js';
 
-export function cleanTasks(options = {}) {
+export async function cleanTasks(options = {}) {
+  await reconcileTasks();
   const tasks = loadTasks();
   const taskList = Object.values(tasks);
 
@@ -33,6 +35,15 @@ export function cleanTasks(options = {}) {
   console.log(chalk.dim(`Removing ${toRemove.length} task(s)...\n`));
 
   for (const task of toRemove) {
+    const runtime = getTaskRuntimeState(task);
+    if (runtime.running) {
+      const termination = await terminateTask(task);
+      if (!(termination.signaled && termination.exited)) {
+        console.log(chalk.red(`  Skipped: ${task.id} [process still alive]`));
+        continue;
+      }
+    }
+
     // Delete log file
     if (task.logFile && existsSync(task.logFile)) {
       unlinkSync(task.logFile);

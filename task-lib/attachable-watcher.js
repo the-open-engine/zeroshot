@@ -47,6 +47,8 @@ function crashWithError(error, source) {
       updateTask(taskIdArg, {
         status: 'failed',
         error: `${source}: ${errorMsg}`,
+        pid: null,
+        watcherPid: null,
         socketPath: null,
       });
     } catch (updateError) {
@@ -281,6 +283,8 @@ server.on('exit', async ({ exitCode, signal }) => {
   try {
     await updateTask(taskId, {
       status,
+      pid: null,
+      watcherPid: null,
       exitCode: resolvedCode,
       error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
       socketPath: null,
@@ -297,7 +301,12 @@ server.on('exit', async ({ exitCode, signal }) => {
 server.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
   try {
-    await updateTask(taskId, { status: 'failed', error: err.message });
+    await updateTask(taskId, {
+      status: 'failed',
+      pid: null,
+      watcherPid: null,
+      error: err.message,
+    });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);
   }
@@ -317,6 +326,7 @@ try {
 
   updateTask(taskId, {
     pid: server.pid,
+    watcherPid: process.pid,
     socketPath,
     attachable: true,
   });

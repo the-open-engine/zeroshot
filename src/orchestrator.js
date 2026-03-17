@@ -225,8 +225,7 @@ class Orchestrator {
           : persistedState.status === VALIDATION_RUNTIME_STATUS.FAILED
             ? VALIDATION_RUNTIME_STATUS.FAILED
             : VALIDATION_RUNTIME_STATUS.NOT_STARTED,
-      env:
-        persistedState.env && typeof persistedState.env === 'object' ? persistedState.env : null,
+      env: persistedState.env && typeof persistedState.env === 'object' ? persistedState.env : null,
       allocatedPorts:
         persistedState.allocatedPorts && typeof persistedState.allocatedPorts === 'object'
           ? persistedState.allocatedPorts
@@ -292,6 +291,8 @@ class Orchestrator {
       const clustersToRemove = [];
       // Track clusters with 0 messages (corrupted from SIGINT race condition)
       const corruptedClusters = [];
+      // Track clusters that failed to load so one broken DB does not hide every other cluster.
+      const failedClusters = [];
 
       for (const [clusterId, clusterData] of Object.entries(data)) {
         // Skip clusters whose .db file doesn't exist (orphaned registry entries)
@@ -305,7 +306,14 @@ class Orchestrator {
         }
 
         this._log(`[Orchestrator] Loading cluster: ${clusterId}`);
-        const cluster = this._loadSingleCluster(clusterId, clusterData);
+        let cluster;
+        try {
+          cluster = this._loadSingleCluster(clusterId, clusterData);
+        } catch (error) {
+          failedClusters.push({ clusterId, error });
+          console.warn(`[Orchestrator] Failed to load cluster ${clusterId}: ${error.message}`);
+          continue;
+        }
 
         // VALIDATION: Detect 0-message clusters (corrupted from SIGINT during initialization)
         // These clusters were created before the initCompletePromise fix was applied
@@ -347,6 +355,18 @@ class Orchestrator {
           console.warn(`    - ${clusterId}`);
         }
         console.warn(`[Orchestrator] Run 'zeroshot clear' to remove all corrupted clusters.\n`);
+      }
+
+      if (failedClusters.length > 0) {
+        console.warn(
+          `\n[Orchestrator] ⚠️  Skipped ${failedClusters.length} cluster(s) that failed to load:`
+        );
+        for (const { clusterId, error } of failedClusters) {
+          console.warn(`    - ${clusterId}: ${error.message}`);
+        }
+        console.warn(
+          `[Orchestrator] Healthy clusters remain available. Use 'zeroshot status <cluster-id>' for fallback history when possible.\n`
+        );
       }
 
       this._log(`[Orchestrator] Total clusters loaded: ${this.clusters.size}`);
@@ -1943,9 +1963,7 @@ class Orchestrator {
           break;
         } catch (error) {
           lastError = error;
-          await new Promise((resolve) =>
-            setTimeout(resolve, runtimeState.config.readyIntervalMs)
-          );
+          await new Promise((resolve) => setTimeout(resolve, runtimeState.config.readyIntervalMs));
         }
       }
 
@@ -1972,7 +1990,10 @@ class Orchestrator {
     await this._saveClusters().catch(() => {});
 
     try {
-      runtimeState.allocatedPorts = await this._allocateValidationRuntimePorts(cluster.id, portKeys);
+      runtimeState.allocatedPorts = await this._allocateValidationRuntimePorts(
+        cluster.id,
+        portKeys
+      );
       runtimeState.env = resolveValidationRuntimeEnv({
         envConfig: runtimeState.config.env,
         clusterId: cluster.id,
@@ -3139,7 +3160,10 @@ Continue from where you left off. Review your previous output to understand what
     if (typeof config === 'object' && config.base) {
       const { base, params } = config;
       const resolver = new TemplateResolver(templatesDir);
-      loadedConfig = resolver.resolve(base, this._mergeParameterizedTemplateParams(base, params, cluster));
+      loadedConfig = resolver.resolve(
+        base,
+        this._mergeParameterizedTemplateParams(base, params, cluster)
+      );
     } else if (typeof config === 'string') {
       // Static config - load directly from file
       const configPath = path.join(templatesDir, `${config}.json`);
@@ -3698,13 +3722,15 @@ Continue from where you left off. Review your previous output to understand what
       daemonPid: cluster.daemonPid || cluster.pid || null,
       createdAt: cluster.createdAt,
       agents: cluster.agents.map((a) => a.getState()),
-      messageCount: summary?.messageCount ?? (() => {
-        try {
-          return cluster.messageBus.count({ cluster_id: clusterId });
-        } catch {
-          return 0;
-        }
-      })(),
+      messageCount:
+        summary?.messageCount ??
+        (() => {
+          try {
+            return cluster.messageBus.count({ cluster_id: clusterId });
+          } catch {
+            return 0;
+          }
+        })(),
       taskSummary: summary?.taskSummary || null,
       lastActivityAt: summary?.lastActivityAt || null,
       currentAgent: summary?.currentAgent || null,
@@ -3739,13 +3765,15 @@ Continue from where you left off. Review your previous output to understand what
         createdAt: cluster.createdAt,
         issue: cluster.issue || null,
         agentCount: cluster.agents.length,
-        messageCount: summary?.messageCount ?? (() => {
-          try {
-            return cluster.messageBus.count({ cluster_id: cluster.id });
-          } catch {
-            return 0;
-          }
-        })(),
+        messageCount:
+          summary?.messageCount ??
+          (() => {
+            try {
+              return cluster.messageBus.count({ cluster_id: cluster.id });
+            } catch {
+              return 0;
+            }
+          })(),
         taskSummary: summary?.taskSummary || null,
         lastActivityAt: summary?.lastActivityAt || null,
         currentAgent: summary?.currentAgent || null,

@@ -2,7 +2,7 @@ const fs = require('fs');
 const Orchestrator = require('../../src/orchestrator');
 const { detectIdType } = require('../../lib/id-detector');
 const { getTask } = require('../../task-lib/store.js');
-const { isProcessRunning } = require('../../task-lib/runner.js');
+const { isTaskProcessRunning } = require('../../task-lib/runner.js');
 const {
   getProcessMetrics,
   isPlatformSupported: metricsPlatformSupported,
@@ -11,10 +11,7 @@ const {
   analyzeProcessHealth,
   isPlatformSupported: stuckDetectorPlatformSupported,
 } = require('../../src/agent/agent-stuck-detector');
-const {
-  printClusterInspectionHuman,
-  printTaskInspectionHuman,
-} = require('./inspect-render');
+const { printClusterInspectionHuman, printTaskInspectionHuman } = require('./inspect-render');
 
 const DEFAULT_SAMPLE_MS = 1000;
 const TASK_STALE_WARNING_MS = 5 * 60 * 1000;
@@ -124,7 +121,7 @@ function buildTaskDetails(task, now, existsSync) {
 
   return {
     updatedAgeMs: updatedAt ? now - updatedAt.getTime() : null,
-    processRunning: task.pid ? isProcessRunning(task.pid) : false,
+    processRunning: isTaskProcessRunning(task),
     logFile,
     socketPath,
   };
@@ -139,6 +136,7 @@ function buildTaskSummary(task, details) {
     id: task.id,
     status: task.status,
     pid: task.pid || null,
+    watcherPid: task.watcherPid || null,
     exitCode: task.exitCode ?? null,
     error: task.error || null,
     cwd: task.cwd || null,
@@ -178,9 +176,10 @@ async function inspectProcess(pid, sampleMs, options = {}) {
   const metricsPromise = metricsPlatformSupported()
     ? getProcessMetrics(pid, { samplePeriodMs: sampleMs })
     : Promise.resolve(null);
-  const healthPromise = includeHealth && stuckDetectorPlatformSupported()
-    ? analyzeProcessHealth(pid, sampleMs)
-    : Promise.resolve(null);
+  const healthPromise =
+    includeHealth && stuckDetectorPlatformSupported()
+      ? analyzeProcessHealth(pid, sampleMs)
+      : Promise.resolve(null);
 
   const [metrics, health] = await Promise.all([metricsPromise, healthPromise]);
   return {

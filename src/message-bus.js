@@ -231,6 +231,9 @@ class MessageBus extends EventEmitter {
    * Close the message bus
    */
   close() {
+    // Remove all event listeners to prevent memory leaks
+    this.removeAllListeners();
+
     // Close all WebSocket connections
     for (const ws of this.wsClients) {
       try {

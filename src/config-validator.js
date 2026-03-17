@@ -166,7 +166,10 @@ function validateTrigger(trigger, triggerPrefix, errors) {
     errors.push(`${triggerPrefix}.topic is required`);
   }
 
-  if (trigger.action && !['execute_task', 'stop_cluster', 'evaluate_logic'].includes(trigger.action)) {
+  if (
+    trigger.action &&
+    !['execute_task', 'stop_cluster', 'evaluate_logic'].includes(trigger.action)
+  ) {
     errors.push(
       `${triggerPrefix}.action must be 'execute_task', 'stop_cluster', or 'evaluate_logic', got '${trigger.action}'`
     );
@@ -386,7 +389,9 @@ function reportCompletionHandlers(config, errors, warnings) {
       'No completion handler found. Cluster will run until idle timeout (2 min). ' +
       'Add an agent with trigger action: "stop_cluster"';
     if (isTemplateConfig || hasConductorAgents) {
-      warnings.push(`${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`);
+      warnings.push(
+        `${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`
+      );
     } else {
       errors.push(message);
     }
@@ -503,11 +508,26 @@ function reportMissingValidationTriggers(config, errors) {
     return;
   }
 
+  // Check if there's a coordinator that aggregates validator results
+  // and produces VALIDATION_RESULT (consensus pattern)
+  // Must both CONSUME and PRODUCE VALIDATION_RESULT (not just consume for stop_cluster)
+  const hasCoordinatorForValidation = config.agents.some((agent) => {
+    const consumesValidatorResults = agent.triggers?.some(
+      (t) => t.topic && (t.topic === 'VALIDATION_RESULT' || t.topic.includes('VALIDATION_'))
+    );
+    const producesValidationResult =
+      agent.hooks?.onComplete?.config?.topic === 'VALIDATION_RESULT' ||
+      agent.hooks?.onComplete?.transform?.script?.includes('VALIDATION_RESULT');
+    // Coordinator must PRODUCE VALIDATION_RESULT, not just consume it for stop_cluster
+    return consumesValidatorResults && producesValidationResult;
+  });
+
   for (const worker of workers) {
     const triggersOnValidation = worker.triggers?.some(
       (t) => t.topic === 'VALIDATION_RESULT' || t.topic.includes('VALIDATION')
     );
-    if (!triggersOnValidation) {
+    // Skip error if there's a coordinator handling validation aggregation
+    if (!triggersOnValidation && !hasCoordinatorForValidation) {
       errors.push(
         `Worker '${worker.id}' has validators but doesn't trigger on VALIDATION_RESULT. ` +
           'Rejections will be ignored. Add trigger: { "topic": "VALIDATION_RESULT", "logic": {...} }'
@@ -608,7 +628,9 @@ function reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, 
     'Cluster may run until timeout even when validation appears to pass.';
   const isDynamic = hasDynamicLoadConfigPath(config);
   if (isDynamic) {
-    warnings.push(`${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`);
+    warnings.push(
+      `${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`
+    );
     return;
   }
 

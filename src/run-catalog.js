@@ -42,7 +42,10 @@ function pickCurrentAgent(agentStates) {
   }
 
   const busyAgent = agentStates.find(
-    (agent) => agent && typeof agent.state === 'string' && !['idle', 'completed', 'stopped'].includes(agent.state)
+    (agent) =>
+      agent &&
+      typeof agent.state === 'string' &&
+      !['idle', 'completed', 'stopped'].includes(agent.state)
   );
   return busyAgent?.id || null;
 }
@@ -159,7 +162,10 @@ function buildSetupLogSummary({ clusterId, registry, registryEntry, daemonLogPat
     state,
     rawState: registry.rawState,
     issue: registryEntry?.issue ?? undefined,
-    createdAt: buildSummaryTimestamp(registryEntry?.createdAt, logStat.birthtimeMs ?? logStat.mtimeMs),
+    createdAt: buildSummaryTimestamp(
+      registryEntry?.createdAt,
+      logStat.birthtimeMs ?? logStat.mtimeMs
+    ),
     lastActivityAt,
     currentAgent: pickCurrentAgent(registryEntry?.agentStates),
     taskSummary: null,
@@ -168,6 +174,60 @@ function buildSetupLogSummary({ clusterId, registry, registryEntry, daemonLogPat
     daemonPid: registry.daemonPid ?? null,
     failureReason: buildSetupFailureReason(setup.failureReason, state),
     source: 'setup-log',
+  };
+}
+
+function attachWarning(summary, warning) {
+  if (!summary || !warning) {
+    return summary;
+  }
+  return { ...summary, warning };
+}
+
+function deriveFallbackState({ registry, hasDaemonLog }) {
+  if (registry.state) {
+    return registry.state;
+  }
+  return hasDaemonLog ? 'setup_failed' : 'unknown';
+}
+
+function buildFallbackFailureReason(daemonLogPath, state) {
+  if (state !== 'setup_failed' || !fs.existsSync(daemonLogPath)) {
+    return null;
+  }
+  return deriveSetupFailure(readTail(daemonLogPath)).failureReason;
+}
+
+function buildSqliteFallbackSummary({
+  clusterId,
+  dbPath,
+  daemonLogPath,
+  registry,
+  registryEntry,
+  dbHistory,
+}) {
+  const dbStat = fs.existsSync(dbPath) ? fs.statSync(dbPath) : null;
+  const daemonLogStat = fs.existsSync(daemonLogPath) ? fs.statSync(daemonLogPath) : null;
+  const state = deriveFallbackState({ registry, hasDaemonLog: Boolean(daemonLogStat) });
+
+  return {
+    id: clusterId,
+    state,
+    rawState: registry.rawState,
+    issue: registryEntry?.issue ?? undefined,
+    createdAt: buildSummaryTimestamp(
+      registryEntry?.createdAt,
+      dbStat?.birthtimeMs ?? dbStat?.mtimeMs ?? daemonLogStat?.birthtimeMs ?? daemonLogStat?.mtimeMs
+    ),
+    lastActivityAt: buildSummaryTimestamp(dbStat?.mtimeMs, daemonLogStat?.mtimeMs),
+    currentAgent: pickCurrentAgent(registryEntry?.agentStates),
+    taskSummary: null,
+    messageCount: null,
+    orphaned: registry.orphaned,
+    daemonPid: registry.daemonPid ?? null,
+    failureReason: buildFallbackFailureReason(daemonLogPath, state),
+    source: registryEntry ? 'registry-fallback' : 'history-fallback',
+    warning: dbHistory.sqliteWarning,
   };
 }
 
@@ -220,11 +280,23 @@ function buildRunSummary({
   registryEntry = null,
   isProcessRunning = defaultIsProcessRunning,
   inMemory = false,
+  readDbHistoryFn = readDbHistory,
 }) {
   const dbPath = path.join(storageDir, `${clusterId}.db`);
   const daemonLogPath = path.join(storageDir, `${clusterId}-daemon.log`);
-  const dbHistory = readDbHistory(clusterId, dbPath);
+  const dbHistory = readDbHistoryFn(clusterId, dbPath);
   const registry = classifyRegistryState(registryEntry, isProcessRunning);
+
+  if (dbHistory?.sqliteUnavailable) {
+    return buildSqliteFallbackSummary({
+      clusterId,
+      dbPath,
+      daemonLogPath,
+      registry,
+      registryEntry,
+      dbHistory,
+    });
+  }
 
   if ((dbHistory === null || dbHistory.messageCount === 0) && fs.existsSync(daemonLogPath)) {
     return buildSetupLogSummary({ clusterId, registry, registryEntry, daemonLogPath });
@@ -234,7 +306,10 @@ function buildRunSummary({
     return null;
   }
 
-  return buildDbSummary({ clusterId, dbPath, dbHistory, registry, registryEntry, inMemory });
+  return attachWarning(
+    buildDbSummary({ clusterId, dbPath, dbHistory, registry, registryEntry, inMemory }),
+    dbHistory.sqliteWarning
+  );
 }
 
 function coerceSince(value) {
@@ -308,8 +383,9 @@ function listRunSummaries({
   const registry = readRegistry(storageDir);
   const clusterIds = collectClusterIds(storageDir, registry);
   const sinceMs = today ? startOfToday() : coerceSince(since);
-  const runs = buildSummaryList({ clusterIds, storageDir, registry, isProcessRunning })
-    .filter((summary) => shouldIncludeSummary(summary, sinceMs, activeOnly));
+  const runs = buildSummaryList({ clusterIds, storageDir, registry, isProcessRunning }).filter(
+    (summary) => shouldIncludeSummary(summary, sinceMs, activeOnly)
+  );
   sortRunSummaries(runs);
 
   return applySummaryLimit(runs, limit);

@@ -1,8 +1,9 @@
 import chalk from 'chalk';
 import { getTask } from '../store.js';
-import { isProcessRunning } from '../runner.js';
+import { getTaskRuntimeState, reconcileTasks } from '../runner.js';
 
-export function showStatus(taskId) {
+export async function showStatus(taskId) {
+  await reconcileTasks();
   const task = getTask(taskId);
 
   if (!task) {
@@ -12,7 +13,7 @@ export function showStatus(taskId) {
 
   // Verify running status
   let status = task.status;
-  if (status === 'running' && !isProcessRunning(task.pid)) {
+  if (status === 'running' && !getTaskRuntimeState(task).running) {
     status = 'stale (process died)';
   }
 
@@ -21,7 +22,7 @@ export function showStatus(taskId) {
       running: chalk.green,
       completed: chalk.green,
       failed: chalk.red,
-    }[task.status] || chalk.yellow;
+    }[status] || chalk.yellow;
 
   console.log(chalk.bold(`\nTask: ${task.id}\n`));
   console.log(`${chalk.dim('Status:')}     ${statusColor(status)}`);
@@ -29,6 +30,7 @@ export function showStatus(taskId) {
   console.log(`${chalk.dim('Updated:')}    ${task.updatedAt}`);
   console.log(`${chalk.dim('CWD:')}        ${task.cwd}`);
   console.log(`${chalk.dim('PID:')}        ${task.pid || 'N/A'}`);
+  console.log(`${chalk.dim('Watcher PID:')} ${task.watcherPid || 'N/A'}`);
   console.log(`${chalk.dim('Exit Code:')}  ${task.exitCode ?? 'N/A'}`);
   console.log(`${chalk.dim('Session:')}    ${task.sessionId || 'N/A'}`);
   console.log(`${chalk.dim('Log File:')}   ${task.logFile}`);

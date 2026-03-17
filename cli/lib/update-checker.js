@@ -120,14 +120,14 @@ function promptForUpdate(currentVersion, latestVersion) {
  * @returns {boolean} True if we can write to npm global prefix
  */
 function canWriteToNpmGlobal() {
-  const { execSync } = require('child_process');
+  const { execSync } = require('../../src/lib/safe-exec');
   const fs = require('fs');
 
   try {
     // Get npm global prefix (e.g., /usr/lib or /home/user/.nvm/versions/node/...)
     const prefix = execSync('npm config get prefix', {
       encoding: 'utf8',
-      timeout: 2000
+      timeout: 2000,
     }).trim();
     const globalModulesDir = require('path').join(prefix, 'lib', 'node_modules');
 
@@ -209,6 +209,15 @@ function shouldCheckForUpdates(settings) {
  * @returns {Promise<void>}
  */
 async function checkForUpdates(options = {}) {
+  // Skip in test/CI environments to avoid network hangs
+  if (
+    process.env.NODE_ENV === 'test' ||
+    process.env.CI === 'true' ||
+    process.env.ZEROSHOT_SKIP_UPDATE_CHECK === '1'
+  ) {
+    return;
+  }
+
   const settings = loadSettings();
 
   // Skip check if not due

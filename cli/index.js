@@ -61,6 +61,7 @@ const {
   startClusterFromIssue,
   startClusterFromText,
 } = require('../lib/start-cluster');
+const { waitForClusterRegistration, resolveWaitTimeoutMs } = require('../lib/detached-startup');
 const { requirePreflight } = require('../src/preflight');
 const { providersCommand, setDefaultCommand, setupCommand } = require('./commands/providers');
 const { runInspectCommand } = require('./commands/inspect');
@@ -180,7 +181,7 @@ function normalizeRunOptions(options) {
   }
 }
 
-function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
+async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
   // Detect which issue provider tool is needed
   let issueProvider = null;
   let targetHost = null;
@@ -204,7 +205,7 @@ function runClusterPreflight({ input, options, providerOverride, settings, force
     }
   }
 
-  requirePreflight({
+  await requirePreflight({
     requireGh: issueProvider === 'github', // gh CLI required for GitHub
     requireDocker: options.docker,
     requireGit: options.worktree,
@@ -214,6 +215,45 @@ function runClusterPreflight({ input, options, providerOverride, settings, force
     issueProvider, // Pass detected issue provider for tool checking
     targetHost, // Pass target host for multi-instance auth checks (e.g., GitLab self-hosted)
   });
+}
+
+/**
+ * Validate loaded cluster config with runtime simulation
+ * Catches bugs like incorrect trigger logic, missing completion handlers, etc.
+ * @param {Object} config - Loaded cluster configuration
+ * @param {string} configName - Config name for error messages
+ */
+async function validateLoadedClusterConfig(config, configName) {
+  const simMode = process.env.ZEROSHOT_CLUSTER_SIMULATION || 'on';
+  if (simMode === 'off') {
+    return; // Skip validation if explicitly disabled
+  }
+
+  const { validateClusterConfig } = require('../src/preflight');
+  const result = await validateClusterConfig(config, configName);
+
+  if (result.warnings.length > 0) {
+    for (const warning of result.warnings) {
+      console.warn(chalk.yellow(warning));
+    }
+  }
+
+  if (result.errors.length > 0) {
+    console.error('\n' + '='.repeat(60));
+    console.error(chalk.red.bold('CLUSTER CONFIG VALIDATION FAILED'));
+    console.error('='.repeat(60));
+    console.error(chalk.dim(`Config: ${configName}`));
+    console.error('');
+    for (const error of result.errors) {
+      console.error(chalk.red(error));
+    }
+    console.error('='.repeat(60) + '\n');
+    console.error(
+      chalk.yellow('💡 Tip: Set ZEROSHOT_CLUSTER_SIMULATION=off to skip (NOT recommended)')
+    );
+    console.error('');
+    process.exit(1);
+  }
 }
 
 function shouldRunDetached(options) {
@@ -230,13 +270,39 @@ function printDetachedClusterStart(options, clusterId) {
   console.log(`Attach:  zeroshot attach ${clusterId}`);
 }
 
+function readPromptFromStdin() {
+  return new Promise((resolve, reject) => {
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      input += chunk;
+    });
+    process.stdin.on('end', () => {
+      resolve(input);
+    });
+    process.stdin.on('error', reject);
+  });
+}
+
+function resolveTaskPrompt(prompt, options) {
+  if (typeof prompt === 'string' && prompt.trim().length > 0) {
+    return prompt;
+  }
+
+  if (!options.stdin) {
+    return prompt || '';
+  }
+
+  return readPromptFromStdin();
+}
+
 function createDaemonLogFile(clusterId) {
   const storageDir = path.join(os.homedir(), '.zeroshot');
   if (!fs.existsSync(storageDir)) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
   const logPath = path.join(storageDir, `${clusterId}-daemon.log`);
-  return fs.openSync(logPath, 'w');
+  return { logFd: fs.openSync(logPath, 'w'), logPath, storageDir };
 }
 
 function serializeRunOptions(options) {
@@ -275,10 +341,9 @@ function buildDaemonEnv(options, clusterId, targetCwd) {
   };
 }
 
-function spawnDetachedCluster(options, clusterId) {
+async function spawnDetachedCluster(options, clusterId) {
   const { spawn } = require('child_process');
-  printDetachedClusterStart(options, clusterId);
-  const logFd = createDaemonLogFile(clusterId);
+  const { logFd, logPath, storageDir } = createDaemonLogFile(clusterId);
   const targetCwd = detectGitRepoRoot();
   const daemon = spawn(process.execPath, process.argv.slice(1), {
     detached: true,
@@ -288,6 +353,15 @@ function spawnDetachedCluster(options, clusterId) {
   });
   daemon.unref();
   fs.closeSync(logFd);
+
+  await waitForClusterRegistration({
+    clusterId,
+    timeoutMs: resolveWaitTimeoutMs(process.env.ZEROSHOT_DETACH_WAIT_SECONDS),
+    storageDir,
+    daemonPid: daemon.pid,
+    logPath,
+  });
+  printDetachedClusterStart(options, clusterId);
 }
 
 function resolveClusterId(generateName) {
@@ -674,11 +748,7 @@ function formatClusterRow(cluster) {
   const stateDisplay =
     cluster.state === 'zombie' ? chalk.red(cluster.state.padEnd(12)) : cluster.state.padEnd(12);
   const rowColor =
-    cluster.state === 'zombie'
-      ? chalk.red
-      : cluster.orphaned
-        ? chalk.yellow
-        : (text) => text;
+    cluster.state === 'zombie' ? chalk.red : cluster.orphaned ? chalk.yellow : (text) => text;
 
   return `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount
     .toString()
@@ -750,11 +820,7 @@ function printRunRow(run) {
   const issue = run.issue ? `#${String(run.issue)}` : '-';
   const task = formatRunTaskSummary(run.taskSummary, 52);
   const stateDisplay =
-    run.state === 'setup_failed'
-      ? chalk.red(state)
-      : run.orphaned
-        ? chalk.yellow(state)
-        : state;
+    run.state === 'setup_failed' ? chalk.red(state) : run.orphaned ? chalk.yellow(state) : state;
   return `${run.id.padEnd(25)} ${stateDisplay} ${issue.padEnd(8)} ${currentAgent} ${lastActivity} ${created} ${task}`;
 }
 
@@ -789,9 +855,12 @@ function printHistoricalRunStatus(run) {
   if (run.taskSummary) {
     console.log(`Task: ${run.taskSummary}`);
   }
-  console.log(`Messages: ${run.messageCount}`);
+  console.log(`Messages: ${run.messageCount ?? 'unknown'}`);
   if (run.orphaned) {
     console.log(chalk.yellow('Orphaned: yes'));
+  }
+  if (run.warning) {
+    console.log(chalk.yellow(`Warning: ${run.warning}`));
   }
   if (run.failureReason) {
     console.log(`Failure: ${run.failureReason}`);
@@ -822,6 +891,10 @@ function buildRunsQueryOptions(options) {
 
 function loadRuns(options) {
   return listRunSummaries(buildRunsQueryOptions(options));
+}
+
+function findHistoricalRun(id) {
+  return loadRuns({}).find((run) => run.id === id) || null;
 }
 
 function getClusterTokensByRole(orchestrator, clusterId) {
@@ -1937,12 +2010,13 @@ async function getPurgeData(orchestrator) {
     (cluster) => cluster.state === 'running' || cluster.state === 'initializing'
   );
   const { loadTasks } = await import('../task-lib/store.js');
-  const { isProcessRunning } = await import('../task-lib/runner.js');
+  const { isTaskProcessRunning, reconcileTasks } = await import('../task-lib/runner.js');
+  await reconcileTasks();
   const tasks = Object.values(loadTasks());
   const runningTasks = tasks.filter(
-    (task) => task.status === 'running' && isProcessRunning(task.pid)
+    (task) => task.status === 'running' && isTaskProcessRunning(task)
   );
-  return { clusters, runningClusters, tasks, runningTasks, isProcessRunning };
+  return { clusters, runningClusters, tasks, runningTasks };
 }
 
 function printPurgeSummary({ clusters, runningClusters, tasks, runningTasks }) {
@@ -1998,27 +2072,34 @@ async function killRunningClusters(orchestrator, runningClusters) {
   }
 }
 
-async function killRunningTasks(runningTasks, isProcessRunning) {
+async function killRunningTasks(runningTasks) {
   if (runningTasks.length === 0) {
     return;
   }
   console.log(chalk.bold('Killing running tasks...'));
-  const { killTask } = await import('../task-lib/runner.js');
+  const { getTaskRuntimeState, terminateTask } = await import('../task-lib/runner.js');
   const { updateTask } = await import('../task-lib/store.js');
 
   for (const task of runningTasks) {
-    if (!isProcessRunning(task.pid)) {
+    if (!getTaskRuntimeState(task).running) {
       updateTask(task.id, {
         status: 'stale',
+        pid: null,
+        watcherPid: null,
         error: 'Process died unexpectedly',
       });
       console.log(chalk.yellow(`○ Task ${task.id} was already dead, marked stale`));
       continue;
     }
 
-    const killed = killTask(task.pid);
-    if (killed) {
-      updateTask(task.id, { status: 'killed', error: 'Killed by clear' });
+    const killed = await terminateTask(task);
+    if (killed.signaled && killed.exited) {
+      updateTask(task.id, {
+        status: 'killed',
+        pid: null,
+        watcherPid: null,
+        error: 'Killed by clear',
+      });
       console.log(chalk.green(`✓ Killed task: ${task.id}`));
     } else {
       console.log(chalk.red(`✗ Failed to kill task: ${task.id}`));
@@ -2480,7 +2561,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       const providerOverride = resolveProviderOverride(options);
 
       // Preflight checks
-      runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
+      await runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
 
       // Secondary preflight: token-free template simulation/validation
       const simMode = String(options.sim || 'fast').toLowerCase();
@@ -2510,7 +2591,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 
       if (shouldRunDetached(options)) {
         const clusterId = generateName('cluster');
-        spawnDetachedCluster(options, clusterId);
+        await spawnDetachedCluster(options, clusterId);
         return;
       }
 
@@ -2530,6 +2611,9 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 
       const modelOverride = resolveModelOverride(options);
       applyModelOverrideToConfig(config, modelOverride, providerOverride, settings);
+
+      // Validate loaded cluster config with runtime simulation
+      await validateLoadedClusterConfig(config, configName);
 
       let cluster = null;
       if (input.text) {
@@ -2588,7 +2672,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 const taskCmd = program.command('task').description('Single-agent task management');
 
 taskCmd
-  .command('run <prompt>')
+  .command('run [prompt]')
   .description('Run a single-agent background task')
   .option('-C, --cwd <path>', 'Working directory for task')
   .option('--provider <provider>', 'Provider to use (claude, codex, gemini, opencode)')
@@ -2604,15 +2688,18 @@ taskCmd
   )
   .option('--json-schema <schema>', 'JSON schema for structured output')
   .option('--silent-json-output', 'Log ONLY final structured output')
+  .option('--stdin', 'Read the prompt from stdin instead of argv')
   .action(async (prompt, options) => {
     try {
+      const resolvedPrompt = await resolveTaskPrompt(prompt, options);
+
       // === PREFLIGHT CHECKS ===
       // Provider CLI must be installed for task execution
       const settings = loadSettings();
       const providerOverride = normalizeProviderName(
         options.provider || process.env.ZEROSHOT_PROVIDER || settings.defaultProvider
       );
-      requirePreflight({
+      await requirePreflight({
         requireGh: false, // gh not needed for plain tasks
         requireDocker: false, // Docker not needed for plain tasks
         quiet: false,
@@ -2621,7 +2708,7 @@ taskCmd
 
       // Dynamically import task command (ESM module)
       const { runTask } = await import('../task-lib/commands/run.js');
-      await runTask(prompt, options);
+      await runTask(resolvedPrompt, options);
     } catch (error) {
       console.error('Error:', error.message);
       process.exit(1);
@@ -2739,7 +2826,7 @@ program
       const type = detectIdType(id);
 
       if (!type) {
-        const historicalRun = loadRuns({}).find((run) => run.id === id);
+        const historicalRun = findHistoricalRun(id);
         if (!historicalRun) {
           reportMissingId(id, options);
           return;
@@ -2753,15 +2840,28 @@ program
       }
 
       if (type === 'cluster') {
-        const orchestrator = await getOrchestrator();
-        const status = orchestrator.getStatus(id);
-        const tokensByRole = getClusterTokensByRole(orchestrator, id);
-        if (options.json) {
-          printClusterStatusJson(status, tokensByRole);
+        try {
+          const orchestrator = await getOrchestrator();
+          const status = orchestrator.getStatus(id);
+          const tokensByRole = getClusterTokensByRole(orchestrator, id);
+          if (options.json) {
+            printClusterStatusJson(status, tokensByRole);
+            return;
+          }
+          printClusterStatusHuman(status, tokensByRole, id);
+          return;
+        } catch (clusterError) {
+          const historicalRun = findHistoricalRun(id);
+          if (!historicalRun) {
+            throw clusterError;
+          }
+          if (options.json) {
+            console.log(JSON.stringify({ type: 'cluster-history', ...historicalRun }, null, 2));
+            return;
+          }
+          printHistoricalRunStatus(historicalRun);
           return;
         }
-        printClusterStatusHuman(status, tokensByRole, id);
-        return;
       }
 
       await showTaskStatus(id, options);
@@ -2936,10 +3036,11 @@ program
       );
 
       const { loadTasks } = await import('../task-lib/store.js');
-      const { isProcessRunning } = await import('../task-lib/runner.js');
+      const { isTaskProcessRunning, reconcileTasks } = await import('../task-lib/runner.js');
+      await reconcileTasks();
       const tasks = loadTasks();
       const runningTasks = Object.values(tasks).filter(
-        (t) => t.status === 'running' && isProcessRunning(t.pid)
+        (t) => t.status === 'running' && isTaskProcessRunning(t)
       );
 
       const totalCount = runningClusters.length + runningTasks.length;
@@ -2998,23 +3099,27 @@ program
 
       // Kill tasks
       if (runningTasks.length > 0) {
-        const { killTask, isProcessRunning: checkPid } = await import('../task-lib/runner.js');
+        const { getTaskRuntimeState, terminateTask } = await import('../task-lib/runner.js');
         const { updateTask } = await import('../task-lib/store.js');
 
         for (const task of runningTasks) {
-          if (!checkPid(task.pid)) {
+          if (!getTaskRuntimeState(task).running) {
             updateTask(task.id, {
               status: 'stale',
+              pid: null,
+              watcherPid: null,
               error: 'Process died unexpectedly',
             });
             console.log(chalk.yellow(`○ Task ${task.id} was already dead, marked stale`));
             continue;
           }
 
-          const killed = killTask(task.pid);
-          if (killed) {
+          const killed = await terminateTask(task);
+          if (killed.signaled && killed.exited) {
             updateTask(task.id, {
               status: 'killed',
+              pid: null,
+              watcherPid: null,
               error: 'Killed by kill-all',
             });
             console.log(chalk.green(`✓ Killed task: ${task.id}`));
@@ -3171,7 +3276,7 @@ program
           cluster.config?.defaultProvider ||
           settings.defaultProvider;
 
-        requirePreflight({
+        await requirePreflight({
           requireGh: false, // Resume doesn't fetch new issues
           requireDocker: requiresDocker,
           quiet: false,
@@ -3303,7 +3408,7 @@ program
           // If task store is unavailable, fall back to default provider
         }
 
-        requirePreflight({
+        await requirePreflight({
           requireGh: false,
           requireDocker: false,
           quiet: false,
@@ -3385,7 +3490,9 @@ function printGcResult(result, dryRun) {
   }
   if (result.orphanedWorktrees.length > 0) {
     console.log(chalk.bold(`\n${verb} ${result.orphanedWorktrees.length} orphaned worktree(s):`));
-    result.orphanedWorktrees.forEach((n) => console.log(chalk.dim(`  ~/.zeroshot/worktrees/${n}/`)));
+    result.orphanedWorktrees.forEach((n) =>
+      console.log(chalk.dim(`  ~/.zeroshot/worktrees/${n}/`))
+    );
   }
   if (result.orphanedDbs.length > 0) {
     console.log(chalk.bold(`\n${verb} ${result.orphanedDbs.length} orphaned database file(s):`));
@@ -3446,7 +3553,7 @@ program
       console.log('');
 
       await killRunningClusters(orchestrator, purgeData.runningClusters);
-      await killRunningTasks(purgeData.runningTasks, purgeData.isProcessRunning);
+      await killRunningTasks(purgeData.runningTasks);
       deleteClusterData(orchestrator, purgeData.clusters);
       await deleteTaskData(purgeData.tasks);
 

@@ -28,8 +28,7 @@ function defineWithModelTests() {
       assert.strictEqual(behavior.expectedModel, 'opus');
     });
 
-    it('should validate model during run()', async function () {
-      this.timeout(3000);
+    it('should validate model during run()', async () => {
       mockRunner.when('planner').withModel('opus').returns({ plan: 'detailed' });
 
       // Should succeed with correct model

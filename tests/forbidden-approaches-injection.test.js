@@ -27,6 +27,7 @@ describe('Fixer Instructions - CRITICAL', () => {
   });
 
   afterEach(() => {
+    if (ledger) ledger.close();
     if (tempDir && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

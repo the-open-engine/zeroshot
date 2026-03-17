@@ -168,6 +168,9 @@ class LogicEngine {
       // Triggering message
       message: message || null,
 
+      // Cluster ID (top-level for convenience in trigger scripts)
+      cluster_id: clusterId,
+
       // APIs
       ledger: ledgerAPI,
       cluster: clusterAPI,

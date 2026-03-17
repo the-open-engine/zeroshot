@@ -10,7 +10,7 @@
 
 import blessed from 'blessed';
 import { loadTasks } from './store.js';
-import { isProcessRunning } from './runner.js';
+import { getTaskRuntimeState } from './runner.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -307,7 +307,7 @@ class TaskTUI {
 
     // Verify running status
     for (const task of this.tasks) {
-      if (task.status === 'running' && !isProcessRunning(task.pid)) {
+      if (task.status === 'running' && !getTaskRuntimeState(task).running) {
         task.status = 'stale';
       }
     }

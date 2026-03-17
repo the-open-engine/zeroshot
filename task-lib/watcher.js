@@ -7,7 +7,7 @@
 
 import { spawn } from 'child_process';
 import { appendFileSync } from 'fs';
-import { updateTask } from './store.js';
+import { getTask, updateTask } from './store.js';
 import {
   detectFatalClaudeError,
   detectStreamingModeError,
@@ -18,9 +18,56 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { normalizeProviderName } = require('../lib/provider-names');
 
-const [, , taskId, cwd, logFile, argsJson, configJson] = process.argv;
-const args = JSON.parse(argsJson);
-const config = configJson ? JSON.parse(configJson) : {};
+const [, , taskIdArg, cwdArg, logFileArg, argsJsonArg, configJsonArg] = process.argv;
+
+function emergencyLog(msg) {
+  if (logFileArg) {
+    try {
+      appendFileSync(logFileArg, msg);
+    } catch {
+      process.stderr.write(msg);
+    }
+  } else {
+    process.stderr.write(msg);
+  }
+}
+
+function crashWithError(error, source) {
+  const timestamp = Date.now();
+  const errorMsg = error instanceof Error ? error.stack || error.message : String(error);
+
+  emergencyLog(`\n[${timestamp}][CRASH] ${source}: ${errorMsg}\n`);
+  emergencyLog(`[${timestamp}][CRASH] Process terminating due to unhandled error\n`);
+
+  if (taskIdArg) {
+    try {
+      updateTask(taskIdArg, {
+        status: 'failed',
+        error: `${source}: ${errorMsg}`,
+        pid: null,
+        watcherPid: null,
+      });
+    } catch (updateError) {
+      emergencyLog(`[${timestamp}][CRASH] Failed to update task status: ${updateError.message}\n`);
+    }
+  }
+
+  process.exit(1);
+}
+
+process.on('uncaughtException', (error) => {
+  crashWithError(error, 'uncaughtException');
+});
+
+process.on('unhandledRejection', (reason) => {
+  crashWithError(reason, 'unhandledRejection');
+});
+
+const taskId = taskIdArg;
+const cwd = cwdArg;
+const logFile = logFileArg;
+const args = JSON.parse(argsJsonArg);
+const config = configJsonArg ? JSON.parse(configJsonArg) : {};
 
 function log(msg) {
   appendFileSync(logFile, msg);
@@ -32,12 +79,22 @@ const enableRecovery = providerName === 'claude';
 const env = { ...process.env, ...(config.env || {}) };
 const command = config.command || 'claude';
 const finalArgs = [...args];
+const promptTransport = config.promptTransport || 'argv';
+const promptFromStore = promptTransport === 'stdin' ? getTask(taskId)?.fullPrompt || '' : '';
 
 const child = spawn(command, finalArgs, {
   cwd,
   env,
-  stdio: ['ignore', 'pipe', 'pipe'],
+  stdio: ['pipe', 'pipe', 'pipe'],
 });
+
+updateTask(taskId, { watcherPid: process.pid });
+
+if (promptTransport === 'stdin') {
+  child.stdin?.end(promptFromStore, 'utf-8');
+} else {
+  child.stdin?.end();
+}
 
 updateTask(taskId, { pid: child.pid });
 
@@ -251,6 +308,8 @@ child.on('close', async (code, signal) => {
   try {
     await updateTask(taskId, {
       status,
+      pid: null,
+      watcherPid: null,
       exitCode: resolvedCode,
       error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
     });
@@ -263,7 +322,12 @@ child.on('close', async (code, signal) => {
 child.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
   try {
-    await updateTask(taskId, { status: 'failed', error: err.message });
+    await updateTask(taskId, {
+      status: 'failed',
+      pid: null,
+      watcherPid: null,
+      error: err.message,
+    });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);
   }
