@@ -37,6 +37,15 @@ const CAPABILITIES = {
     thinkingMode: true,
     reasoningEffort: true,
   },
+  novita: {
+    dockerIsolation: true,
+    worktreeIsolation: true,
+    mcpServers: true,
+    jsonSchema: true,
+    streamJson: true,
+    thinkingMode: true,
+    reasoningEffort: true,
+  },
 };
 
 function checkCapability(provider, capability) {

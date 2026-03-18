@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"thread-1"}
+{"type":"turn.started","turn_id":"turn-1","thread_id":"thread-1"}
+{"type":"item.created","item":{"type":"message","id":"msg-1","role":"user","content":"Hello"}}
+{"type":"item.created","item":{"type":"message","id":"msg-2","role":"assistant","content":[{"type":"text","text":"Hello from Novita."}]}}
+{"type":"item.completed","item":{"type":"message","id":"msg-2","role":"assistant","content":[{"type":"text","text":"Hello from Novita."}]}}
+{"type":"turn.completed","turn_id":"turn-1","thread_id":"thread-1","usage":{"input_tokens":12,"output_tokens":4}}

@@ -11,6 +11,7 @@ authentication. Use each CLI's login flow or API key setup.
 | Codex    | Codex       | `npm install -g @openai/codex`             |
 | Gemini   | Gemini      | `npm install -g @google/gemini-cli`        |
 | Opencode | Opencode    | See https://opencode.ai                    |
+| Novita   | Codex       | `npm install -g @openai/codex`             |
 
 ## Selecting a Provider
 
@@ -51,23 +52,25 @@ Notes:
 - `reasoningEffort` applies to Codex and Opencode only.
 - `model` is still supported as a provider-specific escape hatch.
 
-## Docker Isolation and Credentials
+## Novita Provider
 
-Zeroshot does not inject credentials for non-Claude CLIs. When using
-`--docker`, mount your provider config directories explicitly.
+Novita uses Codex CLI with an OpenAI-compatible API endpoint.
 
-Examples:
+**API Key Setup:**
 
 ```bash
-# Codex
-zeroshot run 123 --docker --mount ~/.config/codex:/home/node/.config/codex:ro
-
-# Gemini (use gemini or gcloud config as needed)
-zeroshot run 123 --docker --mount ~/.config/gemini:/home/node/.config/gemini:ro
-zeroshot run 123 --docker --mount ~/.config/gcloud:/home/node/.config/gcloud:ro
+export NOVITA_API_KEY="your-novita-api-key"
 ```
 
-Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`, `opencode`.
+**Model IDs (using `/` separator):**
 
-Use `--no-mounts` to disable all credential mounts (you will get a warning if
-credentials are missing).
+- `deepseek/deepseek-v3.2` (default for level1/level2)
+- `zai-org/glm-5` (default for level3)
+- `minimax/minimax-m2.5`
+
+**Docker Isolation:**
+Novita uses Codex CLI credentials, so Docker needs the same mounts:
+
+```bash
+zeroshot run 123 --docker --mount ~/.config/codex:/home/node/.config/codex:ro
+```
