@@ -654,7 +654,21 @@ function runPreflight(options = {}) {
 
   // 6. Check Docker (if required)
   if (options.requireDocker) {
-    errors.push(...validateDockerRequirement());
+    const { checkCapability } = require('./providers/capabilities');
+    if (!checkCapability(providerName, 'dockerIsolation')) {
+      errors.push(
+        formatError(
+          `Docker isolation not supported for provider "${providerName}"`,
+          `The ${providerName} provider does not support --docker mode`,
+          [
+            'Remove the --docker flag, or choose a provider that supports Docker isolation',
+            'Providers with Docker support: claude, codex, gemini, opencode',
+          ]
+        )
+      );
+    } else {
+      errors.push(...validateDockerRequirement());
+    }
   }
 
   // 7. Check git repo (if required for worktree isolation)

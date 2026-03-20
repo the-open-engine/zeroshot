@@ -122,7 +122,7 @@ class IsolationManager {
       clusterConfigDir,
     });
 
-    const mountedHosts = this._applyCredentialMounts(args, config, settings, containerHome);
+    const mountedHosts = this._applyCredentialMounts(args, config, settings, containerHome, providerName);
     this._warnMissingProviderCredentials(providerName, mountedHosts, config, containerHome);
 
     args.push('-w', '/workspace', image, 'tail', '-f', '/dev/null');
@@ -236,7 +236,7 @@ class IsolationManager {
     return settings.dockerMounts;
   }
 
-  _applyCredentialMounts(args, config, settings, containerHome) {
+  _applyCredentialMounts(args, config, settings, containerHome, providerName) {
     const mountedHosts = [];
     if (config.noMounts) {
       return mountedHosts;
@@ -273,7 +273,7 @@ class IsolationManager {
       mountedHosts.push(hostPath);
     }
 
-    const envToPass = this._collectDockerEnvVars(mountConfig, settings);
+    const envToPass = this._collectDockerEnvVars(mountConfig, settings, providerName);
     for (const [key, value] of Object.entries(envToPass)) {
       args.push('-e', `${key}=${value}`);
     }
@@ -281,7 +281,7 @@ class IsolationManager {
     return mountedHosts;
   }
 
-  _collectDockerEnvVars(mountConfig, settings) {
+  _collectDockerEnvVars(mountConfig, settings, providerName) {
     const envToPass = {};
     const envSpecs = expandEnvPatterns(resolveEnvs(mountConfig, settings.dockerEnvPassthrough));
 
@@ -303,6 +303,19 @@ class IsolationManager {
     for (const [key, value] of Object.entries(authEnv)) {
       if (!(key in envToPass)) {
         envToPass[key] = value;
+      }
+    }
+
+    // Forward provider-specific auth env vars into the container
+    if (providerName && providerName !== 'claude') {
+      const provider = getProvider(providerName);
+      if (provider && typeof provider.resolveAuthEnv === 'function') {
+        const providerAuthEnv = provider.resolveAuthEnv();
+        for (const [key, value] of Object.entries(providerAuthEnv)) {
+          if (!(key in envToPass) && value !== undefined) {
+            envToPass[key] = value;
+          }
+        }
       }
     }
 
