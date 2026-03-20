@@ -38,7 +38,7 @@ const CAPABILITIES = {
     reasoningEffort: true,
   },
   novita: {
-    dockerIsolation: true,
+    dockerIsolation: false,
     worktreeIsolation: true,
     mcpServers: true,
     jsonSchema: true,

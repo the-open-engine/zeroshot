@@ -38,4 +38,4 @@ impl fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
-pub const VALID_PROVIDERS: [&str; 4] = ["claude", "codex", "gemini", "opencode"];
+pub const VALID_PROVIDERS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "novita"];
