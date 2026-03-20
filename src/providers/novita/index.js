@@ -31,7 +31,6 @@ class NovitaProvider extends BaseProvider {
   getPermanentErrorPatterns() {
     return [
       ...super.getPermanentErrorPatterns(),
-      /novita\.ai/i,
       /invalid_api_key/i,
       /\binsufficient_quota\b/i,
       /\bmodel_not_found\b/i,

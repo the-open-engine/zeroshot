@@ -1,7 +1,12 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
 function buildCommand(context, options = {}) {
   const { modelSpec, outputFormat, jsonSchema, cwd, autoApprove, cliFeatures = {}, authEnv = {} } = options;
 
   const args = ['exec'];
+  const cleanup = [];
 
   if ((outputFormat === 'stream-json' || outputFormat === 'json') && cliFeatures.supportsJson) {
     args.push('--json');
@@ -29,18 +34,24 @@ function buildCommand(context, options = {}) {
   }
 
   let finalContext = context;
-  if (jsonSchema) {
-    if (cliFeatures.supportsOutputSchema !== false) {
-      const schemaStr =
-        typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema);
-      args.push('--output-schema', schemaStr);
-    } else {
-      // Fall back to prompt injection when --output-schema is not available
-      const schemaStr =
-        typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema, null, 2);
-      finalContext =
-        context +
-        `\n\n## OUTPUT FORMAT (CRITICAL - REQUIRED)
+  if (jsonSchema && cliFeatures.supportsOutputSchema) {
+    // CRITICAL: Codex --output-schema takes a FILE PATH, not a JSON string
+    const schemaStr =
+      typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema, null, 2);
+    const schemaFile = path.join(
+      os.tmpdir(),
+      `zeroshot-schema-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+    );
+    fs.writeFileSync(schemaFile, schemaStr);
+    cleanup.push(schemaFile);
+    args.push('--output-schema', schemaFile);
+  } else if (jsonSchema) {
+    // Fall back to prompt injection when --output-schema is not available
+    const schemaStr =
+      typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema, null, 2);
+    finalContext =
+      context +
+      `\n\n## OUTPUT FORMAT (CRITICAL - REQUIRED)
 
 You MUST respond with a JSON object that exactly matches this schema. NO markdown, NO explanation, NO code blocks. ONLY the raw JSON object.
 
@@ -50,7 +61,6 @@ ${schemaStr}
 \`\`\`
 
 Your response must be ONLY valid JSON. Start with { and end with }. Nothing else.`;
-    }
   }
 
   args.push(finalContext);
@@ -59,6 +69,7 @@ Your response must be ONLY valid JSON. Start with { and end with }. Nothing else
     binary: 'codex',
     args,
     env: authEnv,
+    cleanup,
   };
 }
 
