@@ -428,6 +428,11 @@ function validateProvider(providerName, options) {
         'Command "opencode" not installed',
         ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
       ),
+    novita: () =>
+      validateCliProvider('codex', 'Codex CLI not available', 'Command "codex" not installed', [
+        'Install Codex CLI: npm install -g @openai/codex',
+        'Then run: codex --version',
+      ]),
   };
 
   const validator = validatorByProvider[providerName];
@@ -435,7 +440,7 @@ function validateProvider(providerName, options) {
     return {
       errors: [
         formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
-          'Use claude, codex, gemini, or opencode',
+          'Use claude, codex, gemini, opencode, or novita',
         ]),
       ],
       warnings: [],
