@@ -1,5 +1,5 @@
 function buildCommand(context, options = {}) {
-  const { modelSpec, outputFormat, jsonSchema, cwd, autoApprove, cliFeatures = {} } = options;
+  const { modelSpec, outputFormat, jsonSchema, cwd, autoApprove, cliFeatures = {}, authEnv = {} } = options;
 
   const args = ['exec'];
 
@@ -28,15 +28,19 @@ function buildCommand(context, options = {}) {
     args.push('--skip-git-repo-check');
   }
 
-  // Augment context with schema if CLI doesn't support native --output-schema
   let finalContext = context;
   if (jsonSchema) {
-    // Inject schema into prompt since Novata CLI (Codex-based) has no --output-schema flag
-    const schemaStr =
-      typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema, null, 2);
-    finalContext =
-      context +
-      `\n\n## OUTPUT FORMAT (CRITICAL - REQUIRED)
+    if (cliFeatures.supportsOutputSchema !== false) {
+      const schemaStr =
+        typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema);
+      args.push('--output-schema', schemaStr);
+    } else {
+      // Fall back to prompt injection when --output-schema is not available
+      const schemaStr =
+        typeof jsonSchema === 'string' ? jsonSchema : JSON.stringify(jsonSchema, null, 2);
+      finalContext =
+        context +
+        `\n\n## OUTPUT FORMAT (CRITICAL - REQUIRED)
 
 You MUST respond with a JSON object that exactly matches this schema. NO markdown, NO explanation, NO code blocks. ONLY the raw JSON object.
 
@@ -46,6 +50,7 @@ ${schemaStr}
 \`\`\`
 
 Your response must be ONLY valid JSON. Start with { and end with }. Nothing else.`;
+    }
   }
 
   args.push(finalContext);
@@ -53,7 +58,7 @@ Your response must be ONLY valid JSON. Start with { and end with }. Nothing else
   return {
     binary: 'codex',
     args,
-    env: {},
+    env: authEnv,
   };
 }
 

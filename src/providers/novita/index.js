@@ -122,7 +122,7 @@ class NovitaProvider extends BaseProvider {
       );
     }
 
-    return buildCommand(context, { ...options, cliFeatures });
+    return buildCommand(context, { ...options, cliFeatures, authEnv: this.resolveAuthEnv() });
   }
 
   parseEvent(line) {
