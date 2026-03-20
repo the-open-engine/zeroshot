@@ -5,9 +5,9 @@ const MODEL_CATALOG = {
 };
 
 const LEVEL_MAPPING = {
-  level1: { rank: 1, model: 'deepseek/deepseek-v3.2', reasoningEffort: 'low' },
-  level2: { rank: 2, model: 'deepseek/deepseek-v3.2', reasoningEffort: 'medium' },
-  level3: { rank: 3, model: 'zai-org/glm-5', reasoningEffort: 'high' },
+  level1: { rank: 1, model: 'deepseek/deepseek-v3.2' },
+  level2: { rank: 2, model: 'deepseek/deepseek-v3.2' },
+  level3: { rank: 3, model: 'zai-org/glm-5' },
 };
 
 const DEFAULT_LEVEL = 'level2';
