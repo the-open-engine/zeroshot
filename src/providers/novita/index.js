@@ -89,7 +89,7 @@ class NovitaProvider extends BaseProvider {
     if (process.env.NOVITA_API_KEY) {
       env.OPENAI_API_KEY = process.env.NOVITA_API_KEY;
     }
-    env.OPENAI_BASE_URL = 'https://api.novita.ai/openai/v1';
+    env.OPENAI_BASE_URL = 'https://api.novita.ai/openai';
     return env;
   }
 
