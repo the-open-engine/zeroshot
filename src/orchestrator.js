@@ -2887,9 +2887,11 @@ Continue from where you left off. Review your previous output to understand what
           `    🔄 Replacing agent ${agentConfig.id} (old role: ${existingAgent.config.role})`
         );
 
-        // Stop the existing agent (cluster.agents contains AgentWrapper instances directly)
+        // Stop the existing agent and wait for shutdown before replacement.
+        // This prevents the old instance from draining buffered messages or
+        // finishing in-flight work after the new agent has already started.
         if (existingAgent.stop) {
-          existingAgent.stop();
+          await existingAgent.stop();
         }
 
         // Remove from cluster.agents array
