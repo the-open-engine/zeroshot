@@ -11,6 +11,7 @@ authentication. Use each CLI's login flow or API key setup.
 | Codex    | Codex       | `npm install -g @openai/codex`             |
 | Gemini   | Gemini      | `npm install -g @google/gemini-cli`        |
 | Opencode | Opencode    | See https://opencode.ai                    |
+| MiniMax  | SDK-based   | `export MINIMAX_API_KEY=your-key`          |
 
 ## Selecting a Provider
 
@@ -50,6 +51,28 @@ Notes:
 
 - `reasoningEffort` applies to Codex and Opencode only.
 - `model` is still supported as a provider-specific escape hatch.
+
+## MiniMax (SDK-Based Provider)
+
+MiniMax is the first SDK-based provider — it uses the MiniMax OpenAI-compatible API
+directly instead of shelling out to an external CLI. Set your API key and you're ready:
+
+```bash
+export MINIMAX_API_KEY=your-api-key
+zeroshot providers set-default minimax
+```
+
+Available models:
+
+| Model                 | Context   | Best For                         |
+| --------------------- | --------- | -------------------------------- |
+| MiniMax-M2.7          | 1,000,000 | Complex tasks (default level2/3) |
+| MiniMax-M2.7-highspeed| 1,000,000 | Faster responses                 |
+| MiniMax-M2.5          | 204,000   | Balanced quality/cost            |
+| MiniMax-M2.5-highspeed| 204,000   | Cheapest/fastest (level1)        |
+
+MiniMax also implements the SDK extension point (`callSimple`/`callSDK`), enabling
+features like output reformatting when other providers add SDK support.
 
 ## Docker Isolation and Credentials
 

@@ -1,6 +1,6 @@
 # zeroshot CLI
 
-> **🎉 New in v5.4:** Now supports **OpenCode** CLI! Use Claude, Codex, Gemini, or OpenCode as your AI provider. Also supports **GitHub, GitLab, Jira, and Azure DevOps** as issue backends. See [Providers](#providers) and [Multi-Platform Issue Support](#multi-platform-issue-support).
+> **🎉 New in v5.4:** Now supports **OpenCode** CLI and **MiniMax** (SDK-based)! Use Claude, Codex, Gemini, OpenCode, or MiniMax as your AI provider. Also supports **GitHub, GitLab, Jira, and Azure DevOps** as issue backends. See [Providers](#providers) and [Multi-Platform Issue Support](#multi-platform-issue-support).
 
 <!-- install-placeholder -->
 <p align="center">
@@ -85,7 +85,7 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 npm install -g @covibes/zeroshot
 ```
 
-**Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode).
+**Requires**: Node 18+, at least one provider CLI or API key (Claude Code, Codex, Gemini, Opencode, MiniMax).
 
 ```bash
 # Install one or more providers
@@ -93,6 +93,7 @@ npm i -g @anthropic-ai/claude-code
 npm i -g @openai/codex
 npm i -g @google/gemini-cli
 # Opencode: see https://opencode.ai
+# MiniMax: export MINIMAX_API_KEY=your-key (no CLI needed)
 
 # Authenticate with the provider CLI
 claude login        # Claude
@@ -384,7 +385,7 @@ When using `--docker`, zeroshot mounts credential directories so agents can acce
 
 **Default mounts**: `gh`, `git`, `ssh` (GitHub CLI, git config, SSH keys)
 
-**Available presets**: `gh`, `git`, `ssh`, `aws`, `azure`, `kube`, `terraform`, `gcloud`, `claude`, `codex`, `gemini`
+**Available presets**: `gh`, `git`, `ssh`, `aws`, `azure`, `kube`, `terraform`, `gcloud`, `claude`, `codex`, `gemini`, `minimax`
 
 ```bash
 # Configure via settings (persistent)
@@ -452,6 +453,7 @@ zeroshot settings set dockerEnvPassthrough '["MY_API_KEY", "TF_VAR_*"]'
 | `claude: command not found`   | `npm i -g @anthropic-ai/claude-code && claude auth login`                                 |
 | `codex: command not found`    | `npm i -g @openai/codex && codex login`                                                   |
 | `gemini: command not found`   | `npm i -g @google/gemini-cli && gemini auth login`                                        |
+| MiniMax not available         | `export MINIMAX_API_KEY=your-key` (SDK-based, no CLI needed)                              |
 | `gh: command not found`       | [Install GitHub CLI](https://cli.github.com/)                                             |
 | `--docker` fails              | Docker must be running: `docker ps` to verify                                             |
 | Cluster stuck                 | `zeroshot resume <id>` to continue                                                        |

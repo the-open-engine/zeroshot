@@ -37,6 +37,15 @@ const CAPABILITIES = {
     thinkingMode: true,
     reasoningEffort: true,
   },
+  minimax: {
+    dockerIsolation: true,
+    worktreeIsolation: true,
+    mcpServers: false,
+    jsonSchema: 'experimental',
+    streamJson: true,
+    thinkingMode: true,
+    reasoningEffort: false,
+  },
 };
 
 function checkCapability(provider, capability) {

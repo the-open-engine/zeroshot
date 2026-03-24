@@ -67,6 +67,7 @@
     "claude",
     "codex",
     "gemini",
+    "minimax",
     "automation"
   ],
   "author": "Covibes",
