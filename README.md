@@ -1,6 +1,6 @@
 # zeroshot CLI
 
-> **🎉 New in v5.4:** Now supports **OpenCode** CLI! Use Claude, Codex, Gemini, or OpenCode as your AI provider. Also supports **GitHub, GitLab, Jira, and Azure DevOps** as issue backends. See [Providers](#providers) and [Multi-Platform Issue Support](#multi-platform-issue-support).
+> Supports Claude Code, Codex, Gemini, and Opencode provider CLIs, plus GitHub, GitLab, Jira, and Azure DevOps issue backends.
 
 <!-- install-placeholder -->
 <p align="center">
@@ -152,6 +152,7 @@ Rule of thumb: if you cannot describe what "done" means, validators cannot verif
 ```bash
 # Run
 zeroshot run 123                      # GitHub issue
+zeroshot run PROJ-123                 # Jira issue key
 zeroshot run feature.md               # Markdown file
 zeroshot run "Add dark mode"          # Inline text
 
@@ -170,11 +171,14 @@ zeroshot run 123 --ship -d
 # Control
 zeroshot list
 zeroshot status <id>
+zeroshot inspect <id>
 zeroshot logs <id> -f
+zeroshot attach <id>
 zeroshot resume <id>
+zeroshot finish <id>
 zeroshot stop <id>
 zeroshot kill <id>
-zeroshot watch
+zeroshot kill-all
 
 # Providers
 zeroshot providers
@@ -184,10 +188,41 @@ zeroshot providers set-default codex
 zeroshot agents list
 zeroshot agents show <name>
 
+# TUI / schedules / config
+zeroshot watch
+zeroshot tui
+zeroshot schedule "Daily dependency sweep"
+zeroshot schedules
+zeroshot scheduler status
+zeroshot config list
+zeroshot config show conductor-bootstrap
+
 # Maintenance
 zeroshot clean
+zeroshot gc
 zeroshot purge
 ```
+
+For command-specific help:
+
+```bash
+zeroshot --help
+zeroshot run --help
+zeroshot providers --help
+```
+
+## Full Command Map
+
+| Category           | Commands                                                |
+| ------------------ | ------------------------------------------------------- |
+| Cluster execution  | `run`, `finish`, `resume`                               |
+| Single-agent tasks | `task`                                                  |
+| Observation        | `list`, `status`, `inspect`, `logs`, `attach`, `export` |
+| Control            | `stop`, `kill`, `kill-all`                              |
+| Maintenance        | `clean`, `gc`, `purge`, `update`                        |
+| Scheduling         | `schedule`, `schedules`, `unschedule`, `scheduler`      |
+| TUI                | `watch`, `tui`, `claude`, `codex`, `gemini`, `opencode` |
+| Configuration      | `settings`, `providers`, `config`, `agents`             |
 
 ## Multi-Platform Issue Support
 
