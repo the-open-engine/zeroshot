@@ -2705,6 +2705,30 @@ Continue from where you left off. Review your previous output to understand what
     );
   }
 
+  _clusterHasAgent(cluster, agentId) {
+    return Boolean(
+      cluster?.agents?.some((agent) => agent.id === agentId || agent.config?.id === agentId) ||
+      cluster?.config?.agents?.some((agent) => agent.id === agentId)
+    );
+  }
+
+  _normalizeCompletionHandlersForPrMode(cluster, agentConfigs) {
+    if (!Array.isArray(agentConfigs) || agentConfigs.length === 0) {
+      return [];
+    }
+
+    const isPrMode = cluster?.autoPr ?? process.env.ZEROSHOT_PR === '1';
+    const hasGitPusher =
+      this._clusterHasAgent(cluster, 'git-pusher') ||
+      agentConfigs.some((agent) => agent?.id === 'git-pusher');
+
+    if (!isPrMode || !hasGitPusher) {
+      return agentConfigs;
+    }
+
+    return agentConfigs.filter((agent) => agent?.id !== 'completion-detector');
+  }
+
   _injectCriticalValidationResultProducer(agentConfigs) {
     const hasMetaCoordinator = agentConfigs.some((agent) => agent.id === 'meta-coordinator');
     const hasRuntimeValidator = agentConfigs.some((agent) => agent.role === 'validator');
@@ -2736,8 +2760,11 @@ Continue from where you left off. Review your previous output to understand what
     }
   }
 
-  _prepareValidationAgentConfigs(proposedAgentConfigs) {
-    const validationAgents = JSON.parse(JSON.stringify(proposedAgentConfigs || []));
+  _prepareValidationAgentConfigs(cluster, proposedAgentConfigs) {
+    const validationAgents = this._normalizeCompletionHandlersForPrMode(
+      cluster,
+      JSON.parse(JSON.stringify(proposedAgentConfigs || []))
+    );
 
     this._injectCriticalValidationResultProducer(validationAgents);
 
@@ -2756,7 +2783,7 @@ Continue from where you left off. Review your previous output to understand what
   }
 
   _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
-    const validationAgents = this._prepareValidationAgentConfigs(proposedAgentConfigs);
+    const validationAgents = this._prepareValidationAgentConfigs(cluster, proposedAgentConfigs);
     const mockConfig = { agents: validationAgents };
     const validation = configValidator.validateConfig(mockConfig);
 
@@ -2818,9 +2845,13 @@ Continue from where you left off. Review your previous output to understand what
    * @private
    */
   async _opAddAgents(cluster, op, context) {
-    const agents = op.agents;
+    const agents = this._normalizeCompletionHandlersForPrMode(cluster, op.agents);
     if (!agents || !Array.isArray(agents)) {
       throw new Error('add_agents operation missing agents array');
+    }
+    if (agents.length === 0) {
+      this._log(`    Skipping add_agents: PR-mode completion detector replaced by git-pusher`);
+      return;
     }
 
     // CRITICAL: Inject cluster's worktree cwd into dynamically added agents
@@ -2856,9 +2887,11 @@ Continue from where you left off. Review your previous output to understand what
           `    🔄 Replacing agent ${agentConfig.id} (old role: ${existingAgent.config.role})`
         );
 
-        // Stop the existing agent (cluster.agents contains AgentWrapper instances directly)
+        // Stop the existing agent and wait for shutdown before replacement.
+        // This prevents the old instance from draining buffered messages or
+        // finishing in-flight work after the new agent has already started.
         if (existingAgent.stop) {
-          existingAgent.stop();
+          await existingAgent.stop();
         }
 
         // Remove from cluster.agents array

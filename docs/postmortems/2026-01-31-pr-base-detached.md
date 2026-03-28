@@ -40,6 +40,7 @@
 - Parse daemon run options in `buildStartOptions` as a fallback for any missing CLI flags.
 - Add unit coverage to ensure env-run-options are honored.
 - Update operator docs to explicitly require forwarding options for detached runs.
+- Re-state branch ownership in repo context: `dev` is the normal development/integration branch; `main` is release-only promotion from `dev`.
 
 ## Action Items
 

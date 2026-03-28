@@ -384,6 +384,13 @@ const maxValidators = cluster.config.complexity === 'CRITICAL' ? 5 : 3;
 
 **CI blocks PRs to main from any branch except `dev`.** See `.github/workflows/ci.yml` → `enforce-main-pr-source` job.
 
+**Development branch ownership:**
+
+- `dev` is the integration branch for normal development work.
+- Feature branches merge into `dev`, not `main`.
+- `main` is release-only. Promote `dev` to `main` only when you intentionally want a release.
+- If you are "just shipping a fix" during development, ship it to `dev`.
+
 ```bash
 # ❌ CI WILL BLOCK - PRs to main from feature branches
 gh pr create --base main --head fix/my-feature  # FAILS in CI
@@ -397,6 +404,8 @@ gh pr create --base main --head dev --title "Release"  # dev → main (allowed)
 **POSTMORTEM (2026-01-16):** Agent found merge conflicts between dev and main. Instead of resolving conflicts properly (merge main into dev), created a feature branch directly from main and merged fixes to main. This bypassed dev, created divergence, and left dev without the fixes.
 
 **FIX:** Added CI enforcement (`enforce-main-pr-source` job). Now mechanically impossible to merge non-dev branches to main.
+
+**POSTMORTEM RULE:** Treat `main` as the release branch, not the development branch. If you are choosing a destination branch for active work, the answer is `dev`.
 
 ## 🔴 BEHAVIORAL RULES
 
@@ -423,6 +432,13 @@ Merge to dev (only if CI passes on rebased code)
 ```
 
 **Pre-push hook blocks:** Direct pushes to `main` or `dev`. Must use PR workflow.
+
+**Branch intent:**
+
+- `dev`: active development / integration
+- `main`: release only
+- Feature branch → PR to `dev`
+- `dev` → PR to `main` only for release promotion
 
 **Commands:**
 
