@@ -48,7 +48,7 @@ describe('Provider settings', function () {
         maxLevel: 'level3',
         defaultLevel: 'level2',
         levelOverrides: {
-          level1: { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
+          level1: { model: 'gpt-5.4-codex', reasoningEffort: 'low' },
         },
       });
     });
@@ -85,10 +85,10 @@ describe('Provider settings', function () {
     assert.strictEqual(settings.providerSettings.claude.defaultLevel, 'level1');
   });
 
-  it('uses gpt-5.3-codex as the default codex model', function () {
+  it('uses gpt-5.4-codex as the default codex model', function () {
     const codex = getProvider('codex');
     const modelSpec = codex.resolveModelSpec(codex.getDefaultLevel(), {});
-    assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
+    assert.strictEqual(modelSpec.model, 'gpt-5.4-codex');
   });
 
   it('maps claude level3 to opus alias', function () {
