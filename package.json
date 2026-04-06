@@ -148,7 +148,9 @@
     "diff": ">=8.0.3",
     "tar": ">=7.5.8",
     "undici": ">=7.18.2",
-    "minimatch": ">=10.2.1"
+    "minimatch": ">=10.2.1",
+    "lodash": ">=4.17.24",
+    "marked": ">=15.0.7"
   },
   "lint-staged": {
     "*.{js,mjs,cjs}": [
