@@ -19,6 +19,7 @@ const { getProvider, parseChunkWithProvider } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
 const { loadSettings } = require('../../lib/settings.js');
 const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
+const { prependWorktreeToolBinToEnv } = require('../worktree-tooling-env.js');
 
 // Schema utilities for normalizing LLM output
 const { normalizeEnumValues } = require('./schema-utils');
@@ -700,6 +701,7 @@ function ensureProviderHooks(agent, providerName) {
 
 function buildSpawnEnv(agent, providerName, modelSpec) {
   const spawnEnv = { ...process.env };
+  const agentCwd = agent.config?.cwd || agent.worktree?.path || process.cwd();
 
   if (providerName === 'claude') {
     Object.assign(spawnEnv, buildClaudeEnv(modelSpec));
@@ -709,6 +711,11 @@ function buildSpawnEnv(agent, providerName, modelSpec) {
       spawnEnv.ZEROSHOT_WORKTREE = '1';
     }
   }
+
+  prependWorktreeToolBinToEnv(spawnEnv, {
+    cwd: agentCwd,
+    worktreePath: agent.worktree?.path || null,
+  });
 
   return spawnEnv;
 }

@@ -12,6 +12,7 @@ const TaskRunner = require('./task-runner');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
+const { prependWorktreeToolBinToEnv } = require('./worktree-tooling-env');
 
 class ClaudeTaskRunner extends TaskRunner {
   /**
@@ -42,7 +43,7 @@ class ClaudeTaskRunner extends TaskRunner {
    * Execute a task via zeroshot CLI
    *
    * @param {string} context - Full prompt/context
-   * @param {{agentId?: string, model?: string, outputFormat?: string, jsonSchema?: any, strictSchema?: boolean, cwd?: string, isolation?: any}} options - Execution options
+   * @param {{agentId?: string, model?: string, outputFormat?: string, jsonSchema?: any, strictSchema?: boolean, cwd?: string, worktreePath?: string|null, isolation?: any}} options - Execution options
    * @returns {Promise<{success: boolean, output: string, error: string|null, taskId?: string}>}
    */
   async run(context, options = {}) {
@@ -57,6 +58,7 @@ class ClaudeTaskRunner extends TaskRunner {
       jsonSchema = null,
       strictSchema = false, // false = live streaming (default), true = CLI schema enforcement (no streaming)
       cwd = process.cwd(),
+      worktreePath = null,
       isolation = null,
     } = options;
 
@@ -101,7 +103,10 @@ class ClaudeTaskRunner extends TaskRunner {
     });
 
     // Spawn and get task ID
-    const spawnEnv = this._buildSpawnEnv(providerName, resolvedModelSpec);
+    const spawnEnv = this._buildSpawnEnv(providerName, resolvedModelSpec, {
+      cwd,
+      worktreePath,
+    });
 
     const taskId = await this._spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, agentId);
 
@@ -179,13 +184,16 @@ class ClaudeTaskRunner extends TaskRunner {
     return args;
   }
 
-  _buildSpawnEnv(providerName, resolvedModelSpec) {
+  _buildSpawnEnv(providerName, resolvedModelSpec, options = {}) {
+    const { cwd = process.cwd(), worktreePath = null } = options;
     const spawnEnv = {
       ...process.env,
     };
     if (providerName === 'claude' && resolvedModelSpec?.model) {
       spawnEnv.ANTHROPIC_MODEL = resolvedModelSpec.model;
     }
+
+    prependWorktreeToolBinToEnv(spawnEnv, { cwd, worktreePath });
 
     return spawnEnv;
   }
