@@ -101,6 +101,8 @@ class AgentWrapper {
           model: this._selectModel(),
           modelSpec: spec,
           provider: this._resolveProvider(),
+          cwd: this.config.cwd || process.cwd(),
+          worktreePath: this.worktree?.path || null,
         });
       };
     } else {
