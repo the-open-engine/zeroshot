@@ -14,10 +14,17 @@ const { files, sourceBase, destBase } = workerData;
 let copied = 0;
 let skipped = 0;
 const errors = [];
+const resolvedDestBase = path.resolve(destBase);
 
 for (const relativePath of files) {
   const srcPath = path.join(sourceBase, relativePath);
-  const destPath = path.join(destBase, relativePath);
+  const destPath = path.resolve(destBase, relativePath);
+
+  if (destPath !== resolvedDestBase && !destPath.startsWith(resolvedDestBase + path.sep)) {
+    skipped++;
+    errors.push({ file: relativePath, error: 'Invalid destination path' });
+    continue;
+  }
 
   try {
     // Ensure parent directory exists
