@@ -51,9 +51,13 @@ describe('Orchestrator Flow Integration', function () {
           // Ignore cleanup errors
         }
       }
+
+      orchestrator.close();
+      orchestrator = null;
     }
     if (tempDir && fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
+      tempDir = null;
     }
   });
 
