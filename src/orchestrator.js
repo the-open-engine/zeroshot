@@ -394,7 +394,10 @@ class Orchestrator {
 
   _instantiateAgent(agentConfig, messageBus, clusterContext, agentOptions) {
     if (agentConfig.type === 'subcluster') {
-      return new SubClusterWrapper(agentConfig, messageBus, clusterContext, agentOptions);
+      return new SubClusterWrapper(agentConfig, messageBus, clusterContext, {
+        ...agentOptions,
+        createChildOrchestrator: (orchestratorOptions) => Orchestrator.create(orchestratorOptions),
+      });
     }
 
     return new AgentWrapper(agentConfig, messageBus, clusterContext, agentOptions);
@@ -1160,7 +1163,10 @@ class Orchestrator {
 
       const agent =
         agentConfig.type === 'subcluster'
-          ? new SubClusterWrapper(agentConfig, messageBus, cluster, agentOptions)
+          ? new SubClusterWrapper(agentConfig, messageBus, cluster, {
+              ...agentOptions,
+              createChildOrchestrator: (orchestratorOptions) => Orchestrator.create(orchestratorOptions),
+            })
           : new AgentWrapper(agentConfig, messageBus, cluster, agentOptions);
 
       cluster.agents.push(agent);

@@ -159,6 +159,16 @@ function validateSubclusterAgent(agent, depth, errors, warnings) {
   const subResult = subClusterSchema.validateSubCluster(agent, depth);
   errors.push(...subResult.errors);
   warnings.push(...subResult.warnings);
+
+  if (!agent.config || !Array.isArray(agent.config.agents)) {
+    return;
+  }
+
+  const childValidation = validateConfig(agent.config, depth + 1);
+  if (!childValidation.valid) {
+    errors.push(...childValidation.errors.map((e) => `Sub-cluster '${agent.id}': ${e}`));
+  }
+  warnings.push(...childValidation.warnings.map((w) => `Sub-cluster '${agent.id}': ${w}`));
 }
 
 function validateTrigger(trigger, triggerPrefix, errors) {
