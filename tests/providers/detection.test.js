@@ -1,5 +1,6 @@
 const assert = require('assert');
 const sinon = require('sinon');
+const path = require('path');
 const {
   commandExists,
   getCommandPath,
@@ -46,5 +47,30 @@ describe('commandLookupCommand', () => {
   it('uses command -v on non-Windows platforms', () => {
     platformStub = sinon.stub(process, 'platform').value('linux');
     assert.strictEqual(commandLookupCommand('claude'), 'command -v claude');
+  });
+});
+
+const { buildZeroshotSpawnSpec } = require('../../src/agent/agent-task-executor');
+
+describe('buildZeroshotSpawnSpec', () => {
+  let platformStub;
+
+  afterEach(() => {
+    if (platformStub) platformStub.restore();
+  });
+
+  it('uses node + cli script on Windows', () => {
+    platformStub = sinon.stub(process, 'platform').value('win32');
+    const spec = buildZeroshotSpawnSpec('zeroshot', ['task', 'run']);
+    assert.strictEqual(spec.command, process.execPath);
+    assert.strictEqual(spec.args[0], path.resolve(process.cwd(), 'cli/index.js'));
+    assert.deepStrictEqual(spec.args.slice(1), ['task', 'run']);
+  });
+
+  it('uses the resolved zeroshot command on non-Windows platforms', () => {
+    platformStub = sinon.stub(process, 'platform').value('linux');
+    const spec = buildZeroshotSpawnSpec('/usr/local/bin/zeroshot', ['task', 'run']);
+    assert.strictEqual(spec.command, '/usr/local/bin/zeroshot');
+    assert.deepStrictEqual(spec.args, ['task', 'run']);
   });
 });

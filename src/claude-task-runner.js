@@ -12,6 +12,7 @@ const TaskRunner = require('./task-runner');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
+const { buildZeroshotSpawnSpec } = require('./agent/agent-task-executor');
 
 class ClaudeTaskRunner extends TaskRunner {
   /**
@@ -196,7 +197,8 @@ class ClaudeTaskRunner extends TaskRunner {
    */
   _spawnAndGetTaskId(ctPath, args, cwd, spawnEnv, _agentId) {
     return new Promise((resolve, reject) => {
-      const proc = spawn(ctPath, args, {
+      const spawnSpec = buildZeroshotSpawnSpec(ctPath, args);
+      const proc = spawn(spawnSpec.command, spawnSpec.args, {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: spawnEnv,
