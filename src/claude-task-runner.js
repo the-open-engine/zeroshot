@@ -200,6 +200,7 @@ class ClaudeTaskRunner extends TaskRunner {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: spawnEnv,
+        windowsHide: true,
       });
 
       let stdout = '';

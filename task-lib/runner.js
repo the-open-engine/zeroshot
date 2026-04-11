@@ -173,6 +173,7 @@ function spawnWatcher({ watcherScript, id, cwd, logFile, finalArgs, watcherConfi
     {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     }
   );
 
