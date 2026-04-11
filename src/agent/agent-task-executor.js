@@ -723,10 +723,12 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
   const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(ctPath, args, {
+    const spawnSpec = buildZeroshotSpawnSpec(ctPath, args);
+    const proc = spawn(spawnSpec.command, spawnSpec.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: spawnEnv,
+      windowsHide: true,
     });
 
     // NOTE: Don't emit PROCESS_SPAWNED here - proc.pid is a wrapper that exits immediately.
@@ -1254,6 +1256,21 @@ function followClaudeTaskLogs(agent, taskId) {
   const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
 
   return createLogFollower({ agent, taskId, fsModule, ctPath, providerName });
+}
+
+
+function buildZeroshotSpawnSpec(ctPath, args) {
+  if (process.platform === 'win32') {
+    return {
+      command: process.execPath,
+      args: [path.join(__dirname, '../../cli/index.js'), ...args],
+    };
+  }
+
+  return {
+    command: ctPath,
+    args,
+  };
 }
 
 // Cache zeroshot path at module load time (when PATH is correct)
@@ -1917,6 +1934,7 @@ module.exports = {
   waitForTaskReady,
   spawnClaudeTaskIsolated,
   getClaudeTasksPath,
+  buildZeroshotSpawnSpec,
   parseResultOutput,
   killTask,
 };
