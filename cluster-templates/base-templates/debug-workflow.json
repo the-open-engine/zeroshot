@@ -232,6 +232,7 @@
       "modelLevel": "{{tester_level}}",
       "timeout": "{{timeout}}",
       "outputFormat": "json",
+      "strictSchema": true,
       "jsonSchema": {
         "type": "object",
         "properties": {
