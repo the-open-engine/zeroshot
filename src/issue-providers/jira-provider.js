@@ -12,6 +12,14 @@ class JiraProvider extends IssueProvider {
   static id = 'jira';
   static displayName = 'Jira';
 
+  static getAuthCheckCommand() {
+    return 'jira me';
+  }
+
+  static getIssueViewCommand(issueKey) {
+    return `jira issue view ${issueKey} --raw`;
+  }
+
   /**
    * Detect Jira issue keys and URLs
    * Matches:
@@ -71,9 +79,14 @@ class JiraProvider extends IssueProvider {
    */
   static checkAuth() {
     try {
-      // go-jira uses 'jira session' to verify authentication
-      // If not configured, it fails with endpoint/login errors
-      execSync('jira session', { encoding: 'utf8', stdio: 'pipe', timeout: AUTH_CHECK_TIMEOUT_MS });
+      // ankitpokhrel/jira-cli exposes `jira me` for auth verification and is the
+      // same CLI family used by fetchIssue(). Keep the auth check aligned with
+      // the actual commands this provider runs.
+      execSync(JiraProvider.getAuthCheckCommand(), {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: AUTH_CHECK_TIMEOUT_MS,
+      });
       return { authenticated: true, error: null, recovery: [] };
     } catch (err) {
       const stderr = err.stderr || err.message || '';
@@ -92,8 +105,8 @@ class JiraProvider extends IssueProvider {
       if (stderr.includes('Command timed out')) {
         return {
           authenticated: false,
-          error: 'jira session timed out',
-          recovery: ['Retry: jira session', 'Check ~/.jira.d/config.yml for endpoint/login'],
+          error: 'jira me timed out',
+          recovery: ['Retry: jira me', 'Check your jira CLI auth/config for endpoint/login'],
         };
       }
 
@@ -111,7 +124,7 @@ class JiraProvider extends IssueProvider {
             'Create ~/.jira.d/config.yml with your Jira endpoint',
             'See: https://github.com/go-jira/jira#configuration',
             'Example config:\n   endpoint: https://yourcompany.atlassian.net\n   login: your-email@company.com',
-            'Then verify: jira session',
+            'Then verify: jira me',
           ],
         };
       }
@@ -167,7 +180,7 @@ class JiraProvider extends IssueProvider {
       const issueKey = this._extractIssueKey(identifier, settings);
 
       // Fetch issue using jira CLI
-      const cmd = `jira issue view ${issueKey} --template json`;
+      const cmd = JiraProvider.getIssueViewCommand(issueKey);
       const output = execSync(cmd, { encoding: 'utf8' });
       const issue = JSON.parse(output);
 

@@ -149,6 +149,14 @@ describe('Jira Provider', () => {
     expect(tool.name).to.equal('jira');
     expect(tool.checkCmd).to.equal('jira version');
   });
+
+  it('uses jira-cli auth command for auth checks', () => {
+    expect(JiraProvider.getAuthCheckCommand()).to.equal('jira me');
+  });
+
+  it('uses --raw when fetching issue payloads', () => {
+    expect(JiraProvider.getIssueViewCommand('PROJ-123')).to.equal('jira issue view PROJ-123 --raw');
+  });
 });
 
 describe('Azure DevOps Provider', () => {
