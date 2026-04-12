@@ -68,6 +68,7 @@ process.on('unhandledRejection', (reason) => {
 const require = createRequire(import.meta.url);
 const { AttachServer } = require('../src/attach');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { resolveWindowsCommandSpawn } = require('../lib/provider-detection');
 
 const taskId = taskIdArg;
 const cwd = cwdArg;
@@ -91,8 +92,9 @@ const providerName = normalizeProviderName(config.provider || 'claude');
 const enableRecovery = providerName === 'claude';
 
 const env = { ...process.env, ...(config.env || {}) };
-const command = config.command || 'claude';
 const finalArgs = [...args];
+const spawnSpec = resolveWindowsCommandSpawn(config.command || 'claude', finalArgs);
+const command = spawnSpec.command;
 
 const silentJsonMode =
   config.outputFormat === 'json' && config.jsonSchema && config.silentJsonOutput && enableRecovery;
@@ -241,7 +243,7 @@ server = new AttachServer({
   id: taskId,
   socketPath,
   command,
-  args: finalArgs,
+  args: spawnSpec.args,
   cwd,
   env,
   cols: 120,

@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { loadSettings } = require('../lib/settings.js');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('../src/providers');
+const { getCommandPath } = require('../lib/provider-detection');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -156,7 +157,7 @@ function buildWatcherConfig(outputFormat, jsonSchema, options, providerName, com
     jsonSchema,
     silentJsonOutput: options.silentJsonOutput || false,
     provider: providerName,
-    command: commandSpec.binary,
+    command: getCommandPath(commandSpec.binary) || commandSpec.binary,
     env: commandSpec.env || {},
   };
 }

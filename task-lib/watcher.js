@@ -17,6 +17,7 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const { normalizeProviderName } = require('../lib/provider-names');
+const { resolveWindowsCommandSpawn } = require('../lib/provider-detection');
 
 const [, , taskId, cwd, logFile, argsJson, configJson] = process.argv;
 const args = JSON.parse(argsJson);
@@ -30,10 +31,10 @@ const providerName = normalizeProviderName(config.provider || 'claude');
 const enableRecovery = providerName === 'claude';
 
 const env = { ...process.env, ...(config.env || {}) };
-const command = config.command || 'claude';
 const finalArgs = [...args];
-
-const child = spawn(command, finalArgs, {
+const spawnSpec = resolveWindowsCommandSpawn(config.command || 'claude', finalArgs);
+const command = spawnSpec.command;
+const child = spawn(command, spawnSpec.args, {
   cwd,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
