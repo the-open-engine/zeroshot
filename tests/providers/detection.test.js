@@ -11,6 +11,7 @@ const {
   commandLookupCommand,
   resolveWindowsCommandSpawn,
   extractNodeScriptFromCmdWrapper,
+  spawnCommandSync,
 } = require('../../lib/provider-detection');
 
 describe('Provider CLI detection', () => {
@@ -77,7 +78,8 @@ describe('resolveWindowsCommandSpawn', () => {
   let tempDir;
 
   afterEach(() => {
-    if (platformStub) platformStub.restore();
+    sinon.restore();
+    platformStub = null;
     if (tempDir) {
       fs.rmSync(tempDir, { recursive: true, force: true });
       tempDir = null;
@@ -108,5 +110,30 @@ describe('resolveWindowsCommandSpawn', () => {
     const spec = resolveWindowsCommandSpawn('claude', ['--print', 'hello']);
     assert.strictEqual(spec.command, 'claude');
     assert.deepStrictEqual(spec.args, ['--print', 'hello']);
+  });
+
+  it('uses the resolved spawn spec for sync help/version probes', () => {
+    platformStub = sinon.stub(process, 'platform').value('win32');
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-detection-'));
+    const wrapperPath = path.join(tempDir, 'codex.cmd');
+    const scriptDir = path.join(tempDir, 'node_modules', '@openai', 'codex', 'dist');
+    fs.mkdirSync(scriptDir, { recursive: true });
+    const scriptPath = path.join(scriptDir, 'cli.js');
+    fs.writeFileSync(
+      scriptPath,
+      "if (process.argv.includes('--help')) { console.log('wrapped-help'); } else if (process.argv.includes('--version')) { console.log('wrapped-version'); }"
+    );
+    fs.writeFileSync(
+      wrapperPath,
+      '@ECHO off\r\n"%~dp0\\node.exe"  "%~dp0\\node_modules\\@openai\\codex\\dist\\cli.js" %*\r\n'
+    );
+
+    const help = getHelpOutput(wrapperPath, ['exec']);
+    const version = getVersionOutput(wrapperPath);
+    const result = spawnCommandSync(wrapperPath, ['exec', '--help']);
+
+    assert.strictEqual(help, 'wrapped-help');
+    assert.strictEqual(version, 'wrapped-version');
+    assert.strictEqual(result.stdout.trim(), 'wrapped-help');
   });
 });
