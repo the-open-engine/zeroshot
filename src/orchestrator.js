@@ -833,11 +833,12 @@ class Orchestrator {
       autoPr: options.autoPr || false,
       // PR configuration options (persisted for resume)
       prOptions:
-        options.prBase || options.mergeQueue || options.closeIssue
+        options.prBase || options.mergeQueue || options.closeIssue || options.autoMerge
           ? {
               prBase: options.prBase || null,
               mergeQueue: options.mergeQueue || false,
               closeIssue: options.closeIssue || null,
+              autoMerge: options.autoMerge || false,
             }
           : null,
       // Model override for all agents (applied to dynamically added agents)
@@ -1520,6 +1521,7 @@ class Orchestrator {
       prBase: options.prBase,
       mergeQueue: options.mergeQueue,
       closeIssue: options.closeIssue,
+      autoMerge: options.autoMerge,
     });
 
     // Template replacement for issue context
