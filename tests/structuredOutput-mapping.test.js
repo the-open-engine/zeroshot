@@ -105,4 +105,21 @@ describe('structuredOutput → jsonSchema mapping', function () {
       );
     }
   });
+
+  it('should not require merge_commit_sha in review-only PR mode', function () {
+    const agentConfig = generateGitPusherAgent('github', { autoMerge: false });
+    const normalized = validateAgentConfig({ ...agentConfig });
+
+    assert.deepStrictEqual(normalized.jsonSchema.required, ['pr_number', 'pr_url', 'merged']);
+    assert.ok(normalized.prompt.includes('STOP. Do not merge it. Leave it open for human review.'));
+    assert.ok(!normalized.prompt.includes('GET IT MERGED'));
+  });
+
+  it('should still require merge_commit_sha in ship mode', function () {
+    const agentConfig = generateGitPusherAgent('github', { autoMerge: true });
+    const normalized = validateAgentConfig({ ...agentConfig });
+
+    assert.ok(normalized.jsonSchema.required.includes('merge_commit_sha'));
+    assert.ok(normalized.prompt.includes('GET IT MERGED'));
+  });
 });

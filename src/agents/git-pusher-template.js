@@ -118,6 +118,7 @@ function normalizeCloseIssueMode(value) {
  * @param {string} [options.prBase] - Target branch for PRs
  * @param {boolean} [options.mergeQueue] - Use GitHub merge queue
  * @param {string} [options.closeIssue] - When to close issue: auto|always|never
+ * @param {boolean} [options.autoMerge] - Whether the git-pusher should merge after PR creation
  * @returns {Object} Resolved configuration
  */
 function resolveGitHubConfig(options = {}) {
@@ -138,7 +139,9 @@ function resolveGitHubConfig(options = {}) {
     (parseBool(repoGithub.closeIssue) === true ? 'always' : null) ||
     'never';
 
-  return { prBase, useMergeQueue, closeIssueMode };
+  const autoMerge = options.autoMerge === true;
+
+  return { prBase, useMergeQueue, closeIssueMode, autoMerge };
 }
 
 /**
@@ -149,7 +152,7 @@ function resolveGitHubConfig(options = {}) {
  * @returns {Object|null} Platform configuration or null if unsupported
  */
 function getPlatformConfig(platform, config = {}) {
-  const { prBase, useMergeQueue, closeIssueMode } = config;
+  const { prBase, useMergeQueue, closeIssueMode, autoMerge } = config;
 
   const PLATFORM_CONFIGS = {
     github: {
@@ -170,6 +173,7 @@ done`
       rebaseBranch: prBase || 'main',
       usesMergeQueue: useMergeQueue,
       closeIssueMode: closeIssueMode || 'never',
+      autoMerge: autoMerge === true,
     },
     gitlab: {
       prName: 'MR',
@@ -229,6 +233,7 @@ function generatePrompt(config) {
     rebaseBranch,
     usesMergeQueue,
     closeIssueMode,
+    autoMerge,
   } = config;
 
   // Azure-specific instructions for PR ID extraction
@@ -237,6 +242,8 @@ function generatePrompt(config) {
 Look for output like: "Created PR 123" or parse the URL for the PR number.
 Save the PR ID to a variable for step 6.`
     : '';
+
+  const needsMergeStep = autoMerge === true || requiresPrIdExtraction;
 
   // Azure uses different merge terminology
   const mergeDescription = requiresPrIdExtraction
@@ -258,7 +265,9 @@ If enqueue fails (merge queue not enabled, missing permissions, etc.), fall back
 
   const postMergeStatus = requiresPrIdExtraction
     ? 'PR IS CREATED AND AUTO-COMPLETE IS SET'
-    : `${prName} IS MERGED`;
+    : autoMerge
+      ? `${prName} IS MERGED`
+      : `${prName} IS CREATED`;
 
   const finalOutputNote = requiresPrIdExtraction
     ? `ONLY after the PR is created and auto-complete is set, output:
@@ -270,7 +279,8 @@ If truly no changes exist, output:
 \`\`\`json
 {"${outputFields.urlField}": null, "${outputFields.numberField}": null, "merged": false, "auto_complete": false}
 \`\`\``
-    : `ONLY after the ${prName} is MERGED, output:
+    : autoMerge
+      ? `ONLY after the ${prName} is MERGED, output:
 \`\`\`json
 {"${outputFields.urlField}": "${prUrlExample}", "${outputFields.numberField}": 123, "merged": true}
 \`\`\`
@@ -278,9 +288,18 @@ If truly no changes exist, output:
 If truly no changes exist, output:
 \`\`\`json
 {"${outputFields.urlField}": null, "${outputFields.numberField}": null, "merged": false}
+\`\`\``
+      : `ONLY after the ${prName} is CREATED, output:
+\`\`\`json
+{"${outputFields.urlField}": "${prUrlExample}", "${outputFields.numberField}": 123, "merged": false}
+\`\`\`
+
+If truly no changes exist, output:
+\`\`\`json
+{"${outputFields.urlField}": null, "${outputFields.numberField}": null, "merged": false}
 \`\`\``;
 
-  return `🚨 CRITICAL: ALL VALIDATORS APPROVED. YOU MUST CREATE A ${prName} AND GET IT MERGED. DO NOT STOP UNTIL THE ${prName} IS MERGED. 🚨
+  return `🚨 CRITICAL: ALL VALIDATORS APPROVED. ${needsMergeStep ? `YOU MUST CREATE A ${prName} AND GET IT MERGED. DO NOT STOP UNTIL THE ${prName} IS MERGED.` : `YOU MUST CREATE A ${prName} AND STOP AFTER IT IS OPEN FOR HUMAN REVIEW.`} 🚨
 
 ## MANDATORY STEPS - EXECUTE EACH ONE IN ORDER - DO NOT SKIP ANY STEP
 
@@ -318,7 +337,7 @@ ${createCmd}
 The push output shows a "Create a ${prNameLower}" link - IGNORE IT.
 You MUST run the \`${createCmd.split(' ').slice(0, 3).join(' ')}\` command above.${requiresPrIdExtraction ? '' : ` Save the actual ${prName} URL from the output.`}${azurePrIdNote}
 
-⚠️ AFTER ${prName} CREATION YOU ARE NOT DONE! CONTINUE TO STEP 6! ⚠️
+${needsMergeStep ? `⚠️ AFTER ${prName} CREATION YOU ARE NOT DONE! CONTINUE TO STEP 6! ⚠️
 
 ### STEP 6: ${mergeDescription}
 \`\`\`bash
@@ -351,10 +370,10 @@ ${mergeFallbackCmd}
 \`\`\`
 
 REPEAT UNTIL MERGED. DO NOT GIVE UP. DO NOT SKIP. THE ${prName} MUST BE ${requiresPrIdExtraction ? 'SET TO AUTO-COMPLETE' : 'MERGED'}.
-If merge is blocked by CI, wait and retry. ${requiresPrIdExtraction ? 'The auto-complete will merge when CI passes.' : 'If blocked by reviews, set auto-merge.'}
+If merge is blocked by CI, wait and retry. ${requiresPrIdExtraction ? 'The auto-complete will merge when CI passes.' : 'If blocked by reviews, set auto-merge.'}` : `After ${prName} creation, STOP. Do not merge it. Leave it open for human review.`}
 
 ${
-  closeIssueMode !== 'never'
+  closeIssueMode !== 'never' && needsMergeStep
     ? `### STEP 7: Close the issue (MANDATORY)
 \`\`\`bash
 if [ "{{issue_number}}" != "unknown" ]; then
@@ -387,14 +406,14 @@ Only do this AFTER the ${prName} is merged.`
 }
 
 ## CRITICAL RULES
-- Execute EVERY step in order (1, 2, 3, 4, 5, 6)
+- Execute EVERY step in order (${needsMergeStep ? '1, 2, 3, 4, 5, 6' : '1, 2, 3, 4, 5'})
 - Do NOT skip git add -A
 - Do NOT skip git commit
 - Do NOT skip ${createCmd.split(' ').slice(0, 3).join(' ')} - THE TASK IS NOT DONE UNTIL ${prName} EXISTS
-- Do NOT skip ${mergeCmd.split(' ').slice(0, 4).join(' ')} - THE TASK IS NOT DONE UNTIL ${postMergeStatus}${requiresPrIdExtraction ? '\n- MUST extract PR ID from step 5 output to use in step 6' : ''}
+${needsMergeStep ? `- Do NOT skip ${mergeCmd.split(' ').slice(0, 4).join(' ')} - THE TASK IS NOT DONE UNTIL ${postMergeStatus}${requiresPrIdExtraction ? '\n- MUST extract PR ID from step 5 output to use in step 6' : ''}
+- If ${requiresPrIdExtraction ? 'auto-complete' : 'merge'} fails, debug and fix it` : '- Do NOT merge the PR in --pr mode - THE TASK IS DONE ONCE THE PR EXISTS'}
 - If push fails, debug and fix it
 - If ${prName} creation fails, debug and fix it
-- If ${requiresPrIdExtraction ? 'auto-complete' : 'merge'} fails, debug and fix it
 - DO NOT OUTPUT JSON UNTIL ${postMergeStatus}
 - A link from git push is NOT a ${prName} - you must run ${createCmd.split(' ').slice(0, 3).join(' ')}
 
@@ -422,6 +441,8 @@ function generateGitPusherAgent(platform, options = {}) {
     const supported = SUPPORTED_PLATFORMS.join(', ');
     throw new Error(`Unsupported platform '${platform}'. Supported: ${supported}`);
   }
+
+  const requireMergeCommitSha = platformConfig.autoMerge === true || platformConfig.requiresPrIdExtraction;
 
   return {
     id: 'git-pusher',
@@ -463,7 +484,9 @@ function generateGitPusherAgent(platform, options = {}) {
           description: 'MUST extract from gh pr merge output',
         },
       },
-      required: ['pr_number', 'pr_url', 'merged', 'merge_commit_sha'],
+      required: requireMergeCommitSha
+        ? ['pr_number', 'pr_url', 'merged', 'merge_commit_sha']
+        : ['pr_number', 'pr_url', 'merged'],
     },
   };
 }
