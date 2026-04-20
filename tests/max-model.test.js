@@ -319,6 +319,36 @@ function registerModelHierarchyValidationTests() {
         /Agent requests "opus" but maxModel is "sonnet"/
       );
     });
+
+    it('should auto-upgrade when requested is below minModel floor', function () {
+      // haiku < sonnet (minModel), should auto-upgrade to sonnet
+      const result = settingsModule.validateModelAgainstMax('haiku', 'opus', 'sonnet');
+      assert.strictEqual(result, 'sonnet');
+    });
+
+    it('should return requested model when at or above minModel floor', function () {
+      // sonnet >= sonnet (minModel), should return as-is
+      const result = settingsModule.validateModelAgainstMax('sonnet', 'opus', 'sonnet');
+      assert.strictEqual(result, 'sonnet');
+
+      // opus > sonnet (minModel), should return as-is
+      const result2 = settingsModule.validateModelAgainstMax('opus', 'opus', 'sonnet');
+      assert.strictEqual(result2, 'opus');
+    });
+
+    it('should throw for invalid minModel', function () {
+      assert.throws(
+        () => settingsModule.validateModelAgainstMax('haiku', 'opus', 'gpt4'),
+        /Invalid minModel "gpt4"/
+      );
+    });
+
+    it('should throw when minModel exceeds maxModel', function () {
+      assert.throws(
+        () => settingsModule.validateModelAgainstMax('haiku', 'haiku', 'opus'),
+        /minModel "opus" cannot be higher than maxModel "haiku"/
+      );
+    });
   });
 }
 

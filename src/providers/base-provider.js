@@ -1,3 +1,6 @@
+// Track warned level upgrades to avoid log spam (warn once per unique upgrade)
+const _warnedLevelUpgrades = new Set();
+
 /**
  * BaseProvider - Abstract provider interface
  *
@@ -255,9 +258,16 @@ class BaseProvider {
     }
 
     if (minLevel && rank(level) < rank(minLevel)) {
-      throw new Error(
-        `Level "${level}" is below minLevel "${minLevel}" for provider "${this.name}"`
-      );
+      // Auto-upgrade to meet minLevel floor (fix for issue #162)
+      // Warn once per unique upgrade to avoid log spam
+      const upgradeKey = `${this.name}:${level}→${minLevel}`;
+      if (!_warnedLevelUpgrades.has(upgradeKey)) {
+        _warnedLevelUpgrades.add(upgradeKey);
+        console.warn(
+          `[zeroshot] Level auto-upgrade: "${level}" → "${minLevel}" for provider "${this.name}" (minLevel floor)`
+        );
+      }
+      return minLevel;
     }
 
     return level;

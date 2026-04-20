@@ -616,7 +616,10 @@ async function spawnClaudeTask(agent, context) {
 }
 
 function resolveAgentModelSpec(agent) {
-  return agent._resolveModelSpec ? agent._resolveModelSpec() : { model: agent._selectModel() };
+  const spec = agent._resolveModelSpec ? agent._resolveModelSpec() : { model: null };
+  // Use _selectModel() to get the validated/upgraded model (applies minModel/maxModel bounds)
+  const validatedModel = agent._selectModel();
+  return { ...spec, model: validatedModel };
 }
 
 function resolveOutputFormatConfig(agent) {

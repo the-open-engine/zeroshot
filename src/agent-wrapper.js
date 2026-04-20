@@ -573,13 +573,39 @@ class AgentWrapper {
 
   /**
    * Get current agent state
+   * Note: Uses defensive try-catch for model resolution to prevent crashes
+   * during read-only operations (e.g., `zeroshot logs`) when minLevel
+   * validation would otherwise throw. See issue #162.
    */
   getState() {
-    const modelSpec = this._resolveModelSpec();
+    let modelSpec = null;
+    let model = null;
+    try {
+      modelSpec = this._resolveModelSpec();
+      model = this._selectModel();
+    } catch (error) {
+      // Only handle expected min/max level validation errors for read-only display
+      const isLevelValidation =
+        error.message?.includes('minModel') ||
+        error.message?.includes('minLevel') ||
+        error.message?.includes('maxModel') ||
+        error.message?.includes('maxLevel');
+      if (!isLevelValidation) {
+        // Unexpected error - re-throw to avoid hiding bugs
+        throw error;
+      }
+      // Use raw config values for display; include error for diagnostics
+      model = this.modelConfig?.model || this.modelConfig?.modelLevel || null;
+      modelSpec = {
+        model,
+        level: this.modelConfig?.modelLevel || 'unknown',
+        validationError: error.message,
+      };
+    }
     return {
       id: this.id,
       role: this.role,
-      model: this._selectModel(),
+      model,
       provider: this._resolveProvider(),
       modelSpec,
       state: this.state,
