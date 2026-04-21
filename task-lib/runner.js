@@ -37,6 +37,9 @@ export async function spawnTask(prompt, options = {}) {
     cwd,
     autoApprove: true,
     cliFeatures,
+    mcpConfig: providerSettings.mcpConfig,
+    addDirs: providerSettings.addDirs,
+    providerSettings,
   });
 
   const finalArgs = resolveFinalArgs(commandSpec, providerName, options);

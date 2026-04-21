@@ -71,3 +71,83 @@ Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`, 
 
 Use `--no-mounts` to disable all credential mounts (you will get a warning if
 credentials are missing).
+
+## GitHub Copilot CLI
+
+The `copilot` provider integrates the GitHub Copilot CLI.
+
+Install:
+
+```bash
+npm install -g @github/copilot
+```
+
+Authenticate (interactive, one-time):
+
+```bash
+copilot
+# then inside the REPL:
+/login
+```
+
+Credentials are stored under `~/.copilot/`. Logs are under `~/.copilot/logs/`.
+
+Usage with zeroshot:
+
+```bash
+zeroshot run 123 --provider copilot
+```
+
+Models (level mapping):
+
+- `level1` → `gpt-5-mini`
+- `level2` → `claude-sonnet-4.5` (default)
+- `level3` → `claude-opus-4.6`
+
+Override per level via `providerSettings.copilot.levelOverrides`.
+
+Limitations:
+
+- Copilot CLI emits **plain text** with `--silent` (no structured streaming
+  JSON like Claude/Codex). Token usage is not reported, and live tool-call
+  events are not surfaced. The whole stdout stream is treated as text.
+- `jsonSchema` is supported only by **prompt-injecting** the schema (no native
+  `--output-schema` flag); reliability depends on the underlying model.
+- Thinking mode and reasoningEffort are not exposed by the CLI.
+- Auto-approval is enabled via `--allow-all` (a.k.a. `--yolo`); use isolation
+  (`--worktree` / `--docker`) when running untrusted prompts.
+
+### MCP servers
+
+Copilot CLI loads MCP servers from `~/.copilot/mcp-config.json` by default.
+zeroshot can additionally pass per-run MCP configs via the `--additional-mcp-config`
+flag. Set `providerSettings.copilot.mcpConfig` to any of:
+
+- a JSON string (raw config),
+- an object (zeroshot will `JSON.stringify` it),
+- a file path prefixed with `@` (e.g. `"@./mcp.json"`),
+- an array of any of the above (each entry emits one flag — augments, not
+  overrides, the user-level config).
+
+Example:
+
+```jsonc
+{
+  "providerSettings": {
+    "copilot": {
+      "mcpConfig": {
+        "mcpServers": {
+          "fs": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+GitHub's built-in MCP server can be tuned with `--add-github-mcp-tool` /
+`--add-github-mcp-toolset` directly in `extraArgs` if you need to override the
+default CLI subset.

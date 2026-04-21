@@ -2287,7 +2287,7 @@ program
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
   .option(
     '--provider <provider>',
-    'Override all agents to use a provider (claude, codex, gemini, opencode)'
+    'Override all agents to use a provider (claude, codex, gemini, opencode, copilot)'
   )
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
   .option(
