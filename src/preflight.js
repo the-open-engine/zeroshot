@@ -428,6 +428,16 @@ function validateProvider(providerName, options) {
         'Command "opencode" not installed',
         ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
       ),
+    copilot: () =>
+      validateCliProvider(
+        'copilot',
+        'GitHub Copilot CLI not available',
+        'Command "copilot" not installed',
+        [
+          'Install Copilot CLI: npm install -g @github/copilot',
+          'Then run: copilot (and use /login inside the REPL)',
+        ]
+      ),
   };
 
   const validator = validatorByProvider[providerName];
@@ -435,7 +445,7 @@ function validateProvider(providerName, options) {
     return {
       errors: [
         formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
-          'Use claude, codex, gemini, or opencode',
+          'Use claude, codex, gemini, opencode, or copilot',
         ]),
       ],
       warnings: [],
