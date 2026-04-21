@@ -71,3 +71,48 @@ Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`, 
 
 Use `--no-mounts` to disable all credential mounts (you will get a warning if
 credentials are missing).
+
+## GitHub Copilot CLI
+
+The `copilot` provider integrates the GitHub Copilot CLI.
+
+Install:
+
+```bash
+npm install -g @github/copilot
+```
+
+Authenticate (interactive, one-time):
+
+```bash
+copilot
+# then inside the REPL:
+/login
+```
+
+Credentials are stored under `~/.copilot/`. Logs are under `~/.copilot/logs/`.
+
+Usage with zeroshot:
+
+```bash
+zeroshot run 123 --provider copilot
+```
+
+Models (level mapping):
+
+- `level1` → `gpt-5-mini`
+- `level2` → `claude-sonnet-4.5` (default)
+- `level3` → `claude-opus-4.6`
+
+Override per level via `providerSettings.copilot.levelOverrides`.
+
+Limitations:
+
+- Copilot CLI emits **plain text** with `--silent` (no structured streaming
+  JSON like Claude/Codex). Token usage is not reported, and live tool-call
+  events are not surfaced. The whole stdout stream is treated as text.
+- `jsonSchema` is supported only by **prompt-injecting** the schema (no native
+  `--output-schema` flag); reliability depends on the underlying model.
+- MCP servers, thinking mode, and reasoningEffort are not supported.
+- Auto-approval is enabled via `--allow-all` (a.k.a. `--yolo`); use isolation
+  (`--worktree` / `--docker`) when running untrusted prompts.
