@@ -45,6 +45,9 @@ class CopilotProvider extends BaseProvider {
       supportsSilent: unknown ? true : /--silent\b/.test(help),
       supportsNoCustomInstructions: unknown ? true : /--no-custom-instructions\b/.test(help),
       supportsAutoApprove: unknown ? true : /--allow-all\b|--yolo\b/.test(help),
+      supportsMcpConfig: unknown ? true : /--additional-mcp-config\b/.test(help),
+      supportsAddDir: unknown ? true : /--add-dir\b/.test(help),
+      supportsConfigDir: unknown ? true : /--config-dir\b/.test(help),
       unknown,
     };
 

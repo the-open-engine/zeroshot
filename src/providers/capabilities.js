@@ -40,7 +40,7 @@ const CAPABILITIES = {
   copilot: {
     dockerIsolation: true,
     worktreeIsolation: true,
-    mcpServers: false,
+    mcpServers: true,
     jsonSchema: 'experimental',
     streamJson: false,
     thinkingMode: false,

@@ -1,5 +1,5 @@
 function buildCommand(context, options = {}) {
-  const { modelSpec, jsonSchema, autoApprove, cliFeatures = {} } = options;
+  const { modelSpec, jsonSchema, autoApprove, mcpConfig, addDirs, cliFeatures = {} } = options;
 
   let finalContext = context;
   if (jsonSchema) {
@@ -22,6 +22,25 @@ function buildCommand(context, options = {}) {
 
   if (modelSpec?.model && cliFeatures.supportsModel !== false) {
     args.push('--model', modelSpec.model);
+  }
+
+  // MCP servers — Copilot CLI augments ~/.copilot/mcp-config.json with --additional-mcp-config.
+  // Accepts either a JSON string, a config object (will be JSON.stringified),
+  // a file path prefixed with @, or an array of any of the above (each emits one flag).
+  if (mcpConfig && cliFeatures.supportsMcpConfig !== false) {
+    const entries = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
+    for (const entry of entries) {
+      if (entry === null || entry === undefined) continue;
+      const value = typeof entry === 'string' ? entry : JSON.stringify(entry);
+      args.push('--additional-mcp-config', value);
+    }
+  }
+
+  // Allow extra directories for file access (useful when running outside cwd)
+  if (Array.isArray(addDirs) && cliFeatures.supportsAddDir !== false) {
+    for (const dir of addDirs) {
+      if (typeof dir === 'string' && dir) args.push('--add-dir', dir);
+    }
   }
 
   return {

@@ -31,7 +31,7 @@ describe('Copilot provider', function () {
     assert.ok(caps);
     assert.strictEqual(caps.dockerIsolation, true);
     assert.strictEqual(caps.worktreeIsolation, true);
-    assert.strictEqual(caps.mcpServers, false);
+    assert.strictEqual(caps.mcpServers, true);
     assert.strictEqual(caps.streamJson, false);
     assert.strictEqual(caps.thinkingMode, false);
     assert.strictEqual(caps.reasoningEffort, false);
@@ -95,6 +95,56 @@ describe('Copilot provider', function () {
       const ctx = result.args[pIndex + 1];
       assert.match(ctx, /## OUTPUT FORMAT/);
       assert.match(ctx, /"ok"/);
+    });
+
+    it('passes mcpConfig as JSON string via --additional-mcp-config', function () {
+      const result = buildCommand('p', {
+        mcpConfig: '{"mcpServers":{"x":{"command":"true"}}}',
+        cliFeatures: { supportsMcpConfig: true },
+      });
+      const i = result.args.indexOf('--additional-mcp-config');
+      assert.notStrictEqual(i, -1);
+      assert.strictEqual(result.args[i + 1], '{"mcpServers":{"x":{"command":"true"}}}');
+    });
+
+    it('serializes object mcpConfig to JSON', function () {
+      const cfg = { mcpServers: { fs: { command: 'npx', args: ['-y', 'pkg'] } } };
+      const result = buildCommand('p', {
+        mcpConfig: cfg,
+        cliFeatures: { supportsMcpConfig: true },
+      });
+      const i = result.args.indexOf('--additional-mcp-config');
+      assert.strictEqual(result.args[i + 1], JSON.stringify(cfg));
+    });
+
+    it('emits --additional-mcp-config once per array entry, supports @file paths', function () {
+      const result = buildCommand('p', {
+        mcpConfig: ['@./mcp-a.json', { mcpServers: { b: { command: 'b' } } }],
+        cliFeatures: { supportsMcpConfig: true },
+      });
+      const flags = result.args.filter((a) => a === '--additional-mcp-config');
+      assert.strictEqual(flags.length, 2);
+      assert.ok(result.args.includes('@./mcp-a.json'));
+      assert.ok(result.args.includes(JSON.stringify({ mcpServers: { b: { command: 'b' } } })));
+    });
+
+    it('omits --additional-mcp-config when CLI does not support it', function () {
+      const result = buildCommand('p', {
+        mcpConfig: '{}',
+        cliFeatures: { supportsMcpConfig: false },
+      });
+      assert.ok(!result.args.includes('--additional-mcp-config'));
+    });
+
+    it('passes addDirs as repeated --add-dir flags', function () {
+      const result = buildCommand('p', {
+        addDirs: ['/tmp/a', '/tmp/b'],
+        cliFeatures: { supportsAddDir: true },
+      });
+      const flags = result.args.filter((a) => a === '--add-dir');
+      assert.strictEqual(flags.length, 2);
+      assert.ok(result.args.includes('/tmp/a'));
+      assert.ok(result.args.includes('/tmp/b'));
     });
   });
 

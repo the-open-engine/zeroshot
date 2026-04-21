@@ -113,6 +113,41 @@ Limitations:
   events are not surfaced. The whole stdout stream is treated as text.
 - `jsonSchema` is supported only by **prompt-injecting** the schema (no native
   `--output-schema` flag); reliability depends on the underlying model.
-- MCP servers, thinking mode, and reasoningEffort are not supported.
+- Thinking mode and reasoningEffort are not exposed by the CLI.
 - Auto-approval is enabled via `--allow-all` (a.k.a. `--yolo`); use isolation
   (`--worktree` / `--docker`) when running untrusted prompts.
+
+### MCP servers
+
+Copilot CLI loads MCP servers from `~/.copilot/mcp-config.json` by default.
+zeroshot can additionally pass per-run MCP configs via the `--additional-mcp-config`
+flag. Set `providerSettings.copilot.mcpConfig` to any of:
+
+- a JSON string (raw config),
+- an object (zeroshot will `JSON.stringify` it),
+- a file path prefixed with `@` (e.g. `"@./mcp.json"`),
+- an array of any of the above (each entry emits one flag — augments, not
+  overrides, the user-level config).
+
+Example:
+
+```jsonc
+{
+  "providerSettings": {
+    "copilot": {
+      "mcpConfig": {
+        "mcpServers": {
+          "fs": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+GitHub's built-in MCP server can be tuned with `--add-github-mcp-tool` /
+`--add-github-mcp-toolset` directly in `extraArgs` if you need to override the
+default CLI subset.
