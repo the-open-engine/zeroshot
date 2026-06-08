@@ -382,6 +382,7 @@ class AgentWrapper {
       role: this.role,
       iteration: this.iteration,
       cluster_id: this.cluster.id,
+      requiredQualityGates: this.config?.requiredQualityGates || [],
     };
 
     return evaluateTrigger({
@@ -576,6 +577,8 @@ class AgentWrapper {
    */
   getState() {
     const modelSpec = this._resolveModelSpec();
+    const hasLiveOrTrackedTask =
+      this.state === 'executing_task' && (!!this.currentTask || !!this.currentTaskId);
     return {
       id: this.id,
       role: this.role,
@@ -585,7 +588,7 @@ class AgentWrapper {
       state: this.state,
       iteration: this.iteration,
       maxIterations: this.maxIterations,
-      currentTask: this.currentTask ? true : false,
+      currentTask: hasLiveOrTrackedTask,
       currentTaskId: this.currentTaskId,
       pid: this.processPid,
     };

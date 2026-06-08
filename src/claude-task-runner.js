@@ -5,14 +5,83 @@
  * following logs, and assembling results.
  */
 
-const { spawn } = require('child_process');
-const { exec, execSync } = require('./lib/safe-exec'); // Enforces timeouts
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const TaskRunner = require('./task-runner');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const { prependWorktreeToolBinToEnv } = require('./worktree-tooling-env');
+const { prepareClaudeConfigDir } = require('./worktree-claude-config');
+
+function runCommand(command, args, options = {}, callback = null) {
+  const timeout = options.timeout ?? 30000;
+  if (timeout <= 0) {
+    const error = new Error('runCommand timeout must be > 0. Infinite waits are forbidden.');
+    if (callback) {
+      callback(error);
+      return;
+    }
+    return Promise.reject(error);
+  }
+
+  if (callback) {
+    const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeout);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      callback(error, stdout, stderr);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        callback(null, stdout, stderr);
+        return;
+      }
+      const error = new Error(
+        `Command ${command} exited with code ${code ?? 'null'} signal ${signal || 'none'}`
+      );
+      error.code = code;
+      error.signal = signal;
+      error.stderr = stderr;
+      callback(error, stdout, stderr);
+    });
+    return;
+  }
+
+  return new Promise((resolve, reject) => {
+    runCommand(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function runCommandSync(command, args, options = {}) {
+  const timeout = options.timeout ?? 30000;
+  const result = spawnSync(command, args, { ...options, timeout });
+  if (result.status !== 0 || result.error) {
+    const detail = result.error?.message || result.stderr?.toString() || 'no stderr';
+    const error = new Error(
+      `Command ${command} failed with status ${result.status ?? 'null'}: ${detail}`
+    );
+    error.status = result.status;
+    error.stderr = result.stderr?.toString();
+    throw error;
+  }
+  return result.stdout?.toString() || '';
+}
 
 class ClaudeTaskRunner extends TaskRunner {
   /**
@@ -192,6 +261,12 @@ class ClaudeTaskRunner extends TaskRunner {
     if (providerName === 'claude' && resolvedModelSpec?.model) {
       spawnEnv.ANTHROPIC_MODEL = resolvedModelSpec.model;
     }
+    if (providerName === 'claude') {
+      const claudeConfigDir = prepareClaudeConfigDir({ cwd, worktreePath });
+      if (claudeConfigDir) {
+        spawnEnv.CLAUDE_CONFIG_DIR = claudeConfigDir;
+      }
+    }
 
     prependWorktreeToolBinToEnv(spawnEnv, { cwd, worktreePath });
 
@@ -254,7 +329,7 @@ class ClaudeTaskRunner extends TaskRunner {
   async _waitForTaskReady(ctPath, taskId, maxRetries = 10, delayMs = 200) {
     for (let i = 0; i < maxRetries; i++) {
       const exists = await new Promise((resolve) => {
-        exec(`${ctPath} status ${taskId}`, (error, stdout) => {
+        runCommand(ctPath, ['status', taskId], {}, (error, stdout) => {
           resolve(!error && !stdout.includes('Task not found'));
         });
       });
@@ -288,7 +363,7 @@ class ClaudeTaskRunner extends TaskRunner {
 
       // Get log file path
       try {
-        logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
+        logFilePath = runCommandSync(ctPath, ['get-log-path', taskId], {
           encoding: 'utf-8',
         }).trim();
       } catch {
@@ -349,7 +424,7 @@ class ClaudeTaskRunner extends TaskRunner {
       const pollLogFile = () => {
         if (!logFilePath) {
           try {
-            logFilePath = execSync(`${ctPath} get-log-path ${taskId}`, {
+            logFilePath = runCommandSync(ctPath, ['get-log-path', taskId], {
               encoding: 'utf-8',
             }).trim();
           } catch {
@@ -418,7 +493,7 @@ class ClaudeTaskRunner extends TaskRunner {
       };
 
       statusCheckInterval = setInterval(() => {
-        exec(`${ctPath} status ${taskId}`, (error, stdout) => {
+        runCommand(ctPath, ['status', taskId], {}, (error, stdout) => {
           if (resolved) return;
 
           if (

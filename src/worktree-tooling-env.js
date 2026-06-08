@@ -24,7 +24,9 @@ function isWithinRoot(candidatePath, rootPath) {
     return false;
   }
 
-  return candidateRealPath === rootRealPath || candidateRealPath.startsWith(`${rootRealPath}${path.sep}`);
+  return (
+    candidateRealPath === rootRealPath || candidateRealPath.startsWith(`${rootRealPath}${path.sep}`)
+  );
 }
 
 function dedupePaths(entries) {
@@ -124,7 +126,9 @@ function resolveWorktreeToolBinEntries(options = {}) {
   }
   candidates.push(...listFallbackBinDirectories(worktreeRoot));
 
-  return dedupePaths(candidates).filter((candidatePath) => isWithinRoot(candidatePath, worktreeRoot));
+  return dedupePaths(candidates).filter((candidatePath) =>
+    isWithinRoot(candidatePath, worktreeRoot)
+  );
 }
 
 function prependWorktreeToolBinToEnv(env, options = {}) {
@@ -141,5 +145,6 @@ function prependWorktreeToolBinToEnv(env, options = {}) {
 
 module.exports = {
   prependWorktreeToolBinToEnv,
+  resolveWorktreeRoot,
   resolveWorktreeToolBinEntries,
 };

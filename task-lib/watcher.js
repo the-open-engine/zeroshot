@@ -6,13 +6,15 @@
  */
 
 import { spawn } from 'child_process';
-import { appendFileSync } from 'fs';
+import { appendFileSync, unlinkSync } from 'fs';
+import { unlink } from 'fs/promises';
 import { updateTask } from './store.js';
 import {
-  detectFatalClaudeError,
-  detectStreamingModeError,
-  recoverStructuredOutput,
-} from './claude-recovery.js';
+  detectProviderFatalError,
+  detectProviderStreamingModeError,
+  recoverProviderStructuredOutput,
+  supportsProviderStructuredOutputRecovery,
+} from './provider-helper-runtime.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -21,20 +23,26 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const [, , taskId, cwd, logFile, argsJson, configJson] = process.argv;
 const args = JSON.parse(argsJson);
 const config = configJson ? JSON.parse(configJson) : {};
+const commandSpec = config.commandSpec || {
+  binary: config.command || 'claude',
+  args,
+  env: config.env || {},
+  cleanup: [],
+};
 
 function log(msg) {
   appendFileSync(logFile, msg);
 }
 
 const providerName = normalizeProviderName(config.provider || 'claude');
-const enableRecovery = providerName === 'claude';
+const enableRecovery = supportsProviderStructuredOutputRecovery(providerName);
 
-const env = { ...process.env, ...(config.env || {}) };
-const command = config.command || 'claude';
-const finalArgs = [...args];
+const env = { ...process.env, ...(commandSpec.env || {}) };
+const command = commandSpec.binary;
+const finalArgs = [...(commandSpec.args || args)];
 
 const child = spawn(command, finalArgs, {
-  cwd,
+  cwd: commandSpec.cwd || cwd,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -42,11 +50,15 @@ const child = spawn(command, finalArgs, {
 updateTask(taskId, { pid: child.pid });
 
 const silentJsonMode =
-  config.outputFormat === 'json' && config.jsonSchema && config.silentJsonOutput && enableRecovery;
+  config.outputFormat === 'json' &&
+  config.jsonSchema &&
+  config.silentJsonOutput &&
+  supportsProviderStructuredOutputRecovery(providerName);
 
 let finalResultJson = null;
 let streamingModeError = null;
 let fatalError = null;
+let cleanupStarted = false;
 
 let stdoutBuffer = '';
 let stderrBuffer = '';
@@ -59,11 +71,11 @@ function splitBufferLines(buffer, chunk) {
 }
 
 function maybeHandleFatalError(line, timestamp) {
-  if (!enableRecovery || fatalError) {
+  if (fatalError) {
     return false;
   }
 
-  const detected = detectFatalClaudeError(line);
+  const detected = detectProviderFatalError(providerName, line);
   if (!detected) {
     return false;
   }
@@ -95,11 +107,7 @@ function maybeHandleFatalError(line, timestamp) {
 }
 
 function captureStreamingError(line, timestamp) {
-  if (!enableRecovery) {
-    return false;
-  }
-
-  const detectedError = detectStreamingModeError(line);
+  const detectedError = detectProviderStreamingModeError(providerName, line);
   if (!detectedError) {
     return false;
   }
@@ -173,11 +181,11 @@ function flushStderrBuffer(timestamp) {
 }
 
 function attemptRecovery(code, timestamp) {
-  if (!(enableRecovery && code !== 0 && streamingModeError?.sessionId)) {
+  if (!(code !== 0 && streamingModeError?.sessionId)) {
     return null;
   }
 
-  const recovered = recoverStructuredOutput(streamingModeError.sessionId);
+  const recovered = recoverProviderStructuredOutput(providerName, streamingModeError.sessionId);
   if (recovered?.payload) {
     const recoveredLine = JSON.stringify(recovered.payload);
     if (silentJsonMode) {
@@ -194,6 +202,30 @@ function attemptRecovery(code, timestamp) {
   }
 
   return recovered;
+}
+
+async function cleanupCommandSpec() {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  for (const file of commandSpec.cleanup || []) {
+    try {
+      await unlink(file);
+    } catch (error) {
+      log(`[${Date.now()}][CLEANUP] Failed to delete ${file}: ${error.message}\n`);
+    }
+  }
+}
+
+function cleanupCommandSpecSync() {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  for (const file of commandSpec.cleanup || []) {
+    try {
+      unlinkSync(file);
+    } catch (error) {
+      log(`[${Date.now()}][CLEANUP] Failed to delete ${file}: ${error.message}\n`);
+    }
+  }
 }
 
 function writeCompletionFooter(code, signal) {
@@ -245,6 +277,7 @@ child.on('close', async (code, signal) => {
   }
 
   writeCompletionFooter(code, signal);
+  await cleanupCommandSpec();
 
   const resolvedCode = fatalError ? 1 : recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
@@ -262,6 +295,7 @@ child.on('close', async (code, signal) => {
 
 child.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
+  cleanupCommandSpecSync();
   try {
     await updateTask(taskId, { status: 'failed', error: err.message });
   } catch (updateError) {

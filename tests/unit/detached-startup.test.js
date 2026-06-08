@@ -3,10 +3,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const Orchestrator = require('../../src/orchestrator');
 
 const {
   getClustersFilePath,
   isClusterRegistered,
+  markDetachedSetupFailed,
+  registerDetachedSetupCluster,
   resolveWaitTimeoutMs,
   waitForClusterRegistration,
 } = require('../../lib/detached-startup');
@@ -61,6 +64,71 @@ describe('detached-startup helpers', function () {
     );
 
     assert.strictEqual(isClusterRegistered('ready-cluster', storageDir), true);
+  });
+
+  it('registers detached setup clusters before the daemon creates a ledger', async function () {
+    const storageDir = createTempStorageDir();
+
+    await registerDetachedSetupCluster({
+      clusterId: 'setup-cluster',
+      pid: 12345,
+      storageDir,
+      logPath: path.join(storageDir, 'setup-cluster-daemon.log'),
+      runOptions: { pr: true, prBase: 'dev' },
+      cwd: '/repo',
+    });
+
+    const clusters = JSON.parse(fs.readFileSync(getClustersFilePath(storageDir), 'utf8'));
+    assert.strictEqual(clusters['setup-cluster'].state, 'setup');
+    assert.strictEqual(clusters['setup-cluster'].pid, 12345);
+    assert.strictEqual(clusters['setup-cluster'].prOptions.prBase, 'dev');
+    assert.strictEqual(isClusterRegistered('setup-cluster', storageDir), true);
+  });
+
+  it('keeps setup clusters visible in list/status before a ledger exists', async function () {
+    const storageDir = createTempStorageDir();
+
+    await registerDetachedSetupCluster({
+      clusterId: 'visible-setup-cluster',
+      pid: process.pid,
+      storageDir,
+      logPath: path.join(storageDir, 'visible-setup-cluster-daemon.log'),
+    });
+
+    const orchestrator = await Orchestrator.create({ quiet: true, storageDir });
+    const listed = orchestrator
+      .listClusters()
+      .find((cluster) => cluster.id === 'visible-setup-cluster');
+    assert(listed);
+    assert.strictEqual(listed.state, 'setup');
+    assert.strictEqual(listed.agentCount, 0);
+
+    const status = orchestrator.getStatus('visible-setup-cluster');
+    assert.strictEqual(status.state, 'setup');
+    assert.strictEqual(status.messageCount, 0);
+  });
+
+  it('marks detached setup failures while keeping the setup log path', async function () {
+    const storageDir = createTempStorageDir();
+    const logPath = path.join(storageDir, 'failed-daemon.log');
+
+    await registerDetachedSetupCluster({
+      clusterId: 'failed-cluster',
+      pid: 12345,
+      storageDir,
+      logPath,
+    });
+    await markDetachedSetupFailed({
+      clusterId: 'failed-cluster',
+      storageDir,
+      error: new Error('setup exploded'),
+    });
+
+    const clusters = JSON.parse(fs.readFileSync(getClustersFilePath(storageDir), 'utf8'));
+    assert.strictEqual(clusters['failed-cluster'].state, 'failed');
+    assert.strictEqual(clusters['failed-cluster'].pid, null);
+    assert.strictEqual(clusters['failed-cluster'].setupLogPath, logPath);
+    assert.strictEqual(clusters['failed-cluster'].failureInfo.error, 'setup exploded');
   });
 
   it('waits until cluster is registered', async function () {

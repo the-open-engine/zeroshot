@@ -2,7 +2,7 @@
  * PR/MR Verification - Provider-agnostic verification for git-pusher hook
  */
 
-const { execSync } = require('../lib/safe-exec');
+const { spawnSync } = require('child_process');
 
 const DEFAULT_VERIFICATION_PLATFORM = 'github';
 
@@ -37,10 +37,17 @@ const VERIFICATION_ADAPTERS = {
       /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/(\d+)/g,
       /https:\/\/api\.github\.com\/repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pulls\/(\d+)/g,
     ],
-    buildViewCmd(prNumber) {
-      const base = 'gh pr view';
-      const suffix = '--json state,mergedAt,url,number';
-      return prNumber ? `${base} ${prNumber} ${suffix}` : `${base} ${suffix}`;
+    buildViewCommand(prNumber) {
+      return {
+        command: 'gh',
+        args: [
+          'pr',
+          'view',
+          ...(prNumber ? [String(prNumber)] : []),
+          '--json',
+          'state,mergedAt,url,number',
+        ],
+      };
     },
     parseViewOutput(raw) {
       const data = parseJson(raw, 'gh pr view');
@@ -78,8 +85,11 @@ const VERIFICATION_ADAPTERS = {
     urlPatterns: [
       /https?:\/\/[A-Za-z0-9_.:-]+\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/-\/merge_requests\/(\d+)/g,
     ],
-    buildViewCmd(prNumber) {
-      return prNumber ? `glab mr view ${prNumber} --output json` : 'glab mr view --output json';
+    buildViewCommand(prNumber) {
+      return {
+        command: 'glab',
+        args: ['mr', 'view', ...(prNumber ? [String(prNumber)] : []), '--output', 'json'],
+      };
     },
     parseViewOutput(raw) {
       const data = parseJson(raw, 'glab mr view');
@@ -123,13 +133,16 @@ const VERIFICATION_ADAPTERS = {
       /https?:\/\/[^.\s]+\.visualstudio\.com\/[^/\s]+\/_git\/[^/\s]+\/pullrequest\/(\d+)/g,
       /https?:\/\/dev\.azure\.com\/[^/\s]+\/[^/\s]+\/_apis\/git\/repositories\/[^/\s]+\/pullRequests\/(\d+)/g,
     ],
-    buildViewCmd(prNumber) {
+    buildViewCommand(prNumber) {
       if (!prNumber) {
         throw new Error(
           'Verification requires pr_number/pullRequestId for Azure DevOps; no PR number was found in agent output.'
         );
       }
-      return `az repos pr show --id ${prNumber} --output json`;
+      return {
+        command: 'az',
+        args: ['repos', 'pr', 'show', '--id', String(prNumber), '--output', 'json'],
+      };
     },
     parseViewOutput(raw) {
       const data = parseJson(raw, 'az repos pr show');
@@ -244,6 +257,24 @@ function extractPrInfoFromRawOutput(output, adapter = null) {
   };
 }
 
+function runViewCommand(adapter, prNumber, cwd) {
+  const spec = adapter.buildViewCommand(prNumber);
+  const result = spawnSync(spec.command, spec.args, {
+    encoding: 'utf8',
+    cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0 || result.error) {
+    const detail = result.error?.message || result.stderr || 'no stderr';
+    const error = new Error(
+      `${adapter.displayName} view command failed for ${adapter.itemName} #${prNumber || 'current'}: ${detail}`
+    );
+    error.status = result.status;
+    error.stderr = result.stderr;
+    throw error;
+  }
+  return result.stdout;
+}
 function normalizeFetchedPrData(prData, adapter) {
   const number = normalizePrNumber(prData?.number);
   if (!number) {
@@ -264,16 +295,12 @@ async function fetchPrDataWithRetry({ adapter, cwd, prNumber, agent }) {
   const attempts = prNumber
     ? parsePositiveInt(process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_ATTEMPTS, 6)
     : 1;
-  const intervalMs = parsePositiveInt(
-    process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS,
-    5000
-  );
+  const intervalMs = parsePositiveInt(process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS, 5000);
   const itemLabel = adapter.itemName;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const cmd = adapter.buildViewCmd(prNumber);
-      const raw = execSync(cmd, { encoding: 'utf8', cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+      const raw = runViewCommand(adapter, prNumber, cwd);
       return normalizeFetchedPrData(adapter.parseViewOutput(raw), adapter);
     } catch (err) {
       const isNotFound =
@@ -338,6 +365,17 @@ function publishClusterComplete(agent, data) {
   agent._publish({ topic: 'CLUSTER_COMPLETE', content: { data } });
 }
 
+function publishPushBlocked(agent, data) {
+  agent._publish({
+    topic: 'PUSH_BLOCKED',
+    receiver: 'broadcast',
+    content: {
+      text: `git-pusher blocked: ${data.blocked_reason}`,
+      data,
+    },
+  });
+}
+
 function buildVerificationPayload({ platform, prData, reason }) {
   const payload = {
     reason,
@@ -352,6 +390,78 @@ function buildVerificationPayload({ platform, prData, reason }) {
   }
 
   return payload;
+}
+
+function isTrue(value) {
+  return value === true || value === 'true';
+}
+
+function normalizeBlockedReason(value) {
+  if (typeof value !== 'string') return 'unspecified pusher block';
+  const trimmed = value.trim();
+  return trimmed || 'unspecified pusher block';
+}
+
+function isStatusOnlyPusherReason(reason) {
+  const normalized = String(reason || '').toLowerCase();
+  const hasPendingSignal =
+    normalized.includes('pending') ||
+    normalized.includes('waiting') ||
+    normalized.includes('auto-merge') ||
+    normalized.includes('automerge') ||
+    normalized.includes('auto complete') ||
+    normalized.includes('auto-complete') ||
+    normalized.includes('merge queue') ||
+    normalized.includes('required review') ||
+    normalized.includes('review required');
+  const hasFailureSignal =
+    normalized.includes('fail') ||
+    normalized.includes('error') ||
+    normalized.includes('conflict') ||
+    normalized.includes('rejected') ||
+    normalized.includes('hook') ||
+    normalized.includes('compile') ||
+    normalized.includes('test failed') ||
+    normalized.includes('check failed');
+
+  return hasPendingSignal && !hasFailureSignal;
+}
+
+function handleBlockedPusherOutcome({ claims, platform, agent }) {
+  const structuredOutput = claims.structuredOutput || {};
+  if (!isTrue(structuredOutput.blocked)) return false;
+
+  const blockedReason = normalizeBlockedReason(structuredOutput.blocked_reason);
+  const payload = buildVerificationPayload({
+    platform,
+    prData: {
+      number: claims.claimedPrNumber,
+      url: claims.claimedPrUrl,
+    },
+    reason: 'git-pusher-blocked',
+  });
+
+  if (isStatusOnlyPusherReason(blockedReason)) {
+    agent._log(`⚠️  git-pusher status pending: ${blockedReason}`);
+    publishClusterComplete(agent, {
+      ...payload,
+      reason: 'git-pusher-complete-verification-pending',
+      verification_pending: true,
+      verification_message: blockedReason,
+      pusher_blocked: false,
+    });
+    return true;
+  }
+
+  agent._log(`🔁 git-pusher blocked; routing back to worker repair: ${blockedReason}`);
+  publishPushBlocked(agent, {
+    ...payload,
+    blocked: true,
+    blocked_reason: blockedReason,
+    pusher_blocked: true,
+    timestamp: Date.now(),
+  });
+  return true;
 }
 
 async function pollForMerge({ adapter, prData, agent, cwd }) {
@@ -369,8 +479,7 @@ async function pollForMerge({ adapter, prData, agent, cwd }) {
   for (let attempt = 1; attempt <= pollAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     try {
-      const pollCmd = adapter.buildViewCmd(prNumber);
-      const raw = execSync(pollCmd, { encoding: 'utf8', cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+      const raw = runViewCommand(adapter, prNumber, cwd);
       latest = normalizeFetchedPrData(adapter.parseViewOutput(raw), adapter);
     } catch {
       continue;
@@ -476,6 +585,10 @@ async function verifyPullRequest({ result, agent }) {
   const providerName =
     typeof agent?._resolveProvider === 'function' ? agent._resolveProvider() : 'claude';
   const claims = resolvePrClaimsFromOutput({ output: result.output, providerName, adapter });
+
+  if (handleBlockedPusherOutcome({ claims, platform, agent })) {
+    return;
+  }
 
   if (shouldSkipVerification(adapter)) {
     const skipVar = (adapter.skipEnvVars || []).find((name) => process.env[name] === '1');

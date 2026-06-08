@@ -50,8 +50,6 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        env:
-          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
 
       - name: Link CLI
@@ -109,72 +107,8 @@ jobs:
           console.log('✓ StatusFooter test passed');
           "
 
-  tui-binary-matrix:
-    if: |
-      (github.event_name == 'workflow_dispatch' && inputs.dry_run == true) ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm64
-            platform: linux
-            arch: arm64
-            target: aarch64-unknown-linux-gnu
-          - os: macos-13
-            platform: darwin
-            arch: x64
-            target: x86_64-apple-darwin
-          - os: macos-14
-            platform: darwin
-            arch: arm64
-            target: aarch64-apple-darwin
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Build zeroshot-tui
-        run: |
-          cargo build --release -p zeroshot-tui --target ${{ matrix.target }} --manifest-path tui-rs/Cargo.toml
-
-      - name: Smoke test binary
-        run: |
-          BIN_PATH="tui-rs/target/${{ matrix.target }}/release/zeroshot-tui"
-          "$BIN_PATH" --version
-          "$BIN_PATH" --smoke-test
-
-      - name: Package release asset
-        run: |
-          BIN_DIR="tui-rs/target/${{ matrix.target }}/release"
-          ASSET="zeroshot-tui-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz"
-          tar -czf "$ASSET" -C "$BIN_DIR" zeroshot-tui
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$ASSET" > "$ASSET.sha256"
-          else
-            shasum -a 256 "$ASSET" > "$ASSET.sha256"
-          fi
-
-      - name: Upload TUI binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tui-binary-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            zeroshot-tui-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
-            zeroshot-tui-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz.sha256
-
   release:
-    needs: [install-matrix, tui-binary-matrix]
+    needs: [install-matrix]
     # SAFETY: Only run if CI passed OR manual dry-run
     # Real releases MUST go through CI (workflow_run with success)
     # Manual trigger MUST be dry-run only (cannot publish untested code)
@@ -203,22 +137,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        env:
-          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
-
-      - name: Download TUI binaries
-        uses: actions/download-artifact@v4
-        with:
-          pattern: tui-binary-*
-          path: dist/tui
-          merge-multiple: true
-
-      - name: Prepare TUI binary for install validation
-        run: |
-          ls -la dist/tui
-          tar -xzf dist/tui/zeroshot-tui-linux-x64.tar.gz -C dist/tui
-          chmod +x dist/tui/zeroshot-tui
 
       - name: Verify package before release
         run: |
@@ -228,16 +147,13 @@ jobs:
           echo "Created: $TARBALL"
 
           # Install from tarball (simulates npm install -g @covibes/zeroshot)
-          ZEROSHOT_TUI_BINARY_PATH="$PWD/dist/tui/zeroshot-tui" npm install -g "./$TARBALL"
+          npm install -g "./$TARBALL"
 
           # Smoke tests - must all pass
           echo "=== Testing installed package ==="
           zeroshot --version
           zeroshot --help
           zeroshot list
-          INSTALLED_ROOT="$(npm root -g)/@covibes/zeroshot"
-          test -x "$INSTALLED_ROOT/libexec/zeroshot-tui"
-          "$INSTALLED_ROOT/libexec/zeroshot-tui" --version
 
           # Cleanup
           npm uninstall -g @covibes/zeroshot

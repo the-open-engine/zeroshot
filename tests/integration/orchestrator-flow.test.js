@@ -13,10 +13,12 @@ const assert = require('node:assert');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFileSync } = require('child_process');
 
 const Orchestrator = require('../../src/orchestrator');
 const _Ledger = require('../../src/ledger');
 const _MessageBus = require('../../src/message-bus');
+const { generateGitPusherAgent } = require('../../src/agents/git-pusher-template');
 const MockTaskRunner = require('../helpers/mock-task-runner');
 const LedgerAssertions = require('../helpers/ledger-assertions');
 
@@ -298,74 +300,391 @@ function defineWorkerValidatorFlowTests() {
 
 function definePrModeFlowTests() {
   describe('PR Mode Flow', () => {
-    const prConfig = {
-      agents: [
-        {
-          id: 'worker',
-          role: 'implementation',
-          timeout: 0,
-          triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: { topic: 'IMPLEMENTATION_READY' },
-            },
+    it('should stop after git-pusher completes in autoPr mode', runExplicitGatePrModeTest);
+    it(
+      'should repair blocked pusher outcomes before retrying git-pusher',
+      runBlockedPusherRepairLoopTest
+    );
+    it(
+      'should apply cluster-configured quality gates to validators and PR resume options',
+      runClusterConfiguredGatePrModeTest
+    );
+    it(
+      'should apply repo-settings quality gates to validators and PR resume options',
+      runRepoSettingsGatePrModeTest
+    );
+    it(
+      'should apply required quality gates to dynamically added validators',
+      runDynamicValidatorGatePrModeTest
+    );
+  });
+}
+
+function createPrConfig() {
+  return {
+    agents: [
+      {
+        id: 'worker',
+        role: 'implementation',
+        timeout: 0,
+        triggers: [{ topic: 'ISSUE_OPENED', action: 'execute_task' }],
+        hooks: {
+          onComplete: {
+            action: 'publish_message',
+            config: { topic: 'IMPLEMENTATION_READY' },
           },
         },
-        {
-          id: 'validator',
-          role: 'validator',
-          timeout: 0,
-          triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
-          outputFormat: 'json',
-          jsonSchema: {
-            type: 'object',
-            properties: {
-              approved: { type: 'boolean' },
-            },
-            required: ['approved'],
+      },
+      {
+        id: 'validator',
+        role: 'validator',
+        timeout: 0,
+        triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+        outputFormat: 'json',
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            approved: { type: 'boolean' },
+            qualityGates: { type: 'array' },
           },
-          hooks: {
-            onComplete: {
-              action: 'publish_message',
-              config: {
-                topic: 'VALIDATION_RESULT',
-                content: { data: { approved: '{{result.approved}}' } },
+          required: ['approved'],
+        },
+        hooks: {
+          onComplete: {
+            action: 'publish_message',
+            config: {
+              topic: 'VALIDATION_RESULT',
+              content: {
+                data: {
+                  approved: '{{result.approved}}',
+                  qualityGates: '{{result.qualityGates}}',
+                },
               },
             },
           },
         },
+      },
+    ],
+  };
+}
+
+function createGate({ scope, description }) {
+  return {
+    id: 'repo-quality',
+    scope,
+    description,
+    command: `quality-check --scope ${scope}`,
+  };
+}
+
+function configurePassingPrModeMocks(gate, prNumber, prUrl) {
+  mockRunner.when('worker').returns({ summary: 'No changes', result: 'noop' });
+  mockRunner.when('validator').calls(() => ({
+    success: true,
+    output: JSON.stringify({
+      approved: true,
+      qualityGates: [
+        {
+          id: gate.id,
+          status: 'PASS',
+          scope: gate.scope,
+          completedAt: Date.now() + 60000,
+          evidence: { command: gate.command, exitCode: 0, output: 'pass' },
+        },
       ],
-    };
-
-    it('should stop after git-pusher completes in autoPr mode', async () => {
-      mockRunner.when('worker').returns({ summary: 'No changes', result: 'noop' });
-      mockRunner.when('validator').returns({ approved: true });
-      mockRunner.when('git-pusher').returns({
-        summary: 'PR done',
-        result: 'Merged',
-        pr_number: 12345,
-        pr_url: 'https://github.com/test/test/pull/12345',
-      });
-
-      createOrchestrator();
-
-      const result = await orchestrator.start(
-        prConfig,
-        { text: 'PR mode completion test' },
-        { autoPr: true }
-      );
-      const clusterId = result.id;
-
-      await waitForClusterState(orchestrator, clusterId, 'stopped', 10000);
-
-      mockRunner.assertCalled('git-pusher', 1);
-
-      const cluster = orchestrator.getCluster(clusterId);
-      const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
-      assertions.assertPublished('CLUSTER_COMPLETE');
-    });
+    }),
+    error: null,
+  }));
+  mockRunner.when('git-pusher').returns({
+    summary: 'PR done',
+    result: 'Merged',
+    pr_number: prNumber,
+    pr_url: prUrl,
+    merged: true,
   });
+}
+
+async function startPassingPrModeCluster(config, inputText, options) {
+  createOrchestrator();
+
+  const result = await orchestrator.start(config, { text: inputText }, options);
+  await waitForClusterState(orchestrator, result.id, 'stopped', 10000);
+  mockRunner.assertCalled('git-pusher', 1);
+
+  return {
+    clusterId: result.id,
+    cluster: orchestrator.getCluster(result.id),
+  };
+}
+
+function assertClusterAgentsRequireGate(cluster, gate) {
+  assert.deepStrictEqual(
+    cluster.config.agents.find((agent) => agent.id === 'validator').requiredQualityGates,
+    [gate]
+  );
+  assert.deepStrictEqual(
+    cluster.config.agents.find((agent) => agent.id === 'git-pusher').requiredQualityGates,
+    [gate]
+  );
+}
+
+function assertValidatorContextListsGate(gate) {
+  const validatorContext = mockRunner.getCalls('validator')[0].context;
+  assert.match(validatorContext, /Required Handoff Quality Gates/);
+  assert.ok(validatorContext.includes(`id: ${gate.id}, scope: ${gate.scope}`));
+  assert.ok(validatorContext.includes(gate.command));
+}
+
+function assertValidatorConfigRequiresGate(agentConfig, gate) {
+  assert.deepStrictEqual(agentConfig.requiredQualityGates, [gate]);
+  assert.ok(agentConfig.jsonSchema.properties.qualityGates);
+  assert.strictEqual(
+    agentConfig.hooks.onComplete.config.content.data.qualityGates,
+    '{{result.qualityGates}}'
+  );
+}
+
+function assertGatePersistsForResume(clusterId, gate) {
+  const persisted = JSON.parse(fs.readFileSync(path.join(tempDir, 'clusters.json'), 'utf8'));
+  assert.deepStrictEqual(persisted[clusterId].prOptions.requiredQualityGates, [gate]);
+  assert.deepStrictEqual(
+    generateGitPusherAgent('github', persisted[clusterId].prOptions).requiredQualityGates,
+    [gate]
+  );
+}
+
+async function runExplicitGatePrModeTest() {
+  const gate = createGate({
+    scope: 'repo',
+    description: 'Required repository quality gate',
+  });
+  configurePassingPrModeMocks(gate, 12345, 'https://github.com/test/test/pull/12345');
+
+  const { clusterId, cluster } = await startPassingPrModeCluster(
+    createPrConfig(),
+    'PR mode completion test',
+    { autoPr: true, requiredQualityGates: [gate] }
+  );
+
+  assert.deepStrictEqual(cluster.prOptions.requiredQualityGates, [gate]);
+  new LedgerAssertions(cluster.messageBus.ledger, clusterId).assertPublished('CLUSTER_COMPLETE');
+}
+
+async function runBlockedPusherRepairLoopTest() {
+  const gate = createGate({
+    scope: 'repo',
+    description: 'Required repository quality gate',
+  });
+  const prUrl = 'https://github.com/test/test/pull/765';
+
+  let workerCallCount = 0;
+  mockRunner.when('worker').calls(() => {
+    workerCallCount++;
+    return {
+      success: true,
+      output: JSON.stringify({ summary: `worker pass ${workerCallCount}` }),
+      error: null,
+    };
+  });
+
+  let validatorCallCount = 0;
+  mockRunner.when('validator').calls(() => {
+    validatorCallCount++;
+    return {
+      success: true,
+      output: JSON.stringify({
+        approved: true,
+        qualityGates: [
+          {
+            id: gate.id,
+            status: 'PASS',
+            scope: gate.scope,
+            completedAt: Date.now() + validatorCallCount * 1000,
+            evidence: { command: gate.command, exitCode: 0, output: 'pass' },
+          },
+        ],
+      }),
+      error: null,
+    };
+  });
+
+  let pusherCallCount = 0;
+  mockRunner.when('git-pusher').calls(() => {
+    pusherCallCount++;
+    if (pusherCallCount === 1) {
+      return {
+        success: true,
+        output: JSON.stringify({
+          pr_number: 765,
+          pr_url: prUrl,
+          merged: false,
+          blocked: true,
+          blocked_reason: 'ci_failed: required test failed',
+        }),
+        error: null,
+      };
+    }
+
+    return {
+      success: true,
+      output: JSON.stringify({
+        pr_number: 765,
+        pr_url: prUrl,
+        merged: true,
+      }),
+      error: null,
+    };
+  });
+
+  createOrchestrator();
+
+  const result = await orchestrator.start(
+    createPrConfig(),
+    { text: 'Blocked pusher repair test' },
+    { autoPr: true, requiredQualityGates: [gate] }
+  );
+  const clusterId = result.id;
+  await waitForClusterState(orchestrator, clusterId, 'stopped', 15000);
+  const cluster = orchestrator.getCluster(clusterId);
+  const assertions = new LedgerAssertions(cluster.messageBus.ledger, clusterId);
+  const implementationReady = assertions.getMessages('IMPLEMENTATION_READY');
+  const validationResults = assertions.getMessages('VALIDATION_RESULT');
+  const pushBlocked = assertions.getMessages('PUSH_BLOCKED');
+
+  assert.strictEqual(workerCallCount, 2, 'worker should repair after PUSH_BLOCKED');
+  assert.strictEqual(validatorCallCount, 2, 'validator should rerun after repair');
+  assert.strictEqual(pusherCallCount, 2, 'git-pusher should retry after fresh validation');
+  assert.strictEqual(implementationReady.length, 2, 'repair should publish fresh handoff');
+  assert.strictEqual(validationResults.length, 2, 'repair should publish fresh validation');
+  assert.strictEqual(pushBlocked.length, 1, 'blocked pusher event should be published once');
+  assert.match(pushBlocked[0].content.data.blocked_reason, /ci_failed/);
+  assert(
+    validationResults[1].timestamp > pushBlocked[0].timestamp,
+    'second validation must happen after PUSH_BLOCKED'
+  );
+  assert(
+    mockRunner.getCalls('worker')[1].context.includes('ci_failed: required test failed'),
+    'worker repair context should include blocked reason'
+  );
+}
+
+async function runClusterConfiguredGatePrModeTest() {
+  const gate = createGate({
+    scope: 'workspace',
+    description: 'Required workspace quality gate',
+  });
+  const config = {
+    ...createPrConfig(),
+    ship: { requiredQualityGates: [gate] },
+  };
+  configurePassingPrModeMocks(gate, 12346, 'https://github.com/test/test/pull/12346');
+
+  const { clusterId, cluster } = await startPassingPrModeCluster(
+    config,
+    'Configured gate PR test',
+    { autoPr: true }
+  );
+
+  assert.deepStrictEqual(cluster.prOptions.requiredQualityGates, [gate]);
+  assertClusterAgentsRequireGate(cluster, gate);
+  assertValidatorContextListsGate(gate);
+  assertGatePersistsForResume(clusterId, gate);
+}
+
+function createRepoWithSettingsGate(gate) {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-pr-settings-repo-'));
+  execFileSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/example/repo.git'], {
+    cwd: repoDir,
+    stdio: 'ignore',
+  });
+  const settingsDir = path.join(repoDir, '.zeroshot');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(settingsDir, 'settings.json'),
+    JSON.stringify({ ship: { requiredQualityGates: [gate] } }, null, 2)
+  );
+  return repoDir;
+}
+
+async function runRepoSettingsGatePrModeTest() {
+  const gate = createGate({
+    scope: 'settings',
+    description: 'Required settings quality gate',
+  });
+  const repoDir = createRepoWithSettingsGate(gate);
+  try {
+    configurePassingPrModeMocks(gate, 12347, 'https://github.com/example/repo/pull/12347');
+    const { cluster } = await startPassingPrModeCluster(
+      createPrConfig(),
+      'Repo settings gate PR test',
+      { autoPr: true, cwd: repoDir }
+    );
+
+    assert.deepStrictEqual(cluster.prOptions.requiredQualityGates, [gate]);
+    assertClusterAgentsRequireGate(cluster, gate);
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+}
+
+async function runDynamicValidatorGatePrModeTest() {
+  const gate = createGate({
+    scope: 'dynamic',
+    description: 'Required dynamic validator gate',
+  });
+  const messageBus = new _MessageBus(new _Ledger(path.join(tempDir, 'dynamic-validator.db')));
+  const cluster = {
+    id: 'dynamic-validator-gate-test',
+    config: { agents: [] },
+    agents: [],
+    messageBus,
+    requiredQualityGates: [gate],
+    modelOverride: null,
+    worktree: { path: tempDir },
+    isolation: null,
+  };
+  const dynamicValidator = {
+    id: 'validator',
+    role: 'validator',
+    timeout: 0,
+    triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+    outputFormat: 'json',
+    jsonSchema: {
+      type: 'object',
+      properties: {
+        approved: { type: 'boolean' },
+      },
+      required: ['approved'],
+    },
+    hooks: {
+      onComplete: {
+        action: 'publish_message',
+        config: {
+          topic: 'VALIDATION_RESULT',
+          content: {
+            data: {
+              approved: '{{result.approved}}',
+            },
+          },
+        },
+      },
+    },
+  };
+
+  createOrchestrator();
+
+  try {
+    await orchestrator._opAddAgents(cluster, { agents: [dynamicValidator] }, {});
+
+    assertValidatorConfigRequiresGate(cluster.config.agents[0], gate);
+    assertValidatorConfigRequiresGate(cluster.agents[0].config, gate);
+  } finally {
+    for (const agent of cluster.agents) {
+      await agent.stop();
+    }
+    messageBus.close();
+  }
 }
 
 const consensusConfig = {

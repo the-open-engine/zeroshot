@@ -1,7 +1,9 @@
 const assert = require('assert');
 const path = require('node:path');
 
-const { simulateRandomTopology } = require('../../src/template-validation/simulate-random-topology');
+const {
+  simulateRandomTopology,
+} = require('../../src/template-validation/simulate-random-topology');
 
 describe('simulateRandomTopology', function () {
   it('passes for a topology with terminal completion path', async function () {
@@ -44,7 +46,9 @@ describe('simulateRandomTopology', function () {
       templatesDir: path.join(__dirname, '..', '..', 'cluster-templates'),
       samples: 3,
       maxSteps: 40,
-      maxScenarioMs: 150,
+      // Coverage + parallel test load can add scheduling noise; keep the contract
+      // about terminal completion, not a razor-thin wall-clock budget.
+      maxScenarioMs: 1000,
     });
 
     assert.deepStrictEqual(errors, []);
@@ -104,7 +108,8 @@ describe('simulateRandomTopology', function () {
 
     assert.ok(
       errors.some(
-        (error) => error.includes('step budget') || error.includes('quiesced without CLUSTER_COMPLETE')
+        (error) =>
+          error.includes('step budget') || error.includes('quiesced without CLUSTER_COMPLETE')
       ),
       `Expected loop/stuck error, got: ${errors.join(' | ')}`
     );

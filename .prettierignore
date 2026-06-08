@@ -3,3 +3,4 @@ coverage
 *.db
 .tsbuildinfo
 .eslintcache
+lib/agent-cli-provider

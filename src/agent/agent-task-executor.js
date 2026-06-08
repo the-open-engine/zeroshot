@@ -10,16 +10,88 @@
  * - Vibe-specific Claude config with AskUserQuestion blocked
  */
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { exec, execSync } = require('../lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
-const { getProvider, parseChunkWithProvider } = require('../providers');
+const { parseProviderChunk } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
 const { loadSettings } = require('../../lib/settings.js');
 const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
 const { prependWorktreeToolBinToEnv } = require('../worktree-tooling-env.js');
+const { prepareClaudeConfigDir } = require('../worktree-claude-config.js');
+const { buildRawLogOnlyMetadata } = require('./context-replay-policy');
+
+function runCommandWithTimeout(command, args, options = {}, callback = null) {
+  const timeout = options.timeout ?? 30000;
+  if (timeout <= 0) {
+    const error = new Error(
+      'runCommandWithTimeout timeout must be > 0. Infinite waits are forbidden.'
+    );
+    if (callback) {
+      callback(error);
+      return;
+    }
+    return Promise.reject(error);
+  }
+
+  if (callback) {
+    const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeout);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      callback(error, stdout, stderr);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        callback(null, stdout, stderr);
+        return;
+      }
+      const error = new Error(
+        `Command ${command} exited with code ${code ?? 'null'} signal ${signal || 'none'}`
+      );
+      error.code = code;
+      error.signal = signal;
+      error.stderr = stderr;
+      callback(error, stdout, stderr);
+    });
+    return;
+  }
+
+  return new Promise((resolve, reject) => {
+    runCommandWithTimeout(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function runCommandSync(command, args, options = {}) {
+  const timeout = options.timeout ?? 30000;
+  const result = spawnSync(command, args, { ...options, timeout });
+  if (result.status !== 0 || result.error) {
+    const detail = result.error?.message || result.stderr?.toString() || 'no stderr';
+    const error = new Error(
+      `Command ${command} failed with status ${result.status ?? 'null'}: ${detail}`
+    );
+    error.status = result.status;
+    error.stderr = result.stderr?.toString();
+    throw error;
+  }
+  return result.stdout?.toString() || '';
+}
 
 // Schema utilities for normalizing LLM output
 const { normalizeEnumValues } = require('./schema-utils');
@@ -293,11 +365,9 @@ function extractErrorContext({ output, statusOutput, taskId, isNotFound = false,
   return sanitizeErrorMessage(`Task failed. Output: ${trimmedOutput}`);
 }
 
-// Track if we've already ensured the AskUserQuestion hook is installed
-let askUserQuestionHookInstalled = false;
-
-// Track if we've already ensured the dangerous git hook is installed
-let dangerousGitHookInstalled = false;
+// Track which config dirs already have zeroshot-installed hooks.
+const askUserQuestionHookInstalledDirs = new Set();
+const dangerousGitHookInstalledDirs = new Set();
 
 /**
  * Extract token usage from NDJSON output.
@@ -311,8 +381,7 @@ let dangerousGitHookInstalled = false;
 function extractTokenUsage(output, providerName = 'claude') {
   if (!output) return null;
 
-  const provider = getProvider(providerName);
-  const events = parseChunkWithProvider(provider, output);
+  const events = parseProviderChunk(providerName, output);
   const resultEvent = events.find((event) => event.type === 'result');
 
   if (!resultEvent) {
@@ -360,12 +429,12 @@ function extractTokenUsage(output, providerName = 'claude') {
  *
  * Safe to call multiple times - only modifies config once per process.
  */
-function ensureAskUserQuestionHook() {
-  if (askUserQuestionHookInstalled) {
-    return; // Already installed this session
+function ensureAskUserQuestionHook(targetClaudeDir = null) {
+  const userClaudeDir =
+    targetClaudeDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  if (askUserQuestionHookInstalledDirs.has(userClaudeDir)) {
+    return;
   }
-
-  const userClaudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const hooksDir = path.join(userClaudeDir, 'hooks');
   const settingsPath = path.join(userClaudeDir, 'settings.json');
   const hookScriptName = 'block-ask-user-question.py';
@@ -427,7 +496,7 @@ function ensureAskUserQuestionHook() {
     console.log(`[AgentTaskExecutor] Installed AskUserQuestion blocking hook in ${settingsPath}`);
   }
 
-  askUserQuestionHookInstalled = true;
+  askUserQuestionHookInstalledDirs.add(userClaudeDir);
 }
 
 /**
@@ -438,12 +507,12 @@ function ensureAskUserQuestionHook() {
  * Only used in worktree mode - Docker isolation mode has its own git-safe.sh wrapper.
  * Safe to call multiple times - only modifies config once per process.
  */
-function ensureDangerousGitHook() {
-  if (dangerousGitHookInstalled) {
-    return; // Already installed this session
+function ensureDangerousGitHook(targetClaudeDir = null) {
+  const userClaudeDir =
+    targetClaudeDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  if (dangerousGitHookInstalledDirs.has(userClaudeDir)) {
+    return;
   }
-
-  const userClaudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
   const hooksDir = path.join(userClaudeDir, 'hooks');
   const settingsPath = path.join(userClaudeDir, 'settings.json');
   const hookScriptName = 'block-dangerous-git.py';
@@ -506,7 +575,7 @@ function ensureDangerousGitHook() {
     console.log(`[AgentTaskExecutor] Installed dangerous git blocking hook in ${settingsPath}`);
   }
 
-  dangerousGitHookInstalled = true;
+  dangerousGitHookInstalledDirs.add(userClaudeDir);
 }
 
 /**
@@ -572,8 +641,16 @@ async function spawnClaudeTask(agent, context) {
   // AskUserQuestion blocking handled via:
   // 1. Prompt injection (see agent-context-builder)
   // 2. PreToolUse hook (defense-in-depth) - activated by ZEROSHOT_BLOCK_ASK_USER env var
-  ensureProviderHooks(agent, providerName);
-  const spawnEnv = buildSpawnEnv(agent, providerName, modelSpec);
+  const claudeConfigDir =
+    providerName === 'claude'
+      ? prepareClaudeConfigDir({
+          cwd,
+          worktreePath: agent.worktree?.path || null,
+        })
+      : null;
+
+  ensureProviderHooks(agent, providerName, claudeConfigDir);
+  const spawnEnv = buildSpawnEnv(agent, providerName, modelSpec, { claudeConfigDir });
   const taskId = await spawnTaskProcess({
     agent,
     ctPath,
@@ -686,25 +763,29 @@ function buildFinalContext({ agent, context, desiredOutputFormat, runOutputForma
   return context;
 }
 
-function ensureProviderHooks(agent, providerName) {
+function ensureProviderHooks(agent, providerName, claudeConfigDir = null) {
   if (providerName !== 'claude') {
     return;
   }
 
-  ensureAskUserQuestionHook();
+  ensureAskUserQuestionHook(claudeConfigDir);
 
   // WORKTREE MODE: Install git safety hook (blocks dangerous git commands)
   if (agent.worktree?.enabled) {
-    ensureDangerousGitHook();
+    ensureDangerousGitHook(claudeConfigDir);
   }
 }
 
-function buildSpawnEnv(agent, providerName, modelSpec) {
+function buildSpawnEnv(agent, providerName, modelSpec, options = {}) {
+  const { claudeConfigDir = null } = options;
   const spawnEnv = { ...process.env };
   const agentCwd = agent.config?.cwd || agent.worktree?.path || process.cwd();
 
   if (providerName === 'claude') {
     Object.assign(spawnEnv, buildClaudeEnv(modelSpec));
+    if (claudeConfigDir) {
+      spawnEnv.CLAUDE_CONFIG_DIR = claudeConfigDir;
+    }
 
     // WORKTREE MODE: Activate git safety hook via environment variable
     if (agent.worktree?.enabled) {
@@ -824,7 +905,7 @@ async function waitForTaskReady(agent, taskId, maxRetries = 10, delayMs = 200) {
   for (let i = 0; i < maxRetries; i++) {
     let exists = false;
     try {
-      const { stdout } = await exec(`${ctPath} status ${taskId}`, { timeout: 5000 });
+      const { stdout } = await runCommandWithTimeout(ctPath, ['status', taskId], { timeout: 5000 });
       exists = !stdout.includes('Task not found');
     } catch {
       // Timeout or error - task not ready yet
@@ -861,7 +942,7 @@ function createLogFollowState() {
 
 function lookupLogFilePath(ctPath, taskId) {
   try {
-    return execSync(`${ctPath} get-log-path ${taskId}`, {
+    return runCommandSync(ctPath, ['get-log-path', taskId], {
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
@@ -921,6 +1002,7 @@ function broadcastAgentLine({ agent, providerName, state, line }) {
   agent._publish({
     topic: 'AGENT_OUTPUT',
     receiver: 'broadcast',
+    metadata: buildRawLogOnlyMetadata(),
     timestamp,
     content: {
       text: content,
@@ -1017,6 +1099,60 @@ function determineStaleSuccess({ agent, output, providerName, taskId }) {
   }
 
   return success;
+}
+
+function requiresStructuredResult(agent) {
+  const outputFormat = agent?.config?.outputFormat || 'json';
+  return outputFormat !== 'text' || !!agent?.config?.jsonSchema;
+}
+
+async function evaluateStructuredSuccess({ agent, taskId, state, success }) {
+  if (!success || !requiresStructuredResult(agent)) {
+    return { success, error: null };
+  }
+  try {
+    await agent._parseResultOutput(state.output);
+    return { success: true, error: null };
+  } catch (error) {
+    const errorContext = sanitizeErrorMessage(error.message);
+    console.warn(
+      `[Agent ${agent.id}] Task ${taskId} reported completed but produced invalid structured output; ` +
+        `treating task as failed: ${errorContext}`
+    );
+    return { success: false, error: errorContext };
+  }
+}
+
+function buildFailureContext({ agent, taskId, providerName, state, stdout }) {
+  return extractErrorContext({
+    output: state.output,
+    statusOutput: stdout,
+    taskId,
+    debug: {
+      agentId: agent.id,
+      providerName,
+      pid: agent.processPid,
+      cwd: agent.config.cwd || process.cwd(),
+      worktreePath: agent.worktree?.path || null,
+      isolation: !!agent.isolation?.enabled,
+      logFilePath: state.logFilePath || null,
+    },
+  });
+}
+
+async function buildCompletionResult({ agent, taskId, providerName, state, stdout, success }) {
+  const classified = await evaluateStructuredSuccess({ agent, taskId, state, success });
+  let errorContext = classified.error;
+  if (!errorContext && !classified.success) {
+    errorContext = buildFailureContext({ agent, taskId, providerName, state, stdout });
+  }
+
+  return {
+    success: classified.success,
+    output: state.output,
+    error: errorContext,
+    tokenUsage: extractTokenUsage(state.output, providerName),
+  };
 }
 
 function finalizeLogFollow(agent, state) {
@@ -1153,29 +1289,23 @@ function handleStatusCompletion({
 
     finalizeLogFollow(agent, state);
 
-    const errorContext = !success
-      ? extractErrorContext({
-          output: state.output,
-          statusOutput: stdout,
-          taskId,
-          debug: {
-            agentId: agent.id,
-            providerName,
-            pid: agent.processPid,
-            cwd: agent.config.cwd || process.cwd(),
-            worktreePath: agent.worktree?.path || null,
-            isolation: !!agent.isolation?.enabled,
-            logFilePath: state.logFilePath || null,
-          },
-        })
-      : null;
-
-    resolve({
+    buildCompletionResult({
+      agent,
+      taskId,
+      providerName,
+      state,
+      stdout,
       success,
-      output: state.output,
-      error: errorContext,
-      tokenUsage: extractTokenUsage(state.output, providerName),
-    });
+    })
+      .then(resolve)
+      .catch((error) => {
+        resolve({
+          success: false,
+          output: state.output,
+          error: sanitizeErrorMessage(error.message),
+          tokenUsage: extractTokenUsage(state.output, providerName),
+        });
+      });
   }, 500);
 
   return true;
@@ -1224,24 +1354,29 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
     state.pollInterval = setInterval(pollLogFile, 300);
 
     state.statusCheckInterval = setInterval(() => {
-      exec(`${ctPath} status ${taskId}`, { timeout: 5000 }, (error, stdout, stderr) => {
-        if (state.resolved) return;
+      runCommandWithTimeout(
+        ctPath,
+        ['status', taskId],
+        { timeout: 5000 },
+        (error, stdout, stderr) => {
+          if (state.resolved) return;
 
-        if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
-          return;
+          if (handleStatusExecError({ agent, state, ctPath, taskId, error, stderr, resolve })) {
+            return;
+          }
+
+          state.consecutiveExecFailures = 0;
+          handleStatusCompletion({
+            agent,
+            taskId,
+            providerName,
+            state,
+            stdout,
+            pollLogFile,
+            resolve,
+          });
         }
-
-        state.consecutiveExecFailures = 0;
-        handleStatusCompletion({
-          agent,
-          taskId,
-          providerName,
-          state,
-          stdout,
-          pollLogFile,
-          resolve,
-        });
-      });
+      );
     }, 1000);
 
     agent.currentTask = buildKillHandler({ agent, state, providerName, resolve });
@@ -1270,7 +1405,7 @@ function _resolveZeroshotPath() {
 
   try {
     // Use safe execSync (already imported at top) with explicit PATH
-    const fullPath = execSync('which zeroshot', {
+    const fullPath = runCommandSync('which', ['zeroshot'], {
       encoding: 'utf8',
       env: { ...process.env }, // Pass current process's PATH
     }).trim();
@@ -1303,71 +1438,27 @@ function getClaudeTasksPath() {
 async function spawnClaudeTaskIsolated(agent, context) {
   const { manager, clusterId } = agent.isolation;
   const providerName = agent._resolveProvider ? agent._resolveProvider() : 'claude';
-  const modelSpec = agent._resolveModelSpec
-    ? agent._resolveModelSpec()
-    : { model: agent._selectModel() };
+  const modelSpec = resolveAgentModelSpec(agent);
 
   agent._log(`📦 Agent ${agent.id}: Running task in isolated container using zeroshot task run...`);
 
-  // Build zeroshot task run command (same infrastructure as non-isolation mode)
-  // CRITICAL: Default to strict schema validation to prevent cluster crashes from parse failures
-  const desiredOutputFormat = agent.config.outputFormat || 'json';
-  const strictSchema = agent.config.strictSchema !== false; // DEFAULT TO TRUE
-  const runOutputFormat =
-    agent.config.jsonSchema && desiredOutputFormat === 'json' && !strictSchema
-      ? 'stream-json'
-      : desiredOutputFormat;
-
+  const { desiredOutputFormat, runOutputFormat } = resolveOutputFormatConfig(agent);
   const command = [
     'zeroshot',
-    'task',
-    'run',
-    '--output-format',
-    runOutputFormat,
-    '--provider',
-    providerName,
+    ...buildTaskRunArgs({
+      agent,
+      providerName,
+      modelSpec,
+      runOutputFormat,
+    }),
   ];
-
-  if (modelSpec?.model) {
-    command.push('--model', modelSpec.model);
-  }
-
-  if (modelSpec?.reasoningEffort) {
-    command.push('--reasoning-effort', modelSpec.reasoningEffort);
-  }
-
-  // Add verification mode flag if configured
-  if (agent.config.verificationMode) {
-    command.push('-v');
-  }
-
-  // Add JSON schema if specified in agent config
-  // If we are running stream-json for live logs (strictSchema=false), do NOT pass schema to CLI
-  if (agent.config.jsonSchema) {
-    if (runOutputFormat === 'json') {
-      // strictSchema=true OR no schema conflict: pass schema to CLI for native enforcement
-      const schema = JSON.stringify(agent.config.jsonSchema);
-      command.push('--json-schema', schema);
-    } else if (!agent.quiet) {
-      agent._log(
-        `[Agent ${agent.id}] jsonSchema configured; running stream-json for live logs (strictSchema=false). Schema will be validated after completion.`
-      );
-    }
-  }
-
-  // Add explicit output instructions when we run stream-json for a jsonSchema agent
-  let finalContext = context;
-  if (
-    agent.config.jsonSchema &&
-    desiredOutputFormat === 'json' &&
-    runOutputFormat === 'stream-json'
-  ) {
-    finalContext += `\n\n## Output Format (REQUIRED)\n\nReturn a JSON object that matches this schema exactly.\n\nSchema:\n\`\`\`json\n${JSON.stringify(
-      agent.config.jsonSchema,
-      null,
-      2
-    )}\n\`\`\`\n`;
-  }
+  maybeLogStreamJsonNotice(agent, runOutputFormat);
+  const finalContext = buildFinalContext({
+    agent,
+    context,
+    desiredOutputFormat,
+    runOutputFormat,
+  });
 
   command.push(finalContext);
 
@@ -1424,9 +1515,8 @@ async function spawnClaudeTaskIsolated(agent, context) {
 
       if (code === 0) {
         // Parse task ID from output: "✓ Task spawned: xxx-yyy-nn"
-        const match = stdout.match(/Task spawned: ((?:task-)?[a-z]+-[a-z]+-[a-z0-9]+)/);
-        if (match) {
-          const spawnedTaskId = match[1];
+        const spawnedTaskId = parseTaskIdFromOutput(stdout);
+        if (spawnedTaskId) {
           agent.currentTaskId = spawnedTaskId; // Track for resume capability
           agent._publishLifecycle('TASK_ID_ASSIGNED', {
             pid: agent.processPid,
@@ -1521,6 +1611,7 @@ function broadcastIsolatedLine({ agent, providerName, taskId, line }) {
     cluster_id: agent.cluster.id,
     topic: 'AGENT_OUTPUT',
     sender: agent.id,
+    metadata: buildRawLogOnlyMetadata(),
     content: {
       data: {
         line: content,
@@ -1905,14 +1996,19 @@ function killTask(agent) {
   // This ensures the task process is stopped, not just our polling intervals
   if (agent.currentTaskId) {
     const ctPath = getClaudeTasksPath();
-    exec(`${ctPath} task kill ${agent.currentTaskId}`, { timeout: 10000 }, (error) => {
-      if (error) {
-        // Task may have already completed or been killed, ignore errors
-        agent._log(`Note: Could not kill task ${agent.currentTaskId}: ${error.message}`);
-      } else {
-        agent._log(`Killed task ${agent.currentTaskId}`);
+    runCommandWithTimeout(
+      ctPath,
+      ['task', 'kill', agent.currentTaskId],
+      { timeout: 10000 },
+      (error) => {
+        if (error) {
+          // Task may have already completed or been killed, ignore errors
+          agent._log(`Note: Could not kill task ${agent.currentTaskId}: ${error.message}`);
+        } else {
+          agent._log(`Killed task ${agent.currentTaskId}`);
+        }
       }
-    });
+    );
     agent.currentTaskId = null;
   }
 }
@@ -1924,6 +2020,9 @@ module.exports = {
   waitForTaskReady,
   spawnClaudeTaskIsolated,
   getClaudeTasksPath,
+  broadcastAgentLine,
+  broadcastIsolatedLine,
   parseResultOutput,
+  buildCompletionResult,
   killTask,
 };

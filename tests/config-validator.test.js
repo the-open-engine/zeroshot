@@ -499,7 +499,9 @@ describe('analyzeMessageFlow - resolved topology regression checks', function ()
     });
 
     assert.ok(
-      result.errors.some((e) => e.includes('No reachable path from ISSUE_OPENED to terminal signal')),
+      result.errors.some((e) =>
+        e.includes('No reachable path from ISSUE_OPENED to terminal signal')
+      ),
       `Expected missing completion path error, got: ${result.errors.join(' | ')}`
     );
   });

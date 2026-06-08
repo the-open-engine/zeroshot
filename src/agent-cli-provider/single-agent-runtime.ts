@@ -1,0 +1,311 @@
+import { getProviderAdapter } from './adapters';
+import { isRecord } from './json';
+import type {
+  BuildProviderCommandOptions,
+  CliFeatureOverrides,
+  CommandSpec,
+  LevelOverrides,
+  ModelLevel,
+  ModelSpec,
+  ProviderAdapter,
+  ProviderCliFeatures,
+  ProviderId,
+  ReasoningEffort,
+} from './types';
+
+type UnknownFunction = (...args: readonly unknown[]) => unknown;
+
+interface CommandParts {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+interface RuntimeProviderSettings {
+  readonly defaultLevel?: ModelLevel;
+  readonly levelOverrides: LevelOverrides;
+}
+
+export interface SingleAgentProviderCommandInput {
+  readonly provider?: string | null;
+  readonly context: string;
+  readonly options?: BuildProviderCommandOptions;
+}
+
+export interface PreparedSingleAgentProviderCommand {
+  readonly adapter: ProviderAdapter;
+  readonly commandSpec: CommandSpec;
+  readonly options: BuildProviderCommandOptions;
+  readonly cliFeatures: CliFeatureOverrides;
+}
+
+type MutableModelSpec = {
+  level?: ModelLevel;
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort;
+};
+
+const MODEL_LEVELS: readonly ModelLevel[] = ['level1', 'level2', 'level3'];
+const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+
+const settingsModule: unknown = require('../../lib/settings');
+const providerDetectionModule: unknown = require('../../lib/provider-detection');
+const claudeAuthModule: unknown = require('../../lib/settings/claude-auth');
+
+const loadSettingsFn = moduleFunction(settingsModule, 'loadSettings');
+const getClaudeCommandFn = moduleFunction(settingsModule, 'getClaudeCommand');
+const getHelpOutputFn = moduleFunction(providerDetectionModule, 'getHelpOutput');
+const resolveClaudeAuthFn = moduleFunction(claudeAuthModule, 'resolveClaudeAuth');
+
+export function prepareSingleAgentProviderCommand(
+  input: SingleAgentProviderCommandInput
+): PreparedSingleAgentProviderCommand {
+  const settings = loadRuntimeSettings();
+  const adapter = adapterForRuntimeInput(input.provider, settings);
+  const providerSettings = runtimeProviderSettings(settings, adapter.id);
+  const baseOptions = input.options ?? {};
+  const cliFeatures = baseOptions.cliFeatures ?? detectRuntimeProviderCliFeatures(adapter.id);
+  const authEnv = baseOptions.authEnv ?? resolveRuntimeAuthEnv(adapter.id, settings);
+  const options = buildRuntimeOptions(baseOptions, adapter, providerSettings, cliFeatures, authEnv);
+  return {
+    adapter,
+    options,
+    cliFeatures,
+    commandSpec: adapter.buildCommand(input.context, options),
+  };
+}
+
+export function detectRuntimeProviderCliFeatures(provider: string): ProviderCliFeatures {
+  const adapter = getProviderAdapter(provider);
+  const helpCommand = runtimeHelpCommand(adapter.id);
+  const helpText = stringResult(getHelpOutputFn(helpCommand.command, helpCommand.args));
+  return adapter.detectCliFeatures(helpText);
+}
+
+function buildRuntimeOptions(
+  baseOptions: BuildProviderCommandOptions,
+  adapter: ProviderAdapter,
+  providerSettings: RuntimeProviderSettings,
+  cliFeatures: CliFeatureOverrides,
+  authEnv: Readonly<Record<string, string>>
+): BuildProviderCommandOptions {
+  const resolved = {
+    ...baseOptions,
+    modelSpec: resolveRuntimeModelSpec(adapter, baseOptions.modelSpec, providerSettings),
+    cliFeatures,
+  };
+  if (!shouldIncludeAuthEnv(baseOptions, authEnv)) return resolved;
+  return { ...resolved, authEnv };
+}
+
+function shouldIncludeAuthEnv(
+  baseOptions: BuildProviderCommandOptions,
+  authEnv: Readonly<Record<string, string>>
+): boolean {
+  return baseOptions.authEnv !== undefined || Object.keys(authEnv).length > 0;
+}
+
+function resolveRuntimeModelSpec(
+  adapter: ProviderAdapter,
+  explicit: ModelSpec | undefined,
+  providerSettings: RuntimeProviderSettings
+): ModelSpec {
+  if (explicit?.model !== undefined) {
+    adapter.validateModelId(explicit.model);
+    return explicit;
+  }
+
+  const level = explicit?.level ?? providerSettings.defaultLevel ?? adapter.defaultLevel;
+  const resolved = adapter.resolveModelSpec(level, providerSettings.levelOverrides);
+  const modelSpec = modelSpecFromResolved(resolved);
+  if (explicit?.reasoningEffort === undefined) return modelSpec;
+  return { ...modelSpec, reasoningEffort: explicit.reasoningEffort };
+}
+
+function modelSpecFromResolved(resolved: {
+  readonly level: ModelLevel;
+  readonly model: string | null;
+  readonly reasoningEffort: ReasoningEffort | undefined;
+}): ModelSpec {
+  const result: MutableModelSpec = {
+    level: resolved.level,
+    model: resolved.model,
+  };
+  if (resolved.reasoningEffort !== undefined) result.reasoningEffort = resolved.reasoningEffort;
+  return result;
+}
+
+function resolveRuntimeAuthEnv(
+  provider: ProviderId,
+  settings: Record<string, unknown>
+): Readonly<Record<string, string>> {
+  if (provider !== 'claude') return {};
+  return stringRecordFromUnknown(resolveClaudeAuthFn(settings), 'resolveClaudeAuth');
+}
+
+function adapterForRuntimeInput(
+  provider: string | null | undefined,
+  settings: Record<string, unknown>
+): ProviderAdapter {
+  const configured = provider ?? optionalString(settings.defaultProvider, 'settings.defaultProvider');
+  return getProviderAdapter(configured ?? 'claude');
+}
+
+function runtimeProviderSettings(
+  settings: Record<string, unknown>,
+  provider: ProviderId
+): RuntimeProviderSettings {
+  const allSettings = optionalRecord(settings.providerSettings, 'settings.providerSettings');
+  const providerValue = allSettings?.[provider];
+  if (providerValue === undefined) return { levelOverrides: {} };
+  const providerSettings = requiredRecord(providerValue, `settings.providerSettings.${provider}`);
+  const defaultLevel = optionalModelLevel(
+    providerSettings.defaultLevel,
+    `settings.providerSettings.${provider}.defaultLevel`
+  );
+  const levelOverrides = levelOverridesFromUnknown(
+    providerSettings.levelOverrides,
+    `settings.providerSettings.${provider}.levelOverrides`
+  );
+  if (defaultLevel === undefined) return { levelOverrides };
+  return { defaultLevel, levelOverrides };
+}
+
+function runtimeHelpCommand(provider: ProviderId): CommandParts {
+  if (provider === 'claude') return getClaudeRuntimeCommand();
+  if (provider === 'codex') return { command: 'codex', args: ['exec'] };
+  if (provider === 'opencode') return { command: 'opencode', args: ['run'] };
+  return { command: 'gemini', args: [] };
+}
+
+function getClaudeRuntimeCommand(): CommandParts {
+  return commandPartsFromUnknown(getClaudeCommandFn(), 'getClaudeCommand');
+}
+
+function loadRuntimeSettings(): Record<string, unknown> {
+  const settings = loadSettingsFn();
+  return requiredRecord(settings, 'loadSettings');
+}
+
+function moduleFunction(moduleValue: unknown, field: string): UnknownFunction {
+  const record = requiredRecord(moduleValue, 'module');
+  const value = record[field];
+  if (isUnknownFunction(value)) return value;
+  throw new Error(`Expected ${field} to be a function.`);
+}
+
+function isUnknownFunction(value: unknown): value is UnknownFunction {
+  return typeof value === 'function';
+}
+
+function commandPartsFromUnknown(value: unknown, field: string): CommandParts {
+  const record = requiredRecord(value, field);
+  return {
+    command: requiredStringValue(record.command, `${field}.command`),
+    args: stringArray(record.args, `${field}.args`),
+  };
+}
+
+function levelOverridesFromUnknown(value: unknown, field: string): LevelOverrides {
+  if (value === undefined) return {};
+  const record = requiredRecord(value, field);
+  const result: Partial<Record<ModelLevel, ModelSpec>> = {};
+  for (const level of MODEL_LEVELS) {
+    if (record[level] !== undefined) result[level] = modelSpecFromUnknown(record[level], field);
+  }
+  return result;
+}
+
+function modelSpecFromUnknown(value: unknown, field: string): ModelSpec {
+  const record = requiredRecord(value, field);
+  const result: MutableModelSpec = {};
+  addModelLevel(result, record.level, `${field}.level`);
+  addModel(result, record.model, `${field}.model`);
+  addReasoningEffort(result, record.reasoningEffort, `${field}.reasoningEffort`);
+  return result;
+}
+
+function addModelLevel(result: MutableModelSpec, value: unknown, field: string): void {
+  const level = optionalModelLevel(value, field);
+  if (level !== undefined) result.level = level;
+}
+
+function addModel(result: MutableModelSpec, value: unknown, field: string): void {
+  if (value === undefined) return;
+  if (value === null || typeof value === 'string') {
+    result.model = value;
+    return;
+  }
+  throw new Error(`${field} must be a string or null.`);
+}
+
+function addReasoningEffort(result: MutableModelSpec, value: unknown, field: string): void {
+  const effort = optionalReasoningEffort(value, field);
+  if (effort !== undefined) result.reasoningEffort = effort;
+}
+
+function optionalModelLevel(value: unknown, field: string): ModelLevel | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'level1' || value === 'level2' || value === 'level3') return value;
+  throw new Error(`${field} must be one of: ${MODEL_LEVELS.join(', ')}.`);
+}
+
+function optionalReasoningEffort(value: unknown, field: string): ReasoningEffort | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') {
+    return value;
+  }
+  throw new Error(`${field} must be one of: ${REASONING_EFFORTS.join(', ')}.`);
+}
+
+function optionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string') return value;
+  throw new Error(`${field} must be a string.`);
+}
+
+function requiredStringValue(value: unknown, field: string): string {
+  if (typeof value === 'string' && value.length > 0) return value;
+  throw new Error(`${field} must be a non-empty string.`);
+}
+
+function optionalRecord(
+  value: unknown,
+  field: string
+): Readonly<Record<string, unknown>> | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requiredRecord(value, field);
+}
+
+function requiredRecord(value: unknown, field: string): Record<string, unknown> {
+  if (isRecord(value)) return value;
+  throw new Error(`${field} must be an object.`);
+}
+
+function stringRecordFromUnknown(
+  value: unknown,
+  field: string
+): Readonly<Record<string, string>> {
+  if (value === undefined || value === null) return {};
+  const record = requiredRecord(value, field);
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item !== 'string') throw new Error(`${field}.${key} must be a string.`);
+    result[key] = item;
+  }
+  return result;
+}
+
+function stringArray(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value)) throw new Error(`${field} must be an array.`);
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') throw new Error(`${field} entries must be strings.`);
+    result.push(item);
+  }
+  return result;
+}
+
+function stringResult(value: unknown): string {
+  if (typeof value === 'string') return value;
+  throw new Error('Provider help output must be a string.');
+}

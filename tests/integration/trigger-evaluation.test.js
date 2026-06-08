@@ -13,7 +13,10 @@ const os = require('os');
 const LogicEngine = require('../../src/logic-engine');
 const MessageBus = require('../../src/message-bus');
 const Ledger = require('../../src/ledger');
-const { SHARED_TRIGGER_SCRIPT } = require('../../src/agents/git-pusher-template');
+const {
+  generateGitPusherAgent,
+  SHARED_TRIGGER_SCRIPT,
+} = require('../../src/agents/git-pusher-template');
 
 let tempDir;
 let ledger;
@@ -479,57 +482,146 @@ function defineComplexConsensusTests() {
   });
 }
 
+function createQualityGate(overrides = {}) {
+  const id = overrides.id || 'repo-quality';
+  const scope = overrides.scope || 'repo';
+  const status = overrides.status || 'PASS';
+  const exitCode = Object.prototype.hasOwnProperty.call(overrides, 'exitCode')
+    ? overrides.exitCode
+    : 0;
+  const gate = {
+    id,
+    status,
+    scope,
+    completedAt: Date.now(),
+    evidence: {
+      command: overrides.command || `quality-check --scope ${scope}`,
+      exitCode,
+      output: overrides.output || `${id} passed`,
+    },
+  };
+  if (Object.prototype.hasOwnProperty.call(overrides, 'completedAt')) {
+    gate.completedAt = overrides.completedAt;
+  }
+  if (Object.prototype.hasOwnProperty.call(overrides, 'timestamp')) {
+    gate.timestamp = overrides.timestamp;
+  }
+  if (overrides.stale === true) {
+    gate.stale = true;
+  }
+  if (overrides.reason) {
+    gate.reason = overrides.reason;
+  }
+  return gate;
+}
+
+function publishImplementationReady(timestamp = Date.now()) {
+  return messageBus.publish({
+    cluster_id: cluster.id,
+    topic: 'IMPLEMENTATION_READY',
+    sender: 'worker',
+    timestamp,
+  });
+}
+
+function publishValidationResult({
+  sender,
+  timestamp,
+  approved = true,
+  criteriaResults,
+  qualityGates,
+  errors = [],
+  stage,
+}) {
+  const data = { approved, errors };
+  if (criteriaResults !== undefined) data.criteriaResults = criteriaResults;
+  if (qualityGates !== undefined) data.qualityGates = qualityGates;
+  if (stage !== undefined) data.stage = stage;
+  return messageBus.publish({
+    cluster_id: cluster.id,
+    topic: 'VALIDATION_RESULT',
+    sender,
+    timestamp,
+    content: { data },
+  });
+}
+
+function evaluateGitPusherHandoff(options = {}) {
+  const requiredQualityGates = Object.prototype.hasOwnProperty.call(options, 'requiredQualityGates')
+    ? options.requiredQualityGates
+    : [{ id: 'repo-quality' }];
+  const shouldExecute = logicEngine.evaluate(
+    SHARED_TRIGGER_SCRIPT,
+    { id: 'git-pusher', cluster_id: cluster.id, requiredQualityGates },
+    { topic: 'VALIDATION_RESULT' }
+  );
+  const mutationCommands = [];
+  if (shouldExecute) {
+    mutationCommands.push('git commit', 'git push', 'gh pr merge');
+  }
+  return { shouldExecute, mutationCommands };
+}
+
+function evaluateGeneratedGitPusherHandoff(gitPusherConfig) {
+  const withoutExistingPusher = cluster.agents.filter((candidate) => candidate.id !== 'git-pusher');
+  cluster.agents = [...withoutExistingPusher, gitPusherConfig];
+  const shouldExecute = logicEngine.evaluate(
+    SHARED_TRIGGER_SCRIPT,
+    { id: gitPusherConfig.id, cluster_id: cluster.id },
+    { topic: 'VALIDATION_RESULT' }
+  );
+  const mutationCommands = [];
+  if (shouldExecute) {
+    mutationCommands.push('git commit', 'git push', 'gh pr merge');
+  }
+  return { shouldExecute, mutationCommands };
+}
+
+function captureConsoleError(fn) {
+  const originalError = console.error;
+  const messages = [];
+  console.error = (...args) => {
+    messages.push(args.map((arg) => String(arg)).join(' '));
+  };
+  try {
+    return { result: fn(), messages };
+  } finally {
+    console.error = originalError;
+  }
+}
+
 function defineGitPusherTriggerTests() {
   describe('Git-pusher Trigger Evidence', () => {
-    it('should allow approvals with CANNOT_VALIDATE and empty output evidence', () => {
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'IMPLEMENTATION_READY',
-        sender: 'worker',
-        timestamp: Date.now(),
-      });
+    it('allows pusher handoff when configured quality gate passes', () => {
+      const impl = publishImplementationReady();
 
-      const implTime = Date.now();
-
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'VALIDATION_RESULT',
+      publishValidationResult({
         sender: 'validator-1',
-        timestamp: implTime + 100,
-        content: {
-          data: {
-            approved: true,
-            criteriaResults: [
-              {
-                id: 'AC1',
-                status: 'PASS',
-                evidence: { command: 'npm test', exitCode: 0, output: '' },
-              },
-              {
-                id: 'AC2',
-                status: 'CANNOT_VALIDATE',
-                reason: 'Docker not available',
-              },
-            ],
+        timestamp: impl.timestamp + 100,
+        qualityGates: [createQualityGate({ scope: 'repo' })],
+        criteriaResults: [
+          {
+            id: 'AC1',
+            status: 'PASS',
+            evidence: { command: 'npm test', exitCode: 0, output: '' },
           },
-        },
+          {
+            id: 'AC2',
+            status: 'CANNOT_VALIDATE',
+            reason: 'Docker not available',
+          },
+        ],
       });
 
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'VALIDATION_RESULT',
+      publishValidationResult({
         sender: 'validator-2',
-        timestamp: implTime + 200,
-        content: { data: { approved: true } },
+        timestamp: impl.timestamp + 200,
       });
 
-      const result = logicEngine.evaluate(
-        SHARED_TRIGGER_SCRIPT,
-        { id: 'git-pusher', cluster_id: cluster.id },
-        { topic: 'VALIDATION_RESULT' }
-      );
+      const result = evaluateGitPusherHandoff();
 
-      assert.strictEqual(result, true);
+      assert.strictEqual(result.shouldExecute, true);
+      assert.deepStrictEqual(result.mutationCommands, ['git commit', 'git push', 'gh pr merge']);
     });
 
     it('should accept consensus-only VALIDATION_RESULT when validators do not publish directly', () => {
@@ -540,29 +632,19 @@ function defineGitPusherTriggerTests() {
         { id: 'validator-4', role: 'validator' }
       );
 
-      const implTime = Date.now();
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'IMPLEMENTATION_READY',
-        sender: 'worker',
-        timestamp: implTime,
-      });
+      const impl = publishImplementationReady();
 
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'VALIDATION_RESULT',
+      publishValidationResult({
         sender: 'consensus-coordinator',
-        timestamp: implTime + 100,
-        content: { data: { approved: true, stage: 'heavy' } },
+        timestamp: impl.timestamp + 100,
+        stage: 'heavy',
+        qualityGates: [createQualityGate({ scope: 'repo' })],
       });
 
-      const result = logicEngine.evaluate(
-        SHARED_TRIGGER_SCRIPT,
-        { id: 'git-pusher', cluster_id: cluster.id },
-        { topic: 'VALIDATION_RESULT' }
-      );
+      const result = evaluateGitPusherHandoff();
 
-      assert.strictEqual(result, true);
+      assert.strictEqual(result.shouldExecute, true);
+      assert.deepStrictEqual(result.mutationCommands, ['git commit', 'git push', 'gh pr merge']);
     });
 
     it('should not accept consensus-only VALIDATION_RESULT when rejected', () => {
@@ -571,29 +653,296 @@ function defineGitPusherTriggerTests() {
         { id: 'validator-4', role: 'validator' }
       );
 
-      const implTime = Date.now();
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'IMPLEMENTATION_READY',
-        sender: 'worker',
-        timestamp: implTime,
-      });
+      const impl = publishImplementationReady();
 
-      messageBus.publish({
-        cluster_id: cluster.id,
-        topic: 'VALIDATION_RESULT',
+      publishValidationResult({
         sender: 'consensus-coordinator',
-        timestamp: implTime + 100,
-        content: { data: { approved: false, stage: 'quick' } },
+        timestamp: impl.timestamp + 100,
+        approved: false,
+        stage: 'quick',
       });
 
-      const result = logicEngine.evaluate(
-        SHARED_TRIGGER_SCRIPT,
-        { id: 'git-pusher', cluster_id: cluster.id },
-        { topic: 'VALIDATION_RESULT' }
+      const result = evaluateGitPusherHandoff();
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+    });
+
+    it('does not require a quality gate when none are configured', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const result = evaluateGitPusherHandoff({ requiredQualityGates: [] });
+
+      assert.strictEqual(result.shouldExecute, true);
+      assert.deepStrictEqual(result.mutationCommands, ['git commit', 'git push', 'gh pr merge']);
+    });
+
+    it('blocks pusher mutation when configured quality gate is missing', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        criteriaResults: [
+          {
+            id: 'AC1',
+            status: 'PASS',
+            evidence: { command: 'npm test', exitCode: 0, output: 'pass' },
+          },
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      assert.match(messages.join('\n'), /Required quality gate missing/);
+    });
+
+    it('blocks pusher mutation when generated pusher config requires a missing gate', () => {
+      const impl = publishImplementationReady();
+      const gitPusherConfig = generateGitPusherAgent('github', {
+        requiredQualityGates: [{ id: 'repo-quality', scope: 'repo' }],
+      });
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(() =>
+        evaluateGeneratedGitPusherHandoff(gitPusherConfig)
       );
 
-      assert.strictEqual(result, false);
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      assert.match(messages.join('\n'), /Required quality gate missing/);
+    });
+
+    it('blocks pusher mutation when generated pusher config requires a failing gate', () => {
+      const impl = publishImplementationReady();
+      const gitPusherConfig = generateGitPusherAgent('github', {
+        requiredQualityGates: [{ id: 'repo-quality', scope: 'repo' }],
+      });
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({
+            scope: 'repo',
+            status: 'FAIL',
+            exitCode: 1,
+            output: 'configured quality gate failed',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(() =>
+        evaluateGeneratedGitPusherHandoff(gitPusherConfig)
+      );
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      const log = messages.join('\n');
+      assert.match(log, /Required quality gate blocked/);
+      assert.match(log, /configured quality gate failed/);
+    });
+
+    it('blocks pusher mutation when frontend quality gate fails', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({
+            scope: 'frontend',
+            status: 'FAIL',
+            exitCode: 1,
+            output: 'type check failed',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      const log = messages.join('\n');
+      assert.match(log, /Required quality gate blocked/);
+      assert.match(log, /scope=frontend/);
+      assert.match(log, /type check failed/);
+    });
+
+    it('blocks pusher mutation when workspace manifest quality gate fails', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({
+            scope: 'workspace-manifest',
+            status: 'FAIL',
+            exitCode: 1,
+            output: 'workspace manifest validation failed',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      const log = messages.join('\n');
+      assert.match(log, /Required quality gate blocked/);
+      assert.match(log, /scope=workspace-manifest/);
+      assert.match(log, /workspace manifest validation failed/);
+    });
+
+    it('blocks pusher mutation when configured quality gate is unavailable', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({
+            scope: 'repo',
+            status: 'UNAVAILABLE',
+            exitCode: 127,
+            output: 'quality tool unavailable',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      const log = messages.join('\n');
+      assert.match(log, /Required quality gate blocked/);
+      assert.match(log, /quality tool unavailable/);
+    });
+
+    it('blocks pusher mutation when configured quality gate is stale', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({
+            scope: 'repo',
+            status: 'PASS',
+            exitCode: 0,
+            completedAt: impl.timestamp - 1,
+            output: 'old pass',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      assert.match(messages.join('\n'), /Required quality gate blocked/);
+    });
+
+    it('blocks pusher mutation when configured quality gate has no evidence timestamp', () => {
+      const impl = publishImplementationReady();
+      const gate = createQualityGate({ scope: 'repo' });
+      delete gate.completedAt;
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [gate],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(evaluateGitPusherHandoff);
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      assert.match(messages.join('\n'), /missing completedAt/);
+    });
+
+    it('blocks pusher mutation when configured status gate fails', () => {
+      const impl = publishImplementationReady();
+
+      publishValidationResult({
+        sender: 'validator-1',
+        timestamp: impl.timestamp + 100,
+        qualityGates: [
+          createQualityGate({ id: 'repo-quality', scope: 'repo' }),
+          createQualityGate({
+            id: 'ci-status',
+            scope: 'merge',
+            status: 'FAIL',
+            exitCode: 1,
+            output: 'required status check failed',
+          }),
+        ],
+      });
+      publishValidationResult({
+        sender: 'validator-2',
+        timestamp: impl.timestamp + 200,
+      });
+
+      const { result, messages } = captureConsoleError(() =>
+        evaluateGitPusherHandoff({
+          requiredQualityGates: [{ id: 'repo-quality' }, { id: 'ci-status' }],
+        })
+      );
+
+      assert.strictEqual(result.shouldExecute, false);
+      assert.deepStrictEqual(result.mutationCommands, []);
+      const log = messages.join('\n');
+      assert.match(log, /Required quality gate blocked/);
+      assert.match(log, /gate=ci-status/);
+      assert.match(log, /required status check failed/);
     });
   });
 }

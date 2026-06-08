@@ -11,10 +11,7 @@ const {
   analyzeProcessHealth,
   isPlatformSupported: stuckDetectorPlatformSupported,
 } = require('../../src/agent/agent-stuck-detector');
-const {
-  printClusterInspectionHuman,
-  printTaskInspectionHuman,
-} = require('./inspect-render');
+const { printClusterInspectionHuman, printTaskInspectionHuman } = require('./inspect-render');
 
 const DEFAULT_SAMPLE_MS = 1000;
 const TASK_STALE_WARNING_MS = 5 * 60 * 1000;
@@ -178,9 +175,10 @@ async function inspectProcess(pid, sampleMs, options = {}) {
   const metricsPromise = metricsPlatformSupported()
     ? getProcessMetrics(pid, { samplePeriodMs: sampleMs })
     : Promise.resolve(null);
-  const healthPromise = includeHealth && stuckDetectorPlatformSupported()
-    ? analyzeProcessHealth(pid, sampleMs)
-    : Promise.resolve(null);
+  const healthPromise =
+    includeHealth && stuckDetectorPlatformSupported()
+      ? analyzeProcessHealth(pid, sampleMs)
+      : Promise.resolve(null);
 
   const [metrics, health] = await Promise.all([metricsPromise, healthPromise]);
   return {

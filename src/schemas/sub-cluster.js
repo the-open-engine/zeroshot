@@ -49,7 +49,7 @@ function validateSubCluster(agentConfig, depth = 0) {
     errors.push(`Agent '${agentConfig.id}' must have type: 'subcluster'`);
   }
 
-  if (!validateSubClusterConfig(agentConfig, errors)) {
+  if (!validateSubClusterConfig(agentConfig, depth, errors, warnings)) {
     return buildValidationResult(errors, warnings);
   }
 
@@ -73,7 +73,7 @@ function buildValidationResult(errors, warnings) {
   };
 }
 
-function validateSubClusterConfig(agentConfig, errors) {
+function validateSubClusterConfig(agentConfig, depth, errors, warnings) {
   if (!agentConfig.config) {
     errors.push(`Sub-cluster '${agentConfig.id}' missing config field`);
     return false;
@@ -88,6 +88,16 @@ function validateSubClusterConfig(agentConfig, errors) {
     errors.push(`Sub-cluster '${agentConfig.id}' config.agents cannot be empty`);
     return false;
   }
+
+  // Recursively validate nested cluster config
+  const configValidator = require('../config-validator');
+  const childValidation = configValidator.validateConfig(agentConfig.config, depth + 1);
+
+  if (!childValidation.valid) {
+    errors.push(...childValidation.errors.map((e) => `Sub-cluster '${agentConfig.id}': ${e}`));
+  }
+
+  warnings.push(...childValidation.warnings.map((w) => `Sub-cluster '${agentConfig.id}': ${w}`));
   return true;
 }
 

@@ -191,4 +191,171 @@ if (crashType === 'sync-throw') {
       done();
     });
   });
+
+  function runWatcher({ commandSpec, config = {}, env = {} }, done) {
+    const watcherPath = path.resolve(__dirname, '../../task-lib/watcher.js');
+    const child = spawn(
+      process.execPath,
+      [
+        watcherPath,
+        taskId,
+        tempDir,
+        logFile,
+        JSON.stringify([]),
+        JSON.stringify({
+          outputFormat: 'text',
+          provider: 'codex',
+          ...config,
+          commandSpec,
+        }),
+      ],
+      {
+        env: {
+          ...process.env,
+          ZEROSHOT_HOME: tempDir,
+          ...env,
+        },
+        stdio: 'pipe',
+      }
+    );
+
+    child.on('error', done);
+    child.on('exit', (code) => done(null, { code }));
+  }
+
+  it('removes helper cleanup files after watcher close', (done) => {
+    const cleanupFile = path.join(tempDir, 'schema.json');
+    fs.writeFileSync(cleanupFile, '{}');
+
+    runWatcher(
+      {
+        commandSpec: {
+          binary: process.execPath,
+          args: ['-e', 'process.exit(0)'],
+          env: {},
+          cleanup: [cleanupFile],
+          cleanupMetadata: [
+            { kind: 'temp-file', provider: 'codex', path: cleanupFile, reason: 'output-schema' },
+          ],
+        },
+      },
+      (error, result) => {
+        if (error) return done(error);
+        expect(result.code).to.equal(0);
+        expect(fs.existsSync(cleanupFile)).to.equal(false);
+        done();
+      }
+    );
+  });
+
+  it('logs helper cleanup failures with the cleanup path', (done) => {
+    const cleanupDir = path.join(tempDir, 'cleanup-dir');
+    fs.mkdirSync(cleanupDir);
+
+    runWatcher(
+      {
+        commandSpec: {
+          binary: process.execPath,
+          args: ['-e', 'process.exit(0)'],
+          env: {},
+          cleanup: [cleanupDir],
+          cleanupMetadata: [
+            { kind: 'temp-file', provider: 'codex', path: cleanupDir, reason: 'output-schema' },
+          ],
+        },
+      },
+      (error, result) => {
+        if (error) return done(error);
+        expect(result.code).to.equal(0);
+        const log = fs.readFileSync(logFile, 'utf8');
+        expect(log).to.include('[CLEANUP]');
+        expect(log).to.include(cleanupDir);
+        done();
+      }
+    );
+  });
+
+  it('removes helper cleanup files when command spawn fails', (done) => {
+    const cleanupFile = path.join(tempDir, 'schema-error.json');
+    fs.writeFileSync(cleanupFile, '{}');
+
+    runWatcher(
+      {
+        commandSpec: {
+          binary: path.join(tempDir, 'missing-command'),
+          args: [],
+          env: {},
+          cleanup: [cleanupFile],
+          cleanupMetadata: [
+            { kind: 'temp-file', provider: 'codex', path: cleanupFile, reason: 'output-schema' },
+          ],
+        },
+      },
+      (error, result) => {
+        if (error) return done(error);
+        expect(result.code).to.equal(1);
+        expect(fs.existsSync(cleanupFile)).to.equal(false);
+        done();
+      }
+    );
+  });
+
+  it('recovers Claude structured JSON after streaming mode failure', (done) => {
+    const claudeConfigDir = path.join(tempDir, 'claude');
+    const projectDir = path.join(claudeConfigDir, 'projects', 'test-project');
+    const sessionId = 'session-recovery-test';
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, `${sessionId}.jsonl`),
+      JSON.stringify({
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'StructuredOutput',
+              input: { summary: 'recovered', completionStatus: { canValidate: true } },
+            },
+          ],
+          usage: { input_tokens: 1, output_tokens: 2 },
+        },
+      }) + '\n'
+    );
+
+    const script = `
+console.log(JSON.stringify({
+  type: 'result',
+  is_error: true,
+  errors: ['only prompt commands are supported in streaming mode'],
+  session_id: '${sessionId}'
+}));
+process.exit(1);
+`;
+
+    runWatcher(
+      {
+        commandSpec: {
+          binary: process.execPath,
+          args: ['-e', script],
+          env: {},
+          cleanup: [],
+          cleanupMetadata: [],
+        },
+        config: {
+          provider: 'claude',
+          outputFormat: 'json',
+          jsonSchema: { type: 'object' },
+          silentJsonOutput: true,
+        },
+        env: { CLAUDE_CONFIG_DIR: claudeConfigDir },
+      },
+      (error, result) => {
+        if (error) return done(error);
+        expect(result.code).to.equal(0);
+        const log = fs.readFileSync(logFile, 'utf8');
+        expect(log).to.include('"structured_output"');
+        expect(log).to.include('"summary":"recovered"');
+        done();
+      }
+    );
+  });
 });

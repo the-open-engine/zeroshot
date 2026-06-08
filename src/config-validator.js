@@ -159,16 +159,6 @@ function validateSubclusterAgent(agent, depth, errors, warnings) {
   const subResult = subClusterSchema.validateSubCluster(agent, depth);
   errors.push(...subResult.errors);
   warnings.push(...subResult.warnings);
-
-  if (!agent.config || !Array.isArray(agent.config.agents)) {
-    return;
-  }
-
-  const childValidation = validateConfig(agent.config, depth + 1);
-  if (!childValidation.valid) {
-    errors.push(...childValidation.errors.map((e) => `Sub-cluster '${agent.id}': ${e}`));
-  }
-  warnings.push(...childValidation.warnings.map((w) => `Sub-cluster '${agent.id}': ${w}`));
 }
 
 function validateTrigger(trigger, triggerPrefix, errors) {
@@ -396,7 +386,9 @@ function reportCompletionHandlers(config, errors, warnings) {
       'No completion handler found. Cluster will run until idle timeout (2 min). ' +
       'Add an agent with trigger action: "stop_cluster"';
     if (isTemplateConfig || hasConductorAgents) {
-      warnings.push(`${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`);
+      warnings.push(
+        `${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`
+      );
     } else {
       errors.push(message);
     }
@@ -618,7 +610,9 @@ function reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, 
     'Cluster may run until timeout even when validation appears to pass.';
   const isDynamic = hasDynamicLoadConfigPath(config);
   if (isDynamic) {
-    warnings.push(`${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`);
+    warnings.push(
+      `${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`
+    );
     return;
   }
 

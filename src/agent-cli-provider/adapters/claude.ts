@@ -1,0 +1,247 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { getString, isRecord, stringifyJson } from '../json';
+import {
+  type BuildProviderCommandOptions,
+  type ClaudeCliFeatures,
+  type CommandSpec,
+  type ErrorClassification,
+  InvalidProviderModelError,
+  type LevelModelSpec,
+  type LevelOverrides,
+  type ModelCatalogEntry,
+  type ModelLevel,
+  type ProviderAdapter,
+  type ResolvedModelSpec,
+  type WarningMetadata,
+} from '../types';
+import {
+  classifyBaseProviderError,
+  commandSpec,
+  createParserState,
+  envRedactions,
+  optionFeatures,
+  resolveModelSpecWithConfig,
+  validateModelIdFromCatalog,
+  warning,
+} from './common';
+import { parseClaudeEvent } from './claude-parser';
+
+const MODEL_CATALOG: Readonly<Record<string, ModelCatalogEntry>> = {
+  haiku: { rank: 1 },
+  sonnet: { rank: 2 },
+  opus: { rank: 3 },
+};
+
+const LEVEL_MAPPING: Readonly<Record<ModelLevel, LevelModelSpec>> = {
+  level1: { rank: 1, model: 'haiku' },
+  level2: { rank: 2, model: 'sonnet' },
+  level3: { rank: 3, model: 'opus' },
+};
+
+function detectCliFeatures(helpText?: string | null): ClaudeCliFeatures {
+  const help = helpText ?? '';
+  const unknown = !help;
+  return {
+    provider: 'claude',
+    supportsOutputFormat: unknown ? true : /--output-format/.test(help),
+    supportsStreamJson: unknown ? true : /stream-json/.test(help),
+    supportsJsonSchema: unknown ? true : /--json-schema/.test(help),
+    supportsAutoApprove: unknown ? true : /--dangerously-skip-permissions/.test(help),
+    supportsIncludePartials: unknown ? true : /--include-partial-messages/.test(help),
+    supportsVerbose: unknown ? true : /--verbose/.test(help),
+    supportsModel: unknown ? true : /--model/.test(help),
+    unknown,
+  };
+}
+
+function addOutputArgs(args: string[], options: BuildProviderCommandOptions): void {
+  const features = optionFeatures(options);
+  if (options.outputFormat && features.supportsOutputFormat !== false) {
+    args.push('--output-format', options.outputFormat);
+  }
+  if (options.outputFormat === 'stream-json') {
+    if (features.supportsVerbose !== false) args.push('--verbose');
+    if (features.supportsIncludePartials !== false) args.push('--include-partial-messages');
+  }
+}
+
+function addSchemaArgs(args: string[], options: BuildProviderCommandOptions): void {
+  const features = optionFeatures(options);
+  if (
+    options.jsonSchema &&
+    options.outputFormat === 'json' &&
+    features.supportsJsonSchema !== false
+  ) {
+    args.push(
+      '--json-schema',
+      typeof options.jsonSchema === 'string'
+        ? options.jsonSchema
+        : stringifyJson(options.jsonSchema)
+    );
+  }
+}
+
+function addModelArgs(args: string[], options: BuildProviderCommandOptions): void {
+  const features = optionFeatures(options);
+  if (options.modelSpec?.model && features.supportsModel !== false) {
+    args.push('--model', options.modelSpec.model);
+  }
+}
+
+function addAutoApproveArgs(args: string[], options: BuildProviderCommandOptions): void {
+  const features = optionFeatures(options);
+  if (options.autoApprove && features.supportsAutoApprove !== false) {
+    args.push('--dangerously-skip-permissions');
+  }
+}
+
+function addSessionArgs(args: string[], options: BuildProviderCommandOptions): void {
+  if (options.resumeSessionId) {
+    args.push('--resume', options.resumeSessionId);
+    return;
+  }
+  if (options.continueSession) {
+    args.push('--continue');
+  }
+}
+
+function readConfiguredClaudeCommand(): string {
+  if (process.env.ZEROSHOT_CLAUDE_COMMAND?.trim()) {
+    return process.env.ZEROSHOT_CLAUDE_COMMAND;
+  }
+
+  const settingsPath =
+    process.env.ZEROSHOT_SETTINGS_FILE || join(homedir(), '.zeroshot', 'settings.json');
+  if (!existsSync(settingsPath)) return 'claude';
+
+  try {
+    const settings: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    const configured = isRecord(settings) ? getString(settings, 'claudeCommand') : null;
+    if (configured?.trim()) return configured;
+  } catch {
+    return 'claude';
+  }
+
+  return 'claude';
+}
+
+function resolveClaudeCommand(): { readonly command: string; readonly args: readonly string[] } {
+  const parts = readConfiguredClaudeCommand().trim().split(/\s+/);
+  return {
+    command: parts[0] ?? 'claude',
+    args: parts.slice(1),
+  };
+}
+
+function collectWarnings(options: BuildProviderCommandOptions): WarningMetadata[] {
+  const features = optionFeatures(options);
+  const warnings: WarningMetadata[] = [];
+  if (options.jsonSchema && options.outputFormat !== 'json' && !options.strictSchema) {
+    warnings.push(
+      warning(
+        'claude',
+        'claude-jsonschema-stream',
+        'jsonSchema requested with stream output; schema enforcement will be post-validated.'
+      )
+    );
+  }
+  if (
+    options.jsonSchema &&
+    options.outputFormat === 'json' &&
+    features.supportsJsonSchema === false
+  ) {
+    warnings.push(
+      warning(
+        'claude',
+        'claude-jsonschema-flag',
+        'Claude CLI does not support --json-schema; skipping schema flag.'
+      )
+    );
+  }
+  if (options.autoApprove && features.supportsAutoApprove === false) {
+    warnings.push(
+      warning(
+        'claude',
+        'claude-auto-approve',
+        'Claude CLI does not support --dangerously-skip-permissions; continuing without auto-approve.'
+      )
+    );
+  }
+  return warnings;
+}
+
+function buildCommand(context: string, options: BuildProviderCommandOptions = {}): CommandSpec {
+  const { command, args: commandPrefix } = resolveClaudeCommand();
+  const args: string[] = [...commandPrefix, '--print', '--input-format', 'text'];
+  const authEnv = options.authEnv ?? {};
+
+  addOutputArgs(args, options);
+  addSchemaArgs(args, options);
+  addModelArgs(args, options);
+  addAutoApproveArgs(args, options);
+  addSessionArgs(args, options);
+
+  args.push(context);
+
+  return commandSpec({
+    binary: command,
+    args,
+    env: authEnv,
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    warnings: collectWarnings(options),
+    redactions: envRedactions(authEnv),
+  });
+}
+
+function resolveModelSpec(level: ModelLevel, overrides?: LevelOverrides): ResolvedModelSpec {
+  return resolveModelSpecWithConfig({
+    mapping: LEVEL_MAPPING,
+    defaultLevel: 'level2',
+    level,
+    overrides,
+    validateModelId,
+  });
+}
+
+function validateModelId(modelId: string | null | undefined): string | null | undefined {
+  try {
+    return validateModelIdFromCatalog('claude', MODEL_CATALOG, modelId);
+  } catch (error) {
+    if (modelId && (modelId === 'opus-4.6' || modelId === 'claude-opus-4-6')) {
+      throw new InvalidProviderModelError(
+        `Invalid model "${modelId}" for provider "claude". Use canonical model ids: haiku, sonnet, opus.`
+      );
+    }
+    throw error;
+  }
+}
+
+function classifyError(error: unknown): ErrorClassification {
+  return classifyBaseProviderError(
+    error,
+    [/no messages returned/i, /\boverloaded\b/i, /\brate[_ -]?limit\b/i],
+    [/invalid_request_error/i, /model_not_available/i]
+  );
+}
+
+export const claudeAdapter: ProviderAdapter = {
+  id: 'claude',
+  displayName: 'Claude',
+  binary: 'claude',
+  adapterVersion: '1',
+  credentialEnvKeys: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
+  modelCatalog: MODEL_CATALOG,
+  levelMapping: LEVEL_MAPPING,
+  defaultLevel: 'level2',
+  defaultMaxLevel: 'level3',
+  defaultMinLevel: 'level1',
+  detectCliFeatures,
+  buildCommand,
+  parseEvent: parseClaudeEvent,
+  createParserState: () => createParserState('claude'),
+  resolveModelSpec,
+  validateModelId,
+  classifyError,
+};

@@ -7,6 +7,19 @@
 
 /* global describe, beforeEach, afterEach, it */
 const assert = require('assert');
+const childProcess = require('child_process');
+
+function spawnSuccess(stdout) {
+  return { status: 0, stdout, stderr: '' };
+}
+
+function spawnFailure(stderr) {
+  return { status: 1, stdout: '', stderr };
+}
+
+function commandText(command, args) {
+  return [command, ...(args || [])].join(' ');
+}
 
 // Mock agent with required methods
 function createMockAgent(workingDirectory = process.cwd(), providerName = 'claude') {
@@ -25,8 +38,9 @@ function createMockAgent(workingDirectory = process.cwd(), providerName = 'claud
 
 describe('verify_pull_request hook action', () => {
   let executeHook;
-  let mockExecSyncFn;
+  let mockSpawnSyncFn;
   let mockPlatformResolver;
+  let originalSpawnSync;
   let previousPollAttempts;
   let previousPollIntervalMs;
   let previousFetchRetryAttempts;
@@ -43,7 +57,6 @@ describe('verify_pull_request hook action', () => {
     process.env.ZEROSHOT_PR_VERIFY_FETCH_RETRY_INTERVAL_MS = '1';
 
     // Clear module cache for modules in the dependency chain
-    const safeExecPath = require.resolve('../src/lib/safe-exec.js');
     const prVerificationPath = require.resolve('../src/agent/pr-verification.js');
     const issueProvidersPath = require.resolve('../src/issue-providers/index.js');
     const hookExecutorPath = require.resolve('../src/agent/agent-hook-executor.js');
@@ -51,21 +64,13 @@ describe('verify_pull_request hook action', () => {
     delete require.cache[hookExecutorPath];
     delete require.cache[prVerificationPath];
     delete require.cache[issueProvidersPath];
-    delete require.cache[safeExecPath];
 
-    // Mock safe-exec module BEFORE reloading any modules that depend on it
-    require.cache[safeExecPath] = {
-      id: safeExecPath,
-      filename: safeExecPath,
-      loaded: true,
-      exports: {
-        execSync: function (...args) {
-          if (mockExecSyncFn) {
-            return mockExecSyncFn(...args);
-          }
-          throw new Error('Mock execSync not configured');
-        },
-      },
+    originalSpawnSync = childProcess.spawnSync;
+    childProcess.spawnSync = function (...args) {
+      if (mockSpawnSyncFn) {
+        return mockSpawnSyncFn(...args);
+      }
+      return spawnFailure('Mock spawnSync not configured');
     };
 
     mockPlatformResolver = null;
@@ -78,13 +83,14 @@ describe('verify_pull_request hook action', () => {
       },
     };
 
-    // Reload executeHook — pr-verification.js will pick up mocked safe-exec
+    // Reload executeHook after replacing spawnSync so pr-verification captures the seam.
     executeHook = require('../src/agent/agent-hook-executor').executeHook;
-    mockExecSyncFn = null;
+    mockSpawnSyncFn = null;
   });
 
   afterEach(() => {
-    mockExecSyncFn = null;
+    childProcess.spawnSync = originalSpawnSync;
+    mockSpawnSyncFn = null;
     mockPlatformResolver = null;
     if (previousPollAttempts === undefined) {
       delete process.env.ZEROSHOT_PR_MERGE_POLL_ATTEMPTS;
@@ -119,13 +125,15 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      return JSON.stringify({
-        number: 123,
-        state: 'MERGED',
-        mergedAt: '2026-01-15T10:30:00Z',
-        url: 'https://github.com/org/repo/pull/123',
-      });
+    mockSpawnSyncFn = () => {
+      return spawnSuccess(
+        JSON.stringify({
+          number: 123,
+          state: 'MERGED',
+          mergedAt: '2026-01-15T10:30:00Z',
+          url: 'https://github.com/org/repo/pull/123',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -143,11 +151,7 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      const error = new Error('Could not resolve to a PullRequest');
-      error.status = 1;
-      throw error;
-    };
+    mockSpawnSyncFn = () => spawnFailure('Could not resolve to a PullRequest');
 
     try {
       await executeHook({ hook, agent, result });
@@ -170,13 +174,15 @@ describe('verify_pull_request hook action', () => {
     };
 
     // Always returns OPEN
-    mockExecSyncFn = () => {
-      return JSON.stringify({
-        number: 123,
-        state: 'OPEN',
-        mergedAt: null,
-        url: 'https://github.com/org/repo/pull/123',
-      });
+    mockSpawnSyncFn = () => {
+      return spawnSuccess(
+        JSON.stringify({
+          number: 123,
+          state: 'OPEN',
+          mergedAt: null,
+          url: 'https://github.com/org/repo/pull/123',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -200,13 +206,15 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      return JSON.stringify({
-        number: 123,
-        state: 'CLOSED',
-        mergedAt: null,
-        url: 'https://github.com/org/repo/pull/123',
-      });
+    mockSpawnSyncFn = () => {
+      return spawnSuccess(
+        JSON.stringify({
+          number: 123,
+          state: 'CLOSED',
+          mergedAt: null,
+          url: 'https://github.com/org/repo/pull/123',
+        })
+      );
     };
 
     await assert.rejects(
@@ -232,22 +240,26 @@ describe('verify_pull_request hook action', () => {
 
     // Simulate GitHub eventual consistency: OPEN for first 3 calls, then MERGED
     let callCount = 0;
-    mockExecSyncFn = () => {
+    mockSpawnSyncFn = () => {
       callCount++;
       if (callCount <= 3) {
-        return JSON.stringify({
-          number: 1411,
-          state: 'OPEN',
-          mergedAt: null,
-          url: 'https://github.com/org/repo/pull/1411',
-        });
+        return spawnSuccess(
+          JSON.stringify({
+            number: 1411,
+            state: 'OPEN',
+            mergedAt: null,
+            url: 'https://github.com/org/repo/pull/1411',
+          })
+        );
       }
-      return JSON.stringify({
-        number: 1411,
-        state: 'MERGED',
-        mergedAt: '2026-02-11T10:08:37Z',
-        url: 'https://github.com/org/repo/pull/1411',
-      });
+      return spawnSuccess(
+        JSON.stringify({
+          number: 1411,
+          state: 'MERGED',
+          mergedAt: '2026-02-11T10:08:37Z',
+          url: 'https://github.com/org/repo/pull/1411',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -270,14 +282,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCmd;
-    mockExecSyncFn = (cmd) => {
-      capturedCmd = cmd;
-      return JSON.stringify({
-        number: 555,
-        state: 'MERGED',
-        mergedAt: '2026-02-11T10:00:00Z',
-        url: 'https://github.com/org/repo/pull/555',
-      });
+    mockSpawnSyncFn = (command, args) => {
+      capturedCmd = commandText(command, args);
+      return spawnSuccess(
+        JSON.stringify({
+          number: 555,
+          state: 'MERGED',
+          mergedAt: '2026-02-11T10:00:00Z',
+          url: 'https://github.com/org/repo/pull/555',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -301,7 +315,7 @@ describe('verify_pull_request hook action', () => {
     };
 
     // Should NOT reach gh pr view at all
-    mockExecSyncFn = () => {
+    mockSpawnSyncFn = () => {
       assert.fail('gh pr view should not be called when no PR data in output');
     };
 
@@ -343,14 +357,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCmd;
-    mockExecSyncFn = (cmd) => {
-      capturedCmd = cmd;
-      return JSON.stringify({
-        number: 321,
-        state: 'MERGED',
-        mergedAt: '2026-02-17T10:00:00Z',
-        url: 'https://github.com/org/repo/pull/321',
-      });
+    mockSpawnSyncFn = (command, args) => {
+      capturedCmd = commandText(command, args);
+      return spawnSuccess(
+        JSON.stringify({
+          number: 321,
+          state: 'MERGED',
+          mergedAt: '2026-02-17T10:00:00Z',
+          url: 'https://github.com/org/repo/pull/321',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -378,14 +394,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCmd;
-    mockExecSyncFn = (cmd) => {
-      capturedCmd = cmd;
-      return JSON.stringify({
-        number: 654,
-        state: 'MERGED',
-        mergedAt: '2026-02-17T10:00:00Z',
-        url: 'https://github.com/org/repo/pull/654',
-      });
+    mockSpawnSyncFn = (command, args) => {
+      capturedCmd = commandText(command, args);
+      return spawnSuccess(
+        JSON.stringify({
+          number: 654,
+          state: 'MERGED',
+          mergedAt: '2026-02-17T10:00:00Z',
+          url: 'https://github.com/org/repo/pull/654',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -407,14 +425,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCmd;
-    mockExecSyncFn = (cmd) => {
-      capturedCmd = cmd;
-      return JSON.stringify({
-        number: 100,
-        state: 'MERGED',
-        mergedAt: '2026-02-11T10:00:00Z',
-        url: 'https://github.com/org/repo/pull/100',
-      });
+    mockSpawnSyncFn = (command, args) => {
+      capturedCmd = commandText(command, args);
+      return spawnSuccess(
+        JSON.stringify({
+          number: 100,
+          state: 'MERGED',
+          mergedAt: '2026-02-11T10:00:00Z',
+          url: 'https://github.com/org/repo/pull/100',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -431,13 +451,15 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      return JSON.stringify({
-        number: 456,
-        state: 'MERGED',
-        mergedAt: '2026-01-15T10:30:00Z',
-        url: 'https://github.com/org/repo/pull/456',
-      });
+    mockSpawnSyncFn = () => {
+      return spawnSuccess(
+        JSON.stringify({
+          number: 456,
+          state: 'MERGED',
+          mergedAt: '2026-01-15T10:30:00Z',
+          url: 'https://github.com/org/repo/pull/456',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -458,14 +480,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCwd;
-    mockExecSyncFn = (cmd, opts) => {
+    mockSpawnSyncFn = (command, args, opts) => {
       capturedCwd = opts.cwd;
-      return JSON.stringify({
-        number: 789,
-        state: 'MERGED',
-        mergedAt: '2026-01-15T10:30:00Z',
-        url: 'https://github.com/org/repo/pull/789',
-      });
+      return spawnSuccess(
+        JSON.stringify({
+          number: 789,
+          state: 'MERGED',
+          mergedAt: '2026-01-15T10:30:00Z',
+          url: 'https://github.com/org/repo/pull/789',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
@@ -482,9 +506,7 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      throw new Error('Network error: timeout');
-    };
+    mockSpawnSyncFn = () => spawnFailure('Network error: timeout');
 
     try {
       await executeHook({ hook, agent, result });
@@ -504,13 +526,15 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    mockExecSyncFn = () => {
-      return JSON.stringify({
-        number: 222,
-        state: 'MERGED',
-        mergedAt: '2026-01-15T10:30:00Z',
-        url: 'https://github.com/org/repo/pull/222',
-      });
+    mockSpawnSyncFn = () => {
+      return spawnSuccess(
+        JSON.stringify({
+          number: 222,
+          state: 'MERGED',
+          mergedAt: '2026-01-15T10:30:00Z',
+          url: 'https://github.com/org/repo/pull/222',
+        })
+      );
     };
 
     await assert.rejects(() => executeHook({ hook, agent, result }), /claimed URL/i);
@@ -529,14 +553,16 @@ describe('verify_pull_request hook action', () => {
     };
 
     let capturedCmd;
-    mockExecSyncFn = (cmd) => {
-      capturedCmd = cmd;
-      return JSON.stringify({
-        iid: 42,
-        state: 'merged',
-        merged_at: '2026-02-23T12:00:00Z',
-        web_url: 'https://gitlab.com/org/repo/-/merge_requests/42',
-      });
+    mockSpawnSyncFn = (command, args) => {
+      capturedCmd = commandText(command, args);
+      return spawnSuccess(
+        JSON.stringify({
+          iid: 42,
+          state: 'merged',
+          merged_at: '2026-02-23T12:00:00Z',
+          web_url: 'https://gitlab.com/org/repo/-/merge_requests/42',
+        })
+      );
     };
 
     await executeHook({ hook, agent, result });
