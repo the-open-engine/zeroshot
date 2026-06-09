@@ -115,6 +115,9 @@ zeroshot run 123 --provider gemini
 ```
 
 See `docs/providers.md` for setup, model levels, and Docker mounts.
+See `docs/provider-cli-helper.md` for the strict TypeScript provider helper,
+the `zeroshot-agent-provider` JSON executable contract, and the boundary with
+Orchestra.
 
 ## Why Multiple Agents?
 
@@ -130,6 +133,31 @@ Zeroshot fixes this with isolated agents that check each other's work. Validator
 - **Crash recovery** - All state persisted to SQLite; resume anytime
 - **Isolation modes** - None, git worktree, or Docker container
 - **Cost control** - Model ceilings prevent runaway API spend
+
+## Required Handoff Quality Gates
+
+Zeroshot owns a tool-neutral handoff contract for `--pr` and `--ship` flows. It does not know which tool produced a gate. Repos configure required gates, validators publish matching `qualityGates` evidence, and the git-pusher trigger refuses to wake until every configured gate has fresh passing evidence after `IMPLEMENTATION_READY`.
+
+Gate config can come from run options or repo settings:
+
+```json
+{
+  "ship": {
+    "requiredQualityGates": [
+      {
+        "id": "repo-quality",
+        "scope": "repo",
+        "description": "Repository quality gate",
+        "command": "repo-quality --changed --json"
+      }
+    ]
+  }
+}
+```
+
+The `id` and optional `scope` are generic. A repo may bind `repo-quality` to any local quality command, a CI status command, or another quality command outside Zeroshot. Validators receive the configured gate list and must publish entries with `status`, `completedAt` or `timestamp`, and `evidence.command`, `evidence.exitCode`, and string `evidence.output`. Failing or unavailable commands mean `approved: false` with gate status `FAIL` or `UNAVAILABLE`.
+
+The pusher fails closed before commit, push, PR creation, or merge when a configured gate is missing, failing, unavailable, stale, older than `IMPLEMENTATION_READY`, or lacks usable evidence. If no `requiredQualityGates` are configured, Zeroshot preserves its existing validator consensus behavior.
 
 ## When to Use Zeroshot
 
@@ -471,74 +499,8 @@ For security issues, see [SECURITY.md](SECURITY.md).
 
 ## TUI
 
-Ratatui (Rust) is the only supported TUI. Entry points:
-
-- `zeroshot` (TTY + no args)
-- `zeroshot tui`
-- `zeroshot watch`
-
-### TUI Development
-
-The Rust TUI spawns a Node backend over stdio. Run both while iterating.
-
-Single command dev loop (auto-rebuild + restart):
-
-```bash
-cargo install cargo-watch
-npm run dev:tui
-```
-
-1. Install deps
-
-   ```bash
-   npm ci
-   ```
-
-2. Build the TUI backend in watch mode
-
-   ```bash
-   npm run build:tui-backend -- --watch
-   # or
-   npx tsc -p tsconfig.tui-backend.json -w
-   ```
-
-3. Run the Rust TUI (second terminal)
-
-   ```bash
-   cd tui-rs
-   cargo run -p zeroshot-tui -- --ui disruptive
-   ```
-
-### Local CLI From This Repo
-
-If you want `zeroshot` to run from the dev branch globally:
-
-```bash
-npm run dev:link
-```
-
-One command to link + run the TUI dev loop:
-
-```bash
-npm run dev:bootstrap
-```
-
-### CLI Integration Loop
-
-Use the Node CLI to launch your local Rust binary:
-
-```bash
-cd tui-rs
-cargo build -p zeroshot-tui
-cd ..
-ZEROSHOT_TUI_BINARY_PATH="$PWD/tui-rs/target/debug/zeroshot-tui" node cli/index.js tui
-```
-
-### TUI Overrides
-
-- `ZEROSHOT_TUI_BACKEND_PATH` points to a specific `lib/tui-backend/server.js`
-- `ZEROSHOT_TUI_BINARY_PATH` points to a local Rust binary
-- `ZEROSHOT_TUI_UI=classic|disruptive` forces UI variant
+The TUI is not included in this release. Use `zeroshot logs -f`, `zeroshot logs -w`,
+`zeroshot list`, and `zeroshot status <id>` for monitoring.
 
 ---
 

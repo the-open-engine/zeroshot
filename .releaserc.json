@@ -9,11 +9,6 @@
         "npmPublish": true
       }
     ],
-    [
-      "@semantic-release/github",
-      {
-        "assets": ["dist/tui/zeroshot-tui-*.tar.gz", "dist/tui/zeroshot-tui-*.tar.gz.sha256"]
-      }
-    ]
+    "@semantic-release/github"
   ]
 }

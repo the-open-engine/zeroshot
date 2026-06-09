@@ -15,7 +15,7 @@ const DEFAULT_MAX_SCENARIO_MS = 120;
 const MAX_ERRORS = 3;
 
 function createSeededRng(seed) {
-  let state = (seed >>> 0) || 0x9e3779b9;
+  let state = seed >>> 0 || 0x9e3779b9;
   return () => {
     state ^= state << 13;
     state >>>= 0;
@@ -313,14 +313,7 @@ function createIssueOpenedMessage(clusterId) {
   };
 }
 
-async function runScenario({
-  config,
-  templateId,
-  seed,
-  maxSteps,
-  maxScenarioMs,
-  templatesDir,
-}) {
+async function runScenario({ config, templateId, seed, maxSteps, maxScenarioMs, templatesDir }) {
   const initialAgentConfigs = JSON.parse(JSON.stringify(config.agents || []));
   const state = {
     agentConfigs: initialAgentConfigs,

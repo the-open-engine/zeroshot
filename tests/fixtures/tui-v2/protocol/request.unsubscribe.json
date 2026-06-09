@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 21,
-  "method": "unsubscribe",
-  "params": {
-    "subscriptionId": "sub-123"
-  }
-}

@@ -115,7 +115,11 @@ describe('inspect command helpers', function () {
     assert.strictEqual(inspection.cluster.id, 'cluster-1');
     assert.strictEqual(inspection.agents.length, 1);
     assert.strictEqual(inspection.agents[0].task.id, 'task-123');
-    assert(inspection.agents[0].task.warnings.some((warning) => warning.includes('task log file missing')));
+    assert(
+      inspection.agents[0].task.warnings.some((warning) =>
+        warning.includes('task log file missing')
+      )
+    );
   });
 
   it('should build task inspection payload', async function () {

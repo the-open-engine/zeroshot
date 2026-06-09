@@ -107,6 +107,11 @@ describe('CLI Invalid Command Handling', function () {
       assert.strictEqual(shouldPrependRun(['settings']), false);
     });
 
+    it('should not prepend run for unavailable TUI commands', function () {
+      assert.strictEqual(shouldPrependRun(['watch']), false);
+      assert.strictEqual(shouldPrependRun(['tui']), false);
+    });
+
     it('should not prepend run for "codex" command', function () {
       assert.strictEqual(shouldPrependRun(['codex']), false);
     });

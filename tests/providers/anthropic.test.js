@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { parseChunk } = require('../../src/providers/anthropic/output-parser');
+const { parseProviderChunk } = require('../../src/providers');
 
 describe('Claude provider parser', () => {
   it('parses text, tool, and result events', () => {
@@ -46,7 +46,7 @@ describe('Claude provider parser', () => {
       }),
     ].join('\n');
 
-    const events = parseChunk(chunk);
+    const events = parseProviderChunk('claude', chunk);
     const textEvent = events.find((e) => e.type === 'text');
     const toolCall = events.find((e) => e.type === 'tool_call');
     const toolResult = events.find((e) => e.type === 'tool_result');

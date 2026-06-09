@@ -60,8 +60,6 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        env:
-          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
 
       - name: Security audit
@@ -77,11 +75,8 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Type check (tui-backend)
-        run: npm run typecheck:tui-backend
-
-      - name: Build tui-backend
-        run: npm run build:tui-backend
+      - name: Check provider CLI helper
+        run: npm run check:agent-cli-provider:ci
 
       - name: Unit tests with coverage (fast)
         run: npm run test:coverage
@@ -90,36 +85,6 @@ jobs:
       - name: Integration tests (slow, Docker)
         run: npm run test:slow
         timeout-minutes: 15
-
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Cache cargo registry + build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            tui-rs/target
-          key: rust-${{ runner.os }}-${{ hashFiles('tui-rs/Cargo.lock') }}
-          restore-keys: rust-${{ runner.os }}-
-
-      - name: Rust fmt
-        run: cargo fmt --manifest-path tui-rs/Cargo.toml --all -- --check
-
-      - name: Rust build
-        run: cargo build --release --manifest-path tui-rs/Cargo.toml
-
-      - name: Rust test
-        run: cargo test --manifest-path tui-rs/Cargo.toml
-
-      - name: Rust clippy
-        run: cargo clippy --manifest-path tui-rs/Cargo.toml -- -D warnings
-
-      - name: Smoke test Rust TUI binary
-        run: ./tui-rs/target/release/zeroshot-tui --version
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -160,8 +125,6 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        env:
-          ZEROSHOT_TUI_BINARY_SKIP: '1'
         run: npm ci
 
       - name: Link CLI

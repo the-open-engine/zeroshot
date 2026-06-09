@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.agent-cli-provider.json",
+  "compilerOptions": {
+    "rootDir": "src/agent-cli-provider",
+    "outDir": "lib/agent-cli-provider",
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/agent-cli-provider/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage", "lib", "tui-rs/target"]
+}

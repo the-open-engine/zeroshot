@@ -1,7 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { parseChunk } = require('../../src/providers/google/output-parser');
+const { parseProviderChunk } = require('../../src/providers');
 
 describe('Gemini provider parser', () => {
   it('parses assistant text output', () => {
@@ -9,7 +9,7 @@ describe('Gemini provider parser', () => {
       path.join(__dirname, '..', 'fixtures', 'gemini', 'text.jsonl'),
       'utf8'
     );
-    const events = parseChunk(fixture, {});
+    const events = parseProviderChunk('gemini', fixture);
 
     const textEvent = events.find((e) => e.type === 'text');
     const result = events.find((e) => e.type === 'result');
@@ -23,7 +23,7 @@ describe('Gemini provider parser', () => {
       path.join(__dirname, '..', 'fixtures', 'gemini', 'tool.jsonl'),
       'utf8'
     );
-    const events = parseChunk(fixture, {});
+    const events = parseProviderChunk('gemini', fixture);
 
     const toolCall = events.find((e) => e.type === 'tool_call');
     const toolResult = events.find((e) => e.type === 'tool_result');

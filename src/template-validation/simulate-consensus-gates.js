@@ -103,7 +103,11 @@ function createSimulationContext(config, options = {}) {
       : [],
     cluster: {
       id: 'template-sim',
-      agents: agents.map((a) => ({ id: a.id, role: a.role })),
+      agents: agents.map((a) => ({
+        id: a.id,
+        role: a.role,
+        requiredQualityGates: a.requiredQualityGates || [],
+      })),
     },
   };
 }
@@ -113,6 +117,7 @@ function evaluateScenario({
   cluster,
   topic,
   script,
+  requiredQualityGates,
   producers,
   producersByTopic,
   requiredStageTopics,
@@ -133,9 +138,43 @@ function evaluateScenario({
 
   publishMessages(messageBus, producers, cluster.id);
 
-  const result = logicEngine.evaluate(script, { id: agentId, cluster_id: cluster.id }, { topic });
+  const result = logicEngine.evaluate(
+    script,
+    { id: agentId, cluster_id: cluster.id, requiredQualityGates },
+    { topic }
+  );
   ledger.close();
   return result;
+}
+
+function getPassingQualityGate(requiredGate) {
+  const scope = requiredGate.scope || 'template-sim';
+  return {
+    id: requiredGate.id,
+    status: 'PASS',
+    scope,
+    completedAt: Date.now(),
+    evidence: {
+      command: `quality-check --scope ${scope}`,
+      exitCode: 0,
+      output: 'template simulation quality pass',
+    },
+  };
+}
+
+function getApprovedResultData(context) {
+  const data = { approved: true };
+  const requiredQualityGates = Array.isArray(context.requiredQualityGates)
+    ? context.requiredQualityGates
+    : [];
+  if (
+    context.agentId === 'git-pusher' &&
+    context.topic === 'VALIDATION_RESULT' &&
+    requiredQualityGates.length > 0
+  ) {
+    data.qualityGates = requiredQualityGates.map(getPassingQualityGate);
+  }
+  return data;
 }
 
 function checkDuplicateProducerScenario(context) {
@@ -146,13 +185,13 @@ function checkDuplicateProducerScenario(context) {
         cluster_id: clusterId,
         topic: context.topic,
         sender: producers[0],
-        content: { data: { approved: true } },
+        content: { data: getApprovedResultData(context) },
       });
       messageBus.publish({
         cluster_id: clusterId,
         topic: context.topic,
         sender: producers[0],
-        content: { data: { approved: true } },
+        content: { data: getApprovedResultData(context) },
       });
     },
   });
@@ -167,7 +206,7 @@ function checkDistinctProducerScenario(context) {
           cluster_id: clusterId,
           topic: context.topic,
           sender: producer,
-          content: { data: { approved: true } },
+          content: { data: getApprovedResultData(context) },
         });
       }
     },
@@ -214,6 +253,7 @@ function getConsensusScenarioContext(agent, trigger, simulation) {
       cluster: simulation.cluster,
       topic,
       script,
+      requiredQualityGates: agent.requiredQualityGates || [],
       producers,
       producersByTopic: simulation.producersByTopic,
       requiredStageTopics,

@@ -31,6 +31,12 @@ function restoreEnv() {
 }
 
 describe('CLI PR config env fallback', function () {
+  beforeEach(function () {
+    for (const key of ENV_VARS) {
+      delete process.env[key];
+    }
+  });
+
   afterEach(function () {
     restoreEnv();
   });

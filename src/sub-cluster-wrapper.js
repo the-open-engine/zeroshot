@@ -70,7 +70,6 @@ class SubClusterWrapper {
 
     this.quiet = options.quiet || false;
     this.modelOverride = options.modelOverride || null;
-    this.createChildOrchestrator = options.createChildOrchestrator || null;
   }
 
   /**
@@ -422,18 +421,15 @@ class SubClusterWrapper {
    * @private
    */
   async _spawnChildCluster(context) {
+    const Orchestrator = require('./orchestrator');
     const path = require('path');
-
-    if (!this.createChildOrchestrator) {
-      throw new Error('SubClusterWrapper requires createChildOrchestrator');
-    }
 
     // Generate child cluster ID (namespaced under parent)
     const childId = `${this.parentCluster.id}.${this.id}`;
     this.childClusterId = childId;
 
     // Create child orchestrator with separate database
-    const childOrchestrator = await this.createChildOrchestrator({
+    const childOrchestrator = await Orchestrator.create({
       quiet: this.quiet,
       skipLoad: true,
       storageDir: path.join(this.parentCluster.ledger.dbPath, '..', 'subclusters', childId),

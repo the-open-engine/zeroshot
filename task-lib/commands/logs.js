@@ -307,22 +307,8 @@ export async function showLogs(taskId, options = {}) {
   const follow = options.follow;
   const watch = options.watch;
 
-  // IMPORTANT: -f should stream logs (like tail -f), -w launches interactive TUI
-  // This prevents confusion when users expect tail-like behavior
   if (watch) {
-    // Use TUI for watch mode (interactive interface)
-    const { default: TaskLogsTUI } = await import('../tui/index.js');
-    const tui = new TaskLogsTUI({
-      taskId: task.id,
-      logFile: task.logFile,
-      taskInfo: {
-        status: task.status,
-        createdAt: task.createdAt,
-        prompt: task.prompt,
-      },
-      pid: task.pid,
-    });
-    await tui.start();
+    throw new Error('Task log TUI is unavailable in this release. Use `zeroshot logs <id> -f`.');
   } else if (follow) {
     // Stream logs continuously (like tail -f) - show last N lines first
     await tailFollow(task.logFile, task.pid, lines);

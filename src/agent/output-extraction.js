@@ -16,7 +16,7 @@
  * 4. Direct JSON parse of entire output
  */
 
-const { getProvider, parseChunkWithProvider } = require('../providers');
+const { parseProviderChunk } = require('../providers');
 
 /**
  * Strip timestamp prefix from log lines.
@@ -104,13 +104,12 @@ function extractResultContent(obj) {
  * @returns {object|null} Extracted JSON or null
  */
 function extractFromTextEvents(output, providerName) {
-  const provider = getProvider(providerName);
   const normalized = output
     .split('\n')
     .map((line) => stripTimestamp(line))
     .filter(Boolean)
     .join('\n');
-  const events = parseChunkWithProvider(provider, normalized);
+  const events = parseProviderChunk(providerName, normalized);
 
   // Fast-path: many providers eventually emit the full JSON as a single text event.
   // Scan from the end to find the last parseable JSON snippet without requiring

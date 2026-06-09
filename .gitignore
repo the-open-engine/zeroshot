@@ -10,9 +10,6 @@ dist/
 build/
 *.tsbuildinfo
 
-# Rust build output
-tui-rs/target/
-
 # Environment
 .env
 .env.local
@@ -60,4 +57,4 @@ report/
 # Generated/temp files
 test-metadata-manual.sh
 test-isolated-fix.js
-lib/tui-backend/
+lib/agent-cli-provider/

@@ -6,40 +6,28 @@ import { addTask, generateId, ensureDirs } from './store.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { loadSettings } = require('../lib/settings.js');
-const { normalizeProviderName } = require('../lib/provider-names');
-const { getProvider } = require('../src/providers');
+const { prepareSingleAgentProviderCommand } = require('./provider-helper-runtime.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export async function spawnTask(prompt, options = {}) {
+export function spawnTask(prompt, options = {}) {
   ensureDirs();
 
   const id = generateId();
   const logFile = join(LOGS_DIR, `${id}.log`);
   const cwd = options.cwd || process.cwd();
 
-  const settings = loadSettings();
-  const { providerName, provider, providerSettings, levelOverrides } = resolveProviderContext(
-    options,
-    settings
-  );
-
   const outputFormat = resolveOutputFormat(options);
   const jsonSchema = resolveJsonSchema(options, outputFormat);
-  const modelSpec = resolveModelSpec(options, provider, providerSettings, levelOverrides);
-
-  const cliFeatures = await provider.getCliFeatures();
-  const commandSpec = provider.buildCommand(prompt, {
-    modelSpec,
-    outputFormat,
-    jsonSchema,
-    cwd,
-    autoApprove: true,
-    cliFeatures,
+  const prepared = prepareSingleAgentProviderCommand({
+    provider: options.provider || null,
+    context: prompt,
+    options: buildProviderOptions(options, outputFormat, jsonSchema, cwd),
   });
+  const providerName = prepared.adapter.id;
+  const modelSpec = prepared.options.modelSpec;
+  const commandSpec = prepared.commandSpec;
 
-  const finalArgs = resolveFinalArgs(commandSpec, providerName, options);
   const task = buildTaskRecord({
     id,
     prompt,
@@ -65,21 +53,11 @@ export async function spawnTask(prompt, options = {}) {
     id,
     cwd,
     logFile,
-    finalArgs,
+    finalArgs: commandSpec.args,
     watcherConfig,
   });
 
   return task;
-}
-
-function resolveProviderContext(options, settings) {
-  const providerName = normalizeProviderName(
-    options.provider || settings.defaultProvider || 'claude'
-  );
-  const provider = getProvider(providerName);
-  const providerSettings = settings.providerSettings?.[providerName] || {};
-  const levelOverrides = providerSettings.levelOverrides || {};
-  return { providerName, provider, providerSettings, levelOverrides };
 }
 
 function resolveOutputFormat(options) {
@@ -95,36 +73,39 @@ function resolveJsonSchema(options, outputFormat) {
   return jsonSchema;
 }
 
-function resolveModelSpec(options, provider, providerSettings, levelOverrides) {
+function buildProviderOptions(options, outputFormat, jsonSchema, cwd) {
+  return {
+    outputFormat,
+    jsonSchema,
+    cwd,
+    autoApprove: true,
+    ...modelSpecOption(options),
+    ...(options.resume ? { resumeSessionId: options.resume } : {}),
+    ...(options.continue ? { continueSession: true } : {}),
+  };
+}
+
+function modelSpecOption(options) {
+  const modelSpec = resolveRequestedModelSpec(options);
+  return modelSpec === undefined ? {} : { modelSpec };
+}
+
+function resolveRequestedModelSpec(options) {
   if (options.model) {
-    provider.validateModelId(options.model);
     return {
       model: options.model,
-      reasoningEffort: options.reasoningEffort,
+      ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
     };
   }
 
-  const level = options.modelLevel || providerSettings.defaultLevel || provider.getDefaultLevel();
-  let modelSpec = provider.resolveModelSpec(level, levelOverrides);
   if (options.reasoningEffort) {
-    modelSpec = { ...modelSpec, reasoningEffort: options.reasoningEffort };
+    return {
+      ...(options.modelLevel ? { level: options.modelLevel } : {}),
+      reasoningEffort: options.reasoningEffort,
+    };
   }
-  return modelSpec;
-}
-
-function resolveFinalArgs(commandSpec, providerName, options) {
-  const finalArgs = [...commandSpec.args];
-  if (providerName === 'claude') {
-    const promptIndex = finalArgs.length - 1;
-    if (options.resume) {
-      finalArgs.splice(promptIndex, 0, '--resume', options.resume);
-    } else if (options.continue) {
-      finalArgs.splice(promptIndex, 0, '--continue');
-    }
-  } else if (options.resume || options.continue) {
-    console.warn('Warning: resume/continue is only supported for Claude CLI; ignoring.');
-  }
-  return finalArgs;
+  if (options.modelLevel) return { level: options.modelLevel };
+  return undefined;
 }
 
 function buildTaskRecord({ id, prompt, cwd, options, logFile, providerName, modelSpec }) {
@@ -159,7 +140,14 @@ function buildWatcherConfig(outputFormat, jsonSchema, options, providerName, com
     provider: providerName,
     command: commandSpec.binary,
     env: commandSpec.env || {},
+    commandSpec: buildWatcherCommandSpec(commandSpec),
   };
+}
+
+function buildWatcherCommandSpec(commandSpec) {
+  const watcherCommandSpec = { ...commandSpec };
+  delete watcherCommandSpec.args;
+  return watcherCommandSpec;
 }
 
 function resolveWatcherScript(options) {

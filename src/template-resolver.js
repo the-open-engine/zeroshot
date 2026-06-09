@@ -15,6 +15,79 @@
 const fs = require('fs');
 const path = require('path');
 
+const COMPARISON_OPERATORS = ['==', '!=', '<=', '>=', '<', '>'];
+
+function isIdentifierChar(char) {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    code === 95
+  );
+}
+
+function replaceBareIdentifier(source, name, replacement) {
+  let result = '';
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const index = source.indexOf(name, cursor);
+    if (index === -1) {
+      return result + source.slice(cursor);
+    }
+
+    const before = source[index - 1];
+    const after = source[index + name.length];
+    const replace = !isIdentifierChar(before) && !isIdentifierChar(after);
+    result += source.slice(cursor, index);
+    result += replace ? replacement : name;
+    cursor = index + name.length;
+  }
+
+  return result;
+}
+
+function formatConditionValue(value) {
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return JSON.stringify(value);
+  return String(value);
+}
+
+function parseNumberLiteral(value) {
+  if (!value) return null;
+  const unsigned = value[0] === '-' ? value.slice(1) : value;
+  const parts = unsigned.split('.');
+  if (parts.length > 2 || parts.some((part) => part.length === 0)) return null;
+  const numeric = parts.every((part) =>
+    [...part].every((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 48 && code <= 57;
+    })
+  );
+  return numeric ? Number(value) : null;
+}
+
+function compareValues(left, operator, right) {
+  switch (operator) {
+    case '==':
+      return left === right;
+    case '!=':
+      return left !== right;
+    case '<':
+      return left < right;
+    case '>':
+      return left > right;
+    case '<=':
+      return left <= right;
+    case '>=':
+      return left >= right;
+    default:
+      throw new Error(`Unsupported comparison operator: ${operator}`);
+  }
+}
+
 class TemplateResolver {
   /**
    * @param {string} templatesDir
@@ -40,6 +113,16 @@ class TemplateResolver {
     const templateJson = fs.readFileSync(templatePath, 'utf8');
     const template = JSON.parse(templateJson);
 
+    return this.resolveTemplate(template, params);
+  }
+
+  /**
+   * Resolve an already-loaded parameterized template object.
+   * @param {Object} template
+   * @param {Object} params
+   * @returns {Object} Resolved cluster config
+   */
+  resolveTemplate(template, params = {}) {
     // Validate required params
     this._validateParams(template, params);
 
@@ -53,7 +136,7 @@ class TemplateResolver {
     if (resolved.agents) {
       resolved.agents = resolved.agents.filter((/** @type {any} */ agent) => {
         if (!agent.condition) return true;
-        const conditionMet = this._evaluateCondition(agent.condition, params);
+        const conditionMet = this._evaluateCondition(agent.condition, paramsWithDefaults);
         delete agent.condition; // Remove condition field from final output
         return conditionMet;
       });
@@ -192,21 +275,13 @@ class TemplateResolver {
     expr = expr.replace(
       /\{\{(\w+)\}\}/g,
       (/** @type {any} */ _match, /** @type {any} */ paramName) => {
-        const value = params[paramName];
-        if (value === undefined) return 'undefined';
-        if (typeof value === 'string') return `"${value}"`;
-        return String(value);
+        return formatConditionValue(params[paramName]);
       }
     );
 
     // Replace bare param names
     for (const [name, value] of Object.entries(params)) {
-      const regex = new RegExp(`\\b${name}\\b`, 'g');
-      if (typeof value === 'string') {
-        expr = expr.replace(regex, `"${value}"`);
-      } else {
-        expr = expr.replace(regex, String(value));
-      }
+      expr = replaceBareIdentifier(expr, name, formatConditionValue(value));
     }
 
     try {
@@ -228,36 +303,16 @@ class TemplateResolver {
   _evaluateSimpleExpression(expr) {
     // Handle logical operators (&&, ||) by splitting and recursing
     if (expr.includes('||')) {
-      const parts = expr.split('||');
-      return parts.some((part) => this._evaluateSimpleExpression(part.trim()));
+      return expr.split('||').some((part) => this._evaluateSimpleExpression(part.trim()));
     }
     if (expr.includes('&&')) {
-      const parts = expr.split('&&');
-      return parts.every((part) => this._evaluateSimpleExpression(part.trim()));
+      return expr.split('&&').every((part) => this._evaluateSimpleExpression(part.trim()));
     }
 
-    // Handle comparison operators
-    const comparisonOps = ['==', '!=', '<=', '>=', '<', '>'];
-    for (const op of comparisonOps) {
+    for (const op of COMPARISON_OPERATORS) {
       if (expr.includes(op)) {
         const [left, right] = expr.split(op).map((s) => s.trim());
-        const leftVal = this._parseValue(left);
-        const rightVal = this._parseValue(right);
-
-        switch (op) {
-          case '==':
-            return leftVal === rightVal;
-          case '!=':
-            return leftVal !== rightVal;
-          case '<':
-            return leftVal < rightVal;
-          case '>':
-            return leftVal > rightVal;
-          case '<=':
-            return leftVal <= rightVal;
-          case '>=':
-            return leftVal >= rightVal;
-        }
+        return compareValues(this._parseValue(left), op, this._parseValue(right));
       }
     }
 
@@ -287,10 +342,8 @@ class TemplateResolver {
     if (trimmed === 'false') return false;
     if (trimmed === 'undefined' || trimmed === 'null') return undefined;
 
-    // Numbers
-    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-      return parseFloat(trimmed);
-    }
+    const numericValue = parseNumberLiteral(trimmed);
+    if (numericValue !== null) return numericValue;
 
     // Return as-is for other cases
     return trimmed;

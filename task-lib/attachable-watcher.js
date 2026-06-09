@@ -5,15 +5,17 @@
  * Runs detached from parent, provides Unix socket for attach clients.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { unlink } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { updateTask } from './store.js';
 import {
-  detectFatalClaudeError,
-  detectStreamingModeError,
-  recoverStructuredOutput,
-} from './claude-recovery.js';
+  detectProviderFatalError,
+  detectProviderStreamingModeError,
+  recoverProviderStructuredOutput,
+  supportsProviderStructuredOutputRecovery,
+} from './provider-helper-runtime.js';
 import { createRequire } from 'module';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -22,6 +24,8 @@ import { createRequire } from 'module';
 // ═══════════════════════════════════════════════════════════════════════════
 
 const [, , taskIdArg, cwdArg, logFileArg, argsJsonArg, configJsonArg] = process.argv;
+let commandSpecCleanup = [];
+let cleanupStarted = false;
 
 function emergencyLog(msg) {
   if (logFileArg) {
@@ -41,6 +45,7 @@ function crashWithError(error, source) {
 
   emergencyLog(`\n[${timestamp}][CRASH] ${source}: ${errorMsg}\n`);
   emergencyLog(`[${timestamp}][CRASH] Process terminating due to unhandled error\n`);
+  cleanupCommandSpecSync();
 
   if (taskIdArg) {
     try {
@@ -74,6 +79,13 @@ const cwd = cwdArg;
 const logFile = logFileArg;
 const args = JSON.parse(argsJsonArg);
 const config = configJsonArg ? JSON.parse(configJsonArg) : {};
+const commandSpec = config.commandSpec || {
+  binary: config.command || 'claude',
+  args,
+  env: config.env || {},
+  cleanup: [],
+};
+commandSpecCleanup = commandSpec.cleanup || [];
 let server = null;
 
 const SOCKET_DIR = join(homedir(), '.zeroshot', 'sockets');
@@ -88,14 +100,17 @@ function log(msg) {
 }
 
 const providerName = normalizeProviderName(config.provider || 'claude');
-const enableRecovery = providerName === 'claude';
+const enableRecovery = supportsProviderStructuredOutputRecovery(providerName);
 
-const env = { ...process.env, ...(config.env || {}) };
-const command = config.command || 'claude';
-const finalArgs = [...args];
+const env = { ...process.env, ...(commandSpec.env || {}) };
+const command = commandSpec.binary;
+const finalArgs = [...(commandSpec.args || args)];
 
 const silentJsonMode =
-  config.outputFormat === 'json' && config.jsonSchema && config.silentJsonOutput && enableRecovery;
+  config.outputFormat === 'json' &&
+  config.jsonSchema &&
+  config.silentJsonOutput &&
+  supportsProviderStructuredOutputRecovery(providerName);
 
 let finalResultJson = null;
 let outputBuffer = '';
@@ -110,11 +125,11 @@ function splitBufferLines(buffer, chunk) {
 }
 
 function maybeHandleFatalError(line, timestamp) {
-  if (!enableRecovery || fatalError) {
+  if (fatalError) {
     return false;
   }
 
-  const detected = detectFatalClaudeError(line);
+  const detected = detectProviderFatalError(providerName, line);
   if (!detected) {
     return false;
   }
@@ -127,17 +142,15 @@ function maybeHandleFatalError(line, timestamp) {
   log(`[${timestamp}][FATAL] ${detected}\n`);
 
   if (server) {
-    server.stop('SIGTERM').catch(() => {});
+    server.stop('SIGTERM').catch((error) => {
+      log(`[${timestamp}][FATAL] Attach server stop failed: ${error.message}\n`);
+    });
   }
   return true;
 }
 
 function captureStreamingError(line, timestamp) {
-  if (!enableRecovery) {
-    return false;
-  }
-
-  const detectedError = detectStreamingModeError(line);
+  const detectedError = detectProviderStreamingModeError(providerName, line);
   if (!detectedError) {
     return false;
   }
@@ -204,11 +217,11 @@ function flushOutputBuffer(timestamp) {
 }
 
 function attemptRecovery(code, timestamp) {
-  if (!(enableRecovery && code !== 0 && streamingModeError?.sessionId)) {
+  if (!(code !== 0 && streamingModeError?.sessionId)) {
     return null;
   }
 
-  const recovered = recoverStructuredOutput(streamingModeError.sessionId);
+  const recovered = recoverProviderStructuredOutput(providerName, streamingModeError.sessionId);
   if (recovered?.payload) {
     const recoveredLine = JSON.stringify(recovered.payload);
     if (silentJsonMode) {
@@ -227,6 +240,30 @@ function attemptRecovery(code, timestamp) {
   return recovered;
 }
 
+async function cleanupCommandSpec() {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  for (const file of commandSpecCleanup) {
+    try {
+      await unlink(file);
+    } catch (error) {
+      log(`[${Date.now()}][CLEANUP] Failed to delete ${file}: ${error.message}\n`);
+    }
+  }
+}
+
+function cleanupCommandSpecSync() {
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  for (const file of commandSpecCleanup) {
+    try {
+      unlinkSync(file);
+    } catch (error) {
+      emergencyLog(`[${Date.now()}][CLEANUP] Failed to delete ${file}: ${error.message}\n`);
+    }
+  }
+}
+
 function writeCompletionFooter(code, signal) {
   if (config.outputFormat === 'json') {
     return;
@@ -242,7 +279,7 @@ server = new AttachServer({
   socketPath,
   command,
   args: finalArgs,
-  cwd,
+  cwd: commandSpec.cwd || cwd,
   env,
   cols: 120,
   rows: 30,
@@ -275,6 +312,7 @@ server.on('exit', async ({ exitCode, signal }) => {
   }
 
   writeCompletionFooter(code, signal);
+  await cleanupCommandSpec();
 
   const resolvedCode = fatalError ? 1 : recovered?.payload ? 0 : code;
   const status = resolvedCode === 0 ? 'completed' : 'failed';
@@ -296,6 +334,7 @@ server.on('exit', async ({ exitCode, signal }) => {
 
 server.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
+  await cleanupCommandSpec();
   try {
     await updateTask(taskId, { status: 'failed', error: err.message });
   } catch (updateError) {
@@ -326,6 +365,7 @@ try {
   log(`[${Date.now()}][SYSTEM] PID: ${server.pid}\n`);
 } catch (err) {
   log(`\nFailed to start: ${err.message}\n`);
+  await cleanupCommandSpec();
   updateTask(taskId, { status: 'failed', error: err.message });
   process.exit(1);
 }

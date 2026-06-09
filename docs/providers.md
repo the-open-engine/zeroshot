@@ -71,3 +71,21 @@ Mount presets in `dockerMounts` include: `codex`, `gemini`, `gcloud`, `claude`, 
 
 Use `--no-mounts` to disable all credential mounts (you will get a warning if
 credentials are missing).
+
+## Provider CLI Helper
+
+Provider command construction, feature probing, model resolution, output
+parsing, error classification, redaction metadata, and executable JSON behavior
+live behind the strict TypeScript helper in `src/agent-cli-provider/`.
+
+The public process contract is `zeroshot-agent-provider`, a JSON stdin/stdout
+executable for provider-only commands: `probe`, `build-command`,
+`parse-output`, `classify-error`, and `invoke`.
+
+This helper does not share Zeroshot clusters, task store, message bus,
+scheduler, PR/ship flow, TUI, or orchestration policy. Consumers such as
+Orchestra must call the JSON executable contract and must not import Zeroshot
+internals.
+
+See `docs/provider-cli-helper.md` for the ownership boundary, non-goals, rollout
+rules, and required verification commands.

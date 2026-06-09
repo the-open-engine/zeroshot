@@ -10,6 +10,7 @@
  */
 
 const { loadSettings, validateModelAgainstMax, VALID_MODELS } = require('../../lib/settings');
+const { applyValidatorQualityGateDefaults } = require('./agent-quality-gate-schema');
 
 const VALID_LEVELS = ['level1', 'level2', 'level3'];
 
@@ -57,6 +58,8 @@ function applyOutputDefaults(config) {
       required: ['summary', 'result'],
     };
   }
+
+  applyValidatorQualityGateDefaults(config);
 }
 
 function buildModelConfig(config) {
@@ -127,27 +130,37 @@ function validateModelConfig(config, modelConfig, maxModel, minModel) {
   }
 }
 
-function buildPromptConfig(config) {
-  if (config.prompt?.iterations) {
-    return { type: 'rules', rules: config.prompt.iterations };
-  }
-
-  if (config.prompt?.initial || config.prompt?.subsequent) {
+function buildInitialPromptRules(prompt) {
+  if (prompt?.initial || prompt?.subsequent) {
     const rules = [];
-    if (config.prompt.initial) rules.push({ match: '1', system: config.prompt.initial });
-    if (config.prompt.subsequent) rules.push({ match: '2+', system: config.prompt.subsequent });
-    return { type: 'rules', rules };
+    if (prompt.initial) rules.push({ match: '1', system: prompt.initial });
+    if (prompt.subsequent) rules.push({ match: '2+', system: prompt.subsequent });
+    return rules;
   }
 
-  if (typeof config.prompt === 'string') {
-    return { type: 'static', system: config.prompt };
+  return null;
+}
+
+function buildPromptConfig(config) {
+  const prompt = config.prompt;
+  if (prompt?.iterations) {
+    return { type: 'rules', rules: prompt.iterations };
   }
 
-  if (config.prompt?.system) {
-    return { type: 'static', system: config.prompt.system };
+  const initialRules = buildInitialPromptRules(prompt);
+  if (initialRules) {
+    return { type: 'rules', rules: initialRules };
   }
 
-  if (config.prompt) {
+  if (typeof prompt === 'string') {
+    return { type: 'static', system: prompt };
+  }
+
+  if (prompt?.system) {
+    return { type: 'static', system: prompt.system };
+  }
+
+  if (prompt) {
     throw new Error(`Agent "${config.id}": invalid prompt format`);
   }
 

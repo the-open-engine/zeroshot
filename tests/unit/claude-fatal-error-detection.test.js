@@ -1,41 +1,32 @@
 const { describe, it } = require('mocha');
 const { expect } = require('chai');
-const path = require('path');
-const { pathToFileURL } = require('url');
 
-function loadRecoveryModule() {
-  const modulePath = path.resolve(__dirname, '../../task-lib/claude-recovery.js');
-  return import(pathToFileURL(modulePath).href);
-}
+const { NO_MESSAGES_RETURNED, detectProviderFatalError } = require('../../lib/agent-cli-provider');
 
 describe('Claude fatal error detection', () => {
-  it('detects "No messages returned" in error output', async () => {
-    const { detectFatalClaudeError, NO_MESSAGES_RETURNED } = await loadRecoveryModule();
+  it('detects "No messages returned" in error output', () => {
     const line = 'Error: No messages returned';
 
-    const detected = detectFatalClaudeError(line);
+    const detected = detectProviderFatalError('claude', line);
 
     expect(detected).to.equal(`Claude CLI error: ${NO_MESSAGES_RETURNED}`);
   });
 
-  it('is case-insensitive', async () => {
-    const { detectFatalClaudeError, NO_MESSAGES_RETURNED } = await loadRecoveryModule();
+  it('is case-insensitive', () => {
     const line = 'error: NO MESSAGES RETURNED';
 
-    const detected = detectFatalClaudeError(line);
+    const detected = detectProviderFatalError('claude', line);
 
     expect(detected).to.equal(`Claude CLI error: ${NO_MESSAGES_RETURNED}`);
   });
 
-  it('returns null for unrelated output', async () => {
-    const { detectFatalClaudeError } = await loadRecoveryModule();
-
-    expect(detectFatalClaudeError('All good')).to.equal(null);
-    expect(detectFatalClaudeError('')).to.equal(null);
+  it('returns null for unrelated output', () => {
+    expect(detectProviderFatalError('claude', 'All good')).to.equal(null);
+    expect(detectProviderFatalError('claude', '')).to.equal(null);
+    expect(detectProviderFatalError('codex', 'Error: No messages returned')).to.equal(null);
   });
 
-  it('does not flag valid JSON output that contains the message', async () => {
-    const { detectFatalClaudeError } = await loadRecoveryModule();
+  it('does not flag valid JSON output that contains the message', () => {
     const jsonLine = JSON.stringify({
       type: 'result',
       structured_output: {
@@ -43,6 +34,6 @@ describe('Claude fatal error detection', () => {
       },
     });
 
-    expect(detectFatalClaudeError(jsonLine)).to.equal(null);
+    expect(detectProviderFatalError('claude', jsonLine)).to.equal(null);
   });
 });

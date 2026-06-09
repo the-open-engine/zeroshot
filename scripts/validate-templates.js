@@ -29,15 +29,16 @@ function parseArgs(argv) {
   const sampleSteps = Number(
     sampleStepsArg ? sampleStepsArg.split('=')[1] : process.env.ZEROSHOT_TEMPLATE_SIM_STEPS
   );
-  const sampleMs = Number(sampleMsArg ? sampleMsArg.split('=')[1] : process.env.ZEROSHOT_TEMPLATE_SIM_MS);
+  const sampleMs = Number(
+    sampleMsArg ? sampleMsArg.split('=')[1] : process.env.ZEROSHOT_TEMPLATE_SIM_MS
+  );
 
   const deep =
     argv.includes('--deep') ||
     argv.includes('--sim=deep') ||
     simMode === 'deep' ||
     simMode === 'all';
-  const randomSampling =
-    argv.includes('--sim=random') || simMode === 'random' || simMode === 'all';
+  const randomSampling = argv.includes('--sim=random') || simMode === 'random' || simMode === 'all';
 
   return {
     deep,

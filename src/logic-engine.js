@@ -11,6 +11,90 @@
 
 const vm = require('vm');
 
+function buildLedgerAPI(messageBus, clusterId) {
+  return {
+    query: (criteria) => {
+      return messageBus.query({ ...criteria, cluster_id: clusterId });
+    },
+
+    findLast: (criteria) => {
+      return messageBus.findLast({ ...criteria, cluster_id: clusterId });
+    },
+
+    count: (criteria) => {
+      return messageBus.count({ ...criteria, cluster_id: clusterId });
+    },
+
+    since: (timestamp) => {
+      return messageBus.since({ cluster_id: clusterId, timestamp });
+    },
+  };
+}
+
+function buildHelpers(ledgerAPI) {
+  return {
+    allResponded: (agents, topic, since) => {
+      const responses = ledgerAPI.query({ topic, since });
+      const responders = new Set(responses.map((r) => r.sender));
+      return agents.every((a) => responders.has(a.id || a));
+    },
+
+    hasConsensus: (topic, since) => {
+      const responses = ledgerAPI.query({ topic, since });
+      if (responses.length === 0) return false;
+      return responses.every((r) => r.content?.data?.approved === true);
+    },
+
+    timeSinceLastMessage: (topic) => {
+      const last = ledgerAPI.findLast({ topic });
+      if (!last) return Infinity;
+      return Date.now() - last.timestamp;
+    },
+
+    hasMessagesSince: (topic, since) => {
+      const count = ledgerAPI.count({ topic, since });
+      return count > 0;
+    },
+
+    getConfig: require('./config-router').getConfig,
+  };
+}
+
+function buildClusterAPI(cluster, clusterId) {
+  const getAgents = () => (cluster ? cluster.agents || [] : []);
+
+  return {
+    id: clusterId,
+    getAgents,
+    getAgentsByRole: (role) => getAgents().filter((a) => a.role === role),
+    getAgent: (id) => getAgents().find((a) => a.id === id) || null,
+  };
+}
+
+function buildAgentContext(agent) {
+  return {
+    id: agent.id,
+    role: agent.role,
+    iteration: agent.iteration || 0,
+    requiredQualityGates: Array.isArray(agent.requiredQualityGates)
+      ? agent.requiredQualityGates
+      : [],
+  };
+}
+
+function getSafeBuiltins() {
+  return { Set, Map, Array, Object, String, Number, Boolean, Math, Date, JSON };
+}
+
+function getQuietConsole() {
+  return {
+    log: () => {},
+    error: () => {},
+    warn: () => {},
+    info: () => {},
+  };
+}
+
 class LogicEngine {
   constructor(messageBus, cluster) {
     this.messageBus = messageBus;
@@ -75,123 +159,17 @@ class LogicEngine {
    */
   _buildContext(agent, message) {
     const clusterId = agent.cluster_id;
-
-    // Ledger API wrapper (auto-scoped to cluster)
-    const ledgerAPI = {
-      query: (criteria) => {
-        return this.messageBus.query({ ...criteria, cluster_id: clusterId });
-      },
-
-      findLast: (criteria) => {
-        return this.messageBus.findLast({ ...criteria, cluster_id: clusterId });
-      },
-
-      count: (criteria) => {
-        return this.messageBus.count({ ...criteria, cluster_id: clusterId });
-      },
-
-      since: (timestamp) => {
-        return this.messageBus.since({ cluster_id: clusterId, timestamp });
-      },
-    };
-
-    // Helper functions
-    const helpers = {
-      /**
-       * Check if all agents have responded to a topic since a timestamp
-       */
-      allResponded: (agents, topic, since) => {
-        const responses = ledgerAPI.query({ topic, since });
-        const responders = new Set(responses.map((r) => r.sender));
-        return agents.every((a) => responders.has(a.id || a));
-      },
-
-      /**
-       * Check if all responses have approved=true
-       */
-      hasConsensus: (topic, since) => {
-        const responses = ledgerAPI.query({ topic, since });
-        if (responses.length === 0) return false;
-        return responses.every((r) => r.content?.data?.approved === true);
-      },
-
-      /**
-       * Get time since last message on topic (in milliseconds)
-       */
-      timeSinceLastMessage: (topic) => {
-        const last = ledgerAPI.findLast({ topic });
-        if (!last) return Infinity;
-        return Date.now() - last.timestamp;
-      },
-
-      /**
-       * Check if a topic has any messages since timestamp
-       */
-      hasMessagesSince: (topic, since) => {
-        const count = ledgerAPI.count({ topic, since });
-        return count > 0;
-      },
-
-      /**
-       * Get cluster config based on complexity and task type
-       * Returns: { base: 'template-name', params: { ... } }
-       */
-      getConfig: require('./config-router').getConfig,
-    };
-
-    // Cluster API wrapper
-    const clusterAPI = {
-      id: clusterId,
-
-      getAgents: () => {
-        return this.cluster ? this.cluster.agents || [] : [];
-      },
-
-      getAgentsByRole: (role) => {
-        return this.cluster ? (this.cluster.agents || []).filter((a) => a.role === role) : [];
-      },
-
-      getAgent: (id) => {
-        return this.cluster ? (this.cluster.agents || []).find((a) => a.id === id) : null;
-      },
-    };
+    const ledgerAPI = buildLedgerAPI(this.messageBus, clusterId);
 
     // Build context
     return {
-      // Agent context
-      agent: {
-        id: agent.id,
-        role: agent.role,
-        iteration: agent.iteration || 0,
-      },
-
-      // Triggering message
+      agent: buildAgentContext(agent),
       message: message || null,
-
-      // APIs
       ledger: ledgerAPI,
-      cluster: clusterAPI,
-      helpers,
-
-      // Safe built-ins
-      Set,
-      Map,
-      Array,
-      Object,
-      String,
-      Number,
-      Boolean,
-      Math,
-      Date,
-      JSON,
-
-      // No-op console (prevent output in production)
-      console: {
-        log: () => {},
-        error: () => {},
-        warn: () => {},
-        info: () => {},
-      },
+      cluster: buildClusterAPI(this.cluster, clusterId),
+      helpers: buildHelpers(ledgerAPI),
+      ...getSafeBuiltins(),
+      console: getQuietConsole(),
     };
   }
 

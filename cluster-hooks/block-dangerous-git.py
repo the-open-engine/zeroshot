@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+from typing import Optional, Tuple
 
 
 # Patterns that should be BLOCKED
@@ -83,7 +84,7 @@ DANGEROUS_PATTERNS = [
 ]
 
 
-def check_command(command: str) -> tuple[bool, str, str] | None:
+def check_command(command: str) -> Optional[Tuple[bool, str, str]]:
     """Check if command matches any dangerous pattern.
 
     Returns (matched, reason, alternative) if dangerous, None if safe.
