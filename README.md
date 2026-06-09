@@ -202,7 +202,6 @@ zeroshot logs <id> -f
 zeroshot resume <id>
 zeroshot stop <id>
 zeroshot kill <id>
-zeroshot watch
 
 # Providers
 zeroshot providers
