@@ -72,7 +72,6 @@ IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
 | Ledger (SQLite)          | `src/ledger.js`                     |
 | Trigger evaluation       | `src/logic-engine.js`               |
 | Agent wrapper            | `src/agent-wrapper.js`              |
-| Rust TUI (Ratatui)       | `tui-rs/crates/zeroshot-tui/`       |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Issue providers          | `src/issue-providers/`              |
@@ -101,13 +100,13 @@ zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot                          # Rust TUI (TTY only)
-zeroshot tui                      # Rust TUI explicit entry
-zeroshot watch                    # Rust TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings
 ```
+
+The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
+and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
 
 **UX modes:**
 
