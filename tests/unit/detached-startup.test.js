@@ -66,6 +66,19 @@ describe('detached-startup helpers', function () {
     assert.strictEqual(isClusterRegistered('ready-cluster', storageDir), true);
   });
 
+  it('does not replace an existing clusters file when registering setup clusters', async function () {
+    const storageDir = createTempStorageDir();
+    const clustersFile = getClustersFilePath(storageDir);
+    fs.mkdirSync(path.dirname(clustersFile), { recursive: true });
+    fs.writeFileSync(clustersFile, JSON.stringify({ existing: { id: 'existing' } }));
+
+    await registerDetachedSetupCluster({ clusterId: 'new-cluster', storageDir });
+
+    const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    assert.deepStrictEqual(clusters.existing, { id: 'existing' });
+    assert.strictEqual(clusters['new-cluster'].id, 'new-cluster');
+  });
+
   it('registers detached setup clusters before the daemon creates a ledger', async function () {
     const storageDir = createTempStorageDir();
 

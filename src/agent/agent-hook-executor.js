@@ -295,6 +295,7 @@ function buildTransformSandbox({ resultData, context, agent }) {
 
 function runTransformScript(script, sandbox) {
   const vmContext = vm.createContext(sandbox);
+  // codeql[js/bad-code-sanitization] Transform scripts are repo-authored config code executed only inside Zeroshot's restricted VM sandbox.
   const wrappedScript = `(function() { ${script} })()`;
 
   try {
@@ -687,6 +688,7 @@ function evaluateHookLogic(params) {
 
   // Execute in VM sandbox with timeout
   const vmContext = vm.createContext(sandbox);
+  // codeql[js/bad-code-sanitization] Hook logic scripts are repo-authored config code executed only inside Zeroshot's restricted VM sandbox.
   const wrappedScript = `(function() { 'use strict'; ${logic.script} })()`;
 
   let result;
