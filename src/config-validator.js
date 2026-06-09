@@ -917,6 +917,7 @@ function validateLogicScripts(config) {
 
       // Syntax check
       try {
+        // codeql[js/bad-code-sanitization] Validator compiles repo-authored config scripts only to report syntax errors before runtime sandbox execution.
         const wrappedScript = `(function() { ${script} })()`;
         new vm.Script(wrappedScript);
       } catch (syntaxError) {
@@ -1296,6 +1297,7 @@ function validateHookLogic(hook, prefix, errors) {
   } else {
     try {
       const vm = require('vm');
+      // codeql[js/bad-code-sanitization] Validator compiles repo-authored hook logic only to report syntax errors before runtime sandbox execution.
       const wrappedScript = `(function() { 'use strict'; ${hook.logic.script} })()`;
       new vm.Script(wrappedScript);
     } catch (syntaxError) {

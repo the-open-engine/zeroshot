@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { afterEach, test } = require('node:test');
 
@@ -11,6 +12,10 @@ const createdTempFiles = new Set();
 afterEach(() => {
   for (const file of createdTempFiles) {
     if (fs.existsSync(file)) fs.unlinkSync(file);
+    const parentDir = path.dirname(file);
+    if (path.basename(parentDir).startsWith('zeroshot-schema-')) {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    }
   }
   createdTempFiles.clear();
 });
@@ -131,6 +136,8 @@ test('Codex helper exposes strict schema cleanup metadata through runtime facade
   const schema = JSON.parse(fs.readFileSync(actual.cleanupMetadata[0].path, 'utf8'));
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['foo']);
+  assert.equal(path.dirname(path.dirname(actual.cleanupMetadata[0].path)), os.tmpdir());
+  assert.match(path.basename(path.dirname(actual.cleanupMetadata[0].path)), /^zeroshot-schema-/);
 });
 
 test('model resolution and invalid-model permanence match helper', () => {

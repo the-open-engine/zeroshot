@@ -108,7 +108,8 @@ export function writeStrictOutputSchemaFile(schema: unknown): string {
   const parsedSchema = typeof schema === 'string' ? parseJson(schema) : schema;
   const strictSchema = enforceOpenAIStrictSchema(parsedSchema);
   const schemaText = stringifyJson(strictSchema, 2);
-  const schemaFile = path.join(os.tmpdir(), `zeroshot-schema-${Date.now()}-${randomUUID()}.json`);
-  fs.writeFileSync(schemaFile, schemaText);
+  const schemaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-schema-'));
+  const schemaFile = path.join(schemaDir, `${randomUUID()}.json`);
+  fs.writeFileSync(schemaFile, schemaText, { flag: 'wx', mode: 0o600 });
   return schemaFile;
 }
