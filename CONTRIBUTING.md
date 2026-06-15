@@ -30,7 +30,7 @@ Thank you for your interest in contributing to Zeroshot! This guide covers every
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/covibes/zeroshot.git
+   git clone https://github.com/the-open-engine/zeroshot.git
    cd zeroshot
    ```
 
