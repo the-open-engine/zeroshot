@@ -79,7 +79,7 @@ The semantic-release workflow expects an `NPM_TOKEN` secret.
 
 ### Add the secret:
 
-1. Go to your GitHub repository: https://github.com/covibes/zeroshot
+1. Go to your GitHub repository: https://github.com/the-open-engine/zeroshot
 
 2. Navigate to: **Settings → Secrets and variables → Actions**
 
@@ -168,7 +168,7 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
 
 ### Check the release:
 
-- **GitHub**: https://github.com/covibes/zeroshot/releases
+- **GitHub**: https://github.com/the-open-engine/zeroshot/releases
 - **npm**: https://www.npmjs.com/package/@covibes/zeroshot
 
 ## Conventional Commit Format

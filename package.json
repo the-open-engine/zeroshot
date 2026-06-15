@@ -73,13 +73,13 @@
   ],
   "author": "Covibes",
   "license": "MIT",
-  "homepage": "https://github.com/covibes/zeroshot",
+  "homepage": "https://github.com/the-open-engine/zeroshot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/covibes/zeroshot.git"
+    "url": "https://github.com/the-open-engine/zeroshot.git"
   },
   "bugs": {
-    "url": "https://github.com/covibes/zeroshot/issues"
+    "url": "https://github.com/the-open-engine/zeroshot/issues"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -399,8 +399,8 @@ Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as no
 
 Multiple CI jobs fail → Diagnose each independently.
 
-1. Get exact status: `gh api repos/covibes/zeroshot/actions/runs/{RUN_ID}/jobs`
-2. Read ACTUAL error: `gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs`
+1. Get exact status: `gh api repos/the-open-engine/zeroshot/actions/runs/{RUN_ID}/jobs`
+2. Read ACTUAL error: `gh api repos/the-open-engine/zeroshot/actions/jobs/{JOB_ID}/logs`
 3. Fix ONE error → Push → Rerun → Repeat
 
 ## Release Pipeline Convention

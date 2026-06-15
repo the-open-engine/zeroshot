@@ -13,7 +13,7 @@
   <em>Demo (100x speed, 90-minute run, 5 iterations to approval)</em>
 </p>
 
-[![CI](https://github.com/covibes/zeroshot/actions/workflows/ci.yml/badge.svg)](https://github.com/covibes/zeroshot/actions/workflows/ci.yml)
+[![CI](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml/badge.svg)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@covibes/zeroshot.svg)](https://www.npmjs.com/package/@covibes/zeroshot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
@@ -503,6 +503,6 @@ The TUI is not included in this release. Use `zeroshot logs -f`, `zeroshot logs 
 
 ---
 
-MIT - [Covibes](https://github.com/covibes)
+MIT - [Covibes](https://github.com/the-open-engine)
 
 Built on [Claude Code](https://claude.com/product/claude-code) by Anthropic.
