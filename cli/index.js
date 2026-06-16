@@ -2973,10 +2973,10 @@ program
         return;
       }
 
-      // PDF export - convert ANSI to HTML, then to PDF
+      // PDF export - convert ANSI to HTML, then render it to PDF
       const outputFile = options.output || `${clusterId}.pdf`;
       const AnsiToHtml = require('ansi-to-html');
-      const { mdToPdf } = await import('md-to-pdf');
+      const { default: puppeteer } = await import('puppeteer');
 
       const ansiConverter = new AnsiToHtml({
         fg: '#d4d4d4',
@@ -3002,22 +3002,11 @@ program
       });
 
       const htmlContent = ansiConverter.toHtml(terminalOutput);
-      const fullHtml = `<pre style="margin:0;padding:0;white-space:pre-wrap;word-wrap:break-word;">${htmlContent}</pre>`;
-
-      const pdf = await mdToPdf(
-        { content: fullHtml },
-        {
-          pdf_options: {
-            format: 'A4',
-            margin: {
-              top: '10mm',
-              right: '10mm',
-              bottom: '10mm',
-              left: '10mm',
-            },
-            printBackground: true,
-          },
-          css: `
+      const fullHtml = `<!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
             @page { size: A4 landscape; }
             body {
               margin: 0; padding: 16px;
@@ -3026,11 +3015,33 @@ program
               font-size: 9pt; line-height: 1.4;
             }
             pre { margin: 0; font-family: inherit; }
-          `,
-        }
-      );
+            </style>
+          </head>
+          <body>
+            <pre style="margin:0;padding:0;white-space:pre-wrap;word-wrap:break-word;">${htmlContent}</pre>
+          </body>
+        </html>`;
 
-      require('fs').writeFileSync(outputFile, pdf.content);
+      const browser = await puppeteer.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
+        const pdf = await page.pdf({
+          format: 'A4',
+          landscape: true,
+          margin: {
+            top: '10mm',
+            right: '10mm',
+            bottom: '10mm',
+            left: '10mm',
+          },
+          printBackground: true,
+        });
+
+        require('fs').writeFileSync(outputFile, pdf);
+      } finally {
+        await browser.close();
+      }
       console.log(`Exported to ${outputFile}`);
     } catch (error) {
       console.error('Error exporting cluster:', error.message);

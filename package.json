@@ -107,10 +107,10 @@
     "better-sqlite3": "^12.6.2",
     "chalk": "^4.1.2",
     "commander": "^14.0.2",
-    "md-to-pdf": "^5.2.5",
     "node-pty": "^1.1.0",
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
+    "puppeteer": "^24.34.0",
     "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
@@ -140,6 +140,9 @@
     "unimported": "^1.31.0"
   },
   "overrides": {
+    "cosmiconfig": {
+      "js-yaml": "4.2.0"
+    },
     "xml2js": "^0.5.0",
     "diff": ">=8.0.3",
     "tar": ">=7.5.8",
