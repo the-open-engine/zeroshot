@@ -2,7 +2,7 @@ UPDATE THIS FILE when making architectural changes, adding patterns, or changing
 
 # Zeroshot: Multi-Agent Coordination Engine
 
-Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @covibes/zeroshot` or `npm link` (dev).
+Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @the-open-engine/zeroshot` or `npm link` (dev).
 
 ## 🔴 CRITICAL RULES
 

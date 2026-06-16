@@ -23,7 +23,7 @@ import {
 const expectedMetadata: Readonly<AgentCliProviderHelperMetadata> = agentCliProviderHelperMetadata;
 
 test('provider helper metadata documents package and build output', (): void => {
-  assert.equal(expectedMetadata.packageName, '@covibes/zeroshot');
+  assert.equal(expectedMetadata.packageName, '@the-open-engine/zeroshot');
   assert.equal(expectedMetadata.buildOutputDir, 'lib/agent-cli-provider');
   assert.equal(expectedMetadata.contractVersion, 1);
   assert.equal(typeof expectedMetadata.adapterVersion, 'string');

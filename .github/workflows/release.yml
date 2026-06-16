@@ -146,7 +146,7 @@ jobs:
           TARBALL=$(npm pack | tail -1)
           echo "Created: $TARBALL"
 
-          # Install from tarball (simulates npm install -g @covibes/zeroshot)
+          # Install from tarball (simulates npm install -g @the-open-engine/zeroshot)
           npm install -g "./$TARBALL"
 
           # Smoke tests - must all pass
@@ -156,7 +156,7 @@ jobs:
           zeroshot list
 
           # Cleanup
-          npm uninstall -g @covibes/zeroshot
+          npm uninstall -g @the-open-engine/zeroshot
           rm "$TARBALL"
 
           echo "✅ Package verification passed"
@@ -164,6 +164,9 @@ jobs:
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Trusted publishing is attempted first; keep the npm automation token
+          # as fallback for first publish / unconfigured trusted-publisher cases.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # SAFETY: Manual triggers MUST be dry-run only
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

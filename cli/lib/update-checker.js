@@ -20,7 +20,7 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 
 // npm registry URL
-const REGISTRY_URL = 'https://registry.npmjs.org/@covibes/zeroshot/latest';
+const REGISTRY_URL = 'https://registry.npmjs.org/@the-open-engine/zeroshot/latest';
 
 /**
  * Get current package version
@@ -146,14 +146,14 @@ function runUpdate() {
     if (!canWriteToNpmGlobal()) {
       console.log('\n⚠️  Cannot auto-update: no write permission to npm global directory.');
       console.log('   Run manually with sudo:');
-      console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
+      console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
       resolve(false);
       return;
     }
 
     console.log('\n📥 Installing update...');
 
-    const proc = spawn('npm', ['install', '-g', '@covibes/zeroshot@latest'], {
+    const proc = spawn('npm', ['install', '-g', '@the-open-engine/zeroshot@latest'], {
       stdio: 'inherit',
       shell: true,
     });
@@ -165,14 +165,14 @@ function runUpdate() {
         resolve(true);
       } else {
         console.log('❌ Update failed. Try manually:');
-        console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
+        console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
         resolve(false);
       }
     });
 
     proc.on('error', () => {
       console.log('❌ Update failed. Try manually:');
-      console.log('   sudo npm install -g @covibes/zeroshot@latest\n');
+      console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
       resolve(false);
     });
   });
@@ -246,9 +246,9 @@ async function checkForUpdates(options = {}) {
   if (options.quiet) {
     console.log(`📦 Update available: ${currentVersion} → ${latestVersion}`);
     if (hasWriteAccess) {
-      console.log('   Run: npm install -g @covibes/zeroshot@latest\n');
+      console.log('   Run: npm install -g @the-open-engine/zeroshot@latest\n');
     } else {
-      console.log('   Run: sudo npm install -g @covibes/zeroshot@latest\n');
+      console.log('   Run: sudo npm install -g @the-open-engine/zeroshot@latest\n');
     }
     return;
   }
@@ -257,7 +257,7 @@ async function checkForUpdates(options = {}) {
   // (they'd say yes then get an error, which is frustrating UX)
   if (!hasWriteAccess) {
     console.log(`\n📦 Update available: ${currentVersion} → ${latestVersion}`);
-    console.log('   Run: sudo npm install -g @covibes/zeroshot@latest\n');
+    console.log('   Run: sudo npm install -g @the-open-engine/zeroshot@latest\n');
     return;
   }
 
