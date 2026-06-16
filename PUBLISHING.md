@@ -1,4 +1,4 @@
-# NPM Publishing Setup for @covibes/zeroshot
+# NPM Publishing Setup for @the-open-engine/zeroshot
 
 This document explains how to set up automated NPM publishing using semantic-release and GitHub Actions.
 
@@ -6,18 +6,18 @@ This document explains how to set up automated NPM publishing using semantic-rel
 
 Before you can publish the package, you need to:
 
-1. **Create the @covibes npm organization** (if it doesn't exist yet)
-2. **Generate an NPM automation token**
-3. **Add the token to GitHub Secrets**
+1. **Create the @the-open-engine npm organization** (if it doesn't exist yet)
+2. **Configure npm trusted publishing** for this GitHub Actions workflow
+3. **Keep an NPM automation token fallback** until trusted publishing has been verified
 
-## Step 1: Create the @covibes npm Organization
+## Step 1: Create the @the-open-engine npm Organization
 
-The package name `@covibes/zeroshot` uses the `@covibes` scope, which requires an npm organization.
+The package name `@the-open-engine/zeroshot` uses the `@the-open-engine` scope, which requires an npm organization.
 
 ### Check if the organization exists:
 
 ```bash
-npm org ls @covibes
+npm org ls @the-open-engine
 ```
 
 If you get an error or "organization not found", you need to create it:
@@ -32,7 +32,7 @@ If you get an error or "organization not found", you need to create it:
 
 2. Visit https://www.npmjs.com/org/create
 
-3. Create an organization named `covibes`
+3. Create an organization named `the-open-engine`
 
 4. Choose the organization type:
    - **Free** (for public packages only)
@@ -40,60 +40,42 @@ If you get an error or "organization not found", you need to create it:
 
 5. Verify the organization exists:
    ```bash
-   npm org ls @covibes
+   npm org ls @the-open-engine
    ```
 
-## Step 2: Generate an NPM Automation Token
+## Step 2: Configure Trusted Publishing
 
-For CI/CD publishing, you need an **automation token** (not a classic token).
+The release workflow is configured for npm trusted publishing via GitHub Actions OIDC. Configure the package on npm with:
+
+- **GitHub organization/user:** `the-open-engine`
+- **Repository:** `zeroshot`
+- **Workflow filename:** `release.yml`
+- **Allowed action:** `npm publish`
+
+The package's `repository.url` in `package.json` must continue to match `git+https://github.com/the-open-engine/zeroshot.git`.
+
+If `@the-open-engine/zeroshot` does not exist yet, use the `NPM_TOKEN` fallback in Step 3 for the first publish, then add the trusted publisher in npm package settings and keep the token only as an emergency fallback.
+
+## Step 3: Add NPM_TOKEN Fallback
+
+The semantic-release workflow attempts trusted publishing first and falls back to `NPM_TOKEN` when npm OIDC cannot publish, such as the first publish of a new package or a missing trusted-publisher configuration.
 
 ### Generate the token:
 
 1. Log in to npmjs.com
-
-2. Navigate to **Access Tokens** page:
-   - Click your profile icon → "Access Tokens"
-   - OR visit: https://www.npmjs.com/settings/[your-username]/tokens
-
-3. Click **"Generate New Token"** → Select **"Automation"**
-
-4. Name the token: `GitHub Actions - zeroshot`
-
-5. Set the token type to **"Automation"**
-
-6. **Copy the token immediately** (you won't be able to see it again)
-
-### Token Permissions:
-
-Automation tokens have these capabilities:
-
-- ✅ Publish packages
-- ✅ Update package metadata
-- ✅ Read private packages (if your org has any)
-- ❌ Cannot bypass 2FA prompts
-- ❌ Cannot be used for `npm login`
-
-## Step 3: Add NPM_TOKEN to GitHub Secrets
-
-The semantic-release workflow expects an `NPM_TOKEN` secret.
+2. Open **Access Tokens**
+3. Generate an **Automation** token named `GitHub Actions - zeroshot`
+4. Copy the token immediately
 
 ### Add the secret:
 
-1. Go to your GitHub repository: https://github.com/the-open-engine/zeroshot
-
-2. Navigate to: **Settings → Secrets and variables → Actions**
-
-3. Click **"New repository secret"**
-
+1. Go to https://github.com/the-open-engine/zeroshot
+2. Navigate to **Settings -> Secrets and variables -> Actions**
+3. Click **New repository secret**
 4. Set:
    - **Name:** `NPM_TOKEN`
-   - **Value:** [paste the automation token from Step 2]
-
-5. Click **"Add secret"**
-
-### Verify the secret:
-
-The secret should now appear in the list as `NPM_TOKEN` (value hidden).
+   - **Value:** the automation token
+5. Save the secret
 
 ## Step 4: Verify Package Configuration
 
@@ -101,8 +83,8 @@ The package.json is already configured correctly:
 
 ```json
 {
-  "name": "@covibes/zeroshot",
-  "version": "0.1.0",
+  "name": "@the-open-engine/zeroshot",
+  "version": "5.4.0",
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
@@ -114,11 +96,11 @@ The package.json is already configured correctly:
 
 - **`"access": "public"`** - Required for scoped packages to be public
 - **`"registry"`** - Explicit npm registry URL
-- **`"name"`** - Scoped package name with @covibes org
+- **`"name"`** - Scoped package name with @the-open-engine org
 
 ## Step 5: Test Publishing Locally (Optional)
 
-Before relying on CI/CD, test publishing manually:
+Before relying on CI/CD, test packaging manually:
 
 ### Dry run:
 
@@ -128,18 +110,18 @@ npm publish --dry-run
 
 This shows what would be published without actually publishing.
 
-### Manual publish (first time):
+### Manual publish fallback:
 
 ```bash
 npm login
-npm publish
+npm publish --access public
 ```
 
-For subsequent releases, semantic-release will handle this automatically.
+Use manual publish only for emergency recovery. Normal releases should go through GitHub Actions.
 
 ## Step 6: How Automated Publishing Works
 
-Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
+Once trusted publishing or the `NPM_TOKEN` fallback is configured, publishing happens automatically from `main` after CI passes.
 
 ### Trigger a release:
 
@@ -153,10 +135,12 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
    git commit -m "feat!: breaking change"     # Major version bump (0.1.0 → 1.0.0)
    ```
 
-3. **Push to main branch**:
+3. **Merge through the protected flow**:
 
    ```bash
-   git push origin main
+   # PR into dev, then release PR from dev to main
+   gh pr create --base dev
+   gh pr create --base main --head dev --title "Release"
    ```
 
 4. **GitHub Actions runs** the release workflow:
@@ -169,7 +153,7 @@ Once the `NPM_TOKEN` secret is configured, publishing happens automatically:
 ### Check the release:
 
 - **GitHub**: https://github.com/the-open-engine/zeroshot/releases
-- **npm**: https://www.npmjs.com/package/@covibes/zeroshot
+- **npm**: https://www.npmjs.com/package/@the-open-engine/zeroshot
 
 ## Conventional Commit Format
 
@@ -196,27 +180,27 @@ git commit -m "feat: new API" -m "BREAKING CHANGE: removes old API"
 
 ## Troubleshooting
 
-### Error: "npm ERR! 404 Not Found - PUT https://registry.npmjs.org/@covibes%2fzeroshot"
+### Error: "npm ERR! 404 Not Found - PUT https://registry.npmjs.org/@the-open-engine%2fzeroshot"
 
-**Cause:** The @covibes organization doesn't exist.
+**Cause:** The @the-open-engine organization or package is missing, trusted publishing is not configured for `the-open-engine/zeroshot` + `release.yml`, or the token fallback lacks publish access.
 
-**Fix:** Create the organization (see Step 1).
+**Fix:** Create the organization, verify `package.json#repository.url`, configure trusted publishing, or update `NPM_TOKEN`.
 
 ### Error: "npm ERR! 403 Forbidden"
 
-**Cause:** The NPM_TOKEN doesn't have permission to publish to @covibes.
+**Cause:** The token fallback does not have permission to publish to @the-open-engine.
 
 **Fix:**
 
-1. Verify you're a member of the @covibes npm organization
+1. Verify you're a member of the @the-open-engine npm organization
 2. Regenerate the automation token
 3. Update the GitHub secret
 
 ### Error: "npm ERR! need auth This command requires you to be logged in"
 
-**Cause:** The NPM_TOKEN secret is missing or invalid.
+**Cause:** Trusted publishing is not configured and the `NPM_TOKEN` fallback is missing or invalid.
 
-**Fix:** Verify the secret exists in GitHub Settings → Secrets → Actions.
+**Fix:** Configure trusted publishing or verify the secret exists in GitHub Settings -> Secrets -> Actions.
 
 ### No release created
 
@@ -236,33 +220,34 @@ npm login
 npm version patch   # or 'minor' or 'major'
 
 # Publish
-npm publish
+npm publish --access public
 
-# Push the version commit and tag
-git push origin main --follow-tags
+# Open PRs through the protected dev -> main flow,
+# then let the release workflow own normal publication again.
 ```
 
 ## Security Best Practices
 
-1. ✅ **Use automation tokens** (not classic tokens)
-2. ✅ **Store tokens in GitHub Secrets** (never commit them)
-3. ✅ **Enable 2FA** on your npm account
-4. ✅ **Rotate tokens** periodically (e.g., every 6 months)
-5. ✅ **Revoke tokens** immediately if compromised
+1. Prefer trusted publishing over long-lived tokens.
+2. Keep `NPM_TOKEN` only as a first-publish or emergency fallback.
+3. Store tokens only in GitHub Secrets.
+4. Enable 2FA on npm maintainer accounts.
+5. Revoke or rotate tokens immediately if compromised.
 
 ## Next Steps
 
-1. ✅ Create @covibes npm organization (if needed)
-2. ✅ Generate NPM automation token
-3. ✅ Add NPM_TOKEN to GitHub Secrets
+1. ✅ Create @the-open-engine npm organization (if needed)
+2. ✅ Configure trusted publishing for `the-open-engine/zeroshot` + `release.yml`
+3. ✅ Add or refresh `NPM_TOKEN` as fallback
 4. ✅ Make a commit with `feat:` or `fix:`
-5. ✅ Push to main branch
+5. ✅ Merge dev to main through the protected PR flow
 6. ✅ Watch GitHub Actions run the release
 7. ✅ Verify package published to npm
 
 ## Resources
 
 - [npm Organizations](https://docs.npmjs.com/organizations)
+- [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
 - [npm Tokens](https://docs.npmjs.com/about-access-tokens)
 - [Conventional Commits](https://www.conventionalcommits.org/)
 - [semantic-release](https://semantic-release.gitbook.io/)

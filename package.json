@@ -1,5 +1,5 @@
 {
-  "name": "@covibes/zeroshot",
+  "name": "@the-open-engine/zeroshot",
   "version": "5.4.0",
   "description": "Multi-agent orchestration engine for Claude, Codex, and Gemini",
   "main": "src/orchestrator.js",
@@ -76,7 +76,7 @@
   "homepage": "https://github.com/the-open-engine/zeroshot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/the-open-engine/zeroshot.git"
+    "url": "git+https://github.com/the-open-engine/zeroshot.git"
   },
   "bugs": {
     "url": "https://github.com/the-open-engine/zeroshot/issues"

@@ -4,7 +4,7 @@
 
 <!-- install-placeholder -->
 <p align="center">
-  <code>npm install -g @covibes/zeroshot</code>
+  <code>npm install -g @the-open-engine/zeroshot</code>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 </p>
 
 [![CI](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml/badge.svg)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/@covibes/zeroshot.svg)](https://www.npmjs.com/package/@covibes/zeroshot)
+[![npm version](https://img.shields.io/npm/v/@the-open-engine/zeroshot.svg)](https://www.npmjs.com/package/@the-open-engine/zeroshot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-brightgreen.svg)](https://nodejs.org/)
 ![Platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue.svg)
@@ -82,7 +82,7 @@ and surface conflicts with details. Handle the ABA problem where version goes A-
 **Platforms**: Linux, macOS. Windows (native/WSL) is deferred while we harden reliability and multi-provider correctness.
 
 ```bash
-npm install -g @covibes/zeroshot
+npm install -g @the-open-engine/zeroshot
 ```
 
 **Requires**: Node 18+, at least one provider CLI (Claude Code, Codex, Gemini, Opencode).
@@ -483,7 +483,7 @@ zeroshot settings set dockerEnvPassthrough '["MY_API_KEY", "TF_VAR_*"]'
 | `--docker` fails              | Docker must be running: `docker ps` to verify                                             |
 | Cluster stuck                 | `zeroshot resume <id>` to continue                                                        |
 | Agent keeps failing           | Check `zeroshot logs <id>` for actual error                                               |
-| `zeroshot: command not found` | `npm install -g @covibes/zeroshot`                                                        |
+| `zeroshot: command not found` | `npm install -g @the-open-engine/zeroshot`                                                |
 | Agents misbehave              | `/analyze-cluster-postmortem <id>` in Claude Code (creates issue if fix is generalizable) |
 
 </details>

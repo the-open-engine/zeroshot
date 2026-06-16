@@ -3,7 +3,7 @@ UPDATE THIS FILE when making architectural changes, adding patterns, or changing
 # Zeroshot: Multi-Agent Coordination Engine
 
 Operational rules and references for automated agents working on this repo. Install:
-`npm i -g @covibes/zeroshot` or `npm link` (dev).
+`npm i -g @the-open-engine/zeroshot` or `npm link` (dev).
 
 ## CRITICAL RULES
 

@@ -76,7 +76,7 @@ export type {
 import type { AgentCliProviderHelperMetadata } from './types';
 
 export const agentCliProviderHelperMetadata: Readonly<AgentCliProviderHelperMetadata> = {
-  packageName: '@covibes/zeroshot',
+  packageName: '@the-open-engine/zeroshot',
   buildOutputDir: 'lib/agent-cli-provider',
   contractVersion: 1,
   adapterVersion: '1',

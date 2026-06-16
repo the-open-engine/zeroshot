@@ -6,7 +6,7 @@ export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type OutputFormat = 'text' | 'json' | 'stream-json';
 
 export interface AgentCliProviderHelperMetadata {
-  readonly packageName: '@covibes/zeroshot';
+  readonly packageName: '@the-open-engine/zeroshot';
   readonly buildOutputDir: 'lib/agent-cli-provider';
   readonly contractVersion: 1;
   readonly adapterVersion: string;
