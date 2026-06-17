@@ -7,8 +7,10 @@ This document explains how to set up automated NPM publishing using semantic-rel
 Before you can publish the package, you need to:
 
 1. **Create the @the-open-engine npm organization** (if it doesn't exist yet)
-2. **Configure npm trusted publishing** for this GitHub Actions workflow
-3. **Keep an NPM automation token fallback** until trusted publishing has been verified
+2. **Create the initial @the-open-engine/zeroshot package** with an interactive 2FA publish if it does not exist yet
+3. **Configure npm trusted publishing** for this GitHub Actions workflow
+
+Do not add an `NPM_TOKEN` publish fallback. This repository is configured to fail closed if OIDC trusted publishing is not available.
 
 ## Step 1: Create the @the-open-engine npm Organization
 
@@ -43,7 +45,19 @@ If you get an error or "organization not found", you need to create it:
    npm org ls @the-open-engine
    ```
 
-## Step 2: Configure Trusted Publishing
+## Step 2: Create the Initial Package with 2FA
+
+npm trusted publishing is configured per package. If `@the-open-engine/zeroshot` does not exist yet, npm cannot attach a trusted publisher to it. Create the package once with an interactive maintainer publish:
+
+```bash
+npm login
+npm ci
+npm publish --access public --otp <your-2fa-code>
+```
+
+Run this from a clean checkout of the `main` commit that should seed the new package scope. Do not create or store an automation publish token for this step.
+
+## Step 3: Configure Trusted Publishing
 
 The release workflow is configured for npm trusted publishing via GitHub Actions OIDC. Configure the package on npm with:
 
@@ -53,29 +67,6 @@ The release workflow is configured for npm trusted publishing via GitHub Actions
 - **Allowed action:** `npm publish`
 
 The package's `repository.url` in `package.json` must continue to match `git+https://github.com/the-open-engine/zeroshot.git`.
-
-If `@the-open-engine/zeroshot` does not exist yet, use the `NPM_TOKEN` fallback in Step 3 for the first publish, then add the trusted publisher in npm package settings and keep the token only as an emergency fallback.
-
-## Step 3: Add NPM_TOKEN Fallback
-
-The semantic-release workflow attempts trusted publishing first and falls back to `NPM_TOKEN` when npm OIDC cannot publish, such as the first publish of a new package or a missing trusted-publisher configuration.
-
-### Generate the token:
-
-1. Log in to npmjs.com
-2. Open **Access Tokens**
-3. Generate an **Automation** token named `GitHub Actions - zeroshot`
-4. Copy the token immediately
-
-### Add the secret:
-
-1. Go to https://github.com/the-open-engine/zeroshot
-2. Navigate to **Settings -> Secrets and variables -> Actions**
-3. Click **New repository secret**
-4. Set:
-   - **Name:** `NPM_TOKEN`
-   - **Value:** the automation token
-5. Save the secret
 
 ## Step 4: Verify Package Configuration
 
@@ -110,18 +101,18 @@ npm publish --dry-run
 
 This shows what would be published without actually publishing.
 
-### Manual publish fallback:
+### Manual first publish:
 
 ```bash
 npm login
-npm publish --access public
+npm publish --access public --otp <your-2fa-code>
 ```
 
-Use manual publish only for emergency recovery. Normal releases should go through GitHub Actions.
+Use manual publish only for the initial package creation or emergency recovery. Normal releases should go through GitHub Actions trusted publishing.
 
 ## Step 6: How Automated Publishing Works
 
-Once trusted publishing or the `NPM_TOKEN` fallback is configured, publishing happens automatically from `main` after CI passes.
+Once trusted publishing is configured, publishing happens automatically from `main` after CI passes.
 
 ### Trigger a release:
 
@@ -182,25 +173,25 @@ git commit -m "feat: new API" -m "BREAKING CHANGE: removes old API"
 
 ### Error: "npm ERR! 404 Not Found - PUT https://registry.npmjs.org/@the-open-engine%2fzeroshot"
 
-**Cause:** The @the-open-engine organization or package is missing, trusted publishing is not configured for `the-open-engine/zeroshot` + `release.yml`, or the token fallback lacks publish access.
+**Cause:** The @the-open-engine organization or package is missing, or trusted publishing is not configured for `the-open-engine/zeroshot` + `release.yml`.
 
-**Fix:** Create the organization, verify `package.json#repository.url`, configure trusted publishing, or update `NPM_TOKEN`.
+**Fix:** Create the organization, create the first package version with interactive 2FA if needed, verify `package.json#repository.url`, and configure trusted publishing.
 
 ### Error: "npm ERR! 403 Forbidden"
 
-**Cause:** The token fallback does not have permission to publish to @the-open-engine.
+**Cause:** Your npm account does not have permission to publish to @the-open-engine, or the trusted publisher is not allowed to publish this package.
 
 **Fix:**
 
 1. Verify you're a member of the @the-open-engine npm organization
-2. Regenerate the automation token
-3. Update the GitHub secret
+2. Verify the package trusted publisher is configured for `the-open-engine/zeroshot` + `release.yml`
+3. Verify the package is public and `package.json#repository.url` matches the GitHub repository
 
 ### Error: "npm ERR! need auth This command requires you to be logged in"
 
-**Cause:** Trusted publishing is not configured and the `NPM_TOKEN` fallback is missing or invalid.
+**Cause:** Trusted publishing is not configured or the package cannot be matched to the configured publisher.
 
-**Fix:** Configure trusted publishing or verify the secret exists in GitHub Settings -> Secrets -> Actions.
+**Fix:** Configure trusted publishing in npm package settings and verify the workflow filename is `release.yml`.
 
 ### No release created
 
@@ -220,7 +211,7 @@ npm login
 npm version patch   # or 'minor' or 'major'
 
 # Publish
-npm publish --access public
+npm publish --access public --otp <your-2fa-code>
 
 # Open PRs through the protected dev -> main flow,
 # then let the release workflow own normal publication again.
@@ -229,16 +220,16 @@ npm publish --access public
 ## Security Best Practices
 
 1. Prefer trusted publishing over long-lived tokens.
-2. Keep `NPM_TOKEN` only as a first-publish or emergency fallback.
-3. Store tokens only in GitHub Secrets.
+2. Do not add an `NPM_TOKEN` publish fallback.
+3. Use interactive 2FA for the one-time initial package creation.
 4. Enable 2FA on npm maintainer accounts.
-5. Revoke or rotate tokens immediately if compromised.
+5. Revoke any historical publish tokens that can access this package.
 
 ## Next Steps
 
 1. ✅ Create @the-open-engine npm organization (if needed)
-2. ✅ Configure trusted publishing for `the-open-engine/zeroshot` + `release.yml`
-3. ✅ Add or refresh `NPM_TOKEN` as fallback
+2. ✅ Create the initial `@the-open-engine/zeroshot` package with interactive 2FA if needed
+3. ✅ Configure trusted publishing for `the-open-engine/zeroshot` + `release.yml`
 4. ✅ Make a commit with `feat:` or `fix:`
 5. ✅ Merge dev to main through the protected PR flow
 6. ✅ Watch GitHub Actions run the release
@@ -248,7 +239,6 @@ npm publish --access public
 
 - [npm Organizations](https://docs.npmjs.com/organizations)
 - [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
-- [npm Tokens](https://docs.npmjs.com/about-access-tokens)
 - [Conventional Commits](https://www.conventionalcommits.org/)
 - [semantic-release](https://semantic-release.gitbook.io/)
 - [GitHub Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
