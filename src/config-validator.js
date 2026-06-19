@@ -17,6 +17,13 @@ const { getProvider } = require('./providers');
 const { CAPABILITIES } = require('./providers/capabilities');
 const { GUIDANCE_TOPICS } = require('./guidance-topics');
 
+const HOOK_ACTION_TOPIC_CONTRACTS = Object.freeze({
+  verify_pull_request: Object.freeze([
+    { topic: 'CLUSTER_COMPLETE', keys: null },
+    { topic: 'PUSH_BLOCKED', keys: null },
+  ]),
+});
+
 /**
  * Check if config is a conductor-bootstrap style config
  * Conductor configs dynamically spawn agents via CLUSTER_OPERATIONS
@@ -288,6 +295,25 @@ function ensureTopicList(map, topic) {
   return map.get(topic);
 }
 
+function getHookActionTopicContracts(hook) {
+  if (!hook?.action) {
+    return [];
+  }
+  return HOOK_ACTION_TOPIC_CONTRACTS[hook.action] || [];
+}
+
+function recordOutputTopic(agent, topic, topicProducers, agentOutputTopics, producerId = agent.id) {
+  const producers = ensureTopicList(topicProducers, topic);
+  if (!producers.includes(producerId)) {
+    producers.push(producerId);
+  }
+
+  const outputs = agentOutputTopics.get(agent.id);
+  if (!outputs.includes(topic)) {
+    outputs.push(topic);
+  }
+}
+
 function recordAgentTriggers(agent, topicConsumers, agentInputTopics) {
   for (const trigger of agent.triggers || []) {
     const topic = trigger.topic;
@@ -321,16 +347,19 @@ function extractDynamicTopicsFromScript(script, ctx) {
 }
 
 function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
+  const hook = agent.hooks?.onComplete;
   const outputTopic = agent.hooks?.onComplete?.config?.topic;
   if (outputTopic) {
-    ensureTopicList(topicProducers, outputTopic).push(agent.id);
-    agentOutputTopics.get(agent.id).push(outputTopic);
+    recordOutputTopic(agent, outputTopic, topicProducers, agentOutputTopics);
   }
 
   const ctx = { outputTopic, agentId: agent.id, topicProducers, agentOutputTopics };
-  const hook = agent.hooks?.onComplete;
   extractDynamicTopicsFromScript(hook?.logic?.script, ctx);
   extractDynamicTopicsFromScript(hook?.transform?.script, ctx);
+
+  for (const contract of getHookActionTopicContracts(hook)) {
+    recordOutputTopic(agent, contract.topic, topicProducers, agentOutputTopics);
+  }
 }
 
 function buildMessageFlowGraph(config) {
@@ -682,6 +711,13 @@ function collectTopicContracts(config) {
         // Topic inferred from transform script. Treat as dynamic payload shape.
         addContract(topic, { agentId: agent.id, keys: null });
       }
+    }
+
+    for (const contract of getHookActionTopicContracts(hook)) {
+      addContract(contract.topic, {
+        agentId: agent.id,
+        keys: contract.keys instanceof Set ? new Set(contract.keys) : contract.keys,
+      });
     }
   }
 
