@@ -62,6 +62,17 @@ jobs:
         if: inputs.publish_bridge == true && inputs.dry_run == false
         run: npm publish --provenance --access public
 
+      - name: Configure npm token for deprecation
+        if: inputs.deprecate_legacy == true
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::Set repository secret NPM_TOKEN to an npm token that can deprecate @covibes/zeroshot."
+            exit 1
+          fi
+          npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+
       - name: Deprecate legacy versions
         if: inputs.deprecate_legacy == true
         run: |
