@@ -169,6 +169,33 @@ git commit -m "feat!: remove deprecated API"
 git commit -m "feat: new API" -m "BREAKING CHANGE: removes old API"
 ```
 
+## Legacy @covibes Bridge
+
+The old `@covibes/zeroshot` npm package is deprecated in favor of
+`@the-open-engine/zeroshot`.
+
+The bridge package lives in `legacy/covibes-zeroshot-bridge` and publishes as
+`@covibes/zeroshot@5.4.1`. Its CLI prints a migration notice on every run, delegates normal
+commands to `@the-open-engine/zeroshot`, and makes `zeroshot update` install
+`@the-open-engine/zeroshot@latest` with `--force` so the global `zeroshot` bin moves to the new
+package.
+
+Publish the bridge with the manual `Publish Covibes Bridge` workflow
+(`.github/workflows/publish-covibes-bridge.yml`). It defaults to dry-run. Before running with
+`dry_run=false`, configure npm trusted publishing for:
+
+- package: `@covibes/zeroshot`
+- repository: `the-open-engine/zeroshot`
+- workflow filename: `publish-covibes-bridge.yml`
+
+After the bridge version is published, deprecate the old package versions with an npm maintainer
+account:
+
+```bash
+npm deprecate '@covibes/zeroshot@<=5.4.0' \
+  'Zeroshot has moved to @the-open-engine/zeroshot. Run: npm install -g @the-open-engine/zeroshot'
+```
+
 ## Troubleshooting
 
 ### Error: "npm ERR! 404 Not Found - PUT https://registry.npmjs.org/@the-open-engine%2fzeroshot"

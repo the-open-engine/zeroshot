@@ -1,0 +1,51 @@
+name: Publish Covibes Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run npm publish in dry-run mode'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-bridge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: legacy/covibes-zeroshot-bridge
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify bridge metadata
+        run: |
+          node -e "
+          const pkg = require('./package.json');
+          if (pkg.name !== '@covibes/zeroshot') throw new Error('wrong package name');
+          if (pkg.version !== '5.4.1') throw new Error('wrong bridge version');
+          if (pkg.bin.zeroshot !== 'cli/index.js') throw new Error('missing zeroshot bin');
+          console.log(pkg.name + '@' + pkg.version);
+          "
+
+      - name: Pack bridge
+        run: npm pack --dry-run
+
+      - name: Dry-run publish bridge
+        if: inputs.dry_run == true
+        run: npm publish --dry-run --access public
+
+      - name: Publish bridge
+        if: inputs.dry_run == false
+        run: npm publish --provenance --access public

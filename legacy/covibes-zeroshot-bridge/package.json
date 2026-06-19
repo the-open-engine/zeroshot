@@ -1,0 +1,35 @@
+{
+  "name": "@covibes/zeroshot",
+  "version": "5.4.1",
+  "description": "Migration bridge from @covibes/zeroshot to @the-open-engine/zeroshot",
+  "bin": {
+    "zeroshot": "cli/index.js"
+  },
+  "scripts": {
+    "test": "node cli/index.js --version"
+  },
+  "dependencies": {
+    "@the-open-engine/zeroshot": "^6.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "cli/",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/the-open-engine/zeroshot",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-open-engine/zeroshot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/the-open-engine/zeroshot/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

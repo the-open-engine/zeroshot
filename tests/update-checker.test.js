@@ -12,6 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const assert = require('assert');
+const EventEmitter = require('events');
+const childProcess = require('child_process');
 
 // Test storage directory (isolated)
 const TEST_STORAGE_DIR = path.join(os.tmpdir(), 'zeroshot-update-checker-test-' + Date.now());
@@ -141,6 +143,145 @@ describe('Update Checker', function () {
     it('should be 24 hours in milliseconds', function () {
       const expectedMs = 24 * 60 * 60 * 1000;
       assert.strictEqual(updateChecker.CHECK_INTERVAL_MS, expectedMs);
+    });
+  });
+
+  describe('legacy package migration', function () {
+    it('detects the legacy covibes package name', function () {
+      assert.strictEqual(updateChecker.isLegacyDistro('@covibes/zeroshot'), true);
+      assert.strictEqual(updateChecker.isLegacyDistro('@the-open-engine/zeroshot'), false);
+    });
+
+    it('prints the legacy distro notice to stderr', function () {
+      const originalError = console.error;
+      const messages = [];
+      console.error = (message) => messages.push(message);
+
+      try {
+        const printed = updateChecker.printLegacyDistroNotice('@covibes/zeroshot');
+
+        assert.strictEqual(printed, true);
+        assert.ok(messages.join('\n').includes('@covibes/zeroshot has moved'));
+        assert.ok(messages.join('\n').includes('@the-open-engine/zeroshot'));
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it('does not print the legacy distro notice for the new package', function () {
+      const originalError = console.error;
+      const messages = [];
+      console.error = (message) => messages.push(message);
+
+      try {
+        const printed = updateChecker.printLegacyDistroNotice('@the-open-engine/zeroshot');
+
+        assert.strictEqual(printed, false);
+        assert.deepStrictEqual(messages, []);
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
+
+  describe('install target resolution', function () {
+    it('derives a Unix npm prefix from a scoped global package root', function () {
+      const prefix = updateChecker.deriveInstallPrefixFromPackageRoot(
+        '/opt/homebrew/lib/node_modules/@the-open-engine/zeroshot',
+        '@the-open-engine/zeroshot'
+      );
+
+      assert.strictEqual(prefix, '/opt/homebrew');
+    });
+
+    it('derives a Unix npm prefix from the legacy scoped package root', function () {
+      const prefix = updateChecker.deriveInstallPrefixFromPackageRoot(
+        '/Users/tom/.hermes/node/lib/node_modules/@covibes/zeroshot',
+        '@covibes/zeroshot'
+      );
+
+      assert.strictEqual(prefix, '/Users/tom/.hermes/node');
+    });
+
+    it('returns null for a local development checkout', function () {
+      const prefix = updateChecker.deriveInstallPrefixFromPackageRoot(
+        '/Users/tom/code/covibes/zeroshot',
+        '@the-open-engine/zeroshot'
+      );
+
+      assert.strictEqual(prefix, null);
+    });
+
+    it('uses --force only when migrating the legacy package', function () {
+      const legacyArgs = updateChecker.buildInstallArgs({
+        installPrefix: '/tmp/prefix',
+        legacy: true,
+      });
+      const newArgs = updateChecker.buildInstallArgs({
+        installPrefix: '/tmp/prefix',
+        legacy: false,
+      });
+
+      assert.deepStrictEqual(legacyArgs, [
+        'install',
+        '-g',
+        '--prefix',
+        '/tmp/prefix',
+        '--force',
+        '@the-open-engine/zeroshot@latest',
+      ]);
+      assert.deepStrictEqual(newArgs, [
+        'install',
+        '-g',
+        '--prefix',
+        '/tmp/prefix',
+        '@the-open-engine/zeroshot@latest',
+      ]);
+    });
+
+    it('runs npm with the resolved prefix when updating the legacy package', async function () {
+      const originalSpawn = childProcess.spawn;
+      const installPrefix = path.join(TEST_STORAGE_DIR, 'legacy-prefix');
+      fs.mkdirSync(path.join(installPrefix, 'lib', 'node_modules'), { recursive: true });
+
+      let spawnCommand = null;
+      let spawnArgs = null;
+      let spawnOptions = null;
+
+      childProcess.spawn = (command, args, options) => {
+        spawnCommand = command;
+        spawnArgs = args;
+        spawnOptions = options;
+
+        const proc = new EventEmitter();
+        process.nextTick(() => proc.emit('close', 0));
+        return proc;
+      };
+
+      try {
+        const success = await updateChecker.runUpdate({
+          packageName: '@covibes/zeroshot',
+          installPrefix,
+          npmCommand: '/tmp/npm-for-test',
+        });
+
+        assert.strictEqual(success, true);
+        assert.strictEqual(spawnCommand, '/tmp/npm-for-test');
+        assert.deepStrictEqual(spawnArgs, [
+          'install',
+          '-g',
+          '--prefix',
+          installPrefix,
+          '--force',
+          '@the-open-engine/zeroshot@latest',
+        ]);
+        assert.deepStrictEqual(spawnOptions, {
+          stdio: 'inherit',
+          shell: false,
+        });
+      } finally {
+        childProcess.spawn = originalSpawn;
+      }
     });
   });
 
