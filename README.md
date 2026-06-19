@@ -503,6 +503,6 @@ The TUI is not included in this release. Use `zeroshot logs -f`, `zeroshot logs 
 
 ---
 
-MIT - [Covibes](https://github.com/the-open-engine)
+MIT - [The Open Engine Company](https://github.com/the-open-engine)
 
 Built on [Claude Code](https://claude.com/product/claude-code) by Anthropic.
