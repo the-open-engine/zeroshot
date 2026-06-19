@@ -8,6 +8,11 @@ on:
         required: true
         default: true
         type: boolean
+      publish_bridge:
+        description: 'Publish @covibes/zeroshot bridge package'
+        required: true
+        default: true
+        type: boolean
       deprecate_legacy:
         description: 'Deprecate @covibes/zeroshot versions before the bridge'
         required: true
@@ -35,6 +40,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Verify bridge metadata
+        if: inputs.publish_bridge == true
         run: |
           node -e "
           const pkg = require('./package.json');
@@ -45,14 +51,15 @@ jobs:
           "
 
       - name: Pack bridge
+        if: inputs.publish_bridge == true
         run: npm pack --dry-run
 
       - name: Dry-run publish bridge
-        if: inputs.dry_run == true
+        if: inputs.publish_bridge == true && inputs.dry_run == true
         run: npm publish --dry-run --access public
 
       - name: Publish bridge
-        if: inputs.dry_run == false
+        if: inputs.publish_bridge == true && inputs.dry_run == false
         run: npm publish --provenance --access public
 
       - name: Deprecate legacy versions
