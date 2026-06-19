@@ -8,6 +8,11 @@ on:
         required: true
         default: true
         type: boolean
+      deprecate_legacy:
+        description: 'Deprecate @covibes/zeroshot versions before the bridge'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -49,3 +54,8 @@ jobs:
       - name: Publish bridge
         if: inputs.dry_run == false
         run: npm publish --provenance --access public
+
+      - name: Deprecate legacy versions
+        if: inputs.deprecate_legacy == true
+        run: |
+          npm deprecate '@covibes/zeroshot@<=5.4.0' 'Zeroshot has moved to @the-open-engine/zeroshot. Run: npm install -g @the-open-engine/zeroshot'
