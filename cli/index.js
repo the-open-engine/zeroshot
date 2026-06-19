@@ -5387,15 +5387,15 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
 
 // Main async entry point
 async function main() {
-  const isQuiet =
-    process.argv.includes('-q') ||
-    process.argv.includes('--quiet') ||
-    process.env.NODE_ENV === 'test';
+  const isTest = process.env.NODE_ENV === 'test';
+  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet') || isTest;
 
   printLegacyDistroNotice();
 
   // Check for updates (non-blocking if offline)
-  await checkForUpdates({ quiet: isQuiet });
+  if (!isTest) {
+    await checkForUpdates({ quiet: isQuiet });
+  }
 
   let args = process.argv.slice(2);
 
