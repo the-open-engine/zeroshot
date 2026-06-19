@@ -9,9 +9,15 @@
  */
 
 const https = require('https');
-const { spawn } = require('child_process');
+const childProcess = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const readline = require('readline');
 const { loadSettings, saveSettings } = require('../../lib/settings');
+
+const NEW_PACKAGE_NAME = '@the-open-engine/zeroshot';
+const LEGACY_PACKAGE_NAME = '@covibes/zeroshot';
+const NEW_PACKAGE_SPEC = `${NEW_PACKAGE_NAME}@latest`;
 
 // 24 hours in milliseconds
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -20,15 +26,177 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5000;
 
 // npm registry URL
-const REGISTRY_URL = 'https://registry.npmjs.org/@the-open-engine/zeroshot/latest';
+const REGISTRY_URL = `https://registry.npmjs.org/${NEW_PACKAGE_NAME}/latest`;
+
+function getPackageMetadata() {
+  return require('../../package.json');
+}
+
+function getCurrentPackageName() {
+  return getPackageMetadata().name || NEW_PACKAGE_NAME;
+}
 
 /**
  * Get current package version
  * @returns {string}
  */
 function getCurrentVersion() {
-  const pkg = require('../../package.json');
-  return pkg.version;
+  return getPackageMetadata().version;
+}
+
+function isLegacyDistro(packageName = getCurrentPackageName()) {
+  return packageName === LEGACY_PACKAGE_NAME;
+}
+
+function printLegacyDistroNotice(packageName = getCurrentPackageName()) {
+  if (!isLegacyDistro(packageName)) {
+    return false;
+  }
+
+  console.error(
+    `\n⚠️  ${LEGACY_PACKAGE_NAME} has moved to ${NEW_PACKAGE_NAME}. ` +
+      'Run `zeroshot update` to switch this installation.\n'
+  );
+  return true;
+}
+
+function getPackageRoot() {
+  return path.dirname(require.resolve('../../package.json'));
+}
+
+function hasPathSuffix(parts, suffix) {
+  if (suffix.length > parts.length) {
+    return false;
+  }
+
+  const start = parts.length - suffix.length;
+  return suffix.every((part, index) => parts[start + index] === part);
+}
+
+function joinPathParts(parts) {
+  const joined = parts.join(path.sep);
+  return joined === '' ? path.parse(process.cwd()).root : joined;
+}
+
+function deriveInstallPrefixFromPackageRoot(packageRoot, packageName) {
+  const parts = path.resolve(packageRoot).split(path.sep);
+  const packageParts = packageName.split('/');
+
+  if (!hasPathSuffix(parts, packageParts)) {
+    return null;
+  }
+
+  const nodeModulesIndex = parts.length - packageParts.length - 1;
+  if (nodeModulesIndex < 0 || parts[nodeModulesIndex] !== 'node_modules') {
+    return null;
+  }
+
+  if (parts[nodeModulesIndex - 1] === 'lib') {
+    return joinPathParts(parts.slice(0, nodeModulesIndex - 1));
+  }
+
+  return joinPathParts(parts.slice(0, nodeModulesIndex));
+}
+
+function resolveNpmCommand(installPrefix = null) {
+  const npmName = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const candidates = [];
+
+  if (installPrefix) {
+    candidates.push(path.join(installPrefix, 'bin', npmName));
+  }
+
+  candidates.push(path.join(path.dirname(process.execPath), npmName));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return npmName;
+}
+
+function getNpmConfiguredPrefix(npmCommand = resolveNpmCommand()) {
+  return childProcess
+    .execFileSync(npmCommand, ['config', 'get', 'prefix'], {
+      encoding: 'utf8',
+    })
+    .trim();
+}
+
+function getInstallPrefix(options = {}) {
+  if (options.installPrefix) {
+    return options.installPrefix;
+  }
+
+  const packageName = options.packageName || getCurrentPackageName();
+  const packageRoot = options.packageRoot || getPackageRoot();
+  const derivedPrefix = deriveInstallPrefixFromPackageRoot(packageRoot, packageName);
+
+  if (derivedPrefix) {
+    return derivedPrefix;
+  }
+
+  return getNpmConfiguredPrefix(options.npmCommand);
+}
+
+function getGlobalModulesDir(installPrefix) {
+  const unixGlobalModulesDir = path.join(installPrefix, 'lib', 'node_modules');
+  if (fs.existsSync(unixGlobalModulesDir)) {
+    return unixGlobalModulesDir;
+  }
+
+  return path.join(installPrefix, 'node_modules');
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:@+-]+$/.test(value)) {
+    return value;
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildManualInstallCommand(installPrefix = null, useSudo = false) {
+  const command = [
+    useSudo ? 'sudo' : null,
+    'npm',
+    'install',
+    '-g',
+    installPrefix ? '--prefix' : null,
+    installPrefix ? shellQuote(installPrefix) : null,
+    NEW_PACKAGE_SPEC,
+  ].filter(Boolean);
+
+  return command.join(' ');
+}
+
+function getUpdateTarget(options = {}) {
+  const packageName = options.packageName || getCurrentPackageName();
+  const legacy = isLegacyDistro(packageName);
+  const installPrefix = getInstallPrefix(options);
+  const npmCommand = options.npmCommand || resolveNpmCommand(installPrefix);
+
+  return {
+    packageName,
+    legacy,
+    installPrefix,
+    npmCommand,
+    globalModulesDir: getGlobalModulesDir(installPrefix),
+  };
+}
+
+function buildInstallArgs(updateTarget) {
+  const args = ['install', '-g', '--prefix', updateTarget.installPrefix];
+
+  if (updateTarget.legacy) {
+    // npm refuses to replace the legacy package's `zeroshot` bin without this.
+    args.push('--force');
+  }
+
+  args.push(NEW_PACKAGE_SPEC);
+  return args;
 }
 
 /**
@@ -119,17 +287,10 @@ function promptForUpdate(currentVersion, latestVersion) {
  * Check if we have write permission to npm global directory
  * @returns {boolean} True if we can write to npm global prefix
  */
-function canWriteToNpmGlobal() {
-  const { execSync } = require('child_process');
-  const fs = require('fs');
-
+function canWriteToNpmGlobal(options = {}) {
   try {
-    // Get npm global prefix (e.g., /usr/lib or /home/user/.nvm/versions/node/...)
-    const prefix = execSync('npm config get prefix', { encoding: 'utf8' }).trim();
-    const globalModulesDir = require('path').join(prefix, 'lib', 'node_modules');
-
-    // Check if directory exists and is writable
-    fs.accessSync(globalModulesDir, fs.constants.W_OK);
+    const updateTarget = getUpdateTarget(options);
+    fs.accessSync(updateTarget.globalModulesDir, fs.constants.W_OK);
     return true;
   } catch {
     return false;
@@ -140,22 +301,32 @@ function canWriteToNpmGlobal() {
  * Run npm install to update the package
  * @returns {Promise<boolean>} True if update succeeded
  */
-function runUpdate() {
+function runUpdate(options = {}) {
   return new Promise((resolve) => {
+    let updateTarget;
+    try {
+      updateTarget = getUpdateTarget(options);
+    } catch {
+      console.log('❌ Update failed. Try manually:');
+      console.log(`   ${buildManualInstallCommand()}\n`);
+      resolve(false);
+      return;
+    }
+
     // Check permissions BEFORE attempting update
-    if (!canWriteToNpmGlobal()) {
+    if (!canWriteToNpmGlobal(options)) {
       console.log('\n⚠️  Cannot auto-update: no write permission to npm global directory.');
       console.log('   Run manually with sudo:');
-      console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
+      console.log(`   ${buildManualInstallCommand(updateTarget.installPrefix, true)}\n`);
       resolve(false);
       return;
     }
 
     console.log('\n📥 Installing update...');
 
-    const proc = spawn('npm', ['install', '-g', '@the-open-engine/zeroshot@latest'], {
+    const proc = childProcess.spawn(updateTarget.npmCommand, buildInstallArgs(updateTarget), {
       stdio: 'inherit',
-      shell: true,
+      shell: false,
     });
 
     proc.on('close', (code) => {
@@ -165,14 +336,14 @@ function runUpdate() {
         resolve(true);
       } else {
         console.log('❌ Update failed. Try manually:');
-        console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
+        console.log(`   ${buildManualInstallCommand(updateTarget.installPrefix, true)}\n`);
         resolve(false);
       }
     });
 
     proc.on('error', () => {
       console.log('❌ Update failed. Try manually:');
-      console.log('   sudo npm install -g @the-open-engine/zeroshot@latest\n');
+      console.log(`   ${buildManualInstallCommand(updateTarget.installPrefix, true)}\n`);
       resolve(false);
     });
   });
@@ -246,9 +417,9 @@ async function checkForUpdates(options = {}) {
   if (options.quiet) {
     console.log(`📦 Update available: ${currentVersion} → ${latestVersion}`);
     if (hasWriteAccess) {
-      console.log('   Run: npm install -g @the-open-engine/zeroshot@latest\n');
+      console.log(`   Run: ${buildManualInstallCommand(getInstallPrefix(), false)}\n`);
     } else {
-      console.log('   Run: sudo npm install -g @the-open-engine/zeroshot@latest\n');
+      console.log(`   Run: ${buildManualInstallCommand(getInstallPrefix(), true)}\n`);
     }
     return;
   }
@@ -257,7 +428,7 @@ async function checkForUpdates(options = {}) {
   // (they'd say yes then get an error, which is frustrating UX)
   if (!hasWriteAccess) {
     console.log(`\n📦 Update available: ${currentVersion} → ${latestVersion}`);
-    console.log('   Run: sudo npm install -g @the-open-engine/zeroshot@latest\n');
+    console.log(`   Run: ${buildManualInstallCommand(getInstallPrefix(), true)}\n`);
     return;
   }
 
@@ -271,7 +442,17 @@ async function checkForUpdates(options = {}) {
 module.exports = {
   checkForUpdates,
   // Exported for testing and CLI update command
+  NEW_PACKAGE_NAME,
+  LEGACY_PACKAGE_NAME,
   getCurrentVersion,
+  getCurrentPackageName,
+  isLegacyDistro,
+  printLegacyDistroNotice,
+  deriveInstallPrefixFromPackageRoot,
+  getInstallPrefix,
+  resolveNpmCommand,
+  getUpdateTarget,
+  buildInstallArgs,
   isNewerVersion,
   fetchLatestVersion,
   runUpdate,

@@ -9,6 +9,8 @@
  */
 const { spawn } = require('child_process');
 
+process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+
 const testFileAliases = new Map([
   ['provider-cli-builder', ['tests/provider-cli-builder.test.js']],
   ['providers', ['tests/providers/**/*.test.js']],

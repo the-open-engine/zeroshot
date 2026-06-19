@@ -67,7 +67,7 @@ const {
   registerDetachedSetupCluster,
 } = require('../lib/detached-startup');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
-const { checkForUpdates } = require('./lib/update-checker');
+const { checkForUpdates, printLegacyDistroNotice } = require('./lib/update-checker');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
 
 // =============================================================================
@@ -5387,13 +5387,15 @@ function printMessage(msg, showClusterId = false, watchMode = false, isActive = 
 
 // Main async entry point
 async function main() {
-  const isQuiet =
-    process.argv.includes('-q') ||
-    process.argv.includes('--quiet') ||
-    process.env.NODE_ENV === 'test';
+  const isTest = process.env.NODE_ENV === 'test';
+  const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet') || isTest;
+
+  printLegacyDistroNotice();
 
   // Check for updates (non-blocking if offline)
-  await checkForUpdates({ quiet: isQuiet });
+  if (!isTest) {
+    await checkForUpdates({ quiet: isQuiet });
+  }
 
   let args = process.argv.slice(2);
 
