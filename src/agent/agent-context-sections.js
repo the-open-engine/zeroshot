@@ -107,6 +107,28 @@ function buildGitOperationsSection() {
   ].join('\n');
 }
 
+function buildValidatorPrePushSection() {
+  return [
+    '## 🪝 PRE-PUSH HOOKS - MANDATORY VALIDATION GATE',
+    '',
+    "Run the repository's pre-push hook(s) as part of validation, so a failing hook is",
+    'caught now (the worker can then fix it) instead of blocking the deterministic push later.',
+    '',
+    'From the repo root, run whichever applies (redirect stdin from /dev/null so the hook',
+    'does not block waiting for ref input):',
+    '- `git hook run pre-push </dev/null` (Git 2.36+, respects core.hooksPath / husky)',
+    '- otherwise run the hook file directly: `bash .husky/pre-push </dev/null`, or',
+    '  `bash .git/hooks/pre-push </dev/null`',
+    '',
+    'Record the result as a criterion with evidence (command, exitCode, output):',
+    '- No pre-push hook present → status SKIPPED, continue.',
+    '- Hook exits 0 → status PASS.',
+    '- Hook exits non-zero → status FAIL: set approved=false and add the failure to errors.',
+    '  NEVER approve over a failing pre-push hook.',
+    '',
+  ].join('\n');
+}
+
 function buildHeaderContext({ id, role, iteration, isIsolated }) {
   return [
     `You are agent "${id}" with role "${role}".`,
@@ -116,6 +138,7 @@ function buildHeaderContext({ id, role, iteration, isIsolated }) {
     buildAutonomousSection(),
     buildOutputStyleSection(),
     isIsolated ? '' : buildGitOperationsSection(),
+    role === 'validator' ? buildValidatorPrePushSection() : '',
   ]
     .filter(Boolean)
     .join('\n');
