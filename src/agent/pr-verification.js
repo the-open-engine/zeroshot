@@ -579,6 +579,194 @@ function shouldSkipVerification(adapter) {
   return skipVars.some((name) => process.env[name] === '1');
 }
 
+function getSafeBranchName(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  // Conservative allowlist to avoid shell/argument surprises with generated commands.
+  if (!trimmed || !/^[A-Za-z0-9._/-]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function runGit(args, cwd) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  return {
+    status: typeof result.status === 'number' ? result.status : 1,
+    stdout: (result.stdout || '').trim(),
+    stderr: (result.stderr || '').trim(),
+  };
+}
+
+function getIssueContext(agent) {
+  let number = agent?.cluster?.issue ?? null;
+  let title = null;
+  try {
+    const bus = agent?.messageBus;
+    if (bus && typeof bus.findLast === 'function') {
+      const msg = bus.findLast({ topic: 'ISSUE_OPENED', cluster_id: agent?.cluster?.id });
+      const data = (msg && msg.content && msg.content.data) || {};
+      if (typeof data.title === 'string' && data.title.trim()) title = data.title.trim();
+      if (!number && data.issue_number) number = data.issue_number;
+    }
+  } catch {
+    // best-effort; fall back to whatever we already have
+  }
+  return { number: normalizePrNumber(number), title };
+}
+
+function resolvePrBaseBranch(cwd) {
+  const envBase = getSafeBranchName(process.env.ZEROSHOT_PR_BASE);
+  if (envBase) return envBase;
+  const head = runGit(['rev-parse', '--abbrev-ref', 'origin/HEAD'], cwd);
+  if (head.status === 0) {
+    const base = getSafeBranchName(head.stdout.replace(/^origin\//, ''));
+    if (base) return base;
+  }
+  return null;
+}
+
+function findExistingPrForBranch(branch, cwd) {
+  const result = spawnSync(
+    'gh',
+    ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'url,number', '--jq', '.[0]'],
+    { cwd, encoding: 'utf8' }
+  );
+  if (result.status === 0 && (result.stdout || '').trim()) {
+    try {
+      const parsed = JSON.parse(result.stdout.trim());
+      if (parsed && parsed.number) {
+        return { prNumber: normalizePrNumber(parsed.number), prUrl: parsed.url || null };
+      }
+    } catch {
+      // ignore parse errors and fall through
+    }
+  }
+  return null;
+}
+
+/**
+ * Stage, commit, and push any work left in the live worktree. Returns true once
+ * the branch is on the remote (nothing-to-commit is fine; a push failure is not).
+ */
+function commitAndPushWorktree(agent, branch, cwd) {
+  runGit(['add', '-A'], cwd);
+  const hasStaged = runGit(['diff', '--cached', '--quiet'], cwd).status === 1;
+  if (hasStaged) {
+    const { title } = getIssueContext(agent);
+    const subject = title ? `feat: ${title}` : 'feat: automated implementation';
+    const commit = runGit(['commit', '-m', subject], cwd);
+    if (commit.status !== 0) {
+      agent._log(
+        `⚠️  Deterministic PR fallback: git commit failed: ${commit.stderr.slice(0, 200)}`
+      );
+    }
+  }
+
+  const push = runGit(['push', '-u', 'origin', branch], cwd);
+  if (push.status !== 0) {
+    agent._log(`⚠️  Deterministic PR fallback: git push failed: ${push.stderr.slice(0, 200)}`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Open (or find) a GitHub PR for the given branch. Returns { prNumber, prUrl } or null.
+ */
+function openGithubPrForBranch(agent, adapter, branch, cwd) {
+  const existing = findExistingPrForBranch(branch, cwd);
+  if (existing) return existing;
+
+  const { number: issueNumber, title: issueTitle } = getIssueContext(agent);
+  const base = resolvePrBaseBranch(cwd);
+  const args = ['pr', 'create', '--head', branch];
+  if (base) args.push('--base', base);
+  if (issueTitle) {
+    args.push('--title', `feat: ${issueTitle}`);
+    args.push('--body', issueNumber ? `Closes #${issueNumber}` : 'Automated by ZeroShot.');
+  } else {
+    args.push('--fill');
+  }
+
+  const create = spawnSync('gh', args, { cwd, encoding: 'utf8' });
+  const combined = `${create.stdout || ''}\n${create.stderr || ''}`;
+  if (create.status !== 0) {
+    // A racing create may already have opened the PR; prefer that over failing.
+    const afterFailure = findExistingPrForBranch(branch, cwd);
+    if (afterFailure) return afterFailure;
+    agent._log(
+      `⚠️  Deterministic PR fallback: gh pr create failed: ${combined.trim().slice(0, 300)}`
+    );
+    return null;
+  }
+
+  const info = extractPrInfoFromRawOutput(combined, adapter);
+  if (info.prNumber || info.prUrl) {
+    return { prNumber: info.prNumber, prUrl: info.prUrl };
+  }
+  return findExistingPrForBranch(branch, cwd);
+}
+
+/**
+ * Deterministically commit/push the worktree and open a PR when the git-pusher
+ * agent failed to do so itself (it never committed, or it hallucinated a PR that
+ * does not exist). Runs in the still-live worktree, so the worker's changes are
+ * preserved. GitHub only for now; returns { prNumber, prUrl } or null.
+ */
+function createPullRequestDeterministically({ agent, adapter, platform }) {
+  if (platform !== 'github') return null;
+  const cwd = agent?.workingDirectory || process.cwd();
+
+  const head = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const branch = getSafeBranchName(head.stdout);
+  if (head.status !== 0 || !branch || branch === 'HEAD') {
+    agent._log('⚠️  Deterministic PR fallback: could not resolve a named branch; skipping.');
+    return null;
+  }
+
+  if (!commitAndPushWorktree(agent, branch, cwd)) return null;
+  return openGithubPrForBranch(agent, adapter, branch, cwd);
+}
+
+function isMissingPrError(err) {
+  const text = String((err && err.message) || '').toUpperCase();
+  return text.includes('HALLUCINATED') || text.includes('DOES NOT EXIST');
+}
+
+/**
+ * Recover from a git-pusher that did not leave a real PR behind: create the PR
+ * deterministically, confirm it exists via the platform CLI, then publish
+ * CLUSTER_COMPLETE. Returns true if recovery fully succeeded.
+ */
+async function recoverWithDeterministicPr({ agent, adapter, platform }) {
+  const created = createPullRequestDeterministically({ agent, adapter, platform });
+  if (!created) return false;
+
+  let prData;
+  try {
+    prData = await fetchPrDataWithRetry({
+      adapter,
+      cwd: agent.workingDirectory,
+      prNumber: created.prNumber,
+      agent,
+    });
+  } catch (err) {
+    agent._log(
+      `⚠️  Deterministic PR fallback: created ${adapter.itemName} but could not verify it: ${err.message}`
+    );
+    return false;
+  }
+
+  agent._log(
+    `✅ Deterministic ${adapter.itemName} recovery succeeded: #${prData.number} ` +
+      `(${prData.url || created.prUrl || 'url unknown'})`
+  );
+  publishClusterComplete(
+    agent,
+    buildVerificationPayload({ platform, prData, reason: 'git-pusher-complete-verified' })
+  );
+  return true;
+}
+
 async function verifyPullRequest({ result, agent }) {
   const platform = resolveVerificationPlatform(agent);
   const adapter = getVerificationAdapter(platform);
@@ -604,14 +792,30 @@ async function verifyPullRequest({ result, agent }) {
     return;
   }
 
+  // The git-pusher agent produced no PR/MR at all. Before failing the cluster,
+  // try to create it deterministically from the still-live worktree.
+  if (!claims.claimedPrNumber && !claims.claimedPrUrl) {
+    if (await recoverWithDeterministicPr({ agent, adapter, platform })) return;
+  }
+
   validatePrClaims(claims);
 
-  let prData = await fetchPrDataWithRetry({
-    adapter,
-    cwd: agent.workingDirectory,
-    prNumber: claims.claimedPrNumber,
-    agent,
-  });
+  let prData;
+  try {
+    prData = await fetchPrDataWithRetry({
+      adapter,
+      cwd: agent.workingDirectory,
+      prNumber: claims.claimedPrNumber,
+      agent,
+    });
+  } catch (err) {
+    // The agent claimed a PR/MR that does not actually exist (hallucinated).
+    // Recover by creating the real PR deterministically.
+    if (isMissingPrError(err) && (await recoverWithDeterministicPr({ agent, adapter, platform }))) {
+      return;
+    }
+    throw err;
+  }
 
   validatePrUrl({ adapter, claimedPrUrl: claims.claimedPrUrl, prData });
 

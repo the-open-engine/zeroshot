@@ -304,7 +304,9 @@ describe('verify_pull_request hook action', () => {
   // REGRESSION: flying-jungle-51 (2026-02-16)
   // Agent failed to create PR (type errors blocked commit). Structured output had no pr_number/pr_url.
   // Old code fell through to `gh pr view` which found an unrelated open PR → "Agent LIED" error.
-  it('should throw when structured output has no PR data (agent failed to create PR)', async function () {
+  // New behaviour: deterministic recovery is attempted, but it is branch-scoped and must NEVER
+  // consult `gh` to adopt an unrelated PR when it cannot proceed (here: detached HEAD).
+  it('should throw when no PR data and deterministic recovery cannot proceed', async function () {
     const agent = createMockAgent();
     const hook = { action: 'verify_pull_request' };
     const result = {
@@ -314,9 +316,16 @@ describe('verify_pull_request hook action', () => {
       }),
     };
 
-    // Should NOT reach gh pr view at all
-    mockSpawnSyncFn = () => {
-      assert.fail('gh pr view should not be called when no PR data in output');
+    mockSpawnSyncFn = (command, args) => {
+      // Recovery first resolves the branch; a detached HEAD makes it bail immediately.
+      if (command === 'git' && args[0] === 'rev-parse') {
+        return spawnSuccess('HEAD');
+      }
+      // It must not reach gh and adopt an unrelated PR.
+      if (command === 'gh') {
+        assert.fail('gh must not be called when deterministic recovery cannot proceed');
+      }
+      return spawnFailure('unexpected command');
     };
 
     try {
@@ -327,6 +336,62 @@ describe('verify_pull_request hook action', () => {
       assert.match(err.message, /no pr_number, mr_number, pr_url, or mr_url/i);
       assert.match(err.message, /compilation errors/i);
     }
+  });
+
+  // Core of the reliability fix: when the git-pusher produced no PR, recover by
+  // committing/pushing the live worktree and opening the PR deterministically.
+  it('recovers deterministically when the git-pusher created no PR', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_pull_request' };
+    const result = { output: JSON.stringify({ summary: 'git-pusher produced no PR' }) };
+
+    const calls = [];
+    mockSpawnSyncFn = (command, args) => {
+      calls.push(commandText(command, args));
+      if (command === 'git') {
+        if (args[0] === 'rev-parse' && args.includes('origin/HEAD')) {
+          return spawnSuccess('origin/main');
+        }
+        if (args[0] === 'rev-parse') {
+          return spawnSuccess('zeroshot/feature-1');
+        }
+        if (args[0] === 'diff') {
+          return spawnFailure(''); // exit 1 => there are staged changes to commit
+        }
+        return spawnSuccess(''); // add, commit, push
+      }
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'list') {
+        return spawnSuccess(''); // no existing PR for the branch
+      }
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+        return spawnSuccess('https://github.com/o/r/pull/77');
+      }
+      if (command === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+        return spawnSuccess(
+          JSON.stringify({
+            number: 77,
+            state: 'OPEN',
+            mergedAt: null,
+            url: 'https://github.com/o/r/pull/77',
+          })
+        );
+      }
+      return spawnFailure(`unexpected command: ${commandText(command, args)}`);
+    };
+
+    await executeHook({ hook, agent, result });
+
+    assert.ok(agent.lastPublished, 'should publish a completion message');
+    assert.strictEqual(agent.lastPublished.topic, 'CLUSTER_COMPLETE');
+    assert.strictEqual(agent.lastPublished.content.data.pr_number, 77);
+    assert.ok(
+      calls.some((c) => c.startsWith('gh pr create')),
+      'should open the PR via gh pr create'
+    );
+    assert.ok(
+      calls.some((c) => c.startsWith('git push')),
+      'should push the worktree branch'
+    );
   });
 
   // REGRESSION: provider mismatch in hook parser
