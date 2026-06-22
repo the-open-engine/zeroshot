@@ -658,6 +658,8 @@ function commitAndPushWorktree(agent, branch, cwd) {
       agent._log(
         `⚠️  Deterministic PR fallback: git commit failed: ${commit.stderr.slice(0, 200)}`
       );
+      // Do not push an unchanged branch — that would open a PR with none of the work.
+      return false;
     }
   }
 

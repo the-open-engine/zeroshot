@@ -394,6 +394,40 @@ describe('verify_pull_request hook action', () => {
     );
   });
 
+  // A failed commit must not fall through to push — that would open a PR whose branch
+  // contains none of the worker's changes (empty PR).
+  it('does not push or open a PR when git commit fails', async function () {
+    const agent = createMockAgent();
+    const hook = { action: 'verify_pull_request' };
+    const result = { output: JSON.stringify({ summary: 'no PR; commit will fail' }) };
+
+    const calls = [];
+    mockSpawnSyncFn = (command, args) => {
+      calls.push(commandText(command, args));
+      if (command === 'git') {
+        if (args[0] === 'rev-parse') return spawnSuccess('zeroshot/feature-1');
+        if (args[0] === 'diff') return spawnFailure(''); // exit 1 => staged changes present
+        if (args[0] === 'commit') return spawnFailure('pre-commit hook rejected the commit');
+        return spawnSuccess(''); // git add
+      }
+      if (command === 'gh') {
+        assert.fail('gh must not be called when the commit failed');
+      }
+      return spawnFailure('unexpected command');
+    };
+
+    try {
+      await executeHook({ hook, agent, result });
+      assert.fail('Expected error to be thrown');
+    } catch (err) {
+      assert.match(err.message, /without creating a PR/);
+    }
+    assert.ok(
+      !calls.some((c) => c.startsWith('git push')),
+      'must not push an unchanged branch after a failed commit'
+    );
+  });
+
   // REGRESSION: provider mismatch in hook parser
   // verify_pull_request previously parsed Codex output with Claude parser assumptions.
   // That dropped pr_number/pr_url even when the assistant output contained valid JSON.
