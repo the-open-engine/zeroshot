@@ -682,12 +682,11 @@ function commitAndPushWorktree(agent, branch, cwd) {
 /**
  * Open (or find) a GitHub PR for the given branch. Returns { prNumber, prUrl } or null.
  */
-function openGithubPrForBranch(agent, adapter, branch, cwd) {
+function openGithubPrForBranch(agent, adapter, branch, base, cwd) {
   const existing = findExistingPrForBranch(branch, cwd);
   if (existing) return existing;
 
   const { number: issueNumber, title: issueTitle } = getIssueContext(agent);
-  const base = resolvePrBaseBranch(cwd);
   const args = ['pr', 'create', '--head', branch];
   if (base) args.push('--base', base);
   if (issueTitle) {
@@ -724,19 +723,32 @@ function openGithubPrForBranch(agent, adapter, branch, cwd) {
  */
 function createPullRequestDeterministically({ agent, adapter, platform }) {
   if (platform !== 'github') return null;
-  const cwd = agent?.workingDirectory || process.cwd();
+  // Work where the worker's changes + the feature branch live: the isolation worktree.
+  // agent.workingDirectory resolves to the source checkout (typically on the base branch),
+  // which must NEVER receive commits/pushes.
+  const cwd = agent?.worktree?.path || agent?.workingDirectory || process.cwd();
 
   const head = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const branch = getSafeBranchName(head.stdout);
+  const base = resolvePrBaseBranch(cwd);
   console.error(
-    `[zeroshot:pr-recovery] createPR cwd=${cwd} headStatus=${head.status} headOut=${head.stdout.slice(0, 60)} branch=${branch}`
+    `[zeroshot:pr-recovery] createPR cwd=${cwd} worktree=${agent?.worktree?.path || 'none'} ` +
+      `branch=${branch} base=${base}`
   );
   if (head.status !== 0 || !branch || branch === 'HEAD') {
     return null;
   }
 
+  // Never commit/push onto the base branch — that is not a pull request and is destructive.
+  if (base && branch === base) {
+    console.error(
+      `[zeroshot:pr-recovery] refusing to operate on base branch "${base}"; skipping recovery.`
+    );
+    return null;
+  }
+
   if (!commitAndPushWorktree(agent, branch, cwd)) return null;
-  return openGithubPrForBranch(agent, adapter, branch, cwd);
+  return openGithubPrForBranch(agent, adapter, branch, base, cwd);
 }
 
 function isMissingPrError(err) {
