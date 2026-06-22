@@ -95,7 +95,7 @@ npm i -g @google/gemini-cli
 # Opencode: see https://opencode.ai
 
 # Authenticate with the provider CLI
-claude login        # Claude
+claude auth login   # Claude
 codex login         # Codex
 gemini auth login   # Gemini
 opencode auth login # Opencode
