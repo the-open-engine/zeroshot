@@ -775,6 +775,10 @@ async function verifyPullRequest({ result, agent }) {
   const providerName =
     typeof agent?._resolveProvider === 'function' ? agent._resolveProvider() : 'claude';
   const claims = resolvePrClaimsFromOutput({ output: result.output, providerName, adapter });
+  console.error(
+    `[zeroshot:pr-recovery] verifyPullRequest entered: platform=${platform} ` +
+      `claimedNumber=${claims.claimedPrNumber ?? 'none'} claimedUrl=${claims.claimedPrUrl ?? 'none'}`
+  );
 
   if (handleBlockedPusherOutcome({ claims, platform, agent })) {
     return;
@@ -813,6 +817,10 @@ async function verifyPullRequest({ result, agent }) {
   } catch (err) {
     // The agent claimed a PR/MR that does not actually exist (hallucinated).
     // Recover by creating the real PR deterministically.
+    console.error(
+      `[zeroshot:pr-recovery] fetch failed: isMissingPrError=${isMissingPrError(err)} ` +
+        `msg=${String(err && err.message).slice(0, 100)}`
+    );
     if (isMissingPrError(err) && (await recoverWithDeterministicPr({ agent, adapter, platform }))) {
       return;
     }
