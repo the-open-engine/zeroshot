@@ -428,6 +428,11 @@ function validateProvider(providerName, options) {
         'Command "opencode" not installed',
         ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
       ),
+    kiro: () =>
+      validateCliProvider('kiro-cli', 'Kiro CLI not available', 'Command "kiro-cli" not installed', [
+        'Install Kiro CLI: see https://kiro.dev',
+        'Then run: kiro-cli --version',
+      ]),
   };
 
   const validator = validatorByProvider[providerName];
@@ -435,7 +440,7 @@ function validateProvider(providerName, options) {
     return {
       errors: [
         formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
-          'Use claude, codex, gemini, or opencode',
+          'Use claude, codex, gemini, opencode, or kiro',
         ]),
       ],
       warnings: [],
