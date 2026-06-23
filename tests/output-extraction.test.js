@@ -14,6 +14,8 @@ const {
   extractFromTextEvents,
   extractFromMarkdown,
   extractDirectJson,
+  extractEmbeddedJson,
+  stripAnsi,
   stripTimestamp,
 } = require('../src/agent/output-extraction');
 
@@ -23,6 +25,7 @@ describe('Output Extraction Module', function () {
   defineTextEventExtractionTests();
   defineMarkdownExtractionTests();
   defineDirectJsonExtractionTests();
+  defineEmbeddedJsonExtractionTests();
   defineCliErrorExtractionTests();
   defineFullPipelineTests();
   defineRegressionTests();
@@ -449,6 +452,7 @@ function defineFullPipelineTests() {
     defineClaudePipelineTests();
     defineCodexPipelineTests();
     defineGeminiPipelineTests();
+    defineKiroPipelineTests();
     defineEdgeCasePipelineTests();
     defineStrategyPriorityTests();
   });
@@ -666,6 +670,107 @@ Done.`;
         '{"type":"result","subtype":"error","is_error":true,"duration_ms":1234,"duration_api_ms":1200,"num_turns":0,"session_id":"abc123","total_cost_usd":0.0,"usage":{},"modelUsage":null,"permission_denials":[],"uuid":"xyz","errors":["Permission denied"]}';
       const result = extractJsonFromOutput(output, 'claude');
       assert.strictEqual(result, null);
+    });
+  });
+}
+
+function defineEmbeddedJsonExtractionTests() {
+  // ============================================================================
+  // STRATEGY 5: EMBEDDED JSON EXTRACTION (ANSI-wrapped pretty text, e.g. kiro)
+  // ============================================================================
+  describe('stripAnsi', function () {
+    const ESC = String.fromCharCode(27);
+
+    it('should remove color escape sequences', function () {
+      const input = ESC + '[38;5;141m> ' + ESC + '[0m{"a":1}';
+      assert.strictEqual(stripAnsi(input), '> {"a":1}');
+    });
+
+    it('should remove cursor-control escape sequences', function () {
+      const input = ESC + '[?25l' + 'text' + ESC + '[1G' + ESC + '[?25h';
+      assert.strictEqual(stripAnsi(input), 'text');
+    });
+
+    it('should handle empty input', function () {
+      assert.strictEqual(stripAnsi(''), '');
+      assert.strictEqual(stripAnsi(null), '');
+      assert.strictEqual(stripAnsi(undefined), '');
+    });
+  });
+
+  describe('extractEmbeddedJson', function () {
+    it('should extract a JSON object embedded in noisy text', function () {
+      const input = 'preamble\n> {"complexity":"SIMPLE","taskType":"TASK"}\nfooter';
+      assert.deepStrictEqual(extractEmbeddedJson(input), {
+        complexity: 'SIMPLE',
+        taskType: 'TASK',
+      });
+    });
+
+    it('should not be confused by braces inside string values', function () {
+      const input = 'x {"a":"has } and { braces","b":2} y';
+      assert.deepStrictEqual(extractEmbeddedJson(input), { a: 'has } and { braces', b: 2 });
+    });
+
+    it('should return the last valid object when several are present', function () {
+      const input = '{"step":"first"}\nmore\n{"step":"final","done":true}';
+      assert.deepStrictEqual(extractEmbeddedJson(input), { step: 'final', done: true });
+    });
+
+    it('should reject CLI metadata objects', function () {
+      const input = '> {"duration_ms":12,"session_id":"abc"}';
+      assert.strictEqual(extractEmbeddedJson(input), null);
+    });
+
+    it('should return null when there is no JSON object', function () {
+      assert.strictEqual(extractEmbeddedJson('just text, no json'), null);
+      assert.strictEqual(extractEmbeddedJson(''), null);
+      assert.strictEqual(extractEmbeddedJson(null), null);
+    });
+  });
+}
+
+function defineKiroPipelineTests() {
+  describe('Kiro Provider', function () {
+    const ESC = String.fromCharCode(27);
+
+    // Real-world kiro-cli output: the agent's JSON answer printed as pretty
+    // terminal text (color codes + "> " prefix), surrounded by a trust banner
+    // and a "Credits/Time" footer. kiro-cli has no machine-readable mode.
+    const kiroOutput = [
+      'execute tools without asking for confirmation.' + ESC + '[0m',
+      'Agents can sometimes do unexpected things so understand the risks.',
+      '',
+      'Learn more at ' + ESC + '[38;5;141mhttps://kiro.dev/docs/cli/chat/security' + ESC + '[0m',
+      '',
+      ESC + '[38;5;8m',
+      ' ▸ Credits: 0.05 • Time: 4s',
+      '',
+      ESC +
+        '[38;5;141m> ' +
+        ESC +
+        '[0m{"complexity":"SIMPLE","taskType":"TASK","reasoning":"Adding a single utility function plus tests. Small, low-risk."}',
+      ESC + '[0m' + ESC + '[1G' + ESC + '[0m' + ESC + '[?25h',
+    ].join('\n');
+
+    it('should extract the agent JSON from pretty/ANSI kiro output', function () {
+      const result = extractJsonFromOutput(kiroOutput, 'kiro');
+      assert.strictEqual(result.complexity, 'SIMPLE');
+      assert.strictEqual(result.taskType, 'TASK');
+      assert.ok(result.reasoning);
+    });
+
+    it('should extract multi-line (pretty-printed) JSON from kiro output', function () {
+      const output =
+        ESC + '[0m> ' + ESC + '[0m{\n  "complexity": "STANDARD",\n  "taskType": "DEBUG"\n}';
+      const result = extractJsonFromOutput(output, 'kiro');
+      assert.strictEqual(result.complexity, 'STANDARD');
+      assert.strictEqual(result.taskType, 'DEBUG');
+    });
+
+    it('should NOT apply the embedded-JSON fallback for non-kiro providers', function () {
+      // Strategy 5 is gated to kiro; the same noisy output yields null for claude.
+      assert.strictEqual(extractJsonFromOutput(kiroOutput, 'claude'), null);
     });
   });
 }

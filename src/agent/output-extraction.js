@@ -8,15 +8,35 @@
  * - Claude: {"type":"result","result":{...}} or {"type":"result","structured_output":{...}}
  * - Codex: Raw text in item.created events, turn.completed has NO result field
  * - Gemini: Raw text in message events, result event may have NO result field
+ * - Kiro: No machine-readable mode; the agent's JSON answer is printed inside
+ *   pretty/ANSI terminal text (e.g. "> {json}"), recovered by embedded scan.
  *
  * Extraction priority (most specific → least specific):
  * 1. Result wrapper with content (type:result + result/structured_output field)
  * 2. Accumulated text from provider parser events
  * 3. Markdown code block extraction
  * 4. Direct JSON parse of entire output
+ * 5. Embedded JSON object scan (ANSI-stripped, for pretty-text CLIs like kiro)
  */
 
 const { parseProviderChunk } = require('../providers');
+
+/**
+ * Remove ANSI/VT escape sequences (colors, cursor control) from text.
+ * Some CLIs (notably kiro-cli) render pretty terminal output even when their
+ * stdout is piped, so the agent's JSON answer arrives wrapped in escape codes;
+ * strip them before attempting to parse.
+ *
+ * @param {string} text - Text that may contain ANSI escape sequences
+ * @returns {string} Text with escape sequences removed
+ */
+function stripAnsi(text) {
+  if (!text || typeof text !== 'string') return '';
+  const ESC = String.fromCharCode(27);
+  // Strip CSI escape sequences: ESC [ ... <final letter> (colors, cursor moves).
+  const ansiPattern = new RegExp(ESC + '\\[[0-9;?=]*[A-Za-z]', 'g');
+  return text.replace(ansiPattern, '');
+}
 
 /**
  * Strip timestamp prefix from log lines.
@@ -235,6 +255,89 @@ function extractDirectJson(text) {
 }
 
 /**
+ * Find all top-level balanced { ... } JSON object substrings in text,
+ * respecting string literals and escape characters so that braces inside
+ * string values do not break balancing. Used to recover an agent's JSON
+ * answer from noisy, human-formatted CLI output (e.g. kiro-cli's pretty text
+ * like "> {json}").
+ *
+ * @param {string} text - Text to scan
+ * @returns {string[]} Balanced object substrings, in order of appearance
+ */
+function findBalancedJsonObjects(text) {
+  const objects = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          objects.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+  }
+
+  return objects;
+}
+
+/**
+ * Strategy 5: Embedded JSON object extraction.
+ * Strips ANSI escapes, then scans for balanced { ... } objects and returns the
+ * last one that parses to a non-metadata object. Handles CLIs like kiro-cli
+ * that have no machine-readable output mode and print the agent's JSON answer
+ * inside pretty terminal output (e.g. "> {json}" with color codes).
+ *
+ * @param {string} output - Raw CLI output
+ * @returns {object|null} Extracted JSON or null
+ */
+function extractEmbeddedJson(output) {
+  if (!output || typeof output !== 'string') return null;
+
+  const cleaned = stripAnsi(output);
+  const candidates = findBalancedJsonObjects(cleaned);
+
+  // Prefer the last valid object: the agent's final answer is emitted last,
+  // after any tool-call rendering or preamble.
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    try {
+      const parsed = JSON.parse(candidates[i]);
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        !isCliMetadata(parsed)
+      ) {
+        return parsed;
+      }
+    } catch {
+      // Not valid JSON, try the next candidate
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract CLI error from provider output (all providers).
  * Returns the error message if the CLI reported an error, null otherwise.
  *
@@ -323,7 +426,7 @@ function hasFatalStandaloneOutput(output) {
  * Main extraction function - tries all strategies in priority order
  *
  * @param {string} output - Raw output from AI provider CLI
- * @param {string} providerName - Provider name ('claude', 'codex', 'gemini')
+ * @param {string} providerName - Provider name ('claude', 'codex', 'gemini', 'kiro')
  * @returns {object|null} Extracted JSON object or null if extraction failed
  */
 function extractJsonFromOutput(output, providerName = 'claude') {
@@ -348,6 +451,14 @@ function extractJsonFromOutput(output, providerName = 'claude') {
   const fromDirect = extractDirectJson(trimmedOutput);
   if (fromDirect) return fromDirect;
 
+  // Strategy 5: Embedded JSON in pretty/ANSI text. kiro-cli has no
+  // machine-readable output mode, so the agent's JSON answer is printed as
+  // terminal text; recover it by stripping ANSI and scanning for the object.
+  if (providerName === 'kiro') {
+    const fromEmbedded = extractEmbeddedJson(trimmedOutput);
+    if (fromEmbedded) return fromEmbedded;
+  }
+
   if (hasFatalStandaloneOutput(trimmedOutput)) {
     return null;
   }
@@ -362,6 +473,9 @@ module.exports = {
   extractFromTextEvents,
   extractFromMarkdown,
   extractDirectJson,
+  extractEmbeddedJson,
+  findBalancedJsonObjects,
+  stripAnsi,
   stripTimestamp,
   hasFatalStandaloneOutput,
 };

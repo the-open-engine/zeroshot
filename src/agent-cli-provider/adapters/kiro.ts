@@ -120,17 +120,16 @@ function buildCommand(context: string, options: BuildProviderCommandOptions = {}
 
   return commandSpec({
     binary: 'kiro-cli',
+    // kiro-cli renders colored/pretty output even when piped; NO_COLOR keeps
+    // stdout (and logs) clean so the agent's JSON answer is easy to recover.
+    env: { NO_COLOR: '1' },
     args,
-    env: {},
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     warnings: collectKiroWarnings(options),
   });
 }
 
-function parseToolCalls(
-  obj: Record<string, unknown>,
-  state: ProviderParserState
-): OutputEvent[] {
+function parseToolCalls(obj: Record<string, unknown>, state: ProviderParserState): OutputEvent[] {
   const events: OutputEvent[] = [];
   for (const call of getArray(obj, 'tool_calls')) {
     if (!isRecord(call)) continue;
