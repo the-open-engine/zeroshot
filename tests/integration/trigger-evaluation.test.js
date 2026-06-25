@@ -6,6 +6,7 @@
  */
 
 const assert = require('node:assert');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -416,6 +417,42 @@ function defineScriptValidationTests() {
 
       assert.strictEqual(validResult.valid, true);
       assert.strictEqual(invalidResult.valid, false);
+    });
+
+    it('should not freeze host prototypes when evaluating scripts', () => {
+      const childScript = `
+        const LogicEngine = require(${JSON.stringify(path.resolve(__dirname, '../../src/logic-engine'))});
+        const messageBus = {
+          query: () => [],
+          findLast: () => null,
+          count: () => 0,
+          since: () => [],
+        };
+        const engine = new LogicEngine(messageBus, { id: 'test-cluster', agents: [] });
+        const result = engine.evaluate(
+          'return true;',
+          { id: 'evaluator', cluster_id: 'test-cluster' },
+          { topic: 'TRIGGER' }
+        );
+        console.log(JSON.stringify({
+          result,
+          objectPrototypeFrozen: Object.isFrozen(Object.prototype),
+          arrayPrototypeFrozen: Object.isFrozen(Array.prototype),
+        }));
+      `;
+
+      const child = spawnSync(process.execPath, ['-e', childScript], {
+        encoding: 'utf8',
+      });
+
+      assert.strictEqual(child.status, 0, child.stderr || child.stdout);
+      const output = JSON.parse(child.stdout.trim());
+
+      assert.deepStrictEqual(output, {
+        result: true,
+        objectPrototypeFrozen: false,
+        arrayPrototypeFrozen: false,
+      });
     });
   });
 }
