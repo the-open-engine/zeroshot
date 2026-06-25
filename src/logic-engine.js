@@ -82,10 +82,6 @@ function buildAgentContext(agent) {
   };
 }
 
-function getSafeBuiltins() {
-  return { Set, Map, Array, Object, String, Number, Boolean, Math, Date, JSON };
-}
-
 function getQuietConsole() {
   return {
     log: () => {},
@@ -114,33 +110,19 @@ class LogicEngine {
       // Build sandbox context
       const context = this._buildContext(agent, message);
 
-      // Create isolated context with frozen prototypes
-      // This prevents prototype pollution attacks
-      const isolatedContext = {};
+      // Contextify before execution so scripts use VM-owned globals instead of
+      // host constructors. Keep the function-body contract: trigger scripts use
+      // return statements throughout built-in templates and user configs.
+      const sandbox = { ...context };
+      vm.createContext(sandbox);
 
-      // Freeze Object, Array, Function prototypes in the sandbox
-      isolatedContext.Object = Object.freeze({ ...Object });
-      isolatedContext.Array = Array;
-      isolatedContext.Function = Function;
-
-      // Copy safe context properties
-      Object.assign(isolatedContext, context);
-
-      // Wrap script to prevent prototype access
       const wrappedScript = `(function() {
         'use strict';
-        // Prevent prototype pollution
-        const frozenObject = Object;
-        const frozenArray = Array;
-        Object.freeze(frozenObject.prototype);
-        Object.freeze(frozenArray.prototype);
-
         ${script}
       })()`;
 
-      // Create and run in context
-      vm.createContext(isolatedContext);
-      const result = vm.runInContext(wrappedScript, isolatedContext, {
+      // Run in context
+      const result = vm.runInContext(wrappedScript, sandbox, {
         timeout: this.timeout,
         displayErrors: true,
       });
@@ -168,7 +150,6 @@ class LogicEngine {
       ledger: ledgerAPI,
       cluster: buildClusterAPI(this.cluster, clusterId),
       helpers: buildHelpers(ledgerAPI),
-      ...getSafeBuiltins(),
       console: getQuietConsole(),
     };
   }
