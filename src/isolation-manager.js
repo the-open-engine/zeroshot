@@ -108,14 +108,28 @@ class IsolationManager {
   }
 
   /**
-   * Get GitHub token from gh CLI config (hosts.yml)
-   * Works with older gh CLI versions that don't have `gh auth token` command
+   * Get GitHub token from gh CLI.
+   * Tries `gh auth token` first (respects GH_CONFIG_DIR), then falls back to
+   * reading hosts.yml directly for older gh versions.
    * @returns {string|null}
    * @private
    */
   _getGhToken() {
+    // `gh auth token` respects GH_CONFIG_DIR and all auth methods (OAuth, PAT, etc.)
     try {
-      const hostsPath = path.join(os.homedir(), '.config', 'gh', 'hosts.yml');
+      const token = runSync('gh', ['auth', 'token'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }).trim();
+      if (token) return token;
+    } catch {
+      // gh auth token not available (gh < v2.0) — fall through to file-based lookup
+    }
+
+    try {
+      // Respect GH_CONFIG_DIR env var (set in non-default gh config environments)
+      const ghConfigDir = process.env.GH_CONFIG_DIR || path.join(os.homedir(), '.config', 'gh');
+      const hostsPath = path.join(ghConfigDir, 'hosts.yml');
       if (!fs.existsSync(hostsPath)) return null;
 
       const content = fs.readFileSync(hostsPath, 'utf8');
