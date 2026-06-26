@@ -49,6 +49,11 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const { resolveClusterRequiredQualityGates } = require('./quality-gates');
+const {
+  commandProofsToQualityGates,
+  mergeCommandProofs,
+  resolveClusterCommandProofs,
+} = require('./command-proofs');
 const crypto = require('crypto');
 
 function applyModelOverride(agentConfig, modelOverride) {
@@ -116,6 +121,46 @@ function applyRequiredQualityGatesToValidators(config, requiredQualityGates) {
   for (const agentConfig of config.agents || []) {
     applyRequiredQualityGatesToAgent(agentConfig, requiredQualityGates);
   }
+}
+
+function applyCommandProofsToAgent(agentConfig, commandProofs) {
+  if (!Array.isArray(commandProofs) || commandProofs.length === 0) {
+    return;
+  }
+
+  agentConfig.commandProofs = mergeCommandProofs(agentConfig.commandProofs, commandProofs);
+}
+
+function applyCommandProofsToAgents(config, commandProofs) {
+  if (!Array.isArray(commandProofs) || commandProofs.length === 0) {
+    return;
+  }
+
+  for (const agentConfig of config.agents || []) {
+    applyCommandProofsToAgent(agentConfig, commandProofs);
+  }
+}
+
+function mergeQualityGates(...sources) {
+  const byId = new Map();
+  const order = [];
+
+  for (const source of sources) {
+    if (!Array.isArray(source)) {
+      continue;
+    }
+    for (const gate of source) {
+      if (!gate?.id) {
+        continue;
+      }
+      if (!byId.has(gate.id)) {
+        order.push(gate.id);
+      }
+      byId.set(gate.id, gate);
+    }
+  }
+
+  return order.map((id) => byId.get(id));
 }
 
 function getTriggerTopic(trigger) {
@@ -521,6 +566,7 @@ class Orchestrator {
       isolation,
       autoPr: clusterData.autoPr || false,
       prOptions: clusterData.prOptions || null,
+      commandProofs: clusterData.commandProofs || [],
       issue: clusterData.issue || null,
     };
 
@@ -801,6 +847,8 @@ class Orchestrator {
           autoPr: cluster.autoPr || false,
           // Persist PR options for resume
           prOptions: cluster.prOptions || null,
+          // Persist cluster-scoped command proof configuration for resume and dynamic agents
+          commandProofs: cluster.commandProofs || [],
           // Persist model override for consistent agent spawning on resume
           modelOverride: cluster.modelOverride || null,
           // Persist issue number for heroshot/external tools
@@ -1007,9 +1055,9 @@ class Orchestrator {
       config,
       clusterId
     );
-    const requiredQualityGates = resolveClusterRequiredQualityGates(config, options);
+    let requiredQualityGates = resolveClusterRequiredQualityGates(config, options);
+    let commandProofs = resolveClusterCommandProofs(config, options);
     options.requiredQualityGates = requiredQualityGates;
-    applyRequiredQualityGatesToValidators(config, requiredQualityGates);
 
     // Build cluster object
     // CRITICAL: initComplete promise ensures ISSUE_OPENED is published before stop() completes
@@ -1034,6 +1082,7 @@ class Orchestrator {
       _resolveInitComplete: resolveInitComplete,
       autoPr: options.autoPr || false,
       requiredQualityGates,
+      commandProofs,
       // PR configuration options (persisted for resume)
       prOptions: buildPrOptions(options, requiredQualityGates),
       // Model override for all agents (applied to dynamically added agents)
@@ -1133,6 +1182,21 @@ class Orchestrator {
       } else {
         throw new Error('Either issue, file, or text input is required');
       }
+
+      commandProofs = mergeCommandProofs(
+        commandProofs,
+        resolveClusterCommandProofs(config, options, inputData.context)
+      );
+      requiredQualityGates = mergeQualityGates(
+        requiredQualityGates,
+        commandProofsToQualityGates(commandProofs)
+      );
+      options.requiredQualityGates = requiredQualityGates;
+      cluster.requiredQualityGates = requiredQualityGates;
+      cluster.commandProofs = commandProofs;
+      cluster.prOptions = buildPrOptions(options, requiredQualityGates);
+      applyCommandProofsToAgents(config, commandProofs);
+      applyRequiredQualityGatesToValidators(config, requiredQualityGates);
 
       // Detect git platform for --pr mode (independent of issue provider)
       if (options.autoPr) {
@@ -3188,6 +3252,7 @@ Continue from where you left off. Review your previous output to understand what
       }
 
       applyRequiredQualityGatesToAgent(agentConfig, cluster.requiredQualityGates);
+      applyCommandProofsToAgent(agentConfig, cluster.commandProofs);
       if (cluster.autoPr) {
         applyPushBlockedRepairTrigger(agentConfig);
       }

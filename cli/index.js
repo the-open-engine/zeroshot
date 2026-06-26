@@ -62,6 +62,7 @@ const {
 const { requirePreflight } = require('../src/preflight');
 const { providersCommand, setDefaultCommand, setupCommand } = require('./commands/providers');
 const { runInspectCommand } = require('./commands/inspect');
+const { runCmdproof } = require('./commands/cmdproof');
 const {
   markDetachedSetupFailed,
   registerDetachedSetupCluster,
@@ -2539,6 +2540,25 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
 // === TASK COMMANDS ===
 // Task run - single-agent background task
 const taskCmd = program.command('task').description('Single-agent task management');
+
+const cmdproofCmd = program
+  .command('cmdproof')
+  .description('Run configured cmdproof command proofs');
+
+for (const mode of ['prove', 'verify', 'check']) {
+  cmdproofCmd
+    .command(`${mode} <id>`)
+    .description(`${mode} a configured command proof`)
+    .action((id) => {
+      try {
+        const exitCode = runCmdproof({ mode, id });
+        process.exit(exitCode);
+      } catch (error) {
+        console.error('Error:', error.message);
+        process.exit(1);
+      }
+    });
+}
 
 taskCmd
   .command('run <prompt>')
