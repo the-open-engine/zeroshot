@@ -6,6 +6,7 @@ const path = require('path');
 const {
   buildCmdproofArgs,
   parseCommandToArgv,
+  proofLockName,
   runCmdproof,
 } = require('../../cli/commands/cmdproof');
 
@@ -112,6 +113,7 @@ describe('zeroshot cmdproof command', function () {
       ]),
       CMDPROOF_CACHE_DIR: path.join(tempDir, 'cache'),
       CMDPROOF_KEY_DIR: path.join(tempDir, 'keys'),
+      ZEROSHOT_CMDPROOF_LOCK_DIR: path.join(tempDir, 'locks'),
     };
 
     try {
@@ -140,6 +142,131 @@ describe('zeroshot cmdproof command', function () {
         calls.map((call) => call.args[0]),
         ['verify', 'prove']
       );
+      assert.strictEqual(fs.existsSync(env.ZEROSHOT_CMDPROOF_LOCK_DIR), false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('waits for an in-flight proof and reuses it instead of proving concurrently', function () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-cmdproof-test-'));
+    const proof = {
+      id: 'opcore-ci',
+      profile: 'ci-equivalent',
+      command: 'bash ./scripts/ci/run-local-ci-equivalent.sh',
+    };
+    const env = {
+      ZEROSHOT_COMMAND_PROOFS: JSON.stringify([proof]),
+      CMDPROOF_CACHE_DIR: path.join(tempDir, 'cache'),
+      CMDPROOF_KEY_DIR: path.join(tempDir, 'keys'),
+      ZEROSHOT_CMDPROOF_LOCK_DIR: path.join(tempDir, 'locks'),
+      ZEROSHOT_CMDPROOF_WAIT_MS: '50',
+      ZEROSHOT_CMDPROOF_POLL_MS: '1',
+    };
+    const calls = [];
+    const stdout = [];
+    const stderr = [];
+
+    try {
+      fs.mkdirSync(env.CMDPROOF_KEY_DIR, { recursive: true });
+      fs.writeFileSync(path.join(env.CMDPROOF_KEY_DIR, 'private-key.json'), '{}');
+      fs.writeFileSync(path.join(env.CMDPROOF_KEY_DIR, 'public-key.json'), '{}');
+      const lockPath = path.join(
+        env.ZEROSHOT_CMDPROOF_LOCK_DIR,
+        proofLockName(proof, { actionKey: 'action-a' })
+      );
+      fs.mkdirSync(lockPath, { recursive: true });
+      fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({ pid: process.pid }));
+
+      const exitCode = runCmdproof({
+        mode: 'check',
+        id: 'opcore-ci',
+        env,
+        cwd: tempDir,
+        spawnSyncFn: (command, args) => {
+          calls.push({ command, args });
+          if (
+            args[0] === 'verify' &&
+            calls.filter((call) => call.args[0] === 'verify').length === 1
+          ) {
+            return { status: 2, stdout: '{"status":"miss","actionKey":"action-a"}\n', stderr: '' };
+          }
+          if (args[0] === 'verify') {
+            return { status: 0, stdout: '{"status":"reused_proof","reused":true}\n', stderr: '' };
+          }
+          return { status: 0, stdout: '', stderr: '' };
+        },
+        stdout: { write: (chunk) => stdout.push(chunk) },
+        stderr: { write: (chunk) => stderr.push(chunk) },
+      });
+
+      assert.strictEqual(exitCode, 0);
+      assert.deepStrictEqual(
+        calls.map((call) => call.args[0]),
+        ['verify', 'verify']
+      );
+      assert.match(stdout.join(''), /"status":"miss"/);
+      assert.match(stdout.join(''), /"status":"reused_proof"/);
+      assert.match(stderr.join(''), /waiting for in-flight proof/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('takes over proving when an in-flight proof lock is stale', function () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-cmdproof-test-'));
+    const proof = {
+      id: 'opcore-ci',
+      profile: 'ci-equivalent',
+      command: 'bash ./scripts/ci/run-local-ci-equivalent.sh',
+    };
+    const env = {
+      ZEROSHOT_COMMAND_PROOFS: JSON.stringify([proof]),
+      CMDPROOF_CACHE_DIR: path.join(tempDir, 'cache'),
+      CMDPROOF_KEY_DIR: path.join(tempDir, 'keys'),
+      ZEROSHOT_CMDPROOF_LOCK_DIR: path.join(tempDir, 'locks'),
+      ZEROSHOT_CMDPROOF_LOCK_STALE_MS: '1',
+    };
+    const calls = [];
+
+    try {
+      fs.mkdirSync(env.CMDPROOF_KEY_DIR, { recursive: true });
+      fs.writeFileSync(path.join(env.CMDPROOF_KEY_DIR, 'private-key.json'), '{}');
+      fs.writeFileSync(path.join(env.CMDPROOF_KEY_DIR, 'public-key.json'), '{}');
+      const lockPath = path.join(
+        env.ZEROSHOT_CMDPROOF_LOCK_DIR,
+        proofLockName(proof, { actionKey: 'action-stale' })
+      );
+      fs.mkdirSync(lockPath, { recursive: true });
+      const old = new Date(Date.now() - 10_000);
+      fs.utimesSync(lockPath, old, old);
+
+      const exitCode = runCmdproof({
+        mode: 'check',
+        id: 'opcore-ci',
+        env,
+        cwd: tempDir,
+        spawnSyncFn: (command, args) => {
+          calls.push({ command, args });
+          if (args[0] === 'verify') {
+            return {
+              status: 2,
+              stdout: '{"status":"miss","actionKey":"action-stale"}\n',
+              stderr: '',
+            };
+          }
+          return { status: 0, stdout: '{"status":"passed"}\n', stderr: '' };
+        },
+        stdout: { write: () => {} },
+        stderr: { write: () => {} },
+      });
+
+      assert.strictEqual(exitCode, 0);
+      assert.deepStrictEqual(
+        calls.map((call) => call.args[0]),
+        ['verify', 'prove']
+      );
+      assert.strictEqual(fs.existsSync(lockPath), false);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
