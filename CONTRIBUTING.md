@@ -122,7 +122,8 @@ zeroshot/
 npm test
 ```
 
-Runs all tests in `tests/**/*.test.js` using Mocha.
+Runs the fast test suite (unit + top-level tests) as defined in `package.json`.
+Integration tests in `tests/integration/**/*.test.js` are excluded from `npm test`; run them with `npm run test:slow`.
 
 ### Specific Test File
 
