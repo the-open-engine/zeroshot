@@ -45,6 +45,11 @@ function normalizeObjectGate(gate) {
   setOptionalString(normalized, gate, 'scope');
   setOptionalString(normalized, gate, 'description');
   setOptionalString(normalized, gate, 'command');
+  setOptionalString(normalized, gate, 'profile');
+  setOptionalString(normalized, gate, 'proofProfile');
+  if (gate.commandProof === true) {
+    normalized.commandProof = true;
+  }
   return normalized;
 }
 

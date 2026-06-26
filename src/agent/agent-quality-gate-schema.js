@@ -28,6 +28,15 @@ function buildQualityGateSchema() {
             command: { type: 'string' },
             exitCode: { type: 'integer' },
             output: { type: 'string' },
+            proof: {
+              type: 'object',
+              description: 'Optional command proof metadata when the gate used cmdproof.',
+              properties: {
+                profile: { type: 'string' },
+                reused: { type: 'boolean' },
+                status: { type: 'string' },
+              },
+            },
           },
           required: ['command', 'exitCode', 'output'],
         },

@@ -16,6 +16,31 @@ function baseContextParams(config) {
 }
 
 describe('required handoff quality gate context', function () {
+  it('adds reusable command proof instructions for implementation agents', function () {
+    const config = validateAgentConfig({
+      id: 'worker',
+      role: 'implementation',
+      outputFormat: 'json',
+      commandProofs: [
+        {
+          id: 'opcore-ci',
+          profile: 'ci-equivalent',
+          scope: 'repo',
+          description: 'Opcore local CI',
+          command: 'bash ./scripts/ci/run-local-ci-equivalent.sh',
+        },
+      ],
+      prompt: 'Do the work.',
+    });
+
+    const context = buildContext(baseContextParams(config));
+
+    assert.match(context, /Reusable Command Proofs/);
+    assert.match(context, /id: opcore-ci, profile: ci-equivalent, scope: repo/);
+    assert.match(context, /bash \.\/scripts\/ci\/run-local-ci-equivalent\.sh/);
+    assert.match(context, /zeroshot cmdproof check opcore-ci/);
+  });
+
   it('adds generic configured gate instructions and schema for validators', function () {
     const config = validateAgentConfig({
       id: 'validator',
@@ -34,6 +59,8 @@ describe('required handoff quality gate context', function () {
           scope: 'workspace',
           description: 'Run the configured workspace quality gate',
           command: 'quality-check --scope workspace',
+          profile: 'ci-equivalent',
+          commandProof: true,
         },
       ],
     });
@@ -45,10 +72,15 @@ describe('required handoff quality gate context', function () {
       config.jsonSchema.properties.qualityGates.items.properties.evidence.required,
       ['command', 'exitCode', 'output']
     );
+    assert.ok(
+      config.jsonSchema.properties.qualityGates.items.properties.evidence.properties.proof,
+      'schema should accept optional cmdproof evidence metadata'
+    );
     assert.match(context, /Required Handoff Quality Gates/);
     assert.match(context, /id: repo-quality, scope: workspace/);
     assert.match(context, /Run the configured workspace quality gate/);
     assert.match(context, /quality-check --scope workspace/);
+    assert.match(context, /zeroshot cmdproof check repo-quality/);
     assert.match(context, /publish one `qualityGates` entry/);
     assert.match(context, /approved` to false and publish status `FAIL`/);
     assert.match(context, /approved` to false and publish status `UNAVAILABLE`/);

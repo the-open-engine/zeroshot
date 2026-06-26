@@ -30,6 +30,7 @@ const {
   buildValidatorSkipSection,
 } = require('./agent-context-sections');
 const { buildRequiredQualityGatesSection } = require('./agent-quality-gates-context');
+const { buildCommandProofsSection } = require('./agent-command-proofs-context');
 
 function pushStaticPack({ packs, packId, section, text, order, options = {} }) {
   if (!text) {
@@ -82,6 +83,7 @@ function buildStaticSections(params) {
     header: buildHeaderContext({ id, role, iteration, isIsolated }),
     instructions: buildInstructionsSection({ config, selectedPrompt, id }),
     repoTooling: buildRepoToolingSection({ config, worktree }),
+    commandProofs: buildCommandProofsSection(config),
     legacyOutputSchema: buildLegacyOutputSchemaSection(config),
     queuedGuidance: queuedGuidance || '',
     requiredQualityGates: buildRequiredQualityGatesSection(config),
@@ -100,6 +102,7 @@ function buildPacks(params) {
     'header',
     'instructions',
     'repoTooling',
+    'commandProofs',
     'queuedGuidance',
     'legacyOutputSchema',
     'requiredQualityGates',

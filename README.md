@@ -159,6 +159,52 @@ The `id` and optional `scope` are generic. A repo may bind `repo-quality` to any
 
 The pusher fails closed before commit, push, PR creation, or merge when a configured gate is missing, failing, unavailable, stale, older than `IMPLEMENTATION_READY`, or lacks usable evidence. If no `requiredQualityGates` are configured, Zeroshot preserves its existing validator consensus behavior.
 
+## Cmdproof Command Reuse
+
+Clusters can make expensive exact commands reusable across workers and validators with `cmdproof`. Zeroshot does not intercept arbitrary shell commands; it gives agents a cluster-scoped helper for configured command proofs.
+
+Issue bodies can opt in per run:
+
+````markdown
+```zeroshot-command-proofs
+[
+  {
+    "id": "repo-ci",
+    "profile": "ci-equivalent",
+    "scope": "repo",
+    "description": "Repository local CI-equivalent gate",
+    "command": "bash ./scripts/ci/run-local-ci-equivalent.sh"
+  }
+]
+```
+````
+
+Repos can also configure the same commands in `.zeroshot/settings.json`:
+
+```json
+{
+  "ship": {
+    "commandProofs": [
+      {
+        "id": "repo-ci",
+        "profile": "ci-equivalent",
+        "scope": "repo",
+        "description": "Repository local CI-equivalent gate",
+        "command": "bash ./scripts/ci/run-local-ci-equivalent.sh"
+      }
+    ]
+  }
+}
+```
+
+Agents receive instructions to use:
+
+```bash
+zeroshot cmdproof check repo-ci
+```
+
+The helper uses a cluster-local cache and trusted-agent key under `~/.zeroshot/cmdproof/<cluster-id>/`, runs `cmdproof verify` first, and falls back to `cmdproof prove --fallback run` on misses. In `--ship` flows, configured command proofs are also required handoff quality gates.
+
 ## When to Use Zeroshot
 
 Zeroshot performs best when tasks have clear acceptance criteria.

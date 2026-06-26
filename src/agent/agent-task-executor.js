@@ -780,6 +780,25 @@ function buildSpawnEnv(agent, providerName, modelSpec, options = {}) {
   const { claudeConfigDir = null } = options;
   const spawnEnv = { ...process.env };
   const agentCwd = agent.config?.cwd || agent.worktree?.path || process.cwd();
+  const clusterId = agent.cluster?.id || agent.cluster_id || process.env.ZEROSHOT_CLUSTER_ID;
+
+  if (clusterId) {
+    spawnEnv.ZEROSHOT_CLUSTER_ID = clusterId;
+    const cmdproofRoot = path.join(os.homedir(), '.zeroshot', 'cmdproof', clusterId);
+    if (!spawnEnv.CMDPROOF_CACHE_DIR) {
+      spawnEnv.CMDPROOF_CACHE_DIR = path.join(cmdproofRoot, 'cache');
+    }
+    if (!spawnEnv.CMDPROOF_KEY_DIR) {
+      spawnEnv.CMDPROOF_KEY_DIR = path.join(cmdproofRoot, 'keys');
+    }
+  }
+
+  const commandProofs = Array.isArray(agent.config?.commandProofs)
+    ? agent.config.commandProofs
+    : agent.cluster?.commandProofs || [];
+  if (commandProofs.length > 0) {
+    spawnEnv.ZEROSHOT_COMMAND_PROOFS = JSON.stringify(commandProofs);
+  }
 
   if (providerName === 'claude') {
     Object.assign(spawnEnv, buildClaudeEnv(modelSpec));

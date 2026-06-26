@@ -8,6 +8,10 @@ function appendGateDetails(lines, gate, index) {
   if (gate.command) {
     lines.push(`   command: ${gate.command}`);
   }
+  if (gate.profile || gate.proofProfile) {
+    lines.push(`   cmdproof profile: ${gate.profile || gate.proofProfile}`);
+    lines.push(`   cmdproof helper: zeroshot cmdproof check ${gate.id}`);
+  }
 }
 
 function buildRequiredQualityGatesSection(config) {
@@ -35,6 +39,7 @@ function buildRequiredQualityGatesSection(config) {
     '',
     'For each configured gate:',
     '- Run the configured command when one is provided by repo or cluster config.',
+    '- For gates with a cmdproof profile, run `zeroshot cmdproof check <id>` before considering a raw command.',
     '- Put the command, numeric exit code, and string output in `evidence`.',
     '- Set `status` to `PASS` only when the gate completes successfully.',
     '- If a required gate fails, set `approved` to false and publish status `FAIL`.',
