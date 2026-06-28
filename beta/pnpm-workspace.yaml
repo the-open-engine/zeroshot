@@ -1,0 +1,8 @@
+packages:
+  - api
+  - types
+  - web
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild
