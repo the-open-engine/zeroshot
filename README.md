@@ -7,13 +7,18 @@
 
 &nbsp;
 
-[![npm](https://img.shields.io/npm/v/@the-open-engine/zeroshot?style=flat-square&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine/zeroshot)
-[![CI](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?style=flat-square&labelColor=171411&label=CI)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat-square)](LICENSE)
-[![node](https://img.shields.io/badge/node-%E2%89%A5%2018-171411?style=flat-square)](#install)
-[![platforms](https://img.shields.io/badge/platforms-linux%20%C2%B7%20macos-171411?style=flat-square)](#install)
-[![stars](https://img.shields.io/github/stars/the-open-engine/zeroshot?style=flat-square&labelColor=171411&color=171411)](https://github.com/the-open-engine/zeroshot)
-[![Layer 01 · The Open Engine](https://img.shields.io/badge/Layer_01-The_Open_Engine-C2240C?style=flat-square&labelColor=171411)](#the-open-engine)
+<a href="https://theopenengine.com"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="Website" src="docs/brand/social/website-light.png" height="30"></picture></a>
+<a href="https://x.com/OpenEngineCo"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineCo" src="docs/brand/social/x-light.png" height="30"></picture></a>
+<a href="https://www.linkedin.com/company/the-open-engine-company"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/linkedin-dark.png"><img alt="LinkedIn" src="docs/brand/social/linkedin-light.png" height="30"></picture></a>
+<a href="https://discord.gg/fZyzf2Cut9"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-dark.png"><img alt="Discord" src="docs/brand/social/discord-light.png" height="30"></picture></a>
+
+[![npm](https://img.shields.io/npm/v/@the-open-engine/zeroshot?style=flat&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine/zeroshot)
+[![CI](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?style=flat&labelColor=171411&label=CI)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
+[![node](https://img.shields.io/badge/node-%E2%89%A5%2018-171411?style=flat)](#install)
+[![platforms](https://img.shields.io/badge/platforms-linux%20%C2%B7%20macos-171411?style=flat)](#install)
+[![stars](https://img.shields.io/github/stars/the-open-engine/zeroshot?style=flat&labelColor=171411&color=171411)](https://github.com/the-open-engine/zeroshot)
+[![Layer 01 · The Open Engine](https://img.shields.io/badge/Layer_01-The_Open_Engine-C2240C?style=flat&labelColor=171411)](#the-open-engine)
 
 </div>
 
@@ -209,7 +214,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [CODE_OF_CONDUCT.m
 
 <!-- discord-placeholder -->
 
-Questions and help: [Discord](https://discord.gg/PdZ3UEXB).
+Questions and help: [Discord](https://discord.gg/fZyzf2Cut9).
 
 ## License
 
