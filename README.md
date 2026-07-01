@@ -51,6 +51,16 @@ task --> plan --> implement --> verify --> APPROVED --> done
 
 Bring your own provider and your own backend. Zeroshot orchestrates the agents that write your code; it doesn't store your keys or replace your models.
 
+## How is this different from a single coding agent?
+
+|                             | A single coding agent        | Zeroshot                                                                                    |
+| --------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------- |
+| Who says it is correct?     | the same agent that wrote it | a separate agent that never saw how it was written                                          |
+| Is the code actually run?   | usually just claimed         | executed against your real tests                                                            |
+| When it fails, you get      | an assertion it is fine      | a reproducible failure                                                                      |
+| When does it stop?          | when it decides it is done   | when the change is verified, or provably is not                                             |
+| Which coding agent runs it? | one, fixed                   | any you already run: Zeroshot is the harness around Claude Code, Codex, Gemini, or OpenCode |
+
 ## Quick start
 
 ```bash
