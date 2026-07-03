@@ -827,7 +827,7 @@ function parseTaskIdFromOutput(stdout) {
 
 function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
-  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+  const SPAWN_TIMEOUT_MS = 60000; // 60 seconds to spawn task (allows for LM Studio model priming)
 
   return new Promise((resolve, reject) => {
     const proc = spawn(ctPath, args, {
@@ -1483,7 +1483,7 @@ async function spawnClaudeTaskIsolated(agent, context) {
 
   // STEP 1: Spawn task and extract task ID (same as non-isolated mode)
   // Timeout for spawn phase - if CLI hangs during init (e.g., opencode 429 bug), kill it
-  const SPAWN_TIMEOUT_MS = 30000; // 30 seconds to spawn task
+  const SPAWN_TIMEOUT_MS = 60000; // 60 seconds to spawn task (allows for LM Studio model priming)
   // Note: Auth env vars are injected by IsolationManager, we only need model mapping here
   const isolatedEnv =
     providerName === 'claude' ? buildClaudeEnv(modelSpec, { includeAuth: false }) : {};
