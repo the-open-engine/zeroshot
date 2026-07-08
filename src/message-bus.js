@@ -24,12 +24,14 @@ class MessageBus extends EventEmitter {
     this.setMaxListeners(MAX_LISTENERS);
     this.ledger = ledger || new Ledger();
     this.wsClients = new Set();
+    this._closed = false;
 
     // Forward ledger events
-    this.ledger.on('message', (message) => {
+    this._forwardLedgerMessage = (message) => {
       this.emit('message', message);
       this._broadcastToWebSocket(message);
-    });
+    };
+    this.ledger.on('message', this._forwardLedgerMessage);
   }
 
   /**
@@ -241,6 +243,14 @@ class MessageBus extends EventEmitter {
    * Close the message bus
    */
   close() {
+    if (this._closed) {
+      return;
+    }
+    this._closed = true;
+
+    this.ledger.off('message', this._forwardLedgerMessage);
+    this.removeAllListeners();
+
     // Close all WebSocket connections
     for (const ws of this.wsClients) {
       try {

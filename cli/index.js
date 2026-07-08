@@ -2612,6 +2612,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
 
       if (!process.env.ZEROSHOT_DAEMON) {
         await streamClusterInForeground(cluster, orchestrator, clusterId, options);
+        orchestrator.close();
       }
 
       setupDaemonCleanup(orchestrator, clusterId);

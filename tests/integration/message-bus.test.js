@@ -647,6 +647,25 @@ function registerTaskIdTokenTotalsTest() {
   });
 }
 
+function registerCloseTests() {
+  describe('Close lifecycle', () => {
+    it('should be idempotent and ignore publishes after close', () => {
+      messageBus.close();
+      messageBus.close();
+      ledger.close();
+
+      const published = messageBus.publish({
+        cluster_id: 'closed-cluster',
+        topic: 'AFTER_CLOSE',
+        sender: 'test',
+        content: { text: 'ignored' },
+      });
+
+      assert.strictEqual(published, null);
+    });
+  });
+}
+
 describe('MessageBus Integration', function () {
   this.timeout(10000);
 
@@ -672,4 +691,5 @@ describe('MessageBus Integration', function () {
   registerEventEmissionTests();
   registerBatchPublishingTests();
   registerTaskIdCausalLinkingTests();
+  registerCloseTests();
 });

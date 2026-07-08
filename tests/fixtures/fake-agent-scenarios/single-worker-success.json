@@ -1,0 +1,8 @@
+{
+  "files": [{ "path": "output.txt", "content": "feature implemented\n" }],
+  "messages": [
+    "Implementing the requested feature.",
+    "{\"summary\": \"Implemented the requested feature\", \"result\": \"Wrote output.txt\"}"
+  ],
+  "exitCode": 0
+}
