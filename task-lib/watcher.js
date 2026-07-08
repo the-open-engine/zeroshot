@@ -45,6 +45,7 @@ const child = spawn(command, finalArgs, {
   cwd: commandSpec.cwd || cwd,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
+  windowsHide: true,
 });
 
 updateTask(taskId, { pid: child.pid });
