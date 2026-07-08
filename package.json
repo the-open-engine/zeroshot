@@ -1,31 +1,33 @@
 {
-  "name": "@covibes/zeroshot",
+  "name": "@the-open-engine/zeroshot",
   "version": "5.4.0",
   "description": "Multi-agent orchestration engine for Claude, Codex, and Gemini",
   "main": "src/orchestrator.js",
   "bin": {
-    "zeroshot": "./cli/index.js"
+    "zeroshot": "./cli/index.js",
+    "zeroshot-agent-provider": "./lib/agent-cli-provider/executable.js"
   },
   "directories": {
     "example": "examples",
     "test": "tests"
   },
   "scripts": {
-    "test": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
-    "test:unit": "mocha 'tests/unit/**/*.test.js' 'tests/*.test.js' --parallel",
+    "pretest": "npm run build:agent-cli-provider",
+    "test": "node tests/run-tests.js",
+    "test:unit": "node tests/run-tests.js",
     "test:slow": "mocha 'tests/integration/**/*.test.js' --timeout 180000",
     "test:all": "npm run test && npm run test:slow",
     "test:coverage": "c8 npm run test:unit",
     "test:coverage:report": "c8 --reporter=html npm run test:unit && echo 'Coverage report generated at coverage/index.html'",
-    "postinstall": "node scripts/fix-node-pty-permissions.js && node scripts/install-tui-binary.js",
+    "postinstall": "node scripts/fix-node-pty-permissions.js",
     "start": "node cli/index.js",
-    "build:tui-backend": "tsc --project tsconfig.tui-backend.json",
-    "build:tui": "npm run build:tui-backend",
     "typecheck": "tsc --noEmit",
-    "typecheck:tui-backend": "tsc --project tsconfig.tui-backend.json --noEmit",
-    "dev:link": "ZEROSHOT_TUI_BINARY_SKIP=1 npm link",
-    "dev:tui": "concurrently -k -n backend,tui \"npm run build:tui-backend -- --watch\" \"sh -c 'cd tui-rs && cargo watch -w . -x \\\"run -p zeroshot-tui -- --ui disruptive\\\"'\"",
-    "dev:bootstrap": "npm run dev:link && npm run dev:tui",
+    "typecheck:agent-cli-provider": "tsc --project tsconfig.agent-cli-provider.json",
+    "lint:agent-cli-provider": "eslint \"src/agent-cli-provider/**/*.ts\" \"tests/agent-cli-provider/**/*.ts\"",
+    "build:agent-cli-provider": "tsc --project tsconfig.agent-cli-provider.build.json",
+    "test:agent-cli-provider": "node --test tests/agent-cli-provider/*.test.js",
+    "check:agent-cli-provider:ci": "npm run typecheck:agent-cli-provider && npm run lint:agent-cli-provider && npm run build:agent-cli-provider && npm run test:agent-cli-provider",
+    "dev:link": "npm link",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "validate:templates": "node scripts/validate-templates.js",
@@ -36,11 +38,11 @@
     "deadcode:deps": "depcheck",
     "deadcode:all": "npm run deadcode && npm run deadcode:files && npm run deadcode:deps",
     "dupcheck": "jscpd src/ --min-lines 5 --min-tokens 50 --threshold 5",
-    "check": "npm run typecheck && npm run typecheck:tui-backend && npm run lint",
+    "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run build:tui",
-    "prepare": "husky"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run check:agent-cli-provider:ci",
+    "prepare": "npm run build:agent-cli-provider && husky"
   },
   "c8": {
     "reporter": [
@@ -71,13 +73,13 @@
   ],
   "author": "Covibes",
   "license": "MIT",
-  "homepage": "https://github.com/covibes/zeroshot",
+  "homepage": "https://github.com/the-open-engine/zeroshot",
   "repository": {
     "type": "git",
-    "url": "https://github.com/covibes/zeroshot.git"
+    "url": "git+https://github.com/the-open-engine/zeroshot.git"
   },
   "bugs": {
-    "url": "https://github.com/covibes/zeroshot/issues"
+    "url": "https://github.com/the-open-engine/zeroshot/issues"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -102,18 +104,14 @@
   "dependencies": {
     "ajv": "^8.18.0",
     "ansi-to-html": "^0.7.2",
-    "better-sqlite3": "^12.5.0",
-    "blessed": "^0.1.81",
-    "blessed-contrib": "^4.11.0",
+    "better-sqlite3": "^12.6.2",
     "chalk": "^4.1.2",
     "commander": "^14.0.2",
-    "ink": "^6.6.0",
-    "md-to-pdf": "^5.2.5",
     "node-pty": "^1.1.0",
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
-    "proper-lockfile": "^4.1.2",
-    "react": "^19.2.4"
+    "puppeteer": "^24.34.0",
+    "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
@@ -121,11 +119,8 @@
     "@semantic-release/github": "^11.0.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.3",
-    "@types/react": "^19.2.9",
-    "@types/react-reconciler": "^0.33.0",
     "c8": "^10.1.3",
     "chai": "^6.2.1",
-    "concurrently": "^9.1.0",
     "depcheck": "^1.4.7",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
@@ -141,14 +136,20 @@
     "sinon": "^21.0.0",
     "ts-prune": "^0.10.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.4",
     "unimported": "^1.31.0"
   },
   "overrides": {
+    "cosmiconfig": {
+      "js-yaml": "4.2.0"
+    },
     "xml2js": "^0.5.0",
     "diff": ">=8.0.3",
     "tar": ">=7.5.8",
     "undici": ">=7.18.2",
-    "minimatch": ">=10.2.1"
+    "minimatch": ">=10.2.1",
+    "lodash": ">=4.17.24",
+    "marked": ">=15.0.7"
   },
   "lint-staged": {
     "*.{js,mjs,cjs}": [

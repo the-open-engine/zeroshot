@@ -5,7 +5,7 @@
     "validator_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
-      "default": "level2"
+      "default": "level3"
     },
     "max_tokens": {
       "type": "number",
@@ -276,7 +276,7 @@
           },
           "logic": {
             "engine": "javascript",
-            "script": "if (!result.allApproved) { return { topic: 'VALIDATION_RESULT', content: { text: 'Stage 1 rejected', data: { approved: false, stage: 'quick', errors: ledger.query({ topic: 'QUICK_VALIDATION_RESULT' }).flatMap(r => r.content?.data?.errors || []) } } }; }"
+            "script": "if (!result.allApproved) { const validationResults = ledger.query({ topic: 'QUICK_VALIDATION_RESULT' }); return { topic: 'VALIDATION_RESULT', content: { text: 'Stage 1 rejected', data: { approved: false, stage: 'quick', errors: validationResults.flatMap(r => r.content?.data?.errors || []), qualityGates: validationResults.flatMap(r => r.content?.data?.qualityGates || []) } } }; }"
           }
         }
       }

@@ -3,6 +3,11 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import securityPlugin from 'eslint-plugin-security';
 import sonarPlugin from 'eslint-plugin-sonarjs';
 import prettierConfig from 'eslint-config-prettier';
+import tseslint from 'typescript-eslint';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const tsconfigRootDir = dirname(fileURLToPath(import.meta.url));
 
 export default [
   {
@@ -214,6 +219,57 @@ export default [
     },
   },
   {
+    files: ['src/agent-cli-provider/**/*.ts', 'tests/agent-cli-provider/**/*.ts'],
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: './tsconfig.agent-cli-provider.json',
+        tsconfigRootDir,
+      },
+      ecmaVersion: 2022,
+      sourceType: 'module',
+    },
+    rules: {
+      'no-undef': 'off',
+      'no-unused-vars': 'off',
+      'unused-imports/no-unused-vars': 'off',
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-check': false,
+          'ts-expect-error': true,
+          'ts-ignore': true,
+          'ts-nocheck': true,
+        },
+      ],
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/explicit-function-return-type': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-call': 'error',
+      '@typescript-eslint/no-unsafe-member-access': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/no-unsafe-type-assertion': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          vars: 'all',
+          varsIgnorePattern: '^_',
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+  {
     // TUI/CLI/streaming files use ANSI escape codes for terminal colors - allow control characters
     files: [
       'src/streaming/*.js',
@@ -270,6 +326,7 @@ export default [
       'cluster-hooks/**',
       'hooks/**',
       'lib/tui-backend/**',
+      'lib/agent-cli-provider/**',
     ],
   },
   prettierConfig,

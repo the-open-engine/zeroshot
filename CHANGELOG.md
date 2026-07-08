@@ -1,3 +1,9 @@
+## Unreleased
+
+### Bug Fixes
+
+- **logic-engine:** prevent trigger sandbox evaluation from freezing host prototypes while preserving `return`-based logic scripts; reported in [#496](https://github.com/the-open-engine/zeroshot/pull/496).
+
 # [5.3.0](https://github.com/covibes/zeroshot/compare/v5.2.1...v5.3.0) (2026-01-12)
 
 ### Bug Fixes

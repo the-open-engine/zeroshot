@@ -1,7 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { parseChunk } = require('../../src/providers/openai/output-parser');
+const { parseProviderChunk } = require('../../src/providers');
 
 describe('Codex provider parser', () => {
   it('parses assistant text output', () => {
@@ -9,7 +9,7 @@ describe('Codex provider parser', () => {
       path.join(__dirname, '..', 'fixtures', 'codex', 'text.jsonl'),
       'utf8'
     );
-    const events = parseChunk(fixture);
+    const events = parseProviderChunk('codex', fixture);
 
     const textEvent = events.find((e) => e.type === 'text');
     const result = events.find((e) => e.type === 'result');
@@ -25,7 +25,7 @@ describe('Codex provider parser', () => {
       path.join(__dirname, '..', 'fixtures', 'codex', 'tool.jsonl'),
       'utf8'
     );
-    const events = parseChunk(fixture);
+    const events = parseProviderChunk('codex', fixture);
 
     const toolCall = events.find((e) => e.type === 'tool_call');
     const toolResult = events.find((e) => e.type === 'tool_result');

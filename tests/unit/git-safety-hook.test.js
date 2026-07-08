@@ -14,12 +14,30 @@
  */
 
 const assert = require('assert');
-const { execSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 // Path to the hook script
 const HOOK_PATH = path.join(__dirname, '../../hooks/block-dangerous-git.py');
+
+function resolvePython() {
+  const candidates = [process.env.PYTHON, '/usr/bin/python3', 'python3', 'python'].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ['--version'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (result.status === 0) {
+      return candidate;
+    }
+  }
+
+  throw new Error('No working Python interpreter found for git safety hook tests');
+}
+
+const PYTHON = resolvePython();
 
 /**
  * Run the hook with a simulated Bash tool input
@@ -35,7 +53,8 @@ function runHook(command) {
 
   try {
     // CRITICAL: Must set ZEROSHOT_WORKTREE=1 or hook exits without checking
-    const output = execSync(`echo '${input}' | python3 "${HOOK_PATH}"`, {
+    const output = execFileSync(PYTHON, [HOOK_PATH], {
+      input,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ZEROSHOT_WORKTREE: '1' },
@@ -199,8 +218,10 @@ function registerNonBashToolsTests() {
       });
 
       // Hook exits 0 with no output for non-Bash tools (passthrough)
-      const output = execSync(`echo '${input}' | python3 "${HOOK_PATH}"`, {
+      const output = execFileSync(PYTHON, [HOOK_PATH], {
+        input,
         encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ZEROSHOT_WORKTREE: '1' },
       });
 

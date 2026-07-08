@@ -8,8 +8,7 @@
  * - Container cleanup on stop/kill
  */
 
-const { spawn } = require('child_process');
-const { execSync } = require('./lib/safe-exec'); // Enforces timeouts - prevents infinite hangs
+const { spawn, spawnSync } = require('child_process');
 const { Worker } = require('worker_threads');
 const crypto = require('crypto');
 const path = require('path');
@@ -22,16 +21,25 @@ const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker
 const { getProvider } = require('./providers');
 const { readRepoSettings } = require('../lib/repo-settings');
 
-/**
- * Escape a string for safe use in shell commands
- * Prevents shell injection when passing dynamic values to execSync with shell: true
- * @param {string} str - String to escape
- * @returns {string} Shell-escaped string
- */
-function escapeShell(str) {
-  // Replace single quotes with escaped version and wrap in single quotes
-  // This is the safest approach for shell escaping
-  return `'${str.replace(/'/g, "'\\''")}'`;
+const DEFAULT_WORKTREE_SETUP_TIMEOUT_MS = 15 * 60 * 1000;
+
+function runSync(command, args, options = {}) {
+  const timeout = options.timeout ?? 30000;
+  const result = spawnSync(command, args, { ...options, timeout });
+  if (result.status !== 0 || result.error) {
+    const detail = result.error?.message || result.stderr?.toString() || 'no stderr';
+    const error = new Error(
+      `Command ${command} failed with status ${result.status ?? 'null'}: ${detail}`
+    );
+    error.status = result.status;
+    error.stderr = result.stderr?.toString();
+    throw error;
+  }
+  return result.stdout?.toString() || '';
+}
+
+function runShellSync(command, options = {}) {
+  return runSync('/bin/bash', ['-lc', command], options);
 }
 
 function expandHomePath(value) {
@@ -45,6 +53,46 @@ function pathContains(base, target) {
   const resolvedTarget = path.resolve(target);
   if (resolvedBase === resolvedTarget) return true;
   return resolvedTarget.startsWith(resolvedBase + path.sep);
+}
+
+function parsePositiveInteger(value, fieldName) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  throw new Error(`${fieldName} must be a positive integer number of milliseconds`);
+}
+
+function resolveWorktreeSetupTimeoutMs(repoSettings = {}, options = {}) {
+  const candidates = [
+    { value: options.worktreeSetupTimeoutMs, field: 'options.worktreeSetupTimeoutMs' },
+    { value: options.setupTimeoutMs, field: 'options.setupTimeoutMs' },
+    {
+      value: process.env.ZEROSHOT_WORKTREE_SETUP_TIMEOUT_MS,
+      field: 'ZEROSHOT_WORKTREE_SETUP_TIMEOUT_MS',
+    },
+    { value: repoSettings.worktree?.setupTimeoutMs, field: 'worktree.setupTimeoutMs' },
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parsePositiveInteger(candidate.value, candidate.field);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  return DEFAULT_WORKTREE_SETUP_TIMEOUT_MS;
 }
 
 const DEFAULT_IMAGE = 'zeroshot-cluster-base';
@@ -713,7 +761,7 @@ class IsolationManager {
     // Get remote URL from original repo (for PR creation)
     let remoteUrl = null;
     try {
-      remoteUrl = execSync('git remote get-url origin', {
+      remoteUrl = runSync('git', ['remote', 'get-url', 'origin'], {
         cwd: sourceDir,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -741,23 +789,19 @@ class IsolationManager {
       }
     }
 
-    // Batch all git operations into a single shell command
-    // Using --allow-empty on commit to handle edge case of empty directories
-    const gitCommands = [
-      'git init',
-      authRemoteUrl ? `git remote add origin ${escapeShell(authRemoteUrl)}` : null,
-      'git add -A',
-      'git commit -m "Initial commit (isolated copy)" --allow-empty',
-      `git checkout -b ${escapeShell(branchName)}`,
-    ]
-      .filter(Boolean)
-      .join(' && ');
-
-    execSync(gitCommands, {
+    runSync('git', ['init'], { cwd: isolatedPath, stdio: 'pipe' });
+    if (authRemoteUrl) {
+      runSync('git', ['remote', 'add', 'origin', authRemoteUrl], {
+        cwd: isolatedPath,
+        stdio: 'pipe',
+      });
+    }
+    runSync('git', ['add', '-A'], { cwd: isolatedPath, stdio: 'pipe' });
+    runSync('git', ['commit', '-m', 'Initial commit (isolated copy)', '--allow-empty'], {
       cwd: isolatedPath,
       stdio: 'pipe',
-      shell: '/bin/bash',
     });
+    runSync('git', ['checkout', '-b', branchName], { cwd: isolatedPath, stdio: 'pipe' });
 
     return isolatedPath;
   }
@@ -1119,7 +1163,7 @@ class IsolationManager {
   _getDockerGid() {
     try {
       // Get docker group info: "docker:x:999:user1,user2"
-      const result = execSync('getent group docker', { encoding: 'utf8' });
+      const result = runSync('getent', ['group', 'docker'], { encoding: 'utf8' });
       const gid = result.split(':')[2];
       return gid.trim();
     } catch {
@@ -1135,12 +1179,9 @@ class IsolationManager {
    */
   _isContainerRunning(containerId) {
     try {
-      const result = execSync(
-        `docker inspect -f '{{.State.Running}}' ${escapeShell(containerId)} 2>/dev/null`,
-        {
-          encoding: 'utf8',
-        }
-      );
+      const result = runSync('docker', ['inspect', '-f', '{{.State.Running}}', containerId], {
+        encoding: 'utf8',
+      });
       return result.trim() === 'true';
     } catch {
       return false;
@@ -1153,7 +1194,7 @@ class IsolationManager {
    */
   _removeContainerByName(name) {
     try {
-      execSync(`docker rm -f ${escapeShell(name)} 2>/dev/null`, { encoding: 'utf8' });
+      runSync('docker', ['rm', '-f', name], { encoding: 'utf8' });
     } catch {
       // Ignore - container doesn't exist
     }
@@ -1166,7 +1207,7 @@ class IsolationManager {
   static isDockerAvailable() {
     try {
       // Require both CLI binary and a reachable daemon.
-      execSync('docker info', { encoding: 'utf8', stdio: 'pipe' });
+      runSync('docker', ['info'], { encoding: 'utf8', stdio: 'pipe' });
       return true;
     } catch {
       return false;
@@ -1180,7 +1221,7 @@ class IsolationManager {
    */
   static imageExists(image = DEFAULT_IMAGE) {
     try {
-      execSync(`docker image inspect ${escapeShell(image)} 2>/dev/null`, {
+      runSync('docker', ['image', 'inspect', image], {
         encoding: 'utf8',
         stdio: 'pipe',
       });
@@ -1213,7 +1254,7 @@ class IsolationManager {
       try {
         // CRITICAL: Run from repo root so build context includes package.json and src/
         // Use -f flag to specify Dockerfile location
-        execSync(`docker build -f docker/zeroshot-cluster/Dockerfile -t ${escapeShell(image)} .`, {
+        runSync('docker', ['build', '-f', 'docker/zeroshot-cluster/Dockerfile', '-t', image, '.'], {
           cwd: repoRoot,
           encoding: 'utf8',
           stdio: 'inherit',
@@ -1266,7 +1307,7 @@ class IsolationManager {
    */
   _isGitRepo(dir) {
     try {
-      execSync('git rev-parse --git-dir', {
+      runSync('git', ['rev-parse', '--git-dir'], {
         cwd: dir,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -1283,7 +1324,7 @@ class IsolationManager {
    */
   _getGitRoot(dir) {
     try {
-      return execSync('git rev-parse --show-toplevel', {
+      return runSync('git', ['rev-parse', '--show-toplevel'], {
         cwd: dir,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -1338,6 +1379,9 @@ class IsolationManager {
    * Create a git worktree for isolated work
    * @param {string} clusterId - Cluster ID (used as branch name)
    * @param {string} workDir - Original working directory
+   * @param {object} [options] - Worktree creation options
+   * @param {string} [options.baseRef] - Git ref to base the worktree branch on
+   * @param {number} [options.worktreeSetupTimeoutMs] - Setup command timeout in milliseconds
    * @returns {{ path: string, branch: string, repoRoot: string }}
    */
   createWorktree(clusterId, workDir, options = {}) {
@@ -1345,13 +1389,61 @@ class IsolationManager {
     if (!repoRoot) {
       throw new Error(`Cannot find git root for ${workDir}`);
     }
+    console.log(`[IsolationManager] Worktree setup phase: preparing git worktree`);
+    console.log(`[IsolationManager] Source repo: ${repoRoot}`);
+
+    // Disk space guard: prevent worktree creation when disk is critically low.
+    // Uses standalone gc module (no Orchestrator dependency — avoids circular require).
+    const { gcOrphanedWorktrees, getDiskSpace, countOrphanedWorktrees } = require('./lib/gc');
+    const MIN_DISK_GB = 10;
+    const AUTO_GC_THRESHOLD_PERCENT = 80;
+
+    const diskCheck = getDiskSpace(os.homedir());
+    if (diskCheck) {
+      // Auto-GC when disk usage exceeds threshold
+      if (diskCheck.usagePercent > AUTO_GC_THRESHOLD_PERCENT) {
+        const orphanCount = countOrphanedWorktrees();
+        if (orphanCount > 0) {
+          console.log(
+            `[IsolationManager] Disk at ${diskCheck.usagePercent.toFixed(0)}% usage, ` +
+              `running auto-GC on ${orphanCount} orphaned worktree(s)...`
+          );
+          const gcResult = gcOrphanedWorktrees();
+          if (gcResult.orphanedWorktrees.length > 0 || gcResult.orphanedDbs.length > 0) {
+            console.log(
+              `[IsolationManager] Auto-GC: removed ${gcResult.orphanedWorktrees.length} worktree(s), ` +
+                `${gcResult.orphanedDbs.length} db file(s)`
+            );
+          }
+        }
+
+        // Re-check disk after GC
+        const afterGc = getDiskSpace(os.homedir());
+        if (afterGc && afterGc.available < MIN_DISK_GB * 1e9) {
+          throw new Error(
+            `Insufficient disk space: ${(afterGc.available / 1e9).toFixed(1)}GB available, ` +
+              `need ${MIN_DISK_GB}GB minimum. Run 'zeroshot gc' to clean up orphaned worktrees, ` +
+              `or 'zeroshot purge' to remove all cluster data.`
+          );
+        }
+      } else if (diskCheck.available < MIN_DISK_GB * 1e9) {
+        throw new Error(
+          `Insufficient disk space: ${(diskCheck.available / 1e9).toFixed(1)}GB available, ` +
+            `need ${MIN_DISK_GB}GB minimum. Run 'zeroshot gc' to clean up orphaned worktrees, ` +
+            `or 'zeroshot purge' to remove all cluster data.`
+        );
+      }
+    }
 
     // Priority: 1) options.baseRef, 2) repo settings, 3) HEAD (default)
     let worktreeBaseRef = options.baseRef || null;
+    let worktreeSetupCommand = null;
+    let repoSettings = {};
     try {
       const repoSettingsResult = readRepoSettings(repoRoot);
-      const repoSettings = repoSettingsResult.settings || {};
+      repoSettings = repoSettingsResult.settings || {};
       const candidate = repoSettings.worktree?.baseRef;
+      worktreeSetupCommand = repoSettings.worktree?.setup || null;
       if (
         !worktreeBaseRef &&
         typeof candidate === 'string' &&
@@ -1362,12 +1454,13 @@ class IsolationManager {
     } catch {
       // ignore
     }
+    const worktreeSetupTimeoutMs = resolveWorktreeSetupTimeoutMs(repoSettings, options);
 
     // Best-effort ensure origin/<branch> exists locally if requested.
     if (worktreeBaseRef && worktreeBaseRef.startsWith('origin/')) {
       const branch = worktreeBaseRef.slice('origin/'.length);
       try {
-        execSync(`git fetch origin ${escapeShell(branch)}`, {
+        runSync('git', ['fetch', 'origin', branch], {
           cwd: repoRoot,
           encoding: 'utf8',
           stdio: 'pipe',
@@ -1394,7 +1487,7 @@ class IsolationManager {
     // IMPORTANT: If a previous run deleted the directory without deregistering the worktree,
     // git may keep the branch "checked out" and block deletion/reuse.
     try {
-      execSync(`git worktree remove --force ${escapeShell(worktreePath)}`, {
+      runSync('git', ['worktree', 'remove', '--force', worktreePath], {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -1403,7 +1496,7 @@ class IsolationManager {
       // ignore
     }
     try {
-      execSync('git worktree prune', { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+      runSync('git', ['worktree', 'prune'], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
     } catch {
       // ignore
     }
@@ -1414,12 +1507,14 @@ class IsolationManager {
     }
 
     const baseRef = worktreeBaseRef || 'HEAD';
+    console.log(`[IsolationManager] Worktree base ref: ${baseRef}`);
+    console.log(`[IsolationManager] Worktree path: ${worktreePath}`);
 
     // Create worktree with new branch based on baseRef (retry on branch collision/in-use)
     for (let attempt = 0; attempt < 10; attempt++) {
       // Best-effort delete if branch exists and is not in use by another worktree.
       try {
-        execSync(`git branch -D ${escapeShell(branchName)}`, {
+        runSync('git', ['branch', '-D', branchName], {
           cwd: repoRoot,
           encoding: 'utf8',
           stdio: 'pipe',
@@ -1429,14 +1524,12 @@ class IsolationManager {
       }
 
       try {
-        execSync(
-          `git worktree add -b ${escapeShell(branchName)} ${escapeShell(worktreePath)} ${escapeShell(baseRef)}`,
-          {
-            cwd: repoRoot,
-            encoding: 'utf8',
-            stdio: 'pipe',
-          }
-        );
+        runSync('git', ['worktree', 'add', '-b', branchName, worktreePath, baseRef], {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: 'pipe',
+        });
+        console.log(`[IsolationManager] Worktree setup phase: created branch ${branchName}`);
         break;
       } catch (err) {
         const stderr = (
@@ -1450,7 +1543,11 @@ class IsolationManager {
         if (attempt < 9 && isBranchCollision) {
           branchName = `${baseBranchName}-${crypto.randomBytes(3).toString('hex')}`;
           try {
-            execSync('git worktree prune', { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+            runSync('git', ['worktree', 'prune'], {
+              cwd: repoRoot,
+              encoding: 'utf8',
+              stdio: 'pipe',
+            });
           } catch {
             // ignore
           }
@@ -1460,11 +1557,86 @@ class IsolationManager {
       }
     }
 
+    // Run repo-configured setup command (e.g. npm ci)
+    if (worktreeSetupCommand && typeof worktreeSetupCommand === 'string') {
+      console.log(`[IsolationManager] Worktree setup phase: running repo setup command`);
+      console.log(
+        `[IsolationManager] Setup command: ${worktreeSetupCommand} ` +
+          `(timeout ${worktreeSetupTimeoutMs}ms)`
+      );
+      console.log(`[IsolationManager] Setup command output follows`);
+      runShellSync(worktreeSetupCommand, {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        stdio: 'inherit',
+        timeout: worktreeSetupTimeoutMs,
+      });
+      console.log(`[IsolationManager] Worktree setup phase: repo setup command complete`);
+    }
+
+    console.log(`[IsolationManager] ✓ Worktree setup complete`);
+
     return {
       path: worktreePath,
       branch: branchName,
       repoRoot,
     };
+  }
+
+  /**
+   * Kill detached processes whose command line is scoped to a worktree path.
+   * Claude Code hook daemons survive agent shutdown because they run detached
+   * and keep the worktree path in argv; cleaning them up here prevents orphaned
+   * daemons from accumulating across stopped or deleted worktrees.
+   * @param {string} worktreePath
+   * @returns {number[]} PIDs signalled with SIGTERM
+   */
+  cleanupWorktreeProcesses(worktreePath) {
+    if (!worktreePath || process.platform === 'win32') {
+      return [];
+    }
+
+    let processList = '';
+    try {
+      processList = runSync('ps', ['axww', '-o', 'pid=,command='], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: 5000,
+      });
+    } catch {
+      return [];
+    }
+
+    const resolvedWorktreePath = path.resolve(worktreePath);
+    const signalledPids = [];
+
+    for (const line of String(processList).split('\n')) {
+      const match = line.trim().match(/^(\d+)\s+(.*)$/);
+      if (!match) {
+        continue;
+      }
+
+      const pid = Number.parseInt(match[1], 10);
+      const command = match[2];
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) {
+        continue;
+      }
+
+      if (!command.includes(resolvedWorktreePath)) {
+        continue;
+      }
+
+      try {
+        process.kill(pid, 'SIGTERM');
+        signalledPids.push(pid);
+      } catch (error) {
+        if (error.code !== 'ESRCH') {
+          throw error;
+        }
+      }
+    }
+
+    return signalledPids;
   }
 
   /**
@@ -1474,13 +1646,15 @@ class IsolationManager {
    * @param {boolean} [options.deleteBranch=false] - Also delete the branch
    */
   removeWorktree(worktreeInfo, _options = {}) {
+    this.cleanupWorktreeProcesses(worktreeInfo.path);
+
     // Tear down any Docker Compose services that may have been started in this worktree.
     // Without this, containers keep running with host port mappings after the worktree is deleted,
     // blocking port allocation for the main project or other worktrees.
     const composePath = path.join(worktreeInfo.path, 'docker-compose.yml');
     if (fs.existsSync(composePath)) {
       try {
-        execSync('docker compose down --remove-orphans --volumes --timeout 10', {
+        runSync('docker', ['compose', 'down', '--remove-orphans', '--volumes', '--timeout', '10'], {
           cwd: worktreeInfo.path,
           encoding: 'utf8',
           stdio: 'pipe',
@@ -1493,7 +1667,7 @@ class IsolationManager {
 
     // Remove the worktree (prefer git so metadata is cleaned up).
     try {
-      execSync(`git worktree remove --force ${escapeShell(worktreeInfo.path)}`, {
+      runSync('git', ['worktree', 'remove', '--force', worktreeInfo.path], {
         cwd: worktreeInfo.repoRoot,
         encoding: 'utf8',
         stdio: 'pipe',
@@ -1501,7 +1675,7 @@ class IsolationManager {
     } catch {
       // If git worktree metadata is stale, prune and retry once.
       try {
-        execSync('git worktree prune', {
+        runSync('git', ['worktree', 'prune'], {
           cwd: worktreeInfo.repoRoot,
           encoding: 'utf8',
           stdio: 'pipe',
@@ -1510,7 +1684,7 @@ class IsolationManager {
         // ignore
       }
       try {
-        execSync(`git worktree remove --force ${escapeShell(worktreeInfo.path)}`, {
+        runSync('git', ['worktree', 'remove', '--force', worktreeInfo.path], {
           cwd: worktreeInfo.repoRoot,
           encoding: 'utf8',
           stdio: 'pipe',
@@ -1523,7 +1697,7 @@ class IsolationManager {
           // ignore
         }
         try {
-          execSync('git worktree prune', {
+          runSync('git', ['worktree', 'prune'], {
             cwd: worktreeInfo.repoRoot,
             encoding: 'utf8',
             stdio: 'pipe',

@@ -15,7 +15,7 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const IsolationManager = require('../../src/isolation-manager');
 
@@ -23,18 +23,40 @@ let manager;
 let testRepoDir;
 const testClusterId = 'test-worktree-' + Date.now();
 
+function shellQuote(value) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function runGit(args, options = {}) {
+  const result = spawnSync('git', args, {
+    cwd: options.cwd,
+    encoding: options.encoding || 'utf8',
+    stdio: options.stdio || 'pipe',
+  });
+  if (result.status !== 0 || result.error) {
+    const detail = result.error?.message || result.stderr || 'no stderr';
+    throw new Error(`git ${args.join(' ')} failed in ${options.cwd || process.cwd()}: ${detail}`);
+  }
+  return result.stdout || '';
+}
+
+function createTempGitRepo(prefix) {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+
+  runGit(['init'], { cwd: repoDir });
+  runGit(['config', 'user.email', 'test@test.com'], { cwd: repoDir });
+  runGit(['config', 'user.name', 'Test User'], { cwd: repoDir });
+
+  fs.writeFileSync(path.join(repoDir, 'test.txt'), 'initial content');
+  runGit(['add', 'test.txt'], { cwd: repoDir });
+  runGit(['commit', '-m', 'Initial commit'], { cwd: repoDir });
+
+  return repoDir;
+}
+
 function registerRepositoryHooks() {
   before(function () {
-    testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zs-worktree-test-repo-'));
-
-    execSync('git init', { cwd: testRepoDir, stdio: 'pipe' });
-    execSync('git config user.email "test@test.com"', { cwd: testRepoDir, stdio: 'pipe' });
-    execSync('git config user.name "Test User"', { cwd: testRepoDir, stdio: 'pipe' });
-
-    fs.writeFileSync(path.join(testRepoDir, 'test.txt'), 'initial content');
-    execSync('git add -A', { cwd: testRepoDir, stdio: 'pipe' });
-    execSync('git commit -m "Initial commit"', { cwd: testRepoDir, stdio: 'pipe' });
-
+    testRepoDir = createTempGitRepo('zs-worktree-test-repo-');
     manager = new IsolationManager();
   });
 
@@ -65,6 +87,7 @@ function registerCreateWorktreeIsolationTests() {
     registerWorktreeIsolationTest();
     registerWorktreeNonGitTest();
     registerWorktreeCleanupBeforeCreateTest();
+    registerWorktreeSetupCommandTest();
   });
 }
 
@@ -94,7 +117,7 @@ function registerWorktreeBranchTest() {
       `Branch should start with zeroshot/, got: ${info.branch}`
     );
 
-    const branches = execSync('git branch --list', { cwd: testRepoDir, encoding: 'utf8' });
+    const branches = runGit(['branch', '--list'], { cwd: testRepoDir });
     assert(branches.includes(info.branch), `Branch ${info.branch} should exist`);
   });
 }
@@ -115,10 +138,7 @@ function registerWorktreeGitRepoTest() {
   it('should create working git repo in worktree', function () {
     const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
 
-    const gitDir = execSync('git rev-parse --git-dir', {
-      cwd: info.path,
-      encoding: 'utf8',
-    }).trim();
+    const gitDir = runGit(['rev-parse', '--git-dir'], { cwd: info.path }).trim();
 
     assert(gitDir.includes('.git/worktrees/'), `Should be a worktree, got git-dir: ${gitDir}`);
   });
@@ -140,10 +160,7 @@ function registerWorktreeBranchCheckoutTest() {
   it('should be on the new branch', function () {
     const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
 
-    const currentBranch = execSync('git branch --show-current', {
-      cwd: info.path,
-      encoding: 'utf8',
-    }).trim();
+    const currentBranch = runGit(['branch', '--show-current'], { cwd: info.path }).trim();
 
     assert.strictEqual(currentBranch, info.branch, 'Worktree should be on the new branch');
   });
@@ -155,10 +172,10 @@ function registerWorktreeCommitTest() {
 
     fs.writeFileSync(path.join(info.path, 'new-file.txt'), 'worktree content');
 
-    execSync('git add new-file.txt', { cwd: info.path, stdio: 'pipe' });
-    execSync('git commit -m "Add new file in worktree"', { cwd: info.path, stdio: 'pipe' });
+    runGit(['add', 'new-file.txt'], { cwd: info.path });
+    runGit(['commit', '-m', 'Add new file in worktree'], { cwd: info.path });
 
-    const log = execSync('git log --oneline', { cwd: info.path, encoding: 'utf8' });
+    const log = runGit(['log', '--oneline'], { cwd: info.path });
     assert(log.includes('Add new file in worktree'), 'Commit should exist');
   });
 }
@@ -168,8 +185,8 @@ function registerWorktreeIsolationTest() {
     const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
 
     fs.writeFileSync(path.join(info.path, 'isolated-file.txt'), 'isolated content');
-    execSync('git add isolated-file.txt', { cwd: info.path, stdio: 'pipe' });
-    execSync('git commit -m "Isolated commit"', { cwd: info.path, stdio: 'pipe' });
+    runGit(['add', 'isolated-file.txt'], { cwd: info.path });
+    runGit(['commit', '-m', 'Isolated commit'], { cwd: info.path });
 
     assert(
       !fs.existsSync(path.join(testRepoDir, 'isolated-file.txt')),
@@ -211,6 +228,65 @@ function registerWorktreeCleanupBeforeCreateTest() {
   });
 }
 
+function registerWorktreeSetupCommandTest() {
+  it('should run worktree.setup command from repo settings', function () {
+    const settingsDir = path.join(testRepoDir, '.zeroshot');
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(settingsDir, 'settings.json'),
+      JSON.stringify({ worktree: { setup: 'touch setup-ran.marker' } })
+    );
+    runGit(['add', '.zeroshot/settings.json'], { cwd: testRepoDir });
+    runGit(['commit', '-m', 'Add zeroshot settings'], { cwd: testRepoDir });
+
+    const info = manager.createWorktreeIsolation(testClusterId, testRepoDir);
+
+    const markerPath = path.join(info.path, 'setup-ran.marker');
+    assert(fs.existsSync(markerPath), 'Setup command should have created marker file in worktree');
+  });
+
+  it('should honor worktree.setupTimeoutMs from repo settings', function () {
+    const timeoutRepoDir = createTempGitRepo('zs-worktree-timeout-repo-');
+    const timeoutClusterId = 'test-worktree-timeout-' + Date.now();
+    const timeoutManager = new IsolationManager();
+    const settingsDir = path.join(timeoutRepoDir, '.zeroshot');
+    const worktreePath = path.join(os.homedir(), '.zeroshot', 'worktrees', timeoutClusterId);
+
+    try {
+      fs.mkdirSync(settingsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(settingsDir, 'settings.json'),
+        JSON.stringify({
+          worktree: {
+            setup: `${shellQuote(process.execPath)} -e "setTimeout(() => {}, 1000)"`,
+            setupTimeoutMs: 50,
+          },
+        })
+      );
+      runGit(['add', '.zeroshot/settings.json'], { cwd: timeoutRepoDir });
+      runGit(['commit', '-m', 'Add timeout settings'], { cwd: timeoutRepoDir });
+
+      assert.throws(
+        () => timeoutManager.createWorktreeIsolation(timeoutClusterId, timeoutRepoDir),
+        /ETIMEDOUT|timed out|SIGTERM|spawnSync/,
+        'Setup command should be killed by the repo-configured timeout'
+      );
+    } finally {
+      try {
+        runGit(['worktree', 'remove', '--force', worktreePath], { cwd: timeoutRepoDir });
+      } catch {
+        // Ignore cleanup errors after timeout races.
+      }
+      try {
+        runGit(['worktree', 'prune'], { cwd: timeoutRepoDir });
+      } catch {
+        // Ignore cleanup errors.
+      }
+      fs.rmSync(timeoutRepoDir, { recursive: true, force: true });
+    }
+  });
+}
+
 function registerCleanupWorktreeIsolationTests() {
   describe('cleanupWorktreeIsolation()', function () {
     registerCleanupWorktreeDirectoryTest();
@@ -238,12 +314,12 @@ function registerCleanupWorktreeTrackingTest() {
   it('should remove worktree from git tracking', function () {
     manager.createWorktreeIsolation(testClusterId, testRepoDir);
 
-    const beforeList = execSync('git worktree list', { cwd: testRepoDir, encoding: 'utf8' });
+    const beforeList = runGit(['worktree', 'list'], { cwd: testRepoDir });
     assert(beforeList.includes(testClusterId), 'Worktree should be tracked before cleanup');
 
     manager.cleanupWorktreeIsolation(testClusterId);
 
-    const afterList = execSync('git worktree list', { cwd: testRepoDir, encoding: 'utf8' });
+    const afterList = runGit(['worktree', 'list'], { cwd: testRepoDir });
     assert(!afterList.includes(testClusterId), 'Worktree should not be tracked after cleanup');
   });
 }
@@ -255,7 +331,7 @@ function registerCleanupWorktreeBranchTest() {
 
     manager.cleanupWorktreeIsolation(testClusterId);
 
-    const branches = execSync('git branch --list', { cwd: testRepoDir, encoding: 'utf8' });
+    const branches = runGit(['branch', '--list'], { cwd: testRepoDir });
     assert(branches.includes(branchName), 'Branch should be preserved after cleanup');
   });
 }

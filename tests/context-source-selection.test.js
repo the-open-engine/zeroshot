@@ -139,6 +139,23 @@ describe('context source selection', () => {
     );
   });
 
+  it('keeps explicit all strategy oldest-first when amount is set', () => {
+    const baseTime = Date.now();
+    publishMessage('TEST_TOPIC', 'first-explicit-all', baseTime);
+    publishMessage('TEST_TOPIC', 'second-explicit-all', baseTime + 10);
+    publishMessage('TEST_TOPIC', 'third-explicit-all', baseTime + 20);
+
+    const worker = createWorker({
+      sources: [{ topic: 'TEST_TOPIC', amount: 2, strategy: 'all' }],
+    });
+
+    const context = worker._buildContext(buildTriggeringMessage(baseTime + 30));
+
+    assert(context.includes('first-explicit-all'), 'Should include first message');
+    assert(context.includes('second-explicit-all'), 'Should include second message');
+    assert(!context.includes('third-explicit-all'), 'Should not include third message');
+  });
+
   it('uses limit as amount alias with latest default', () => {
     const baseTime = Date.now();
     publishMessage('TEST_TOPIC', 'old-message', baseTime);

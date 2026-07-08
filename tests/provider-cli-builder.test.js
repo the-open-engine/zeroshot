@@ -1,47 +1,78 @@
 /**
- * Provider CLI Builder Tests
- *
- * Tests the command building logic for each provider, including
- * JSON schema injection when native CLI support is unavailable.
+ * Provider helper command builder tests.
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const helper = require('../lib/agent-cli-provider');
 
-// ============================================================================
-// CODEX PROVIDER
-// ============================================================================
-describe('Codex CLI Builder', function () {
-  const { buildCommand } = require('../src/providers/openai/cli-builder');
+const createdTempFiles = new Set();
 
-  it('should pass --output-schema when CLI supports it', function () {
-    const result = buildCommand('test context', {
+afterEach(() => {
+  for (const file of createdTempFiles) {
+    try {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch {
+      // best-effort test cleanup
+    }
+  }
+  createdTempFiles.clear();
+});
+
+function buildCommand(provider, context, options = {}) {
+  const spec = helper.buildProviderCommand(provider, context, options);
+  for (const file of spec.cleanup || []) createdTempFiles.add(file);
+  return spec;
+}
+
+describe('Codex provider helper builder', function () {
+  it('warns when unsupported session control options are ignored', function () {
+    const resumed = buildCommand('codex', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.ok(!resumed.args.includes('--resume'));
+    assert.ok(
+      resumed.warnings.some(
+        (warning) =>
+          warning.code === 'unsupported-session-control' &&
+          warning.message === 'resume/continue is only supported for Claude CLI; ignoring.'
+      )
+    );
+
+    const continued = buildCommand('codex', 'test context', {
+      continueSession: true,
+    });
+    assert.ok(!continued.args.includes('--continue'));
+    assert.ok(continued.warnings.some((warning) => warning.code === 'unsupported-session-control'));
+  });
+
+  it('passes --output-schema when CLI supports it', function () {
+    const result = buildCommand('codex', 'test context', {
       jsonSchema: { type: 'object', properties: { foo: { type: 'string' } } },
       cliFeatures: { supportsOutputSchema: true, supportsJson: true },
     });
 
     assert.ok(result.args.includes('--output-schema'));
     assert.ok(!result.args[result.args.length - 1].includes('OUTPUT FORMAT'));
+    assert.strictEqual(result.cleanupMetadata.length, 1);
   });
 
-  it('should inject schema into context when CLI does NOT support --output-schema', function () {
+  it('injects schema into context when CLI does not support --output-schema', function () {
     const schema = { type: 'object', properties: { foo: { type: 'string' } } };
-    const result = buildCommand('test context', {
+    const result = buildCommand('codex', 'test context', {
       jsonSchema: schema,
       cliFeatures: { supportsOutputSchema: false, supportsJson: true },
     });
 
-    // Should NOT have --output-schema flag
     assert.ok(!result.args.includes('--output-schema'));
-
-    // Context (last arg) should include schema instructions
     const finalContext = result.args[result.args.length - 1];
     assert.ok(finalContext.includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
     assert.ok(finalContext.includes('You MUST respond with a JSON object'));
     assert.ok(finalContext.includes('"foo"'));
   });
 
-  it('should NOT inject schema when no jsonSchema provided', function () {
-    const result = buildCommand('test context', {
+  it('does not inject schema when no jsonSchema is provided', function () {
+    const result = buildCommand('codex', 'test context', {
       cliFeatures: { supportsOutputSchema: false, supportsJson: true },
     });
 
@@ -50,9 +81,9 @@ describe('Codex CLI Builder', function () {
     assert.ok(!finalContext.includes('OUTPUT FORMAT'));
   });
 
-  it('should handle string jsonSchema', function () {
+  it('handles string jsonSchema', function () {
     const schemaStr = '{"type":"object","properties":{"bar":{"type":"number"}}}';
-    const result = buildCommand('test context', {
+    const result = buildCommand('codex', 'test context', {
       jsonSchema: schemaStr,
       cliFeatures: { supportsOutputSchema: false, supportsJson: true },
     });
@@ -62,8 +93,8 @@ describe('Codex CLI Builder', function () {
     assert.ok(finalContext.includes('"bar"'));
   });
 
-  it('should include --json flag when outputFormat is json', function () {
-    const result = buildCommand('test', {
+  it('includes --json flag when outputFormat is json', function () {
+    const result = buildCommand('codex', 'test', {
       outputFormat: 'json',
       cliFeatures: { supportsJson: true },
     });
@@ -71,8 +102,8 @@ describe('Codex CLI Builder', function () {
     assert.ok(result.args.includes('--json'));
   });
 
-  it('should include --json flag when outputFormat is stream-json', function () {
-    const result = buildCommand('test', {
+  it('includes --json flag when outputFormat is stream-json', function () {
+    const result = buildCommand('codex', 'test', {
       outputFormat: 'stream-json',
       cliFeatures: { supportsJson: true },
     });
@@ -81,20 +112,34 @@ describe('Codex CLI Builder', function () {
   });
 });
 
-// ============================================================================
-// GEMINI PROVIDER
-// ============================================================================
-describe('Gemini CLI Builder', function () {
-  const { buildCommand } = require('../src/providers/google/cli-builder');
+describe('Gemini provider helper builder', function () {
+  it('warns when unsupported session control options are ignored', function () {
+    const resumed = buildCommand('gemini', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.ok(!resumed.args.includes('--resume'));
+    assert.ok(
+      resumed.warnings.some(
+        (warning) =>
+          warning.code === 'unsupported-session-control' &&
+          warning.message === 'resume/continue is only supported for Claude CLI; ignoring.'
+      )
+    );
 
-  it('should always inject schema into context (no native support)', function () {
+    const continued = buildCommand('gemini', 'test context', {
+      continueSession: true,
+    });
+    assert.ok(!continued.args.includes('--continue'));
+    assert.ok(continued.warnings.some((warning) => warning.code === 'unsupported-session-control'));
+  });
+
+  it('always injects schema into context', function () {
     const schema = { type: 'object', properties: { result: { type: 'string' } } };
-    const result = buildCommand('test prompt', {
+    const result = buildCommand('gemini', 'test prompt', {
       jsonSchema: schema,
       cliFeatures: { supportsStreamJson: true },
     });
 
-    // Find the -p argument value (context)
     const pIndex = result.args.indexOf('-p');
     const finalContext = result.args[pIndex + 1];
 
@@ -103,8 +148,8 @@ describe('Gemini CLI Builder', function () {
     assert.ok(finalContext.includes('"result"'));
   });
 
-  it('should NOT inject schema when no jsonSchema provided', function () {
-    const result = buildCommand('test prompt', {
+  it('does not inject schema when no jsonSchema is provided', function () {
+    const result = buildCommand('gemini', 'test prompt', {
       cliFeatures: { supportsStreamJson: true },
     });
 
@@ -115,8 +160,8 @@ describe('Gemini CLI Builder', function () {
     assert.ok(!finalContext.includes('OUTPUT FORMAT'));
   });
 
-  it('should include --output-format stream-json when supported', function () {
-    const result = buildCommand('test', {
+  it('includes --output-format stream-json when supported', function () {
+    const result = buildCommand('gemini', 'test', {
       outputFormat: 'json',
       cliFeatures: { supportsStreamJson: true },
     });
@@ -126,15 +171,30 @@ describe('Gemini CLI Builder', function () {
   });
 });
 
-// ============================================================================
-// OPENCODE PROVIDER
-// ============================================================================
-describe('Opencode CLI Builder', function () {
-  const { buildCommand } = require('../src/providers/opencode/cli-builder');
+describe('Opencode provider helper builder', function () {
+  it('warns when unsupported session control options are ignored', function () {
+    const resumed = buildCommand('opencode', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.ok(!resumed.args.includes('--resume'));
+    assert.ok(
+      resumed.warnings.some(
+        (warning) =>
+          warning.code === 'unsupported-session-control' &&
+          warning.message === 'resume/continue is only supported for Claude CLI; ignoring.'
+      )
+    );
 
-  it('should inject schema into context when jsonSchema provided', function () {
+    const continued = buildCommand('opencode', 'test context', {
+      continueSession: true,
+    });
+    assert.ok(!continued.args.includes('--continue'));
+    assert.ok(continued.warnings.some((warning) => warning.code === 'unsupported-session-control'));
+  });
+
+  it('injects schema into context when jsonSchema is provided', function () {
     const schema = { type: 'object', properties: { result: { type: 'string' } } };
-    const result = buildCommand('test prompt', {
+    const result = buildCommand('opencode', 'test prompt', {
       jsonSchema: schema,
       cliFeatures: { supportsJson: true },
     });
@@ -145,8 +205,8 @@ describe('Opencode CLI Builder', function () {
     assert.ok(finalContext.includes('"result"'));
   });
 
-  it('should include --format json when outputFormat is json or stream-json', function () {
-    const result = buildCommand('test', {
+  it('includes --format json when outputFormat is json or stream-json', function () {
+    const result = buildCommand('opencode', 'test', {
       outputFormat: 'json',
       cliFeatures: { supportsJson: true },
     });
@@ -155,8 +215,8 @@ describe('Opencode CLI Builder', function () {
     assert.ok(result.args.includes('json'));
   });
 
-  it('should include model and variant when provided', function () {
-    const result = buildCommand('test', {
+  it('includes model and variant when provided', function () {
+    const result = buildCommand('opencode', 'test', {
       modelSpec: { model: 'opencode/glm-4.7-free', reasoningEffort: 'high' },
       cliFeatures: { supportsJson: true, supportsVariant: true },
     });
@@ -168,15 +228,20 @@ describe('Opencode CLI Builder', function () {
   });
 });
 
-// ============================================================================
-// CLAUDE PROVIDER
-// ============================================================================
-describe('Claude CLI Builder', function () {
-  const { buildCommand } = require('../src/providers/anthropic/cli-builder');
+describe('Claude provider helper builder', function () {
+  const originalEnv = process.env.ZEROSHOT_CLAUDE_COMMAND;
 
-  it('should pass --json-schema when CLI supports it', function () {
+  afterEach(function () {
+    if (originalEnv === undefined) {
+      delete process.env.ZEROSHOT_CLAUDE_COMMAND;
+    } else {
+      process.env.ZEROSHOT_CLAUDE_COMMAND = originalEnv;
+    }
+  });
+
+  it('passes --json-schema when CLI supports it', function () {
     const schema = { type: 'object', properties: { foo: { type: 'string' } } };
-    const result = buildCommand('test context', {
+    const result = buildCommand('claude', 'test context', {
       jsonSchema: schema,
       outputFormat: 'json',
       cliFeatures: { supportsJsonSchema: true },
@@ -185,9 +250,9 @@ describe('Claude CLI Builder', function () {
     assert.ok(result.args.includes('--json-schema'));
   });
 
-  it('should NOT pass --json-schema when outputFormat is not json', function () {
+  it('does not pass --json-schema when outputFormat is not json', function () {
     const schema = { type: 'object', properties: { foo: { type: 'string' } } };
-    const result = buildCommand('test context', {
+    const result = buildCommand('claude', 'test context', {
       jsonSchema: schema,
       outputFormat: 'stream-json',
       cliFeatures: { supportsJsonSchema: true },
@@ -196,9 +261,9 @@ describe('Claude CLI Builder', function () {
     assert.ok(!result.args.includes('--json-schema'));
   });
 
-  it('should NOT pass --json-schema when CLI does not support it', function () {
+  it('does not pass --json-schema when CLI does not support it', function () {
     const schema = { type: 'object', properties: { foo: { type: 'string' } } };
-    const result = buildCommand('test context', {
+    const result = buildCommand('claude', 'test context', {
       jsonSchema: schema,
       outputFormat: 'json',
       cliFeatures: { supportsJsonSchema: false },
@@ -206,17 +271,41 @@ describe('Claude CLI Builder', function () {
 
     assert.ok(!result.args.includes('--json-schema'));
   });
+
+  it('passes model value through without alias normalization', function () {
+    const result = buildCommand('claude', 'test context', {
+      modelSpec: { model: 'opus-4.6' },
+      cliFeatures: { supportsModel: true },
+    });
+
+    const modelFlagIndex = result.args.indexOf('--model');
+    assert.ok(modelFlagIndex >= 0);
+    assert.strictEqual(result.args[modelFlagIndex + 1], 'opus-4.6');
+  });
+
+  it('adds Claude resume and continue args before the prompt', function () {
+    const resumed = buildCommand('claude', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.deepStrictEqual(resumed.args.slice(-3), ['--resume', 'session-123', 'test context']);
+
+    const continued = buildCommand('claude', 'test context', {
+      continueSession: true,
+    });
+    assert.deepStrictEqual(continued.args.slice(-2), ['--continue', 'test context']);
+  });
+
+  it('honors configured Claude executable selection inside the helper', function () {
+    process.env.ZEROSHOT_CLAUDE_COMMAND = 'ccr code';
+    const result = buildCommand('claude', 'test context');
+
+    assert.strictEqual(result.binary, 'ccr');
+    assert.deepStrictEqual(result.args.slice(0, 3), ['code', '--print', '--input-format']);
+  });
 });
 
-// ============================================================================
-// REGRESSION TESTS
-// ============================================================================
-describe('Regression Tests', function () {
-  it('REGRESSION: Codex planner returns markdown when schema not enforced', function () {
-    // This was the bug: Codex CLI doesn't support --output-schema,
-    // so schema was silently dropped and model returned markdown
-    const { buildCommand } = require('../src/providers/openai/cli-builder');
-
+describe('Provider helper builder regressions', function () {
+  it('Codex planner schema is injected when native schema support is unavailable', function () {
     const plannerSchema = {
       type: 'object',
       properties: {
@@ -227,7 +316,7 @@ describe('Regression Tests', function () {
       required: ['plan', 'summary'],
     };
 
-    const result = buildCommand('Create a plan for implementing feature X', {
+    const result = buildCommand('codex', 'Create a plan for implementing feature X', {
       jsonSchema: plannerSchema,
       outputFormat: 'json',
       cliFeatures: { supportsOutputSchema: false, supportsJson: true },
@@ -235,27 +324,13 @@ describe('Regression Tests', function () {
 
     const finalContext = result.args[result.args.length - 1];
 
-    // Must have schema injection
-    assert.ok(
-      finalContext.includes('OUTPUT FORMAT'),
-      'Schema instructions must be injected when CLI lacks native support'
-    );
-
-    // Must tell model to output JSON only
-    assert.ok(
-      finalContext.includes('ONLY valid JSON'),
-      'Must explicitly tell model to output only JSON'
-    );
-
-    // Must include the actual schema
-    assert.ok(finalContext.includes('"plan"'), 'Schema must include plan property');
-    assert.ok(finalContext.includes('"summary"'), 'Schema must include summary property');
+    assert.ok(finalContext.includes('OUTPUT FORMAT'));
+    assert.ok(finalContext.includes('ONLY valid JSON'));
+    assert.ok(finalContext.includes('"plan"'));
+    assert.ok(finalContext.includes('"summary"'));
   });
 
-  it('REGRESSION: Gemini conductor returns text when schema not enforced', function () {
-    // Gemini CLI has no --output-schema support at all
-    const { buildCommand } = require('../src/providers/google/cli-builder');
-
+  it('Gemini conductor schema is injected', function () {
     const conductorSchema = {
       type: 'object',
       properties: {
@@ -266,7 +341,7 @@ describe('Regression Tests', function () {
       required: ['complexity', 'taskType', 'reasoning'],
     };
 
-    const result = buildCommand('Classify this task', {
+    const result = buildCommand('gemini', 'Classify this task', {
       jsonSchema: conductorSchema,
       outputFormat: 'json',
       cliFeatures: { supportsStreamJson: true },
@@ -275,14 +350,8 @@ describe('Regression Tests', function () {
     const pIndex = result.args.indexOf('-p');
     const finalContext = result.args[pIndex + 1];
 
-    // Must have schema injection
-    assert.ok(
-      finalContext.includes('OUTPUT FORMAT'),
-      'Schema instructions must always be injected for Gemini provider'
-    );
-
-    // Must include the actual schema properties
-    assert.ok(finalContext.includes('"complexity"'), 'Schema must include complexity');
-    assert.ok(finalContext.includes('"taskType"'), 'Schema must include taskType');
+    assert.ok(finalContext.includes('OUTPUT FORMAT'));
+    assert.ok(finalContext.includes('"complexity"'));
+    assert.ok(finalContext.includes('"taskType"'));
   });
 });

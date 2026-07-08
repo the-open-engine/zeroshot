@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const Orchestrator = require('../src/orchestrator.js');
+const AgentWrapper = require('../src/agent-wrapper.js');
 const MockTaskRunner = require('./helpers/mock-task-runner.js');
 
 // Isolate tests from user settings
@@ -251,6 +252,76 @@ describe('add_agents duplicate ID handling', function () {
     // Verify the new config was applied
     assert.strictEqual(agentAfter.config.triggers[0].topic, 'TEST2');
     assert.strictEqual(agentAfter.config.prompt, 'Replaced agent.');
+
+    await orchestrator.stop(clusterId);
+  });
+
+  it('should wait for async shutdown before starting a replacement agent', async function () {
+    orchestrator = new Orchestrator({
+      dataDir: tmpDir,
+      taskRunner: mockRunner,
+      quiet: true,
+    });
+
+    const initialConfig = {
+      agents: [
+        {
+          id: 'consensus-coordinator',
+          role: 'coordinator',
+          triggers: [{ topic: 'TEST', action: 'execute_task' }],
+          prompt: 'Initial coordinator.',
+        },
+      ],
+    };
+
+    const result = await orchestrator.start(initialConfig, { text: 'Test task' });
+    const clusterId = result.id;
+    const cluster = orchestrator.getCluster(clusterId);
+    const existingAgent = cluster.agents.find((a) => a.id === 'consensus-coordinator');
+
+    assert.ok(existingAgent, 'consensus-coordinator should exist before replacement');
+
+    let stopResolved = false;
+    existingAgent.stop = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stopResolved = true;
+    };
+
+    const originalStart = AgentWrapper.prototype.start;
+    let replacementStartedBeforeStop = null;
+
+    AgentWrapper.prototype.start = function () {
+      if (this.id === 'consensus-coordinator') {
+        replacementStartedBeforeStop = !stopResolved;
+      }
+      return Promise.resolve();
+    };
+
+    try {
+      await orchestrator._opAddAgents(
+        cluster,
+        {
+          agents: [
+            {
+              id: 'consensus-coordinator',
+              role: 'coordinator',
+              triggers: [{ topic: 'TEST_2', action: 'execute_task' }],
+              prompt: 'Replacement coordinator.',
+            },
+          ],
+        },
+        {}
+      );
+    } finally {
+      AgentWrapper.prototype.start = originalStart;
+    }
+
+    assert.strictEqual(stopResolved, true, 'Replacement should wait for old agent shutdown');
+    assert.strictEqual(
+      replacementStartedBeforeStop,
+      false,
+      'Replacement agent must not start before prior agent stop() resolves'
+    );
 
     await orchestrator.stop(clusterId);
   });

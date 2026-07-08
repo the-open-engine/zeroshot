@@ -3,7 +3,7 @@ UPDATE THIS FILE when making architectural changes, adding patterns, or changing
 # Zeroshot: Multi-Agent Coordination Engine
 
 Operational rules and references for automated agents working on this repo. Install:
-`npm i -g @covibes/zeroshot` or `npm link` (dev).
+`npm i -g @the-open-engine/zeroshot` or `npm link` (dev).
 
 ## CRITICAL RULES
 
@@ -21,70 +21,28 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                        | File                                                       |
-| ------------------------------ | ---------------------------------------------------------- |
-| Conductor classification       | `src/conductor-bootstrap.js`                               |
-| Base templates                 | `cluster-templates/base-templates/`                        |
-| Message bus                    | `src/message-bus.js`                                       |
-| Ledger (SQLite)                | `src/ledger.js`                                            |
-| Guidance topics                | `src/guidance-topics.js`                                   |
-| Guidance mailbox helper        | `src/ledger.js`                                            |
-| Guidance live injection        | `src/orchestrator.js`                                      |
-| Trigger evaluation             | `src/logic-engine.js`                                      |
-| Agent wrapper                  | `src/agent-wrapper.js`                                     |
-| Providers registry             | `src/providers/index.js`                                   |
-| Provider implementations       | `src/providers/`                                           |
-| Provider detection             | `lib/provider-detection.js`                                |
-| Provider capabilities          | `src/providers/capabilities.js`                            |
-| TUI backend entrypoint         | `src/tui-backend/index.ts`                                 |
-| TUI backend server             | `src/tui-backend/server.ts`                                |
-| TUI backend services           | `src/tui-backend/services/`                                |
-| TUI backend subscriptions      | `src/tui-backend/subscriptions/`                           |
-| TUI backend build output       | `lib/tui-backend/`                                         |
-| TUI launcher (Node)            | `lib/tui-launcher.js`                                      |
-| TUI binary mapping             | `lib/tui-binary.js`                                        |
-| TUI start-cluster helper       | `lib/start-cluster.js`                                     |
-| TUI binary installer           | `scripts/install-tui-binary.js`                            |
-| TUI v2 protocol spec           | `docs/tui-v2/protocol.md`                                  |
-| TUI v2 protocol types (TS)     | `src/tui-backend/protocol/`                                |
-| TUI v2 protocol types (Rust)   | `tui-rs/crates/zeroshot-tui/src/protocol/`                 |
-| Rust TUI backend client        | `tui-rs/crates/zeroshot-tui/src/backend/`                  |
-| Rust TUI entrypoint            | `tui-rs/crates/zeroshot-tui/src/main.rs`                   |
-| Rust TUI core loop (MVU)       | `tui-rs/crates/zeroshot-tui/src/app/mod.rs`                |
-| Rust TUI spine completion      | `tui-rs/crates/zeroshot-tui/src/app/spine_completion.rs`   |
-| Rust TUI input routing         | `tui-rs/crates/zeroshot-tui/src/input.rs`                  |
-| Rust TUI commands              | `tui-rs/crates/zeroshot-tui/src/commands/`                 |
-| Rust TUI command parser        | `tui-rs/crates/zeroshot-tui/src/commands/parser.rs`        |
-| Rust TUI command dispatch      | `tui-rs/crates/zeroshot-tui/src/commands/dispatcher.rs`    |
-| Rust TUI command types         | `tui-rs/crates/zeroshot-tui/src/commands/types.rs`         |
-| Rust TUI screens               | `tui-rs/crates/zeroshot-tui/src/screens/`                  |
-| Rust TUI Fleet Radar screen    | `tui-rs/crates/zeroshot-tui/src/screens/radar.rs`          |
-| Rust TUI Cluster Canvas screen | `tui-rs/crates/zeroshot-tui/src/screens/cluster_canvas.rs` |
-| Rust TUI render entrypoint     | `tui-rs/crates/zeroshot-tui/src/ui/mod.rs`                 |
-| Rust TUI widgets               | `tui-rs/crates/zeroshot-tui/src/ui/widgets/`               |
-| Rust TUI toast widget          | `tui-rs/crates/zeroshot-tui/src/ui/widgets/toast.rs`       |
-| Rust TUI command bar widget    | `tui-rs/crates/zeroshot-tui/src/ui/widgets/command_bar.rs` |
-| Rust TUI terminal guard        | `tui-rs/crates/zeroshot-tui/src/terminal.rs`               |
-| Docker mounts/env              | `lib/docker-config.js`                                     |
-| Container lifecycle            | `src/isolation-manager.js`                                 |
-| Settings                       | `lib/settings.js`                                          |
+| Concept                  | File                                |
+| ------------------------ | ----------------------------------- |
+| Conductor classification | `src/conductor-bootstrap.js`        |
+| Base templates           | `cluster-templates/base-templates/` |
+| Message bus              | `src/message-bus.js`                |
+| Ledger (SQLite)          | `src/ledger.js`                     |
+| Guidance topics          | `src/guidance-topics.js`            |
+| Guidance mailbox helper  | `src/ledger.js`                     |
+| Guidance live injection  | `src/orchestrator.js`               |
+| Trigger evaluation       | `src/logic-engine.js`               |
+| Agent wrapper            | `src/agent-wrapper.js`              |
+| Providers registry       | `src/providers/index.js`            |
+| Provider implementations | `src/providers/`                    |
+| Provider detection       | `lib/provider-detection.js`         |
+| Provider capabilities    | `src/providers/capabilities.js`     |
+| Start-cluster helper     | `lib/start-cluster.js`              |
+| Docker mounts/env        | `lib/docker-config.js`              |
+| Container lifecycle      | `src/isolation-manager.js`          |
+| Settings                 | `lib/settings.js`                   |
 
-TUI v2 (Rust) convention:
-Ratatui is the only supported TUI; legacy UI removed. centralized key routing in `src/input.rs`; `app::update()` is pure and returns effects; `ui::render()` is pure and performs no IO. Adding a screen requires a `ScreenId` variant plus a screen reducer and render entry.
-TUI v2 (Rust) command flow: `Effect::Command(CommandRequest)` is emitted by `app::update()` and executed in `src/main.rs` via `commands::dispatch()`, with failures surfaced through `BackendAction::Error`.
-TUI v2 (Rust) provider override lives in `AppState.provider_override` and is forwarded when launching clusters (e.g. `StartClusterFromText`).
-TUI v2 (Rust) command bar: `AppState.command_bar` captures input; `/` opens it outside Launcher; Esc closes; Submit dispatches. Toast output lives in `AppState.toast` and renders via `ui/widgets/toast.rs`.
-TUI v2 (Rust) Agent Microscope renders phase markers derived from cluster timeline events (deduped, capped) in a left margin when space allows.
-TUI v2 (Rust) Disruptive zoom stack: `ScreenId::IntentConsole` (root), `FleetRadar`, `ClusterCanvas { id }`, `AgentMicroscope { cluster_id, agent_id }`; zoom stack context drives spine whisper targets.
-TUI v2 (Rust) Cluster Canvas overlays: use `ui/widgets/stream.rs` StreamOverlay + placement helper in `screens/cluster_canvas.rs` to render bounded log/timeline slices near focus, clamped to canvas bounds and never intersecting the spine; render after the canvas draw.
-TUI v2 (Rust) calm empty states: use `ui/shared.rs::calm_empty_state` for centered headline/detail/footer cards in Disruptive screens.
-TUI v2 (Rust) Disruptive stream windowing: `TimeCursor` (mode, `t_ms`, `window_ms`) plus `TimeIndexedBuffer` in `ui/shared.rs` back logs/timeline window queries; cluster canvas overlay renders windowed slices from time-indexed buffers.
-TUI v2 (Rust) motion/smoothing: `app/animation.rs` defines `AnimClock` + smoothing helpers; `AppState.anim_clock` + `last_tick_ms` advance on `Tick`; Fleet Radar smooths orb radius/intensity in `FleetRadarState.orb_states` and uses `pulse_factor` for error pulses; Cluster Canvas uses camera target/velocity smoothing via `State.tick_camera()` (render consumes smoothed camera).
-TUI v2 (Rust) spine intent submit detects issue refs (`123`, `owner/repo#123`, GitHub issue URL) → `StartClusterFromIssue`; otherwise `StartClusterFromText`.
-TUI v2 (Rust) Disruptive pre-M3 decisions live in `docs/ZEROSHOT-DISRUPTIVE-TUI-DECISIONS.md` (focus, labels, topology, scrub, spine height).
-TUI backend test envs: `ZEROSHOT_TUI_BACKEND_MOCK_LAUNCH`, `ZEROSHOT_TUI_BACKEND_MOCK_GUIDANCE`, `ZEROSHOT_TUI_BACKEND_METRICS_PLATFORM` (override platform for metrics; unsupported values force `supported=false`).
-TUI backend path override: `ZEROSHOT_TUI_BACKEND_PATH`.
-TUI launcher env: `ZEROSHOT_TUI_BINARY_PATH` overrides the installed Rust binary, `ZEROSHOT_TUI_PATH`/`ZEROSHOT_TUI_BIN` override Rust binary path, `ZEROSHOT_TUI_BINARY_URL` overrides release asset URL, `ZEROSHOT_TUI_BINARY_SKIP` skips download, `ZEROSHOT_TUI_INITIAL_SCREEN` + `ZEROSHOT_TUI_PROVIDER_OVERRIDE` + `ZEROSHOT_TUI_UI` feed Rust startup defaults (UI variants: classic, disruptive; CLI: `zeroshot tui --ui <variant>`).
+The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
+and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
 
 ## CLI Quick Reference
 
@@ -101,15 +59,12 @@ zeroshot run 123 -d               # Background (daemon) mode
 # Management
 zeroshot list                     # All clusters (--json)
 zeroshot status <id>              # Cluster details
-zeroshot logs <id> [-f]           # Stream logs
+zeroshot logs <id> [-f|-w]        # Stream logs
 zeroshot resume <id> [prompt]     # Resume failed cluster
 zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot                          # TUI (TTY only; Rust default)
-zeroshot tui                      # TUI explicit entry
-zeroshot watch                    # TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings
@@ -444,8 +399,8 @@ Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as no
 
 Multiple CI jobs fail → Diagnose each independently.
 
-1. Get exact status: `gh api repos/covibes/zeroshot/actions/runs/{RUN_ID}/jobs`
-2. Read ACTUAL error: `gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs`
+1. Get exact status: `gh api repos/the-open-engine/zeroshot/actions/runs/{RUN_ID}/jobs`
+2. Read ACTUAL error: `gh api repos/the-open-engine/zeroshot/actions/jobs/{JOB_ID}/logs`
 3. Fix ONE error → Push → Rerun → Repeat
 
 ## Release Pipeline Convention

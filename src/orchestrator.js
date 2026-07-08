@@ -48,6 +48,12 @@ const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
+const { resolveClusterRequiredQualityGates } = require('./quality-gates');
+const {
+  commandProofsToQualityGates,
+  mergeCommandProofs,
+  resolveClusterCommandProofs,
+} = require('./command-proofs');
 const crypto = require('crypto');
 
 function applyModelOverride(agentConfig, modelOverride) {
@@ -84,8 +90,127 @@ const WORKFLOW_TRIGGERS = Object.freeze([
   'PLAN_READY',
   'IMPLEMENTATION_READY',
   'VALIDATION_RESULT',
+  'PUSH_BLOCKED',
   'CONDUCTOR_ESCALATE',
 ]);
+
+const PUSH_BLOCKED_REPAIR_TRIGGER = Object.freeze({
+  topic: 'PUSH_BLOCKED',
+  action: 'execute_task',
+});
+
+function applyRequiredQualityGatesToAgent(agentConfig, requiredQualityGates) {
+  if (!Array.isArray(requiredQualityGates) || requiredQualityGates.length === 0) {
+    return;
+  }
+
+  if (agentConfig.role !== 'validator') {
+    return;
+  }
+
+  if (!Array.isArray(agentConfig.requiredQualityGates)) {
+    agentConfig.requiredQualityGates = requiredQualityGates;
+  }
+}
+
+function applyRequiredQualityGatesToValidators(config, requiredQualityGates) {
+  if (!Array.isArray(requiredQualityGates) || requiredQualityGates.length === 0) {
+    return;
+  }
+
+  for (const agentConfig of config.agents || []) {
+    applyRequiredQualityGatesToAgent(agentConfig, requiredQualityGates);
+  }
+}
+
+function applyCommandProofsToAgent(agentConfig, commandProofs) {
+  if (!Array.isArray(commandProofs) || commandProofs.length === 0) {
+    return;
+  }
+
+  agentConfig.commandProofs = mergeCommandProofs(agentConfig.commandProofs, commandProofs);
+}
+
+function applyCommandProofsToAgents(config, commandProofs) {
+  if (!Array.isArray(commandProofs) || commandProofs.length === 0) {
+    return;
+  }
+
+  for (const agentConfig of config.agents || []) {
+    applyCommandProofsToAgent(agentConfig, commandProofs);
+  }
+}
+
+function mergeQualityGates(...sources) {
+  const byId = new Map();
+  const order = [];
+
+  for (const source of sources) {
+    if (!Array.isArray(source)) {
+      continue;
+    }
+    for (const gate of source) {
+      if (!gate?.id) {
+        continue;
+      }
+      if (!byId.has(gate.id)) {
+        order.push(gate.id);
+      }
+      byId.set(gate.id, gate);
+    }
+  }
+
+  return order.map((id) => byId.get(id));
+}
+
+function getTriggerTopic(trigger) {
+  return typeof trigger === 'string' ? trigger : trigger?.topic;
+}
+
+function shouldHandlePushBlockedRepair(agentConfig) {
+  return agentConfig?.role === 'implementation';
+}
+
+function applyPushBlockedRepairTrigger(agentConfig) {
+  if (!shouldHandlePushBlockedRepair(agentConfig)) {
+    return;
+  }
+
+  if (!Array.isArray(agentConfig.triggers)) {
+    agentConfig.triggers = [];
+  }
+
+  if (agentConfig.triggers.some((trigger) => getTriggerTopic(trigger) === 'PUSH_BLOCKED')) {
+    return;
+  }
+
+  agentConfig.triggers.push({ ...PUSH_BLOCKED_REPAIR_TRIGGER });
+}
+
+function applyPushBlockedRepairTriggers(config) {
+  for (const agentConfig of config?.agents || []) {
+    applyPushBlockedRepairTrigger(agentConfig);
+  }
+}
+
+function buildPrOptions(options, requiredQualityGates) {
+  if (
+    !options.prBase &&
+    !options.mergeQueue &&
+    !options.closeIssue &&
+    requiredQualityGates.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    prBase: options.prBase || null,
+    mergeQueue: options.mergeQueue || false,
+    closeIssue: options.closeIssue || null,
+    ...(requiredQualityGates.length > 0 ? { requiredQualityGates } : {}),
+    cwd: options.cwd || process.cwd(),
+  };
+}
 
 class Orchestrator {
   constructor(options = {}) {
@@ -221,6 +346,11 @@ class Orchestrator {
       const corruptedClusters = [];
 
       for (const [clusterId, clusterData] of Object.entries(data)) {
+        if (clusterData?.state === 'setup' || clusterData?.provisional === true) {
+          this.clusters.set(clusterId, this._loadSetupCluster(clusterId, clusterData));
+          continue;
+        }
+
         // Skip clusters whose .db file doesn't exist (orphaned registry entries)
         const dbPath = path.join(this.storageDir, `${clusterId}.db`);
         if (!fs.existsSync(dbPath)) {
@@ -232,7 +362,15 @@ class Orchestrator {
         }
 
         this._log(`[Orchestrator] Loading cluster: ${clusterId}`);
-        const cluster = this._loadSingleCluster(clusterId, clusterData);
+        let cluster;
+        try {
+          cluster = this._loadSingleCluster(clusterId, clusterData);
+        } catch (error) {
+          console.warn(
+            `[Orchestrator] Skipping cluster ${clusterId}: ${error.message || String(error)}`
+          );
+          continue;
+        }
 
         // VALIDATION: Detect 0-message clusters (corrupted from SIGINT during initialization)
         // These clusters were created before the initCompletePromise fix was applied
@@ -287,6 +425,98 @@ class Orchestrator {
     }
   }
 
+  _loadSetupCluster(clusterId, clusterData) {
+    const ledger = this._createSetupLedgerStub();
+    const messageBus = this._createSetupMessageBusStub(ledger);
+
+    return {
+      ...clusterData,
+      id: clusterId,
+      config: clusterData.config || { agents: [] },
+      state: clusterData.state || 'setup',
+      createdAt: clusterData.createdAt || Date.now(),
+      pid: clusterData.pid || null,
+      agents: [],
+      messageBus,
+      ledger,
+      setupLogPath: clusterData.setupLogPath || null,
+      setupStage: clusterData.setupStage || null,
+      failureInfo: clusterData.failureInfo || null,
+      provisional: true,
+    };
+  }
+
+  _createSetupLedgerStub() {
+    const emptyArray = () => [];
+    const noop = () => {};
+
+    return {
+      append: () => null,
+      batchAppend: () => [],
+      query: emptyArray,
+      queryGuidanceMailbox: emptyArray,
+      findLast: () => null,
+      count: () => 0,
+      since: emptyArray,
+      getAll: emptyArray,
+      getTokensByRole: () => ({
+        _total: { count: 0, inputTokens: 0, outputTokens: 0, totalCostUsd: 0 },
+      }),
+      pollForMessages: () => noop,
+      on: noop,
+      off: noop,
+      close: noop,
+      clear: noop,
+    };
+  }
+
+  _createSetupMessageBusStub(ledger) {
+    const noop = () => {};
+    const unsubscribe = () => {};
+
+    return {
+      ledger,
+      publish: () => null,
+      batchPublish: () => [],
+      subscribe: () => unsubscribe,
+      subscribeTopic: () => unsubscribe,
+      subscribeTopics: () => unsubscribe,
+      query: (criteria) => ledger.query(criteria),
+      queryGuidanceMailbox: (criteria) => ledger.queryGuidanceMailbox(criteria),
+      findLast: (criteria) => ledger.findLast(criteria),
+      count: (criteria) => ledger.count(criteria),
+      since: (params) => ledger.since(params),
+      getAll: (clusterId) => ledger.getAll(clusterId),
+      getTokensByRole: (clusterId) => ledger.getTokensByRole(clusterId),
+      addWebSocketClient: noop,
+      removeWebSocketClient: noop,
+      on: noop,
+      off: noop,
+      emit: () => false,
+      close: noop,
+      clear: noop,
+    };
+  }
+
+  _isSetupCluster(cluster) {
+    return Boolean(cluster?.provisional === true || cluster?.state === 'setup');
+  }
+
+  _resolveStartClusterId(requestedClusterId, dbPath) {
+    if (!requestedClusterId) {
+      return this._generateUniqueClusterId(null, dbPath || null);
+    }
+
+    const existingCluster = this.clusters.get(requestedClusterId);
+    const candidateDbPath = dbPath || path.join(this.storageDir, `${requestedClusterId}.db`);
+    if (this._isSetupCluster(existingCluster) && !fs.existsSync(candidateDbPath)) {
+      this.clusters.delete(requestedClusterId);
+      return requestedClusterId;
+    }
+
+    return this._generateUniqueClusterId(requestedClusterId, dbPath || null);
+  }
+
   /**
    * Load a single cluster from data
    * @private
@@ -312,14 +542,21 @@ class Orchestrator {
       isolation,
     };
 
-    // Reconstruct agent metadata from config (processes are ephemeral)
-    // CRITICAL: Pass isolation context to agents if cluster was running in isolation
-    const agents = this._rebuildClusterAgents(
-      clusterContext,
-      messageBus,
-      isolation,
-      isolationManager
-    );
+    let agents;
+    try {
+      // Reconstruct agent metadata from config (processes are ephemeral)
+      // CRITICAL: Pass isolation context to agents if cluster was running in isolation
+      agents = this._rebuildClusterAgents(clusterContext, messageBus, isolation, isolationManager);
+    } catch (error) {
+      try {
+        ledger.close();
+      } catch (closeError) {
+        console.warn(
+          `[Orchestrator] Failed to close ledger for ${clusterId}: ${closeError.message || String(closeError)}`
+        );
+      }
+      throw error;
+    }
 
     const cluster = {
       ...clusterContext,
@@ -329,6 +566,7 @@ class Orchestrator {
       isolation,
       autoPr: clusterData.autoPr || false,
       prOptions: clusterData.prOptions || null,
+      commandProofs: clusterData.commandProofs || [],
       issue: clusterData.issue || null,
     };
 
@@ -408,7 +646,10 @@ class Orchestrator {
 
     agent.state = savedState.state || 'idle';
     agent.iteration = savedState.iteration || 0;
-    agent.currentTask = savedState.currentTask || false;
+    // currentTask is a live in-process handle, not durable state.
+    // Restoring a serialized boolean here revives a fake runtime handle and
+    // makes stopped/resumed agents look like they still own a running task.
+    agent.currentTask = null;
     agent.currentTaskId = savedState.currentTaskId || null;
     agent.processPid = savedState.processPid || null;
   }
@@ -606,6 +847,8 @@ class Orchestrator {
           autoPr: cluster.autoPr || false,
           // Persist PR options for resume
           prOptions: cluster.prOptions || null,
+          // Persist cluster-scoped command proof configuration for resume and dynamic agents
+          commandProofs: cluster.commandProofs || [],
           // Persist model override for consistent agent spawning on resume
           modelOverride: cluster.modelOverride || null,
           // Persist issue number for heroshot/external tools
@@ -631,6 +874,9 @@ class Orchestrator {
                 processPid: a.processPid,
               }))
             : null,
+          setupLogPath: cluster.setupLogPath || null,
+          setupStage: cluster.setupStage || null,
+          provisional: cluster.provisional || false,
         };
       }
 
@@ -768,6 +1014,7 @@ class Orchestrator {
     const testMode = options.testMode || !!this.taskRunner;
     const autoPr = options.autoPr ?? (testMode ? false : process.env.ZEROSHOT_PR === '1');
     return this._startInternal(config, input, {
+      ...options,
       testMode,
       cwd: options.cwd || process.cwd(), // Target working directory for agents
       isolation: options.isolation || false,
@@ -792,7 +1039,7 @@ class Orchestrator {
     // - test harnesses may set it globally (breaking multi-start tests)
     // - callers may start multiple clusters in one process
     // Use it only when explicitly passed (CLI/daemon parent) via options.clusterId.
-    const clusterId = this._generateUniqueClusterId(
+    const clusterId = this._resolveStartClusterId(
       options.clusterId || null,
       config?.dbPath || null
     );
@@ -808,6 +1055,9 @@ class Orchestrator {
       config,
       clusterId
     );
+    let requiredQualityGates = resolveClusterRequiredQualityGates(config, options);
+    let commandProofs = resolveClusterCommandProofs(config, options);
+    options.requiredQualityGates = requiredQualityGates;
 
     // Build cluster object
     // CRITICAL: initComplete promise ensures ISSUE_OPENED is published before stop() completes
@@ -831,15 +1081,10 @@ class Orchestrator {
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
       autoPr: options.autoPr || false,
+      requiredQualityGates,
+      commandProofs,
       // PR configuration options (persisted for resume)
-      prOptions:
-        options.prBase || options.mergeQueue || options.closeIssue
-          ? {
-              prBase: options.prBase || null,
-              mergeQueue: options.mergeQueue || false,
-              closeIssue: options.closeIssue || null,
-            }
-          : null,
+      prOptions: buildPrOptions(options, requiredQualityGates),
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
       // Issue provider tracking (where issue was fetched from)
@@ -938,6 +1183,21 @@ class Orchestrator {
         throw new Error('Either issue, file, or text input is required');
       }
 
+      commandProofs = mergeCommandProofs(
+        commandProofs,
+        resolveClusterCommandProofs(config, options, inputData.context)
+      );
+      requiredQualityGates = mergeQualityGates(
+        requiredQualityGates,
+        commandProofsToQualityGates(commandProofs)
+      );
+      options.requiredQualityGates = requiredQualityGates;
+      cluster.requiredQualityGates = requiredQualityGates;
+      cluster.commandProofs = commandProofs;
+      cluster.prOptions = buildPrOptions(options, requiredQualityGates);
+      applyCommandProofsToAgents(config, commandProofs);
+      applyRequiredQualityGatesToValidators(config, requiredQualityGates);
+
       // Detect git platform for --pr mode (independent of issue provider)
       if (options.autoPr) {
         const { detectGitContext } = require('../lib/git-remote-utils');
@@ -951,6 +1211,9 @@ class Orchestrator {
 
       // Inject git-pusher agent if --pr is set (replaces completion-detector)
       this._applyAutoPrConfig(config, inputData, options);
+      if (options.autoPr) {
+        applyPushBlockedRepairTriggers(config);
+      }
 
       // Inject workers instruction if --workers explicitly provided and > 1
       this._applyWorkerInstruction(config);
@@ -1077,7 +1340,6 @@ class Orchestrator {
         for (const agent of cluster.agents || []) {
           // Agent start may have partially succeeded.
           // Stop is best-effort and must not mask the original error.
-          // eslint-disable-next-line no-await-in-loop
           await agent.stop();
         }
       } catch {
@@ -1086,7 +1348,6 @@ class Orchestrator {
       try {
         if (cluster.isolation?.manager) {
           // Preserve workspace for inspection; callers can `zeroshot kill` for full cleanup.
-          // eslint-disable-next-line no-await-in-loop
           await cluster.isolation.manager.cleanup(clusterId, { preserveWorkspace: true });
         }
       } catch {
@@ -1184,7 +1445,7 @@ class Orchestrator {
       this._log(`Initiated by: ${message.sender}`);
       this._log(`${'='.repeat(80)}\n`);
 
-      this.stop(clusterId).catch((err) => {
+      this.stop(clusterId, { completedSuccessfully: true }).catch((err) => {
         console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
       });
     });
@@ -1237,6 +1498,15 @@ class Orchestrator {
           console.error(`Failed to auto-stop cluster ${clusterId}:`, err.message);
         });
       }
+    });
+  }
+
+  _registerPushBlockedHandler(messageBus, clusterId) {
+    this._subscribeToClusterTopic(messageBus, clusterId, 'PUSH_BLOCKED', async (message) => {
+      const reason = message.content?.data?.blocked_reason || 'unknown';
+      const prNumber = message.content?.data?.pr_number || message.content?.data?.mr_number;
+      this._log(`🔁 git-pusher blocked${prNumber ? ` (${prNumber})` : ''}: ${reason}`);
+      await this._saveClusters();
     });
   }
 
@@ -1406,6 +1676,7 @@ class Orchestrator {
   _registerClusterSubscriptions({ messageBus, clusterId, isolationManager, containerId }) {
     this._registerClusterCompletionHandlers(messageBus, clusterId);
     this._registerAgentErrorHandler(messageBus, clusterId);
+    this._registerPushBlockedHandler(messageBus, clusterId);
     this._registerAgentLifecycleHandlers(messageBus, clusterId);
 
     const watchdog = this._registerConductorWatchdog(messageBus, clusterId);
@@ -1449,11 +1720,12 @@ class Orchestrator {
       const workDir = options.cwd || process.cwd();
 
       isolationManager = new IsolationManager({});
-      // Use origin/${prBase} if prBase is set (ensures worktree is up-to-date with remote)
+      // `prBase` is the PR target branch. Use that same local ref as the
+      // worktree base so repo-local integration commits are not skipped.
       const worktreeOptions = {};
       if (options.prBase) {
-        worktreeOptions.baseRef = `origin/${options.prBase}`;
-        this._log(`[Orchestrator] Using remote base ref: origin/${options.prBase}`);
+        worktreeOptions.baseRef = options.prBase;
+        this._log(`[Orchestrator] Using worktree base ref: ${options.prBase}`);
       }
       worktreeInfo = isolationManager.createWorktreeIsolation(clusterId, workDir, worktreeOptions);
 
@@ -1520,6 +1792,8 @@ class Orchestrator {
       prBase: options.prBase,
       mergeQueue: options.mergeQueue,
       closeIssue: options.closeIssue,
+      requiredQualityGates: options.requiredQualityGates,
+      cwd: options.cwd,
     });
 
     // Template replacement for issue context
@@ -1605,7 +1879,7 @@ class Orchestrator {
       }
     }
 
-    throw new Error('Failed to generate unique cluster ID after many attempts');
+    throw new Error(`Failed to generate unique cluster ID in ${this.storageDir} after 50 attempts`);
   }
 
   /**
@@ -1634,18 +1908,26 @@ class Orchestrator {
    * @private
    */
   _teardownWorktreeCompose(worktreePath) {
-    const { execSync } = require('./lib/safe-exec');
     const composePath = path.join(worktreePath, 'docker-compose.yml');
     if (!fs.existsSync(composePath)) return;
 
     try {
       this._log(`[Orchestrator] Tearing down Docker Compose services in ${worktreePath}...`);
-      execSync('docker compose down --remove-orphans --volumes --timeout 10', {
-        cwd: worktreePath,
-        encoding: 'utf8',
-        stdio: 'pipe',
-        timeout: 30000,
-      });
+      const { spawnSync } = require('child_process');
+      const result = spawnSync(
+        'docker',
+        ['compose', 'down', '--remove-orphans', '--volumes', '--timeout', '10'],
+        {
+          cwd: worktreePath,
+          encoding: 'utf8',
+          stdio: 'pipe',
+          timeout: 30000,
+        }
+      );
+      if (result.status !== 0 || result.error) {
+        const detail = result.error?.message || result.stderr || 'no stderr';
+        throw new Error(`Docker Compose teardown failed in ${worktreePath}: ${detail}`);
+      }
       this._log(`[Orchestrator] Docker Compose services torn down`);
     } catch {
       // Best-effort: compose project may not have been started
@@ -1716,11 +1998,86 @@ class Orchestrator {
     return { handled: true, remotePid, exited: true, forced: true };
   }
 
+  async _signalSetupProcess(clusterId, cluster) {
+    const setupPid = cluster.pid;
+    if (!setupPid || setupPid === process.pid || !this._isProcessRunning(setupPid)) {
+      return { handled: false };
+    }
+
+    const signalTarget = process.platform === 'win32' ? setupPid : -setupPid;
+    this._log(`[Orchestrator] Killing setup daemon PID ${setupPid} for ${clusterId}...`);
+
+    this._sendSetupSignal(signalTarget, setupPid, 'SIGTERM');
+    const exited = await this._waitForProcessExit(setupPid, 5000);
+    if (exited) {
+      return { handled: true, remotePid: setupPid, exited: true };
+    }
+
+    this._log(`[Orchestrator] Setup daemon PID ${setupPid} still running, sending SIGKILL...`);
+    this._sendSetupSignal(signalTarget, setupPid, 'SIGKILL');
+    const killed = await this._waitForProcessExit(setupPid, 5000);
+    if (!killed) {
+      throw new Error(`Failed to kill setup daemon PID ${setupPid} for cluster ${clusterId}`);
+    }
+
+    return { handled: true, remotePid: setupPid, exited: true, forced: true };
+  }
+
+  _sendSetupSignal(signalTarget, fallbackPid, signal) {
+    try {
+      process.kill(signalTarget, signal);
+      return;
+    } catch (error) {
+      if (error.code !== 'ESRCH') {
+        throw error;
+      }
+    }
+
+    if (signalTarget === fallbackPid) {
+      return;
+    }
+
+    try {
+      process.kill(fallbackPid, signal);
+    } catch (error) {
+      if (error.code !== 'ESRCH') {
+        throw error;
+      }
+    }
+  }
+
+  async _killSetupCluster(clusterId, cluster) {
+    await this._signalSetupProcess(clusterId, cluster);
+
+    if (cluster.worktree?.path) {
+      this._teardownWorktreeCompose(cluster.worktree.path);
+      try {
+        const manager = cluster.worktree.manager || new IsolationManager();
+        manager.worktrees.set(clusterId, {
+          path: cluster.worktree.path,
+          branch: cluster.worktree.branch,
+          repoRoot: cluster.worktree.repoRoot,
+        });
+        manager.cleanupWorktreeIsolation(clusterId, { preserveBranch: true });
+      } catch (error) {
+        this._log(`[Orchestrator] Warning: setup worktree cleanup failed: ${error.message}`);
+      }
+    }
+
+    cluster.state = 'killed';
+    cluster.pid = null;
+    await this._saveClusters();
+    this.clusters.delete(clusterId);
+    this._log(`Setup cluster ${clusterId} killed`);
+  }
+
   /**
    * Stop a cluster
    * @param {String} clusterId - Cluster ID
+   * @param {Object} [options] - Stop options
+   * @param {boolean} [options.completedSuccessfully=false] - Whether cluster completed successfully (vs user-initiated stop)
    */
-  async stop(clusterId) {
+  async stop(clusterId, options = {}) {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
@@ -1768,12 +2125,32 @@ class Orchestrator {
       cluster.validatorIsolation = null;
     }
 
-    // Worktree cleanup on stop: preserve for resume capability
-    // Branch stays, worktree stays - can resume work later
-    // BUT: tear down Docker Compose services to free host ports
-    if (cluster.worktree?.manager) {
+    // Worktree cleanup: auto-remove if completed successfully with --pr/--ship
+    // (no reason to resume after PR is created/merged), otherwise preserve for resume
+    const shouldAutoCleanWorktree =
+      options.completedSuccessfully && cluster.autoPr && cluster.worktree?.manager;
+
+    if (shouldAutoCleanWorktree) {
+      this._log(`[Orchestrator] Auto-cleaning worktree (completed successfully with --pr/--ship)`);
+      // Tear down Docker Compose first, then remove worktree entirely
+      if (cluster.worktree.path) {
+        this._teardownWorktreeCompose(cluster.worktree.path);
+      }
+      try {
+        cluster.worktree.manager.cleanupWorktreeIsolation(clusterId, { preserveBranch: true });
+        this._log(`[Orchestrator] Worktree removed, branch ${cluster.worktree.branch} preserved`);
+      } catch (err) {
+        // Best-effort cleanup — don't fail the stop operation
+        this._log(`[Orchestrator] Warning: worktree cleanup failed: ${err.message}`);
+      }
+    } else if (cluster.worktree?.manager) {
       this._log(`[Orchestrator] Worktree preserved at ${cluster.worktree.path} for resume`);
       this._log(`[Orchestrator] Branch: ${cluster.worktree.branch}`);
+      // Hook daemons run detached inside the worktree and survive agent shutdown
+      // unless we explicitly reap worktree-scoped processes on stop.
+      if (cluster.worktree.path) {
+        cluster.worktree.manager.cleanupWorktreeProcesses(cluster.worktree.path);
+      }
       // Tear down Docker Compose services in the worktree to free host ports.
       // Without this, stopped worktrees hold ports (5433, 6379, etc.) indefinitely.
       if (cluster.worktree.path) {
@@ -1782,12 +2159,24 @@ class Orchestrator {
       // Don't cleanup worktree itself - it will be reused on resume
     }
 
-    cluster.state = 'stopped';
+    cluster.state = shouldAutoCleanWorktree ? 'killed' : 'stopped';
     cluster.pid = null; // Clear PID - cluster is no longer running
-    this._log(`Cluster ${clusterId} stopped`);
+
+    if (shouldAutoCleanWorktree) {
+      // Close message bus and ledger (same as kill() path)
+      cluster.messageBus.close();
+    }
+
+    this._log(`Cluster ${clusterId} ${cluster.state}`);
 
     // Save updated state
+    // Note: 'killed' state causes _saveClusters to DELETE from disk (no stale entries)
     await this._saveClusters();
+
+    if (shouldAutoCleanWorktree) {
+      // Remove from memory after persisting (same as kill() path)
+      this.clusters.delete(clusterId);
+    }
   }
 
   /**
@@ -1798,6 +2187,11 @@ class Orchestrator {
     const cluster = this.clusters.get(clusterId);
     if (!cluster) {
       throw new Error(`Cluster ${clusterId} not found`);
+    }
+
+    if (this._isSetupCluster(cluster)) {
+      await this._killSetupCluster(clusterId, cluster);
+      return;
     }
 
     await this._signalRemoteCluster(cluster, { action: 'kill' });
@@ -1862,7 +2256,7 @@ class Orchestrator {
   async killAll() {
     const results = { killed: [], errors: [] };
     const runningClusters = Array.from(this.clusters.values()).filter(
-      (c) => c.state === 'running' || c.state === 'initializing'
+      (c) => c.state === 'running' || c.state === 'initializing' || this._isSetupCluster(c)
     );
 
     for (const cluster of runningClusters) {
@@ -1917,6 +2311,19 @@ class Orchestrator {
     if (cluster.state === 'running') {
       throw new Error(
         `Cluster ${clusterId} is still running. Use 'zeroshot stop' first if you want to restart it.`
+      );
+    }
+
+    if (this._isSetupCluster(cluster)) {
+      const setupError = cluster.failureInfo?.error
+        ? ` Previous setup error: ${cluster.failureInfo.error}.`
+        : '';
+      const logHint = cluster.setupLogPath ? ` Check setup log: ${cluster.setupLogPath}.` : '';
+      throw new Error(
+        `Cluster ${clusterId} never finished setup and cannot be resumed.` +
+          setupError +
+          ` Use 'zeroshot run' to start a fresh cluster.` +
+          logHint
       );
     }
 
@@ -2230,6 +2637,7 @@ class Orchestrator {
 
   async _restartClusterAgents(cluster) {
     cluster.state = 'running';
+    cluster.pid = process.pid;
     for (const agent of cluster.agents) {
       if (!agent.running) {
         await agent.start();
@@ -2666,8 +3074,96 @@ Continue from where you left off. Review your previous output to understand what
     return loadedConfig.agents;
   }
 
+  _hasCompletionHandler(agentConfigs) {
+    return (agentConfigs || []).some(
+      (agent) =>
+        agent.id === 'completion-detector' ||
+        agent.id === 'git-pusher' ||
+        agent.hooks?.onComplete?.config?.topic === 'CLUSTER_COMPLETE' ||
+        agent.triggers?.some((trigger) => trigger.action === 'stop_cluster')
+    );
+  }
+
+  _clusterHasAgent(cluster, agentId) {
+    return Boolean(
+      cluster?.agents?.some((agent) => agent.id === agentId || agent.config?.id === agentId) ||
+      cluster?.config?.agents?.some((agent) => agent.id === agentId)
+    );
+  }
+
+  _normalizeCompletionHandlersForPrMode(cluster, agentConfigs) {
+    if (!Array.isArray(agentConfigs) || agentConfigs.length === 0) {
+      return [];
+    }
+
+    const isPrMode = cluster?.autoPr ?? process.env.ZEROSHOT_PR === '1';
+    const hasGitPusher =
+      this._clusterHasAgent(cluster, 'git-pusher') ||
+      agentConfigs.some((agent) => agent?.id === 'git-pusher');
+
+    if (!isPrMode || !hasGitPusher) {
+      return agentConfigs;
+    }
+
+    return agentConfigs.filter((agent) => agent?.id !== 'completion-detector');
+  }
+
+  _injectCriticalValidationResultProducer(agentConfigs) {
+    const hasMetaCoordinator = agentConfigs.some((agent) => agent.id === 'meta-coordinator');
+    const hasRuntimeValidator = agentConfigs.some((agent) => agent.role === 'validator');
+    const hasSimulator = agentConfigs.some((agent) => agent.id === '__validation-result-simulator');
+
+    // CRITICAL flow loads quick/heavy validators dynamically; simulate stage-1 producer
+    // for static validation so we don't reject legitimate staged topologies.
+    if (hasMetaCoordinator && !hasRuntimeValidator && !hasSimulator) {
+      agentConfigs.push({
+        id: '__validation-result-simulator',
+        role: 'validator',
+        triggers: [{ topic: 'IMPLEMENTATION_READY', action: 'execute_task' }],
+        hooks: {
+          onComplete: {
+            action: 'publish_message',
+            config: {
+              topic: 'VALIDATION_RESULT',
+              content: {
+                data: {
+                  approved: true,
+                  errors: [],
+                  criteriaResults: [],
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+  }
+
+  _prepareValidationAgentConfigs(cluster, proposedAgentConfigs) {
+    const validationAgents = this._normalizeCompletionHandlersForPrMode(
+      cluster,
+      JSON.parse(JSON.stringify(proposedAgentConfigs || []))
+    );
+
+    this._injectCriticalValidationResultProducer(validationAgents);
+
+    // Operation-chain validation runs before _injectCompletionAgent executes.
+    // Add a synthetic completion handler so transient missing completion detectors
+    // don't invalidate otherwise-correct topology changes.
+    if (!this._hasCompletionHandler(validationAgents)) {
+      validationAgents.push({
+        id: '__completion-validator',
+        role: 'orchestrator',
+        triggers: [{ topic: 'VALIDATION_RESULT', action: 'stop_cluster' }],
+      });
+    }
+
+    return validationAgents;
+  }
+
   _validateProposedConfig(clusterId, cluster, proposedAgentConfigs, operations) {
-    const mockConfig = { agents: proposedAgentConfigs };
+    const validationAgents = this._prepareValidationAgentConfigs(cluster, proposedAgentConfigs);
+    const mockConfig = { agents: validationAgents };
     const validation = configValidator.validateConfig(mockConfig);
 
     if (!validation.valid) {
@@ -2728,9 +3224,13 @@ Continue from where you left off. Review your previous output to understand what
    * @private
    */
   async _opAddAgents(cluster, op, context) {
-    const agents = op.agents;
+    const agents = this._normalizeCompletionHandlersForPrMode(cluster, op.agents);
     if (!agents || !Array.isArray(agents)) {
       throw new Error('add_agents operation missing agents array');
+    }
+    if (agents.length === 0) {
+      this._log(`    Skipping add_agents: PR-mode completion detector replaced by git-pusher`);
+      return;
     }
 
     // CRITICAL: Inject cluster's worktree cwd into dynamically added agents
@@ -2750,6 +3250,13 @@ Continue from where you left off. Review your previous output to understand what
         applyModelOverride(agentConfig, cluster.modelOverride);
         this._log(`    [model] Overridden model for ${agentConfig.id}: ${cluster.modelOverride}`);
       }
+
+      applyRequiredQualityGatesToAgent(agentConfig, cluster.requiredQualityGates);
+      applyCommandProofsToAgent(agentConfig, cluster.commandProofs);
+      if (cluster.autoPr) {
+        applyPushBlockedRepairTrigger(agentConfig);
+      }
+
       // Validate agent config has required fields
       if (!agentConfig.id) {
         throw new Error('Agent config missing required field: id');
@@ -2766,9 +3273,11 @@ Continue from where you left off. Review your previous output to understand what
           `    🔄 Replacing agent ${agentConfig.id} (old role: ${existingAgent.config.role})`
         );
 
-        // Stop the existing agent (cluster.agents contains AgentWrapper instances directly)
+        // Stop the existing agent and wait for shutdown before replacement.
+        // This prevents the old instance from draining buffered messages or
+        // finishing in-flight work after the new agent has already started.
         if (existingAgent.stop) {
-          existingAgent.stop();
+          await existingAgent.stop();
         }
 
         // Remove from cluster.agents array
@@ -3125,6 +3634,9 @@ Continue from where you left off. Review your previous output to understand what
           return 0;
         }
       })(),
+      setupLogPath: cluster.setupLogPath || null,
+      setupStage: cluster.setupStage || null,
+      failureInfo: cluster.failureInfo || null,
     };
   }
 
@@ -3162,6 +3674,10 @@ Continue from where you left off. Review your previous output to understand what
             return 0;
           }
         })(),
+        pid: cluster.pid || null,
+        setupLogPath: cluster.setupLogPath || null,
+        setupStage: cluster.setupStage || null,
+        failureInfo: cluster.failureInfo || null,
       };
     });
   }
@@ -3448,6 +3964,25 @@ Continue from where you left off. Review your previous output to understand what
     }
 
     return config;
+  }
+
+  /**
+   * Garbage-collect orphaned worktree directories and database files.
+   *
+   * Delegates to the standalone gc module, passing in-memory cluster IDs
+   * as additional known IDs (clusters.json may not reflect recently spawned clusters).
+   *
+   * @param {object} [options]
+   * @param {boolean} [options.dryRun=false] - If true, report but don't delete
+   * @returns {{ orphanedWorktrees: string[], orphanedDbs: string[], errors: string[] }}
+   */
+  gcWorktrees(options = {}) {
+    const { gcOrphanedWorktrees } = require('./lib/gc');
+    return gcOrphanedWorktrees({
+      storageDir: this.storageDir,
+      extraKnownIds: new Set(this.clusters.keys()),
+      dryRun: options.dryRun || false,
+    });
   }
 }
 

@@ -5,7 +5,7 @@
     "planner_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
-      "default": "level2"
+      "default": "level3"
     },
     "worker_level": {
       "type": "string",
@@ -15,7 +15,7 @@
     "validator_level": {
       "type": "string",
       "enum": ["level1", "level2", "level3"],
-      "default": "level2"
+      "default": "level3"
     },
     "validator_count": {
       "type": "number",
@@ -289,13 +289,13 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["load_quick", "load_heavy", "skip"]
+            "enum": ["load_quick", "load_heavy"]
           }
         },
         "required": ["action"]
       },
       "prompt": {
-        "system": "Coordinate two-stage validation. On IMPLEMENTATION_READY: output {\"action\":\"load_quick\"}. On QUICK_VALIDATION_PASSED: output {\"action\":\"load_heavy\"}. On VALIDATION_RESULT from Stage 1 (rejection): output {\"action\":\"skip\"}"
+        "system": "Coordinate two-stage validation. On IMPLEMENTATION_READY: output {\"action\":\"load_quick\"}. On QUICK_VALIDATION_PASSED: output {\"action\":\"load_heavy\"}."
       },
       "contextStrategy": {
         "sources": [
@@ -348,10 +348,6 @@
           "transform": {
             "engine": "javascript",
             "script": "const template = result.action === 'load_quick' ? 'quick-validation' : 'heavy-validation'; const republishTopic = result.action === 'load_quick' ? 'IMPLEMENTATION_READY' : 'QUICK_VALIDATION_PASSED'; const republishContent = triggeringMessage && triggeringMessage.content ? triggeringMessage.content : { text: '', data: {} }; return { topic: 'CLUSTER_OPERATIONS', content: { text: result.action === 'load_quick' ? 'Stage 1 (quick)' : 'Stage 2 (heavy)', data: { operations: [{ action: 'load_config', config: { base: template, params: { validator_level: '{{validator_level}}', max_tokens: {{max_tokens}}, timeout: {{timeout}} } } }, { action: 'publish', topic: republishTopic, content: republishContent, metadata: { _republished: true } }] } } };"
-          },
-          "logic": {
-            "engine": "javascript",
-            "script": "return result.action !== 'skip';"
           }
         }
       }

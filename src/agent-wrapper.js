@@ -101,6 +101,8 @@ class AgentWrapper {
           model: this._selectModel(),
           modelSpec: spec,
           provider: this._resolveProvider(),
+          cwd: this.config.cwd || process.cwd(),
+          worktreePath: this.worktree?.path || null,
         });
       };
     } else {
@@ -162,6 +164,7 @@ class AgentWrapper {
       for (const rule of this.modelConfig.rules) {
         if (this._matchesIterationRange(rule.iterations)) {
           if (rule.model) {
+            provider.validateModelId(rule.model);
             return {
               level: 'custom',
               model: rule.model,
@@ -186,6 +189,7 @@ class AgentWrapper {
     }
 
     if (this.modelConfig.model) {
+      provider.validateModelId(this.modelConfig.model);
       return {
         level: 'custom',
         model: this.modelConfig.model,
@@ -378,6 +382,7 @@ class AgentWrapper {
       role: this.role,
       iteration: this.iteration,
       cluster_id: this.cluster.id,
+      requiredQualityGates: this.config?.requiredQualityGates || [],
     };
 
     return evaluateTrigger({
@@ -572,6 +577,8 @@ class AgentWrapper {
    */
   getState() {
     const modelSpec = this._resolveModelSpec();
+    const hasLiveOrTrackedTask =
+      this.state === 'executing_task' && (!!this.currentTask || !!this.currentTaskId);
     return {
       id: this.id,
       role: this.role,
@@ -581,7 +588,7 @@ class AgentWrapper {
       state: this.state,
       iteration: this.iteration,
       maxIterations: this.maxIterations,
-      currentTask: this.currentTask ? true : false,
+      currentTask: hasLiveOrTrackedTask,
       currentTaskId: this.currentTaskId,
       pid: this.processPid,
     };

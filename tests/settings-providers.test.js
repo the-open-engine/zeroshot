@@ -48,7 +48,7 @@ describe('Provider settings', function () {
         maxLevel: 'level3',
         defaultLevel: 'level2',
         levelOverrides: {
-          level1: { model: 'codex-model-main', reasoningEffort: 'low' },
+          level1: { model: 'gpt-5.4', reasoningEffort: 'low' },
         },
       });
     });
@@ -85,15 +85,44 @@ describe('Provider settings', function () {
     assert.strictEqual(settings.providerSettings.claude.defaultLevel, 'level1');
   });
 
-  it('uses gpt-5.3-codex as the default codex model', function () {
+  it('uses gpt-5.4 as the default codex model', function () {
     const codex = getProvider('codex');
     const modelSpec = codex.resolveModelSpec(codex.getDefaultLevel(), {});
-    assert.strictEqual(modelSpec.model, 'gpt-5.3-codex');
+    assert.strictEqual(modelSpec.model, 'gpt-5.4');
   });
 
-  it('maps claude level3 to opus-4.6', function () {
+  it('maps claude level3 to opus alias', function () {
     const claude = getProvider('claude');
     const modelSpec = claude.resolveModelSpec('level3', {});
-    assert.strictEqual(modelSpec.model, 'opus-4.6');
+    assert.strictEqual(modelSpec.model, 'opus');
+  });
+
+  it('rejects legacy claude model aliases as invalid input', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      claude.validateModelId('opus-4.6');
+    }, /Use canonical model ids: haiku, sonnet, opus/);
+  });
+
+  it('marks invalid model errors as permanent', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      try {
+        claude.validateModelId('not-a-model');
+      } catch (error) {
+        assert.strictEqual(error.permanent, true);
+        throw error;
+      }
+    }, /Invalid model "not-a-model"/);
+  });
+
+  it('fails before command build when model override is invalid', function () {
+    const claude = getProvider('claude');
+    assert.throws(() => {
+      claude.buildCommand('test context', {
+        modelSpec: { model: 'opus-4.6' },
+        cliFeatures: { supportsModel: true },
+      });
+    }, /Use canonical model ids: haiku, sonnet, opus/);
   });
 });

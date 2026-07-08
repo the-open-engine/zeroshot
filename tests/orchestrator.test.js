@@ -13,8 +13,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const Orchestrator = require('../src/orchestrator.js');
+const IsolationManager = require('../src/isolation-manager.js');
 const MockTaskRunner = require('./helpers/mock-task-runner.js');
 const LedgerAssertions = require('./helpers/ledger-assertions.js');
+const Ledger = require('../src/ledger.js');
 
 // Isolate tests from user settings (prevents minModel/maxModel conflicts)
 const testSettingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-settings-'));
@@ -91,6 +93,26 @@ function createSimpleConfig() {
       },
     ],
   };
+}
+
+function loadSetupCluster(orchestrator, overrides = {}) {
+  const clusterId = overrides.id || 'setup-cluster-test';
+  const cluster = orchestrator._loadSetupCluster(clusterId, {
+    state: 'failed',
+    createdAt: Date.now(),
+    pid: null,
+    setupLogPath: path.join(os.tmpdir(), `${clusterId}.log`),
+    failureInfo: {
+      type: 'setup',
+      error: 'npm ci failed',
+      timestamp: Date.now(),
+    },
+    provisional: true,
+    ...overrides,
+    id: clusterId,
+  });
+  orchestrator.clusters.set(clusterId, cluster);
+  return { clusterId, cluster };
 }
 
 // Create multi-agent config for testing (used in future tests)
@@ -205,6 +227,31 @@ function defineLifecycleStartTests() {
       ledger.assertPublished('ISSUE_OPENED');
     });
 
+    it('should replace detached setup placeholder with requested cluster id', async function () {
+      const config = createSimpleConfig();
+      const clusterId = 'detached-setup-id';
+      loadSetupCluster(lifecycleOrchestrator, {
+        id: clusterId,
+        state: 'setup',
+        failureInfo: null,
+      });
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' }, { clusterId });
+
+      assert.strictEqual(result.id, clusterId);
+      assert.ok(lifecycleOrchestrator.getCluster(clusterId));
+      assert.deepStrictEqual(
+        Array.from(lifecycleOrchestrator.clusters.keys()).filter((id) => id.startsWith(clusterId)),
+        [clusterId]
+      );
+
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.ok(persisted[clusterId], 'Requested cluster id should be persisted');
+      assert.strictEqual(persisted[clusterId].provisional, false);
+    });
+
     it('should retry once on SIGTERM termination even with maxRetries=1', async function () {
       const config = {
         agents: [
@@ -245,8 +292,7 @@ function defineLifecycleStartTests() {
       assert.strictEqual(callCount, 2, 'Expected SIGTERM failure to trigger one retry');
     });
 
-    // eslint-disable-next-line sonarjs/no-skipped-tests -- AGENT_RESTART_ATTEMPT feature not yet implemented (see AGENTS.md)
-    it.skip('should restart implementation agent after retries exhausted', async function () {
+    it('should restart implementation agent after retries exhausted', async function () {
       const config = {
         agents: [
           {
@@ -322,6 +368,100 @@ function defineLifecycleStartTests() {
         TypeError,
         'Should throw TypeError for null config'
       );
+    });
+
+    it('should forward launch options needed for fresh worktree PR runs', async function () {
+      const config = createSimpleConfig();
+      const forwarded = [];
+      const originalStartInternal =
+        lifecycleOrchestrator._startInternal.bind(lifecycleOrchestrator);
+
+      lifecycleOrchestrator._startInternal = function (cfg, input, options) {
+        forwarded.push({ cfg, input, options });
+        return { id: 'cluster-forward-test' };
+      };
+
+      try {
+        const mounts = [{ source: '/tmp/src', target: '/workspace/src', readonly: true }];
+        await lifecycleOrchestrator.start(
+          config,
+          { text: 'Task' },
+          {
+            cwd: '/tmp/repo',
+            isolation: true,
+            isolationImage: 'zeroshot-cluster-base',
+            worktree: true,
+            autoPr: true,
+            modelOverride: 'gpt-5.4',
+            clusterId: 'cluster-forward-test',
+            settings: { repo: 'covibes/orchestra' },
+            forceProvider: 'github',
+            force: true,
+            prBase: 'main',
+            mergeQueue: true,
+            closeIssue: 'never',
+            noMounts: true,
+            mounts,
+            containerHome: '/tmp/home',
+          }
+        );
+      } finally {
+        lifecycleOrchestrator._startInternal = originalStartInternal;
+      }
+
+      assert.strictEqual(forwarded.length, 1, 'start() should delegate once');
+      const options = forwarded[0].options;
+      assert.strictEqual(options.cwd, '/tmp/repo');
+      assert.strictEqual(options.isolation, true);
+      assert.strictEqual(options.isolationImage, 'zeroshot-cluster-base');
+      assert.strictEqual(options.worktree, true);
+      assert.strictEqual(options.autoPr, true);
+      assert.strictEqual(options.modelOverride, 'gpt-5.4');
+      assert.strictEqual(options.clusterId, 'cluster-forward-test');
+      assert.deepStrictEqual(options.settings, { repo: 'covibes/orchestra' });
+      assert.strictEqual(options.forceProvider, 'github');
+      assert.strictEqual(options.force, true);
+      assert.strictEqual(options.prBase, 'main');
+      assert.strictEqual(options.mergeQueue, true);
+      assert.strictEqual(options.closeIssue, 'never');
+      assert.strictEqual(options.noMounts, true);
+      assert.deepStrictEqual(options.mounts, [
+        { source: '/tmp/src', target: '/workspace/src', readonly: true },
+      ]);
+      assert.strictEqual(options.containerHome, '/tmp/home');
+    });
+
+    it('should base PR worktrees on the local PR base branch', async function () {
+      const config = createSimpleConfig();
+      const originalCreateWorktreeIsolation = IsolationManager.prototype.createWorktreeIsolation;
+      const calls = [];
+
+      IsolationManager.prototype.createWorktreeIsolation = function (clusterId, workDir, options) {
+        calls.push({ clusterId, workDir, options });
+        return {
+          path: '/tmp/zeroshot-worktree',
+          branch: 'zeroshot/cluster-local-base',
+          repoRoot: workDir,
+        };
+      };
+
+      try {
+        await lifecycleOrchestrator._initializeIsolation(
+          {
+            cwd: '/tmp/repo',
+            worktree: true,
+            prBase: 'predev',
+          },
+          config,
+          'cluster-local-base'
+        );
+      } finally {
+        IsolationManager.prototype.createWorktreeIsolation = originalCreateWorktreeIsolation;
+      }
+
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0].workDir, '/tmp/repo');
+      assert.deepStrictEqual(calls[0].options, { baseRef: 'predev' });
     });
 
     it('should handle missing input (requires issue, file, or text)', async function () {
@@ -414,6 +554,98 @@ function defineLifecycleStopTests() {
       const ledger = new LedgerAssertions(cluster.ledger, clusterId);
       ledger.assertPublished('ISSUE_OPENED');
     });
+
+    it('should auto-cleanup when completedSuccessfully + autoPr (--ship mode)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr/--ship mode by setting autoPr on the cluster
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      await lifecycleOrchestrator.stop(clusterId, { completedSuccessfully: true });
+
+      // Verify: Cluster removed from memory (same as kill behavior)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.strictEqual(
+        afterStop,
+        undefined,
+        'Cluster should be removed from memory after auto-cleanup'
+      );
+
+      // Verify: Cluster deleted from disk (not persisted as stopped)
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.strictEqual(
+        persisted[clusterId],
+        undefined,
+        'Cluster should be deleted from disk after auto-cleanup'
+      );
+    });
+
+    it('should preserve worktree when stop is user-initiated (no completedSuccessfully)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr mode
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      // User-initiated stop (Ctrl+C) — no completedSuccessfully flag
+      await lifecycleOrchestrator.stop(clusterId);
+
+      // Verify: Cluster still in memory (preserved for resume)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Cluster should be preserved in memory for resume');
+      assert.strictEqual(afterStop.state, 'stopped', 'State should be stopped');
+
+      // Verify: Cluster persisted to disk
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.ok(persisted[clusterId], 'Cluster should exist on disk for resume');
+    });
+
+    it('should preserve worktree when cluster fails (not completedSuccessfully)', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // Simulate --pr mode
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.autoPr = true;
+
+      // Failed cluster stop — no completedSuccessfully
+      await lifecycleOrchestrator.stop(clusterId);
+
+      // Verify: Cluster preserved for debugging/resume
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Failed cluster should be preserved for resume');
+      assert.strictEqual(afterStop.state, 'stopped');
+    });
+
+    it('should NOT auto-cleanup when completedSuccessfully but no autoPr', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const clusterId = result.id;
+
+      // No autoPr — plain `zeroshot run` without --pr/--ship
+      await lifecycleOrchestrator.stop(clusterId, { completedSuccessfully: true });
+
+      // Verify: Cluster preserved (might want to inspect results)
+      const afterStop = lifecycleOrchestrator.getCluster(clusterId);
+      assert.ok(afterStop, 'Cluster without autoPr should be preserved');
+      assert.strictEqual(afterStop.state, 'stopped');
+    });
   });
 }
 
@@ -446,6 +678,22 @@ function defineLifecycleKillTests() {
         /not found/i,
         'Should reject nonexistent cluster'
       );
+    });
+
+    it('should kill setup clusters without requiring a full message bus', async function () {
+      const { clusterId, cluster } = loadSetupCluster(lifecycleOrchestrator, {
+        id: 'setup-kill-test',
+        pid: 999999,
+      });
+      cluster.messageBus = { count: () => 0 };
+
+      await lifecycleOrchestrator.kill(clusterId);
+
+      assert.strictEqual(lifecycleOrchestrator.getCluster(clusterId), undefined);
+
+      const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
+      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      assert.strictEqual(persisted[clusterId], undefined);
     });
   });
 }
@@ -482,6 +730,66 @@ function defineLifecycleResumeTests() {
       assert.strictEqual(cluster.state, 'stopped', 'Cluster should be stopped');
     });
 
+    it('should mark resumed failed clusters as owned by the current process', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      await lifecycleOrchestrator.stop(result.id);
+
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      cluster.failureInfo = {
+        agentId: 'worker',
+        iteration: 1,
+        error: 'boom',
+      };
+
+      lifecycleMockRunner.when('worker').delays(500, { done: true, resumed: true });
+
+      const resumed = await lifecycleOrchestrator.resume(result.id);
+      const status = lifecycleOrchestrator.getStatus(result.id);
+
+      assert.strictEqual(resumed.resumeType, 'failure');
+      assert.strictEqual(cluster.pid, process.pid, 'Resumed cluster should record current PID');
+      assert.strictEqual(status.state, 'running', 'Resumed cluster should not self-report zombie');
+    });
+
+    it('should not restore serialized currentTask handles from disk', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').delays(1000, { done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      const agent = cluster.agents[0];
+
+      cluster.state = 'stopped';
+      cluster.pid = null;
+      agent.state = 'stopped';
+      agent.currentTask = { kill() {} };
+      agent.currentTaskId = 'task-live';
+      agent.processPid = 4242;
+
+      await lifecycleOrchestrator._saveClusters();
+
+      const reloaded = await Orchestrator.create({
+        taskRunner: new MockTaskRunner(),
+        storageDir: lifecycleStorageDir,
+        quiet: true,
+      });
+
+      try {
+        const restoredCluster = reloaded.getCluster(result.id);
+        const restoredAgent = restoredCluster.agents[0];
+        const restoredState = restoredAgent.getState();
+
+        assert.strictEqual(restoredAgent.currentTask, null);
+        assert.strictEqual(restoredAgent.currentTaskId, 'task-live');
+        assert.strictEqual(restoredState.currentTask, false);
+      } finally {
+        reloaded.close();
+      }
+    });
+
     it('should fail if cluster does not exist', async function () {
       await assert.rejects(
         async () => {
@@ -507,6 +815,29 @@ function defineLifecycleResumeTests() {
         /still running/i,
         'Should reject resume of running cluster'
       );
+    });
+
+    it('should reject setup cluster resume with an actionable error', async function () {
+      const { clusterId, cluster } = loadSetupCluster(lifecycleOrchestrator, {
+        id: 'setup-resume-test',
+        failureInfo: {
+          type: 'setup',
+          error: 'npm ci exploded',
+          timestamp: Date.now(),
+        },
+      });
+      cluster.messageBus = {
+        findLast() {
+          throw new Error('resume should not inspect setup ledger');
+        },
+        query() {
+          throw new Error('resume should not inspect setup ledger');
+        },
+      };
+
+      await assert.rejects(async () => {
+        await lifecycleOrchestrator.resume(clusterId);
+      }, /never finished setup.*cannot be resumed.*npm ci exploded.*zeroshot run/i);
     });
   });
 }
@@ -676,6 +1007,42 @@ describe('Orchestrator - Crash Recovery (CRITICAL)', function () {
     // Verify: Orphaned entry removed
     const clusters = orchestrator.listClusters();
     assert.strictEqual(clusters.length, 0, 'Should have no clusters');
+
+    orchestrator.close();
+  });
+
+  it('should skip invalid persisted clusters and load valid clusters', async function () {
+    const clustersFile = path.join(storageDir, 'clusters.json');
+    const invalidClusterId = 'invalid-template-cluster';
+    const validClusterId = 'valid-cluster';
+    fs.writeFileSync(
+      clustersFile,
+      JSON.stringify({
+        [invalidClusterId]: {
+          id: invalidClusterId,
+          config: {
+            agents: [{ id: 'planner', role: 'planning', modelLevel: '{{planner_level}}' }],
+          },
+          state: 'stopped',
+        },
+        [validClusterId]: {
+          id: validClusterId,
+          config: { agents: [] },
+          state: 'stopped',
+        },
+      })
+    );
+
+    const invalidLedger = new Ledger(path.join(storageDir, `${invalidClusterId}.db`));
+    invalidLedger.close();
+    const validLedger = new Ledger(path.join(storageDir, `${validClusterId}.db`));
+    validLedger.close();
+
+    const orchestrator = await Orchestrator.create({ storageDir, quiet: true });
+    const clusters = orchestrator.listClusters();
+
+    assert.ok(!clusters.some((cluster) => cluster.id === invalidClusterId));
+    assert.ok(clusters.some((cluster) => cluster.id === validClusterId));
 
     orchestrator.close();
   });

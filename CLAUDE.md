@@ -2,7 +2,7 @@ UPDATE THIS FILE when making architectural changes, adding patterns, or changing
 
 # Zeroshot: Multi-Agent Coordination Engine
 
-Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @covibes/zeroshot` or `npm link` (dev).
+Message-passing primitives for multi-agent workflows. **Install:** `npm i -g @the-open-engine/zeroshot` or `npm link` (dev).
 
 ## 🔴 CRITICAL RULES
 
@@ -72,7 +72,6 @@ IS THIS HOW A SENIOR STAFF ARCHITECT WOULD DO IT? ACT LIKE ONE.
 | Ledger (SQLite)          | `src/ledger.js`                     |
 | Trigger evaluation       | `src/logic-engine.js`               |
 | Agent wrapper            | `src/agent-wrapper.js`              |
-| Rust TUI (Ratatui)       | `tui-rs/crates/zeroshot-tui/`       |
 | Docker mounts/env        | `lib/docker-config.js`              |
 | Container lifecycle      | `src/isolation-manager.js`          |
 | Issue providers          | `src/issue-providers/`              |
@@ -101,13 +100,13 @@ zeroshot stop <id>                # Graceful stop
 zeroshot kill <id>                # Force kill
 
 # Utilities
-zeroshot                          # Rust TUI (TTY only)
-zeroshot tui                      # Rust TUI explicit entry
-zeroshot watch                    # Rust TUI Monitor view
 zeroshot export <id>              # Export conversation
 zeroshot agents list              # Available agents
 zeroshot settings                 # View/modify settings
 ```
+
+The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
+and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
 
 **UX modes:**
 
@@ -384,6 +383,13 @@ const maxValidators = cluster.config.complexity === 'CRITICAL' ? 5 : 3;
 
 **CI blocks PRs to main from any branch except `dev`.** See `.github/workflows/ci.yml` → `enforce-main-pr-source` job.
 
+**Development branch ownership:**
+
+- `dev` is the integration branch for normal development work.
+- Feature branches merge into `dev`, not `main`.
+- `main` is release-only. Promote `dev` to `main` only when you intentionally want a release.
+- If you are "just shipping a fix" during development, ship it to `dev`.
+
 ```bash
 # ❌ CI WILL BLOCK - PRs to main from feature branches
 gh pr create --base main --head fix/my-feature  # FAILS in CI
@@ -397,6 +403,8 @@ gh pr create --base main --head dev --title "Release"  # dev → main (allowed)
 **POSTMORTEM (2026-01-16):** Agent found merge conflicts between dev and main. Instead of resolving conflicts properly (merge main into dev), created a feature branch directly from main and merged fixes to main. This bypassed dev, created divergence, and left dev without the fixes.
 
 **FIX:** Added CI enforcement (`enforce-main-pr-source` job). Now mechanically impossible to merge non-dev branches to main.
+
+**POSTMORTEM RULE:** Treat `main` as the release branch, not the development branch. If you are choosing a destination branch for active work, the answer is `dev`.
 
 ## 🔴 BEHAVIORAL RULES
 
@@ -423,6 +431,13 @@ Merge to dev (only if CI passes on rebased code)
 ```
 
 **Pre-push hook blocks:** Direct pushes to `main` or `dev`. Must use PR workflow.
+
+**Branch intent:**
+
+- `dev`: active development / integration
+- `main`: release only
+- Feature branch → PR to `dev`
+- `dev` → PR to `main` only for release promotion
 
 **Commands:**
 
@@ -505,7 +520,7 @@ npm run typecheck         # TypeScript (if applicable)
 1. **Get exact status:**
 
    ```bash
-   gh api repos/covibes/zeroshot/actions/runs/{RUN_ID}/jobs \
+   gh api repos/the-open-engine/zeroshot/actions/runs/{RUN_ID}/jobs \
      --jq '.jobs[] | "\(.name): \(.status) (\(.conclusion // "pending"))"'
    ```
 
@@ -513,7 +528,7 @@ npm run typecheck         # TypeScript (if applicable)
 
    ```bash
    # ✅ CORRECT - Uses API, works for completed jobs
-   gh api repos/covibes/zeroshot/actions/jobs/{JOB_ID}/logs 2>&1 | grep -E "FAIL|Error"
+   gh api repos/the-open-engine/zeroshot/actions/jobs/{JOB_ID}/logs 2>&1 | grep -E "FAIL|Error"
 
    # ❌ WRONG - Waits for ENTIRE run to complete
    gh run view {RUN_ID} --log

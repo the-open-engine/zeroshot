@@ -217,7 +217,7 @@
         "onComplete": {
           "action": "publish_message",
           "config": {
-            "topic": "FIX_APPLIED",
+            "topic": "IMPLEMENTATION_READY",
             "content": {
               "text": "Bug fix applied. Ready for test verification."
             }
@@ -370,7 +370,7 @@
             "amount": 1
           },
           {
-            "topic": "FIX_APPLIED",
+            "topic": "IMPLEMENTATION_READY",
             "priority": "medium",
             "since": "last_agent_start",
             "strategy": "latest",
@@ -382,7 +382,7 @@
       },
       "triggers": [
         {
-          "topic": "FIX_APPLIED",
+          "topic": "IMPLEMENTATION_READY",
           "action": "execute_task"
         }
       ],
@@ -402,6 +402,21 @@
           }
         }
       }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "modelLevel": "level1",
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const approved = message?.content?.data?.approved; return approved === true || approved === 'true';"
+          },
+          "action": "stop_cluster"
+        }
+      ]
     }
   ]
 }

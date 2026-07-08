@@ -19,6 +19,16 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const childProcess = require('child_process');
+
+function isComposeDownCall(call) {
+  return (
+    call.command === 'docker' &&
+    Array.isArray(call.args) &&
+    call.args[0] === 'compose' &&
+    call.args[1] === 'down'
+  );
+}
 
 describe('Worktree Docker Compose Cleanup', function () {
   this.timeout(10000);
@@ -35,26 +45,19 @@ describe('Worktree Docker Compose Cleanup', function () {
 
   describe('IsolationManager.removeWorktree', function () {
     it('should call docker compose down before removing worktree with docker-compose.yml', function () {
-      // Mock safe-exec to intercept execSync calls from isolation-manager
-      const safeExec = require('../src/lib/safe-exec');
-      const origExecSync = safeExec.execSync;
+      const origSpawnSync = childProcess.spawnSync;
       const calls = [];
 
-      safeExec.execSync = function (cmd, opts) {
-        calls.push({ cmd, cwd: opts?.cwd });
-        if (cmd.includes('docker compose down')) {
-          return '';
+      childProcess.spawnSync = function (command, args, opts) {
+        calls.push({ command, args, cwd: opts?.cwd });
+        if (command === 'git' && args[0] === 'worktree') {
+          return { status: 1, stdout: '', stderr: 'not a git repo' };
         }
-        if (cmd.includes('git worktree') || cmd.includes('git branch')) {
-          throw new Error('not a git repo');
-        }
-        return '';
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       try {
-        // Re-require to get fresh module with mocked execSync
-        // (isolation-manager destructures execSync at import, but from safe-exec module object)
-        // Since IsolationManager binds execSync at require-time, we need to clear cache
+        // Re-require because IsolationManager binds child_process helpers at import time.
         delete require.cache[require.resolve('../src/isolation-manager')];
         const IsolationManager = require('../src/isolation-manager');
         const manager = new IsolationManager();
@@ -74,7 +77,7 @@ describe('Worktree Docker Compose Cleanup', function () {
         manager.cleanupWorktreeIsolation('test-cluster');
 
         // Verify docker compose down was called
-        const composeDownCall = calls.find((c) => c.cmd.includes('docker compose down'));
+        const composeDownCall = calls.find(isComposeDownCall);
         assert.ok(composeDownCall, 'docker compose down should be called during cleanup');
         assert.strictEqual(
           composeDownCall.cwd,
@@ -82,38 +85,41 @@ describe('Worktree Docker Compose Cleanup', function () {
           'docker compose down should run in the worktree directory'
         );
         assert.ok(
-          composeDownCall.cmd.includes('--remove-orphans'),
+          composeDownCall.args.includes('--remove-orphans'),
           'docker compose down should use --remove-orphans'
         );
         assert.ok(
-          composeDownCall.cmd.includes('--volumes'),
+          composeDownCall.args.includes('--volumes'),
           'docker compose down should use --volumes to free disk'
         );
 
         // Verify ordering: compose down appears before git worktree remove
-        const composeIdx = calls.findIndex((c) => c.cmd.includes('docker compose down'));
-        const gitIdx = calls.findIndex((c) => c.cmd.includes('git worktree remove'));
+        const composeIdx = calls.findIndex(isComposeDownCall);
+        const gitIdx = calls.findIndex(
+          (c) =>
+            c.command === 'git' &&
+            c.args.join(' ') === `worktree remove --force ${fakeWorktreePath}`
+        );
         assert.ok(
           composeIdx < gitIdx,
           `docker compose down (idx ${composeIdx}) should run before git worktree remove (idx ${gitIdx})`
         );
       } finally {
-        safeExec.execSync = origExecSync;
+        childProcess.spawnSync = origSpawnSync;
         delete require.cache[require.resolve('../src/isolation-manager')];
       }
     });
 
     it('should skip docker compose down when no docker-compose.yml exists', function () {
-      const safeExec = require('../src/lib/safe-exec');
-      const origExecSync = safeExec.execSync;
+      const origSpawnSync = childProcess.spawnSync;
       const calls = [];
 
-      safeExec.execSync = function (cmd, opts) {
-        calls.push({ cmd, cwd: opts?.cwd });
-        if (cmd.includes('git worktree') || cmd.includes('git branch')) {
-          throw new Error('not a git repo');
+      childProcess.spawnSync = function (command, args, opts) {
+        calls.push({ command, args, cwd: opts?.cwd });
+        if (command === 'git' && args[0] === 'worktree') {
+          return { status: 1, stdout: '', stderr: 'not a git repo' };
         }
-        return '';
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       try {
@@ -133,30 +139,31 @@ describe('Worktree Docker Compose Cleanup', function () {
 
         manager.cleanupWorktreeIsolation('test-no-compose');
 
-        const composeCall = calls.find((c) => c.cmd.includes('docker compose'));
+        const composeCall = calls.find(
+          (c) => c.command === 'docker' && Array.isArray(c.args) && c.args[0] === 'compose'
+        );
         assert.strictEqual(
           composeCall,
           undefined,
           'docker compose should NOT be called when no docker-compose.yml exists'
         );
       } finally {
-        safeExec.execSync = origExecSync;
+        childProcess.spawnSync = origSpawnSync;
         delete require.cache[require.resolve('../src/isolation-manager')];
       }
     });
 
     it('should not fail when docker compose down throws', function () {
-      const safeExec = require('../src/lib/safe-exec');
-      const origExecSync = safeExec.execSync;
+      const origSpawnSync = childProcess.spawnSync;
 
-      safeExec.execSync = function (cmd) {
-        if (cmd.includes('docker compose down')) {
-          throw new Error('Docker daemon not running');
+      childProcess.spawnSync = function (command, args) {
+        if (command === 'docker' && args[0] === 'compose') {
+          return { status: 1, stdout: '', stderr: 'Docker daemon not running' };
         }
-        if (cmd.includes('git')) {
-          throw new Error('not a git repo');
+        if (command === 'git') {
+          return { status: 1, stdout: '', stderr: 'not a git repo' };
         }
-        return '';
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       try {
@@ -179,24 +186,21 @@ describe('Worktree Docker Compose Cleanup', function () {
           manager.cleanupWorktreeIsolation('test-compose-fail');
         });
       } finally {
-        safeExec.execSync = origExecSync;
+        childProcess.spawnSync = origSpawnSync;
         delete require.cache[require.resolve('../src/isolation-manager')];
       }
     });
   });
 
   describe('Orchestrator._teardownWorktreeCompose', function () {
-    // _teardownWorktreeCompose uses safe-exec (required lazily inside the method).
-    // Mock via the safe-exec module object since the method re-requires it each call.
-    let safeExec, origExecSync;
+    let origSpawnSync;
 
     beforeEach(function () {
-      safeExec = require('../src/lib/safe-exec');
-      origExecSync = safeExec.execSync;
+      origSpawnSync = childProcess.spawnSync;
     });
 
     afterEach(function () {
-      safeExec.execSync = origExecSync;
+      childProcess.spawnSync = origSpawnSync;
     });
 
     it('should tear down compose services during stop (Ctrl+C path)', function () {
@@ -208,18 +212,18 @@ describe('Worktree Docker Compose Cleanup', function () {
       fs.writeFileSync(path.join(fakeWorktreePath, 'docker-compose.yml'), 'version: "3"');
 
       const calls = [];
-      safeExec.execSync = function (cmd, opts) {
-        calls.push({ cmd, cwd: opts?.cwd });
-        return '';
+      childProcess.spawnSync = function (command, args, opts) {
+        calls.push({ command, args, cwd: opts?.cwd });
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       orchestrator._teardownWorktreeCompose(fakeWorktreePath);
 
-      const composeCall = calls.find((c) => c.cmd.includes('docker compose down'));
+      const composeCall = calls.find(isComposeDownCall);
       assert.ok(composeCall, '_teardownWorktreeCompose should call docker compose down');
       assert.strictEqual(composeCall.cwd, fakeWorktreePath);
-      assert.ok(composeCall.cmd.includes('--remove-orphans'));
-      assert.ok(composeCall.cmd.includes('--volumes'));
+      assert.ok(composeCall.args.includes('--remove-orphans'));
+      assert.ok(composeCall.args.includes('--volumes'));
     });
 
     it('should skip when no docker-compose.yml exists', function () {
@@ -230,9 +234,9 @@ describe('Worktree Docker Compose Cleanup', function () {
       fs.mkdirSync(fakeWorktreePath, { recursive: true });
 
       const calls = [];
-      safeExec.execSync = function (cmd, opts) {
-        calls.push({ cmd, cwd: opts?.cwd });
-        return '';
+      childProcess.spawnSync = function (command, args, opts) {
+        calls.push({ command, args, cwd: opts?.cwd });
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       orchestrator._teardownWorktreeCompose(fakeWorktreePath);
@@ -251,11 +255,11 @@ describe('Worktree Docker Compose Cleanup', function () {
       fs.mkdirSync(fakeWorktreePath, { recursive: true });
       fs.writeFileSync(path.join(fakeWorktreePath, 'docker-compose.yml'), 'version: "3"');
 
-      safeExec.execSync = function (cmd) {
-        if (cmd.includes('docker compose')) {
-          throw new Error('no such service');
+      childProcess.spawnSync = function (command, args) {
+        if (command === 'docker' && args[0] === 'compose') {
+          return { status: 1, stdout: '', stderr: 'no such service' };
         }
-        return '';
+        return { status: 0, stdout: '', stderr: '' };
       };
 
       assert.doesNotThrow(() => {

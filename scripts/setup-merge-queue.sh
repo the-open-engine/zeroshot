@@ -4,7 +4,7 @@
 
 set -e
 
-REPO="covibes/zeroshot"
+REPO="the-open-engine/zeroshot"
 
 echo "╔═══════════════════════════════════════════════════════════════════╗"
 echo "║  Setting up merge queue for $REPO                         ║"

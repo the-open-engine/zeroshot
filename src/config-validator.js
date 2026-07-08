@@ -17,6 +17,13 @@ const { getProvider } = require('./providers');
 const { CAPABILITIES } = require('./providers/capabilities');
 const { GUIDANCE_TOPICS } = require('./guidance-topics');
 
+const HOOK_ACTION_TOPIC_CONTRACTS = Object.freeze({
+  verify_pull_request: Object.freeze([
+    { topic: 'CLUSTER_COMPLETE', keys: null },
+    { topic: 'PUSH_BLOCKED', keys: null },
+  ]),
+});
+
 /**
  * Check if config is a conductor-bootstrap style config
  * Conductor configs dynamically spawn agents via CLUSTER_OPERATIONS
@@ -24,7 +31,8 @@ const { GUIDANCE_TOPICS } = require('./guidance-topics');
  * @returns {boolean}
  */
 function isConductorConfig(config) {
-  return config.agents?.some(
+  const agents = Array.isArray(config?.agents) ? config.agents : [];
+  const hasConductorOps = agents.some(
     (a) =>
       a.role === 'conductor' &&
       // Old style: static topic in config
@@ -32,6 +40,25 @@ function isConductorConfig(config) {
         // New style: topic set in transform script (check for CLUSTER_OPERATIONS in script)
         a.hooks?.onComplete?.transform?.script?.includes('CLUSTER_OPERATIONS'))
   );
+
+  if (!hasConductorOps) {
+    return false;
+  }
+
+  // Once runtime agents are present (after load_config/add_agents), we should NOT
+  // skip message-flow validation. Skipping here caused proposed runtime topologies
+  // to bypass dead-topic checks.
+  const runtimeRoles = new Set([
+    'implementation',
+    'worker',
+    'planner',
+    'validator',
+    'tester',
+    'coordinator',
+  ]);
+  const hasRuntimeAgents = agents.some((a) => runtimeRoles.has(a.role));
+
+  return !hasRuntimeAgents;
 }
 
 /**
@@ -268,6 +295,25 @@ function ensureTopicList(map, topic) {
   return map.get(topic);
 }
 
+function getHookActionTopicContracts(hook) {
+  if (!hook?.action) {
+    return [];
+  }
+  return HOOK_ACTION_TOPIC_CONTRACTS[hook.action] || [];
+}
+
+function recordOutputTopic(agent, topic, topicProducers, agentOutputTopics, producerId = agent.id) {
+  const producers = ensureTopicList(topicProducers, topic);
+  if (!producers.includes(producerId)) {
+    producers.push(producerId);
+  }
+
+  const outputs = agentOutputTopics.get(agent.id);
+  if (!outputs.includes(topic)) {
+    outputs.push(topic);
+  }
+}
+
 function recordAgentTriggers(agent, topicConsumers, agentInputTopics) {
   for (const trigger of agent.triggers || []) {
     const topic = trigger.topic;
@@ -276,34 +322,43 @@ function recordAgentTriggers(agent, topicConsumers, agentInputTopics) {
   }
 }
 
-function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
-  const outputTopic = agent.hooks?.onComplete?.config?.topic;
-  if (outputTopic) {
-    ensureTopicList(topicProducers, outputTopic).push(agent.id);
-    agentOutputTopics.get(agent.id).push(outputTopic);
-  }
-
-  const hookLogicScript = agent.hooks?.onComplete?.logic?.script;
-  if (!hookLogicScript || typeof hookLogicScript !== 'string') {
+function extractDynamicTopicsFromScript(script, ctx) {
+  if (!script || typeof script !== 'string') {
     return;
   }
 
-  const topicMatches = hookLogicScript.match(/topic:\s*['"]([A-Z_]+)['"]/g) || [];
+  const topicMatches = script.match(/topic:\s*['"]([A-Z_]+)['"]/g) || [];
   for (const match of topicMatches) {
     const dynamicTopic = match.match(/['"]([A-Z_]+)['"]/)?.[1];
-    if (!dynamicTopic || dynamicTopic === outputTopic) {
+    if (!dynamicTopic || dynamicTopic === ctx.outputTopic) {
       continue;
     }
 
-    const producers = ensureTopicList(topicProducers, dynamicTopic);
-    if (!producers.includes(agent.id)) {
-      producers.push(`${agent.id}*`);
+    const producers = ensureTopicList(ctx.topicProducers, dynamicTopic);
+    if (!producers.includes(ctx.agentId)) {
+      producers.push(`${ctx.agentId}*`);
     }
 
-    const outputs = agentOutputTopics.get(agent.id);
+    const outputs = ctx.agentOutputTopics.get(ctx.agentId);
     if (!outputs.includes(dynamicTopic)) {
       outputs.push(dynamicTopic);
     }
+  }
+}
+
+function recordAgentOutputs(agent, topicProducers, agentOutputTopics) {
+  const hook = agent.hooks?.onComplete;
+  const outputTopic = agent.hooks?.onComplete?.config?.topic;
+  if (outputTopic) {
+    recordOutputTopic(agent, outputTopic, topicProducers, agentOutputTopics);
+  }
+
+  const ctx = { outputTopic, agentId: agent.id, topicProducers, agentOutputTopics };
+  extractDynamicTopicsFromScript(hook?.logic?.script, ctx);
+  extractDynamicTopicsFromScript(hook?.transform?.script, ctx);
+
+  for (const contract of getHookActionTopicContracts(hook)) {
+    recordOutputTopic(agent, contract.topic, topicProducers, agentOutputTopics);
   }
 }
 
@@ -352,13 +407,17 @@ function reportCompletionHandlers(config, errors, warnings) {
       a.hooks?.onComplete?.config?.topic === 'CLUSTER_COMPLETE'
   );
   const isTemplateConfig = config.params && Object.keys(config.params).length > 0;
+  // Conductor-driven configs (merged conductor + template agents) rely on idle timeout
+  const hasConductorAgents = config.agents.some((a) => a.role === 'conductor');
 
   if (completionHandlers.length === 0) {
     const message =
       'No completion handler found. Cluster will run until idle timeout (2 min). ' +
       'Add an agent with trigger action: "stop_cluster"';
-    if (isTemplateConfig) {
-      warnings.push(`${message} (template will rely on orchestrator injection)`);
+    if (isTemplateConfig || hasConductorAgents) {
+      warnings.push(
+        `${message} (${isTemplateConfig ? 'template will rely on orchestrator injection' : 'conductor-driven cluster relies on idle timeout'})`
+      );
     } else {
       errors.push(message);
     }
@@ -391,6 +450,7 @@ function reportUnproducedTopics(topicConsumers, topicProducers, errors, config) 
     'CLUSTER_RESUMED',
     'QUICK_VALIDATION_PASSED',
     'IMPLEMENTATION_READY',
+    'CLUSTER_OPERATIONS_VALIDATION_FAILED', // Produced by orchestrator at runtime
     ...GUIDANCE_TOPICS,
   ];
   const isSubTemplate = config.params && Object.keys(config.params).length > 0;
@@ -514,6 +574,211 @@ function reportMissingContextTopics(config, warnings) {
   }
 }
 
+function hasDynamicLoadConfigPath(config) {
+  for (const agent of config.agents || []) {
+    const onComplete = agent?.hooks?.onComplete;
+    if (!onComplete) continue;
+
+    const configOps = onComplete.config?.content?.data?.operations;
+    if (Array.isArray(configOps) && configOps.some((op) => op?.action === 'load_config')) {
+      return true;
+    }
+
+    const script = onComplete.transform?.script;
+    if (typeof script === 'string' && script.includes('load_config')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasReachableCompletionPath(config, topicConsumers, agentOutputTopics) {
+  const agentsById = new Map((config.agents || []).map((agent) => [agent.id, agent]));
+  const queue = ['ISSUE_OPENED'];
+  const visitedTopics = new Set(queue);
+
+  while (queue.length > 0) {
+    const topic = queue.shift();
+    if (topic === 'CLUSTER_COMPLETE') {
+      return true;
+    }
+
+    const consumers = topicConsumers.get(topic) || [];
+    for (const agentId of consumers) {
+      const agent = agentsById.get(agentId);
+      if (!agent) continue;
+
+      const stopTrigger = (agent.triggers || []).some(
+        (trigger) => trigger.topic === topic && trigger.action === 'stop_cluster'
+      );
+      if (stopTrigger) {
+        return true;
+      }
+
+      const outputs = agentOutputTopics.get(agentId) || [];
+      for (const nextTopic of outputs) {
+        if (!visitedTopics.has(nextTopic)) {
+          visitedTopics.add(nextTopic);
+          queue.push(nextTopic);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, errors, warnings) {
+  const hasPath = hasReachableCompletionPath(config, topicConsumers, agentOutputTopics);
+  if (hasPath) {
+    return;
+  }
+
+  const message =
+    'No reachable path from ISSUE_OPENED to terminal signal (stop_cluster or CLUSTER_COMPLETE). ' +
+    'Cluster may run until timeout even when validation appears to pass.';
+  const isDynamic = hasDynamicLoadConfigPath(config);
+  if (isDynamic) {
+    warnings.push(
+      `${message} Dynamic load_config path detected; add explicit resolved-topology simulation.`
+    );
+    return;
+  }
+
+  const isSubTemplate = config.params && Object.keys(config.params).length > 0;
+  if (isSubTemplate) {
+    warnings.push(`${message} Template mode may rely on orchestrator completion injection.`);
+    return;
+  }
+
+  errors.push(message);
+}
+
+function extractPublishedDataKeys(hook) {
+  if (hook?.action !== 'publish_message') {
+    return null;
+  }
+  if (hook?.config?.topic && hook?.config?.content) {
+    const data = hook.config.content.data;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return new Set(Object.keys(data));
+    }
+    return new Set();
+  }
+  return null;
+}
+
+function extractHookTopics(hook) {
+  const topics = new Set();
+  if (hook?.config?.topic) {
+    topics.add(String(hook.config.topic));
+  }
+
+  const script = hook?.transform?.script;
+  if (typeof script === 'string') {
+    const matches = script.match(/topic:\s*['"]([A-Za-z0-9_-]+)['"]/g) || [];
+    for (const match of matches) {
+      const topic = match.match(/['"]([A-Za-z0-9_-]+)['"]/)?.[1];
+      if (topic) topics.add(topic);
+    }
+  }
+
+  return topics;
+}
+
+function collectTopicContracts(config) {
+  const contracts = new Map(); // topic -> [{ agentId, keys: Set<string>|null }]
+
+  const addContract = (topic, contract) => {
+    if (!contracts.has(topic)) {
+      contracts.set(topic, []);
+    }
+    contracts.get(topic).push(contract);
+  };
+
+  for (const agent of config.agents || []) {
+    const hook = agent?.hooks?.onComplete;
+    if (!hook) continue;
+
+    const topics = extractHookTopics(hook);
+    const staticKeys = extractPublishedDataKeys(hook);
+
+    for (const topic of topics) {
+      const isStaticTopic = hook?.config?.topic === topic;
+      if (isStaticTopic) {
+        addContract(topic, { agentId: agent.id, keys: staticKeys ?? new Set() });
+      } else {
+        // Topic inferred from transform script. Treat as dynamic payload shape.
+        addContract(topic, { agentId: agent.id, keys: null });
+      }
+    }
+
+    for (const contract of getHookActionTopicContracts(hook)) {
+      addContract(contract.topic, {
+        agentId: agent.id,
+        keys: contract.keys instanceof Set ? new Set(contract.keys) : contract.keys,
+      });
+    }
+  }
+
+  return contracts;
+}
+
+function extractRequiredDataKeys(script) {
+  if (typeof script !== 'string') return new Set();
+  const required = new Set();
+  // Only treat direct `content.data.key` access as required contract keys.
+  // Optional-chained access (`content?.data?.key`) is intentionally excluded.
+  const regex = /\.content\.data\.([A-Za-z_][A-Za-z0-9_]*)/g;
+  let match;
+  while ((match = regex.exec(script)) !== null) {
+    required.add(match[1]);
+  }
+  return required;
+}
+
+function reportSchemaContractMismatches(config, errors, warnings) {
+  const contracts = collectTopicContracts(config);
+  const seen = new Set();
+
+  for (const agent of config.agents || []) {
+    for (const trigger of agent.triggers || []) {
+      if (!trigger?.topic || !trigger?.logic?.script) continue;
+
+      const requiredKeys = extractRequiredDataKeys(trigger.logic.script);
+      if (requiredKeys.size === 0) continue;
+
+      const producers = contracts.get(trigger.topic) || [];
+      if (producers.length === 0) continue;
+
+      const staticProducers = producers.filter((producer) => producer.keys instanceof Set);
+      const hasDynamicProducers = producers.some((producer) => producer.keys === null);
+      if (staticProducers.length === 0) continue;
+
+      for (const key of requiredKeys) {
+        const token = `${agent.id}:${trigger.topic}:${key}`;
+        if (seen.has(token)) continue;
+        seen.add(token);
+
+        const hasStaticKey = staticProducers.some((producer) => producer.keys.has(key));
+        if (hasStaticKey) continue;
+
+        if (hasDynamicProducers) {
+          warnings.push(
+            `Agent '${agent.id}' trigger on '${trigger.topic}' expects content.data.${key}, ` +
+              `but static producers for '${trigger.topic}' do not publish it (dynamic producers present).`
+          );
+        } else {
+          errors.push(
+            `Agent '${agent.id}' trigger on '${trigger.topic}' expects content.data.${key}, ` +
+              `but no producer for '${trigger.topic}' publishes that data key.`
+          );
+        }
+      }
+    }
+  }
+}
+
 function analyzeMessageFlow(config) {
   const errors = [];
   const warnings = [];
@@ -529,6 +794,8 @@ function analyzeMessageFlow(config) {
   reportTwoAgentCycles(config, agentInputTopics, agentOutputTopics, warnings);
   reportMissingValidationTriggers(config, errors);
   reportMissingContextTopics(config, warnings);
+  reportMissingCompletionPath(config, topicConsumers, agentOutputTopics, errors, warnings);
+  reportSchemaContractMismatches(config, errors, warnings);
 
   return { errors, warnings };
 }
@@ -686,6 +953,7 @@ function validateLogicScripts(config) {
 
       // Syntax check
       try {
+        // codeql[js/bad-code-sanitization] Validator compiles repo-authored config scripts only to report syntax errors before runtime sandbox execution.
         const wrappedScript = `(function() { ${script} })()`;
         new vm.Script(wrappedScript);
       } catch (syntaxError) {
@@ -996,7 +1264,8 @@ function validateHookAction(hook, prefix, errors) {
   if (!hook.action) {
     errors.push(
       `[Gap 1] ${prefix}: Missing 'action' field. ` +
-        `Fix: Add "action": "publish_message", "action": "execute_system_command", or "action": "verify_github_pr"`
+        `Fix: Add "action": "publish_message", "action": "execute_system_command", ` +
+        `or "action": "verify_pull_request"`
     );
   }
 }
@@ -1064,6 +1333,7 @@ function validateHookLogic(hook, prefix, errors) {
   } else {
     try {
       const vm = require('vm');
+      // codeql[js/bad-code-sanitization] Validator compiles repo-authored hook logic only to report syntax errors before runtime sandbox execution.
       const wrappedScript = `(function() { 'use strict'; ${hook.logic.script} })()`;
       new vm.Script(wrappedScript);
     } catch (syntaxError) {

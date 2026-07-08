@@ -1,0 +1,291 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { afterEach, test } = require('node:test');
+
+const helper = require('../../lib/agent-cli-provider');
+const runtimeProviders = require('../../src/providers');
+
+const createdTempFiles = new Set();
+
+afterEach(() => {
+  for (const file of createdTempFiles) {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    const parentDir = path.dirname(file);
+    if (path.basename(parentDir).startsWith('zeroshot-schema-')) {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    }
+  }
+  createdTempFiles.clear();
+});
+
+function trackCleanup(command) {
+  for (const file of command.cleanup || []) createdTempFiles.add(file);
+}
+
+function normalizeCommand(command) {
+  trackCleanup(command);
+  return {
+    binary: command.binary,
+    args: command.args.map((arg) =>
+      typeof arg === 'string' && /zeroshot-schema-.*\.json$/.test(arg) ? '<schema-file>' : arg
+    ),
+    env: command.env,
+    cleanup: (command.cleanup || []).map((file) =>
+      /zeroshot-schema-.*\.json$/.test(file) ? '<schema-file>' : file
+    ),
+    cleanupMetadata: (command.cleanupMetadata || []).map((item) => ({
+      ...item,
+      path: /zeroshot-schema-.*\.json$/.test(item.path) ? '<schema-file>' : item.path,
+    })),
+  };
+}
+
+function fixture(provider, name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'fixtures', provider, name), 'utf8');
+}
+
+function assertRuntimeCommandParity(provider, context, options) {
+  const runtime = runtimeProviders.getProvider(provider).buildCommand(context, options);
+  const direct = helper.buildProviderCommand(provider, context, options);
+  assert.deepEqual(normalizeCommand(runtime), normalizeCommand(direct));
+  return direct;
+}
+
+test('runtime Claude command facade delegates to helper', () => {
+  assertRuntimeCommandParity('claude', 'test context', {
+    authEnv: { ANTHROPIC_API_KEY: 'sk-ant-test' },
+    outputFormat: 'json',
+    jsonSchema: { type: 'object', properties: { foo: { type: 'string' } } },
+    modelSpec: { level: 'level2', model: 'sonnet' },
+    autoApprove: true,
+    cliFeatures: {
+      supportsOutputFormat: true,
+      supportsJsonSchema: true,
+      supportsAutoApprove: true,
+      supportsModel: true,
+    },
+  });
+});
+
+test('runtime Codex command facade delegates to helper', () => {
+  assertRuntimeCommandParity('codex', 'test context', {
+    outputFormat: 'json',
+    jsonSchema: { type: 'object', properties: { foo: { type: 'string' } } },
+    cwd: '/tmp/project',
+    modelSpec: { level: 'level3', model: 'gpt-5.4', reasoningEffort: 'xhigh' },
+    autoApprove: true,
+    cliFeatures: {
+      supportsJson: true,
+      supportsOutputSchema: true,
+      supportsCwd: true,
+      supportsConfigOverride: true,
+      supportsAutoApprove: true,
+      supportsSkipGitRepoCheck: true,
+    },
+  });
+});
+
+test('runtime Gemini command facade delegates to helper', () => {
+  assertRuntimeCommandParity('gemini', 'gemini context', {
+    outputFormat: 'stream-json',
+    jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    cwd: '/tmp/project',
+    modelSpec: { level: 'level3', model: 'gemini-2.5-pro' },
+    autoApprove: true,
+    cliFeatures: {
+      supportsStreamJson: true,
+      supportsCwd: true,
+      supportsAutoApprove: true,
+    },
+  });
+});
+
+test('runtime Opencode command facade delegates to helper', () => {
+  assertRuntimeCommandParity('opencode', 'opencode context', {
+    outputFormat: 'json',
+    jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    cwd: '/tmp/project',
+    modelSpec: {
+      level: 'level2',
+      model: 'opencode/glm-4.7-free',
+      reasoningEffort: 'high',
+    },
+    cliFeatures: {
+      supportsJson: true,
+      supportsVariant: true,
+      supportsCwd: true,
+    },
+  });
+});
+
+test('Codex helper exposes strict schema cleanup metadata through runtime facade', () => {
+  const actual = runtimeProviders.getProvider('codex').buildCommand('schema context', {
+    outputFormat: 'json',
+    jsonSchema: { type: 'object', properties: { foo: { type: 'string' } } },
+    cliFeatures: { supportsOutputSchema: true },
+  });
+  trackCleanup(actual);
+
+  assert.equal(actual.cleanupMetadata.length, 1);
+  assert.equal(actual.cleanupMetadata[0].kind, 'temp-file');
+  assert.equal(actual.cleanupMetadata[0].reason, 'output-schema');
+  assert.ok(fs.existsSync(actual.cleanupMetadata[0].path));
+
+  const schema = JSON.parse(fs.readFileSync(actual.cleanupMetadata[0].path, 'utf8'));
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.required, ['foo']);
+  assert.equal(path.dirname(path.dirname(actual.cleanupMetadata[0].path)), os.tmpdir());
+  assert.match(path.basename(path.dirname(actual.cleanupMetadata[0].path)), /^zeroshot-schema-/);
+});
+
+test('model resolution and invalid-model permanence match helper', () => {
+  for (const provider of helper.listProviderAdapters()) {
+    const current = runtimeProviders.getProvider(provider);
+    for (const level of ['level1', 'level2', 'level3']) {
+      assert.deepEqual(
+        helper.resolveModelSpec(provider, level),
+        current.resolveModelSpec(level, {})
+      );
+    }
+
+    assert.deepEqual(
+      helper.resolveModelSpec(provider, 'level2', { level2: { model: '' } }),
+      current.resolveModelSpec('level2', { level2: { model: '' } })
+    );
+
+    assert.throws(
+      () => helper.resolveModelSpec(provider, 'level2', { level2: { model: 'invalid' } }),
+      { permanent: true }
+    );
+    assert.throws(() => current.resolveModelSpec('level2', { level2: { model: 'invalid' } }), {
+      permanent: true,
+    });
+  }
+});
+
+test('retry classification matches helper', () => {
+  const cases = [
+    new Error('Rate limit exceeded. Retry after 60 seconds.'),
+    new Error('invalid_api_key: key revoked'),
+    new Error('server_error'),
+    new Error('RESOURCE_EXHAUSTED'),
+    Object.assign(new Error('status 429'), { status: 429 }),
+    Object.assign(new Error('status 401'), { statusCode: 401 }),
+    Object.assign(new Error('network code'), { code: 'ECONNRESET' }),
+    { message: 'invalid_api_key: key revoked' },
+    Object.assign(new Error('unclassified'), { permanent: true }),
+    new Error('unexpected output'),
+  ];
+
+  for (const provider of helper.listProviderAdapters()) {
+    const current = runtimeProviders.getProvider(provider);
+    for (const error of cases) {
+      assert.equal(
+        helper.classifyProviderError(provider, error).retryable,
+        current.isRetryableError(error),
+        `${provider}: ${error.message}`
+      );
+    }
+  }
+});
+
+test('parser output from runtime facade matches helper fixtures', () => {
+  for (const [provider, files] of [
+    ['codex', ['text.jsonl', 'tool.jsonl']],
+    ['gemini', ['text.jsonl', 'tool.jsonl']],
+  ]) {
+    for (const file of files) {
+      const chunk = fixture(provider, file);
+      assert.deepEqual(
+        runtimeProviders.parseProviderChunk(provider, chunk),
+        helper.parseProviderChunk(provider, chunk)
+      );
+    }
+  }
+});
+
+test('parser output preserves edge-case fields through runtime facade', () => {
+  const cases = [
+    [
+      'codex',
+      JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'function_call_output', call_id: 'call-1', output: 'ok', error: null },
+      }),
+    ],
+    [
+      'claude',
+      JSON.stringify({
+        type: 'result',
+        subtype: 'error',
+        is_error: true,
+        result: { message: 'bad' },
+        usage: {},
+      }),
+    ],
+    [
+      'opencode',
+      JSON.stringify({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            type: 'tool',
+            state: { status: 'completed', output: 'ok' },
+          },
+        },
+      }),
+    ],
+  ];
+
+  for (const [provider, chunk] of cases) {
+    assert.deepEqual(
+      runtimeProviders.parseProviderChunk(provider, chunk),
+      helper.parseProviderChunk(provider, chunk)
+    );
+  }
+});
+
+test('parser strips timestamp and agent prefixes like helper', () => {
+  const raw = JSON.stringify({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      delta: { type: 'text_delta', text: 'Hi' },
+    },
+  });
+  const chunk = `[1721088000000]validator       | ${raw}\n`;
+
+  assert.deepEqual(
+    runtimeProviders.parseProviderChunk('claude', chunk),
+    helper.parseProviderChunk('claude', chunk)
+  );
+});
+
+test('feature probing is deterministic from injected help text', () => {
+  assert.deepEqual(helper.getProviderAdapter('claude').detectCliFeatures(''), {
+    provider: 'claude',
+    supportsOutputFormat: true,
+    supportsStreamJson: true,
+    supportsJsonSchema: true,
+    supportsAutoApprove: true,
+    supportsIncludePartials: true,
+    supportsVerbose: true,
+    supportsModel: true,
+    unknown: true,
+  });
+
+  assert.equal(
+    helper
+      .getProviderAdapter('codex')
+      .detectCliFeatures('codex exec --json --output-schema --config -m -C').supportsAutoApprove,
+    false
+  );
+  assert.equal(
+    helper
+      .getProviderAdapter('opencode')
+      .detectCliFeatures('opencode run --format --model --variant').supportsCwd,
+    false
+  );
+});

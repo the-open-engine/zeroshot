@@ -30,7 +30,7 @@ Thank you for your interest in contributing to Zeroshot! This guide covers every
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/covibes/zeroshot.git
+   git clone https://github.com/the-open-engine/zeroshot.git
    cd zeroshot
    ```
 
@@ -82,7 +82,6 @@ zeroshot/
 │   ├── template-resolver.js # Parameterized template engine
 │   ├── agent/               # Agent subsystems (config, context, triggers, hooks)
 │   ├── agents/              # Built-in agent definitions (git-pusher, etc.)
-│   ├── tui/                 # Terminal UI (zeroshot watch)
 │   ├── attach/              # Attach-to-running-cluster client/server
 │   └── schemas/             # JSON schemas for validation
 ├── cluster-templates/        # Workflow templates
@@ -352,42 +351,16 @@ evaluate(script, agent, message) {
 
 ## Debugging
 
-### Debug the Rust TUI (zeroshot, zeroshot tui, zeroshot watch)
+### Monitor Clusters Without TUI
 
-Use `zeroshot` (TTY only) or `zeroshot tui` for a normal session. Use `zeroshot watch` to open Monitor view directly.
+The TUI is not included in this release. Use the CLI monitoring commands:
 
-1. **Run in development mode**
-
-   ```bash
-   zeroshot tui
-   ```
-
-2. **CI note**
-
-   The Rust TUI backend integration tests require the Node TUI backend to be built.
-   CI enforces this (fails if missing). Locally, run:
-
-   ```bash
-   npm ci
-   npm run build:tui-backend
-   ```
-
-3. **Common TUI issues**
-
-   | Issue              | Fix                                                   |
-   | ------------------ | ----------------------------------------------------- |
-   | Garbled output     | Terminal too small - resize to 80x24+                 |
-   | Missing agents     | Cluster not running - start with `zeroshot run` first |
-   | Stats not updating | File polling delay - wait 2-5 seconds                 |
-   | Resize glitches    | Restart TUI                                           |
-
-4. **Debug TUI rendering**
-
-   Edit `tui-rs/crates/zeroshot-tui/src/` (screen or widget) and add:
-
-   ```rust
-   eprintln!("Debug: {data:?}");
-   ```
+```bash
+zeroshot list
+zeroshot status <id>
+zeroshot logs <id> -f
+zeroshot logs <id> -w
+```
 
 ### Debug Agent Execution
 
