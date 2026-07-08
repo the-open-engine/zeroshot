@@ -69,6 +69,7 @@ const {
 } = require('../lib/detached-startup');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates, printLegacyDistroNotice } = require('./lib/update-checker');
+const { checkBinDirOnPath, printPathWarning } = require('../lib/path-check');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
 
 // =============================================================================
@@ -5405,6 +5406,15 @@ async function main() {
   const isQuiet = process.argv.includes('-q') || process.argv.includes('--quiet') || isTest;
 
   printLegacyDistroNotice();
+
+  try {
+    const { onPath, binDir } = checkBinDirOnPath();
+    if (!onPath && binDir) {
+      printPathWarning(binDir);
+    }
+  } catch {
+    // Never block CLI startup on a PATH check failure
+  }
 
   // Check for updates (non-blocking if offline)
   if (!isTest) {
