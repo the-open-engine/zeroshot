@@ -181,6 +181,16 @@ class MessageBus extends EventEmitter {
   }
 
   /**
+   * Read messageCount and tokensByRole as one consistent point-in-time view
+   * (passthrough to ledger)
+   * @param {String} cluster_id - Cluster ID
+   * @returns {{ messageCount: number, tokensByRole: Object }}
+   */
+  readSnapshot(cluster_id) {
+    return this.ledger.readSnapshot(cluster_id);
+  }
+
+  /**
    * Register a WebSocket client for broadcasts
    * @param {WebSocket} ws - WebSocket connection
    */

@@ -33,6 +33,7 @@ function cleanStaleLock(lockPath) {
     // Ignore - another process may have cleaned it
   }
 }
+const { readClustersFileSync, writeClustersFileAtomic } = require('../lib/clusters-registry');
 const AgentWrapper = require('./agent-wrapper');
 const SubClusterWrapper = require('./sub-cluster-wrapper');
 const MessageBus = require('./message-bus');
@@ -234,6 +235,11 @@ class Orchestrator {
   constructor(options = {}) {
     this.clusters = new Map(); // cluster_id -> cluster object
     this.quiet = options.quiet || false; // Suppress verbose logging
+    // Read-only mode: opens ledgers without write access and skips schema DDL/
+    // side-effecting bootstrap (state snapshotter). Used by CLI read commands
+    // (list/status/logs) so they can never contend with a live daemon's writer
+    // connection or mutate shared state as a side effect of a plain read.
+    this.readonly = options.readonly === true;
 
     // TaskRunner DI - allows injecting MockTaskRunner for testing
     // When set, passed to all AgentWrappers to control task execution
@@ -354,14 +360,12 @@ class Orchestrator {
         },
       });
 
-      const data = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+      const data = readClustersFileSync(this.storageDir);
       const clusterIds = Object.keys(data);
       this._log(`[Orchestrator] Found ${clusterIds.length} clusters in file:`, clusterIds);
 
-      // Track clusters to remove (missing .db files or 0 messages)
+      // Track clusters to remove (missing .db files)
       const clustersToRemove = [];
-      // Track clusters with 0 messages (corrupted from SIGINT race condition)
-      const corruptedClusters = [];
 
       for (const [clusterId, clusterData] of Object.entries(data)) {
         if (clusterData?.state === 'setup' || clusterData?.provisional === true) {
@@ -380,56 +384,27 @@ class Orchestrator {
         }
 
         this._log(`[Orchestrator] Loading cluster: ${clusterId}`);
-        let cluster;
         try {
-          cluster = this._loadSingleCluster(clusterId, clusterData);
+          this._loadSingleCluster(clusterId, clusterData);
         } catch (error) {
           console.warn(
             `[Orchestrator] Skipping cluster ${clusterId}: ${error.message || String(error)}`
           );
           continue;
         }
-
-        // VALIDATION: Detect 0-message clusters (corrupted from SIGINT during initialization)
-        // These clusters were created before the initCompletePromise fix was applied
-        if (cluster && cluster.messageBus) {
-          const messageCount = cluster.messageBus.count({ cluster_id: clusterId });
-          if (messageCount === 0) {
-            console.warn(`[Orchestrator] ⚠️  Cluster ${clusterId} has 0 messages (corrupted)`);
-            console.warn(
-              `[Orchestrator]    This likely occurred from SIGINT during initialization.`
-            );
-            console.warn(
-              `[Orchestrator]    Marking as 'corrupted' - use 'zeroshot kill ${clusterId}' to remove.`
-            );
-            corruptedClusters.push(clusterId);
-            // Mark cluster as corrupted for visibility in status/list commands
-            cluster.state = 'corrupted';
-            cluster.corruptedReason = 'SIGINT during initialization (0 messages in ledger)';
-          }
-        }
       }
 
-      // Clean up orphaned entries from clusters.json
-      if (clustersToRemove.length > 0) {
+      // Clean up orphaned entries from clusters.json. This is a write side effect,
+      // so it must never run for read-only (list/status/logs) instances - only the
+      // writable orchestrator that owns the registry performs cleanup.
+      if (!this.readonly && clustersToRemove.length > 0) {
         for (const clusterId of clustersToRemove) {
           delete data[clusterId];
         }
-        fs.writeFileSync(clustersFile, JSON.stringify(data, null, 2));
+        writeClustersFileAtomic(this.storageDir, data);
         this._log(
           `[Orchestrator] Removed ${clustersToRemove.length} orphaned cluster(s) from registry`
         );
-      }
-
-      // Log summary of corrupted clusters
-      if (corruptedClusters.length > 0) {
-        console.warn(
-          `\n[Orchestrator] ⚠️  Found ${corruptedClusters.length} corrupted cluster(s):`
-        );
-        for (const clusterId of corruptedClusters) {
-          console.warn(`    - ${clusterId}`);
-        }
-        console.warn(`[Orchestrator] Run 'zeroshot clear' to remove all corrupted clusters.\n`);
       }
 
       this._log(`[Orchestrator] Total clusters loaded: ${this.clusters.size}`);
@@ -480,6 +455,10 @@ class Orchestrator {
       getTokensByRole: () => ({
         _total: { count: 0, inputTokens: 0, outputTokens: 0, totalCostUsd: 0 },
       }),
+      readSnapshot: () => ({
+        messageCount: 0,
+        tokensByRole: { _total: { count: 0, inputTokens: 0, outputTokens: 0, totalCostUsd: 0 } },
+      }),
       pollForMessages: () => noop,
       on: noop,
       off: noop,
@@ -506,6 +485,7 @@ class Orchestrator {
       since: (params) => ledger.since(params),
       getAll: (clusterId) => ledger.getAll(clusterId),
       getTokensByRole: (clusterId) => ledger.getTokensByRole(clusterId),
+      readSnapshot: (clusterId) => ledger.readSnapshot(clusterId),
       addWebSocketClient: noop,
       removeWebSocketClient: noop,
       on: noop,
@@ -545,9 +525,11 @@ class Orchestrator {
       return this.clusters.get(clusterId);
     }
 
-    // Restore ledger and message bus
+    // Restore ledger and message bus. Read-only orchestrators (CLI list/status/logs)
+    // open the ledger without write access so they can never contend with the live
+    // daemon's writer connection or take a write lock on another process's database.
     const dbPath = path.join(this.storageDir, `${clusterId}.db`);
-    const ledger = new Ledger(dbPath);
+    const ledger = new Ledger(dbPath, { readonly: this.readonly });
     const messageBus = new MessageBus(ledger);
 
     // Restore isolation manager FIRST if cluster was running in isolation mode
@@ -591,7 +573,12 @@ class Orchestrator {
     Object.assign(clusterContext, cluster);
 
     this.clusters.set(clusterId, clusterContext);
-    this._startSnapshotter(clusterContext);
+    // The snapshotter bootstraps by publishing a STATE_SNAPSHOT message if one is
+    // missing - a ledger write. Read-only orchestrators must never write, so they
+    // skip it; they only need to read existing snapshots, not produce new ones.
+    if (!this.readonly) {
+      this._startSnapshotter(clusterContext);
+    }
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
     return clusterContext;
@@ -738,7 +725,7 @@ class Orchestrator {
 
     const clustersFile = path.join(this.storageDir, 'clusters.json');
     if (!fs.existsSync(clustersFile)) {
-      fs.writeFileSync(clustersFile, '{}');
+      writeClustersFileAtomic(this.storageDir, {});
     }
     return clustersFile;
   }
@@ -799,6 +786,11 @@ class Orchestrator {
       return;
     }
 
+    // Read-only orchestrators (CLI list/status/logs) must never write the registry.
+    if (this.readonly) {
+      return;
+    }
+
     const clustersFile = this._ensureClustersFile();
     if (!clustersFile) {
       return;
@@ -825,8 +817,7 @@ class Orchestrator {
       // Read existing clusters from file (other processes may have added clusters)
       let existingClusters = {};
       try {
-        const content = fs.readFileSync(clustersFile, 'utf8');
-        existingClusters = JSON.parse(content);
+        existingClusters = readClustersFileSync(this.storageDir);
       } catch (error) {
         console.error('[Orchestrator] Failed to read existing clusters:', error.message);
       }
@@ -900,8 +891,9 @@ class Orchestrator {
         };
       }
 
-      // Write merged data
-      fs.writeFileSync(clustersFile, JSON.stringify(existingClusters, null, 2));
+      // Write merged data atomically (temp file + rename) so no reader can ever
+      // observe a partially-written file.
+      writeClustersFileAtomic(this.storageDir, existingClusters);
       this._log(
         `[Orchestrator] Saved ${this.clusters.size} cluster(s), file now has ${Object.keys(existingClusters).length} total`
       );
@@ -953,7 +945,7 @@ class Orchestrator {
           throw lockErr;
         }
 
-        const data = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+        const data = readClustersFileSync(this.storageDir);
 
         for (const [clusterId, clusterData] of Object.entries(data)) {
           if (!knownClusterIds.has(clusterId)) {
@@ -3631,6 +3623,24 @@ Continue from where you left off. Review your previous output to understand what
   }
 
   /**
+   * Read messageCount for a cluster without fabricating a value on failure.
+   * A confirmed zero (ledger read succeeded, cluster has no messages) and a
+   * failed read (ledger unavailable) must stay distinguishable - returning 0
+   * for both is what produced the phantom "failed/msgs=0" state in list/status.
+   * @private
+   */
+  _readMessageCount(cluster, clusterId) {
+    try {
+      return cluster.messageBus.readSnapshot(clusterId).messageCount;
+    } catch (error) {
+      console.error(
+        `[Orchestrator] Failed to read message count for cluster ${clusterId}: ${error.message || String(error)}`
+      );
+      return null;
+    }
+  }
+
+  /**
    * Get cluster status
    * @param {String} clusterId - Cluster ID
    * @returns {Object} Cluster status
@@ -3672,15 +3682,7 @@ Continue from where you left off. Review your previous output to understand what
       pid: cluster.pid || null,
       createdAt: cluster.createdAt,
       agents: cluster.agents.map((a) => a.getState()),
-      messageCount: (() => {
-        try {
-          return cluster.messageBus.count({ cluster_id: clusterId });
-        } catch {
-          // Cluster may have closed its ledger during startup failure cleanup.
-          // Status/list should remain safe to call for visibility + supervisor cleanup.
-          return 0;
-        }
-      })(),
+      messageCount: this._readMessageCount(cluster, clusterId),
       setupLogPath: cluster.setupLogPath || null,
       setupStage: cluster.setupStage || null,
       failureInfo: cluster.failureInfo || null,
@@ -3713,15 +3715,7 @@ Continue from where you left off. Review your previous output to understand what
         createdAt: cluster.createdAt,
         issue: cluster.issue || null,
         agentCount: cluster.agents.length,
-        messageCount: (() => {
-          try {
-            return cluster.messageBus.count({ cluster_id: cluster.id });
-          } catch {
-            // Cluster may have closed its ledger during startup failure cleanup.
-            // List should remain safe to call for cleanup routines.
-            return 0;
-          }
-        })(),
+        messageCount: this._readMessageCount(cluster, cluster.id),
         pid: cluster.pid || null,
         setupLogPath: cluster.setupLogPath || null,
         setupStage: cluster.setupStage || null,
@@ -4032,6 +4026,77 @@ Continue from where you left off. Review your previous output to understand what
       extraKnownIds: new Set(this.clusters.keys()),
       dryRun: options.dryRun || false,
     });
+  }
+
+  /**
+   * Explicitly detect clusters corrupted by SIGINT during initialization
+   * (state='running' but the ledger never received its first message).
+   *
+   * This replaces the old unconditional 0-message check that used to run inside
+   * _loadClusters() on every list/status call: that check mutated cluster.state
+   * as a side effect of a plain read, and a single racy count() (e.g. against a
+   * writer's just-opened connection) was enough to misclassify a healthy running
+   * cluster as corrupted. This method is only ever invoked explicitly (from the
+   * `gc` CLI flow), never from getStatus()/listClusters(), and requires:
+   *   - the cluster has been running longer than `graceMs` (default 60s), so a
+   *     brand-new cluster whose first message hasn't landed yet isn't flagged, and
+   *   - two independent reads 250ms apart both observe 0 messages, so a single
+   *     transient/racy read can't trigger a false positive.
+   *
+   * @param {object} [options]
+   * @param {number} [options.graceMs=60000]
+   * @returns {Promise<string[]>} IDs newly marked corrupted
+   */
+  async detectCorruptedClusters(options = {}) {
+    const graceMs = typeof options.graceMs === 'number' ? options.graceMs : 60000;
+    const now = Date.now();
+    const corrupted = [];
+
+    for (const cluster of this.clusters.values()) {
+      if (this._isSetupCluster(cluster)) continue;
+      if (cluster.state !== 'running') continue;
+      if (!cluster.createdAt || now - cluster.createdAt < graceMs) continue;
+      if (!cluster.messageBus) continue;
+
+      let firstCount;
+      try {
+        firstCount = cluster.messageBus.count({ cluster_id: cluster.id });
+      } catch (error) {
+        console.warn(
+          `[Orchestrator] Skipping corruption check for ${cluster.id}: ${error.message || String(error)}`
+        );
+        continue;
+      }
+      if (firstCount !== 0) continue;
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      let secondCount;
+      try {
+        secondCount = cluster.messageBus.count({ cluster_id: cluster.id });
+      } catch (error) {
+        console.warn(
+          `[Orchestrator] Skipping corruption check for ${cluster.id}: ${error.message || String(error)}`
+        );
+        continue;
+      }
+      if (secondCount !== 0) continue;
+
+      console.warn(`[Orchestrator] ⚠️  Cluster ${cluster.id} has 0 messages (corrupted)`);
+      console.warn(`[Orchestrator]    This likely occurred from SIGINT during initialization.`);
+      console.warn(
+        `[Orchestrator]    Marking as 'corrupted' - use 'zeroshot kill ${cluster.id}' to remove.`
+      );
+      cluster.state = 'corrupted';
+      cluster.corruptedReason = 'SIGINT during initialization (0 messages in ledger)';
+      corrupted.push(cluster.id);
+    }
+
+    if (corrupted.length > 0) {
+      await this._saveClusters();
+    }
+
+    return corrupted;
   }
 }
 

@@ -11,10 +11,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
+const { readClustersFileSync } = require('../../lib/clusters-registry');
 
 const ZEROSHOT_DIR = path.join(os.homedir(), '.zeroshot');
 const SOCKET_DIR = path.join(ZEROSHOT_DIR, 'sockets');
-const CLUSTERS_FILE = path.join(ZEROSHOT_DIR, 'clusters.json');
 
 /**
  * Check if an ID is a known cluster by looking up clusters.json
@@ -24,8 +24,7 @@ const CLUSTERS_FILE = path.join(ZEROSHOT_DIR, 'clusters.json');
  */
 function isKnownCluster(id) {
   try {
-    if (!fs.existsSync(CLUSTERS_FILE)) return false;
-    const clusters = JSON.parse(fs.readFileSync(CLUSTERS_FILE, 'utf8'));
+    const clusters = readClustersFileSync(ZEROSHOT_DIR);
     return id in clusters;
   } catch {
     return false;

@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { readClustersFileSync } = require('../../lib/clusters-registry');
 
 const DEFAULT_STORAGE_DIR = path.join(os.homedir(), '.zeroshot');
 
@@ -35,10 +36,8 @@ function resolveActiveClusterIdFromEnv() {
  */
 function readKnownClusterIds(storageDir) {
   const ids = new Set();
-  const clustersFile = path.join(storageDir, 'clusters.json');
   try {
-    if (!fs.existsSync(clustersFile)) return ids;
-    const raw = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    const raw = readClustersFileSync(storageDir);
     for (const id of Object.keys(raw)) ids.add(id);
   } catch {
     // Corrupt/missing — treat as empty (safe: nothing deleted incorrectly)
