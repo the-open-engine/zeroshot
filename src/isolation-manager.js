@@ -1651,10 +1651,14 @@ class IsolationManager {
     // Tear down any Docker Compose services that may have been started in this worktree.
     // Without this, containers keep running with host port mappings after the worktree is deleted,
     // blocking port allocation for the main project or other worktrees.
-    const composePath = path.join(worktreeInfo.path, 'docker-compose.yml');
-    if (fs.existsSync(composePath)) {
+    // NEVER pass --volumes (irreversible data loss) and NEVER tear down a pinned/shared
+    // Compose project — only a project scoped to the worktree directory basename, which is
+    // the only kind zeroshot could itself have created, is touched.
+    const { resolveWorktreeComposeTeardown } = require('../lib/compose-utils');
+    const teardown = resolveWorktreeComposeTeardown(worktreeInfo.path);
+    if (teardown.shouldTeardown) {
       try {
-        runSync('docker', ['compose', 'down', '--remove-orphans', '--volumes', '--timeout', '10'], {
+        runSync('docker', teardown.args, {
           cwd: worktreeInfo.path,
           encoding: 'utf8',
           stdio: 'pipe',
