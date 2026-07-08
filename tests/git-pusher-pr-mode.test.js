@@ -7,7 +7,6 @@
  *   --ship (or repo settings github.autoMerge=true) -> autoMerge=true -> create + merge
  *   --pr alone                                       -> autoMerge=false -> create + STOP
  */
-/* global describe, it */
 const assert = require('node:assert');
 const os = require('node:os');
 const fs = require('node:fs');
