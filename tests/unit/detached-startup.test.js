@@ -10,6 +10,7 @@ const {
   isClusterRegistered,
   markDetachedSetupFailed,
   registerDetachedSetupCluster,
+  removeDetachedSetupCluster,
   resolveWaitTimeoutMs,
   waitForClusterRegistration,
 } = require('../../lib/detached-startup');
@@ -142,6 +143,27 @@ describe('detached-startup helpers', function () {
     assert.strictEqual(clusters['failed-cluster'].pid, null);
     assert.strictEqual(clusters['failed-cluster'].setupLogPath, logPath);
     assert.strictEqual(clusters['failed-cluster'].failureInfo.error, 'setup exploded');
+  });
+
+  it('removes a provisional setup cluster without leaving a phantom entry', async function () {
+    const storageDir = createTempStorageDir();
+    const clustersFile = getClustersFilePath(storageDir);
+    fs.mkdirSync(path.dirname(clustersFile), { recursive: true });
+    fs.writeFileSync(clustersFile, JSON.stringify({ other: { id: 'other' } }));
+
+    await registerDetachedSetupCluster({
+      clusterId: 'rejected-cluster',
+      pid: 12345,
+      storageDir,
+    });
+    assert.strictEqual(isClusterRegistered('rejected-cluster', storageDir), true);
+
+    await removeDetachedSetupCluster({ clusterId: 'rejected-cluster', storageDir });
+
+    const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    assert.strictEqual(clusters['rejected-cluster'], undefined);
+    // Unrelated entries in the same file must be preserved.
+    assert.deepStrictEqual(clusters.other, { id: 'other' });
   });
 
   it('waits until cluster is registered', async function () {

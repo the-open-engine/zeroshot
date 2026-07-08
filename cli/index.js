@@ -71,6 +71,7 @@ const { runCmdproof } = require('./commands/cmdproof');
 const {
   markDetachedSetupFailed,
   registerDetachedSetupCluster,
+  removeDetachedSetupCluster,
 } = require('../lib/detached-startup');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates, printLegacyDistroNotice } = require('./lib/update-checker');
@@ -2561,6 +2562,23 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
 
       setupDaemonCleanup(orchestrator, clusterId);
     } catch (error) {
+      if (error.code === 'DUPLICATE_CLUSTER') {
+        // Benign guard rejection, not a crash: nothing was allocated, so there is
+        // nothing to roll back. No stack trace, no "Error:" framing.
+        if (process.env.ZEROSHOT_DAEMON && process.env.ZEROSHOT_CLUSTER_ID) {
+          try {
+            await removeDetachedSetupCluster({
+              clusterId: process.env.ZEROSHOT_CLUSTER_ID,
+              storageDir: path.join(os.homedir(), '.zeroshot'),
+            });
+          } catch (removeError) {
+            console.error('Failed to remove provisional setup cluster:', removeError.message);
+          }
+        }
+        console.log(chalk.yellow(error.message));
+        process.exit(1);
+      }
+
       if (process.env.ZEROSHOT_DAEMON && process.env.ZEROSHOT_CLUSTER_ID) {
         try {
           await markDetachedSetupFailed({
