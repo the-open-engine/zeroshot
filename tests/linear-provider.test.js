@@ -97,18 +97,27 @@ describe('Linear Provider', () => {
 
   describe('fetchIssue', () => {
     let originalFetch;
+    let originalApiKey;
 
     beforeEach(() => {
       originalFetch = global.fetch;
+      originalApiKey = process.env.LINEAR_API_KEY;
+      process.env.LINEAR_API_KEY = 'lin_api_test';
     });
 
     afterEach(() => {
       global.fetch = originalFetch;
+      if (originalApiKey === undefined) {
+        delete process.env.LINEAR_API_KEY;
+      } else {
+        process.env.LINEAR_API_KEY = originalApiKey;
+      }
     });
 
     it('returns the standardized InputData shape', async () => {
       global.fetch = () => ({
         status: 200,
+        ok: true,
         json: () => ({
           data: {
             issue: {
@@ -150,9 +159,42 @@ describe('Linear Provider', () => {
       expect(result.context).to.include('## Comments');
     });
 
+    it('sends the human identifier as-is in the query variables (pinned regression test)', async () => {
+      let capturedBody;
+      global.fetch = (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return {
+          status: 200,
+          ok: true,
+          json: () => ({
+            data: {
+              issue: {
+                identifier: 'ENG-42',
+                number: 42,
+                title: 'T',
+                description: '',
+                url: null,
+                labels: { nodes: [] },
+                comments: { nodes: [] },
+              },
+            },
+          }),
+        };
+      };
+
+      const provider = new LinearProvider();
+      await provider.fetchIssue('ENG-42', {});
+
+      // Linear's documented GraphQL contract accepts either the issue UUID or
+      // the human-readable identifier (e.g. ENG-42) for the `id` argument.
+      expect(capturedBody.variables.id).to.equal('ENG-42');
+      expect(capturedBody.query).to.include('issue(id: $id)');
+    });
+
     it('throws a descriptive error on GraphQL errors', async () => {
       global.fetch = () => ({
         status: 200,
+        ok: true,
         json: () => ({ errors: [{ message: 'Entity not found' }] }),
       });
 
@@ -164,6 +206,57 @@ describe('Linear Provider', () => {
         expect(err.message).to.include('Failed to fetch Linear issue');
         expect(err.message).to.include('Entity not found');
       }
+    });
+
+    it('throws a clear "not found" error when data.issue is null with no errors array', async () => {
+      global.fetch = () => ({
+        status: 200,
+        ok: true,
+        json: () => ({ data: { issue: null } }),
+      });
+
+      const provider = new LinearProvider();
+      try {
+        await provider.fetchIssue('ENG-404', {});
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.message).to.include('Linear issue not found: ENG-404');
+        expect(err.message).to.not.include('Cannot read properties of null');
+      }
+    });
+
+    it('throws a rate-limit error on a 429 response', async () => {
+      global.fetch = () => ({
+        status: 429,
+        ok: false,
+        json: () => ({}),
+      });
+
+      const provider = new LinearProvider();
+      try {
+        await provider.fetchIssue('ENG-42', {});
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.message).to.include('rate limit');
+      }
+    });
+
+    it('throws with recovery guidance when LINEAR_API_KEY is unset, without calling fetch', async () => {
+      delete process.env.LINEAR_API_KEY;
+      let fetchCalled = false;
+      global.fetch = () => {
+        fetchCalled = true;
+        return { status: 200, ok: true, json: () => ({}) };
+      };
+
+      const provider = new LinearProvider();
+      try {
+        await provider.fetchIssue('ENG-42', {});
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err.message).to.include('LINEAR_API_KEY not set');
+      }
+      expect(fetchCalled).to.be.false;
     });
   });
 
@@ -197,6 +290,7 @@ describe('Linear Provider', () => {
       process.env.LINEAR_API_KEY = 'lin_api_valid';
       global.fetch = () => ({
         status: 200,
+        ok: true,
         json: () => ({ data: { viewer: { id: 'user_1' } } }),
       });
 
@@ -209,6 +303,7 @@ describe('Linear Provider', () => {
       process.env.LINEAR_API_KEY = 'lin_api_invalid';
       global.fetch = () => ({
         status: 401,
+        ok: false,
         json: () => ({}),
       });
 
@@ -221,12 +316,26 @@ describe('Linear Provider', () => {
       process.env.LINEAR_API_KEY = 'lin_api_invalid';
       global.fetch = () => ({
         status: 200,
+        ok: true,
         json: () => ({ errors: [{ message: 'Authentication required' }] }),
       });
 
       const result = await LinearProvider.checkAuth();
       expect(result.authenticated).to.be.false;
       expect(result.error).to.equal('Linear API key invalid');
+    });
+
+    it('fails with a clear rate-limit message on a 429 response', async () => {
+      process.env.LINEAR_API_KEY = 'lin_api_test';
+      global.fetch = () => ({
+        status: 429,
+        ok: false,
+        json: () => ({}),
+      });
+
+      const result = await LinearProvider.checkAuth();
+      expect(result.authenticated).to.be.false;
+      expect(result.error).to.include('rate limit');
     });
   });
 

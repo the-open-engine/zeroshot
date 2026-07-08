@@ -66,6 +66,32 @@ class LinearProvider extends IssueProvider {
   }
 
   /**
+   * Validate response status and parse GraphQL JSON body.
+   * Shared by checkAuth and fetchIssue so both surface 401/429/non-OK/invalid-body
+   * failures the same way instead of falling through to a generic JSON-parse error.
+   * @private
+   */
+  static async _handleGraphQLResponse(response) {
+    if (response.status === 401) {
+      throw new Error('Linear API key invalid');
+    }
+
+    if (response.status === 429) {
+      throw new Error('Linear API rate limit exceeded, try again later');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Linear API request failed with status ${response.status}`);
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      throw new Error(`Linear API returned an invalid response (status ${response.status})`);
+    }
+  }
+
+  /**
    * Check Linear API key authentication via a minimal GraphQL query
    */
   static async checkAuth() {
@@ -101,15 +127,7 @@ class LinearProvider extends IssueProvider {
         clearTimeout(timeout);
       }
 
-      if (response.status === 401) {
-        return {
-          authenticated: false,
-          error: 'Linear API key invalid',
-          recovery: ['Verify LINEAR_API_KEY at https://linear.app/settings/api'],
-        };
-      }
-
-      const json = await response.json();
+      const json = await LinearProvider._handleGraphQLResponse(response);
       if (json.errors) {
         return {
           authenticated: false,
@@ -120,6 +138,14 @@ class LinearProvider extends IssueProvider {
 
       return { authenticated: true, error: null, recovery: [] };
     } catch (err) {
+      if (err.message === 'Linear API key invalid') {
+        return {
+          authenticated: false,
+          error: err.message,
+          recovery: ['Verify LINEAR_API_KEY at https://linear.app/settings/api'],
+        };
+      }
+
       return {
         authenticated: false,
         error: err.message,
@@ -147,6 +173,15 @@ class LinearProvider extends IssueProvider {
   async fetchIssue(identifier, settings) {
     const issueKey = this._extractIssueKey(identifier, settings);
 
+    const apiKey = process.env.LINEAR_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'Failed to fetch Linear issue: LINEAR_API_KEY not set. ' +
+          'Create a personal API key at https://linear.app/settings/api ' +
+          'and export LINEAR_API_KEY=lin_api_...'
+      );
+    }
+
     const query = `
       query($id: String!) {
         issue(id: $id) {
@@ -155,6 +190,8 @@ class LinearProvider extends IssueProvider {
           title
           description
           url
+          # Linear defaults to a 50-node first page with no pagination here; long
+          # label sets or comment threads beyond that are silently truncated.
           labels {
             nodes {
               name
@@ -183,7 +220,7 @@ class LinearProvider extends IssueProvider {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: process.env.LINEAR_API_KEY,
+            Authorization: apiKey,
           },
           body: JSON.stringify({ query, variables: { id: issueKey } }),
           signal: controller.signal,
@@ -192,10 +229,14 @@ class LinearProvider extends IssueProvider {
         clearTimeout(timeout);
       }
 
-      const json = await response.json();
+      const json = await LinearProvider._handleGraphQLResponse(response);
 
       if (json.errors) {
         throw new Error(json.errors.map((e) => e.message).join('; '));
+      }
+
+      if (!json.data?.issue) {
+        throw new Error(`Linear issue not found: ${issueKey}`);
       }
 
       return this._parseIssue(json.data.issue);
