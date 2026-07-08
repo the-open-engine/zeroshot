@@ -22,5 +22,9 @@ npx lint-staged
 # Type check the entire project (can't be limited to staged files)
 npm run typecheck
 
-# Validate cluster templates (catches hardcoded model names, broken configs)
-npm run validate:templates
+# Validate cluster templates only when template files are staged (catches hardcoded model names, broken configs)
+STAGED_TEMPLATES=$(git diff --cached --name-only --diff-filter=ACM -- 'cluster-templates/**/*.json' || true)
+if [ -n "$STAGED_TEMPLATES" ]; then
+  CHANGED_ARG=$(echo "$STAGED_TEMPLATES" | tr '\n' ',' | sed 's/,$//')
+  node scripts/validate-templates.js --changed="$CHANGED_ARG"
+fi

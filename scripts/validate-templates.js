@@ -8,11 +8,15 @@
  */
 
 const path = require('path');
-const { validateTemplates } = require('../src/template-validation');
+const { validateTemplates, formatValidationReport } = require('../src/template-validation');
 
 const TEMPLATES_DIR = path.join(__dirname, '../cluster-templates');
 
 function parseArgs(argv) {
+  const changedArg = argv.find((arg) => arg.startsWith('--changed='));
+  const changedFiles = changedArg
+    ? new Set(changedArg.split('=').slice(1).join('=').split(',').filter(Boolean))
+    : null;
   const simModeArg = argv.find((arg) => arg.startsWith('--sim='));
   const simMode = simModeArg ? simModeArg.split('=')[1] : process.env.ZEROSHOT_TEMPLATE_SIM;
   const randomScopeArg = argv.find((arg) => arg.startsWith('--random-scope='));
@@ -49,13 +53,16 @@ function parseArgs(argv) {
       maxSteps: Number.isFinite(sampleSteps) && sampleSteps > 0 ? sampleSteps : undefined,
       maxScenarioMs: Number.isFinite(sampleMs) && sampleMs > 0 ? sampleMs : undefined,
     },
+    changedFiles,
   };
 }
 
 async function main() {
   console.log('Validating cluster templates...\n');
 
-  const { deep, randomSampling, randomScope, randomOptions } = parseArgs(process.argv.slice(2));
+  const { deep, randomSampling, randomScope, randomOptions, changedFiles } = parseArgs(
+    process.argv.slice(2)
+  );
   const report = await validateTemplates({
     templatesDir: TEMPLATES_DIR,
     deep,
@@ -64,33 +71,8 @@ async function main() {
     randomOptions,
   });
 
-  let hasErrors = false;
-
-  for (const { filePath, result } of report.results) {
-    const relativePath = path.relative(process.cwd(), filePath);
-
-    if (!result.valid) {
-      hasErrors = true;
-      console.error(`\n❌ ${relativePath}`);
-      for (const error of result.errors) {
-        console.error(`   ERROR: ${error}`);
-      }
-      continue;
-    }
-
-    if (result.warnings.length > 0) {
-      console.warn(`\n⚠️  ${relativePath}`);
-      for (const warning of result.warnings) {
-        console.warn(`   WARN: ${warning}`);
-      }
-      continue;
-    }
-
-    console.log(`✓ ${relativePath}`);
-  }
-
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`Validated: ${report.validated} templates, Skipped: ${report.skipped} files`);
+  const { lines, hasErrors } = formatValidationReport(report, { changedFiles });
+  console.log(lines.join('\n'));
 
   if (hasErrors) {
     console.error('\n❌ VALIDATION FAILED - Fix errors above before merging\n');
