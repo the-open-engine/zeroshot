@@ -56,6 +56,24 @@ const {
 } = require('./command-proofs');
 const crypto = require('crypto');
 
+/**
+ * Thrown when a run is rejected because the issue already has an active cluster.
+ * This is expected control flow (a benign guard), not a crash - callers should
+ * check `error.code === 'DUPLICATE_CLUSTER'` and present it without a stack trace.
+ */
+class DuplicateClusterError extends Error {
+  constructor(message, { issueNumber, existingClusterId, existingState, existingPid, ageMinutes }) {
+    super(message);
+    this.name = 'DuplicateClusterError';
+    this.code = 'DUPLICATE_CLUSTER';
+    this.issueNumber = issueNumber;
+    this.existingClusterId = existingClusterId;
+    this.existingState = existingState;
+    this.existingPid = existingPid;
+    this.ageMinutes = ageMinutes;
+  }
+}
+
 function applyModelOverride(agentConfig, modelOverride) {
   if (!modelOverride) return;
 
@@ -1032,6 +1050,69 @@ class Orchestrator {
   }
 
   /**
+   * Resolve input (issue from provider, file, or text) and reject duplicate active
+   * runs on the same issue. Deliberately allocates NOTHING (no ledger, no isolation,
+   * no cluster registration) so a rejection - duplicate or otherwise - has zero side
+   * effects on disk or in-memory state.
+   * @private
+   * @returns {Promise<{ inputData: Object, issueProviderId: string|null }>}
+   */
+  async _resolveClusterInput(input, options, clusterId) {
+    if (input.issue) {
+      const ProviderClass = detectProvider(
+        input.issue,
+        options.settings || {},
+        options.forceProvider
+      );
+      if (!ProviderClass) {
+        throw new Error(`No issue provider matched input: ${input.issue}`);
+      }
+
+      const provider = new ProviderClass();
+      const inputData = await provider.fetchIssue(input.issue, options.settings || {});
+      const issueNumber = inputData.number || null;
+
+      // Check for duplicate active runs on same issue (unless --force)
+      if (issueNumber && !options.force) {
+        const activeClusters = this._getActiveClustersForIssue(issueNumber, clusterId);
+        if (activeClusters.length > 0) {
+          const existing = activeClusters[0];
+          const age = Math.round((Date.now() - existing.createdAt) / 1000 / 60);
+          throw new DuplicateClusterError(
+            `Issue #${issueNumber} already has an active cluster:\n` +
+              `  Cluster: ${existing.id} (state: ${existing.state}, running for ${age}min, pid: ${existing.pid})\n\n` +
+              `Options:\n` +
+              `  1. Kill existing: zeroshot kill ${existing.id}\n` +
+              `  2. Override check: zeroshot run ${input.issue} --force\n` +
+              `  3. View status:    zeroshot status ${existing.id}`,
+            {
+              issueNumber,
+              existingClusterId: existing.id,
+              existingState: existing.state,
+              existingPid: existing.pid,
+              ageMinutes: age,
+            }
+          );
+        }
+      }
+
+      // Log clickable issue link
+      if (inputData.url) {
+        this._log(`[Orchestrator] Issue (${ProviderClass.displayName}): ${inputData.url}`);
+      }
+
+      return { inputData, issueProviderId: ProviderClass.id };
+    } else if (input.file) {
+      this._log(`[Orchestrator] File: ${input.file}`);
+      return { inputData: InputHelpers.createFileInput(input.file), issueProviderId: null };
+    } else if (input.text) {
+      return { inputData: InputHelpers.createTextInput(input.text), issueProviderId: null };
+    }
+
+    throw new Error('Either issue, file, or text input is required');
+  }
+
+  /**
    * Internal start implementation (shared by start and startWithMock)
    * @private
    */
@@ -1044,6 +1125,15 @@ class Orchestrator {
     const clusterId = this._resolveStartClusterId(
       options.clusterId || null,
       config?.dbPath || null
+    );
+
+    // Resolve input (issue/file/text) and reject duplicate active runs on the same issue
+    // BEFORE allocating any resources. A duplicate-run rejection must have zero side
+    // effects: no ledger db file, no worktree/container, no clusters.json entry.
+    const { inputData, issueProviderId } = await this._resolveClusterInput(
+      input,
+      options,
+      clusterId
     );
 
     // Create ledger and message bus with persistent storage
@@ -1079,6 +1169,8 @@ class Orchestrator {
       createdAt: Date.now(),
       // Track PID for zombie detection (this process owns the cluster)
       pid: process.pid,
+      // Issue number for heroshot/external tools (avoids log parsing)
+      issue: inputData.number || null,
       // Initialization completion tracking (for safe SIGINT handling)
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
@@ -1091,7 +1183,7 @@ class Orchestrator {
       // Model override for all agents (applied to dynamically added agents)
       modelOverride: options.modelOverride || null,
       // Issue provider tracking (where issue was fetched from)
-      issueProvider: null, // Set after fetching issue (github, gitlab, jira, azure-devops)
+      issueProvider: issueProviderId, // null unless input.issue (github, gitlab, jira, azure-devops)
       // Git platform tracking (where PR/MR will be created - independent of issue provider)
       gitPlatform: null, // Set when --pr mode is active
       // Isolation state (only if enabled)
@@ -1129,63 +1221,8 @@ class Orchestrator {
     });
 
     try {
-      // Fetch input (issue from provider, file, or text)
-      let inputData;
-      if (input.issue) {
-        // Detect provider and fetch issue
-        const ProviderClass = detectProvider(
-          input.issue,
-          options.settings || {},
-          options.forceProvider
-        );
-        if (!ProviderClass) {
-          throw new Error(`No issue provider matched input: ${input.issue}`);
-        }
-
-        const provider = new ProviderClass();
-        inputData = await provider.fetchIssue(input.issue, options.settings || {});
-
-        // Store issue provider for logging/debugging and cross-provider workflows
-        cluster.issueProvider = ProviderClass.id;
-
-        // Store issue number for heroshot/external tools (avoids log parsing)
-        cluster.issue = inputData.number || null;
-
-        // Persist issue number early so supervisors can associate this cluster with the issue even if start fails.
-        await this._saveClusters().catch((err) => {
-          console.warn(`[Orchestrator] Failed to persist issue number for ${clusterId}:`, err);
-        });
-
-        // Check for duplicate active runs on same issue (unless --force)
-        if (cluster.issue && !options.force) {
-          const activeClusters = this._getActiveClustersForIssue(cluster.issue, clusterId);
-          if (activeClusters.length > 0) {
-            const existing = activeClusters[0];
-            const age = Math.round((Date.now() - existing.createdAt) / 1000 / 60);
-            throw new Error(
-              `Issue #${cluster.issue} already has an active cluster:\n` +
-                `  Cluster: ${existing.id} (state: ${existing.state}, running for ${age}min, pid: ${existing.pid})\n\n` +
-                `Options:\n` +
-                `  1. Kill existing: zeroshot kill ${existing.id}\n` +
-                `  2. Override check: zeroshot run ${input.issue} --force\n` +
-                `  3. View status:    zeroshot status ${existing.id}`
-            );
-          }
-        }
-
-        // Log clickable issue link
-        if (inputData.url) {
-          this._log(`[Orchestrator] Issue (${ProviderClass.displayName}): ${inputData.url}`);
-        }
-      } else if (input.file) {
-        inputData = InputHelpers.createFileInput(input.file);
-        this._log(`[Orchestrator] File: ${input.file}`);
-      } else if (input.text) {
-        inputData = InputHelpers.createTextInput(input.text);
-      } else {
-        throw new Error('Either issue, file, or text input is required');
-      }
-
+      // Input (issue/file/text) was already resolved and duplicate-checked in
+      // _resolveClusterInput() before any resource was allocated (see above).
       commandProofs = mergeCommandProofs(
         commandProofs,
         resolveClusterCommandProofs(config, options, inputData.context)
@@ -3999,3 +4036,4 @@ Continue from where you left off. Review your previous output to understand what
 }
 
 module.exports = Orchestrator;
+module.exports.DuplicateClusterError = DuplicateClusterError;
