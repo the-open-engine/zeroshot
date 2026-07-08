@@ -21,6 +21,7 @@ const {
 const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { detectGitContext } = require('../lib/git-remote-utils');
+const { readKeychainCredentials } = require('./claude-credentials');
 
 /**
  * Validation result
@@ -133,17 +134,12 @@ function checkMacOsKeychain() {
     return { authenticated: false, error: 'Not macOS' };
   }
 
-  try {
-    // Check if Claude Code credentials exist in Keychain
-    execSync('security find-generic-password -s "Claude Code-credentials"', {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      timeout: 2000,
-    });
+  // Reuses the same Keychain read that provisions isolated agent configs, so a
+  // green preflight here genuinely predicts runtime auth availability.
+  if (readKeychainCredentials()) {
     return { authenticated: true, error: null };
-  } catch {
-    return { authenticated: false, error: 'No credentials in Keychain' };
   }
+  return { authenticated: false, error: 'No credentials in Keychain' };
 }
 
 /**

@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 
 const { resolveWorktreeRoot } = require('./worktree-tooling-env');
+const { provisionClaudeCredentials } = require('./claude-credentials');
 
 const CLAUDE_DIRNAME = '.claude';
 const SETTINGS_BASENAME = 'settings.json';
@@ -60,15 +61,6 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
-function copyIfExists(sourcePath, destPath) {
-  if (!fs.existsSync(sourcePath)) {
-    return;
-  }
-
-  ensureDir(path.dirname(destPath));
-  fs.copyFileSync(sourcePath, destPath);
-}
-
 function resolveRepoClaudeConfig(worktreeRoot) {
   const configDir = path.join(worktreeRoot, CLAUDE_DIRNAME);
   const settingsPath = path.join(configDir, SETTINGS_BASENAME);
@@ -105,10 +97,7 @@ function prepareClaudeConfigDir(options = {}) {
   ensureDir(path.join(overlayDir, 'hooks'));
   ensureDir(path.join(overlayDir, 'projects'));
 
-  copyIfExists(
-    path.join(sourceDir, '.credentials.json'),
-    path.join(overlayDir, '.credentials.json')
-  );
+  provisionClaudeCredentials({ sourceDir, destDir: overlayDir });
 
   const sourceSettings = readJsonIfExists(path.join(sourceDir, SETTINGS_BASENAME)) || {};
   const repoSettings = readJsonIfExists(repoConfig.settingsPath) || {};
