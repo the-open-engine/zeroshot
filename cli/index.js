@@ -52,6 +52,11 @@ const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
 const {
   detectGitRepoRoot,
   detectRunInput,
+  isStdinInput,
+  readStdinText,
+  encodeStdinEnv,
+  decodeStdinEnv,
+  buildTextInput,
   loadClusterConfig,
   resolveConfigPath,
   resolveProviderOverride,
@@ -263,7 +268,7 @@ function resolveMergeQueueEnv(value) {
   return '';
 }
 
-function buildDaemonEnv(options, clusterId, targetCwd) {
+function buildDaemonEnv(options, clusterId, targetCwd, stdinText) {
   const mergeQueueEnv = resolveMergeQueueEnv(options.mergeQueue);
   const runOptionsEnv = serializeRunOptions(options);
   return {
@@ -282,10 +287,11 @@ function buildDaemonEnv(options, clusterId, targetCwd) {
     ZEROSHOT_MERGE_QUEUE: mergeQueueEnv,
     ZEROSHOT_CLOSE_ISSUE: options.closeIssue || '',
     ZEROSHOT_CWD: targetCwd,
+    ZEROSHOT_STDIN_TASK: stdinText !== undefined ? encodeStdinEnv(stdinText) : '',
   };
 }
 
-async function spawnDetachedCluster(options, clusterId) {
+async function spawnDetachedCluster(options, clusterId, stdinText) {
   const { spawn } = require('child_process');
   const logFd = createDaemonLogFile(clusterId);
   const targetCwd = detectGitRepoRoot();
@@ -294,7 +300,7 @@ async function spawnDetachedCluster(options, clusterId) {
     detached: true,
     stdio: ['ignore', logFd, logFd],
     cwd: targetCwd,
-    env: buildDaemonEnv(options, clusterId, targetCwd),
+    env: buildDaemonEnv(options, clusterId, targetCwd, stdinText),
   });
   await registerDetachedSetupCluster({
     clusterId,
@@ -2326,7 +2332,9 @@ Shell completion:
 // Run command - CLUSTER with auto-detection
 program
   .command('run <input>')
-  .description('Start a multi-agent cluster (GitHub issue, markdown file, or plain text)')
+  .description(
+    'Start a multi-agent cluster (GitHub issue, markdown file, plain text, or "-" for stdin)'
+  )
   .option('--config <file>', 'Path to cluster config JSON (default: conductor-bootstrap)')
   .option('--docker', 'Run cluster inside Docker container (full isolation)')
   .option('--worktree', 'Use git worktree for isolation (lightweight, no Docker required)')
@@ -2403,6 +2411,11 @@ Input formats:
     feature.md                       Markdown file
     "Implement feature X"            Plain text task
 
+  Stdin:
+    -                                 Read task body from stdin (pipe/redirect)
+      pbpaste | zeroshot run -
+      zeroshot run - < issue.md
+
 Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Linear)
 `
   )
@@ -2419,8 +2432,31 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
       else if (options.devops) forceProvider = 'azure-devops';
       else if (options.linear) forceProvider = 'linear';
 
+      // Stdin input ('-'): read task body from stdin to avoid shell-quoting breakage
+      let stdinText;
+      if (isStdinInput(inputArg)) {
+        if (process.env.ZEROSHOT_DAEMON === '1') {
+          const encoded = process.env.ZEROSHOT_STDIN_TASK;
+          if (!encoded) {
+            throw new Error('zeroshot run -: daemon mode missing forwarded stdin content');
+          }
+          stdinText = decodeStdinEnv(encoded);
+        } else if (process.stdin.isTTY) {
+          throw new Error(
+            'zeroshot run -: no piped input detected. Pipe or redirect a task body, e.g.\n' +
+              '  pbpaste | zeroshot run -\n' +
+              '  zeroshot run - < issue.md'
+          );
+        } else {
+          stdinText = await readStdinText();
+        }
+        if (!stdinText) {
+          throw new Error('zeroshot run -: stdin was empty, no task content received');
+        }
+      }
+
       // Auto-detect input type
-      const input = detectRunInput(inputArg);
+      const input = stdinText !== undefined ? buildTextInput(stdinText) : detectRunInput(inputArg);
       const settings = loadSettings();
       const providerOverride = resolveProviderOverride(options);
 
@@ -2455,7 +2491,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
 
       if (shouldRunDetached(options)) {
         const clusterId = generateName('cluster');
-        await spawnDetachedCluster(options, clusterId);
+        await spawnDetachedCluster(options, clusterId, stdinText);
         return;
       }
 
