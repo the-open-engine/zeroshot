@@ -892,7 +892,6 @@ class StatusFooter {
    * @returns {string}
    */
   stripAnsi(str) {
-    // eslint-disable-next-line no-control-regex
     return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
   }
 
