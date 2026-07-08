@@ -5,7 +5,6 @@
  * Part of issue #340 - Prevent git-pusher hallucination
  */
 
-/* global describe, beforeEach, afterEach, it */
 const assert = require('assert');
 const childProcess = require('child_process');
 
