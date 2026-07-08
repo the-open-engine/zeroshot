@@ -1908,22 +1908,29 @@ class Orchestrator {
    * @private
    */
   _teardownWorktreeCompose(worktreePath) {
-    const composePath = path.join(worktreePath, 'docker-compose.yml');
-    if (!fs.existsSync(composePath)) return;
+    // NEVER pass --volumes (irreversible data loss) and NEVER tear down a pinned/shared
+    // Compose project — only a project scoped to the worktree directory basename, which is
+    // the only kind zeroshot could itself have created, is touched.
+    const { resolveWorktreeComposeTeardown } = require('../lib/compose-utils');
+    const teardown = resolveWorktreeComposeTeardown(worktreePath);
+    if (!teardown.shouldTeardown) {
+      if (teardown.composePath) {
+        this._log(
+          `[Orchestrator] Skipping Docker Compose teardown in ${worktreePath}: ${teardown.reason}`
+        );
+      }
+      return;
+    }
 
     try {
       this._log(`[Orchestrator] Tearing down Docker Compose services in ${worktreePath}...`);
       const { spawnSync } = require('child_process');
-      const result = spawnSync(
-        'docker',
-        ['compose', 'down', '--remove-orphans', '--volumes', '--timeout', '10'],
-        {
-          cwd: worktreePath,
-          encoding: 'utf8',
-          stdio: 'pipe',
-          timeout: 30000,
-        }
-      );
+      const result = spawnSync('docker', teardown.args, {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: 30000,
+      });
       if (result.status !== 0 || result.error) {
         const detail = result.error?.message || result.stderr || 'no stderr';
         throw new Error(`Docker Compose teardown failed in ${worktreePath}: ${detail}`);
