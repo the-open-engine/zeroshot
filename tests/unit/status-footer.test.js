@@ -31,3 +31,20 @@ describe('StatusFooter updateAgent', () => {
     assert.strictEqual(agent.pid, 2222);
   });
 });
+
+describe('StatusFooter runMode badge', () => {
+  it('shows the armed run mode in the header line', () => {
+    const footer = new StatusFooter({ enabled: false });
+    footer.setCluster('cluster-test');
+    footer.setRunMode('ship');
+    const line = footer.stripAnsi(footer.buildHeaderLine(80));
+    assert.ok(line.includes('[ship]'), `expected header to include [ship], got: ${line}`);
+  });
+
+  it('omits the badge when no run mode is set', () => {
+    const footer = new StatusFooter({ enabled: false });
+    footer.setCluster('cluster-test');
+    const line = footer.stripAnsi(footer.buildHeaderLine(80));
+    assert.ok(!line.includes('['), `expected no badge, got: ${line}`);
+  });
+});

@@ -9,6 +9,7 @@ const {
   getColorForSender,
   parseDataField,
 } = require('./message-formatter-utils');
+const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
 
 /**
  * Format AGENT_ERROR for watch mode
@@ -49,7 +50,7 @@ function formatIssueOpened(msg, clusterPrefix) {
 function formatImplementationReady(msg, clusterPrefix) {
   const agentColor = getColorForSender(msg.sender);
   const agentName = agentColor(msg.sender);
-  const eventText = `${agentName} completed implementation`;
+  const eventText = `${agentName} ${EVENT_COPY.IMPLEMENTATION_READY.toLowerCase()}`;
   console.log(`${clusterPrefix} ${eventText}`);
 }
 
@@ -109,7 +110,11 @@ function formatPrCreated(msg, clusterPrefix) {
   const agentColor = getColorForSender(msg.sender);
   const agentName = agentColor(msg.sender);
   const prNum = msg.content?.data?.pr_number || '';
-  const eventText = `${agentName} created PR${prNum ? ` #${prNum}` : ''}`;
+  let eventText = `${agentName} ${EVENT_COPY.PR_CREATED.toLowerCase()}${prNum ? ` #${prNum}` : ''}`;
+  const mergeStatus = formatMergeStatus(msg.content?.data?.merged);
+  if (mergeStatus) {
+    eventText += chalk.dim(` — ${mergeStatus}`);
+  }
   console.log(`${clusterPrefix} ${eventText}`);
 }
 
@@ -182,4 +187,6 @@ function formatWatchMode(msg, isActive) {
 
 module.exports = {
   formatWatchMode,
+  formatImplementationReady,
+  formatPrCreated,
 };

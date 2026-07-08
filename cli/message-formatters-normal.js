@@ -7,6 +7,7 @@
  */
 
 const chalk = require('chalk');
+const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
 
 /**
  * Format AGENT_LIFECYCLE events
@@ -115,7 +116,9 @@ function formatIssueOpened(msg, prefix, timestamp, shownNewTaskForCluster, print
  * @returns {boolean} True if message was handled
  */
 function formatImplementationReady(msg, prefix, timestamp, print = console.log) {
-  print(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`);
+  print(
+    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow(`✅ ${EVENT_COPY.IMPLEMENTATION_READY.toUpperCase()}`)}`
+  );
 
   if (msg.content?.data?.commit) {
     print(
@@ -233,13 +236,22 @@ function formatPrCreated(msg, prefix, timestamp, print = console.log) {
 
   print(''); // Blank line before PR notification
   print(chalk.bold.green(`${'─'.repeat(60)}`));
-  print(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('🎉 PULL REQUEST CREATED')}`);
+  print(
+    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green(`🎉 ${EVENT_COPY.PR_CREATED.toUpperCase()}`)}`
+  );
 
   if (prNumber) {
     print(`${prefix} ${chalk.gray('PR:')} ${chalk.cyan(`#${prNumber}`)}`);
   }
   if (prUrl) {
     print(`${prefix} ${chalk.gray('URL:')} ${chalk.blue(prUrl)}`);
+  }
+
+  const mergeStatus = formatMergeStatus(msg.content?.data?.merged);
+  if (mergeStatus) {
+    print(
+      `${prefix} ${chalk.gray('Merge:')} ${mergeStatus === 'merged' ? chalk.green(mergeStatus) : chalk.yellow(mergeStatus)}`
+    );
   }
 
   print(chalk.bold.green(`${'─'.repeat(60)}`));
