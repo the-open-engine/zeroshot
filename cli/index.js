@@ -2955,9 +2955,9 @@ program
 program
   .command('export <cluster-id>')
   .description('Export cluster conversation')
-  .option('-f, --format <format>', 'Export format: json, markdown, pdf', 'pdf')
-  .option('-o, --output <file>', 'Output file (auto-generated for pdf)')
-  .action(async (clusterId, options) => {
+  .option('-f, --format <format>', 'Export format: json, markdown, html', 'html')
+  .option('-o, --output <file>', 'Output file (auto-generated for html)')
+  .action((clusterId, options) => {
     try {
       // Get messages from DB
       const Ledger = require('../src/ledger');
@@ -2999,10 +2999,12 @@ program
         return;
       }
 
-      // PDF export - convert ANSI to HTML, then render it to PDF
-      const outputFile = options.output || `${clusterId}.pdf`;
+      // HTML export - convert ANSI to a self-contained, print-ready HTML file.
+      // Open it in any browser and use Print -> Save as PDF for a PDF copy.
+      // `pdf` is accepted as a migration alias for the previous puppeteer-based export.
+      const isLegacyPdfFormat = options.format === 'pdf';
+      const outputFile = options.output || `${clusterId}.html`;
       const AnsiToHtml = require('ansi-to-html');
-      const { default: puppeteer } = await import('puppeteer');
 
       const ansiConverter = new AnsiToHtml({
         fg: '#d4d4d4',
@@ -3048,27 +3050,13 @@ program
           </body>
         </html>`;
 
-      const browser = await puppeteer.launch();
-      try {
-        const page = await browser.newPage();
-        await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
-        const pdf = await page.pdf({
-          format: 'A4',
-          landscape: true,
-          margin: {
-            top: '10mm',
-            right: '10mm',
-            bottom: '10mm',
-            left: '10mm',
-          },
-          printBackground: true,
-        });
-
-        require('fs').writeFileSync(outputFile, pdf);
-      } finally {
-        await browser.close();
-      }
+      require('fs').writeFileSync(outputFile, fullHtml, 'utf8');
       console.log(`Exported to ${outputFile}`);
+      if (isLegacyPdfFormat) {
+        console.log(
+          'Note: PDF export now produces print-ready HTML. Open it in a browser and use Print -> Save as PDF.'
+        );
+      }
     } catch (error) {
       console.error('Error exporting cluster:', error.message);
       process.exit(1);

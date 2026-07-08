@@ -17,7 +17,7 @@ Rust `#C2240C`, the single accent, **semantic only** (the period, the verdict/PA
 
 ## Re-render
 
-The `.html` files are the source of truth. Render to PNG with headless Chrome at 2× device scale, e.g. via the bundled Puppeteer:
+The `.html` files are the source of truth. Render to PNG with headless Chrome at 2× device scale. Puppeteer is not a project dependency; install it on demand (`npx puppeteer browsers install chrome`) or run the snippet below with a one-off `npx -p puppeteer node`:
 
 ```js
 const puppeteer = require('puppeteer');
