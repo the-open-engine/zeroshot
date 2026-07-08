@@ -332,7 +332,10 @@ function ensureCompletionHandler(config, options = {}) {
   };
 }
 
+const { formatValidationReport } = require('./report-formatter');
+
 module.exports = {
   validateTemplates,
   validateTemplateConfig,
+  formatValidationReport,
 };
