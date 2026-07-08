@@ -141,7 +141,7 @@ async function executeHook(params) {
   }
 
   if (hook.action === 'verify_pull_request') {
-    await verifyPullRequest({ result, agent });
+    await verifyPullRequest({ result, agent, autoMerge: hook.config?.autoMerge });
     return;
   }
 

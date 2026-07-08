@@ -341,7 +341,13 @@ function resolveGitHubConfig(options = {}) {
     (parseBool(repoGithub.closeIssue) === true ? 'always' : null) ||
     'never';
 
-  return { prBase, useMergeQueue, closeIssueMode };
+  // --ship (or explicit autoMerge) merges automatically; --pr alone stops after PR creation
+  // for human review. Repo settings can opt in to auto-merge when the caller hasn't decided.
+  const autoMerge =
+    options.autoMerge === true ||
+    (options.autoMerge !== false && parseBool(repoGithub.autoMerge) === true);
+
+  return { prBase, useMergeQueue, closeIssueMode, autoMerge };
 }
 
 /**
@@ -352,7 +358,7 @@ function resolveGitHubConfig(options = {}) {
  * @returns {Object|null} Platform configuration or null if unsupported
  */
 function getPlatformConfig(platform, config = {}) {
-  const { prBase, useMergeQueue, closeIssueMode } = config;
+  const { prBase, useMergeQueue, closeIssueMode, autoMerge } = config;
 
   const PLATFORM_CONFIGS = {
     github: {
@@ -373,6 +379,7 @@ for i in $(seq 1 90); do if timeout 30 gh pr view --json mergedAt --jq .mergedAt
       rebaseBranch: prBase || 'main',
       usesMergeQueue: useMergeQueue,
       closeIssueMode: closeIssueMode || 'never',
+      autoMerge: Boolean(autoMerge),
     },
     gitlab: {
       prName: 'MR',
@@ -384,6 +391,7 @@ for i in $(seq 1 90); do if timeout 30 gh pr view --json mergedAt --jq .mergedAt
       prUrlExample: 'https://gitlab.com/owner/repo/-/merge_requests/123',
       outputFields: { urlField: 'mr_url', numberField: 'mr_number', mergedField: 'merged' },
       closeIssueMode: closeIssueMode || 'never',
+      autoMerge: Boolean(autoMerge),
     },
     'azure-devops': {
       prName: 'PR',
@@ -402,6 +410,7 @@ for i in $(seq 1 90); do if timeout 30 gh pr view --json mergedAt --jq .mergedAt
       // Azure requires extracting PR ID from create output
       requiresPrIdExtraction: true,
       closeIssueMode: closeIssueMode || 'never',
+      autoMerge: Boolean(autoMerge),
     },
   };
 
@@ -413,6 +422,107 @@ for i in $(seq 1 90); do if timeout 30 gh pr view --json mergedAt --jq .mergedAt
  * @returns {string[]} Array of platform IDs
  */
 const SUPPORTED_PLATFORMS = ['github', 'gitlab', 'azure-devops'];
+
+/**
+ * Generate the review-mode prompt (--pr without --ship): create the PR/MR and STOP.
+ * No merge step, no issue-closing - the PR is left open for human review.
+ * @param {Object} config - Platform configuration from PLATFORM_CONFIGS
+ * @returns {string} The complete review-mode prompt
+ */
+function generateReviewModePrompt(config) {
+  const { prName, prNameLower, createCmd, prUrlExample, outputFields, requiresPrIdExtraction } =
+    config;
+
+  return `CRITICAL: ALL VALIDATORS APPROVED. YOU ARE A TRANSPORT-ONLY GIT PUSHER.
+
+Your job is to preserve validator ownership: stage, commit, push, and create the ${prName} for HUMAN REVIEW.
+
+Do NOT edit source files, tests, configs, generated artifacts, or lockfiles.
+Do NOT inspect CI logs to debug product code.
+Do NOT resolve merge conflicts or rebase conflicts.
+Do NOT run implementation/debugging workflows after validators hand off.
+Do NOT merge the ${prName} - it is left OPEN for human review.
+Do NOT close the linked issue - it stays open until a human merges the ${prName}.
+
+Allowed after validation:
+- git add/status/commit/push
+- ${createCmd.split(' ').slice(0, 3).join(' ')}
+- status-only commands such as ${prName === 'PR' ? 'gh pr view/gh pr checks' : 'the platform PR/MR status command'}
+
+If commit hooks, push, ${prName} creation, or conflict handling requires code changes, STOP and report the blocked state in JSON. The implementation and validator agents must fix code and rerun quality gates.
+
+## MANDATORY STEPS - EXECUTE EACH ONE IN ORDER - DO NOT SKIP ANY STEP
+
+### STEP 1: Stage ALL changes (MANDATORY)
+\`\`\`bash
+git add -A
+\`\`\`
+Run this command. Do not skip it. If commit fails because hooks/checks fail, do not edit files. Output blocked JSON with the failure summary.
+
+### STEP 2: Check what's staged
+\`\`\`bash
+git status
+\`\`\`
+Run this. If nothing to commit, output JSON with ${outputFields.urlField}: null and stop.
+
+### STEP 3: Commit the changes (MANDATORY if there are changes)
+\`\`\`bash
+git commit -m "feat: implement #{{issue_number}} - {{issue_title}}"
+\`\`\`
+Run this command. Do not skip it.
+
+### STEP 4: Push to origin (MANDATORY)
+\`\`\`bash
+git push -u origin HEAD
+\`\`\`
+Run this. If it fails, do not edit files, rebase, or resolve conflicts. Output blocked JSON with the failure summary.
+
+⚠️ AFTER PUSH YOU ARE NOT DONE! CONTINUE TO STEP 5! ⚠️
+
+### STEP 5: CREATE THE ${prName.toUpperCase()} (MANDATORY - YOU MUST RUN THIS COMMAND)
+\`\`\`bash
+${createCmd}
+\`\`\`
+🚨 YOU MUST RUN \`${createCmd.split(' ').slice(0, 3).join(' ')}\`! Outputting a link is NOT creating a ${prName}! 🚨
+The push output shows a "Create a ${prNameLower}" link - IGNORE IT.
+You MUST run the \`${createCmd.split(' ').slice(0, 3).join(' ')}\` command above.${requiresPrIdExtraction ? '' : ` Save the actual ${prName} URL from the output.`}
+
+⚠️ AFTER THE ${prName} IS CREATED, YOU ARE DONE. DO NOT MERGE. DO NOT CLOSE THE ISSUE. ⚠️
+
+## CRITICAL RULES
+- Execute EVERY step in order (1, 2, 3, 4, 5)
+- Do NOT skip git add -A
+- Do NOT skip git commit
+- Do NOT skip ${createCmd.split(' ').slice(0, 3).join(' ')} - THE TASK IS NOT DONE UNTIL ${prName} EXISTS
+- Do NOT merge the ${prName} - this run is for human review only
+- Do NOT close the issue - it stays open until a human merges the ${prName}
+- Do NOT edit files after validator handoff
+- Do NOT debug product failures after validator handoff
+- If push or ${prName} creation fails, report it instead of fixing code
+- Output JSON as soon as the ${prName} is created (OPEN, unmerged), or a non-code transport failure blocks progress
+- A link from git push is NOT a ${prName} - you must run ${createCmd.split(' ').slice(0, 3).join(' ')}
+
+## Final Output
+ONLY after the ${prName} is CREATED (left OPEN for review), output:
+\`\`\`json
+{"${outputFields.urlField}": "${prUrlExample}", "${outputFields.numberField}": 123, "merged": false}
+\`\`\`
+
+If truly no changes exist, output:
+\`\`\`json
+{"${outputFields.urlField}": null, "${outputFields.numberField}": null, "merged": false}
+\`\`\`
+
+If blocked after creating a ${prName}, output:
+\`\`\`json
+{"${outputFields.urlField}": "${prUrlExample}", "${outputFields.numberField}": 123, "merged": false, "blocked": true, "blocked_reason": "ci_failed: test job failed"}
+\`\`\`
+
+If blocked before creating a ${prName}, output:
+\`\`\`json
+{"${outputFields.urlField}": null, "${outputFields.numberField}": null, "merged": false, "blocked": true, "blocked_reason": "commit_failed: pre-commit hook failed"}
+\`\`\``;
+}
 
 /**
  * Generate the prompt for a specific platform
@@ -432,7 +542,12 @@ function generatePrompt(config) {
     rebaseBranch,
     usesMergeQueue,
     closeIssueMode,
+    autoMerge,
   } = config;
+
+  if (!autoMerge) {
+    return generateReviewModePrompt(config);
+  }
 
   // Azure-specific instructions for PR ID extraction
   const azurePrIdNote = requiresPrIdExtraction
@@ -614,6 +729,7 @@ If blocked before creating a ${prName}, output:
  * @param {boolean} [options.mergeQueue] - Use GitHub merge queue
  * @param {string} [options.closeIssue] - When to close issue: auto|always|never
  * @param {Array} [options.requiredQualityGates] - Required handoff quality gates
+ * @param {boolean} [options.autoMerge] - Merge the PR (--ship). False stops after PR creation (--pr).
  * @returns {Object} Agent configuration object
  * @throws {Error} If platform is not supported
  */
@@ -647,8 +763,9 @@ function generateGitPusherAgent(platform, options = {}) {
     hooks: {
       onComplete: {
         action: 'verify_pull_request',
-        // No config needed - verification reads from result.structured_output
-        // and publishes CLUSTER_COMPLETE only if verification passes
+        // Verification reads PR data from result.structured_output; autoMerge controls
+        // whether an OPEN unmerged PR counts as success (--pr) or must be merged (--ship).
+        config: { autoMerge: Boolean(platformConfig.autoMerge) },
       },
     },
     output: {
