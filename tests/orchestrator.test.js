@@ -848,7 +848,13 @@ function defineLifecycleGetStatusTests() {
       const config = createSimpleConfig();
       lifecycleMockRunner.when('worker').returns({ done: true });
 
-      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      const result = await lifecycleOrchestrator.start(
+        config,
+        { text: 'Task' },
+        {
+          runMode: 'worktree',
+        }
+      );
       const clusterId = result.id;
 
       const status = lifecycleOrchestrator.getStatus(clusterId);
@@ -857,6 +863,7 @@ function defineLifecycleGetStatusTests() {
       assert.strictEqual(status.state, 'running', 'Status should show running');
       assert.strictEqual(status.agents.length, 1, 'Status should show 1 agent');
       assert.ok(status.messageCount >= 1, 'Status should show message count');
+      assert.strictEqual(status.runMode, 'worktree', 'Status should reflect runMode');
     });
 
     it('should fail if cluster does not exist', function () {
@@ -883,7 +890,7 @@ function defineLifecycleListClustersTests() {
       lifecycleMockRunner.when('worker').returns({ done: true });
 
       await lifecycleOrchestrator.start(config, { text: 'Task 1' });
-      await lifecycleOrchestrator.start(config, { text: 'Task 2' });
+      await lifecycleOrchestrator.start(config, { text: 'Task 2' }, { runMode: 'pr' });
 
       const clusters = lifecycleOrchestrator.listClusters();
       assert.strictEqual(clusters.length, 2, 'Should return 2 clusters');
@@ -894,6 +901,11 @@ function defineLifecycleListClustersTests() {
         assert.ok(cluster.state, 'Cluster should have state');
         assert.ok(typeof cluster.agentCount === 'number', 'Cluster should have agentCount');
       }
+
+      const withoutRunMode = clusters.find((c) => !c.runMode);
+      const withRunMode = clusters.find((c) => c.runMode === 'pr');
+      assert.ok(withoutRunMode, 'Cluster started without runMode should have runMode null');
+      assert.ok(withRunMode, 'Cluster started with runMode option should reflect it');
     });
   });
 }
@@ -926,7 +938,7 @@ describe('Orchestrator - Crash Recovery (CRITICAL)', function () {
       });
 
       const config = createSimpleConfig();
-      const result = await orchestrator.start(config, { text: 'Task' });
+      const result = await orchestrator.start(config, { text: 'Task' }, { runMode: 'ship' });
       clusterId = result.id;
 
       // Publish additional message
@@ -959,6 +971,11 @@ describe('Orchestrator - Crash Recovery (CRITICAL)', function () {
 
       const loadedCluster = clusters.find((c) => c.id === clusterId);
       assert.ok(loadedCluster, 'Should load the created cluster');
+      assert.strictEqual(
+        loadedCluster.runMode,
+        'ship',
+        'runMode should round-trip through save/reload'
+      );
 
       // Verify: Ledger restored
       const cluster = orchestrator2.getCluster(clusterId);

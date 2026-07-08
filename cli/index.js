@@ -22,6 +22,7 @@ const { URL } = require('url');
 const chalk = require('chalk');
 const Orchestrator = require('../src/orchestrator');
 const { setupCompletion } = require('../lib/completion');
+const { resolveRunMode, describeRunMode } = require('../lib/run-mode');
 const { formatWatchMode } = require('./message-formatters-watch');
 const {
   formatAgentLifecycle,
@@ -186,14 +187,6 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
-}
-
-function resolveRunMode(options) {
-  if (options.ship) return options.docker ? 'ship+docker' : 'ship';
-  if (options.pr) return options.docker ? 'pr+docker' : 'pr';
-  if (options.docker) return 'docker';
-  if (options.worktree) return 'worktree';
-  return null;
 }
 
 async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
@@ -681,8 +674,9 @@ function formatClusterRow(cluster) {
   const stateDisplay =
     cluster.state === 'zombie' ? chalk.red(cluster.state.padEnd(12)) : cluster.state.padEnd(12);
   const rowColor = cluster.state === 'zombie' ? chalk.red : (text) => text;
+  const modeDisplay = (cluster.runMode || '-').padEnd(10);
 
-  return `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${cluster.agentCount
+  return `${rowColor(cluster.id.padEnd(25))} ${stateDisplay} ${modeDisplay} ${cluster.agentCount
     .toString()
     .padEnd(8)} ${tokenDisplay.padEnd(12)} ${costDisplay.padEnd(8)} ${created}`;
 }
@@ -696,11 +690,11 @@ function printClusterTable(enrichedClusters) {
 
   console.log(chalk.bold('\n=== Clusters ==='));
   console.log(
-    `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Agents'.padEnd(8)} ${'Tokens'.padEnd(
-      12
-    )} ${'Cost'.padEnd(8)} Created`
+    `${'ID'.padEnd(25)} ${'State'.padEnd(12)} ${'Mode'.padEnd(10)} ${'Agents'.padEnd(
+      8
+    )} ${'Tokens'.padEnd(12)} ${'Cost'.padEnd(8)} Created`
   );
-  console.log('-'.repeat(100));
+  console.log('-'.repeat(110));
   for (const cluster of enrichedClusters) {
     console.log(formatClusterRow(cluster));
   }
@@ -782,6 +776,9 @@ function printClusterStatusHeader(status, clusterId) {
     );
   } else {
     console.log(`State: ${status.state}`);
+  }
+  if (status.runMode) {
+    console.log(`Mode: ${describeRunMode(status.runMode)}`);
   }
   if (status.pid) {
     console.log(`PID: ${status.pid}`);

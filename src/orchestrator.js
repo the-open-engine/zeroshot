@@ -845,6 +845,8 @@ class Orchestrator {
           failureInfo: cluster.failureInfo || null,
           // Persist PR mode for completion agent selection
           autoPr: cluster.autoPr || false,
+          // Persist normalized run mode for status/list display
+          runMode: cluster.runMode || null,
           // Persist PR options for resume
           prOptions: cluster.prOptions || null,
           // Persist cluster-scoped command proof configuration for resume and dynamic agents
@@ -1081,6 +1083,7 @@ class Orchestrator {
       initCompletePromise,
       _resolveInitComplete: resolveInitComplete,
       autoPr: options.autoPr || false,
+      runMode: options.runMode || null,
       requiredQualityGates,
       commandProofs,
       // PR configuration options (persisted for resume)
@@ -3644,6 +3647,7 @@ Continue from where you left off. Review your previous output to understand what
       setupLogPath: cluster.setupLogPath || null,
       setupStage: cluster.setupStage || null,
       failureInfo: cluster.failureInfo || null,
+      runMode: cluster.runMode || null,
     };
   }
 
@@ -3685,6 +3689,7 @@ Continue from where you left off. Review your previous output to understand what
         setupLogPath: cluster.setupLogPath || null,
         setupStage: cluster.setupStage || null,
         failureInfo: cluster.failureInfo || null,
+        runMode: cluster.runMode || null,
       };
     });
   }
