@@ -248,16 +248,17 @@ class BaseProvider {
       );
     }
 
+    // minLevel/maxLevel are the user's floor/ceiling cost guardrails, not a hard
+    // constraint on template-pinned levels. Clamp an out-of-range level into range
+    // rather than throwing: rejecting made a single-level clamp (min === max)
+    // unusable with any template that pins a different level, and broke read-only
+    // commands like `zeroshot logs` that resolve model specs for display (#162).
     if (maxLevel && rank(level) > rank(maxLevel)) {
-      throw new Error(
-        `Level "${level}" exceeds maxLevel "${maxLevel}" for provider "${this.name}"`
-      );
+      return maxLevel;
     }
 
     if (minLevel && rank(level) < rank(minLevel)) {
-      throw new Error(
-        `Level "${level}" is below minLevel "${minLevel}" for provider "${this.name}"`
-      );
+      return minLevel;
     }
 
     return level;
