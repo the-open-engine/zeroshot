@@ -579,7 +579,9 @@ function shouldSkipVerification(adapter) {
   return skipVars.some((name) => process.env[name] === '1');
 }
 
-async function verifyPullRequest({ result, agent }) {
+async function verifyPullRequest({ result, agent, autoMerge }) {
+  // Default to true (merge required) so existing callers/tests and --ship semantics stay fail-closed.
+  const requireMerge = autoMerge !== false;
   const platform = resolveVerificationPlatform(agent);
   const adapter = getVerificationAdapter(platform);
   const providerName =
@@ -620,6 +622,23 @@ async function verifyPullRequest({ result, agent }) {
       `⚠️  PR metadata recovered from raw output fallback ` +
         `(provider=${providerName}, platform=${platform}, ${adapter.itemName.toLowerCase()}=#${prData.number})`
     );
+  }
+
+  if (!requireMerge) {
+    // --pr mode: the PR/MR was created and verified to exist. It's left OPEN for human
+    // review - do NOT poll for merge or treat an unmerged PR as a failure.
+    agent._log(
+      `✅ VERIFICATION PASSED: ${adapter.itemName} #${prData.number} created (open for human review)`
+    );
+    publishClusterComplete(agent, {
+      ...buildVerificationPayload({
+        platform,
+        prData,
+        reason: 'git-pusher-complete-verified',
+      }),
+      merged: adapter.isMerged(prData),
+    });
+    return;
   }
 
   if (!adapter.isMerged(prData)) {

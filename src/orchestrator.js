@@ -194,19 +194,15 @@ function applyPushBlockedRepairTriggers(config) {
 }
 
 function buildPrOptions(options, requiredQualityGates) {
-  if (
-    !options.prBase &&
-    !options.mergeQueue &&
-    !options.closeIssue &&
-    requiredQualityGates.length === 0
-  ) {
-    return null;
-  }
+  // autoMerge must always be persisted (even when no other PR fields are set) so that
+  // `zeroshot run --pr` (autoMerge=false) vs `--ship` (autoMerge=true) survives resume.
+  const autoMerge = Boolean(options.ship) || Boolean(options.autoMerge);
 
   return {
     prBase: options.prBase || null,
     mergeQueue: options.mergeQueue || false,
     closeIssue: options.closeIssue || null,
+    autoMerge,
     ...(requiredQualityGates.length > 0 ? { requiredQualityGates } : {}),
     cwd: options.cwd || process.cwd(),
   };
@@ -1793,6 +1789,7 @@ class Orchestrator {
       mergeQueue: options.mergeQueue,
       closeIssue: options.closeIssue,
       requiredQualityGates: options.requiredQualityGates,
+      autoMerge: Boolean(options.ship) || Boolean(options.autoMerge),
       cwd: options.cwd,
     });
 
@@ -3992,5 +3989,8 @@ Continue from where you left off. Review your previous output to understand what
     });
   }
 }
+
+// Exported for testing (PR options persistence, e.g. autoMerge for --pr vs --ship).
+Orchestrator.buildPrOptions = buildPrOptions;
 
 module.exports = Orchestrator;
