@@ -20,6 +20,7 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
 const { getProvider } = require('./providers');
 const { readRepoSettings } = require('../lib/repo-settings');
+const { provisionClaudeCredentials } = require('./claude-credentials');
 
 const DEFAULT_WORKTREE_SETUP_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -1036,11 +1037,9 @@ class IsolationManager {
     const projectsDir = path.join(configDir, 'projects');
     fs.mkdirSync(projectsDir, { recursive: true });
 
-    // Copy only credentials file (essential for auth)
-    const credentialsFile = path.join(sourceDir, '.credentials.json');
-    if (fs.existsSync(credentialsFile)) {
-      fs.copyFileSync(credentialsFile, path.join(configDir, '.credentials.json'));
-    }
+    // Copy credentials file, or materialize from macOS Keychain if none exists
+    // (essential for auth; see src/claude-credentials.js)
+    provisionClaudeCredentials({ sourceDir, destDir: configDir });
 
     // Copy hook script to block AskUserQuestion (CRITICAL for autonomous execution)
     const hookScriptSrc = path.join(__dirname, '..', 'hooks', 'block-ask-user-question.py');
