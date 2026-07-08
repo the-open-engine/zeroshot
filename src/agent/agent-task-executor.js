@@ -834,6 +834,7 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: spawnEnv,
+      windowsHide: true,
     });
 
     // NOTE: Don't emit PROCESS_SPAWNED here - proc.pid is a wrapper that exits immediately.
