@@ -42,6 +42,8 @@ export default [
         clearInterval: 'readonly',
         setImmediate: 'readonly',
         clearImmediate: 'readonly',
+        fetch: 'readonly',
+        AbortController: 'readonly',
       },
     },
     rules: {

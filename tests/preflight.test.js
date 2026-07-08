@@ -314,11 +314,11 @@ function defineDockerTests() {
 
 function defineRunPreflightTests() {
   describe('runPreflight()', () => {
-    it('should fail when Claude CLI is missing', () => {
+    it('should fail when Claude CLI is missing', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = runPreflight({
+      const result = await runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
@@ -331,11 +331,11 @@ function defineRunPreflightTests() {
       expect(result.errors.join('')).to.include('Claude command not available');
     });
 
-    it('should fail when Codex CLI is missing', () => {
+    it('should fail when Codex CLI is missing', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = runPreflight({
+      const result = await runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
@@ -348,11 +348,11 @@ function defineRunPreflightTests() {
       expect(result.errors.join('')).to.include('Codex CLI not available');
     });
 
-    it('should fail when Gemini CLI is missing', () => {
+    it('should fail when Gemini CLI is missing', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = runPreflight({
+      const result = await runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
@@ -365,7 +365,7 @@ function defineRunPreflightTests() {
       expect(result.errors.join('')).to.include('Gemini CLI not available');
     });
 
-    it('should not require Claude auth when CLI is installed', function () {
+    it('should not require Claude auth when CLI is installed', async function () {
       try {
         execSync(`${whichCmd} claude`, { stdio: 'pipe' });
       } catch {
@@ -378,7 +378,7 @@ function defineRunPreflightTests() {
       const originalDir = process.env.CLAUDE_CONFIG_DIR;
       process.env.CLAUDE_CONFIG_DIR = '/nonexistent';
 
-      const result = runPreflight({
+      const result = await runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,
@@ -390,8 +390,8 @@ function defineRunPreflightTests() {
       expect(result.valid).to.be.true;
     });
 
-    it('should include warnings array in result', function () {
-      const result = runPreflight({
+    it('should include warnings array in result', async function () {
+      const result = await runPreflight({
         requireGh: false,
         requireDocker: false,
         quiet: true,

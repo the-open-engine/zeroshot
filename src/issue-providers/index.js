@@ -7,6 +7,7 @@
 const GitHubProvider = require('./github-provider');
 const GitLabProvider = require('./gitlab-provider');
 const JiraProvider = require('./jira-provider');
+const LinearProvider = require('./linear-provider');
 const AzureDevOpsProvider = require('./azure-devops-provider');
 const { detectGitContext } = require('../../lib/git-remote-utils');
 
@@ -180,6 +181,7 @@ function validateIssueProviderSetting(key, value) {
 registerProvider(GitHubProvider);
 registerProvider(GitLabProvider);
 registerProvider(JiraProvider);
+registerProvider(LinearProvider);
 registerProvider(AzureDevOpsProvider);
 
 module.exports = {
