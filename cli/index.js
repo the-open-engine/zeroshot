@@ -70,6 +70,7 @@ const {
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates, printLegacyDistroNotice } = require('./lib/update-checker');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
+const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
 
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Prevent silent process death
@@ -181,6 +182,14 @@ function normalizeRunOptions(options) {
   }
 }
 
+function resolveRunMode(options) {
+  if (options.ship) return options.docker ? 'ship+docker' : 'ship';
+  if (options.pr) return options.docker ? 'pr+docker' : 'pr';
+  if (options.docker) return 'docker';
+  if (options.worktree) return 'worktree';
+  return null;
+}
+
 async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
   // Detect which issue provider tool is needed
   let issueProvider = null;
@@ -221,11 +230,8 @@ function shouldRunDetached(options) {
 }
 
 function printDetachedClusterStart(options, clusterId, logPath) {
-  if (options.docker) {
-    console.log(`Started ${clusterId} (docker)`);
-  } else {
-    console.log(`Started ${clusterId}`);
-  }
+  const runMode = resolveRunMode(options);
+  console.log(runMode ? `Started ${clusterId} (${runMode})` : `Started ${clusterId}`);
   if (logPath) {
     console.log(`Setup log: ${logPath}`);
   }
@@ -321,13 +327,8 @@ function printForegroundStartInfo(options, clusterId, configName) {
   if (process.env.ZEROSHOT_DAEMON) {
     return;
   }
-  if (options.docker) {
-    console.log(`Starting ${clusterId} (docker)`);
-  } else if (options.worktree) {
-    console.log(`Starting ${clusterId} (worktree)`);
-  } else {
-    console.log(`Starting ${clusterId}`);
-  }
+  const runMode = resolveRunMode(options);
+  console.log(runMode ? `Starting ${clusterId} (${runMode})` : `Starting ${clusterId}`);
   console.log(chalk.dim(`Config: ${configName}`));
   console.log(chalk.dim('Ctrl+C to stop following (cluster keeps running)\n'));
 }
@@ -389,13 +390,14 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
   console.log(chalk.dim(`Model override: ${modelOverride} (all agents)`));
 }
 
-function createStatusFooter(clusterId, messageBus) {
+function createStatusFooter(clusterId, messageBus, runMode) {
   const statusFooter = new StatusFooter({
     refreshInterval: 1000,
     enabled: process.stdout.isTTY,
   });
   statusFooter.setCluster(clusterId);
   statusFooter.setClusterState('running');
+  statusFooter.setRunMode(runMode);
   statusFooter.setMessageBus(messageBus);
   activeStatusFooter = statusFooter;
   return statusFooter;
@@ -571,11 +573,11 @@ function waitForClusterCompletion(orchestrator, clusterId, cleanup) {
   });
 }
 
-async function streamClusterInForeground(cluster, orchestrator, clusterId) {
+async function streamClusterInForeground(cluster, orchestrator, clusterId, options) {
   const sendersWithOutput = new Set();
   const processedMessageIds = new Set();
 
-  const statusFooter = createStatusFooter(clusterId, cluster.messageBus);
+  const statusFooter = createStatusFooter(clusterId, cluster.messageBus, resolveRunMode(options));
   const handleLifecycleMessage = createLifecycleHandler(statusFooter);
   const lifecycleUnsubscribe = cluster.messageBus.subscribeTopic(
     'AGENT_LIFECYCLE',
@@ -2517,7 +2519,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
       }
 
       if (!process.env.ZEROSHOT_DAEMON) {
-        await streamClusterInForeground(cluster, orchestrator, clusterId);
+        await streamClusterInForeground(cluster, orchestrator, clusterId, options);
       }
 
       setupDaemonCleanup(orchestrator, clusterId);
@@ -4782,7 +4784,9 @@ function handleIssueOpenedRender({ msg, prefix, timestamp, lines }) {
 }
 
 function handleImplementationReadyRender({ prefix, timestamp, lines }) {
-  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow('✅ IMPLEMENTATION READY')}`);
+  lines.push(
+    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.yellow(`✅ ${EVENT_COPY.IMPLEMENTATION_READY.toUpperCase()}`)}`
+  );
 }
 
 function normalizeIssueList(rawIssues) {
@@ -4851,12 +4855,17 @@ function handleValidationResultRender({ msg, prefix, timestamp, lines }) {
 function handlePrCreatedRender({ msg, prefix, timestamp, lines }) {
   lines.push('');
   lines.push(chalk.bold.green('─'.repeat(80)));
-  lines.push(`${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green('🔗 PR CREATED')}`);
+  lines.push(
+    `${prefix} ${chalk.gray(timestamp)} ${chalk.bold.green(`🔗 ${EVENT_COPY.PR_CREATED.toUpperCase()}`)}`
+  );
   if (msg.content?.data?.pr_url) {
     lines.push(`${prefix} ${chalk.cyan(msg.content.data.pr_url)}`);
   }
-  if (msg.content?.data?.merged) {
-    lines.push(`${prefix} ${chalk.bold.cyan('✓ MERGED')}`);
+  const mergeStatus = formatMergeStatus(msg.content?.data?.merged);
+  if (mergeStatus) {
+    lines.push(
+      `${prefix} ${chalk.gray('Merge:')} ${mergeStatus === 'merged' ? chalk.bold.cyan(mergeStatus) : chalk.yellow(mergeStatus)}`
+    );
   }
   lines.push(chalk.bold.green('─'.repeat(80)));
 }
@@ -5441,7 +5450,11 @@ async function main() {
 }
 
 // Run main
-main().catch((err) => {
-  console.error('Fatal error:', err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Fatal error:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { resolveRunMode };

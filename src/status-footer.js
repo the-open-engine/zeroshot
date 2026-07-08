@@ -118,6 +118,7 @@ class StatusFooter {
     this.scrollRegionSet = false;
     this.clusterId = null;
     this.clusterState = 'initializing';
+    this.runMode = null;
     this.startTime = Date.now();
     this.messageBus = null; // MessageBus for token usage tracking
 
@@ -390,6 +391,14 @@ class StatusFooter {
    */
   setClusterState(state) {
     this.clusterState = state;
+  }
+
+  /**
+   * Set the armed run mode (e.g. 'ship', 'pr', 'worktree', 'docker')
+   * @param {string|null} mode
+   */
+  setRunMode(mode) {
+    this.runMode = mode;
   }
 
   /**
@@ -675,6 +684,10 @@ class StatusFooter {
     if (this.clusterId) {
       const shortId = this.clusterId.replace('cluster-', '');
       content += ` ${COLORS.cyan}${COLORS.bold}${shortId}${COLORS.reset} `;
+    }
+
+    if (this.runMode) {
+      content += `${COLORS.dim}[${this.runMode}]${COLORS.reset} `;
     }
 
     // Fill with border
