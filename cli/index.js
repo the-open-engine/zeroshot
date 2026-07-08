@@ -181,7 +181,7 @@ function normalizeRunOptions(options) {
   }
 }
 
-function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
+async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
   // Detect which issue provider tool is needed
   let issueProvider = null;
   let targetHost = null;
@@ -205,7 +205,7 @@ function runClusterPreflight({ input, options, providerOverride, settings, force
     }
   }
 
-  requirePreflight({
+  await requirePreflight({
     requireGh: issueProvider === 'github', // gh CLI required for GitHub
     requireDocker: options.docker,
     requireGit: options.worktree,
@@ -2364,6 +2364,7 @@ program
   .option('-L, --gitlab', 'Force GitLab as issue source')
   .option('-J, --jira', 'Force Jira as issue source')
   .option('-D, --devops', 'Force Azure DevOps as issue source')
+  .option('-N, --linear', 'Force Linear as issue source')
   .option('-d, --detach', 'Run in background (default: attach to first agent)')
   .option('--mount <spec...>', 'Add Docker mount (host:container[:ro]). Repeatable.')
   .option('--no-mounts', 'Disable all Docker credential mounts')
@@ -2391,11 +2392,15 @@ Input formats:
   Azure DevOps:
     https://dev.azure.com/org/proj/_workitems/edit/123
 
+  Linear:
+    ENG-42                            Issue key
+    https://linear.app/<workspace>/issue/ENG-42/...
+
   File/Text:
     feature.md                       Markdown file
     "Implement feature X"            Plain text task
 
-Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
+Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Linear)
 `
   )
   .action(async (inputArg, options) => {
@@ -2409,6 +2414,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       else if (options.gitlab) forceProvider = 'gitlab';
       else if (options.jira) forceProvider = 'jira';
       else if (options.devops) forceProvider = 'azure-devops';
+      else if (options.linear) forceProvider = 'linear';
 
       // Auto-detect input type
       const input = detectRunInput(inputArg);
@@ -2416,7 +2422,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps)
       const providerOverride = resolveProviderOverride(options);
 
       // Preflight checks
-      runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
+      await runClusterPreflight({ input, options, providerOverride, settings, forceProvider });
 
       // Secondary preflight: token-free template simulation/validation
       const simMode = String(options.sim || 'fast').toLowerCase();
@@ -2585,7 +2591,7 @@ taskCmd
       const providerOverride = normalizeProviderName(
         options.provider || process.env.ZEROSHOT_PROVIDER || settings.defaultProvider
       );
-      requirePreflight({
+      await requirePreflight({
         requireGh: false, // gh not needed for plain tasks
         requireDocker: false, // Docker not needed for plain tasks
         quiet: false,
@@ -3096,7 +3102,7 @@ program
           cluster.config?.defaultProvider ||
           settings.defaultProvider;
 
-        requirePreflight({
+        await requirePreflight({
           requireGh: false, // Resume doesn't fetch new issues
           requireDocker: requiresDocker,
           quiet: false,
@@ -3228,7 +3234,7 @@ program
           // If task store is unavailable, fall back to default provider
         }
 
-        requirePreflight({
+        await requirePreflight({
           requireGh: false,
           requireDocker: false,
           quiet: false,

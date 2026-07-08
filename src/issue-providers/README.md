@@ -1,15 +1,16 @@
 # Issue Providers
 
-Multi-platform issue support for Zeroshot. Fetch issues from GitHub, GitLab, Jira, and Azure DevOps.
+Multi-platform issue support for Zeroshot. Fetch issues from GitHub, GitLab, Jira, Azure DevOps, and Linear.
 
 ## Supported Providers
 
-| Provider         | CLI Tool | URL Pattern                                  | Issue Key Format      |
-| ---------------- | -------- | -------------------------------------------- | --------------------- |
-| **GitHub**       | `gh`     | `github.com/org/repo/issues/123`             | `123`, `org/repo#123` |
-| **GitLab**       | `glab`   | `gitlab.com/org/repo/-/issues/123`           | `123`, `org/repo#123` |
-| **Jira**         | `jira`   | `*.atlassian.net/browse/KEY-123`             | `KEY-123`             |
-| **Azure DevOps** | `az`     | `dev.azure.com/org/proj/_workitems/edit/123` | `123`                 |
+| Provider         | CLI Tool               | URL Pattern                                  | Issue Key Format      |
+| ---------------- | ---------------------- | -------------------------------------------- | --------------------- |
+| **GitHub**       | `gh`                   | `github.com/org/repo/issues/123`             | `123`, `org/repo#123` |
+| **GitLab**       | `glab`                 | `gitlab.com/org/repo/-/issues/123`           | `123`, `org/repo#123` |
+| **Jira**         | `jira`                 | `*.atlassian.net/browse/KEY-123`             | `KEY-123`             |
+| **Azure DevOps** | `az`                   | `dev.azure.com/org/proj/_workitems/edit/123` | `123`                 |
+| **Linear**       | _(none — GraphQL API)_ | `linear.app/ws/issue/ENG-42`                 | `ENG-42`              |
 
 ## Quick Start
 
@@ -30,6 +31,11 @@ zeroshot run https://company.atlassian.net/browse/PROJ-123
 # Azure DevOps
 zeroshot run https://dev.azure.com/org/project/_workitems/edit/123
 zeroshot run 123 --devops
+
+# Linear
+zeroshot run ENG-42
+zeroshot run https://linear.app/workspace/issue/ENG-42/some-title
+zeroshot run 42 --linear
 ```
 
 ## Automatic Git Remote Detection
@@ -59,6 +65,7 @@ Override auto-detection with explicit provider flags:
 -L, --gitlab    # Force GitLab as issue source
 -J, --jira      # Force Jira as issue source
 -D, --devops    # Force Azure DevOps as issue source
+-N, --linear    # Force Linear as issue source
 ```
 
 **Example:**
@@ -100,6 +107,9 @@ zeroshot settings set jiraProject MYPROJECT  # Default project for bare numbers
 # Azure DevOps configuration
 zeroshot settings set azureOrg mycompany
 zeroshot settings set azureProject myproject  # Default project for bare numbers
+
+# Linear configuration
+zeroshot settings set linearTeam ENG  # Default team key for bare numbers
 ```
 
 ### Settings Reference
@@ -112,6 +122,7 @@ zeroshot settings set azureProject myproject  # Default project for bare numbers
 | `jiraProject`        | string | null    | Default Jira project key for bare numbers  |
 | `azureOrg`           | string | null    | Azure DevOps organization name             |
 | `azureProject`       | string | null    | Azure DevOps project name for bare numbers |
+| `linearTeam`         | string | null    | Default Linear team key for bare numbers   |
 
 ## CLI Tool Setup
 
@@ -164,6 +175,15 @@ brew install azure-cli       # macOS
 # Configure
 az login
 az devops configure --defaults organization=https://dev.azure.com/yourorg
+```
+
+### Linear
+
+No CLI install needed — Linear is accessed directly via its GraphQL API.
+
+```bash
+# Create a personal API key at https://linear.app/settings/api
+export LINEAR_API_KEY=lin_api_...
 ```
 
 ## Self-Hosted Instances
