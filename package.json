@@ -110,7 +110,6 @@
     "node-pty": "^1.1.0",
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
-    "puppeteer": "^24.34.0",
     "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
