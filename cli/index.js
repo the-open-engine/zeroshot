@@ -2488,8 +2488,11 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
       }
 
       // Auto-detect input type
-      const input = stdinText !== undefined ? buildTextInput(stdinText) : detectRunInput(inputArg);
       const settings = loadSettings();
+      const input =
+        stdinText !== undefined
+          ? buildTextInput(stdinText)
+          : detectRunInput(inputArg, settings, forceProvider);
       const providerOverride = resolveProviderOverride(options);
 
       // Preflight checks
