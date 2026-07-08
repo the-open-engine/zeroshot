@@ -109,20 +109,22 @@ zeroshot settings set azureOrg mycompany
 zeroshot settings set azureProject myproject  # Default project for bare numbers
 
 # Linear configuration
-zeroshot settings set linearTeam ENG  # Default team key for bare numbers
+zeroshot settings set linearApiKey lin_api_...  # API key (falls back to LINEAR_API_KEY env var)
+zeroshot settings set linearTeam ENG  # Default team key for bare numbers (auto-derived on first use if unset)
 ```
 
 ### Settings Reference
 
-| Setting              | Type   | Default | Description                                |
-| -------------------- | ------ | ------- | ------------------------------------------ |
-| `defaultIssueSource` | string | github  | Provider for bare numbers (123)            |
-| `gitlabInstance`     | string | null    | Self-hosted GitLab URL                     |
-| `jiraInstance`       | string | null    | Self-hosted Jira URL                       |
-| `jiraProject`        | string | null    | Default Jira project key for bare numbers  |
-| `azureOrg`           | string | null    | Azure DevOps organization name             |
-| `azureProject`       | string | null    | Azure DevOps project name for bare numbers |
-| `linearTeam`         | string | null    | Default Linear team key for bare numbers   |
+| Setting              | Type   | Default | Description                                                                                         |
+| -------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `defaultIssueSource` | string | github  | Provider for bare numbers (123)                                                                     |
+| `gitlabInstance`     | string | null    | Self-hosted GitLab URL                                                                              |
+| `jiraInstance`       | string | null    | Self-hosted Jira URL                                                                                |
+| `jiraProject`        | string | null    | Default Jira project key for bare numbers                                                           |
+| `azureOrg`           | string | null    | Azure DevOps organization name                                                                      |
+| `azureProject`       | string | null    | Azure DevOps project name for bare numbers                                                          |
+| `linearApiKey`       | string | null    | Linear personal API key (falls back to `LINEAR_API_KEY` env var)                                    |
+| `linearTeam`         | string | null    | Default Linear team key for bare numbers (auto-derived from the workspace if unset and unambiguous) |
 
 ## CLI Tool Setup
 
@@ -183,8 +185,16 @@ No CLI install needed — Linear is accessed directly via its GraphQL API.
 
 ```bash
 # Create a personal API key at https://linear.app/settings/api
+zeroshot settings set linearApiKey lin_api_...
+
+# Or, as a fallback, export it as an env var (checked if linearApiKey is unset):
 export LINEAR_API_KEY=lin_api_...
 ```
+
+Note: `KEY-NUMBER` input (e.g. `ENG-42`) is ambiguous between Jira and Linear.
+It's routed to Linear automatically when Linear is configured
+(`linearApiKey`/`linearTeam`) and Jira isn't; otherwise Jira wins. Use
+`--linear`/`--jira` to force a specific provider.
 
 ## Self-Hosted Instances
 

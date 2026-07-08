@@ -44,8 +44,15 @@ class JiraProvider extends IssueProvider {
       return true;
     }
 
-    // Jira issue key pattern (KEY-123)
+    // Jira issue key pattern (KEY-123) - shared with Linear (ENG-42 vs PROJ-123).
+    // Defer to Linear when it's configured and Jira isn't, so the sole
+    // configured tracker wins instead of registration order.
     if (/^[A-Z][A-Z0-9]+-\d+$/.test(input)) {
+      const jiraConfigured = !!(settings.jiraInstance || settings.jiraProject);
+      const linearConfigured = !!(settings.linearApiKey || settings.linearTeam);
+      if (!jiraConfigured && linearConfigured) {
+        return false;
+      }
       return true;
     }
 

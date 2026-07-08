@@ -3547,9 +3547,11 @@ function printNonDockerSettings(settings) {
     if (dockerKeys.has(key)) {
       continue;
     }
+    const displayValue =
+      key === 'linearApiKey' && value ? `${String(value).slice(0, 7)}***` : value;
     const isDefault = JSON.stringify(DEFAULT_SETTINGS[key]) === JSON.stringify(value);
     const label = isDefault ? chalk.dim(key) : chalk.cyan(key);
-    const val = isDefault ? chalk.dim(String(value)) : chalk.white(String(value));
+    const val = isDefault ? chalk.dim(String(displayValue)) : chalk.white(String(displayValue));
     console.log(`  ${label.padEnd(30)} ${val}`);
   }
 }

@@ -7,6 +7,7 @@ const { detectProvider, getProvider, listProviders } = require('../src/issue-pro
 const GitHubProvider = require('../src/issue-providers/github-provider');
 const GitLabProvider = require('../src/issue-providers/gitlab-provider');
 const JiraProvider = require('../src/issue-providers/jira-provider');
+const LinearProvider = require('../src/issue-providers/linear-provider');
 const AzureDevOpsProvider = require('../src/issue-providers/azure-devops-provider');
 
 describe('Provider Registry', () => {
@@ -141,6 +142,20 @@ describe('Jira Provider', () => {
     it('rejects bare numbers when Jira is default without jiraProject', () => {
       const settings = { defaultIssueSource: 'jira' };
       expect(JiraProvider.detectIdentifier('123', settings)).to.be.false;
+    });
+
+    it('defers KEY-NUMBER to Linear when Linear is configured and Jira is not', () => {
+      expect(JiraProvider.detectIdentifier('ENG-42', { linearApiKey: 'lin_x' })).to.be.false;
+      expect(JiraProvider.detectIdentifier('ENG-42', { linearTeam: 'ENG' })).to.be.false;
+    });
+
+    it('keeps Jira for KEY-NUMBER when both Jira and Linear are configured', () => {
+      const settings = { jiraProject: 'ENG', linearApiKey: 'lin_x' };
+      expect(JiraProvider.detectIdentifier('ENG-42', settings)).to.be.true;
+    });
+
+    it('keeps Jira for KEY-NUMBER when neither is configured', () => {
+      expect(JiraProvider.detectIdentifier('ENG-42', {})).to.be.true;
     });
   });
 
@@ -401,6 +416,21 @@ describe('detectProvider', () => {
 
   it('detects Jira by key', () => {
     const ProviderClass = detectProvider('PROJ-123', {});
+    expect(ProviderClass).to.equal(JiraProvider);
+  });
+
+  it('resolves ambiguous KEY-NUMBER to Linear when Linear is configured and Jira is not', () => {
+    const ProviderClass = detectProvider('ENG-42', { linearApiKey: 'lin_x' }, null, null);
+    expect(ProviderClass).to.equal(LinearProvider);
+  });
+
+  it('resolves ambiguous KEY-NUMBER to Jira when Jira is configured', () => {
+    const ProviderClass = detectProvider('ENG-42', { jiraProject: 'ENG' }, null, null);
+    expect(ProviderClass).to.equal(JiraProvider);
+  });
+
+  it('resolves ambiguous KEY-NUMBER to Jira when neither is configured', () => {
+    const ProviderClass = detectProvider('ENG-42', {}, null, null);
     expect(ProviderClass).to.equal(JiraProvider);
   });
 
