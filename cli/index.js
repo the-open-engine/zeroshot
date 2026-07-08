@@ -48,6 +48,7 @@ const {
 } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider, parseProviderChunk } = require('../src/providers');
+const { readClustersFileSync } = require('../lib/clusters-registry');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
 const {
   detectGitRepoRoot,
@@ -638,22 +639,28 @@ function setupDaemonCleanup(orchestrator, clusterId) {
 }
 
 function readClusterTokenTotals(orchestrator, clusterId) {
-  let totalTokens = 0;
-  let totalCostUsd = 0;
   try {
     const clusterObj = orchestrator.getCluster(clusterId);
-    if (clusterObj?.messageBus) {
-      const tokensByRole = clusterObj.messageBus.getTokensByRole(clusterId);
-      if (tokensByRole?._total?.count > 0) {
-        const total = tokensByRole._total;
-        totalTokens = (total.inputTokens || 0) + (total.outputTokens || 0);
-        totalCostUsd = total.totalCostUsd || 0;
-      }
+    if (!clusterObj?.messageBus) {
+      return { totalTokens: 0, totalCostUsd: 0 };
     }
-  } catch {
-    /* Token tracking not available */
+    const { tokensByRole } = clusterObj.messageBus.readSnapshot(clusterId);
+    const total = tokensByRole?._total;
+    if (!total || total.count === 0) {
+      return { totalTokens: 0, totalCostUsd: 0 };
+    }
+    return {
+      totalTokens: (total.inputTokens || 0) + (total.outputTokens || 0),
+      totalCostUsd: total.totalCostUsd || 0,
+    };
+  } catch (error) {
+    // A confirmed-empty ledger (0) and a failed read must stay distinguishable -
+    // fabricating 0 here is what produced phantom "msgs=0 $0" rows in `list --json`.
+    console.error(
+      `[cli] Failed to read token totals for cluster ${clusterId}: ${error.message || String(error)}`
+    );
+    return { totalTokens: null, totalCostUsd: null };
   }
-  return { totalTokens, totalCostUsd };
 }
 
 function enrichClustersWithTokens(clusters, orchestrator) {
@@ -743,13 +750,16 @@ function reportMissingId(id, options) {
 function getClusterTokensByRole(orchestrator, clusterId) {
   try {
     const cluster = orchestrator.getCluster(clusterId);
-    if (cluster?.messageBus) {
-      return cluster.messageBus.getTokensByRole(clusterId);
+    if (!cluster?.messageBus) {
+      return null;
     }
-  } catch {
-    /* Token tracking not available */
+    return cluster.messageBus.readSnapshot(clusterId).tokensByRole;
+  } catch (error) {
+    console.error(
+      `[cli] Failed to read tokens by role for cluster ${clusterId}: ${error.message || String(error)}`
+    );
+    return null;
   }
-  return null;
 }
 
 function printClusterStatusJson(status, tokensByRole) {
@@ -1470,9 +1480,8 @@ async function printAttachableClusters(clusters, socketDiscovery) {
 }
 
 function readClusterFromDisk(id) {
-  const clustersFile = path.join(os.homedir(), '.zeroshot', 'clusters.json');
   try {
-    const clusters = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
+    const clusters = readClustersFileSync(path.join(os.homedir(), '.zeroshot'));
     return clusters[id] || null;
   } catch {
     return null;
@@ -1563,7 +1572,7 @@ async function resolveClusterSocketPath(id, options, socketDiscovery) {
   const cluster = readClusterFromDisk(id);
   ensureClusterRunning(cluster, id);
 
-  const orchestrator = await Orchestrator.create({ quiet: true });
+  const orchestrator = await Orchestrator.create({ quiet: true, readonly: true });
   try {
     const status = orchestrator.getStatus(id);
     const activeAgents = getActiveAgents(status);
@@ -2035,6 +2044,31 @@ function getOrchestrator() {
     });
   }
   return _orchestratorPromise;
+}
+
+// Separate lazy-loaded read-only orchestrator for commands that only ever read
+// cluster state (list/status/logs). Read-only ledgers can never contend with a
+// live daemon's writer connection or mutate clusters.json as a side effect.
+/** @type {import('../src/orchestrator') | null} */
+let _readonlyOrchestrator = null;
+/** @type {Promise<import('../src/orchestrator')> | null} */
+let _readonlyOrchestratorPromise = null;
+/**
+ * @returns {Promise<import('../src/orchestrator')>}
+ */
+function getReadonlyOrchestrator() {
+  if (_readonlyOrchestrator) {
+    return Promise.resolve(_readonlyOrchestrator);
+  }
+  if (!_readonlyOrchestratorPromise) {
+    _readonlyOrchestratorPromise = Orchestrator.create({ quiet: true, readonly: true }).then(
+      (orch) => {
+        _readonlyOrchestrator = orch;
+        return orch;
+      }
+    );
+  }
+  return _readonlyOrchestratorPromise;
 }
 
 /**
@@ -2674,7 +2708,7 @@ program
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     try {
-      const orchestrator = await getOrchestrator();
+      const orchestrator = await getReadonlyOrchestrator();
       const clusters = filterClustersByStatus(orchestrator.listClusters(), options.status);
       const enrichedClusters = enrichClustersWithTokens(clusters, orchestrator);
 
@@ -2712,7 +2746,7 @@ program
       }
 
       if (type === 'cluster') {
-        const orchestrator = await getOrchestrator();
+        const orchestrator = await getReadonlyOrchestrator();
         const status = orchestrator.getStatus(id);
         const tokensByRole = getClusterTokensByRole(orchestrator, id);
         if (options.json) {
@@ -2770,7 +2804,7 @@ program
       }
 
       const limit = parseLogLimit(options);
-      const quietOrchestrator = await Orchestrator.create({ quiet: true });
+      const quietOrchestrator = await Orchestrator.create({ quiet: true, readonly: true });
 
       if (!id) {
         showAllClusterLogs(quietOrchestrator, options, limit);
@@ -3367,6 +3401,23 @@ async function runGc(dryRun) {
   }
 }
 
+async function detectAndReportCorruptedClusters(dryRun) {
+  if (dryRun) {
+    return;
+  }
+  try {
+    const orchestrator = await getOrchestrator();
+    const corrupted = await orchestrator.detectCorruptedClusters();
+    if (corrupted.length > 0) {
+      console.log(chalk.yellow(`\nFound ${corrupted.length} corrupted cluster(s):`));
+      corrupted.forEach((id) => console.log(chalk.yellow(`  ${id}`)));
+      console.log(chalk.dim(`Run 'zeroshot kill <id>' to remove them.`));
+    }
+  } catch (error) {
+    console.error(`Error detecting corrupted clusters: ${error.message}`);
+  }
+}
+
 program
   .command('gc')
   .description('Clean up orphaned worktree directories and stale database files')
@@ -3374,6 +3425,7 @@ program
   .action(async (options) => {
     try {
       printGcResult(await runGc(options.dryRun), options.dryRun);
+      await detectAndReportCorruptedClusters(options.dryRun);
     } catch (error) {
       console.error('Error during garbage collection:', error.message);
       process.exit(1);

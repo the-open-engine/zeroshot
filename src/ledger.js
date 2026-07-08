@@ -18,9 +18,10 @@ const {
 } = require('./guidance-topics');
 
 class Ledger extends EventEmitter {
-  constructor(dbPath = ':memory:') {
+  constructor(dbPath = ':memory:', options = {}) {
     super();
     this.dbPath = dbPath;
+    this.readonly = options.readonly === true;
     const busyTimeoutMs = (() => {
       const raw = process.env.ZEROSHOT_SQLITE_BUSY_TIMEOUT_MS;
       if (!raw) return 5000;
@@ -28,12 +29,23 @@ class Ledger extends EventEmitter {
       return Number.isFinite(value) && value >= 0 ? value : 5000;
     })();
 
-    this.db = new Database(dbPath, { timeout: busyTimeoutMs });
+    // Read-only connections (CLI list/status/logs) never take a write lock on
+    // another process's live database and skip schema DDL entirely - the schema
+    // is guaranteed to already exist for any cluster with a live daemon.
+    this.db = this.readonly
+      ? new Database(dbPath, { readonly: true, fileMustExist: true, timeout: busyTimeoutMs })
+      : new Database(dbPath, { timeout: busyTimeoutMs });
     this.cache = new Map(); // LRU cache for queries
     this.cacheLimit = 1000;
     this._closed = false; // Track closed state to prevent write-after-close
     this._lastTimestamp = 0;
-    this._initSchema();
+
+    if (this.readonly) {
+      this._prepareStatements();
+      this._loadLastTimestamp();
+    } else {
+      this._initSchema();
+    }
   }
 
   _initSchema() {
@@ -475,7 +487,13 @@ class Ledger extends EventEmitter {
     if (!cluster_id) {
       throw new Error('cluster_id is required for getTokensByRole');
     }
+    return this._computeTokensByRole(cluster_id);
+  }
 
+  /**
+   * @private
+   */
+  _computeTokensByRole(cluster_id) {
     // Query all TOKEN_USAGE messages for this cluster
     const sql = `SELECT * FROM messages WHERE cluster_id = ? AND topic = 'TOKEN_USAGE' ORDER BY timestamp ASC`;
     const stmt = this.db.prepare(sql);
@@ -529,6 +547,27 @@ class Ledger extends EventEmitter {
     byRole._total = total;
 
     return byRole;
+  }
+
+  /**
+   * Read messageCount and tokensByRole as one consistent point-in-time view.
+   * Runs both queries inside a single BEGIN DEFERRED transaction so a concurrent
+   * writer's commit can never be observed by one query but not the other
+   * (the exact straddle that produced the msgs=0/$0 phantom in `zeroshot list`).
+   * @param {String} cluster_id - Cluster ID
+   * @returns {{ messageCount: number, tokensByRole: Object }}
+   */
+  readSnapshot(cluster_id) {
+    if (!cluster_id) {
+      throw new Error('cluster_id is required for readSnapshot');
+    }
+    if (!this._snapshotTxn) {
+      this._snapshotTxn = this.db.transaction((id) => ({
+        messageCount: this.stmts.count.get(id).count,
+        tokensByRole: this._computeTokensByRole(id),
+      })).deferred;
+    }
+    return this._snapshotTxn(cluster_id);
   }
 
   /**
