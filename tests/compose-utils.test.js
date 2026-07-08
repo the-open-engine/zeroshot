@@ -15,7 +15,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { resolveWorktreeComposeTeardown } = require('../lib/compose-utils');
+const {
+  resolveWorktreeComposeTeardown,
+  normalizeComposeProjectName,
+} = require('../lib/compose-utils');
 
 describe('resolveWorktreeComposeTeardown', function () {
   let tmpDir;
@@ -52,7 +55,23 @@ describe('resolveWorktreeComposeTeardown', function () {
     assert.strictEqual(result.shouldTeardown, true);
     assert.ok(!result.args.includes('--volumes'), 'must never include --volumes');
     assert.ok(result.args.includes('--remove-orphans'));
-    assert.strictEqual(result.args[result.args.indexOf('-p') + 1], path.basename(tmpDir));
+    assert.strictEqual(
+      result.args[result.args.indexOf('-p') + 1],
+      normalizeComposeProjectName(path.basename(tmpDir))
+    );
+  });
+
+  it('normalizes an uppercase/special-char worktree basename to match Docker Compose default project naming', function () {
+    const worktreeDir = path.join(tmpDir, 'My.Worktree!');
+    fs.mkdirSync(worktreeDir);
+    fs.writeFileSync(
+      path.join(worktreeDir, 'docker-compose.yml'),
+      'services:\n  db:\n    image: postgres\n'
+    );
+
+    const result = resolveWorktreeComposeTeardown(worktreeDir);
+    assert.strictEqual(result.shouldTeardown, true);
+    assert.strictEqual(result.args[result.args.indexOf('-p') + 1], 'myworktree');
   });
 
   it('returns shouldTeardown:false when the compose file pins a top-level project name', function () {
