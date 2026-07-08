@@ -2,10 +2,34 @@
  * Tests for Linear issue provider
  */
 
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { expect } = require('chai');
 const { detectProvider, getProvider, listProviders } = require('../src/issue-providers');
 const JiraProvider = require('../src/issue-providers/jira-provider');
 const LinearProvider = require('../src/issue-providers/linear-provider');
+
+const TEST_SETTINGS_FILE = path.join(
+  os.tmpdir(),
+  `zeroshot-linear-settings-test-${process.pid}.json`
+);
+
+function withSettingsFile(contents, fn) {
+  const originalEnv = process.env.ZEROSHOT_SETTINGS_FILE;
+  fs.writeFileSync(TEST_SETTINGS_FILE, JSON.stringify(contents), 'utf8');
+  process.env.ZEROSHOT_SETTINGS_FILE = TEST_SETTINGS_FILE;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      if (originalEnv === undefined) {
+        delete process.env.ZEROSHOT_SETTINGS_FILE;
+      } else {
+        process.env.ZEROSHOT_SETTINGS_FILE = originalEnv;
+      }
+      fs.rmSync(TEST_SETTINGS_FILE, { force: true });
+    });
+}
 
 describe('Provider Registry (Linear)', () => {
   it('listProviders includes linear', () => {
@@ -241,7 +265,7 @@ describe('Linear Provider', () => {
       }
     });
 
-    it('throws with recovery guidance when LINEAR_API_KEY is unset, without calling fetch', async () => {
+    it('throws with recovery guidance when no key is configured, without calling fetch', async () => {
       delete process.env.LINEAR_API_KEY;
       let fetchCalled = false;
       global.fetch = () => {
@@ -254,19 +278,52 @@ describe('Linear Provider', () => {
         await provider.fetchIssue('ENG-42', {});
         expect.fail('should have thrown');
       } catch (err) {
-        expect(err.message).to.include('LINEAR_API_KEY not set');
+        expect(err.message).to.include('Linear API key not configured');
+        expect(err.message).to.include('zeroshot settings set linearApiKey');
+        expect(err.message).to.include('https://linear.app/settings/api');
       }
       expect(fetchCalled).to.be.false;
     });
+
+    it('uses settings.linearApiKey when LINEAR_API_KEY env is unset', async () => {
+      delete process.env.LINEAR_API_KEY;
+      let capturedAuth;
+      global.fetch = (_url, options) => {
+        capturedAuth = options.headers.Authorization;
+        return {
+          status: 200,
+          ok: true,
+          json: () => ({
+            data: {
+              issue: {
+                identifier: 'ENG-42',
+                number: 42,
+                title: 'T',
+                description: '',
+                url: null,
+                labels: { nodes: [] },
+                comments: { nodes: [] },
+              },
+            },
+          }),
+        };
+      };
+
+      const provider = new LinearProvider();
+      await provider.fetchIssue('ENG-42', { linearApiKey: 'lin_from_settings' });
+
+      expect(capturedAuth).to.equal('lin_from_settings');
+    });
   });
 
-  describe('checkAuth', () => {
+  describe('linearTeam auto-derivation for bare numbers', () => {
     let originalFetch;
     let originalApiKey;
 
     beforeEach(() => {
       originalFetch = global.fetch;
       originalApiKey = process.env.LINEAR_API_KEY;
+      process.env.LINEAR_API_KEY = 'lin_api_test';
     });
 
     afterEach(() => {
@@ -278,12 +335,158 @@ describe('Linear Provider', () => {
       }
     });
 
-    it('fails fast with recovery steps when LINEAR_API_KEY is not set', async () => {
+    it('derives TEAM-42 from the workspace sole team and persists linearTeam', async () => {
+      await withSettingsFile({}, async () => {
+        let capturedIssueId;
+        global.fetch = (_url, options) => {
+          const body = JSON.parse(options.body);
+          if (body.query.includes('teams')) {
+            return {
+              status: 200,
+              ok: true,
+              json: () => ({ data: { teams: { nodes: [{ key: 'ENG' }] } } }),
+            };
+          }
+          capturedIssueId = body.variables.id;
+          return {
+            status: 200,
+            ok: true,
+            json: () => ({
+              data: {
+                issue: {
+                  identifier: 'ENG-42',
+                  number: 42,
+                  title: 'T',
+                  description: '',
+                  url: null,
+                  labels: { nodes: [] },
+                  comments: { nodes: [] },
+                },
+              },
+            }),
+          };
+        };
+
+        const provider = new LinearProvider();
+        await provider.fetchIssue('42', {});
+
+        expect(capturedIssueId).to.equal('ENG-42');
+        const persisted = JSON.parse(fs.readFileSync(TEST_SETTINGS_FILE, 'utf8'));
+        expect(persisted.linearTeam).to.equal('ENG');
+      });
+    });
+
+    it('throws listing team keys when multiple teams exist', async () => {
+      await withSettingsFile({}, async () => {
+        global.fetch = () => ({
+          status: 200,
+          ok: true,
+          json: () => ({ data: { teams: { nodes: [{ key: 'ENG' }, { key: 'OPS' }] } } }),
+        });
+
+        const provider = new LinearProvider();
+        try {
+          await provider.fetchIssue('42', {});
+          expect.fail('should have thrown');
+        } catch (err) {
+          expect(err.message).to.include('ENG');
+          expect(err.message).to.include('OPS');
+          expect(err.message).to.include('linearTeam');
+        }
+      });
+    });
+
+    it('skips team resolution when linearTeam is already set', async () => {
+      let teamsQueried = false;
+      global.fetch = (_url, options) => {
+        const body = JSON.parse(options.body);
+        if (body.query.includes('teams')) {
+          teamsQueried = true;
+        }
+        return {
+          status: 200,
+          ok: true,
+          json: () => ({
+            data: {
+              issue: {
+                identifier: 'OPS-42',
+                number: 42,
+                title: 'T',
+                description: '',
+                url: null,
+                labels: { nodes: [] },
+                comments: { nodes: [] },
+              },
+            },
+          }),
+        };
+      };
+
+      const provider = new LinearProvider();
+      await provider.fetchIssue('42', { linearTeam: 'OPS' });
+
+      expect(teamsQueried).to.be.false;
+    });
+  });
+
+  describe('checkAuth', () => {
+    let originalFetch;
+    let originalApiKey;
+    let originalSettingsFile;
+
+    beforeEach(() => {
+      originalFetch = global.fetch;
+      originalApiKey = process.env.LINEAR_API_KEY;
+      originalSettingsFile = process.env.ZEROSHOT_SETTINGS_FILE;
+      // Point at a non-existent settings file so loadSettings() returns
+      // deterministic defaults (linearApiKey: null) instead of the real
+      // machine's ~/.zeroshot/settings.json.
+      process.env.ZEROSHOT_SETTINGS_FILE = path.join(
+        os.tmpdir(),
+        `zeroshot-linear-checkauth-missing-${process.pid}.json`
+      );
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      if (originalApiKey === undefined) {
+        delete process.env.LINEAR_API_KEY;
+      } else {
+        process.env.LINEAR_API_KEY = originalApiKey;
+      }
+      if (originalSettingsFile === undefined) {
+        delete process.env.ZEROSHOT_SETTINGS_FILE;
+      } else {
+        process.env.ZEROSHOT_SETTINGS_FILE = originalSettingsFile;
+      }
+    });
+
+    it('fails fast with recovery steps when no key is configured', async () => {
       delete process.env.LINEAR_API_KEY;
       const result = await LinearProvider.checkAuth();
       expect(result.authenticated).to.be.false;
-      expect(result.error).to.equal('LINEAR_API_KEY not set');
-      expect(result.recovery).to.have.lengthOf(2);
+      expect(result.error).to.equal('Linear API key not configured');
+      expect(result.recovery.join(' ')).to.include('zeroshot settings set linearApiKey');
+      expect(result.recovery.join(' ')).to.include('https://linear.app/settings/api');
+    });
+
+    it('uses settings.linearApiKey when LINEAR_API_KEY env is unset', async () => {
+      delete process.env.LINEAR_API_KEY;
+      await withSettingsFile({ linearApiKey: 'lin_from_settings' }, async () => {
+        let capturedAuth;
+        global.fetch = (_url, options) => {
+          capturedAuth = options.headers.Authorization;
+          return {
+            status: 200,
+            ok: true,
+            json: () => ({ data: { viewer: { id: 'user_1' } } }),
+          };
+        };
+
+        const result = await LinearProvider.checkAuth();
+        expect(result.authenticated).to.be.true;
+        expect(capturedAuth).to.equal('lin_from_settings');
+      });
     });
 
     it('succeeds with a valid key', async () => {
@@ -350,6 +553,14 @@ describe('Linear Provider', () => {
 
     it('rejects a numeric linearTeam key', () => {
       expect(LinearProvider.validateSetting('linearTeam', '123')).to.be.a('string');
+    });
+
+    it('accepts any non-empty linearApiKey string (no pattern)', () => {
+      expect(LinearProvider.validateSetting('linearApiKey', 'lin_api_anything')).to.be.null;
+    });
+
+    it('accepts null for linearApiKey (nullable)', () => {
+      expect(LinearProvider.validateSetting('linearApiKey', null)).to.be.null;
     });
   });
 });

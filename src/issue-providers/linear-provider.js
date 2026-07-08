@@ -27,10 +27,12 @@ class LinearProvider extends IssueProvider {
    * explicit Linear URLs, Linear issue keys, or settings.
    *
    * Note: Linear and Jira share the same KEY-NUMBER key format (e.g. ENG-42 vs
-   * PROJ-123), so a bare key is ambiguous between the two providers. Registration
-   * order in index.js resolves this for auto-detection — Linear is registered
-   * after Jira, so an ambiguous bare KEY-NUMBER key matches Jira first. Use
-   * --linear or defaultIssueSource=linear for unambiguous Linear selection.
+   * PROJ-123), so a bare key is ambiguous between the two providers. This is
+   * resolved by configuration, not registration order: JiraProvider.detectIdentifier
+   * defers to Linear for KEY-NUMBER input when Linear is configured
+   * (linearApiKey/linearTeam) and Jira is not. If neither or both are configured,
+   * Jira wins by registration order. Use --linear or defaultIssueSource=linear
+   * for unambiguous Linear selection regardless of configuration.
    *
    * @param {string} input - Issue identifier (URL, key, or number)
    * @param {Object} settings - User settings
@@ -92,19 +94,39 @@ class LinearProvider extends IssueProvider {
   }
 
   /**
+   * Resolve the Linear API key: settings-owned, with env var fallback.
+   * @param {Object} [settings] - User settings (may be undefined/null)
+   * @returns {string|null}
+   */
+  static _resolveApiKey(settings) {
+    return settings?.linearApiKey || process.env.LINEAR_API_KEY || null;
+  }
+
+  /**
+   * Recovery hints pointing at the settings-based fix for a missing/invalid key.
+   * @returns {string[]}
+   */
+  static _recoveryHints() {
+    return [
+      'Set it: zeroshot settings set linearApiKey <key>',
+      'Get a key at https://linear.app/settings/api',
+      'Or export LINEAR_API_KEY=lin_api_...',
+    ];
+  }
+
+  /**
    * Check Linear API key authentication via a minimal GraphQL query
    */
   static async checkAuth() {
-    const apiKey = process.env.LINEAR_API_KEY;
+    // Lazy require avoids circular dependency (settings.js lazy-loads issue-providers).
+    const { loadSettings } = require('../../lib/settings');
+    const apiKey = LinearProvider._resolveApiKey(loadSettings());
 
     if (!apiKey) {
       return {
         authenticated: false,
-        error: 'LINEAR_API_KEY not set',
-        recovery: [
-          'Create a personal API key at https://linear.app/settings/api',
-          'export LINEAR_API_KEY=lin_api_...',
-        ],
+        error: 'Linear API key not configured',
+        recovery: LinearProvider._recoveryHints(),
       };
     }
 
@@ -167,22 +189,88 @@ class LinearProvider extends IssueProvider {
         pattern: /^[A-Z][A-Z0-9]*$/,
         patternMsg: 'linearTeam must be a valid Linear team key (e.g., ENG, PROJ)',
       },
+      linearApiKey: {
+        type: 'string',
+        nullable: true,
+        default: null,
+        description: 'Linear personal API key (get one at https://linear.app/settings/api)',
+      },
     };
   }
 
-  async fetchIssue(identifier, settings) {
-    const issueKey = this._extractIssueKey(identifier, settings);
+  /**
+   * Fetch the workspace's Linear teams and, if there's exactly one, persist its
+   * key as `linearTeam` so future bare-number runs skip this round-trip.
+   * @private
+   */
+  static async _resolveTeamKey(apiKey) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-    const apiKey = process.env.LINEAR_API_KEY;
-    if (!apiKey) {
+    let response;
+    try {
+      response = await fetch(LINEAR_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: apiKey,
+        },
+        body: JSON.stringify({ query: '{ teams { nodes { key } } }' }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const json = await LinearProvider._handleGraphQLResponse(response);
+    if (json.errors) {
+      throw new Error(json.errors.map((e) => e.message).join('; '));
+    }
+
+    const teams = json.data?.teams?.nodes || [];
+    if (teams.length === 0) {
+      throw new Error('No Linear teams found for this API key.');
+    }
+    if (teams.length > 1) {
+      const keys = teams.map((t) => t.key).join(', ');
       throw new Error(
-        'Failed to fetch Linear issue: LINEAR_API_KEY not set. ' +
-          'Create a personal API key at https://linear.app/settings/api ' +
-          'and export LINEAR_API_KEY=lin_api_...'
+        `Multiple Linear teams found (${keys}). Set one: zeroshot settings set linearTeam <KEY>`
       );
     }
 
-    const query = `
+    const key = teams[0].key;
+    const { loadSettings, saveSettings } = require('../../lib/settings');
+    const current = loadSettings();
+    current.linearTeam = key;
+    saveSettings(current);
+    return key;
+  }
+
+  /**
+   * Resolve the issue key, auto-deriving `linearTeam` for bare numbers when it
+   * isn't configured yet.
+   * @private
+   */
+  async _resolveIssueKey(identifier, settings, apiKey) {
+    if (/^\d+$/.test(identifier) && !settings.linearTeam) {
+      const team = await LinearProvider._resolveTeamKey(apiKey);
+      return `${team}-${identifier}`;
+    }
+    return this._extractIssueKey(identifier, settings);
+  }
+
+  async fetchIssue(identifier, settings) {
+    const apiKey = LinearProvider._resolveApiKey(settings);
+    if (!apiKey) {
+      throw new Error(
+        `Failed to fetch Linear issue: Linear API key not configured. ${LinearProvider._recoveryHints().join(' ')}`
+      );
+    }
+
+    try {
+      const issueKey = await this._resolveIssueKey(identifier, settings, apiKey);
+
+      const query = `
       query($id: String!) {
         issue(id: $id) {
           identifier
@@ -210,7 +298,6 @@ class LinearProvider extends IssueProvider {
       }
     `;
 
-    try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
