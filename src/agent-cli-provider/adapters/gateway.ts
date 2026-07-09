@@ -102,6 +102,7 @@ function parseEvent(line: string, _state: ProviderParserState): OutputEvent | nu
     return text === null ? null : { type: 'text', text };
   }
   if (type === 'tool_call') {
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'toolName')) return null;
     return {
       type: 'tool_call',
       toolName: getString(parsed, 'toolName'),
@@ -110,6 +111,7 @@ function parseEvent(line: string, _state: ProviderParserState): OutputEvent | nu
     };
   }
   if (type === 'tool_result') {
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'content')) return null;
     return {
       type: 'tool_result',
       toolId: getString(parsed, 'toolId'),
