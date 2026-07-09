@@ -21,6 +21,8 @@ function usage() {
     'Live provider smoke requires explicit provider selection.',
     '',
     'Examples:',
+    '  ZEROSHOT_LIVE_PROVIDERS=all npm run test:providers:live',
+    '  ZEROSHOT_LIVE_PROVIDERS=claude,codex,gemini npm run test:providers:live',
     '  ZEROSHOT_LIVE_PROVIDERS=pi npm run test:providers:live',
     '  ZEROSHOT_LIVE_PROVIDERS=copilot npm run test:providers:live',
     '  ZEROSHOT_LIVE_PROVIDERS=gateway \\',
@@ -42,12 +44,21 @@ function parseProviders() {
   }
 
   const providers = [];
+  const allProviders = helper.listProviderAdapters();
   for (const item of raw.split(',')) {
-    const normalized = helper.normalizeProviderName(item.trim());
+    const trimmed = item.trim();
+    if (trimmed.toLowerCase() === 'all') {
+      for (const provider of allProviders) {
+        if (!providers.includes(provider)) providers.push(provider);
+      }
+      continue;
+    }
+
+    const normalized = helper.normalizeProviderName(trimmed);
     if (!normalized) continue;
-    if (!helper.listProviderAdapters().includes(normalized)) {
+    if (!allProviders.includes(normalized)) {
       throw new Error(
-        `Unknown provider "${item}". Valid providers: ${helper.listProviderAdapters().join(', ')}`
+        `Unknown provider "${item}". Valid providers: ${allProviders.join(', ')}, all`
       );
     }
     if (!providers.includes(normalized)) providers.push(normalized);
