@@ -66,3 +66,25 @@ describe('buildStartOptions() runMode', function () {
     assert.strictEqual(result.runMode, null);
   });
 });
+
+describe('buildStartOptions() autoMerge', function () {
+  it('resolves autoMerge=true for --ship', function () {
+    const result = buildStartOptions({ clusterId: 'c1', options: { ship: true } });
+    assert.strictEqual(result.autoMerge, true);
+  });
+
+  it('resolves autoMerge=false for --pr', function () {
+    const result = buildStartOptions({ clusterId: 'c1', options: { pr: true } });
+    assert.strictEqual(result.autoMerge, false);
+  });
+
+  it('ignores the dead ZEROSHOT_MERGE env var (removed signal has no effect)', function () {
+    process.env.ZEROSHOT_MERGE = '1';
+    try {
+      const result = buildStartOptions({ clusterId: 'c1', options: { pr: true } });
+      assert.strictEqual(result.autoMerge, false);
+    } finally {
+      delete process.env.ZEROSHOT_MERGE;
+    }
+  });
+});

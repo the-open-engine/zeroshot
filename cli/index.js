@@ -189,6 +189,7 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
+  options.autoMerge = Boolean(options.ship);
 }
 
 async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
@@ -2397,7 +2398,7 @@ program
   )
   .option(
     '--pr',
-    'Create PR for human review (uses worktree isolation by default, use --docker for Docker)'
+    'Create PR for human review (uses worktree isolation by default, use --docker for Docker). Never auto-merges itself; a repo-side branch-protection auto-merge rule or merge queue may still merge the PR independently of zeroshot.'
   )
   .option(
     '--ship',
