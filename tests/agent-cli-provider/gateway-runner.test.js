@@ -52,7 +52,7 @@ test('gateway invoke completes deterministic edit task', async () => {
 
   try {
     let requestCount = 0;
-    const response = await withGatewayServer(async (_req, res) => {
+    const response = await withGatewayServer((_req, res) => {
       requestCount += 1;
       if (requestCount === 1) {
         jsonResponse(res, 200, {
@@ -111,7 +111,7 @@ test('gateway invoke completes deterministic edit task', async () => {
           },
         ],
       });
-    }, async (baseUrl) =>
+    }, (baseUrl) =>
       runProviderExecutable(
         JSON.stringify({
           schemaVersion: 1,
@@ -187,14 +187,14 @@ test('gateway rejects invalid config as permanent failures', async () => {
 test('gateway redacts auth failures', async () => {
   const secret = 'gateway-auth-secret';
   const response = await withGatewayServer(
-    async (_req, res) => {
+    (_req, res) => {
       jsonResponse(res, 401, {
         error: {
           message: 'Unauthorized',
         },
       });
     },
-    async (baseUrl) =>
+    (baseUrl) =>
       runProviderExecutable(
         JSON.stringify({
           schemaVersion: 1,
@@ -224,14 +224,14 @@ test('gateway redacts auth failures', async () => {
 
 test('gateway classifies remote invalid-model 404 failures as permanent', async () => {
   const events = await withGatewayServer(
-    async (_req, res) => {
+    (_req, res) => {
       jsonResponse(res, 404, {
         error: {
           message: 'No such model',
         },
       });
     },
-    async (baseUrl) =>
+    (baseUrl) =>
       runGatewayRequest({
         context: 'Reply with ok.',
         cwd: process.cwd(),
@@ -274,7 +274,7 @@ test('gateway requires explicit tool policy before invoke', async () => {
       },
     }),
     {
-      runner: async () => {
+      runner: () => {
         runnerCalled = true;
         return {
           stdout: '',
@@ -300,7 +300,7 @@ test('gateway blocks disallowed command before execution', async () => {
   try {
     let requestCount = 0;
     const events = await withGatewayServer(
-      async (_req, res) => {
+      (_req, res) => {
         requestCount += 1;
         if (requestCount === 1) {
           jsonResponse(res, 200, {
@@ -330,7 +330,7 @@ test('gateway blocks disallowed command before execution', async () => {
         }
         throw new Error('gateway should stop after the rejected command');
       },
-      async (baseUrl) =>
+      (baseUrl) =>
         runGatewayRequest({
           context: 'noop',
           cwd: tempDir,
@@ -371,7 +371,7 @@ test('gateway stops remaining tool calls in a batch after the first tool error',
 
   try {
     let requestCount = 0;
-    const events = await withGatewayServer(async (_req, res) => {
+    const events = await withGatewayServer((_req, res) => {
       requestCount += 1;
       if (requestCount === 1) {
         jsonResponse(res, 200, {
@@ -411,7 +411,7 @@ test('gateway stops remaining tool calls in a batch after the first tool error',
         return;
       }
       throw new Error('gateway should stop after the first tool error in a batch');
-    }, async (baseUrl) =>
+    }, (baseUrl) =>
       runGatewayRequest({
         context: 'noop',
         cwd: tempDir,
@@ -450,7 +450,7 @@ test('gateway preserves prior normalized events when a later gateway request fai
 
   try {
     let requestCount = 0;
-    const events = await withGatewayServer(async (_req, res) => {
+    const events = await withGatewayServer((_req, res) => {
       requestCount += 1;
       if (requestCount === 1) {
         jsonResponse(res, 200, {
@@ -476,7 +476,7 @@ test('gateway preserves prior normalized events when a later gateway request fai
       }
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: { message: 'boom' } }));
-    }, async (baseUrl) =>
+    }, (baseUrl) =>
       runGatewayRequest({
         context: 'noop',
         cwd: tempDir,
@@ -509,12 +509,12 @@ test('gateway emits tool_result for malformed tool arguments before failing the 
 
   try {
     let requestCount = 0;
-    const events = await withGatewayServer(async (_req, res) => {
+    const events = await withGatewayServer((_req, res) => {
       requestCount += 1;
-        if (requestCount === 1) {
-          jsonResponse(res, 200, {
-            choices: [
-              {
+      if (requestCount === 1) {
+        jsonResponse(res, 200, {
+          choices: [
+            {
               message: {
                 content: 'Run the malformed tool call.',
                 tool_calls: [
@@ -528,13 +528,13 @@ test('gateway emits tool_result for malformed tool arguments before failing the 
                   },
                 ],
               },
-              },
-            ],
-          });
-          return;
-        }
+            },
+          ],
+        });
+        return;
+      }
       throw new Error('gateway should stop after malformed tool arguments');
-    }, async (baseUrl) =>
+    }, (baseUrl) =>
       runGatewayRequest({
         context: 'noop',
         cwd: tempDir,
@@ -572,7 +572,7 @@ test('gateway returns failure result after tool errors even if the model stops',
 
   try {
     let requestCount = 0;
-    const events = await withGatewayServer(async (_req, res) => {
+    const events = await withGatewayServer((_req, res) => {
       requestCount += 1;
       if (requestCount === 1) {
         jsonResponse(res, 200, {
@@ -605,7 +605,7 @@ test('gateway returns failure result after tool errors even if the model stops',
           },
         ],
       });
-    }, async (baseUrl) =>
+    }, (baseUrl) =>
       runGatewayRequest({
         context: 'noop',
         cwd: tempDir,
