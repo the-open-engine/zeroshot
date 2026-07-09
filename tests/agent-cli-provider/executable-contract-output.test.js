@@ -133,6 +133,24 @@ test('classify-error returns machine-readable category and redacted evidence', (
   assertNoSecret(response.envelope, 'sk-secret');
 });
 
+test('classify-error treats Gemini unsupported-client auth failures as permanent', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'classify-error',
+    provider: 'gemini',
+    error: {
+      message:
+        'IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. reasonCode: UNSUPPORTED_CLIENT',
+      status: 1,
+    },
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.classification.retryable, false);
+  assert.equal(response.envelope.result.classification.kind, 'permanent-pattern');
+});
+
 test('classify-error redacts secret-looking evidence without matching env value', () => {
   const secret = 'sk-live-123456';
   const response = runExecutable({

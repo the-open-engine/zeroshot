@@ -133,6 +133,7 @@ function summarizeResult(envelope) {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
+      classification: result.classification || null,
       eventCount: events.length,
       lastEventType: last && typeof last === 'object' ? last.type : null,
       text: text.slice(0, 500),

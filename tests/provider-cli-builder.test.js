@@ -169,6 +169,14 @@ describe('Gemini provider helper builder', function () {
     assert.ok(result.args.includes('--output-format'));
     assert.ok(result.args.includes('stream-json'));
   });
+
+  it('marks headless workspaces trusted for noninteractive Gemini runs', function () {
+    const result = buildCommand('gemini', 'test', {
+      cwd: '/tmp/project',
+    });
+
+    assert.strictEqual(result.env.GEMINI_CLI_TRUST_WORKSPACE, 'true');
+  });
 });
 
 describe('Opencode provider helper builder', function () {
