@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakePiScript,
   runExecutable,
   withFakeProviderCli,
   withTempEnv,
@@ -185,6 +186,172 @@ process.exit(17);
   );
 });
 
+test('build-command uses Pi JSON mode with discovery disabled and schema prompt fallback', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cwd: '/tmp/worktree',
+      jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+      modelSpec: { model: 'openai/gpt-5.5' },
+      cliFeatures: {
+        supportsJsonMode: true,
+        supportsNoSession: true,
+        supportsNoExtensions: true,
+        supportsNoSkills: true,
+        supportsNoPromptTemplates: true,
+        supportsNoContextFiles: true,
+        supportsNoApprove: true,
+        supportsModel: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.schemaMode, 'prompt');
+  assert.equal(commandSpec.binary, 'pi');
+  assert.equal(commandSpec.cwd, '/tmp/worktree');
+  assert.deepEqual(commandSpec.args.slice(0, 11), [
+    '--mode',
+    'json',
+    '--no-session',
+    '--no-extensions',
+    '--no-skills',
+    '--no-prompt-templates',
+    '--no-context-files',
+    '--no-approve',
+    '--model',
+    'openai/gpt-5.5',
+    commandSpec.args.at(-1),
+  ]);
+  assert.ok(commandSpec.args.at(-1).includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
+  assert.ok(response.envelope.warnings.some((warning) => warning.code === 'pi-jsonschema'));
+});
+
+test('build-command rejects Pi resume/continue session control requests', () => {
+  const resumed = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: 'ignored-session',
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(resumed.exitCode, 2);
+  assert.equal(resumed.envelope.ok, false);
+  assert.equal(resumed.envelope.error.code, 'invalid-field');
+  assert.equal(resumed.envelope.error.field, 'options.resumeSessionId');
+
+  const emptyResumed = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: '',
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(emptyResumed.exitCode, 2);
+  assert.equal(emptyResumed.envelope.ok, false);
+  assert.equal(emptyResumed.envelope.error.code, 'invalid-field');
+  assert.equal(emptyResumed.envelope.error.field, 'options.resumeSessionId');
+
+  const continued = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      continueSession: true,
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(continued.exitCode, 2);
+  assert.equal(continued.envelope.ok, false);
+  assert.equal(continued.envelope.error.code, 'invalid-field');
+  assert.equal(continued.envelope.error.field, 'options.continueSession');
+});
+
+test('build-command ignores undefined Pi resumeSessionId values', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: undefined,
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.commandSpec.binary, 'pi');
+  assert.equal(response.envelope.result.commandSpec.args.at(-1), 'Return JSON.');
+});
+
+test('build-command keeps Pi JSON-mode args when only version probe returns output', () => {
+  withFakeProviderCli(
+    'pi',
+    fakePiScript(`
+if (process.argv.includes('--help')) {
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('0.80.3\\n');
+  process.exit(0);
+}
+process.stderr.write('unknown option -h\\n');
+process.exit(1);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'pi',
+        context: 'Return JSON.',
+        options: {
+          outputFormat: 'json',
+        },
+      });
+
+      const args = response.envelope.result.commandSpec.args;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.deepEqual(args.slice(0, 8), [
+        '--mode',
+        'json',
+        '--no-session',
+        '--no-extensions',
+        '--no-skills',
+        '--no-prompt-templates',
+        '--no-context-files',
+        '--no-approve',
+      ]);
+      assert.equal(args.at(-1), 'Return JSON.');
+    }
+  );
+});
+
 test('build-command resolves Codex settings default level and model overrides', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-provider-settings-'));
   const settingsFile = path.join(tempDir, 'settings.json');
@@ -289,6 +456,38 @@ process.exit(17);
       assert.equal(response.envelope.result.capabilities.supportsJson, true);
       assert.equal(response.envelope.result.capabilities.supportsOutputSchema, false);
       assert.equal(response.envelope.result.capabilities.unknown, false);
+    }
+  );
+});
+
+test('probe requires Pi help or version output when helpText is not supplied', () => {
+  withFakeProviderCli(
+    'pi',
+    fakePiScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: pi --mode json --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --no-approve --model\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('0.80.3\\n');
+  process.exit(0);
+}
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'probe',
+        provider: 'pi',
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.available, true);
+      assert.equal(response.envelope.result.provider.id, 'pi');
+      assert.equal(response.envelope.result.capabilities.supportsJsonMode, true);
+      assert.equal(response.envelope.result.capabilities.supportsNoApprove, true);
+      assert.equal(response.envelope.result.versionText, '0.80.3');
     }
   );
 });

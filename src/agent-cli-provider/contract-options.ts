@@ -28,6 +28,13 @@ const CLI_FEATURE_FIELDS = [
   'supportsConfigOverride',
   'supportsSkipGitRepoCheck',
   'supportsVariant',
+  'supportsJsonMode',
+  'supportsNoSession',
+  'supportsNoExtensions',
+  'supportsNoSkills',
+  'supportsNoPromptTemplates',
+  'supportsNoContextFiles',
+  'supportsNoApprove',
   'unknown',
 ] as const;
 

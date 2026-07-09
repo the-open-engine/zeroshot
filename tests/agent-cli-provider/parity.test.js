@@ -128,6 +128,25 @@ test('runtime Opencode command facade delegates to helper', () => {
   });
 });
 
+test('runtime Pi command facade delegates to helper', () => {
+  assertRuntimeCommandParity('pi', 'pi context', {
+    outputFormat: 'json',
+    jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    cwd: '/tmp/project',
+    modelSpec: { level: 'level2', model: 'openai/gpt-5.5' },
+    cliFeatures: {
+      supportsJsonMode: true,
+      supportsNoSession: true,
+      supportsNoExtensions: true,
+      supportsNoSkills: true,
+      supportsNoPromptTemplates: true,
+      supportsNoContextFiles: true,
+      supportsNoApprove: true,
+      supportsModel: true,
+    },
+  });
+});
+
 test('Codex helper exposes strict schema cleanup metadata through runtime facade', () => {
   const actual = runtimeProviders.getProvider('codex').buildCommand('schema context', {
     outputFormat: 'json',
@@ -162,6 +181,14 @@ test('model resolution and invalid-model permanence match helper', () => {
       helper.resolveModelSpec(provider, 'level2', { level2: { model: '' } }),
       current.resolveModelSpec('level2', { level2: { model: '' } })
     );
+
+    if (provider === 'pi') {
+      assert.deepEqual(
+        helper.resolveModelSpec(provider, 'level2', { level2: { model: 'invalid' } }),
+        current.resolveModelSpec('level2', { level2: { model: 'invalid' } })
+      );
+      continue;
+    }
 
     assert.throws(
       () => helper.resolveModelSpec(provider, 'level2', { level2: { model: 'invalid' } }),
@@ -203,6 +230,7 @@ test('parser output from runtime facade matches helper fixtures', () => {
   for (const [provider, files] of [
     ['codex', ['text.jsonl', 'tool.jsonl']],
     ['gemini', ['text.jsonl', 'tool.jsonl']],
+    ['pi', ['text.jsonl', 'tool.jsonl', 'command-failure.jsonl']],
   ]) {
     for (const file of files) {
       const chunk = fixture(provider, file);
@@ -299,6 +327,14 @@ test('feature probing is deterministic from injected help text', () => {
   assert.equal(
     helper.getProviderAdapter('opencode').detectCliFeatures('opencode run --format').supportsCwd,
     false
+  );
+  assert.equal(
+    helper
+      .getProviderAdapter('pi')
+      .detectCliFeatures(
+        'pi --mode json --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --no-approve --model'
+      ).supportsNoApprove,
+    true
   );
 });
 

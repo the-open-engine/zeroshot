@@ -250,6 +250,26 @@ describe('Opencode provider helper builder', function () {
   });
 });
 
+describe('Pi provider helper builder', function () {
+  it('fails closed when resume or continue session control is requested', function () {
+    assert.throws(
+      () =>
+        buildCommand('pi', 'test context', {
+          resumeSessionId: 'session-123',
+        }),
+      /does not support resume\/continue session control/
+    );
+
+    assert.throws(
+      () =>
+        buildCommand('pi', 'test context', {
+          continueSession: true,
+        }),
+      /does not support resume\/continue session control/
+    );
+  });
+});
+
 describe('Claude provider helper builder', function () {
   const originalEnv = process.env.ZEROSHOT_CLAUDE_COMMAND;
 

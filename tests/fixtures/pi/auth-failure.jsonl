@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"pi-auth-failure","timestamp":"2026-07-09T00:00:00.000Z","cwd":"/tmp/pi"}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"auth failed"}],"usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0},"stopReason":"error","errorMessage":"authentication required: run /login"},"toolResults":[]}

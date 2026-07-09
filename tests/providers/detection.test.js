@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
   commandExists,
   getCommandPath,
@@ -26,5 +29,23 @@ describe('Provider CLI detection', () => {
     assert.ok(typeof help === 'string');
     assert.ok(typeof version === 'string');
     assert.ok(version.length > 0);
+  });
+
+  it('ignores failing fallback help/version probes', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-detect-'));
+    const cliPath = path.join(tempDir, 'pi');
+
+    fs.writeFileSync(
+      cliPath,
+      '#!/usr/bin/env node\nif (process.argv.includes("--help")) process.exit(0);\nif (process.argv.includes("--version")) { process.stdout.write("0.80.3\\n"); process.exit(0); }\nprocess.stderr.write("unknown option -h\\n"); process.exit(1);\n',
+      { mode: 0o755 }
+    );
+
+    try {
+      assert.strictEqual(getHelpOutput(cliPath), '');
+      assert.strictEqual(getVersionOutput(cliPath), '0.80.3');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

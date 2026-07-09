@@ -26,6 +26,7 @@ const providerPolicyNames = [
   'codex',
   'gemini',
   'opencode',
+  'pi',
   'anthropic',
   'openai',
   'google',
@@ -175,7 +176,7 @@ test('docker preset surfaces derive provider entries from registry', () => {
   assert.match(dockerSource, /listProviderMetadata\(\)/);
   assert.doesNotMatch(
     dockerSource,
-    /claude:\s*\{[\s\S]*codex:\s*\{[\s\S]*gemini:\s*\{[\s\S]*opencode:\s*\{/m
+    /claude:\s*\{[\s\S]*codex:\s*\{[\s\S]*gemini:\s*\{[\s\S]*opencode:\s*\{[\s\S]*pi:\s*\{/m
   );
   assert.match(cliSource, /Object\.keys\(MOUNT_PRESETS\)\.join\(', '\)/);
 });

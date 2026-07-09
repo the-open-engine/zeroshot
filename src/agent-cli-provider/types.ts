@@ -102,11 +102,24 @@ export interface OpencodeCliFeatures extends BaseCliFeatures {
   readonly supportsAutoApprove: false;
 }
 
+export interface PiCliFeatures extends BaseCliFeatures {
+  readonly provider: 'pi';
+  readonly supportsJsonMode: boolean;
+  readonly supportsModel: boolean;
+  readonly supportsNoSession: boolean;
+  readonly supportsNoExtensions: boolean;
+  readonly supportsNoSkills: boolean;
+  readonly supportsNoPromptTemplates: boolean;
+  readonly supportsNoContextFiles: boolean;
+  readonly supportsNoApprove: boolean;
+}
+
 export type ProviderCliFeatures =
   | ClaudeCliFeatures
   | CodexCliFeatures
   | GeminiCliFeatures
-  | OpencodeCliFeatures;
+  | OpencodeCliFeatures
+  | PiCliFeatures;
 
 export interface CliFeatureOverrides {
   readonly supportsOutputFormat?: boolean;
@@ -123,6 +136,13 @@ export interface CliFeatureOverrides {
   readonly supportsConfigOverride?: boolean;
   readonly supportsSkipGitRepoCheck?: boolean;
   readonly supportsVariant?: boolean;
+  readonly supportsJsonMode?: boolean;
+  readonly supportsNoSession?: boolean;
+  readonly supportsNoExtensions?: boolean;
+  readonly supportsNoSkills?: boolean;
+  readonly supportsNoPromptTemplates?: boolean;
+  readonly supportsNoContextFiles?: boolean;
+  readonly supportsNoApprove?: boolean;
   readonly unknown?: boolean;
 }
 
@@ -212,8 +232,10 @@ export type OutputEvent = TextEvent | ThinkingEvent | ToolCallEvent | ToolResult
 export type ProviderParseResult = OutputEvent | readonly OutputEvent[] | null;
 
 export interface ProviderParserState {
-  provider: ProviderId;
+  readonly provider: ProviderId;
   lastToolId: string | null | undefined;
+  lastAssistantText?: string;
+  lastAssistantThinking?: string;
 }
 
 export type ErrorClassificationKind =
