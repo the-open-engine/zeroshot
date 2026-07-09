@@ -2,14 +2,36 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const sinon = require('sinon');
 
 const { prepareClaudeConfigDir } = require('../../src/worktree-claude-config');
+const safeExec = require('../../src/lib/safe-exec');
+
+function withPlatform(value, fn) {
+  const original = Object.getOwnPropertyDescriptor(os, 'platform');
+  Object.defineProperty(os, 'platform', { value: () => value, configurable: true });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(os, 'platform', original);
+  }
+}
+
+function loadWorktreeClaudeConfigWithStubbedCredentials(execSyncStub) {
+  sinon.stub(safeExec, 'execSync').callsFake(execSyncStub);
+  delete require.cache[require.resolve('../../src/claude-credentials')];
+  delete require.cache[require.resolve('../../src/worktree-claude-config')];
+  return require('../../src/worktree-claude-config');
+}
 
 describe('worktree-claude-config', function () {
   /** @type {string[]} */
   let tempDirs = [];
 
   afterEach(function () {
+    sinon.restore();
+    delete require.cache[require.resolve('../../src/claude-credentials')];
+    delete require.cache[require.resolve('../../src/worktree-claude-config')];
     for (const dir of tempDirs.splice(0)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -116,5 +138,42 @@ describe('worktree-claude-config', function () {
 
     const mergedMcp = JSON.parse(fs.readFileSync(path.join(overlayDir, '.mcp.json'), 'utf8'));
     assert.deepStrictEqual(Object.keys(mergedMcp.mcpServers).sort(), ['repo', 'shared']);
+  });
+
+  it('materializes macOS Keychain credentials into the isolated overlay config dir', function () {
+    const worktreeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-claude-worktree-'));
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-claude-source-no-creds-'));
+    tempDirs.push(worktreeRoot, sourceDir);
+
+    fs.writeFileSync(path.join(worktreeRoot, '.git'), 'gitdir: test\n', 'utf8');
+    fs.mkdirSync(path.join(worktreeRoot, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(worktreeRoot, '.claude', 'settings.json'), '{}\n', 'utf8');
+
+    const keychainJson = '{"claudeAiOauth":{"accessToken":"keychain-token"}}';
+    const { prepareClaudeConfigDir: prepareWithStubbedKeychain } =
+      loadWorktreeClaudeConfigWithStubbedCredentials((command) => {
+        assert.strictEqual(
+          command,
+          'security find-generic-password -s "Claude Code-credentials" -w'
+        );
+        return `${keychainJson}\n`;
+      });
+
+    const overlayDir = withPlatform('darwin', () =>
+      prepareWithStubbedKeychain({ worktreePath: worktreeRoot, sourceDir })
+    );
+    tempDirs.push(overlayDir);
+
+    assert.ok(overlayDir, 'expected an overlay config dir');
+    assert.strictEqual(
+      fs.readFileSync(path.join(overlayDir, '.credentials.json'), 'utf8'),
+      keychainJson,
+      'isolated CLAUDE_CONFIG_DIR must receive materialized Keychain credentials'
+    );
+    assert.strictEqual(
+      fs.statSync(path.join(overlayDir, '.credentials.json')).mode & 0o777,
+      0o600,
+      'materialized credentials should be owner-readable only'
+    );
   });
 });

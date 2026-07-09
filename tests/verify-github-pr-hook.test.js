@@ -614,6 +614,39 @@ describe('verify_pull_request hook action', () => {
       assert.strictEqual(callCount, 1, `Expected exactly 1 gh call (got ${callCount})`);
     });
 
+    it('treats PR existence as success even if review-mode agent output claims merged:true', async function () {
+      const agent = createMockAgent();
+      const hook = { action: 'verify_pull_request', config: { autoMerge: false } };
+      const result = {
+        output: JSON.stringify({
+          pr_url: 'https://github.com/org/repo/pull/124',
+          pr_number: 124,
+          merged: true,
+        }),
+      };
+
+      let callCount = 0;
+      mockSpawnSyncFn = () => {
+        callCount++;
+        return spawnSuccess(
+          JSON.stringify({
+            number: 124,
+            state: 'OPEN',
+            mergedAt: null,
+            url: 'https://github.com/org/repo/pull/124',
+          })
+        );
+      };
+
+      await executeHook({ hook, agent, result });
+
+      assert.strictEqual(agent.lastPublished.topic, 'CLUSTER_COMPLETE');
+      assert.strictEqual(agent.lastPublished.content.data.reason, 'git-pusher-complete-verified');
+      assert.strictEqual(agent.lastPublished.content.data.pr_number, 124);
+      assert.strictEqual(agent.lastPublished.content.data.merged, false);
+      assert.strictEqual(callCount, 1, `Expected exactly 1 gh call (got ${callCount})`);
+    });
+
     it('still throws when the PR does not exist (hallucination check still applies)', async function () {
       const agent = createMockAgent();
       const hook = { action: 'verify_pull_request', config: { autoMerge: false } };
