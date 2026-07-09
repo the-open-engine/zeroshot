@@ -118,7 +118,7 @@ function buildClaudeEnv(modelSpec, options = {}) {
     env.ANTHROPIC_MODEL = modelSpec.model;
   }
 
-  // Activate AskUserQuestion blocking hook (see hooks/block-ask-user-question.py)
+  // Activate AskUserQuestion blocking hook (see cluster-hooks/block-ask-user-question.py)
   env.ZEROSHOT_BLOCK_ASK_USER = '1';
 
   return env;
@@ -446,7 +446,7 @@ function ensureAskUserQuestionHook(targetClaudeDir = null) {
   }
 
   // Copy hook script if not present or outdated
-  const hookScriptSrc = path.join(__dirname, '..', '..', 'hooks', hookScriptName);
+  const hookScriptSrc = path.join(__dirname, '..', '..', 'cluster-hooks', hookScriptName);
   if (fs.existsSync(hookScriptSrc)) {
     // Always copy to ensure latest version
     fs.copyFileSync(hookScriptSrc, hookScriptDst);
@@ -524,7 +524,7 @@ function ensureDangerousGitHook(targetClaudeDir = null) {
   }
 
   // Copy hook script if not present or outdated
-  const hookScriptSrc = path.join(__dirname, '..', '..', 'hooks', hookScriptName);
+  const hookScriptSrc = path.join(__dirname, '..', '..', 'cluster-hooks', hookScriptName);
   if (fs.existsSync(hookScriptSrc)) {
     // Always copy to ensure latest version
     fs.copyFileSync(hookScriptSrc, hookScriptDst);

@@ -94,7 +94,7 @@
     "cli/",
     "task-lib/",
     "cluster-templates/",
-    "hooks/",
+    "cluster-hooks/",
     "docker/",
     "scripts/",
     "README.md",

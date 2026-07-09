@@ -11,6 +11,7 @@ const assert = require('node:assert');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execSync } = require('node:child_process');
 
 const { generateGitPusherAgent } = require('../src/agents/git-pusher-template');
 const Orchestrator = require('../src/orchestrator');
@@ -23,6 +24,13 @@ function withTmpCwd(fn) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function writeRepoSettings(cwd, settings) {
+  execSync('git init', { cwd, stdio: 'ignore' });
+  const settingsDir = path.join(cwd, '.zeroshot');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  fs.writeFileSync(path.join(settingsDir, 'settings.json'), JSON.stringify(settings, null, 2));
 }
 
 describe('git-pusher --pr vs --ship (autoMerge)', function () {
@@ -73,6 +81,32 @@ describe('git-pusher --pr vs --ship (autoMerge)', function () {
       const agentConfig = generateGitPusherAgent('github', { cwd });
       assert.strictEqual(agentConfig.hooks.onComplete.config.autoMerge, false);
       assert(!/gh pr merge/i.test(agentConfig.prompt));
+    });
+  });
+
+  it('--pr review mode overrides repo github.autoMerge=true', function () {
+    withTmpCwd((cwd) => {
+      writeRepoSettings(cwd, { github: { autoMerge: true } });
+
+      const agentConfig = generateGitPusherAgent('github', { autoMerge: false, cwd });
+
+      assert.strictEqual(agentConfig.hooks.onComplete.config.autoMerge, false);
+      assert(!/gh pr merge/i.test(agentConfig.prompt), '--pr must not inherit repo auto-merge');
+      assert(
+        /Do NOT merge the PR/i.test(agentConfig.prompt),
+        '--pr must remain a human-review prompt even when repo settings enable auto-merge'
+      );
+    });
+  });
+
+  it('repo github.autoMerge=true only applies when the caller has not selected --pr', function () {
+    withTmpCwd((cwd) => {
+      writeRepoSettings(cwd, { github: { autoMerge: true } });
+
+      const agentConfig = generateGitPusherAgent('github', { cwd });
+
+      assert.strictEqual(agentConfig.hooks.onComplete.config.autoMerge, true);
+      assert(/gh pr merge/i.test(agentConfig.prompt));
     });
   });
 
