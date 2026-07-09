@@ -16,6 +16,10 @@ function kiroFixture(name) {
   return fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'kiro', name), 'utf8');
 }
 
+function copilotFixture(name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'copilot', name), 'utf8');
+}
+
 test('parse-output returns normalized events and parser diagnostics', () => {
   const stdout = [
     JSON.stringify({
@@ -544,6 +548,208 @@ test('classify-error maps Kiro auth, retryable, cancellation, and malformed ACP 
       schemaVersion: 1,
       command: 'classify-error',
       provider: 'kiro',
+      error: { message },
+    });
+
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(response.envelope.result.category, expectedCategory);
+    assert.equal(response.envelope.result.classification.retryable, expectedRetryable);
+  }
+});
+
+test('parse-output normalizes Copilot text and tool JSONL fixtures', () => {
+  const textResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('text.jsonl'),
+  });
+
+  assert.equal(textResponse.exitCode, 0);
+  assert.equal(textResponse.envelope.ok, true);
+  assert.deepEqual(textResponse.envelope.result.events, [
+    { type: 'text', text: 'pong' },
+    {
+      type: 'result',
+      success: true,
+      result: 'pong',
+      error: null,
+      inputTokens: 0,
+      outputTokens: 21,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    },
+  ]);
+
+  const toolResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('tool.jsonl'),
+  });
+
+  assert.equal(toolResponse.exitCode, 0);
+  assert.equal(toolResponse.envelope.ok, true);
+  assert.deepEqual(toolResponse.envelope.result.events, [
+    // `phase:"commentary"` narration is surfaced as thinking, not as the answer text.
+    { type: 'thinking', text: 'Creating hello.txt now.' },
+    {
+      type: 'tool_call',
+      toolName: 'apply_patch',
+      toolId: 'call_1',
+      input: '*** Begin Patch\n*** Add File: hello.txt\n+hi there\n*** End Patch\n',
+    },
+    {
+      type: 'tool_result',
+      toolId: 'call_1',
+      content: 'Added 1 file(s): hello.txt',
+      isError: false,
+    },
+    { type: 'text', text: 'Done. It printed: hi there' },
+    {
+      type: 'result',
+      success: true,
+      result: 'Done. It printed: hi there',
+      error: null,
+      inputTokens: 0,
+      outputTokens: 223,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    },
+  ]);
+});
+
+test('parse-output passes object-form Copilot tool arguments through unchanged', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('tool-object-args.jsonl'),
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  const events = response.envelope.result.events;
+  // Real copilot tool arguments are string-form for some tools (apply_patch) and object-form for
+  // others (bash); the parser must forward both without reshaping.
+  assert.deepEqual(
+    events.find((event) => event.type === 'tool_call'),
+    {
+      type: 'tool_call',
+      toolName: 'bash',
+      toolId: 'call_9',
+      input: { command: 'cat hello.txt' },
+    }
+  );
+  assert.deepEqual(
+    events.find((event) => event.type === 'tool_result'),
+    {
+      type: 'tool_result',
+      toolId: 'call_9',
+      content: 'hi there\n',
+      isError: false,
+    }
+  );
+});
+
+test('parse-output ignores unknown Copilot event types (fail-open)', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('unknown-event.jsonl'),
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(response.envelope.result.events, [
+    { type: 'text', text: 'partial' },
+    {
+      type: 'result',
+      success: true,
+      result: 'partial',
+      error: null,
+      inputTokens: 0,
+      outputTokens: 3,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    },
+  ]);
+});
+
+test('parse-output normalizes Copilot reasoning as a thinking event', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('reasoning.jsonl'),
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(response.envelope.result.events, [
+    { type: 'thinking', text: 'Let me think about this.' },
+    { type: 'text', text: 'answer' },
+    {
+      type: 'result',
+      success: true,
+      result: 'answer',
+      error: null,
+      inputTokens: 0,
+      outputTokens: 5,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    },
+  ]);
+});
+
+test('parse-output reports a non-zero Copilot exitCode as a failed result', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('failure.jsonl'),
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  // Success is derived from the terminal `result` event's top-level exitCode, NOT from any message
+  // text — a non-zero exit must surface as a failed result so restart/resume logic can react.
+  assert.deepEqual(response.envelope.result.events.at(-1), {
+    type: 'result',
+    success: false,
+    result: null,
+    error: 'Copilot exited with code 1',
+    inputTokens: 0,
+    outputTokens: 9,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  });
+
+  const emptyResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'copilot',
+    stdout: copilotFixture('empty.jsonl'),
+  });
+
+  assert.equal(emptyResponse.exitCode, 0);
+  assert.equal(emptyResponse.envelope.ok, true);
+  assert.deepEqual(emptyResponse.envelope.result.events, []);
+});
+
+test('classify-error maps Copilot auth, rate-limit, quota, and command failures', () => {
+  for (const [message, expectedCategory, expectedRetryable] of [
+    ['authentication failed: set GITHUB_TOKEN or run /login', 'auth', false],
+    ['rate limit exceeded; retry later', 'rate-limit', true],
+    ['insufficient quota', 'rate-limit', false],
+    ['Unknown option --bogus', 'permanent', false],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'classify-error',
+      provider: 'copilot',
       error: { message },
     });
 

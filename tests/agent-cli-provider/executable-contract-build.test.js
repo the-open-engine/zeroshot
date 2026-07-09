@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakeCopilotScript,
   fakeKiroScript,
   fakePiScript,
   runExecutable,
@@ -610,6 +611,113 @@ process.exit(17);
       assert.equal(response.envelope.result.capabilities.supportsAcpStdio, true);
       assert.equal(response.envelope.result.capabilities.supportsPermissionRequests, false);
       assert.equal(response.envelope.result.capabilities.supportsTerminalTools, false);
+    }
+  );
+});
+
+test('build-command builds Copilot autonomous argv with schema prompt fallback', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cwd: '/tmp/worktree',
+      autoApprove: true,
+      jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+      modelSpec: { model: 'gpt-5.2' },
+      cliFeatures: {
+        supportsJsonOutput: true,
+        supportsModel: true,
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsAddDir: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.schemaMode, 'prompt');
+  assert.equal(commandSpec.binary, 'copilot');
+  assert.equal(commandSpec.cwd, '/tmp/worktree');
+  assert.deepEqual(commandSpec.args, [
+    '--output-format',
+    'json',
+    '--model',
+    'gpt-5.2',
+    '--add-dir',
+    '/tmp/worktree',
+    '--allow-all',
+    '--no-ask-user',
+    '-p',
+    commandSpec.args.at(-1),
+  ]);
+  assert.equal(commandSpec.args.at(-2), '-p');
+  assert.ok(commandSpec.args.at(-1).includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
+  assert.ok(response.envelope.warnings.some((warning) => warning.code === 'copilot-jsonschema'));
+});
+
+test('build-command omits Copilot approval flags when autoApprove is not requested', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cliFeatures: {
+        supportsJsonOutput: true,
+        supportsModel: true,
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsAddDir: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(commandSpec.args.includes('--allow-all'), false);
+  assert.equal(commandSpec.args.includes('--no-ask-user'), false);
+  assert.equal(commandSpec.args.at(-2), '-p');
+  assert.equal(commandSpec.args.at(-1), 'Return JSON.');
+});
+
+test('build-command keeps Copilot JSON output args when only version probe returns output', () => {
+  withFakeProviderCli(
+    'copilot',
+    fakeCopilotScript(`
+if (process.argv.includes('--help')) {
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('1.0.0\\n');
+  process.exit(0);
+}
+process.stderr.write('unknown option -h\\n');
+process.exit(1);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'copilot',
+        context: 'Return JSON.',
+        options: {
+          outputFormat: 'json',
+        },
+      });
+
+      const args = response.envelope.result.commandSpec.args;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.deepEqual(args.slice(0, 2), ['--output-format', 'json']);
+      assert.equal(args.at(-2), '-p');
+      assert.equal(args.at(-1), 'Return JSON.');
     }
   );
 });

@@ -6,6 +6,7 @@ const { test } = require('node:test');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakeCopilotScript,
   fakeKiroScript,
   fakePiScript,
   invokeCodexSchemaRequest,
@@ -609,4 +610,73 @@ test('invoke classifies Pi in-band turn_end failures even when the process exits
   assert.equal(response.envelope.result.events.at(-1).error, 'authentication required: run /login');
   assert.equal(response.envelope.result.classification.retryable, false);
   assert.equal(response.envelope.result.classification.kind, 'permanent-pattern');
+});
+
+test('invoke runs Copilot in the requested worktree cwd and normalizes streamed JSONL', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-copilot-worktree-'));
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'copilot', 'tool.jsonl');
+
+  try {
+    withFakeProviderCli(
+      'copilot',
+      fakeCopilotScript(`
+const fs = require('node:fs');
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: copilot -p <prompt> --output-format json --model <m> --allow-all --no-ask-user --add-dir <dir>\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('1.0.0\\n');
+  process.exit(0);
+}
+if (fs.realpathSync(process.cwd()) !== process.env.COPILOT_EXPECT_CWD) {
+  process.stderr.write(\`cwd mismatch: \${process.cwd()}\`);
+  process.exit(19);
+}
+process.stdout.write(fs.readFileSync(process.env.COPILOT_FIXTURE, 'utf8'));
+`),
+      () =>
+        withTempEnv(
+          {
+            COPILOT_EXPECT_CWD: fs.realpathSync(tempDir),
+            COPILOT_FIXTURE: fixturePath,
+          },
+          () => {
+            const response = runExecutable({
+              schemaVersion: 1,
+              command: 'invoke',
+              provider: 'copilot',
+              context: 'Run one tool.',
+              options: {
+                cwd: tempDir,
+                outputFormat: 'json',
+              },
+              timeoutMs: 300,
+            });
+
+            assert.equal(response.exitCode, 0);
+            assert.equal(response.envelope.ok, true);
+            assert.equal(response.envelope.result.exitCode, 0);
+            assert.equal(response.envelope.result.commandSpec.cwd, tempDir);
+            const args = response.envelope.result.commandSpec.args;
+            const addDirIndex = args.indexOf('--add-dir');
+            assert.notEqual(addDirIndex, -1);
+            assert.equal(args[addDirIndex + 1], tempDir);
+            const events = response.envelope.result.events;
+            assert.ok(
+              events.some((event) => event.type === 'tool_call'),
+              'expected a tool_call event'
+            );
+            assert.ok(
+              events.some((event) => event.type === 'tool_result'),
+              'expected a tool_result event'
+            );
+            assert.equal(events.at(-1).type, 'result');
+            assert.equal(events.at(-1).success, true);
+          }
+        )
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

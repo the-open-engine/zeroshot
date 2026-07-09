@@ -62,6 +62,7 @@ export type {
   AcpCliFeatures,
   ClaudeCliFeatures,
   CodexCliFeatures,
+  CopilotCliFeatures,
   CommandSpec,
   ErrorClassification,
   ErrorClassificationKind,

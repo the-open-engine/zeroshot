@@ -16,8 +16,13 @@ const os = require('os');
 const fs = require('fs');
 const { loadSettings } = require('../lib/settings');
 const { CLAUDE_AUTH_ENV_VARS, resolveClaudeAuth } = require('../lib/settings/claude-auth');
-const { normalizeProviderName } = require('../lib/provider-names');
-const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
+const { normalizeProviderName, getProviderMetadata } = require('../lib/provider-names');
+const {
+  MOUNT_PRESETS,
+  resolveMounts,
+  resolveEnvs,
+  expandEnvPatterns,
+} = require('../lib/docker-config');
 const { getProvider } = require('./providers');
 const { readRepoSettings } = require('../lib/repo-settings');
 const { provisionClaudeCredentials } = require('./claude-credentials');
@@ -171,7 +176,13 @@ class IsolationManager {
       clusterConfigDir,
     });
 
-    const mountedHosts = this._applyCredentialMounts(args, config, settings, containerHome);
+    const mountedHosts = this._applyCredentialMounts(
+      args,
+      config,
+      settings,
+      containerHome,
+      providerName
+    );
     this._warnMissingProviderCredentials(providerName, mountedHosts, config, containerHome);
 
     args.push('-w', '/workspace', image, 'tail', '-f', '/dev/null');
@@ -285,13 +296,25 @@ class IsolationManager {
     return settings.dockerMounts;
   }
 
-  _applyCredentialMounts(args, config, settings, containerHome) {
+  // Auto-activate the running provider's own credential preset (mount + env) so `--docker` works
+  // without listing it in dockerMounts. Claude is mounted separately, so skip it.
+  _withActiveProviderPreset(mountConfig, providerName) {
+    if (!providerName || providerName === 'claude') return mountConfig;
+    if (!MOUNT_PRESETS[providerName]) return mountConfig;
+    if (mountConfig.some((item) => item === providerName)) return mountConfig;
+    return [...mountConfig, providerName];
+  }
+
+  _applyCredentialMounts(args, config, settings, containerHome, providerName) {
     const mountedHosts = [];
     if (config.noMounts) {
       return mountedHosts;
     }
 
-    const mountConfig = this._resolveMountConfig(config, settings);
+    const mountConfig = this._withActiveProviderPreset(
+      this._resolveMountConfig(config, settings),
+      providerName
+    );
     const mounts = resolveMounts(mountConfig, { containerHome });
     const claudeContainerPath = path.posix.join(containerHome, '.claude');
 
@@ -363,16 +386,40 @@ class IsolationManager {
       return;
     }
 
+    const metadata = getProviderMetadata(providerName);
     const provider = getProvider(providerName);
+
+    // An env token (e.g. COPILOT_GITHUB_TOKEN) is a complete credential on its own.
+    const credentialEnvKeys = metadata.credentialEnvKeys || [];
+    if (credentialEnvKeys.some((key) => process.env[key])) {
+      return;
+    }
+
+    // A mount only counts if it carries the secret (credentialInMount !== false).
+    const credentialInMount = metadata.docker && metadata.docker.credentialInMount === false;
     const credentialPaths = provider.getCredentialPaths ? provider.getCredentialPaths() : [];
     const expandedCreds = credentialPaths.map((cred) => expandHomePath(cred));
-    const hasCredentialMount = mountedHosts.some((hostPath) =>
-      expandedCreds.some(
-        (credPath) => pathContains(hostPath, credPath) || pathContains(credPath, hostPath)
-      )
-    );
+    const hasCredentialMount =
+      !credentialInMount &&
+      mountedHosts.some((hostPath) =>
+        expandedCreds.some(
+          (credPath) => pathContains(hostPath, credPath) || pathContains(credPath, hostPath)
+        )
+      );
+    if (hasCredentialMount) {
+      return;
+    }
 
-    if (!hasCredentialMount && expandedCreds.length > 0) {
+    if (credentialInMount && credentialEnvKeys.length > 0) {
+      console.warn(
+        `[IsolationManager] ⚠️  ${provider.displayName} could not find credentials for Docker. ` +
+          `Its login token is not stored in a mountable file — export one of ` +
+          `${credentialEnvKeys.join(', ')} before running with --docker.`
+      );
+      return;
+    }
+
+    if (expandedCreds.length > 0) {
       const exampleHost = credentialPaths[0];
       const exampleContainer = exampleHost.replace(/^~(?=\/|$)/, containerHome);
       const mountNote = config.noMounts ? 'Credential mounts are disabled. ' : '';

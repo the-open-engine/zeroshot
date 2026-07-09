@@ -270,6 +270,24 @@ describe('Pi provider helper builder', function () {
   });
 });
 
+describe('Copilot provider helper builder', function () {
+  it('emits auto-approve flags when autoApprove is requested', function () {
+    const spec = buildCommand('copilot', 'test context', {
+      autoApprove: true,
+    });
+    assert.ok(spec.args.includes('--allow-all'));
+    assert.ok(spec.args.includes('--no-ask-user'));
+  });
+
+  it('warns and ignores unsupported session control instead of failing closed', function () {
+    const resumed = buildCommand('copilot', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.ok(!resumed.args.includes('--resume'));
+    assert.ok(resumed.warnings.some((warning) => warning.code === 'unsupported-session-control'));
+  });
+});
+
 describe('Claude provider helper builder', function () {
   const originalEnv = process.env.ZEROSHOT_CLAUDE_COMMAND;
 

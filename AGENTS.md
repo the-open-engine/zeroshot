@@ -78,7 +78,7 @@ UX modes:
 - Daemon (`-d`): background, Ctrl+C detaches.
 - Attach (`zeroshot attach`): connect to daemon, Ctrl+C detaches only.
 
-Settings: `defaultProvider`, `providerSettings` (claude/codex/gemini/opencode/pi), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
+Settings: `defaultProvider`, `providerSettings` (claude/codex/gemini/opencode/pi/copilot), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
 
 Provider engines are registry-owned: adding an engine means one entry in `src/agent-cli-provider/provider-registry.ts`, plus the provider-specific adapter and tests. Docker credential mount/env presets, CLI aliases, visible preset lists, and any nontrivial availability probe rules must derive from that registry entry; do not add new provider identity lists or provider preset lists elsewhere.
 
@@ -133,7 +133,7 @@ Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledge
 
 - Use `modelLevel` (`level1`/`level2`/`level3`) for provider-agnostic configs.
 - Set `provider` per agent or `defaultProvider`/`forceProvider` at cluster level.
-- Provider names use CLI identifiers: `claude`, `codex`, `gemini`, `opencode`, `pi` (legacy `anthropic`/`openai`/`google` map to these).
+- Provider names use CLI identifiers: `claude`, `codex`, `gemini`, `opencode`, `pi`, `copilot` (legacy `anthropic`/`openai`/`google` map to these).
 - `model` remains a provider-specific escape hatch.
 - Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh`).
 
@@ -191,11 +191,11 @@ Docker: fresh git clone in container, credentials mounted, auto-cleanup.
 
 Configurable credential mounts for `--docker` mode. See `lib/docker-config.js`.
 
-| Setting                | Type          | Default  | Description                                           |
+| Setting | Type | Default | Description |
 | ---------------------- | ------------- | -------- | ----------------------------------------------------- | ---------------------------------------- |
-| `dockerMounts`         | `Array<string | object>` | `['gh','git','ssh']`                                  | Presets or `{host, container, readonly}` |
-| `dockerEnvPassthrough` | `string[]`    | `[]`     | Extra env vars (supports `VAR`, `VAR_*`, `VAR=value`) |
-| `dockerContainerHome`  | `string`      | `/root`  | Container home for `$HOME` expansion                  |
+| `dockerMounts` | `Array<string | object>` | `['gh','git','ssh']` | Presets or `{host, container, readonly}` |
+| `dockerEnvPassthrough` | `string[]` | `[]` | Extra env vars (supports `VAR`, `VAR_*`, `VAR=value`) |
+| `dockerContainerHome` | `string` | `/root` | Container home for `$HOME` expansion |
 
 Mount presets: infrastructure presets plus provider ids from `src/agent-cli-provider/provider-registry.ts`.
 

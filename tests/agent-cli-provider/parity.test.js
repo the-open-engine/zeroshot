@@ -147,6 +147,23 @@ test('runtime Pi command facade delegates to helper', () => {
   });
 });
 
+test('runtime Copilot command facade delegates to helper', () => {
+  assertRuntimeCommandParity('copilot', 'copilot context', {
+    outputFormat: 'json',
+    autoApprove: true,
+    jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    cwd: '/tmp/project',
+    modelSpec: { level: 'level2', model: 'gpt-5.2' },
+    cliFeatures: {
+      supportsJsonOutput: true,
+      supportsModel: true,
+      supportsAllowAll: true,
+      supportsNoAskUser: true,
+      supportsAddDir: true,
+    },
+  });
+});
+
 test('Codex helper exposes strict schema cleanup metadata through runtime facade', () => {
   const actual = runtimeProviders.getProvider('codex').buildCommand('schema context', {
     outputFormat: 'json',
@@ -182,7 +199,7 @@ test('model resolution and invalid-model permanence match helper', () => {
       current.resolveModelSpec('level2', { level2: { model: '' } })
     );
 
-    if (provider === 'pi') {
+    if (provider === 'pi' || provider === 'copilot') {
       assert.deepEqual(
         helper.resolveModelSpec(provider, 'level2', { level2: { model: 'invalid' } }),
         current.resolveModelSpec('level2', { level2: { model: 'invalid' } })
@@ -230,8 +247,19 @@ test('parser output from runtime facade matches helper fixtures', () => {
   for (const [provider, files] of [
     ['codex', ['text.jsonl', 'tool.jsonl']],
     ['gemini', ['text.jsonl', 'tool.jsonl']],
-    ['kiro', ['text.jsonl', 'tool.jsonl', 'auth-failure.jsonl', 'cancelled.jsonl', 'empty.jsonl', 'malformed.jsonl']],
+    [
+      'kiro',
+      [
+        'text.jsonl',
+        'tool.jsonl',
+        'auth-failure.jsonl',
+        'cancelled.jsonl',
+        'empty.jsonl',
+        'malformed.jsonl',
+      ],
+    ],
     ['pi', ['text.jsonl', 'tool.jsonl', 'command-failure.jsonl']],
+    ['copilot', ['text.jsonl', 'tool.jsonl', 'unknown-event.jsonl']],
   ]) {
     for (const file of files) {
       const chunk = fixture(provider, file);
@@ -335,6 +363,14 @@ test('feature probing is deterministic from injected help text', () => {
       .detectCliFeatures(
         'pi --mode json --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --no-approve --model'
       ).supportsNoApprove,
+    true
+  );
+  assert.equal(
+    helper
+      .getProviderAdapter('copilot')
+      .detectCliFeatures(
+        'copilot -p --output-format json --model --allow-all --no-ask-user --add-dir'
+      ).supportsAllowAll,
     true
   );
   assert.deepEqual(helper.getProviderAdapter('kiro').detectCliFeatures('kiro-cli acp --help'), {

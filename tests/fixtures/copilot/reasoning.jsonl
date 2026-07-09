@@ -1,0 +1,5 @@
+{"type":"assistant.turn_start","data":{"turnId":"0","model":"gpt-5.3-codex"}}
+{"type":"assistant.reasoning","data":{"reasoningId":"r1","content":"Let me think about this."}}
+{"type":"assistant.message_start","data":{"messageId":"m1","phase":"final_answer"},"ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m1","content":"answer","outputTokens":5}}
+{"type":"result","sessionId":"s1","exitCode":0,"usage":{}}

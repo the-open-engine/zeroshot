@@ -425,6 +425,37 @@ function defineRunPreflightTests() {
       }
     });
 
+    it('should fail Copilot preflight when the command exists but help/version probing fails', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-copilot-'));
+      const originalPath = process.env.PATH;
+      const copilotPath = path.join(tempDir, 'copilot');
+
+      fs.writeFileSync(
+        copilotPath,
+        '#!/usr/bin/env node\nif (process.argv.includes("--help") || process.argv.includes("--version")) process.exit(9);\nprocess.exit(0);\n',
+        { mode: 0o755 }
+      );
+      process.env.PATH = `${tempDir}${path.delimiter}${originalPath || ''}`;
+
+      try {
+        const result = await runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'copilot',
+        });
+
+        expect(result.valid).to.be.false;
+        expect(result.errors.join('')).to.include(
+          'Command "copilot" is installed but did not produce usable --help/--version output'
+        );
+        expect(result.errors.join('')).to.include('npm install -g @github/copilot');
+      } finally {
+        process.env.PATH = originalPath;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should not require Claude auth when CLI is installed', async function () {
       try {
         execSync(`${whichCmd} claude`, { stdio: 'pipe' });

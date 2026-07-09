@@ -111,6 +111,10 @@ function fakeKiroScript(body) {
   return `#!/usr/bin/env node\n${body}\n`;
 }
 
+function fakeCopilotScript(body) {
+  return `#!/usr/bin/env node\n${body}\n`;
+}
+
 function invokeCodexSchemaRequest(overrides = {}) {
   return {
     schemaVersion: 1,
@@ -127,6 +131,7 @@ module.exports = {
   codexSchemaOptions,
   invokeCodexSchemaRequest,
   fakeCodexScript,
+  fakeCopilotScript,
   fakeKiroScript,
   fakePiScript,
   repoRoot,

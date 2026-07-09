@@ -116,6 +116,15 @@ export interface PiCliFeatures extends BaseCliFeatures {
   readonly supportsNoApprove: boolean;
 }
 
+export interface CopilotCliFeatures extends BaseCliFeatures {
+  readonly provider: 'copilot';
+  readonly supportsJsonOutput: boolean;
+  readonly supportsModel: boolean;
+  readonly supportsAllowAll: boolean;
+  readonly supportsNoAskUser: boolean;
+  readonly supportsAddDir: boolean;
+}
+
 export interface AcpCliFeatures extends BaseCliFeatures {
   readonly provider: ProviderId;
   readonly supportsAcpStdio: boolean;
@@ -137,6 +146,7 @@ export type ProviderCliFeatures =
   | GeminiCliFeatures
   | OpencodeCliFeatures
   | PiCliFeatures
+  | CopilotCliFeatures
   | AcpCliFeatures;
 
 export interface CliFeatureOverrides {
@@ -161,6 +171,10 @@ export interface CliFeatureOverrides {
   readonly supportsNoPromptTemplates?: boolean;
   readonly supportsNoContextFiles?: boolean;
   readonly supportsNoApprove?: boolean;
+  readonly supportsJsonOutput?: boolean;
+  readonly supportsAllowAll?: boolean;
+  readonly supportsNoAskUser?: boolean;
+  readonly supportsAddDir?: boolean;
   readonly supportsAcpStdio?: boolean;
   readonly supportsPromptImages?: boolean;
   readonly supportsLoadSession?: boolean;
@@ -265,6 +279,7 @@ export interface ProviderParserState {
   lastToolId: string | null | undefined;
   lastAssistantText?: string;
   lastAssistantThinking?: string;
+  messagePhaseById?: Map<string, string>;
   assistantTextByMessageId?: Map<string, string>;
   assistantThinkingByMessageId?: Map<string, string>;
   toolCalls?: Map<
