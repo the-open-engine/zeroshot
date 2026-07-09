@@ -575,6 +575,12 @@ class Orchestrator {
     // missing - a ledger write. Read-only orchestrators must never write, so they
     // skip it; they only need to read existing snapshots, not produce new ones.
     if (!this.readonly) {
+      this._registerClusterSubscriptions({
+        messageBus,
+        clusterId,
+        isolationManager,
+        containerId: isolation?.containerId || null,
+      });
       this._startSnapshotter(clusterContext);
     }
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
@@ -2314,6 +2320,9 @@ class Orchestrator {
    * Call before deleting storageDir to prevent ENOENT race conditions during cleanup
    */
   close() {
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
   }
 

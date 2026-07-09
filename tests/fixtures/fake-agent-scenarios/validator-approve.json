@@ -1,0 +1,8 @@
+{
+  "files": [{ "path": "validation-report.txt", "content": "APPROVED\n" }],
+  "messages": [
+    "Validating the implementation.",
+    "{\"summary\": \"Validation passed\", \"result\": \"All checks green\"}"
+  ],
+  "exitCode": 0
+}

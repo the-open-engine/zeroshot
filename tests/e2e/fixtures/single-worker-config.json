@@ -1,0 +1,23 @@
+{
+  "agents": [
+    {
+      "id": "worker",
+      "role": "implementation",
+      "timeout": 0,
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=worker Implement the requested feature.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": { "topic": "TASK_COMPLETE", "content": { "text": "Done" } }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "timeout": 0,
+      "triggers": [{ "topic": "TASK_COMPLETE", "action": "stop_cluster" }]
+    }
+  ]
+}

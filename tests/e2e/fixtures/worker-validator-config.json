@@ -1,0 +1,52 @@
+{
+  "agents": [
+    {
+      "id": "worker",
+      "role": "implementation",
+      "timeout": 0,
+      "triggers": [
+        { "topic": "ISSUE_OPENED", "action": "execute_task" },
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst response = ledger.findLast({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nreturn response?.content?.data?.approved === false || response?.content?.data?.approved === 'false';"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "prompt": "FAKE_AGENT_ID=worker Implement the requested feature.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "IMPLEMENTATION_READY",
+            "content": { "text": "Ready for validation" }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator",
+      "role": "validator",
+      "timeout": 0,
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=validator Validate the implementation.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": { "text": "Approved", "data": { "approved": true } }
+          }
+        }
+      }
+    },
+    {
+      "id": "completion-detector",
+      "role": "orchestrator",
+      "timeout": 0,
+      "triggers": [{ "topic": "VALIDATION_RESULT", "action": "stop_cluster" }]
+    }
+  ]
+}
