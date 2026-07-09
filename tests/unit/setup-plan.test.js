@@ -12,7 +12,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildSetupPlan } = require('../../lib/setup-plan');
+const { buildSetupPlan, isConsumedPath } = require('../../lib/setup-plan');
 
 const PROVIDER_NAMES = ['claude', 'codex', 'gemini', 'opencode'];
 
@@ -140,10 +140,8 @@ describe('buildSetupPlan', function () {
       const allowedPaths = new Set([
         'defaultProvider',
         'defaultDocker',
-        'allowLocalNoIsolation',
         'defaultDelivery',
         'defaultIssueSource',
-        'prBase',
         'dockerMounts',
         'dockerEnvPassthrough',
         'updatePolicy',
@@ -156,6 +154,25 @@ describe('buildSetupPlan', function () {
         assert.ok('from' in write);
         assert.ok('to' in write);
         assert.ok(typeof write.decisionId === 'string');
+      }
+    });
+
+    it('never proposes a write for a settings key no resolver consumes (no dead writes)', function () {
+      const plan = freshMachinePlan();
+      // allowLocalNoIsolation/prBase are still valid *decisions* (a future wizard
+      // could surface them), but confirmed dead by grep as of #606 — no resolver
+      // reads them, so proposing a write for them would advertise a write apply
+      // will always skip. Assert every proposedWrites path is one apply will
+      // actually perform.
+      assert.ok(plan.decisions.some((d) => d.decisionId === 'allowLocalNoIsolation'));
+      assert.ok(plan.decisions.some((d) => d.decisionId === 'prBase'));
+      assert.ok(!plan.proposedWrites.some((w) => w.decisionId === 'allowLocalNoIsolation'));
+      assert.ok(!plan.proposedWrites.some((w) => w.decisionId === 'prBase'));
+      for (const write of plan.proposedWrites) {
+        assert.ok(
+          isConsumedPath(write.scope, write.path),
+          `unconsumed path: ${write.scope}:${write.path}`
+        );
       }
     });
 
