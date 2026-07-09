@@ -123,3 +123,29 @@ internals.
 
 See `docs/provider-cli-helper.md` for the ownership boundary, non-goals, rollout
 rules, and required verification commands.
+
+## Live Provider Smoke Tests
+
+The normal test suite is deterministic and offline. To verify a provider against
+the real installed CLI or a real gateway endpoint, run the opt-in live smoke
+command:
+
+```bash
+ZEROSHOT_LIVE_PROVIDERS=pi npm run test:providers:live
+ZEROSHOT_LIVE_PROVIDERS=copilot npm run test:providers:live
+```
+
+Gateway requires endpoint settings:
+
+```bash
+ZEROSHOT_LIVE_PROVIDERS=gateway \
+  ZEROSHOT_LIVE_GATEWAY_BASE_URL=https://openrouter.ai/api/v1 \
+  ZEROSHOT_LIVE_GATEWAY_API_KEY=... \
+  ZEROSHOT_LIVE_GATEWAY_MODEL=openai/gpt-5.4 \
+  npm run test:providers:live
+```
+
+The live command invokes the provider through Zeroshot's executable provider
+contract and requires the provider to return the sentinel
+`ZEROSHOT_LIVE_SMOKE_OK`. It is not part of CI because it may require local
+auth, network access, and paid API calls.
