@@ -53,10 +53,6 @@ function parseMessageStart(data: Record<string, unknown>, state: ProviderParserS
   return null;
 }
 
-function textOrThinking(commentary: boolean, text: string): OutputEvent {
-  return commentary ? { type: 'thinking', text } : { type: 'text', text };
-}
-
 function parseMessageDelta(
   data: Record<string, unknown>,
   state: ProviderParserState
@@ -66,7 +62,8 @@ function parseMessageDelta(
   const messageId = getString(data, 'messageId') ?? '';
   const map = messageTextMap(state);
   map.set(messageId, (map.get(messageId) ?? '') + delta);
-  return textOrThinking(isCommentaryPhase(messagePhaseMap(state).get(messageId)), delta);
+  const commentary = isCommentaryPhase(messagePhaseMap(state).get(messageId));
+  return commentary ? { type: 'thinking', text: delta } : { type: 'text', text: delta };
 }
 
 function parseMessage(
@@ -82,7 +79,8 @@ function parseMessage(
   const commentary = isCommentaryPhase(getString(data, 'phase') ?? messagePhaseMap(state).get(messageId));
   // Only the final answer (not commentary narration) is the run's result text.
   if (content && !commentary) state.lastAssistantText = content;
-  return delta ? textOrThinking(commentary, delta) : null;
+  if (!delta) return null;
+  return commentary ? { type: 'thinking', text: delta } : { type: 'text', text: delta };
 }
 
 function parseReasoning(data: Record<string, unknown>): OutputEvent | null {
