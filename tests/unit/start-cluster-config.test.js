@@ -67,6 +67,47 @@ describe('buildStartOptions() runMode', function () {
   });
 });
 
+describe('buildStartOptions() isolation (single producer via run plan)', function () {
+  it('derives isolation=true / worktree=false for --docker', function () {
+    const result = buildStartOptions({ clusterId: 'c1', options: { docker: true } });
+    assert.strictEqual(result.isolation, true);
+    assert.strictEqual(result.worktree, false);
+  });
+
+  it('derives worktree=true / isolation=false for --pr (worktree delivery)', function () {
+    const result = buildStartOptions({ clusterId: 'c1', options: { pr: true } });
+    assert.strictEqual(result.isolation, false);
+    assert.strictEqual(result.worktree, true);
+  });
+
+  it('folds settings.defaultDocker into the plan (isolation without a CLI flag)', function () {
+    const result = buildStartOptions({
+      clusterId: 'c1',
+      options: {},
+      settings: { defaultDocker: true },
+    });
+    assert.strictEqual(result.isolation, true);
+    assert.strictEqual(result.worktree, false);
+    // Label reflects the SAME effective plan, not just the raw flags.
+    assert.strictEqual(result.runMode, 'docker');
+  });
+
+  it('isolation and worktree are mutually exclusive (docker wins over worktree)', function () {
+    const result = buildStartOptions({
+      clusterId: 'c1',
+      options: { worktree: true, docker: true },
+    });
+    assert.strictEqual(result.isolation, true);
+    assert.strictEqual(result.worktree, false);
+  });
+
+  it('no isolation when no flags and no settings', function () {
+    const result = buildStartOptions({ clusterId: 'c1', options: {}, settings: {} });
+    assert.strictEqual(result.isolation, false);
+    assert.strictEqual(result.worktree, false);
+  });
+});
+
 describe('buildStartOptions() autoMerge', function () {
   it('resolves autoMerge=true for --ship', function () {
     const result = buildStartOptions({ clusterId: 'c1', options: { ship: true } });
