@@ -442,12 +442,30 @@ function validateRegistryCliProvider(providerName) {
   const metadata = getProviderMetadata(providerName);
   const { command } = resolveProviderCommand(providerName);
   const installSteps = metadata.installInstructions.split('\n').filter(Boolean);
-  return validateCliProvider(
-    command,
-    `${metadata.displayName} CLI not available`,
-    `Command "${command}" not installed`,
-    [...installSteps, `Then run: ${command} --version`]
-  );
+  if (!commandExists(command)) {
+    return validateCliProvider(
+      command,
+      `${metadata.displayName} CLI not available`,
+      `Command "${command}" not installed`,
+      [...installSteps, `Then run: ${command} --version`]
+    );
+  }
+
+  const { getProvider } = require('./providers');
+  if (getProvider(providerName).isAvailable()) {
+    return { errors: [], warnings: [] };
+  }
+
+  return {
+    errors: [
+      formatError(
+        `${metadata.displayName} CLI not available`,
+        `Command "${command}" is installed but did not produce usable --help/--version output`,
+        [...installSteps, `Then run: ${command} --version`]
+      ),
+    ],
+    warnings: [],
+  };
 }
 
 function validateGhRequirement() {

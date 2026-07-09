@@ -1,10 +1,16 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { test } = require('node:test');
 const {
   assertNoSecret,
   runExecutable,
   runProviderExecutable,
 } = require('./executable-contract-helpers.cjs');
+
+function piFixture(name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'pi', name), 'utf8');
+}
 
 test('parse-output returns normalized events and parser diagnostics', () => {
   const stdout = [
@@ -220,5 +226,115 @@ test('parse-output reports parser-error diagnostics when provider parser throws'
     assert.match(response.envelope.result.diagnostics[0].message, /adapter parser crashed/);
   } finally {
     adapters.parseProviderChunk = originalParseProviderChunk;
+  }
+});
+
+test('parse-output normalizes Pi JSON fixtures without duplicate snapshot text', () => {
+  const textResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'pi',
+    stdout: piFixture('text.jsonl'),
+  });
+
+  assert.equal(textResponse.exitCode, 0);
+  assert.equal(textResponse.envelope.ok, true);
+  assert.deepEqual(textResponse.envelope.result.events, [
+    { type: 'text', text: 'Hello from Pi' },
+    {
+      type: 'result',
+      success: true,
+      result: 'Hello from Pi',
+      error: null,
+      inputTokens: 7,
+      outputTokens: 3,
+      cacheReadInputTokens: 1,
+      cacheCreationInputTokens: 0,
+      cost: null,
+      modelUsage: { input: 7, output: 3, cacheRead: 1, cacheWrite: 0 },
+    },
+  ]);
+
+  const toolResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'pi',
+    stdout: piFixture('tool.jsonl'),
+  });
+
+  assert.equal(toolResponse.exitCode, 0);
+  assert.equal(toolResponse.envelope.ok, true);
+  assert.deepEqual(toolResponse.envelope.result.events, [
+    { type: 'tool_call', toolName: 'bash', toolId: 'tool-1', input: { command: 'pwd' } },
+    { type: 'tool_result', toolId: 'tool-1', content: 'line1', isError: false },
+    { type: 'tool_result', toolId: 'tool-1', content: 'line1\n/tmp/pi', isError: false },
+    { type: 'text', text: 'done' },
+    {
+      type: 'result',
+      success: true,
+      result: 'done',
+      error: null,
+      inputTokens: 9,
+      outputTokens: 4,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cost: null,
+      modelUsage: { input: 9, output: 4, cacheRead: 0, cacheWrite: 0 },
+    },
+  ]);
+});
+
+test('parse-output handles Pi failure and empty fixtures', () => {
+  for (const [name, expectedError] of [
+    ['command-failure.jsonl', 'Unknown option --bogus'],
+    ['auth-failure.jsonl', 'authentication required: run /login'],
+    ['rate-limit.jsonl', 'rate limit exceeded; retry later'],
+    ['cancelled.jsonl', 'cancelled by user'],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'parse-output',
+      provider: 'pi',
+      stdout: piFixture(name),
+    });
+
+    const lastEvent = response.envelope.result.events.at(-1);
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(lastEvent.type, 'result');
+    assert.equal(lastEvent.success, false);
+    assert.equal(lastEvent.error, expectedError);
+  }
+
+  const emptyResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'pi',
+    stdout: piFixture('empty.jsonl'),
+  });
+
+  assert.equal(emptyResponse.exitCode, 0);
+  assert.equal(emptyResponse.envelope.ok, true);
+  assert.deepEqual(emptyResponse.envelope.result.events, []);
+});
+
+test('classify-error maps Pi auth, rate-limit, cancellation, and command failures', () => {
+  for (const [message, expectedCategory, expectedRetryable] of [
+    ['authentication required: run /login', 'auth', false],
+    ['rate limit exceeded; retry later', 'rate-limit', true],
+    ['cancelled by user', 'permanent', false],
+    ['Unknown option --bogus', 'permanent', false],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'classify-error',
+      provider: 'pi',
+      error: { message },
+    });
+
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(response.envelope.result.category, expectedCategory);
+    assert.equal(response.envelope.result.classification.retryable, expectedRetryable);
   }
 });

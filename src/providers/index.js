@@ -34,7 +34,8 @@ class RuntimeProvider extends BaseProvider {
 
   isAvailable() {
     const { command } = resolveProviderCommand(this.name);
-    return commandExists(command);
+    if (!commandExists(command)) return false;
+    return helper.probeRuntimeProviderCli(this.name).available;
   }
 
   getCliPath() {

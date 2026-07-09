@@ -1,14 +1,18 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { test } = require('node:test');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakePiScript,
   invokeCodexSchemaRequest,
   runExecutable,
   runProviderExecutable,
   runnerResult,
   withFakeProviderCli,
+  withTempEnv,
 } = require('./executable-contract-helpers.cjs');
 
 test('invoke returns redacted terminal evidence, parsed events, status, timing, and cleanup', async () => {
@@ -212,4 +216,103 @@ process.stdin.resume();
       assert.ok(response.envelope.result.commandSpec.args.includes('--json'));
     }
   );
+});
+
+test('invoke runs Pi in the requested worktree cwd and normalizes streamed JSONL', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-pi-worktree-'));
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'pi', 'tool.jsonl');
+
+  try {
+    withFakeProviderCli(
+      'pi',
+      fakePiScript(`
+const fs = require('node:fs');
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: pi --mode json --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --no-approve --model\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+process.stdout.write('0.80.3\\n');
+  process.exit(0);
+}
+if (fs.realpathSync(process.cwd()) !== process.env.PI_EXPECT_CWD) {
+  process.stderr.write(\`cwd mismatch: \${process.cwd()}\`);
+  process.exit(19);
+}
+process.stdout.write(fs.readFileSync(process.env.PI_FIXTURE, 'utf8'));
+`),
+      () =>
+        withTempEnv(
+          {
+            PI_EXPECT_CWD: fs.realpathSync(tempDir),
+            PI_FIXTURE: fixturePath,
+          },
+          () => {
+            const response = runExecutable({
+              schemaVersion: 1,
+              command: 'invoke',
+              provider: 'pi',
+              context: 'Run one tool.',
+              options: {
+                cwd: tempDir,
+                outputFormat: 'json',
+                modelSpec: { model: 'openai/gpt-5.5' },
+              },
+              timeoutMs: 300,
+            });
+
+            assert.equal(response.exitCode, 0);
+            assert.equal(response.envelope.ok, true);
+            assert.equal(response.envelope.result.exitCode, 0);
+            assert.equal(response.envelope.result.commandSpec.cwd, tempDir);
+            assert.deepEqual(response.envelope.result.commandSpec.args.slice(0, 10), [
+              '--mode',
+              'json',
+              '--no-session',
+              '--no-extensions',
+              '--no-skills',
+              '--no-prompt-templates',
+              '--no-context-files',
+              '--no-approve',
+              '--model',
+              'openai/gpt-5.5',
+            ]);
+            assert.equal(response.envelope.result.events[0].type, 'tool_call');
+            assert.equal(response.envelope.result.events.at(-1).type, 'result');
+          }
+        )
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('invoke classifies Pi in-band turn_end failures even when the process exits 0', async () => {
+  const fixturePath = path.join(__dirname, '..', 'fixtures', 'pi', 'auth-failure.jsonl');
+  const response = await runProviderExecutable(
+    {
+      schemaVersion: 1,
+      command: 'invoke',
+      provider: 'pi',
+      context: 'Authenticate.',
+      options: {
+        outputFormat: 'json',
+      },
+    },
+    {
+      runner: () =>
+        runnerResult({
+          stdout: fs.readFileSync(fixturePath, 'utf8'),
+          exitCode: 0,
+          signal: null,
+        }),
+    }
+  );
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.events.at(-1).type, 'result');
+  assert.equal(response.envelope.result.events.at(-1).error, 'authentication required: run /login');
+  assert.equal(response.envelope.result.classification.retryable, false);
+  assert.equal(response.envelope.result.classification.kind, 'permanent-pattern');
 });

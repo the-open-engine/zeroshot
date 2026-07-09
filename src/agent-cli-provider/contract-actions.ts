@@ -15,7 +15,7 @@ import {
   schemaMode,
   type RequestData,
 } from './contract-support';
-import { detectRuntimeProviderCliFeatures } from './single-agent-runtime';
+import { probeRuntimeProviderCli } from './single-agent-runtime';
 import { getNumber, getRecord, getString, isRecord, unknownToMessage } from './json';
 import type { ErrorClassification } from './types';
 import type { ProcessRunner } from './process-runner';
@@ -42,8 +42,11 @@ function runBuildCommand(request: RequestData): ContractEnvelope {
 function runProbe(request: RequestData): ContractEnvelope {
   const adapter = adapterForProvider(request.provider);
   const helpText = typeof request.raw.helpText === 'string' ? request.raw.helpText : null;
+  const runtimeProbe = helpText === null ? probeRuntimeProviderCli(adapter.id) : null;
   const capabilities =
-    helpText === null ? detectRuntimeProviderCliFeatures(adapter.id) : adapter.detectCliFeatures(helpText);
+    runtimeProbe === null
+      ? adapter.detectCliFeatures(helpText)
+      : runtimeProbe.capabilities;
   return successEnvelope({
     command: request.command ?? 'probe',
     adapter,
@@ -56,6 +59,9 @@ function runProbe(request: RequestData): ContractEnvelope {
       },
       contractVersion: providerExecutableSchemaVersion,
       adapterVersion: adapter.adapterVersion,
+      available: runtimeProbe?.available ?? true,
+      helpText: runtimeProbe?.helpText ?? helpText,
+      versionText: runtimeProbe?.versionText ?? null,
       capabilities,
       credentials: adapter.credentialEnvKeys.map((key) => ({
         key,

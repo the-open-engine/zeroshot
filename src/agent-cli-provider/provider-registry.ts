@@ -2,6 +2,7 @@ import { claudeAdapter } from './adapters/claude';
 import { codexAdapter } from './adapters/codex';
 import { geminiAdapter } from './adapters/gemini';
 import { opencodeAdapter } from './adapters/opencode';
+import { piAdapter } from './adapters/pi';
 import { resolveClaudeCommand } from './claude-command';
 import type { ModelLevel, ProviderAdapter } from './types';
 
@@ -56,6 +57,7 @@ export interface ProviderRegistryEntry {
   readonly credentialPaths: readonly string[];
   readonly credentialEnvKeys: readonly string[];
   readonly settingsFields: readonly string[];
+  readonly availabilityProbe?: 'command' | 'help-or-version';
   readonly capabilities: ProviderCapabilities;
   readonly docs: ProviderDocsMetadata;
   readonly docker: ProviderDockerMetadata;
@@ -225,6 +227,44 @@ export const providerRegistry = [
       max: opencodeAdapter.defaultMaxLevel,
     },
     adapter: opencodeAdapter,
+  },
+  {
+    id: 'pi',
+    aliases: [],
+    displayName: 'Pi',
+    binary: 'pi',
+    command: { kind: 'fixed', command: 'pi', args: [] },
+    installInstructions:
+      'npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.3',
+    authInstructions: 'pi\n/login',
+    credentialPaths: ['~/.pi'],
+    credentialEnvKeys: piAdapter.credentialEnvKeys,
+    settingsFields: [],
+    availabilityProbe: 'help-or-version',
+    capabilities: {
+      ...STANDARD_CAPABILITIES,
+      mcpServers: false,
+      jsonSchema: false,
+      reasoningEffort: false,
+    },
+    docs: {
+      label: 'Pi',
+      setupHeading: 'Pi Setup',
+    },
+    docker: {
+      mount: {
+        host: '~/.pi',
+        container: '$HOME/.pi',
+        readonly: true,
+      },
+      envPassthrough: [],
+    },
+    defaultLevels: {
+      min: piAdapter.defaultMinLevel,
+      default: piAdapter.defaultLevel,
+      max: piAdapter.defaultMaxLevel,
+    },
+    adapter: piAdapter,
   },
 ] as const satisfies readonly ProviderRegistryEntry[];
 

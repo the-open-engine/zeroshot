@@ -62,7 +62,7 @@ export async function runInvoke(
       { name: 'stderr', value: result.stderr },
     ],
   });
-  const classification = providerFailureClassification(adapter, result);
+  const classification = providerFailureClassification(adapter, result, parsed.events);
   return successEnvelope({
     command: request.command ?? 'invoke',
     adapter,

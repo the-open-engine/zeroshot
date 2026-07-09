@@ -1,6 +1,10 @@
 import { getProviderAdapter } from './adapters';
 import { isRecord } from './json';
-import { resolveProviderCommand } from './provider-registry';
+import {
+  getProviderRegistryEntry,
+  resolveProviderCommand,
+  supportsProviderCapability,
+} from './provider-registry';
 import type {
   BuildProviderCommandOptions,
   CliFeatureOverrides,
@@ -39,6 +43,13 @@ export interface PreparedSingleAgentProviderCommand {
   readonly cliFeatures: CliFeatureOverrides;
 }
 
+export interface RuntimeProviderProbe {
+  readonly available: boolean;
+  readonly helpText: string;
+  readonly versionText: string;
+  readonly capabilities: ProviderCliFeatures;
+}
+
 type MutableModelSpec = {
   level?: ModelLevel;
   model?: string | null;
@@ -54,7 +65,9 @@ const claudeAuthModule: unknown = require('../../lib/settings/claude-auth');
 
 const loadSettingsFn = moduleFunction(settingsModule, 'loadSettings');
 const getClaudeCommandFn = moduleFunction(settingsModule, 'getClaudeCommand');
+const commandExistsFn = moduleFunction(providerDetectionModule, 'commandExists');
 const getHelpOutputFn = moduleFunction(providerDetectionModule, 'getHelpOutput');
+const getVersionOutputFn = moduleFunction(providerDetectionModule, 'getVersionOutput');
 const resolveClaudeAuthFn = moduleFunction(claudeAuthModule, 'resolveClaudeAuth');
 
 export function prepareSingleAgentProviderCommand(
@@ -76,10 +89,32 @@ export function prepareSingleAgentProviderCommand(
 }
 
 export function detectRuntimeProviderCliFeatures(provider: string): ProviderCliFeatures {
+  return probeRuntimeProviderCli(provider).capabilities;
+}
+
+export function probeRuntimeProviderCli(provider: string): RuntimeProviderProbe {
   const adapter = getProviderAdapter(provider);
   const helpCommand = runtimeHelpCommand(adapter.id);
-  const helpText = stringResult(getHelpOutputFn(helpCommand.command, helpCommand.args));
-  return adapter.detectCliFeatures(helpText);
+  const commandAvailable = booleanResult(commandExistsFn(helpCommand.command));
+  if (!commandAvailable) {
+    return {
+      available: false,
+      helpText: '',
+      versionText: '',
+      capabilities: adapter.detectCliFeatures(''),
+    };
+  }
+
+  const helpText = stringResult(getHelpOutputFn(helpCommand.command, helpCommand.args)).trim();
+  const versionText = stringResult(getVersionOutputFn(helpCommand.command, helpCommand.args)).trim();
+  const availabilityProbe = getProviderRegistryEntry(adapter.id).availabilityProbe ?? 'command';
+
+  return {
+    available: availabilityProbe === 'help-or-version' ? Boolean(helpText || versionText) : true,
+    helpText,
+    versionText,
+    capabilities: adapter.detectCliFeatures(helpText),
+  };
 }
 
 function buildRuntimeOptions(
@@ -94,6 +129,12 @@ function buildRuntimeOptions(
     modelSpec: resolveRuntimeModelSpec(adapter, baseOptions.modelSpec, providerSettings),
     cliFeatures,
   };
+  if (baseOptions.jsonSchema && !supportsProviderCapability(adapter.id, 'jsonSchema')) {
+    if (!shouldIncludeAuthEnv(baseOptions, authEnv)) {
+      return { ...resolved, strictSchema: false };
+    }
+    return { ...resolved, authEnv, strictSchema: false };
+  }
   if (!shouldIncludeAuthEnv(baseOptions, authEnv)) return resolved;
   return { ...resolved, authEnv };
 }
@@ -305,4 +346,9 @@ function stringArray(value: unknown, field: string): readonly string[] {
 function stringResult(value: unknown): string {
   if (typeof value === 'string') return value;
   throw new Error('Provider help output must be a string.');
+}
+
+function booleanResult(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  throw new Error('Provider availability probe must return a boolean.');
 }

@@ -392,6 +392,39 @@ function defineRunPreflightTests() {
       }
     });
 
+    it('should fail Pi preflight when the command exists but help/version probing fails', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-pi-'));
+      const originalPath = process.env.PATH;
+      const piPath = path.join(tempDir, 'pi');
+
+      fs.writeFileSync(
+        piPath,
+        '#!/usr/bin/env node\nif (process.argv.includes("--help") || process.argv.includes("--version")) process.exit(9);\nprocess.exit(0);\n',
+        { mode: 0o755 }
+      );
+      process.env.PATH = `${tempDir}${path.delimiter}${originalPath || ''}`;
+
+      try {
+        const result = await runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'pi',
+        });
+
+        expect(result.valid).to.be.false;
+        expect(result.errors.join('')).to.include(
+          'Command "pi" is installed but did not produce usable --help/--version output'
+        );
+        expect(result.errors.join('')).to.include(
+          'npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.3'
+        );
+      } finally {
+        process.env.PATH = originalPath;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should not require Claude auth when CLI is installed', async function () {
       try {
         execSync(`${whichCmd} claude`, { stdio: 'pipe' });

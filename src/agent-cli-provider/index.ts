@@ -35,7 +35,9 @@ export {
 export {
   detectRuntimeProviderCliFeatures,
   prepareSingleAgentProviderCommand,
+  probeRuntimeProviderCli,
   type PreparedSingleAgentProviderCommand,
+  type RuntimeProviderProbe,
   type SingleAgentProviderCommandInput,
 } from './single-agent-runtime';
 export {
@@ -72,6 +74,7 @@ export type {
   OpencodeCliFeatures,
   OutputEvent,
   OutputFormat,
+  PiCliFeatures,
   ProviderAdapter,
   ProviderCapabilities,
   ProviderCapabilityState,
