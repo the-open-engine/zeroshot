@@ -189,7 +189,9 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
-  options.autoMerge = Boolean(options.ship);
+  // autoMerge is NOT stored here — it is derived from the run plan (delivery ===
+  // 'ship') at every consumer. Writing it here unconditionally would clobber an
+  // explicit autoMerge intent (e.g. a future `--auto-merge` flag) back to false.
 }
 
 async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
