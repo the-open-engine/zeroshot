@@ -31,7 +31,16 @@ test('provider helper metadata documents package and build output', (): void => 
 
 test('provider helper public API exposes typed provider adapters', (): void => {
   const providerIds: readonly ProviderId[] = listProviderAdapters();
-  assert.deepEqual(providerIds, ['claude', 'codex', 'gateway', 'gemini', 'opencode', 'pi', 'kiro']);
+  assert.deepEqual(providerIds, [
+    'claude',
+    'codex',
+    'gateway',
+    'gemini',
+    'opencode',
+    'pi',
+    'kiro',
+    'copilot',
+  ]);
 
   const adapter = getProviderAdapter('openai');
   assert.equal(adapter.id, 'codex');

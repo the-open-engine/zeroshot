@@ -29,6 +29,7 @@ const providerPolicyNames = [
   'opencode',
   'pi',
   'kiro',
+  'copilot',
   'anthropic',
   'openai',
   'google',

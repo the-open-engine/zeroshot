@@ -1,6 +1,7 @@
 import { createAcpAdapter } from './adapters/acp';
 import { claudeAdapter } from './adapters/claude';
 import { codexAdapter } from './adapters/codex';
+import { copilotAdapter } from './adapters/copilot';
 import { gatewayAdapter, gatewaySettingsDefaults, validateGatewaySettings } from './adapters/gateway';
 import { geminiAdapter } from './adapters/gemini';
 import { opencodeAdapter } from './adapters/opencode';
@@ -57,6 +58,8 @@ export interface ProviderDockerMountPreset {
 export interface ProviderDockerMetadata {
   readonly mount: ProviderDockerMountPreset;
   readonly envPassthrough: readonly string[];
+  // False when the mounted dir doesn't hold the secret (auth is via an envPassthrough token).
+  readonly credentialInMount?: boolean;
 }
 
 export interface ProviderRegistryEntry {
@@ -397,6 +400,47 @@ export const providerRegistry = [
       max: kiroAdapter.defaultMaxLevel,
     },
     adapter: kiroAdapter,
+  },
+  {
+    id: 'copilot',
+    aliases: [],
+    displayName: 'Copilot',
+    binary: 'copilot',
+    command: { kind: 'fixed', command: 'copilot', args: [] },
+    invoke: SPAWN_INVOKE,
+    installInstructions: 'npm install -g @github/copilot',
+    // Docker/CI can't use the keychain token; export COPILOT_GITHUB_TOKEN instead.
+    authInstructions: 'copilot\n/login\n(Docker/CI: export COPILOT_GITHUB_TOKEN=<token>)',
+    credentialPaths: ['~/.copilot'],
+    credentialEnvKeys: copilotAdapter.credentialEnvKeys,
+    settingsFields: [],
+    availabilityProbe: 'help-or-version',
+    // No MCP passthrough; no native output-schema or reasoning-effort flag.
+    capabilities: {
+      ...STANDARD_CAPABILITIES,
+      mcpServers: false,
+      jsonSchema: false,
+      reasoningEffort: false,
+    },
+    docs: {
+      label: 'Copilot',
+      setupHeading: 'Copilot Setup',
+    },
+    docker: {
+      mount: {
+        host: '~/.copilot',
+        container: '$HOME/.copilot',
+        readonly: true,
+      },
+      envPassthrough: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
+      credentialInMount: false, // token is in the OS keychain, not ~/.copilot
+    },
+    defaultLevels: {
+      min: copilotAdapter.defaultMinLevel,
+      default: copilotAdapter.defaultLevel,
+      max: copilotAdapter.defaultMaxLevel,
+    },
+    adapter: copilotAdapter,
   },
 ] as const satisfies readonly ProviderRegistryEntry[];
 

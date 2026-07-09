@@ -48,6 +48,7 @@ test('providers command renders rows from registry-backed runtime metadata', asy
       gemini: { defaultLevel: 'level2', levelOverrides: {} },
       opencode: { defaultLevel: 'level2', levelOverrides: {} },
       pi: { defaultLevel: 'level2', levelOverrides: {} },
+      copilot: { defaultLevel: 'level2', levelOverrides: {} },
     },
   };
   const detected = Object.fromEntries(
