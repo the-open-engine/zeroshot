@@ -35,10 +35,28 @@ const CLI_FEATURE_FIELDS = [
   'supportsNoPromptTemplates',
   'supportsNoContextFiles',
   'supportsNoApprove',
+  'supportsAcpStdio',
+  'supportsPromptImages',
+  'supportsLoadSession',
+  'supportsSessionCancel',
+  'supportsSessionSetModel',
+  'supportsSessionSetMode',
+  'supportsRemoteTransport',
+  'supportsCustomTransport',
+  'supportsPermissionRequests',
+  'supportsFsTools',
+  'supportsTerminalTools',
   'unknown',
 ] as const;
 
 type CliFeatureField = (typeof CLI_FEATURE_FIELDS)[number];
+const FALSE_ONLY_CLI_FEATURE_FIELDS = new Set<CliFeatureField>([
+  'supportsRemoteTransport',
+  'supportsCustomTransport',
+  'supportsPermissionRequests',
+  'supportsFsTools',
+  'supportsTerminalTools',
+]);
 
 export function requestOptions(value: unknown): BuildProviderCommandOptions {
   if (value === undefined) return {};
@@ -127,12 +145,19 @@ function optionalCliFeatures(value: unknown): CliFeatureOverrides | undefined {
     invalidField('options.cliFeatures', 'options.cliFeatures must be an object.');
   }
 
-  const result: Partial<Record<CliFeatureField, boolean>> = {};
+  const result: Record<string, boolean> = {};
   for (const field of CLI_FEATURE_FIELDS) {
     const item = optionalBooleanValue(value[field], `options.cliFeatures.${field}`);
-    if (item !== undefined) result[field] = item;
+    if (item === undefined) continue;
+    if (item && FALSE_ONLY_CLI_FEATURE_FIELDS.has(field)) {
+      invalidField(
+        `options.cliFeatures.${field}`,
+        `options.cliFeatures.${field} must be false when provided.`
+      );
+    }
+    result[field] = item;
   }
-  return result;
+  return result as CliFeatureOverrides;
 }
 
 function normalizeBuildOptions(value: Record<string, unknown>): BuildProviderCommandOptions {

@@ -27,6 +27,7 @@ const providerPolicyNames = [
   'gemini',
   'opencode',
   'pi',
+  'kiro',
   'anthropic',
   'openai',
   'google',

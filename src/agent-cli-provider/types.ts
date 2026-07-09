@@ -7,6 +7,7 @@ import type {
   ProviderDockerMetadata,
   ProviderDockerMountPreset,
   ProviderDocsMetadata,
+  ProviderInvokeSpec,
   ProviderRegistryEntry,
 } from './provider-registry';
 
@@ -23,6 +24,7 @@ export type {
   ProviderDockerMetadata,
   ProviderDockerMountPreset,
   ProviderDocsMetadata,
+  ProviderInvokeSpec,
   ProviderRegistryEntry,
 };
 
@@ -114,12 +116,28 @@ export interface PiCliFeatures extends BaseCliFeatures {
   readonly supportsNoApprove: boolean;
 }
 
+export interface AcpCliFeatures extends BaseCliFeatures {
+  readonly provider: ProviderId;
+  readonly supportsAcpStdio: boolean;
+  readonly supportsPromptImages: boolean;
+  readonly supportsLoadSession: boolean;
+  readonly supportsSessionCancel: boolean;
+  readonly supportsSessionSetModel: boolean;
+  readonly supportsSessionSetMode: boolean;
+  readonly supportsRemoteTransport: false;
+  readonly supportsCustomTransport: false;
+  readonly supportsPermissionRequests: false;
+  readonly supportsFsTools: false;
+  readonly supportsTerminalTools: false;
+}
+
 export type ProviderCliFeatures =
   | ClaudeCliFeatures
   | CodexCliFeatures
   | GeminiCliFeatures
   | OpencodeCliFeatures
-  | PiCliFeatures;
+  | PiCliFeatures
+  | AcpCliFeatures;
 
 export interface CliFeatureOverrides {
   readonly supportsOutputFormat?: boolean;
@@ -143,6 +161,17 @@ export interface CliFeatureOverrides {
   readonly supportsNoPromptTemplates?: boolean;
   readonly supportsNoContextFiles?: boolean;
   readonly supportsNoApprove?: boolean;
+  readonly supportsAcpStdio?: boolean;
+  readonly supportsPromptImages?: boolean;
+  readonly supportsLoadSession?: boolean;
+  readonly supportsSessionCancel?: boolean;
+  readonly supportsSessionSetModel?: boolean;
+  readonly supportsSessionSetMode?: boolean;
+  readonly supportsRemoteTransport?: false;
+  readonly supportsCustomTransport?: false;
+  readonly supportsPermissionRequests?: false;
+  readonly supportsFsTools?: false;
+  readonly supportsTerminalTools?: false;
   readonly unknown?: boolean;
 }
 
@@ -236,6 +265,21 @@ export interface ProviderParserState {
   lastToolId: string | null | undefined;
   lastAssistantText?: string;
   lastAssistantThinking?: string;
+  assistantTextByMessageId?: Map<string, string>;
+  assistantThinkingByMessageId?: Map<string, string>;
+  toolCalls?: Map<
+    string,
+    {
+      name: string | null | undefined;
+      input: unknown;
+    }
+  >;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  } | null;
 }
 
 export type ErrorClassificationKind =

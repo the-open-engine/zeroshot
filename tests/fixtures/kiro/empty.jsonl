@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"_kiro.dev/progress","params":{"message":"ignored extension"}}
+{"jsonrpc":"2.0","id":2,"result":{"sessionId":"kiro-session-1"}}

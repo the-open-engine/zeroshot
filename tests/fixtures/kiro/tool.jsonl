@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call","toolCallId":"tool-1","title":"bash","rawInput":{"command":"pwd"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","status":"in_progress","rawOutput":"line1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"tool-1","status":"completed","rawOutput":"line1\n/tmp/kiro"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-2","content":{"type":"text","text":"done"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":9,"outputTokens":4,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}}
+{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}

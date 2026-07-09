@@ -230,6 +230,7 @@ test('parser output from runtime facade matches helper fixtures', () => {
   for (const [provider, files] of [
     ['codex', ['text.jsonl', 'tool.jsonl']],
     ['gemini', ['text.jsonl', 'tool.jsonl']],
+    ['kiro', ['text.jsonl', 'tool.jsonl', 'auth-failure.jsonl', 'cancelled.jsonl', 'empty.jsonl', 'malformed.jsonl']],
     ['pi', ['text.jsonl', 'tool.jsonl', 'command-failure.jsonl']],
   ]) {
     for (const file of files) {
@@ -336,6 +337,21 @@ test('feature probing is deterministic from injected help text', () => {
       ).supportsNoApprove,
     true
   );
+  assert.deepEqual(helper.getProviderAdapter('kiro').detectCliFeatures('kiro-cli acp --help'), {
+    provider: 'kiro',
+    supportsAcpStdio: true,
+    supportsPromptImages: true,
+    supportsLoadSession: false,
+    supportsSessionCancel: true,
+    supportsSessionSetModel: false,
+    supportsSessionSetMode: false,
+    supportsRemoteTransport: false,
+    supportsCustomTransport: false,
+    supportsPermissionRequests: false,
+    supportsFsTools: false,
+    supportsTerminalTools: false,
+    unknown: false,
+  });
 });
 
 test('provider registry stays in parity across helper runtime settings and probe contract', async () => {

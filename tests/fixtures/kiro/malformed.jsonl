@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-4","content":{"type":"text","text":"ok"}}}}
+{bad json

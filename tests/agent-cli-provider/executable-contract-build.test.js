@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakeKiroScript,
   fakePiScript,
   runExecutable,
   withFakeProviderCli,
@@ -182,6 +183,99 @@ process.exit(17);
       assert.equal(response.exitCode, 0);
       assert.equal(response.envelope.ok, true);
       assert.ok(response.envelope.result.commandSpec.args.includes('--json'));
+    }
+  );
+});
+
+test('build-command returns ACP stdio command specs without prompt argv coupling', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        options: {
+          cwd: '/tmp/kiro-worktree',
+        },
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.commandSpec.binary, 'kiro-cli');
+      assert.deepEqual(response.envelope.result.commandSpec.args, ['acp']);
+      assert.equal(response.envelope.result.commandSpec.cwd, '/tmp/kiro-worktree');
+      assert.equal(response.envelope.result.commandSpec.args.includes('Reply with OK'), false);
+    }
+  );
+});
+
+test('build-command fails closed when ACP stdio support is not advertised', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
+    }
+  );
+});
+
+test('build-command ignores caller ACP support overrides when runtime probe rejects ACP stdio', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        options: {
+          cliFeatures: {
+            supportsAcpStdio: true,
+          },
+        },
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
     }
   );
 });
@@ -488,6 +582,34 @@ process.exit(17);
       assert.equal(response.envelope.result.capabilities.supportsJsonMode, true);
       assert.equal(response.envelope.result.capabilities.supportsNoApprove, true);
       assert.equal(response.envelope.result.versionText, '0.80.3');
+    }
+  );
+});
+
+test('probe exposes ACP CLI capabilities for Kiro', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'probe',
+        provider: 'kiro',
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.available, true);
+      assert.equal(response.envelope.result.provider.id, 'kiro');
+      assert.equal(response.envelope.result.capabilities.supportsAcpStdio, true);
+      assert.equal(response.envelope.result.capabilities.supportsPermissionRequests, false);
+      assert.equal(response.envelope.result.capabilities.supportsTerminalTools, false);
     }
   );
 });

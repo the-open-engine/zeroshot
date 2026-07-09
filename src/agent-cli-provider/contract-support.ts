@@ -73,6 +73,7 @@ export function buildCommandSpec(request: RequestData): {
   readonly adapter: ProviderAdapter;
   readonly commandSpec: CommandSpec;
   readonly options: BuildProviderCommandOptions;
+  readonly context: string;
 } {
   const adapter = adapterForProvider(request.provider);
   const context = requiredString(request.raw, 'context');
@@ -84,6 +85,7 @@ export function buildCommandSpec(request: RequestData): {
   });
   return {
     adapter: prepared.adapter,
+    context,
     options: prepared.options,
     commandSpec: mergeCommandSpec(prepared.commandSpec, request.env),
   };
