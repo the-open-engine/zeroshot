@@ -1,0 +1,183 @@
+name: Live Provider Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: Comma-separated providers to test, or all.
+        required: true
+        default: claude,codex,gemini,copilot,gateway
+      timeout_ms:
+        description: Per-provider timeout in milliseconds.
+        required: true
+        default: '120000'
+  schedule:
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    if: github.event_name != 'schedule' || vars.ZEROSHOT_LIVE_PROVIDER_SMOKE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      providers: ${{ steps.providers.outputs.providers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build provider matrix
+        id: providers
+        env:
+          DISPATCH_PROVIDERS: ${{ github.event.inputs.providers }}
+          SCHEDULE_PROVIDERS: ${{ vars.ZEROSHOT_LIVE_PROVIDERS }}
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const requested =
+            process.env.DISPATCH_PROVIDERS ||
+            process.env.SCHEDULE_PROVIDERS ||
+            'claude,codex,gemini,copilot,gateway';
+          const helper = require('./lib/agent-cli-provider');
+          const valid = helper.listProviderAdapters();
+          const selected = [];
+          for (const raw of requested.split(',')) {
+            const item = raw.trim().toLowerCase();
+            if (!item) continue;
+            if (item === 'all') {
+              for (const provider of valid) {
+                if (!selected.includes(provider)) selected.push(provider);
+              }
+              continue;
+            }
+            if (!valid.includes(item)) {
+              throw new Error(`Unknown live provider "${raw}". Valid: ${valid.join(', ')}, all`);
+            }
+            if (!selected.includes(item)) selected.push(item);
+          }
+          if (selected.length === 0) {
+            throw new Error('No live providers selected.');
+          }
+          console.log(`providers=${JSON.stringify(selected.map((provider) => ({ provider })))}`);
+          NODE
+
+  live-smoke:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.providers) }}
+    env:
+      ZEROSHOT_LIVE_TIMEOUT_MS: ${{ github.event.inputs.timeout_ms || '120000' }}
+      ANTHROPIC_API_KEY: ${{ secrets.ZEROSHOT_LIVE_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_API_KEY: ${{ secrets.ZEROSHOT_LIVE_CLAUDE_API_KEY || secrets.CLAUDE_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.ZEROSHOT_LIVE_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.ZEROSHOT_LIVE_CODEX_API_KEY || secrets.CODEX_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.ZEROSHOT_LIVE_GEMINI_API_KEY || secrets.GEMINI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.ZEROSHOT_LIVE_GOOGLE_API_KEY || secrets.GOOGLE_API_KEY }}
+      OPENCODE_API_KEY: ${{ secrets.ZEROSHOT_LIVE_OPENCODE_API_KEY || secrets.OPENCODE_API_KEY }}
+      KIRO_API_KEY: ${{ secrets.ZEROSHOT_LIVE_KIRO_API_KEY || secrets.KIRO_API_KEY }}
+      COPILOT_GITHUB_TOKEN: ${{ secrets.ZEROSHOT_LIVE_COPILOT_GITHUB_TOKEN || secrets.COPILOT_GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.ZEROSHOT_LIVE_GH_TOKEN || secrets.GH_TOKEN }}
+      ZEROSHOT_LIVE_GATEWAY_BASE_URL: ${{ secrets.ZEROSHOT_LIVE_GATEWAY_BASE_URL || vars.ZEROSHOT_LIVE_GATEWAY_BASE_URL }}
+      ZEROSHOT_LIVE_GATEWAY_API_KEY: ${{ secrets.ZEROSHOT_LIVE_GATEWAY_API_KEY }}
+      ZEROSHOT_LIVE_GATEWAY_MODEL: ${{ secrets.ZEROSHOT_LIVE_GATEWAY_MODEL || vars.ZEROSHOT_LIVE_GATEWAY_MODEL }}
+      ZEROSHOT_LIVE_GATEWAY_HEADERS_JSON: ${{ secrets.ZEROSHOT_LIVE_GATEWAY_HEADERS_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install provider CLI
+        run: |
+          case "${{ matrix.provider }}" in
+            claude)
+              npm install -g @anthropic-ai/claude-code
+              ;;
+            codex)
+              npm install -g @openai/codex
+              ;;
+            gemini)
+              npm install -g @google/gemini-cli
+              ;;
+            pi)
+              npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.3
+              ;;
+            copilot)
+              npm install -g @github/copilot
+              ;;
+            gateway)
+              ;;
+            opencode)
+              command -v opencode >/dev/null 2>&1 || {
+                echo "::error::opencode is not installed on this runner. Use a self-hosted runner with opencode installed and authenticated."
+                exit 1
+              }
+              ;;
+            kiro)
+              command -v kiro-cli >/dev/null 2>&1 || {
+                echo "::error::kiro-cli is not installed on this runner. Use a self-hosted runner with kiro-cli installed and authenticated."
+                exit 1
+              }
+              ;;
+            *)
+              echo "::error::Unsupported provider ${{ matrix.provider }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Verify live prerequisites
+        run: |
+          case "${{ matrix.provider }}" in
+            claude)
+              test -n "$ANTHROPIC_API_KEY$CLAUDE_API_KEY" || {
+                echo "::error::claude live smoke requires ZEROSHOT_LIVE_ANTHROPIC_API_KEY, ANTHROPIC_API_KEY, ZEROSHOT_LIVE_CLAUDE_API_KEY, or CLAUDE_API_KEY."
+                exit 1
+              }
+              ;;
+            codex)
+              test -n "$OPENAI_API_KEY$CODEX_API_KEY" || {
+                echo "::error::codex live smoke requires ZEROSHOT_LIVE_OPENAI_API_KEY, OPENAI_API_KEY, ZEROSHOT_LIVE_CODEX_API_KEY, or CODEX_API_KEY."
+                exit 1
+              }
+              ;;
+            gemini)
+              test -n "$GEMINI_API_KEY$GOOGLE_API_KEY" || {
+                echo "::error::gemini live smoke requires ZEROSHOT_LIVE_GEMINI_API_KEY, GEMINI_API_KEY, ZEROSHOT_LIVE_GOOGLE_API_KEY, or GOOGLE_API_KEY."
+                exit 1
+              }
+              ;;
+            copilot)
+              test -n "$COPILOT_GITHUB_TOKEN$GH_TOKEN" || {
+                echo "::error::copilot live smoke requires ZEROSHOT_LIVE_COPILOT_GITHUB_TOKEN, COPILOT_GITHUB_TOKEN, ZEROSHOT_LIVE_GH_TOKEN, or GH_TOKEN."
+                exit 1
+              }
+              ;;
+            gateway)
+              test -n "$ZEROSHOT_LIVE_GATEWAY_BASE_URL" &&
+                test -n "$ZEROSHOT_LIVE_GATEWAY_API_KEY" &&
+                test -n "$ZEROSHOT_LIVE_GATEWAY_MODEL" || {
+                  echo "::error::gateway live smoke requires ZEROSHOT_LIVE_GATEWAY_BASE_URL, ZEROSHOT_LIVE_GATEWAY_API_KEY, and ZEROSHOT_LIVE_GATEWAY_MODEL."
+                  exit 1
+                }
+              ;;
+            kiro)
+              test -n "$KIRO_API_KEY" || {
+                echo "::error::kiro live smoke requires ZEROSHOT_LIVE_KIRO_API_KEY or KIRO_API_KEY."
+                exit 1
+              }
+              ;;
+          esac
+
+      - name: Run live provider smoke
+        env:
+          ZEROSHOT_LIVE_PROVIDERS: ${{ matrix.provider }}
+        run: npm run test:providers:live

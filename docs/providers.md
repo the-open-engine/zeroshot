@@ -8,13 +8,16 @@ Zeroshot supports two provider shapes:
 
 ## Supported Providers
 
-| Provider | CLI         | Install                                    |
-| -------- | ----------- | ------------------------------------------ |
-| Claude   | Claude Code | `npm install -g @anthropic-ai/claude-code` |
-| Codex    | Codex       | `npm install -g @openai/codex`             |
-| Gateway  | Bundled     | No external CLI required                   |
-| Gemini   | Gemini      | `npm install -g @google/gemini-cli`        |
-| Opencode | Opencode    | See https://opencode.ai                    |
+| Provider | CLI         | Install                                                                  |
+| -------- | ----------- | ------------------------------------------------------------------------ |
+| Claude   | Claude Code | `npm install -g @anthropic-ai/claude-code`                               |
+| Codex    | Codex       | `npm install -g @openai/codex`                                           |
+| Gateway  | Bundled     | No external CLI required                                                 |
+| Gemini   | Gemini      | `npm install -g @google/gemini-cli`                                      |
+| Opencode | Opencode    | See https://opencode.ai                                                  |
+| Pi       | Pi          | `npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.3` |
+| Kiro     | Kiro        | See https://kiro.dev/docs/cli/                                           |
+| Copilot  | Copilot     | `npm install -g @github/copilot`                                         |
 
 ## Selecting a Provider
 
@@ -131,6 +134,8 @@ the real installed CLI or a real gateway endpoint, run the opt-in live smoke
 command:
 
 ```bash
+ZEROSHOT_LIVE_PROVIDERS=all npm run test:providers:live
+ZEROSHOT_LIVE_PROVIDERS=claude,codex,gemini npm run test:providers:live
 ZEROSHOT_LIVE_PROVIDERS=pi npm run test:providers:live
 ZEROSHOT_LIVE_PROVIDERS=copilot npm run test:providers:live
 ```
@@ -149,3 +154,33 @@ The live command invokes the provider through Zeroshot's executable provider
 contract and requires the provider to return the sentinel
 `ZEROSHOT_LIVE_SMOKE_OK`. It is not part of CI because it may require local
 auth, network access, and paid API calls.
+
+### GitHub Actions Live Smoke
+
+Use the `Live Provider Smoke` workflow for release-gating real providers. It is
+manual by default and scheduled only when the repository variable
+`ZEROSHOT_LIVE_PROVIDER_SMOKE_ENABLED` is set to `true`.
+
+Recommended release gate:
+
+```text
+claude,codex,gemini,copilot,gateway
+```
+
+Run `all` only on a runner that also has Opencode, Pi, and Kiro installed and
+authenticated. The workflow fails selected providers when the executable or
+required credential is missing; it does not convert missing live coverage into a
+passing skip.
+
+Credential names:
+
+| Provider | Required CI credential                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| Claude   | `ZEROSHOT_LIVE_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY`                                         |
+| Codex    | `ZEROSHOT_LIVE_OPENAI_API_KEY` or `OPENAI_API_KEY`                                               |
+| Gemini   | `ZEROSHOT_LIVE_GEMINI_API_KEY` / `ZEROSHOT_LIVE_GOOGLE_API_KEY`                                  |
+| Copilot  | `ZEROSHOT_LIVE_COPILOT_GITHUB_TOKEN`                                                             |
+| Gateway  | `ZEROSHOT_LIVE_GATEWAY_BASE_URL`, `ZEROSHOT_LIVE_GATEWAY_API_KEY`, `ZEROSHOT_LIVE_GATEWAY_MODEL` |
+| Kiro     | `ZEROSHOT_LIVE_KIRO_API_KEY` plus a runner with `kiro-cli` installed                             |
+| Pi       | A runner with `pi` installed and authenticated                                                   |
+| Opencode | A runner with `opencode` installed and authenticated                                             |
