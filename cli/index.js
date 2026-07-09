@@ -4159,6 +4159,45 @@ setupCmd
     console.log(JSON.stringify(plan, null, 2));
   });
 
+setupCmd
+  .command('apply')
+  .description('Apply a decisions file to global/repo settings (writes)')
+  .requiredOption('--decisions <file>', 'Path to decisions JSON file')
+  .option('--json', 'Output as JSON')
+  .option(
+    '--allow-risky-defaults',
+    'Allow storing defaultDelivery=ship as a global default (auto-merge by default)'
+  )
+  .action((opts) => {
+    const { applyDecisions } = require('../lib/setup-apply');
+    try {
+      const results = applyDecisions({
+        decisionsPath: opts.decisions,
+        cwd: process.cwd(),
+        allowRiskyDefaults: !!opts.allowRiskyDefaults,
+      });
+      console.log(JSON.stringify({ results }, null, 2));
+    } catch (err) {
+      console.error(JSON.stringify({ error: err.message }, null, 2));
+      process.exitCode = 1;
+    }
+  });
+
+setupCmd
+  .command('undo')
+  .description('Undo writes made by the most recent `zeroshot setup apply` runs')
+  .option('--json', 'Output as JSON')
+  .action(() => {
+    const { undo } = require('../lib/setup-undo');
+    try {
+      const results = undo({});
+      console.log(JSON.stringify({ results }, null, 2));
+    } catch (err) {
+      console.error(JSON.stringify({ error: err.message }, null, 2));
+      process.exitCode = 1;
+    }
+  });
+
 // Update command
 program
   .command('update')
