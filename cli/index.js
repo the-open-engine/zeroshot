@@ -1233,9 +1233,26 @@ function followSetupLog(logPath) {
 }
 
 function printRecentMessages(messages, limit, isActive, options) {
-  const recentMessages = messages.slice(-limit);
-  for (const msg of recentMessages) {
-    printMessage(msg, true, options.watch, isActive);
+  if (options.watch) {
+    const recentMessages = selectRecentPrintableMessages(messages, limit);
+    for (const msg of recentMessages) {
+      printMessage(msg, true, true, isActive);
+    }
+    if (recentMessages.length === 0 && messages.length > 0) {
+      console.log(chalk.dim(`No printable history in ${messages.length} stored messages.`));
+    }
+    return;
+  }
+
+  const output = renderRecentMessagesToTerminal(messages, limit);
+
+  if (output) {
+    console.log(output);
+    return;
+  }
+
+  if (messages.length > 0) {
+    console.log(chalk.dim(`No printable history in ${messages.length} stored messages.`));
   }
 }
 
@@ -5057,7 +5074,15 @@ function handleAgentOutputRender({ msg, prefix, lines, buffers, toolCalls }) {
     }
     if (event.type === 'tool_result') {
       appendAgentToolResultEvent(lines, msg.sender, prefix, toolCalls, event);
+      continue;
     }
+    if (event.type === 'result') {
+      appendAgentResultEvent(lines, prefix, event);
+    }
+  }
+
+  if (events.length === 0) {
+    appendRawAgentOutputLines(lines, prefix, content);
   }
 }
 
@@ -5071,6 +5096,63 @@ const RENDER_TOPIC_HANDLERS = {
   AGENT_ERROR: handleAgentErrorRender,
   AGENT_OUTPUT: handleAgentOutputRender,
 };
+
+const HISTORY_NOISE_TOPICS = new Set(['STATE_SNAPSHOT', 'TOKEN_USAGE']);
+
+function appendAgentResultEvent(lines, prefix, event) {
+  if (!event.success) {
+    lines.push(`${prefix} ${chalk.bold.red('✗ Error:')} ${event.error || 'Task failed'}`);
+    return;
+  }
+
+  const usage = [];
+  if (Number.isFinite(event.inputTokens)) usage.push(`${event.inputTokens} in`);
+  if (Number.isFinite(event.outputTokens)) usage.push(`${event.outputTokens} out`);
+
+  const suffix = usage.length > 0 ? ` (${usage.join(', ')})` : '';
+  lines.push(`${prefix} ${chalk.green('✓')} completed${suffix}`);
+}
+
+function appendRawAgentOutputLines(lines, prefix, content) {
+  for (const line of String(content).split('\n')) {
+    const trimmed = line.trim();
+    if (shouldSkipAgentOutputLine(trimmed)) continue;
+    lines.push(`${prefix} ${line}`);
+  }
+}
+
+function agentOutputHasPrintableHistory(msg) {
+  const content = msg.content?.data?.line || msg.content?.data?.chunk || msg.content?.text;
+  if (!content || !content.trim()) return false;
+
+  const provider = normalizeProviderName(
+    msg.content?.data?.provider || msg.sender_provider || 'claude'
+  );
+  const events = parseProviderChunk(provider, content);
+  if (events.length === 0) {
+    return String(content)
+      .split('\n')
+      .some((line) => !shouldSkipAgentOutputLine(line.trim()));
+  }
+
+  return events.some((event) =>
+    ['text', 'thinking', 'thinking_start', 'tool_call', 'tool_result', 'result'].includes(
+      event.type
+    )
+  );
+}
+
+function isPrintableHistoryMessage(msg) {
+  if (!msg?.topic || HISTORY_NOISE_TOPICS.has(msg.topic)) return false;
+  if (msg.topic === 'AGENT_OUTPUT') return agentOutputHasPrintableHistory(msg);
+  return true;
+}
+
+function selectRecentPrintableMessages(messages, limit) {
+  const printableMessages = messages.filter(isPrintableHistoryMessage);
+  if (!Number.isFinite(limit) || limit <= 0) return printableMessages;
+  return printableMessages.slice(-limit);
+}
 
 /**
  * Render messages to terminal-style output with ANSI colors (same as zeroshot logs)
@@ -5097,6 +5179,13 @@ function renderMessagesToTerminal(clusterId, messages) {
   flushAllRenderBuffers(lines, buffers);
 
   return lines.join('\n');
+}
+
+function renderRecentMessagesToTerminal(messages, limit) {
+  const selectedMessages = selectRecentPrintableMessages(messages, limit);
+  if (selectedMessages.length === 0) return '';
+
+  return renderMessagesToTerminal(null, selectedMessages);
 }
 
 // Get terminal width for word wrapping
@@ -5575,4 +5664,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { resolveRunMode };
+module.exports = { renderRecentMessagesToTerminal, resolveRunMode };
