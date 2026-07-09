@@ -46,6 +46,7 @@ const {
   validateSetting,
   coerceValue,
   DEFAULT_SETTINGS,
+  settingsFileExists,
 } = require('../lib/settings');
 const { VALID_PROVIDERS, normalizeProviderName } = require('../lib/provider-names');
 const { getProvider, parseProviderChunk } = require('../src/providers');
@@ -4133,6 +4134,29 @@ providersCmd
   .description('Configure provider model levels and overrides')
   .action(async (provider) => {
     await setupCommand([provider]);
+  });
+
+// Setup wizard (read-only facts + setup contract; apply/undo/TTY wizard land separately)
+const setupCmd = program.command('setup').description('Setup and configuration wizard');
+setupCmd
+  .command('plan')
+  .description('Show read-only setup facts and proposed contract (no writes)')
+  .option('--json', 'Output as JSON')
+  .action(() => {
+    const { buildSetupPlan } = require('../lib/setup-plan');
+    const { readRepoSettings } = require('../lib/repo-settings');
+
+    const cwd = process.cwd();
+    const settings = loadSettings();
+    settings.__meta = { fileExists: settingsFileExists() };
+    const { settings: repoSettings } = readRepoSettings(cwd);
+    const plan = buildSetupPlan({
+      cwd,
+      settings,
+      repoSettings,
+      env: { ...process.env, __isTTY: !!process.stdout.isTTY },
+    });
+    console.log(JSON.stringify(plan, null, 2));
   });
 
 // Update command
