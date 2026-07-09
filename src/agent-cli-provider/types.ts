@@ -76,6 +76,7 @@ export interface OpencodeCliFeatures extends BaseCliFeatures {
   readonly supportsJson: boolean;
   readonly supportsModel: boolean;
   readonly supportsVariant: boolean;
+  readonly supportsDir: boolean;
   readonly supportsCwd: boolean;
   readonly supportsAutoApprove: false;
 }
@@ -96,6 +97,7 @@ export interface CliFeatureOverrides {
   readonly supportsModel?: boolean;
   readonly supportsJson?: boolean;
   readonly supportsOutputSchema?: boolean;
+  readonly supportsDir?: boolean;
   readonly supportsCwd?: boolean;
   readonly supportsConfigOverride?: boolean;
   readonly supportsSkipGitRepoCheck?: boolean;

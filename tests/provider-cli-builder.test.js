@@ -226,6 +226,28 @@ describe('Opencode provider helper builder', function () {
     assert.ok(result.args.includes('--variant'));
     assert.ok(result.args.includes('high'));
   });
+
+  it('prefers --dir over --cwd when opencode supports both', function () {
+    const result = buildCommand('opencode', 'test', {
+      cwd: '/tmp/worktree',
+      cliFeatures: { supportsDir: true, supportsCwd: true },
+    });
+
+    assert.ok(result.args.includes('--dir'));
+    assert.ok(!result.args.includes('--cwd'));
+    assert.deepStrictEqual(result.args.slice(1, 3), ['--dir', '/tmp/worktree']);
+  });
+
+  it('falls back to --cwd when opencode does not support --dir', function () {
+    const result = buildCommand('opencode', 'test', {
+      cwd: '/tmp/worktree',
+      cliFeatures: { supportsDir: false, supportsCwd: true },
+    });
+
+    assert.ok(!result.args.includes('--dir'));
+    assert.ok(result.args.includes('--cwd'));
+    assert.deepStrictEqual(result.args.slice(1, 3), ['--cwd', '/tmp/worktree']);
+  });
 });
 
 describe('Claude provider helper builder', function () {
