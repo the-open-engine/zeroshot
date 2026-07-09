@@ -103,7 +103,7 @@ function buildCommand(context: string, options: BuildProviderCommandOptions = {}
   return commandSpec({
     binary: 'gemini',
     args,
-    env: {},
+    env: { GEMINI_CLI_TRUST_WORKSPACE: 'true' },
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     warnings: collectGeminiWarnings(options),
   });
@@ -218,7 +218,14 @@ function classifyError(error: unknown): ErrorClassification {
       /No capacity available/i,
       /quota.?exceeded/i,
     ],
-    [/\bINVALID_ARGUMENT\b/i, /\bPERMISSION_DENIED\b/i, /\bNOT_FOUND\b/i]
+    [
+      /\bINVALID_ARGUMENT\b/i,
+      /\bPERMISSION_DENIED\b/i,
+      /\bNOT_FOUND\b/i,
+      /\bIneligibleTierError\b/i,
+      /\bUNSUPPORTED_CLIENT\b/i,
+      /\bno longer supported\b/i,
+    ]
   );
 }
 
