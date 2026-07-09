@@ -48,4 +48,31 @@ describe('stream-json parser (Codex)', () => {
     const events = parseChunk(chunk);
     assert.deepStrictEqual(events, [{ type: 'result', success: false, error: 'boom' }]);
   });
+
+  it('does not leak Gemini tool ids across parseChunk calls', () => {
+    const toolUse = JSON.stringify({
+      type: 'tool_use',
+      tool_call_id: 'tool-1',
+      tool_name: 'bash',
+      input: { cmd: 'ls' },
+    });
+    const toolResult = JSON.stringify({ type: 'tool_result', output: 'ok', success: true });
+
+    assert.deepStrictEqual(parseChunk(toolUse), [
+      {
+        type: 'tool_call',
+        toolName: 'bash',
+        toolId: 'tool-1',
+        input: { cmd: 'ls' },
+      },
+    ]);
+    assert.deepStrictEqual(parseChunk(toolResult), [
+      {
+        type: 'tool_result',
+        toolId: undefined,
+        content: 'ok',
+        isError: false,
+      },
+    ]);
+  });
 });

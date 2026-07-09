@@ -21,25 +21,26 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                  | File                                |
-| ------------------------ | ----------------------------------- |
-| Conductor classification | `src/conductor-bootstrap.js`        |
-| Base templates           | `cluster-templates/base-templates/` |
-| Message bus              | `src/message-bus.js`                |
-| Ledger (SQLite)          | `src/ledger.js`                     |
-| Guidance topics          | `src/guidance-topics.js`            |
-| Guidance mailbox helper  | `src/ledger.js`                     |
-| Guidance live injection  | `src/orchestrator.js`               |
-| Trigger evaluation       | `src/logic-engine.js`               |
-| Agent wrapper            | `src/agent-wrapper.js`              |
-| Providers registry       | `src/providers/index.js`            |
-| Provider implementations | `src/providers/`                    |
-| Provider detection       | `lib/provider-detection.js`         |
-| Provider capabilities    | `src/providers/capabilities.js`     |
-| Start-cluster helper     | `lib/start-cluster.js`              |
-| Docker mounts/env        | `lib/docker-config.js`              |
-| Container lifecycle      | `src/isolation-manager.js`          |
-| Settings                 | `lib/settings.js`                   |
+| Concept                  | File                                          |
+| ------------------------ | --------------------------------------------- |
+| Conductor classification | `src/conductor-bootstrap.js`                  |
+| Base templates           | `cluster-templates/base-templates/`           |
+| Message bus              | `src/message-bus.js`                          |
+| Ledger (SQLite)          | `src/ledger.js`                               |
+| Guidance topics          | `src/guidance-topics.js`                      |
+| Guidance mailbox helper  | `src/ledger.js`                               |
+| Guidance live injection  | `src/orchestrator.js`                         |
+| Trigger evaluation       | `src/logic-engine.js`                         |
+| Agent wrapper            | `src/agent-wrapper.js`                        |
+| Providers registry       | `src/providers/index.js`                      |
+| Provider implementations | `src/providers/`                              |
+| Provider engine registry | `src/agent-cli-provider/provider-registry.ts` |
+| Provider detection       | `lib/provider-detection.js`                   |
+| Provider capabilities    | `src/providers/capabilities.js`               |
+| Start-cluster helper     | `lib/start-cluster.js`                        |
+| Docker mounts/env        | `lib/docker-config.js`                        |
+| Container lifecycle      | `src/isolation-manager.js`                    |
+| Settings                 | `lib/settings.js`                             |
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
@@ -77,7 +78,9 @@ UX modes:
 - Daemon (`-d`): background, Ctrl+C detaches.
 - Attach (`zeroshot attach`): connect to daemon, Ctrl+C detaches only.
 
-Settings: `defaultProvider`, `providerSettings` (claude/codex/gemini), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
+Settings: `defaultProvider`, `providerSettings` (claude/codex/gemini/opencode), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
+
+Provider engines are registry-owned: adding an engine means one entry in `src/agent-cli-provider/provider-registry.ts`, plus the provider-specific adapter and tests. Docker credential mount/env presets and visible preset lists must derive from that registry entry; do not add new provider identity lists or provider preset lists elsewhere.
 
 ## Architecture
 
@@ -191,7 +194,7 @@ Configurable credential mounts for `--docker` mode. See `lib/docker-config.js`.
 | `dockerEnvPassthrough` | `string[]`    | `[]`     | Extra env vars (supports `VAR`, `VAR_*`, `VAR=value`) |
 | `dockerContainerHome`  | `string`      | `/root`  | Container home for `$HOME` expansion                  |
 
-Mount presets: `gh`, `git`, `ssh`, `aws`, `azure`, `kube`, `terraform`, `gcloud`, `claude`, `codex`, `gemini`, `opencode`.
+Mount presets: infrastructure presets plus provider ids from `src/agent-cli-provider/provider-registry.ts`.
 
 Provider CLIs in Docker require credential mounts; Zeroshot warns when missing.
 

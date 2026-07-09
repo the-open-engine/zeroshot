@@ -38,6 +38,19 @@ export {
   type PreparedSingleAgentProviderCommand,
   type SingleAgentProviderCommandInput,
 } from './single-agent-runtime';
+export {
+  findProviderRegistryEntry,
+  getProviderRegistryEntry,
+  knownProviderNames,
+  listProviderRegistryEntries,
+  normalizeProviderName,
+  providerAliasMap,
+  providerAliases,
+  providerIds,
+  providerRegistry,
+  resolveProviderCommand,
+  supportsProviderCapability,
+} from './provider-registry';
 
 export type {
   AgentCliProviderHelperMetadata,
@@ -60,9 +73,14 @@ export type {
   OutputEvent,
   OutputFormat,
   ProviderAdapter,
+  ProviderCapabilities,
+  ProviderCapabilityState,
+  ProviderCommandSpec,
+  ProviderDocsMetadata,
   ProviderAlias,
   ProviderCliFeatures,
   ProviderId,
+  ProviderRegistryEntry,
   RedactionMetadata,
   ResolvedModelSpec,
   ResultEvent,

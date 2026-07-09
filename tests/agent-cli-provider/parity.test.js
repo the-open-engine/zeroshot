@@ -5,6 +5,13 @@ const path = require('node:path');
 const { afterEach, test } = require('node:test');
 
 const helper = require('../../lib/agent-cli-provider');
+const { ENV_PRESETS, MOUNT_PRESETS } = require('../../lib/docker-config');
+const { validateSetting } = require('../../lib/settings');
+const {
+  KNOWN_PROVIDER_NAMES,
+  VALID_PROVIDERS,
+  normalizeProviderName,
+} = require('../../lib/provider-names');
 const runtimeProviders = require('../../src/providers');
 
 const createdTempFiles = new Set();
@@ -293,4 +300,78 @@ test('feature probing is deterministic from injected help text', () => {
     helper.getProviderAdapter('opencode').detectCliFeatures('opencode run --format').supportsCwd,
     false
   );
+});
+
+test('provider registry stays in parity across helper runtime settings and probe contract', async () => {
+  assert.deepEqual(helper.listProviderAdapters(), VALID_PROVIDERS);
+  assert.deepEqual(runtimeProviders.listProviders(), VALID_PROVIDERS);
+  assert.deepEqual(
+    helper.listProviderRegistryEntries().map((entry) => entry.id),
+    VALID_PROVIDERS
+  );
+  assert.deepEqual(
+    KNOWN_PROVIDER_NAMES.map((name) => normalizeProviderName(name)),
+    KNOWN_PROVIDER_NAMES.map((name) => helper.normalizeProviderName(name))
+  );
+
+  for (const provider of VALID_PROVIDERS) {
+    const metadata = helper.getProviderRegistryEntry(provider);
+    const runtime = runtimeProviders.getProvider(provider);
+    assert.equal(runtime.displayName, metadata.displayName);
+    assert.deepEqual(runtime.getCredentialPaths(), metadata.credentialPaths);
+    assert.deepEqual(runtime.getSettingsFields().slice(4), metadata.settingsFields);
+
+    const response = await helper.runProviderExecutable(
+      JSON.stringify({
+        schemaVersion: 1,
+        command: 'probe',
+        provider,
+        helpText: '',
+      }),
+      {
+        runner: async () => {
+          await Promise.resolve();
+          return {
+            stdout: '',
+            stderr: '',
+            exitCode: 0,
+            signal: null,
+            durationMs: 1,
+          };
+        },
+      }
+    );
+
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(response.envelope.result.provider.id, provider);
+    assert.equal(response.envelope.result.provider.displayName, metadata.displayName);
+    assert.deepEqual(
+      response.envelope.result.credentials.map((credential) => credential.key),
+      metadata.credentialEnvKeys
+    );
+  }
+
+  assert.equal(validateSetting('defaultProvider', 'openai'), null);
+  assert.equal(
+    validateSetting('defaultProvider', 'invalid-provider'),
+    `Invalid provider: invalid-provider. Valid providers: ${VALID_PROVIDERS.join(', ')}`
+  );
+  assert.equal(
+    validateSetting('providerSettings', {
+      openai: { defaultLevel: 'level2', levelOverrides: {} },
+    }),
+    null
+  );
+  assert.equal(
+    validateSetting('providerSettings', {
+      'invalid-provider': { defaultLevel: 'level2', levelOverrides: {} },
+    }),
+    `Unknown provider in providerSettings: invalid-provider. Valid providers: ${VALID_PROVIDERS.join(', ')}`
+  );
+
+  for (const metadata of helper.listProviderRegistryEntries()) {
+    assert.deepEqual(MOUNT_PRESETS[metadata.id], metadata.docker.mount);
+    assert.deepEqual(ENV_PRESETS[metadata.id], metadata.docker.envPassthrough);
+  }
 });

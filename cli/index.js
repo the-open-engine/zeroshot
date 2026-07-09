@@ -47,7 +47,7 @@ const {
   coerceValue,
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
-const { normalizeProviderName } = require('../lib/provider-names');
+const { VALID_PROVIDERS, normalizeProviderName } = require('../lib/provider-names');
 const { getProvider, parseProviderChunk } = require('../src/providers');
 const { readClustersFileSync } = require('../lib/clusters-registry');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
@@ -89,6 +89,7 @@ const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
 let activeClusterId = null;
 /** @type {import('../src/orchestrator') | null} */
 let orchestratorInstance = null;
+const PROVIDER_CHOICES = VALID_PROVIDERS.join(', ');
 
 // Track active status footer for safe output routing
 // When set, all output routes through statusFooter.print() to prevent garbling
@@ -2413,10 +2414,7 @@ program
     'When to close issue after merge: auto|always|never (default: from .zeroshot/settings.json or never)'
   )
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
-  .option(
-    '--provider <provider>',
-    'Override all agents to use a provider (claude, codex, gemini, opencode)'
-  )
+  .option('--provider <provider>', `Override all agents to use a provider (${PROVIDER_CHOICES})`)
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
   .option(
     '--sim <mode>',
@@ -2682,7 +2680,7 @@ taskCmd
   .command('run <prompt>')
   .description('Run a single-agent background task')
   .option('-C, --cwd <path>', 'Working directory for task')
-  .option('--provider <provider>', 'Provider to use (claude, codex, gemini, opencode)')
+  .option('--provider <provider>', `Provider to use (${PROVIDER_CHOICES})`)
   .option('--model <model>', 'Model id override for the provider')
   .option('--model-level <level>', 'Model level override (level1, level2, level3)')
   .option('--reasoning-effort <effort>', 'Reasoning effort (low, medium, high, xhigh)')
@@ -3605,15 +3603,15 @@ function registerTuiEntrypoint(commandName, providerName) {
     .action(failTuiUnavailable);
 }
 
-registerTuiEntrypoint('codex', 'codex');
-registerTuiEntrypoint('claude', 'claude');
-registerTuiEntrypoint('gemini', 'gemini');
-registerTuiEntrypoint('opencode', 'opencode');
+for (const providerName of VALID_PROVIDERS) {
+  registerTuiEntrypoint(providerName, providerName);
+}
 
 // Settings management
 const settingsCmd = program.command('settings').description('Manage zeroshot settings');
 
 function printSettingsUsage() {
+  const mountPresetList = Object.keys(MOUNT_PRESETS).join(', ');
   console.log(chalk.dim('Usage:'));
   console.log(chalk.dim('  zeroshot settings set <key> <value>'));
   console.log(chalk.dim('  zeroshot settings get <key>'));
@@ -3624,11 +3622,7 @@ function printSettingsUsage() {
   console.log(chalk.dim('  zeroshot settings set dockerMounts \'["gh","git","ssh","aws"]\''));
   console.log(chalk.dim('  zeroshot settings set dockerEnvPassthrough \'["AWS_*","TF_VAR_*"]\''));
   console.log('');
-  console.log(
-    chalk.dim(
-      'Available mount presets: gh, git, ssh, aws, azure, kube, terraform, gcloud, claude, codex, gemini'
-    )
-  );
+  console.log(chalk.dim(`Available mount presets: ${mountPresetList}`));
   console.log('');
 }
 
@@ -4129,7 +4123,7 @@ providersCmd.action(async () => {
 
 providersCmd
   .command('set-default <provider>')
-  .description('Set default provider (claude, codex, gemini, opencode)')
+  .description(`Set default provider (${PROVIDER_CHOICES})`)
   .action(async (provider) => {
     await setDefaultCommand([provider]);
   });

@@ -1,7 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { getString, isRecord, stringifyJson } from '../json';
+import { stringifyJson } from '../json';
 import {
   type BuildProviderCommandOptions,
   type ClaudeCliFeatures,
@@ -16,6 +13,7 @@ import {
   type ResolvedModelSpec,
   type WarningMetadata,
 } from '../types';
+import { resolveClaudeCommand } from '../claude-command';
 import {
   classifyBaseProviderError,
   commandSpec,
@@ -105,34 +103,6 @@ function addSessionArgs(args: string[], options: BuildProviderCommandOptions): v
   if (options.continueSession) {
     args.push('--continue');
   }
-}
-
-function readConfiguredClaudeCommand(): string {
-  if (process.env.ZEROSHOT_CLAUDE_COMMAND?.trim()) {
-    return process.env.ZEROSHOT_CLAUDE_COMMAND;
-  }
-
-  const settingsPath =
-    process.env.ZEROSHOT_SETTINGS_FILE || join(homedir(), '.zeroshot', 'settings.json');
-  if (!existsSync(settingsPath)) return 'claude';
-
-  try {
-    const settings: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    const configured = isRecord(settings) ? getString(settings, 'claudeCommand') : null;
-    if (configured?.trim()) return configured;
-  } catch {
-    return 'claude';
-  }
-
-  return 'claude';
-}
-
-function resolveClaudeCommand(): { readonly command: string; readonly args: readonly string[] } {
-  const parts = readConfiguredClaudeCommand().trim().split(/\s+/);
-  return {
-    command: parts[0] ?? 'claude',
-    args: parts.slice(1),
-  };
 }
 
 function collectWarnings(options: BuildProviderCommandOptions): WarningMetadata[] {

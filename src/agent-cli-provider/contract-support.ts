@@ -40,10 +40,10 @@ export function adapterForProvider(provider: string | null): ProviderAdapter {
   }
   try {
     return getProviderAdapter(provider);
-  } catch {
+  } catch (error) {
     throw contractError({
       code: 'unknown-provider',
-      message: `Unknown provider: ${provider}.`,
+      message: error instanceof Error ? error.message : `Unknown provider: ${provider}.`,
       exitCode: 4,
       field: 'provider',
     });
