@@ -6,6 +6,7 @@ const { test } = require('node:test');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakeKiroScript,
   fakePiScript,
   invokeCodexSchemaRequest,
   runExecutable,
@@ -214,6 +215,299 @@ process.stdin.resume();
       assert.equal(response.envelope.result.events[0].type, 'text');
       assert.equal(response.envelope.result.events[0].text, 'HELPER_INVOKE_OK');
       assert.ok(response.envelope.result.commandSpec.args.includes('--json'));
+    }
+  );
+});
+
+test('invoke runs ACP stdio providers through the shared headless lane', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-kiro-worktree-'));
+
+  try {
+    withFakeProviderCli(
+      'kiro-cli',
+      fakeKiroScript(`
+const readline = require('node:readline');
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { protocolVersion: 1 },
+    }) + '\\n');
+    return;
+  }
+  if (message.method === 'session/new') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { sessionId: 'kiro-session-1' },
+    }) + '\\n');
+    return;
+  }
+  if (message.method === 'session/prompt') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'kiro-session-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          title: 'bash',
+          rawInput: { command: 'pwd' },
+        },
+      },
+    }) + '\\n');
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'kiro-session-1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tool-1',
+          status: 'completed',
+          rawOutput: '/tmp/kiro',
+        },
+      },
+    }) + '\\n');
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'kiro-session-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg-1',
+          content: { type: 'text', text: 'Kiro invoke OK' },
+        },
+      },
+    }) + '\\n');
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: {
+        stopReason: 'end_turn',
+        usage: {
+          inputTokens: 5,
+          outputTokens: 3,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    }) + '\\n');
+  }
+});
+`),
+      () => {
+        const response = runExecutable({
+          schemaVersion: 1,
+          command: 'invoke',
+          provider: 'kiro',
+          context: 'Reply with Kiro invoke OK',
+          options: {
+            cwd: tempDir,
+          },
+          timeoutMs: 300,
+        });
+
+        assert.equal(response.exitCode, 0);
+        assert.equal(response.envelope.ok, true);
+        assert.equal(response.envelope.result.commandSpec.binary, 'kiro-cli');
+        assert.deepEqual(response.envelope.result.commandSpec.args, ['acp']);
+        assert.deepEqual(response.envelope.result.events, [
+          { type: 'tool_call', toolName: 'bash', toolId: 'tool-1', input: { command: 'pwd' } },
+          { type: 'tool_result', toolId: 'tool-1', content: '/tmp/kiro', isError: false },
+          { type: 'text', text: 'Kiro invoke OK' },
+          {
+            type: 'result',
+            success: true,
+            result: 'Kiro invoke OK',
+            error: null,
+            inputTokens: 5,
+            outputTokens: 3,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            cost: null,
+            modelUsage: {
+              inputTokens: 5,
+              outputTokens: 3,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+            },
+          },
+        ]);
+      }
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('invoke fails closed on ACP permission callbacks', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+const readline = require('node:readline');
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { protocolVersion: 1 },
+    }) + '\\n');
+    return;
+  }
+  if (message.method === 'session/new') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { sessionId: 'kiro-session-1' },
+    }) + '\\n');
+    return;
+  }
+  if (message.method === 'session/prompt') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 77,
+      method: 'session/request_permission',
+      params: { sessionId: 'kiro-session-1' },
+    }) + '\\n');
+    setInterval(() => {}, 1000);
+  }
+});
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'invoke',
+        provider: 'kiro',
+        context: 'trigger permission callback',
+        timeoutMs: 300,
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.timedOut, false);
+      assert.equal(response.envelope.result.classification.retryable, false);
+      assert.match(
+        response.envelope.result.evidence.stderr,
+        /kiro ACP stdio fail-closed: unsupported session\/request_permission callback/i
+      );
+    }
+  );
+});
+
+test('invoke fails closed on malformed ACP stdout JSON', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+const readline = require('node:readline');
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write('{not json}\\n');
+    setInterval(() => {}, 1000);
+  }
+});
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'invoke',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        timeoutMs: 300,
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.timedOut, false);
+      assert.equal(response.envelope.result.classification.retryable, false);
+      assert.match(
+        response.envelope.result.evidence.stderr,
+        /kiro ACP stdio fail-closed: malformed ACP stdout JSON/i
+      );
+    }
+  );
+});
+
+test('invoke fails closed when ACP stdio support is not advertised', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('invoke should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'invoke',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        timeoutMs: 300,
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
+    }
+  );
+});
+
+test('invoke ignores caller ACP support overrides when runtime probe rejects ACP stdio', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('invoke should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'invoke',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        timeoutMs: 300,
+        options: {
+          cliFeatures: {
+            supportsAcpStdio: true,
+          },
+        },
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
     }
   );
 });

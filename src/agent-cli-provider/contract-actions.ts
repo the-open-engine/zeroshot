@@ -88,7 +88,7 @@ function categoryForClassification(classification: ErrorClassification, error: u
   const message = unknownToMessage(error);
   if (/auth|api[_ -]?key|unauthorized|forbidden|permission/i.test(message)) return 'auth';
   if (/rate|429|quota|resource_exhausted/i.test(message)) return 'rate-limit';
-  if (/schema|json|parse|format/i.test(message)) return 'schema';
+  if (/schema|json|parse|format|malformed/i.test(message)) return 'schema';
   return classification.retryable ? 'retryable' : 'permanent';
 }
 

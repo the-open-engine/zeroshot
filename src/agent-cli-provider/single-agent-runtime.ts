@@ -58,7 +58,6 @@ type MutableModelSpec = {
 
 const MODEL_LEVELS: readonly ModelLevel[] = ['level1', 'level2', 'level3'];
 const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
-
 const settingsModule: unknown = require('../../lib/settings');
 const providerDetectionModule: unknown = require('../../lib/provider-detection');
 const claudeAuthModule: unknown = require('../../lib/settings/claude-auth');
@@ -77,7 +76,7 @@ export function prepareSingleAgentProviderCommand(
   const adapter = adapterForRuntimeInput(input.provider, settings);
   const providerSettings = runtimeProviderSettings(settings, adapter.id);
   const baseOptions = input.options ?? {};
-  const cliFeatures = baseOptions.cliFeatures ?? detectRuntimeProviderCliFeatures(adapter.id);
+  const cliFeatures = resolveRuntimeCliFeatures(adapter.id, baseOptions.cliFeatures);
   const authEnv = baseOptions.authEnv ?? resolveRuntimeAuthEnv(adapter.id, settings);
   const options = buildRuntimeOptions(baseOptions, adapter, providerSettings, cliFeatures, authEnv);
   return {
@@ -90,6 +89,45 @@ export function prepareSingleAgentProviderCommand(
 
 export function detectRuntimeProviderCliFeatures(provider: string): ProviderCliFeatures {
   return probeRuntimeProviderCli(provider).capabilities;
+}
+
+function resolveRuntimeCliFeatures(
+  provider: ProviderId,
+  overrides: CliFeatureOverrides | undefined
+): CliFeatureOverrides {
+  if (getProviderRegistryEntry(provider).invoke.lane !== 'acp-stdio') {
+    return overrides ?? detectRuntimeProviderCliFeatures(provider);
+  }
+
+  const detected = detectRuntimeProviderCliFeatures(provider);
+  if (overrides === undefined) return detected;
+  return mergeAcpFailClosedCliFeatures(detected, overrides);
+}
+
+function mergeAcpFailClosedCliFeatures(
+  detected: ProviderCliFeatures,
+  overrides: CliFeatureOverrides
+): CliFeatureOverrides {
+  if (!('supportsAcpStdio' in detected)) return overrides;
+  return {
+    ...detected,
+    ...overrides,
+    supportsAcpStdio: detected.supportsAcpStdio && overrides.supportsAcpStdio !== false,
+    supportsPromptImages:
+      detected.supportsPromptImages && overrides.supportsPromptImages !== false,
+    supportsLoadSession: detected.supportsLoadSession && overrides.supportsLoadSession !== false,
+    supportsSessionCancel:
+      detected.supportsSessionCancel && overrides.supportsSessionCancel !== false,
+    supportsSessionSetModel:
+      detected.supportsSessionSetModel && overrides.supportsSessionSetModel !== false,
+    supportsSessionSetMode:
+      detected.supportsSessionSetMode && overrides.supportsSessionSetMode !== false,
+    supportsRemoteTransport: false,
+    supportsCustomTransport: false,
+    supportsPermissionRequests: false,
+    supportsFsTools: false,
+    supportsTerminalTools: false,
+  };
 }
 
 export function probeRuntimeProviderCli(provider: string): RuntimeProviderProbe {

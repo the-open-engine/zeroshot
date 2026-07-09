@@ -1,3 +1,4 @@
+import { createAcpAdapter } from './adapters/acp';
 import { claudeAdapter } from './adapters/claude';
 import { codexAdapter } from './adapters/codex';
 import { geminiAdapter } from './adapters/gemini';
@@ -28,6 +29,17 @@ interface ConfiguredClaudeCommandSpec {
   readonly kind: 'configured-claude';
 }
 
+export interface SpawnProviderInvokeSpec {
+  readonly lane: 'spawn';
+}
+
+export interface AcpStdioProviderInvokeSpec {
+  readonly lane: 'acp-stdio';
+  readonly transport: 'stdio';
+}
+
+export type ProviderInvokeSpec = SpawnProviderInvokeSpec | AcpStdioProviderInvokeSpec;
+
 export type ProviderCommandSpec = FixedProviderCommandSpec | ConfiguredClaudeCommandSpec;
 
 export interface ProviderDocsMetadata {
@@ -52,6 +64,7 @@ export interface ProviderRegistryEntry {
   readonly displayName: string;
   readonly binary: string;
   readonly command: ProviderCommandSpec;
+  readonly invoke: ProviderInvokeSpec;
   readonly installInstructions: string;
   readonly authInstructions: string;
   readonly credentialPaths: readonly string[];
@@ -86,6 +99,40 @@ const CLAUDE_DOCKER_ENV_PASSTHROUGH = [
   'CLAUDE_CODE_USE_BEDROCK',
 ] as const;
 
+const SPAWN_INVOKE = Object.freeze({ lane: 'spawn' }) as SpawnProviderInvokeSpec;
+const ACP_STDIO_INVOKE = Object.freeze({
+  lane: 'acp-stdio',
+  transport: 'stdio',
+}) as AcpStdioProviderInvokeSpec;
+
+const kiroAdapter = createAcpAdapter({
+  provider: 'kiro',
+  displayName: 'Kiro',
+  binary: 'kiro-cli',
+  commandArgs: ['acp'],
+  credentialEnvKeys: ['KIRO_API_KEY'],
+  supportsPromptImages: true,
+  supportsLoadSession: false,
+  supportsSessionCancel: true,
+  supportsSessionSetModel: false,
+  supportsSessionSetMode: false,
+  retryableErrorPatterns: [
+    /\brate(?:[ _])?limit\b/i,
+    /\btemporar(?:y|ily)\b/i,
+    /\btimeout\b/i,
+    /\bunavailable\b/i,
+  ],
+  permanentErrorPatterns: [
+    /\bauth(?:entication)?\b/i,
+    /\bapi[_ -]?key\b/i,
+    /\bforbidden\b/i,
+    /\bunauthorized\b/i,
+    /\bcancelled\b/i,
+    /\bmalformed\b/i,
+    /\bunsupported\b/i,
+  ],
+});
+
 export const providerRegistry = [
   {
     id: 'claude',
@@ -93,6 +140,7 @@ export const providerRegistry = [
     displayName: 'Claude',
     binary: 'claude',
     command: { kind: 'configured-claude' },
+    invoke: SPAWN_INVOKE,
     installInstructions:
       'npm install -g @anthropic-ai/claude-code\nOr (macOS): brew install claude',
     authInstructions: 'claude login',
@@ -129,6 +177,7 @@ export const providerRegistry = [
     displayName: 'Codex',
     binary: 'codex',
     command: { kind: 'fixed', command: 'codex', args: ['exec'] },
+    invoke: SPAWN_INVOKE,
     installInstructions: 'npm install -g @openai/codex',
     authInstructions: 'codex login',
     credentialPaths: ['~/.config/codex', '~/.codex'],
@@ -164,6 +213,7 @@ export const providerRegistry = [
     displayName: 'Gemini',
     binary: 'gemini',
     command: { kind: 'fixed', command: 'gemini', args: [] },
+    invoke: SPAWN_INVOKE,
     installInstructions: 'npm install -g @google/gemini-cli',
     authInstructions: 'gemini auth login',
     credentialPaths: ['~/.config/gcloud', '~/.config/gemini', '~/.gemini'],
@@ -199,6 +249,7 @@ export const providerRegistry = [
     displayName: 'Opencode',
     binary: 'opencode',
     command: { kind: 'fixed', command: 'opencode', args: ['run'] },
+    invoke: SPAWN_INVOKE,
     installInstructions: 'See https://opencode.ai for installation instructions.',
     authInstructions: 'opencode auth login',
     credentialPaths: ['~/.local/share/opencode'],
@@ -234,6 +285,7 @@ export const providerRegistry = [
     displayName: 'Pi',
     binary: 'pi',
     command: { kind: 'fixed', command: 'pi', args: [] },
+    invoke: SPAWN_INVOKE,
     installInstructions:
       'npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.3',
     authInstructions: 'pi\n/login',
@@ -265,6 +317,43 @@ export const providerRegistry = [
       max: piAdapter.defaultMaxLevel,
     },
     adapter: piAdapter,
+  },
+  {
+    id: 'kiro',
+    aliases: [],
+    displayName: 'Kiro',
+    binary: 'kiro-cli',
+    command: { kind: 'fixed', command: 'kiro-cli', args: ['acp'] },
+    invoke: ACP_STDIO_INVOKE,
+    installInstructions: 'See https://kiro.dev/docs/cli/',
+    authInstructions: 'See https://kiro.dev/docs/cli/authentication/',
+    credentialPaths: ['~/.kiro'],
+    credentialEnvKeys: kiroAdapter.credentialEnvKeys,
+    settingsFields: [],
+    capabilities: {
+      ...STANDARD_CAPABILITIES,
+      mcpServers: false,
+      jsonSchema: false,
+      reasoningEffort: false,
+    },
+    docs: {
+      label: 'Kiro',
+      setupHeading: 'Kiro Setup',
+    },
+    docker: {
+      mount: {
+        host: '~/.kiro',
+        container: '$HOME/.kiro',
+        readonly: true,
+      },
+      envPassthrough: ['KIRO_API_KEY'],
+    },
+    defaultLevels: {
+      min: kiroAdapter.defaultMinLevel,
+      default: kiroAdapter.defaultLevel,
+      max: kiroAdapter.defaultMaxLevel,
+    },
+    adapter: kiroAdapter,
   },
 ] as const satisfies readonly ProviderRegistryEntry[];
 

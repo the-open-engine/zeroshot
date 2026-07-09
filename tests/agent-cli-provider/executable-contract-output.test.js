@@ -12,6 +12,10 @@ function piFixture(name) {
   return fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'pi', name), 'utf8');
 }
 
+function kiroFixture(name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'kiro', name), 'utf8');
+}
+
 test('parse-output returns normalized events and parser diagnostics', () => {
   const stdout = [
     JSON.stringify({
@@ -318,6 +322,196 @@ test('parse-output handles Pi failure and empty fixtures', () => {
   assert.deepEqual(emptyResponse.envelope.result.events, []);
 });
 
+test('parse-output normalizes Kiro ACP fixtures and diagnostics', () => {
+  const textResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout: kiroFixture('text.jsonl'),
+  });
+
+  assert.equal(textResponse.exitCode, 0);
+  assert.equal(textResponse.envelope.ok, true);
+  assert.deepEqual(textResponse.envelope.result.events, [
+    { type: 'text', text: 'Hello' },
+    { type: 'text', text: ' from Kiro' },
+    {
+      type: 'result',
+      success: true,
+      result: 'Hello from Kiro',
+      error: null,
+      inputTokens: 7,
+      outputTokens: 3,
+      cacheReadInputTokens: 1,
+      cacheCreationInputTokens: 0,
+      cost: null,
+      modelUsage: {
+        inputTokens: 7,
+        outputTokens: 3,
+        cacheReadInputTokens: 1,
+        cacheCreationInputTokens: 0,
+      },
+    },
+  ]);
+
+  const toolResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout: kiroFixture('tool.jsonl'),
+  });
+
+  assert.equal(toolResponse.exitCode, 0);
+  assert.equal(toolResponse.envelope.ok, true);
+  assert.deepEqual(toolResponse.envelope.result.events, [
+    { type: 'tool_call', toolName: 'bash', toolId: 'tool-1', input: { command: 'pwd' } },
+    { type: 'tool_result', toolId: 'tool-1', content: 'line1', isError: false },
+    { type: 'tool_result', toolId: 'tool-1', content: 'line1\n/tmp/kiro', isError: false },
+    { type: 'text', text: 'done' },
+    {
+      type: 'result',
+      success: true,
+      result: 'done',
+      error: null,
+      inputTokens: 9,
+      outputTokens: 4,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cost: null,
+      modelUsage: {
+        inputTokens: 9,
+        outputTokens: 4,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      },
+    },
+  ]);
+
+  for (const [name, expectedError] of [
+    ['auth-failure.jsonl', 'authentication required: run kiro auth login'],
+    ['cancelled.jsonl', 'cancelled by user'],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'parse-output',
+      provider: 'kiro',
+      stdout: kiroFixture(name),
+    });
+
+    const lastEvent = response.envelope.result.events.at(-1);
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(lastEvent.type, 'result');
+    assert.equal(lastEvent.success, false);
+    assert.equal(lastEvent.error, expectedError);
+  }
+
+  const malformedResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout: kiroFixture('malformed.jsonl'),
+  });
+
+  assert.equal(malformedResponse.exitCode, 0);
+  assert.equal(malformedResponse.envelope.ok, true);
+  assert.deepEqual(malformedResponse.envelope.result.events, [{ type: 'text', text: 'ok' }]);
+  assert.equal(malformedResponse.envelope.result.diagnostics[0].kind, 'parse-error');
+
+  const emptyResponse = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout: kiroFixture('empty.jsonl'),
+  });
+
+  assert.equal(emptyResponse.exitCode, 0);
+  assert.equal(emptyResponse.envelope.ok, true);
+  assert.deepEqual(emptyResponse.envelope.result.events, []);
+});
+
+test('parse-output handles spec-compliant ACP content blocks and thought chunks', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout: kiroFixture('thought.jsonl'),
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(response.envelope.result.events, [
+    { type: 'thinking', text: 'Need a plan' },
+    { type: 'thinking', text: ' first' },
+    { type: 'text', text: 'Done' },
+    {
+      type: 'result',
+      success: true,
+      result: 'Done',
+      error: null,
+      cost: null,
+      modelUsage: null,
+    },
+  ]);
+});
+
+test('parse-output accumulates ACP delta chunks into the terminal result', () => {
+  const stdout = [
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'kiro-session-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg-delta-1',
+          content: { type: 'text', text: 'Hello' },
+        },
+      },
+    }),
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'kiro-session-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'msg-delta-1',
+          content: { type: 'text', text: ' world' },
+        },
+      },
+    }),
+    JSON.stringify({
+      jsonrpc: '2.0',
+      result: {
+        stopReason: 'end_turn',
+      },
+    }),
+  ].join('\n');
+
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'parse-output',
+    provider: 'kiro',
+    stdout,
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(response.envelope.result.events, [
+    { type: 'text', text: 'Hello' },
+    { type: 'text', text: ' world' },
+    {
+      type: 'result',
+      success: true,
+      result: 'Hello world',
+      error: null,
+      cost: null,
+      modelUsage: null,
+    },
+  ]);
+});
+
 test('classify-error maps Pi auth, rate-limit, cancellation, and command failures', () => {
   for (const [message, expectedCategory, expectedRetryable] of [
     ['authentication required: run /login', 'auth', false],
@@ -329,6 +523,27 @@ test('classify-error maps Pi auth, rate-limit, cancellation, and command failure
       schemaVersion: 1,
       command: 'classify-error',
       provider: 'pi',
+      error: { message },
+    });
+
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(response.envelope.result.category, expectedCategory);
+    assert.equal(response.envelope.result.classification.retryable, expectedRetryable);
+  }
+});
+
+test('classify-error maps Kiro auth, retryable, cancellation, and malformed ACP failures', () => {
+  for (const [message, expectedCategory, expectedRetryable] of [
+    ['authentication required: run kiro auth login', 'auth', false],
+    ['rate limit exceeded; retry later', 'rate-limit', true],
+    ['cancelled by user', 'permanent', false],
+    ['malformed ACP response', 'schema', false],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'classify-error',
+      provider: 'kiro',
       error: { message },
     });
 

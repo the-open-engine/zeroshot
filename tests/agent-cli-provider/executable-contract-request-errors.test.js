@@ -57,7 +57,7 @@ test('unknown provider returns structured provider error envelope', () => {
   assert.equal(response.envelope.error.code, 'unknown-provider');
   assert.equal(
     response.envelope.error.message,
-    'Unknown provider: unknown. Valid: claude, codex, gemini, opencode, pi'
+    'Unknown provider: unknown. Valid: claude, codex, gemini, opencode, pi, kiro'
   );
 });
 
