@@ -34,14 +34,24 @@ const BASE_PERMANENT_PATTERNS: readonly RegExp[] = [
   /insufficient quota/i,
 ];
 
-function getStatus(error: unknown): number | null {
+function statusFromMessage(message: string): number | null {
+  const match = /\b(?:status(?: code)?|http)\s+(?<status>\d{3})\b/i.exec(message);
+  if (!match?.groups?.status) return null;
+  const status = Number.parseInt(match.groups.status, 10);
+  return Number.isInteger(status) ? status : null;
+}
+
+export function extractErrorStatus(error: unknown): number | null {
   if (!isRecord(error)) return null;
   const directStatus = getNumber(error, 'status') ?? getNumber(error, 'statusCode');
   if (directStatus !== null) return directStatus;
 
   const response = getRecord(error, 'response');
-  if (response === null) return null;
-  return getNumber(response, 'status') ?? getNumber(response, 'statusCode');
+  const responseStatus =
+    response === null ? null : getNumber(response, 'status') ?? getNumber(response, 'statusCode');
+  if (responseStatus !== null) return responseStatus;
+
+  return statusFromMessage(unknownToMessage(error));
 }
 
 function getCode(error: unknown): string | null {
@@ -69,7 +79,7 @@ export function classifyErrorWithPatterns(
   retryablePatterns: readonly RegExp[],
   permanentPatterns: readonly RegExp[]
 ): ErrorClassification {
-  const statusClassification = classifyStatus(getStatus(error));
+  const statusClassification = classifyStatus(extractErrorStatus(error));
   if (statusClassification !== null) return statusClassification;
 
   const codeClassification = classifyCode(getCode(error));

@@ -207,6 +207,34 @@ test('classify-error uses nested response status categories and evidence', () =>
   }
 });
 
+test('classify-error recovers HTTP status from message-only gateway errors', () => {
+  for (const [message, expected] of [
+    [
+      'Gateway request failed with status 404: No such model',
+      { kind: 'status-permanent', category: 'permanent', status: 404, retryable: false },
+    ],
+    [
+      'Gateway request failed with status 500: Upstream exploded',
+      { kind: 'status-retryable', category: 'retryable', status: 500, retryable: true },
+    ],
+  ]) {
+    const response = runExecutable({
+      schemaVersion: 1,
+      command: 'classify-error',
+      provider: 'gateway',
+      error: { message },
+    });
+
+    assert.equal(response.exitCode, 0);
+    assert.equal(response.envelope.ok, true);
+    assert.equal(response.envelope.evidence.status, expected.status);
+    assert.equal(response.envelope.result.evidence.status, expected.status);
+    assert.equal(response.envelope.result.classification.kind, expected.kind);
+    assert.equal(response.envelope.result.classification.retryable, expected.retryable);
+    assert.equal(response.envelope.result.category, expected.category);
+  }
+});
+
 test('parse-output reports parser-error diagnostics when provider parser throws', async () => {
   const adapters = require('../../lib/agent-cli-provider/adapters');
   const originalParseProviderChunk = adapters.parseProviderChunk;

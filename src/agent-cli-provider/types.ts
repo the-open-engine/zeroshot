@@ -59,6 +59,28 @@ export interface ResolvedModelSpec {
 
 export type LevelOverrides = Readonly<Partial<Record<ModelLevel, ModelSpec>>>;
 
+export interface GatewayToolPolicy {
+  readonly roots: readonly string[];
+  readonly commands: readonly string[];
+  readonly commandTimeoutMs?: number;
+}
+
+export interface GatewayBuildOptions {
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly model?: string | null;
+  readonly toolPolicy?: GatewayToolPolicy;
+}
+
+export interface ResolvedGatewayBuildOptions {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly model: string;
+  readonly toolPolicy: GatewayToolPolicy;
+}
+
 export interface BaseCliFeatures {
   readonly provider?: ProviderId;
   readonly unknown?: boolean;
@@ -116,6 +138,11 @@ export interface PiCliFeatures extends BaseCliFeatures {
   readonly supportsNoApprove: boolean;
 }
 
+export interface GatewayCliFeatures extends BaseCliFeatures {
+  readonly provider: 'gateway';
+  readonly supportsBundledRunner: true;
+}
+
 export interface AcpCliFeatures extends BaseCliFeatures {
   readonly provider: ProviderId;
   readonly supportsAcpStdio: boolean;
@@ -137,6 +164,7 @@ export type ProviderCliFeatures =
   | GeminiCliFeatures
   | OpencodeCliFeatures
   | PiCliFeatures
+  | GatewayCliFeatures
   | AcpCliFeatures;
 
 export interface CliFeatureOverrides {
@@ -161,6 +189,7 @@ export interface CliFeatureOverrides {
   readonly supportsNoPromptTemplates?: boolean;
   readonly supportsNoContextFiles?: boolean;
   readonly supportsNoApprove?: boolean;
+  readonly supportsBundledRunner?: boolean;
   readonly supportsAcpStdio?: boolean;
   readonly supportsPromptImages?: boolean;
   readonly supportsLoadSession?: boolean;
@@ -216,6 +245,7 @@ export interface BuildProviderCommandOptions {
   readonly cliFeatures?: CliFeatureOverrides;
   readonly authEnv?: Readonly<Record<string, string>>;
   readonly strictSchema?: boolean;
+  readonly gateway?: GatewayBuildOptions;
 }
 
 export interface TextEvent {

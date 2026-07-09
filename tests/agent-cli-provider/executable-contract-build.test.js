@@ -219,6 +219,118 @@ process.exit(17);
   );
 });
 
+test('build-command returns bundled gateway runner specs with redacted config env', () => {
+  const secret = 'gateway-secret-token';
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'gateway',
+    context: 'Edit the target file.',
+    options: {
+      cwd: '/tmp/gateway-project',
+      gateway: {
+        baseUrl: 'http://127.0.0.1:4000',
+        apiKey: secret,
+        headers: {
+          'X-API-Key': 'custom-header-secret-42',
+        },
+        model: 'openrouter/test-model',
+        toolPolicy: {
+          roots: ['.'],
+          commands: ['node'],
+        },
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.provider, 'gateway');
+  assert.equal(response.envelope.result.commandSpec.binary, process.execPath);
+  assert.match(response.envelope.result.commandSpec.args[0], /gateway-runner\.js$/);
+  assert.equal(response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(secret), false);
+  assert.equal(
+    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes('custom-header-secret-42'),
+    false
+  );
+  assertNoSecret(response.envelope, secret);
+  assertNoSecret(response.envelope, 'custom-header-secret-42');
+});
+
+test('build-command rejects caller env that collides with gateway runner control vars', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'gateway',
+    context: 'Edit the target file.',
+    env: {
+      ZEROSHOT_GATEWAY_API_KEY: 'attacker-key',
+    },
+    options: {
+      gateway: {
+        baseUrl: 'http://127.0.0.1:4000',
+        apiKey: 'gateway-secret-token',
+        model: 'openrouter/test-model',
+        toolPolicy: {
+          roots: ['.'],
+          commands: ['node'],
+        },
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 2);
+  assert.equal(response.envelope.ok, false);
+  assert.equal(response.envelope.error.code, 'forbidden-field');
+  assert.equal(response.envelope.error.field, 'env.ZEROSHOT_GATEWAY_API_KEY');
+  assert.match(response.envelope.error.message, /provider adapters own ZEROSHOT_GATEWAY_API_KEY/i);
+});
+
+test('build-command resolves gateway settings tool roots against options.cwd', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-gateway-settings-'));
+  const settingsFile = path.join(tempDir, 'settings.json');
+  const worktree = path.join(tempDir, 'worktree');
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(
+      {
+        providerSettings: {
+          gateway: {
+            baseUrl: 'http://127.0.0.1:4000',
+            apiKey: 'gateway-secret-token',
+            model: 'openrouter/test-model',
+            toolPolicy: {
+              roots: ['.'],
+              commands: ['node'],
+            },
+          },
+        },
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
+  try {
+    withTempEnv({ ZEROSHOT_SETTINGS_FILE: settingsFile }, () => {
+      const prepared = require('../../lib/agent-cli-provider').prepareSingleAgentProviderCommand({
+        context: 'Edit the target file.',
+        provider: 'gateway',
+        options: {
+          cwd: worktree,
+        },
+      });
+
+      const request = JSON.parse(prepared.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST);
+      assert.deepEqual(request.gateway.toolPolicy.roots, [worktree]);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('build-command fails closed when ACP stdio support is not advertised', () => {
   withFakeProviderCli(
     'kiro-cli',
