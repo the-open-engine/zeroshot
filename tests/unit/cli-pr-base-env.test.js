@@ -140,4 +140,13 @@ describe('CLI PR config env fallback', function () {
 
     assert.strictEqual(result.closeIssue, 'never');
   });
+
+  it('derives autoMerge and worktree from options.ship via resolveRunPlan', function () {
+    process.env.ZEROSHOT_CWD = '/tmp/zeroshot-test';
+
+    const result = buildStartOptions({ clusterId: 'test', options: { ship: true }, settings: {} });
+
+    assert.strictEqual(result.autoMerge, true);
+    assert.strictEqual(result.worktree, true);
+  });
 });

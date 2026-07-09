@@ -194,6 +194,9 @@ function applyPushBlockedRepairTriggers(config) {
 }
 
 function buildPrOptions(options, requiredQualityGates) {
+  // NOTE: git-pusher's merge command is unconditional today (no ship-vs-pr gating);
+  // autoMerge is not threaded here because doing so would change --pr's observable
+  // behavior (out of scope per #582 non-goals).
   if (
     !options.prBase &&
     !options.mergeQueue &&

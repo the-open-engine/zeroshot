@@ -47,6 +47,7 @@ const {
   DEFAULT_SETTINGS,
 } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { resolveRunPlan } = require('../lib/run-plan');
 const { getProvider, parseProviderChunk } = require('../src/providers');
 const { MOUNT_PRESETS, resolveEnvs } = require('../lib/docker-config');
 const {
@@ -167,18 +168,10 @@ process.on('unhandledRejection', (reason) => {
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 
 function normalizeRunOptions(options) {
-  if (options.ship) {
-    options.pr = true;
-    if (!options.docker) {
-      options.worktree = true;
-    }
-  }
-  if (options.pr && !options.docker && !options.worktree) {
-    options.worktree = true;
-  }
-  if (options.docker) {
-    options.worktree = false;
-  }
+  const plan = resolveRunPlan(options);
+  options.pr = plan.delivery !== 'none';
+  options.worktree = plan.isolation === 'worktree';
+  options.docker = plan.isolation === 'docker';
 }
 
 function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
