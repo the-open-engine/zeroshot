@@ -81,7 +81,7 @@ function registerWorktreeHooks() {
     execSync('git config user.email "test@test.com"', { cwd: testRepoDir, stdio: 'pipe' });
     execSync('git config user.name "Test User"', { cwd: testRepoDir, stdio: 'pipe' });
     fs.writeFileSync(path.join(testRepoDir, 'README.md'), '# Test Repo');
-    execSync('git add -A', { cwd: testRepoDir, stdio: 'pipe' });
+    execSync('git add README.md', { cwd: testRepoDir, stdio: 'pipe' });
     execSync('git commit -m "Initial commit"', { cwd: testRepoDir, stdio: 'pipe' });
 
     mockRunner = new MockTaskRunner();

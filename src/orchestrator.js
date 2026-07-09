@@ -47,6 +47,7 @@ const configValidator = require('./config-validator');
 const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
+const { resolveRunPlan } = require('../lib/run-plan');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const { resolveClusterRequiredQualityGates } = require('./quality-gates');
@@ -212,14 +213,11 @@ function applyPushBlockedRepairTriggers(config) {
   }
 }
 
-function resolveAutoMerge(options) {
-  return Boolean(options.ship) || Boolean(options.autoMerge);
-}
-
 function buildPrOptions(options, requiredQualityGates) {
   // autoMerge must always be persisted (even when no other PR fields are set) so that
   // `zeroshot run --pr` (autoMerge=false) vs `--ship` (autoMerge=true) survives resume.
-  const autoMerge = resolveAutoMerge(options);
+  // Derived from the canonical run plan — never recomputed from ship/pr here.
+  const autoMerge = resolveRunPlan(options).autoMerge;
 
   return {
     prBase: options.prBase || null,
@@ -577,6 +575,12 @@ class Orchestrator {
     // missing - a ledger write. Read-only orchestrators must never write, so they
     // skip it; they only need to read existing snapshots, not produce new ones.
     if (!this.readonly) {
+      this._registerClusterSubscriptions({
+        messageBus,
+        clusterId,
+        isolationManager,
+        containerId: isolation?.containerId || null,
+      });
       this._startSnapshotter(clusterContext);
     }
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
@@ -1825,7 +1829,7 @@ class Orchestrator {
       mergeQueue: options.mergeQueue,
       closeIssue: options.closeIssue,
       requiredQualityGates: options.requiredQualityGates,
-      autoMerge: resolveAutoMerge(options),
+      autoMerge: resolveRunPlan(options).autoMerge,
       cwd: options.cwd,
     });
 
@@ -2316,6 +2320,9 @@ class Orchestrator {
    * Call before deleting storageDir to prevent ENOENT race conditions during cleanup
    */
   close() {
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
   }
 
@@ -4103,7 +4110,7 @@ Continue from where you left off. Review your previous output to understand what
 
 // Exported for testing (PR options persistence, e.g. autoMerge for --pr vs --ship).
 Orchestrator.buildPrOptions = buildPrOptions;
-Orchestrator.resolveAutoMerge = resolveAutoMerge;
+Orchestrator.resolveRunPlan = resolveRunPlan;
 
 module.exports = Orchestrator;
 module.exports.DuplicateClusterError = DuplicateClusterError;

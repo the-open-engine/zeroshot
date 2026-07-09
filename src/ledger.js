@@ -715,6 +715,9 @@ class Ledger extends EventEmitter {
    * Close the database connection
    */
   close() {
+    if (this._closed) {
+      return;
+    }
     this._closed = true; // Set flag BEFORE closing to prevent race conditions
     this.db.close();
   }

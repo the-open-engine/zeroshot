@@ -189,7 +189,9 @@ function normalizeRunOptions(options) {
   if (options.docker) {
     options.worktree = false;
   }
-  options.autoMerge = Boolean(options.ship);
+  // autoMerge is NOT stored here — it is derived from the run plan (delivery ===
+  // 'ship') at every consumer. Writing it here unconditionally would clobber an
+  // explicit autoMerge intent (e.g. a future `--auto-merge` flag) back to false.
 }
 
 async function runClusterPreflight({ input, options, providerOverride, settings, forceProvider }) {
@@ -2610,6 +2612,7 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
 
       if (!process.env.ZEROSHOT_DAEMON) {
         await streamClusterInForeground(cluster, orchestrator, clusterId, options);
+        orchestrator.close();
       }
 
       setupDaemonCleanup(orchestrator, clusterId);

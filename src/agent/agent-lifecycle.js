@@ -200,6 +200,8 @@ function start(agent) {
  * @returns {Promise<void>}
  */
 async function stop(agent) {
+  stopLivenessCheck(agent);
+
   if (!agent.running) {
     return;
   }
