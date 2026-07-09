@@ -416,6 +416,29 @@ function validateCliProvider(command, title, detail, recovery) {
   return { errors, warnings: [] };
 }
 
+function validateGatewayProvider() {
+  const { getProvider } = require('./providers');
+  const provider = getProvider('gateway');
+  if (provider.isAvailable()) {
+    return { errors: [], warnings: [] };
+  }
+  return {
+    errors: [
+      formatError(
+        'Gateway provider not configured',
+        'providerSettings.gateway must define baseUrl, apiKey, model, and toolPolicy before gateway can run.',
+        [
+          'Run: zeroshot settings',
+          'Set providerSettings.gateway.baseUrl to your OpenAI-compatible endpoint base URL',
+          'Set providerSettings.gateway.apiKey and providerSettings.gateway.model',
+          'Set providerSettings.gateway.toolPolicy.roots and toolPolicy.commands explicitly',
+        ]
+      ),
+    ],
+    warnings: [],
+  };
+}
+
 function validateProvider(providerName, options) {
   let metadata;
   try {
@@ -433,6 +456,9 @@ function validateProvider(providerName, options) {
 
   if (metadata.command.kind === 'configured-claude') {
     return validateClaudeProvider(options);
+  }
+  if (providerName === 'gateway') {
+    return validateGatewayProvider();
   }
 
   return validateRegistryCliProvider(providerName);

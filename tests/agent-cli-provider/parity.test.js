@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -164,6 +165,96 @@ test('runtime Copilot command facade delegates to helper', () => {
   });
 });
 
+test('gateway availability and cli path use the bundled node runtime, not PATH lookup', async () => {
+  const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-gateway-provider-'));
+  const settingsFile = path.join(settingsDir, 'settings.json');
+  const originalPath = process.env.PATH;
+  const originalSettingsFile = process.env.ZEROSHOT_SETTINGS_FILE;
+
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(
+      {
+        defaultProvider: 'gateway',
+        providerSettings: {
+          gateway: {
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            apiKey: 'gateway-key',
+            model: 'openrouter/test-model',
+            toolPolicy: {
+              roots: ['.'],
+              commands: ['node'],
+            },
+          },
+        },
+      },
+      null,
+      2
+    )
+  );
+
+  process.env.ZEROSHOT_SETTINGS_FILE = settingsFile;
+  process.env.PATH = '/nonexistent';
+
+  try {
+    const detected = await runtimeProviders.detectProviders();
+    assert.equal(detected.gateway.available, true);
+    assert.equal(runtimeProviders.getProvider('gateway').getCliPath(), process.execPath);
+  } finally {
+    process.env.PATH = originalPath;
+    if (originalSettingsFile === undefined) {
+      delete process.env.ZEROSHOT_SETTINGS_FILE;
+    } else {
+      process.env.ZEROSHOT_SETTINGS_FILE = originalSettingsFile;
+    }
+    fs.rmSync(settingsDir, { recursive: true, force: true });
+  }
+});
+
+test('gateway provider discovery fails closed on malformed gateway settings', () => {
+  const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-gateway-provider-invalid-'));
+  const settingsFile = path.join(settingsDir, 'settings.json');
+
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(
+      {
+        defaultProvider: 'gateway',
+        providerSettings: {
+          gateway: {
+            toolPolicy: 'bad',
+          },
+        },
+      },
+      null,
+      2
+    )
+  );
+
+  try {
+    const child = spawnSync(
+      process.execPath,
+      [
+        '-e',
+        "require('./src/providers').detectProviders().then((result) => process.stdout.write(JSON.stringify(result.gateway)))",
+      ],
+      {
+        cwd: path.join(__dirname, '..', '..'),
+        env: {
+          ...process.env,
+          ZEROSHOT_SETTINGS_FILE: settingsFile,
+        },
+        encoding: 'utf8',
+      }
+    );
+
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), { available: false });
+  } finally {
+    fs.rmSync(settingsDir, { recursive: true, force: true });
+  }
+});
+
 test('Codex helper exposes strict schema cleanup metadata through runtime facade', () => {
   const actual = runtimeProviders.getProvider('codex').buildCommand('schema context', {
     outputFormat: 'json',
@@ -199,7 +290,7 @@ test('model resolution and invalid-model permanence match helper', () => {
       current.resolveModelSpec('level2', { level2: { model: '' } })
     );
 
-    if (provider === 'pi' || provider === 'copilot') {
+    if (provider === 'pi' || provider === 'copilot' || provider === 'gateway') {
       assert.deepEqual(
         helper.resolveModelSpec(provider, 'level2', { level2: { model: 'invalid' } }),
         current.resolveModelSpec('level2', { level2: { model: 'invalid' } })
@@ -388,6 +479,11 @@ test('feature probing is deterministic from injected help text', () => {
     supportsTerminalTools: false,
     unknown: false,
   });
+  assert.deepEqual(helper.getProviderAdapter('gateway').detectCliFeatures(''), {
+    provider: 'gateway',
+    supportsBundledRunner: true,
+    unknown: false,
+  });
 });
 
 test('provider registry stays in parity across helper runtime settings and probe contract', async () => {
@@ -448,6 +544,19 @@ test('provider registry stays in parity across helper runtime settings and probe
   assert.equal(
     validateSetting('providerSettings', {
       openai: { defaultLevel: 'level2', levelOverrides: {} },
+    }),
+    null
+  );
+  assert.equal(
+    validateSetting('providerSettings', {
+      gateway: {
+        defaultLevel: 'level2',
+        levelOverrides: {},
+        baseUrl: 'http://127.0.0.1:11434',
+        apiKey: 'gateway-key',
+        model: 'openrouter/test-model',
+        toolPolicy: { roots: ['.'], commands: ['node'] },
+      },
     }),
     null
   );

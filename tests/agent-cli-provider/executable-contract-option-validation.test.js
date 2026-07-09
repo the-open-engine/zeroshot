@@ -51,6 +51,31 @@ const invalidNestedOptionCases = [
     options: { modelSpec: { reasoningEffort: 'extreme' } },
     field: 'options.modelSpec.reasoningEffort',
   },
+  {
+    name: 'gateway object',
+    options: { gateway: 'http://localhost:11434' },
+    field: 'options.gateway',
+  },
+  {
+    name: 'gateway headers string values',
+    options: { gateway: { headers: { Authorization: 123 } } },
+    field: 'options.gateway.headers.Authorization',
+  },
+  {
+    name: 'gateway tool policy object',
+    options: { gateway: { toolPolicy: 'all-access' } },
+    field: 'options.gateway.toolPolicy',
+  },
+  {
+    name: 'gateway tool policy roots array',
+    options: { gateway: { toolPolicy: { roots: 'src', commands: [] } } },
+    field: 'options.gateway.toolPolicy.roots',
+  },
+  {
+    name: 'gateway tool policy command timeout',
+    options: { gateway: { toolPolicy: { roots: ['src'], commands: [], commandTimeoutMs: 0 } } },
+    field: 'options.gateway.toolPolicy.commandTimeoutMs',
+  },
 ];
 
 test('build-command rejects invalid nested options before command spec creation', () => {

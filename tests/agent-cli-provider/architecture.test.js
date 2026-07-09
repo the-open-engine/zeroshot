@@ -24,6 +24,7 @@ function relative(file) {
 const providerPolicyNames = [
   'claude',
   'codex',
+  'gateway',
   'gemini',
   'opencode',
   'pi',

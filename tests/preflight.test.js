@@ -383,12 +383,68 @@ function defineRunPreflightTests() {
           });
 
           expect(result.valid).to.be.false;
+          if (provider === 'gateway') {
+            expect(result.errors.join('')).to.include('Gateway provider not configured');
+            continue;
+          }
           expect(result.errors.join('')).to.include(
             `${getProviderMetadata(provider).displayName} CLI not available`
           );
         }
       } finally {
         process.env.PATH = originalPath;
+      }
+    });
+
+    it('should allow a configured gateway provider when PATH has no node shim', async () => {
+      const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gateway-'));
+      const settingsFile = path.join(settingsDir, 'settings.json');
+      const originalPath = process.env.PATH;
+      const originalSettingsFile = process.env.ZEROSHOT_SETTINGS_FILE;
+
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify(
+          {
+            defaultProvider: 'gateway',
+            providerSettings: {
+              gateway: {
+                baseUrl: 'http://127.0.0.1:11434/v1',
+                apiKey: 'gateway-key',
+                model: 'openrouter/test-model',
+                toolPolicy: {
+                  roots: ['.'],
+                  commands: ['node'],
+                },
+              },
+            },
+          },
+          null,
+          2
+        )
+      );
+
+      process.env.ZEROSHOT_SETTINGS_FILE = settingsFile;
+      process.env.PATH = '/nonexistent';
+
+      try {
+        const result = await runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'gateway',
+        });
+
+        expect(result.valid).to.be.true;
+        expect(result.errors).to.deep.equal([]);
+      } finally {
+        process.env.PATH = originalPath;
+        if (originalSettingsFile === undefined) {
+          delete process.env.ZEROSHOT_SETTINGS_FILE;
+        } else {
+          process.env.ZEROSHOT_SETTINGS_FILE = originalSettingsFile;
+        }
+        fs.rmSync(settingsDir, { recursive: true, force: true });
       }
     });
 

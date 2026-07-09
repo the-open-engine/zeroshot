@@ -33,12 +33,18 @@ class RuntimeProvider extends BaseProvider {
   }
 
   isAvailable() {
+    if (this._usesBundledRunner()) {
+      return helper.probeRuntimeProviderCli(this.name).available;
+    }
     const { command } = resolveProviderCommand(this.name);
     if (!commandExists(command)) return false;
     return helper.probeRuntimeProviderCli(this.name).available;
   }
 
   getCliPath() {
+    if (this._usesBundledRunner()) {
+      return this._adapter.binary || process.execPath;
+    }
     const { command } = resolveProviderCommand(this.name);
     return getCommandPath(command) || command;
   }
@@ -59,6 +65,10 @@ class RuntimeProvider extends BaseProvider {
 
   getCredentialPaths() {
     return this._metadata.credentialPaths;
+  }
+
+  _usesBundledRunner() {
+    return this._adapter.detectCliFeatures('').supportsBundledRunner === true;
   }
 
   buildCommand(context, options = {}) {
@@ -125,6 +135,12 @@ class RuntimeProvider extends BaseProvider {
 
   getDefaultSettings() {
     const settings = super.getDefaultSettings();
+    if (this._metadata.settingsDefaults) {
+      return {
+        ...settings,
+        ...this._metadata.settingsDefaults,
+      };
+    }
     if (this._metadata.settingsFields.length === 0) return settings;
     return this._metadata.settingsFields.reduce(
       (result, field) => ({
@@ -138,13 +154,18 @@ class RuntimeProvider extends BaseProvider {
   validateSettings(settings) {
     const baseError = super.validateSettings(settings);
     if (baseError) return baseError;
-    for (const field of this._metadata.settingsFields) {
-      if (
-        settings[field] !== undefined &&
-        settings[field] !== null &&
-        typeof settings[field] !== 'string'
-      ) {
-        return `providerSettings.${this.name}.${field} must be a string or null`;
+    if (this._metadata.settingsValidator) {
+      const providerError = this._metadata.settingsValidator(settings);
+      if (providerError) return providerError;
+    } else {
+      for (const field of this._metadata.settingsFields) {
+        if (
+          settings[field] !== undefined &&
+          settings[field] !== null &&
+          typeof settings[field] !== 'string'
+        ) {
+          return `providerSettings.${this.name}.${field} must be a string or null`;
+        }
       }
     }
     if (this.name !== 'claude') return null;

@@ -35,6 +35,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Providers registry       | `src/providers/index.js`                      |
 | Provider implementations | `src/providers/`                              |
 | Provider engine registry | `src/agent-cli-provider/provider-registry.ts` |
+| Gateway runner           | `src/agent-cli-provider/gateway-runner.ts`    |
+| Gateway tools/policy     | `src/agent-cli-provider/gateway-tools.ts`     |
 | Provider detection       | `lib/provider-detection.js`                   |
 | Provider capabilities    | `src/providers/capabilities.js`               |
 | Start-cluster helper     | `lib/start-cluster.js`                        |
@@ -78,9 +80,10 @@ UX modes:
 - Daemon (`-d`): background, Ctrl+C detaches.
 - Attach (`zeroshot attach`): connect to daemon, Ctrl+C detaches only.
 
-Settings: `defaultProvider`, `providerSettings` (claude/codex/gemini/opencode/pi/copilot), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
+Settings: `defaultProvider`, `providerSettings` (claude/codex/gateway/gemini/opencode/pi/copilot), legacy `maxModel`, `defaultConfig`, `logLevel`, robustness (`maxRetries`, `backoffBaseMs`, `backoffMaxMs`, `jitterFactor`, `maxRestartAttempts`, `maxTotalRestarts`, `staleWarningsBeforeKill`).
 
 Provider engines are registry-owned: adding an engine means one entry in `src/agent-cli-provider/provider-registry.ts`, plus the provider-specific adapter and tests. Docker credential mount/env presets, CLI aliases, visible preset lists, and any nontrivial availability probe rules must derive from that registry entry; do not add new provider identity lists or provider preset lists elsewhere.
+Model gateways stay behind the single bundled `gateway` engine. Do not add `openrouter`, `ollama`, `vllm`, `hermes`, or similar model-only targets as standalone provider ids.
 
 ACP-native engines use one shared stdio adapter lane. New ACP engines must be added with registry metadata plus helper fixtures only; do not add engine-specific ACP parsers or invoke runners.
 ACP fixtures must use protocol-shaped chunk payloads: `agent_message_chunk.content` is a single `ContentBlock` object, and thought deltas are covered with `agent_thought_chunk` fixtures so parser tests catch spec drift.
