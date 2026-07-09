@@ -23,6 +23,7 @@ const CLI_FEATURE_FIELDS = [
   'supportsModel',
   'supportsJson',
   'supportsOutputSchema',
+  'supportsDir',
   'supportsCwd',
   'supportsConfigOverride',
   'supportsSkipGitRepoCheck',

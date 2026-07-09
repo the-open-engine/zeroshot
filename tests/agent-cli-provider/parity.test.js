@@ -115,6 +115,7 @@ test('runtime Opencode command facade delegates to helper', () => {
     cliFeatures: {
       supportsJson: true,
       supportsVariant: true,
+      supportsDir: true,
       supportsCwd: true,
     },
   });
@@ -285,7 +286,11 @@ test('feature probing is deterministic from injected help text', () => {
   assert.equal(
     helper
       .getProviderAdapter('opencode')
-      .detectCliFeatures('opencode run --format --model --variant').supportsCwd,
+      .detectCliFeatures('opencode run --format --model --variant --dir --cwd').supportsDir,
+    true
+  );
+  assert.equal(
+    helper.getProviderAdapter('opencode').detectCliFeatures('opencode run --format').supportsCwd,
     false
   );
 });
