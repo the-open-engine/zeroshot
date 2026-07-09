@@ -212,10 +212,14 @@ function applyPushBlockedRepairTriggers(config) {
   }
 }
 
+function resolveAutoMerge(options) {
+  return Boolean(options.ship) || Boolean(options.autoMerge);
+}
+
 function buildPrOptions(options, requiredQualityGates) {
   // autoMerge must always be persisted (even when no other PR fields are set) so that
   // `zeroshot run --pr` (autoMerge=false) vs `--ship` (autoMerge=true) survives resume.
-  const autoMerge = Boolean(options.ship) || Boolean(options.autoMerge);
+  const autoMerge = resolveAutoMerge(options);
 
   return {
     prBase: options.prBase || null,
@@ -1821,7 +1825,7 @@ class Orchestrator {
       mergeQueue: options.mergeQueue,
       closeIssue: options.closeIssue,
       requiredQualityGates: options.requiredQualityGates,
-      autoMerge: Boolean(options.ship) || Boolean(options.autoMerge),
+      autoMerge: resolveAutoMerge(options),
       cwd: options.cwd,
     });
 
@@ -4099,6 +4103,7 @@ Continue from where you left off. Review your previous output to understand what
 
 // Exported for testing (PR options persistence, e.g. autoMerge for --pr vs --ship).
 Orchestrator.buildPrOptions = buildPrOptions;
+Orchestrator.resolveAutoMerge = resolveAutoMerge;
 
 module.exports = Orchestrator;
 module.exports.DuplicateClusterError = DuplicateClusterError;

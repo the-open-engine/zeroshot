@@ -87,4 +87,24 @@ describe('git-pusher --pr vs --ship (autoMerge)', function () {
     // otherwise the distinction is lost on `zeroshot resume`.
     assert.notStrictEqual(prOptionsForPr, null);
   });
+
+  it('resolveAutoMerge is the single source for the autoMerge decision', function () {
+    assert.strictEqual(Orchestrator.resolveAutoMerge({ ship: true }), true);
+    assert.strictEqual(Orchestrator.resolveAutoMerge({ pr: true }), false);
+    assert.strictEqual(Orchestrator.resolveAutoMerge({ pr: true, autoMerge: true }), true);
+  });
+
+  it('buildPrOptions and git-pusher config cannot diverge (both derive from resolveAutoMerge)', function () {
+    const shipOptions = { ship: true };
+    const prOptions = { pr: true };
+
+    assert.strictEqual(
+      Orchestrator.buildPrOptions(shipOptions, []).autoMerge,
+      Orchestrator.resolveAutoMerge(shipOptions)
+    );
+    assert.strictEqual(
+      Orchestrator.buildPrOptions(prOptions, []).autoMerge,
+      Orchestrator.resolveAutoMerge(prOptions)
+    );
+  });
 });
