@@ -1,7 +1,10 @@
 # Providers
 
-Zeroshot shells out to provider CLIs. It does not store API keys or manage
-authentication. Use each CLI's login flow or API key setup.
+Zeroshot supports two provider shapes:
+
+- CLI-backed providers that shell out to a full agent CLI
+- One bundled `gateway` provider that wraps OpenAI-compatible model APIs with a
+  Zeroshot-owned tool runner
 
 ## Supported Providers
 
@@ -9,6 +12,7 @@ authentication. Use each CLI's login flow or API key setup.
 | -------- | ----------- | ------------------------------------------ |
 | Claude   | Claude Code | `npm install -g @anthropic-ai/claude-code` |
 | Codex    | Codex       | `npm install -g @openai/codex`             |
+| Gateway  | Bundled     | No external CLI required                   |
 | Gemini   | Gemini      | `npm install -g @google/gemini-cli`        |
 | Opencode | Opencode    | See https://opencode.ai                    |
 
@@ -19,6 +23,36 @@ authentication. Use each CLI's login flow or API key setup.
 - Configure levels: `zeroshot providers setup <provider>`
 - Override per run: `zeroshot run ... --provider <provider>`
 - Env override: `ZEROSHOT_PROVIDER=codex`
+
+## Gateway Provider
+
+Use `gateway` for OpenAI-compatible model endpoints such as OpenRouter,
+Ollama, vLLM, or self-hosted gateways. These stay model configs behind one
+provider engine; do not add them as standalone provider ids.
+
+Required settings:
+
+```json
+{
+  "providerSettings": {
+    "gateway": {
+      "baseUrl": "http://127.0.0.1:11434",
+      "apiKey": "gateway-key",
+      "model": "openrouter/meta-llama/test-model",
+      "toolPolicy": {
+        "roots": ["/absolute/path/to/worktree"],
+        "commands": ["node"]
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- `toolPolicy` is required. There is no default file or shell access.
+- `headers` is optional for extra gateway-specific request headers.
+- `model` may be any non-empty provider-specific model id.
 
 ## Model Levels
 
@@ -53,8 +87,8 @@ Notes:
 
 ## Docker Isolation and Credentials
 
-Zeroshot does not inject credentials for non-Claude CLIs. When using
-`--docker`, mount your provider config directories explicitly.
+Zeroshot does not inject credentials for external CLIs. When using `--docker`,
+mount your provider config directories explicitly.
 
 Examples:
 

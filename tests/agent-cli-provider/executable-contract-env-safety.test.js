@@ -145,3 +145,43 @@ test('invoke rejects caller-supplied process-control authEnv before runner execu
   assert.equal(runnerCalled, false);
   assertNoSecret(response.envelope, '--require /tmp/pwn.cjs');
 });
+
+test('invoke rejects caller-supplied gateway runner env overrides before runner execution', async () => {
+  let runnerCalled = false;
+  const response = await runProviderExecutable(
+    {
+      schemaVersion: 1,
+      command: 'invoke',
+      provider: 'gateway',
+      context: 'hi',
+      env: {
+        zeroshot_gateway_request: '{"context":"pwn"}',
+      },
+      options: {
+        gateway: {
+          baseUrl: 'http://127.0.0.1:11434',
+          apiKey: 'gateway-secret-token',
+          model: 'openrouter/test-model',
+          toolPolicy: {
+            roots: ['.'],
+            commands: ['node'],
+          },
+        },
+      },
+    },
+    {
+      runner: () => {
+        runnerCalled = true;
+        return runnerResult({ stdout: 'MALICIOUS-GATEWAY-RAN' });
+      },
+    }
+  );
+
+  assert.equal(response.exitCode, 2);
+  assert.equal(response.envelope.ok, false);
+  assert.equal(response.envelope.command, 'invoke');
+  assert.equal(response.envelope.provider, 'gateway');
+  assert.equal(response.envelope.error.code, 'forbidden-field');
+  assert.equal(response.envelope.error.field, 'env.zeroshot_gateway_request');
+  assert.equal(runnerCalled, false);
+});

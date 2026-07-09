@@ -1,6 +1,7 @@
 import { createAcpAdapter } from './adapters/acp';
 import { claudeAdapter } from './adapters/claude';
 import { codexAdapter } from './adapters/codex';
+import { gatewayAdapter, gatewaySettingsDefaults, validateGatewaySettings } from './adapters/gateway';
 import { geminiAdapter } from './adapters/gemini';
 import { opencodeAdapter } from './adapters/opencode';
 import { piAdapter } from './adapters/pi';
@@ -70,6 +71,8 @@ export interface ProviderRegistryEntry {
   readonly credentialPaths: readonly string[];
   readonly credentialEnvKeys: readonly string[];
   readonly settingsFields: readonly string[];
+  readonly settingsDefaults?: Readonly<Record<string, unknown>>;
+  readonly settingsValidator?: (settings: Record<string, unknown>) => string | null;
   readonly availabilityProbe?: 'command' | 'help-or-version';
   readonly capabilities: ProviderCapabilities;
   readonly docs: ProviderDocsMetadata;
@@ -206,6 +209,46 @@ export const providerRegistry = [
       max: codexAdapter.defaultMaxLevel,
     },
     adapter: codexAdapter,
+  },
+  {
+    id: 'gateway',
+    aliases: [],
+    displayName: 'Gateway',
+    binary: 'node',
+    command: { kind: 'fixed', command: 'node', args: [] },
+    invoke: SPAWN_INVOKE,
+    installInstructions: 'Bundled with Zeroshot; no external provider CLI install is required.',
+    authInstructions:
+      'Configure providerSettings.gateway.baseUrl, apiKey, model, and toolPolicy in Zeroshot settings.',
+    credentialPaths: [],
+    credentialEnvKeys: gatewayAdapter.credentialEnvKeys,
+    settingsFields: ['baseUrl', 'apiKey', 'headers', 'model', 'toolPolicy'],
+    settingsDefaults: gatewaySettingsDefaults,
+    settingsValidator: validateGatewaySettings,
+    capabilities: {
+      ...STANDARD_CAPABILITIES,
+      mcpServers: false,
+      jsonSchema: false,
+      reasoningEffort: false,
+    },
+    docs: {
+      label: 'Gateway',
+      setupHeading: 'Gateway Setup',
+    },
+    docker: {
+      mount: {
+        host: '~/.zeroshot',
+        container: '$HOME/.zeroshot',
+        readonly: true,
+      },
+      envPassthrough: [],
+    },
+    defaultLevels: {
+      min: gatewayAdapter.defaultMinLevel,
+      default: gatewayAdapter.defaultLevel,
+      max: gatewayAdapter.defaultMaxLevel,
+    },
+    adapter: gatewayAdapter,
   },
   {
     id: 'gemini',

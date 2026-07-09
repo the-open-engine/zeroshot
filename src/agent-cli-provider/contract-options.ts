@@ -1,6 +1,7 @@
 import { isRecord } from './json';
 import { invalidField, contractError } from './contract-errors';
 import { stringRecord } from './contract-env';
+import { normalizeGatewayBuildOptions } from './gateway-tools';
 import type {
   BuildProviderCommandOptions,
   CliFeatureOverrides,
@@ -35,6 +36,7 @@ const CLI_FEATURE_FIELDS = [
   'supportsNoPromptTemplates',
   'supportsNoContextFiles',
   'supportsNoApprove',
+  'supportsBundledRunner',
   'supportsAcpStdio',
   'supportsPromptImages',
   'supportsLoadSession',
@@ -186,6 +188,15 @@ function normalizeBuildOptions(value: Record<string, unknown>): BuildProviderCom
     result,
     'strictSchema',
     optionalBooleanValue(value.strictSchema, 'options.strictSchema')
+  );
+  addDefined(
+    result,
+    'gateway',
+    normalizeGatewayBuildOptions(
+      value.gateway,
+      'options.gateway',
+      optionalStringValue(value.cwd, 'options.cwd') ?? process.cwd()
+    )
   );
   if (Object.prototype.hasOwnProperty.call(value, 'authEnv')) {
     result.authEnv = stringRecord(value.authEnv, 'options.authEnv');

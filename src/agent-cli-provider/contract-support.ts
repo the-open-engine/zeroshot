@@ -54,12 +54,37 @@ function mergeCommandSpec(
   commandSpec: CommandSpec,
   env: Readonly<Record<string, string>>
 ): CommandSpec {
-  const mergedEnv = { ...commandSpec.env, ...env };
+  const overriddenKey = findReservedCommandEnvKey(commandSpec.env, env);
+  if (overriddenKey !== null) {
+    throw contractError({
+      code: 'forbidden-field',
+      message: `env.${overriddenKey.requestKey} is not accepted by provider executable requests; provider adapters own ${overriddenKey.commandKey} and other runner control/auth environment variables.`,
+      exitCode: 2,
+      field: `env.${overriddenKey.requestKey}`,
+    });
+  }
+
+  const mergedEnv = { ...env, ...commandSpec.env };
   return {
     ...commandSpec,
     env: mergedEnv,
     redactions: mergeRedactions(commandSpec.redactions, envRedactions(mergedEnv)),
   };
+}
+
+function findReservedCommandEnvKey(
+  commandEnv: Readonly<Record<string, string>>,
+  requestedEnv: Readonly<Record<string, string>>
+): { readonly requestKey: string; readonly commandKey: string } | null {
+  const commandEnvKeys = new Map<string, string>();
+  for (const key of Object.keys(commandEnv)) {
+    commandEnvKeys.set(key.toLowerCase(), key);
+  }
+  for (const key of Object.keys(requestedEnv)) {
+    const commandKey = commandEnvKeys.get(key.toLowerCase());
+    if (commandKey !== undefined) return { requestKey: key, commandKey };
+  }
+  return null;
 }
 
 function buildOptions(request: RequestData): BuildProviderCommandOptions {

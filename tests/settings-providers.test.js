@@ -76,6 +76,38 @@ describe('Provider settings', function () {
     }, /reasoningEffort overrides are only supported/);
   });
 
+  it('validates gateway settings and accepts arbitrary model ids', function () {
+    assert.doesNotThrow(() => {
+      validateProviderSettings('gateway', {
+        minLevel: 'level1',
+        maxLevel: 'level3',
+        defaultLevel: 'level2',
+        baseUrl: 'http://127.0.0.1:11434',
+        apiKey: 'gateway-key',
+        model: 'openrouter/meta-llama/test',
+        toolPolicy: {
+          roots: ['.'],
+          commands: ['node'],
+        },
+        levelOverrides: {
+          level2: { model: 'openrouter/meta-llama/test' },
+        },
+      });
+    });
+
+    assert.throws(() => {
+      validateProviderSettings('gateway', {
+        baseUrl: 'http://127.0.0.1:11434',
+        apiKey: 'gateway-key',
+        model: 'test-model',
+        toolPolicy: {
+          roots: '.',
+          commands: ['node'],
+        },
+      });
+    }, /toolPolicy\.roots must be an array of strings/);
+  });
+
   it('applies legacy maxModel to claude levels', function () {
     process.env.ZEROSHOT_SETTINGS_FILE = settingsFile;
     fs.writeFileSync(settingsFile, JSON.stringify({ maxModel: 'haiku' }, null, 2), 'utf8');

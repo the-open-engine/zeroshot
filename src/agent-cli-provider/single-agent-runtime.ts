@@ -1,4 +1,5 @@
 import { getProviderAdapter } from './adapters';
+import { normalizeGatewayBuildOptions, resolveGatewayConfiguration } from './gateway-tools';
 import { isRecord } from './json';
 import {
   getProviderRegistryEntry,
@@ -9,12 +10,14 @@ import type {
   BuildProviderCommandOptions,
   CliFeatureOverrides,
   CommandSpec,
+  GatewayBuildOptions,
   LevelOverrides,
   ModelLevel,
   ModelSpec,
   ProviderAdapter,
   ProviderCliFeatures,
   ProviderId,
+  ResolvedGatewayBuildOptions,
   ReasoningEffort,
 } from './types';
 
@@ -28,6 +31,7 @@ interface CommandParts {
 interface RuntimeProviderSettings {
   readonly defaultLevel?: ModelLevel;
   readonly levelOverrides: LevelOverrides;
+  readonly gateway?: GatewayBuildOptions;
 }
 
 export interface SingleAgentProviderCommandInput {
@@ -72,10 +76,14 @@ const resolveClaudeAuthFn = moduleFunction(claudeAuthModule, 'resolveClaudeAuth'
 export function prepareSingleAgentProviderCommand(
   input: SingleAgentProviderCommandInput
 ): PreparedSingleAgentProviderCommand {
+  const baseOptions = input.options ?? {};
   const settings = loadRuntimeSettings();
   const adapter = adapterForRuntimeInput(input.provider, settings);
-  const providerSettings = runtimeProviderSettings(settings, adapter.id);
-  const baseOptions = input.options ?? {};
+  const providerSettings = runtimeProviderSettings(
+    settings,
+    adapter.id,
+    baseOptions.cwd ?? process.cwd()
+  );
   const cliFeatures = resolveRuntimeCliFeatures(adapter.id, baseOptions.cliFeatures);
   const authEnv = baseOptions.authEnv ?? resolveRuntimeAuthEnv(adapter.id, settings);
   const options = buildRuntimeOptions(baseOptions, adapter, providerSettings, cliFeatures, authEnv);
@@ -95,6 +103,13 @@ function resolveRuntimeCliFeatures(
   provider: ProviderId,
   overrides: CliFeatureOverrides | undefined
 ): CliFeatureOverrides {
+  if (provider === 'gateway') {
+    return {
+      ...detectRuntimeProviderCliFeatures(provider),
+      ...overrides,
+      supportsBundledRunner: true,
+    };
+  }
   if (getProviderRegistryEntry(provider).invoke.lane !== 'acp-stdio') {
     return overrides ?? detectRuntimeProviderCliFeatures(provider);
   }
@@ -132,6 +147,9 @@ function mergeAcpFailClosedCliFeatures(
 
 export function probeRuntimeProviderCli(provider: string): RuntimeProviderProbe {
   const adapter = getProviderAdapter(provider);
+  if (adapter.id === 'gateway') {
+    return probeGatewayProvider(adapter);
+  }
   const helpCommand = runtimeHelpCommand(adapter.id);
   const commandAvailable = booleanResult(commandExistsFn(helpCommand.command));
   if (!commandAvailable) {
@@ -162,9 +180,17 @@ function buildRuntimeOptions(
   cliFeatures: CliFeatureOverrides,
   authEnv: Readonly<Record<string, string>>
 ): BuildProviderCommandOptions {
+  const modelSpec = resolveRuntimeModelSpec(adapter, baseOptions.modelSpec, providerSettings);
+  const gateway = resolveRuntimeGatewayOptions(
+    adapter.id,
+    baseOptions,
+    providerSettings,
+    modelSpec
+  );
   const resolved = {
     ...baseOptions,
-    modelSpec: resolveRuntimeModelSpec(adapter, baseOptions.modelSpec, providerSettings),
+    modelSpec,
+    ...(gateway === undefined ? {} : { gateway }),
     cliFeatures,
   };
   if (baseOptions.jsonSchema && !supportsProviderCapability(adapter.id, 'jsonSchema')) {
@@ -175,6 +201,40 @@ function buildRuntimeOptions(
   }
   if (!shouldIncludeAuthEnv(baseOptions, authEnv)) return resolved;
   return { ...resolved, authEnv };
+}
+
+function resolveRuntimeGatewayOptions(
+  provider: ProviderId,
+  baseOptions: BuildProviderCommandOptions,
+  providerSettings: RuntimeProviderSettings,
+  modelSpec: ModelSpec
+): ResolvedGatewayBuildOptions | undefined {
+  if (provider !== 'gateway') return undefined;
+  const cwd = baseOptions.cwd ?? process.cwd();
+  const settingsGateway = providerSettings.gateway ?? {};
+  const requestGateway = baseOptions.gateway ?? {};
+  const mergedHeaders =
+    requestGateway.headers === undefined
+      ? settingsGateway.headers
+      : { ...(settingsGateway.headers ?? {}), ...requestGateway.headers };
+  const mergedGateway: GatewayBuildOptions = {
+    ...(requestGateway.baseUrl ?? settingsGateway.baseUrl
+      ? { baseUrl: requestGateway.baseUrl ?? settingsGateway.baseUrl }
+      : {}),
+    ...(requestGateway.apiKey ?? settingsGateway.apiKey
+      ? { apiKey: requestGateway.apiKey ?? settingsGateway.apiKey }
+      : {}),
+    ...(mergedHeaders === undefined ? {} : { headers: mergedHeaders }),
+    model: requestGateway.model ?? modelSpec.model ?? settingsGateway.model ?? null,
+    ...(requestGateway.toolPolicy ?? settingsGateway.toolPolicy
+      ? { toolPolicy: requestGateway.toolPolicy ?? settingsGateway.toolPolicy }
+      : {}),
+  };
+  return resolveGatewayConfiguration(
+    mergedGateway,
+    'options.gateway',
+    cwd
+  );
 }
 
 function shouldIncludeAuthEnv(
@@ -232,7 +292,8 @@ function adapterForRuntimeInput(
 
 function runtimeProviderSettings(
   settings: Record<string, unknown>,
-  provider: ProviderId
+  provider: ProviderId,
+  cwd: string
 ): RuntimeProviderSettings {
   const allSettings = optionalRecord(settings.providerSettings, 'settings.providerSettings');
   const providerValue = allSettings?.[provider];
@@ -246,8 +307,18 @@ function runtimeProviderSettings(
     providerSettings.levelOverrides,
     `settings.providerSettings.${provider}.levelOverrides`
   );
-  if (defaultLevel === undefined) return { levelOverrides };
-  return { defaultLevel, levelOverrides };
+  const gateway =
+    provider === 'gateway'
+      ? normalizeGatewayBuildOptions(
+          providerSettings,
+          'settings.providerSettings.gateway',
+          cwd
+        )
+      : undefined;
+  if (defaultLevel === undefined) {
+    return gateway === undefined ? { levelOverrides } : { levelOverrides, gateway };
+  }
+  return gateway === undefined ? { defaultLevel, levelOverrides } : { defaultLevel, levelOverrides, gateway };
 }
 
 function runtimeHelpCommand(provider: ProviderId): CommandParts {
@@ -255,6 +326,28 @@ function runtimeHelpCommand(provider: ProviderId): CommandParts {
     return commandPartsFromUnknown(getClaudeCommandFn(), 'getClaudeCommand');
   }
   return resolveProviderCommand(provider);
+}
+
+function probeGatewayProvider(adapter: ProviderAdapter): RuntimeProviderProbe {
+  const capabilities = adapter.detectCliFeatures('');
+  try {
+    const settings = loadRuntimeSettings();
+    const providerSettings = runtimeProviderSettings(settings, 'gateway', process.cwd());
+    resolveGatewayConfiguration(providerSettings.gateway, 'settings.providerSettings.gateway', process.cwd());
+    return {
+      available: true,
+      helpText: 'Bundled gateway runner',
+      versionText: process.version,
+      capabilities,
+    };
+  } catch {
+    return {
+      available: false,
+      helpText: 'Bundled gateway runner',
+      versionText: process.version,
+      capabilities,
+    };
+  }
 }
 
 function loadRuntimeSettings(): Record<string, unknown> {

@@ -59,6 +59,115 @@ test('invoke returns redacted terminal evidence, parsed events, status, timing, 
   assertNoSecret(response.envelope, secret);
 });
 
+test('invoke parses bundled gateway runner events', async () => {
+  let runnerCommand = null;
+  const secret = 'gateway-secret';
+  const response = await runProviderExecutable(
+    {
+      schemaVersion: 1,
+      command: 'invoke',
+      provider: 'gateway',
+      context: 'Edit note.txt',
+      options: {
+        cwd: '/tmp/gateway-project',
+        gateway: {
+          baseUrl: 'http://127.0.0.1:11434',
+          apiKey: secret,
+          model: 'openrouter/test-model',
+          toolPolicy: {
+            roots: ['.'],
+            commands: ['node'],
+          },
+        },
+      },
+    },
+    {
+      runner: (commandSpec) => {
+        runnerCommand = commandSpec;
+        return runnerResult({
+          stdout: [
+            JSON.stringify({ type: 'text', text: 'editing' }),
+            JSON.stringify({
+              type: 'tool_call',
+              toolName: 'read_file',
+              toolId: 'tool-1',
+              input: { path: 'note.txt' },
+            }),
+            JSON.stringify({
+              type: 'tool_result',
+              toolId: 'tool-1',
+              content: { path: 'note.txt', content: 'before' },
+              isError: false,
+            }),
+            JSON.stringify({ type: 'result', success: true, result: { text: 'done' } }),
+          ].join('\n'),
+        });
+      },
+    }
+  );
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(runnerCommand.binary, process.execPath);
+  assert.match(runnerCommand.args[0], /gateway-runner\.js$/);
+  assert.equal(runnerCommand.env.ZEROSHOT_GATEWAY_API_KEY, secret);
+  assert.equal(runnerCommand.env.ZEROSHOT_GATEWAY_REQUEST.includes(secret), false);
+  assert.deepEqual(
+    response.envelope.result.events.map((event) => event.type),
+    ['text', 'tool_call', 'tool_result', 'result']
+  );
+});
+
+test('invoke redacts gateway api keys leaked by the runner', async () => {
+  const secret = 'gateway-plain-secret';
+  const headerSecret = 'custom-header-secret-42';
+  const response = await runProviderExecutable(
+    {
+      schemaVersion: 1,
+      command: 'invoke',
+      provider: 'gateway',
+      context: 'Reply with ok.',
+      options: {
+        gateway: {
+          baseUrl: 'http://127.0.0.1:11434',
+          apiKey: secret,
+          headers: {
+            'X-API-Key': headerSecret,
+          },
+          model: 'openrouter/test-model',
+          toolPolicy: {
+            roots: [process.cwd()],
+            commands: [],
+          },
+        },
+      },
+    },
+    {
+      runner: (commandSpec) => {
+        const request = JSON.parse(commandSpec.env.ZEROSHOT_GATEWAY_REQUEST);
+        const headerEnvKey = request.gatewayHeaderEnv?.['X-API-Key'];
+        const leakedHeaderSecret =
+          (typeof headerEnvKey === 'string' && commandSpec.env[headerEnvKey]) ||
+          request.gateway?.headers?.['X-API-Key'] ||
+          '';
+        return runnerResult({
+          stdout: `leak ${secret} ${leakedHeaderSecret}`,
+          stderr: `auth failed ${secret} ${leakedHeaderSecret}`,
+        });
+      },
+    }
+  );
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.evidence.stdout.includes(secret), false);
+  assert.equal(response.envelope.result.evidence.stderr.includes(secret), false);
+  assert.equal(response.envelope.result.evidence.stdout.includes(headerSecret), false);
+  assert.equal(response.envelope.result.evidence.stderr.includes(headerSecret), false);
+  assertNoSecret(response.envelope, secret);
+  assertNoSecret(response.envelope, headerSecret);
+});
+
 test('invoke removes schema cleanup files when runner rejects', async () => {
   let cleanupPath = null;
   const response = await runProviderExecutable(invokeCodexSchemaRequest(), {
