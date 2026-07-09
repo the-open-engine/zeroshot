@@ -1,9 +1,30 @@
-export type ProviderId = 'claude' | 'codex' | 'gemini' | 'opencode';
-export type ProviderAlias = 'anthropic' | 'openai' | 'google';
+import type {
+  providerAliases,
+  providerIds,
+  ProviderCapabilities,
+  ProviderCapabilityState,
+  ProviderCommandSpec,
+  ProviderDockerMetadata,
+  ProviderDockerMountPreset,
+  ProviderDocsMetadata,
+  ProviderRegistryEntry,
+} from './provider-registry';
+
+export type ProviderId = (typeof providerIds)[number];
+export type ProviderAlias = (typeof providerAliases)[number];
 export type KnownProviderName = ProviderId | ProviderAlias;
 export type ModelLevel = 'level1' | 'level2' | 'level3';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type OutputFormat = 'text' | 'json' | 'stream-json';
+export type {
+  ProviderCapabilities,
+  ProviderCapabilityState,
+  ProviderCommandSpec,
+  ProviderDockerMetadata,
+  ProviderDockerMountPreset,
+  ProviderDocsMetadata,
+  ProviderRegistryEntry,
+};
 
 export interface AgentCliProviderHelperMetadata {
   readonly packageName: '@the-open-engine/zeroshot';

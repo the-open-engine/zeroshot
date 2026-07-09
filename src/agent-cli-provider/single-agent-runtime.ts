@@ -1,5 +1,6 @@
 import { getProviderAdapter } from './adapters';
 import { isRecord } from './json';
+import { resolveProviderCommand } from './provider-registry';
 import type {
   BuildProviderCommandOptions,
   CliFeatureOverrides,
@@ -171,14 +172,10 @@ function runtimeProviderSettings(
 }
 
 function runtimeHelpCommand(provider: ProviderId): CommandParts {
-  if (provider === 'claude') return getClaudeRuntimeCommand();
-  if (provider === 'codex') return { command: 'codex', args: ['exec'] };
-  if (provider === 'opencode') return { command: 'opencode', args: ['run'] };
-  return { command: 'gemini', args: [] };
-}
-
-function getClaudeRuntimeCommand(): CommandParts {
-  return commandPartsFromUnknown(getClaudeCommandFn(), 'getClaudeCommand');
+  if (provider === 'claude') {
+    return commandPartsFromUnknown(getClaudeCommandFn(), 'getClaudeCommand');
+  }
+  return resolveProviderCommand(provider);
 }
 
 function loadRuntimeSettings(): Record<string, unknown> {

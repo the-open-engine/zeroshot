@@ -1,7 +1,13 @@
 const readline = require('readline');
 const { loadSettings, saveSettings } = require('../../lib/settings');
-const { VALID_PROVIDERS, normalizeProviderName } = require('../../lib/provider-names');
+const {
+  VALID_PROVIDERS,
+  normalizeProviderName,
+  providerSupportsCapability,
+} = require('../../lib/provider-names');
 const { detectProviders, getProvider } = require('../../src/providers');
+
+const PROVIDER_CHOICES = VALID_PROVIDERS.join(', ');
 
 function question(rl, prompt) {
   return new Promise((resolve) => {
@@ -45,7 +51,7 @@ async function providersCommand() {
 function setDefaultCommand(args) {
   const provider = normalizeProviderName(args[0]);
   if (!VALID_PROVIDERS.includes(provider)) {
-    console.error(`Invalid provider: ${args[0]}`);
+    console.error(`Invalid provider: ${args[0]}. Valid: ${PROVIDER_CHOICES}`);
     process.exit(1);
   }
 
@@ -58,8 +64,8 @@ function setDefaultCommand(args) {
 
 async function setupCommand(args) {
   const provider = normalizeProviderName(args[0]);
-  if (!provider) {
-    console.error('Provider is required (claude, codex, gemini, opencode)');
+  if (!provider || !VALID_PROVIDERS.includes(provider)) {
+    console.error(`Provider is required (${PROVIDER_CHOICES})`);
     process.exit(1);
   }
 
@@ -115,7 +121,7 @@ async function setupCommand(args) {
       for (const level of levelKeys) {
         const modelChoice = await question(rl, `Model for ${level} (${catalog.join(', ')}): `);
         if (modelChoice) levelOverrides[level] = { model: modelChoice };
-        if (provider !== 'codex') continue;
+        if (!providerSupportsCapability(provider, 'reasoningEffort')) continue;
         const reasoning = await question(rl, `Reasoning for ${level} (low|medium|high|xhigh): `);
         if (reasoning) {
           levelOverrides[level] = {

@@ -28,6 +28,7 @@ const firstRunPath = require.resolve('../cli/lib/first-run');
 // Variables to hold fresh module references (set in before() hook)
 let settingsModule;
 let firstRunModule;
+let providerNamesModule;
 
 describe('First-Run Setup', function () {
   this.timeout(10000);
@@ -50,6 +51,7 @@ describe('First-Run Setup', function () {
     // Now require fresh modules that will read our env var
     settingsModule = require('../lib/settings');
     firstRunModule = require('../cli/lib/first-run');
+    providerNamesModule = require('../lib/provider-names');
 
     // Verify env var is set correctly (sanity check)
     assert.strictEqual(
@@ -129,6 +131,39 @@ describe('First-Run Setup', function () {
   describe('printWelcome()', function () {
     it('should not throw when called', function () {
       assert.doesNotThrow(() => firstRunModule.printWelcome());
+    });
+  });
+
+  describe('promptProvider()', function () {
+    it('should print registry-backed install instructions when no providers are detected', function () {
+      const logged = [];
+      const originalLog = console.log;
+      const originalExit = process.exit;
+
+      console.log = (...args) => logged.push(args.join(' '));
+      process.exit = (code) => {
+        const error = new Error(`exit ${code}`);
+        error.code = code;
+        throw error;
+      };
+
+      try {
+        assert.throws(
+          () => firstRunModule.promptProvider({}, {}),
+          (error) => error && error.code === 1
+        );
+      } finally {
+        console.log = originalLog;
+        process.exit = originalExit;
+      }
+
+      const output = logged.join('\n');
+      for (const provider of providerNamesModule.listProviderMetadata()) {
+        assert.ok(output.includes(`- ${provider.displayName}:`));
+        for (const line of provider.installInstructions.split('\n')) {
+          assert.ok(output.includes(line));
+        }
+      }
     });
   });
 

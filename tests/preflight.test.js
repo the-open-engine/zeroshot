@@ -15,6 +15,7 @@ const { execSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { VALID_PROVIDERS, getProviderMetadata } = require('../lib/provider-names');
 
 const {
   runPreflight,
@@ -318,51 +319,77 @@ function defineRunPreflightTests() {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = await runPreflight({
-        requireGh: false,
-        requireDocker: false,
-        quiet: true,
-        provider: 'claude',
-      });
+      try {
+        const result = await runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'claude',
+        });
 
-      process.env.PATH = originalPath;
+        const errorText = result.errors.join('');
+        const metadata = getProviderMetadata('claude');
 
-      expect(result.valid).to.be.false;
-      expect(result.errors.join('')).to.include('Claude command not available');
+        expect(result.valid).to.be.false;
+        expect(errorText).to.include('Claude command not available');
+        for (const line of metadata.installInstructions.split('\n')) {
+          expect(errorText).to.include(line);
+        }
+        expect(errorText).to.include(`Then run: ${metadata.binary} --version`);
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
 
-    it('should fail when Codex CLI is missing', async () => {
+    it('should keep custom Claude command recovery when override is missing', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = await runPreflight({
-        requireGh: false,
-        requireDocker: false,
-        quiet: true,
-        provider: 'codex',
-      });
+      try {
+        const result = await runPreflight({
+          requireGh: false,
+          requireDocker: false,
+          quiet: true,
+          provider: 'claude',
+          claudeCommand: 'ccr code',
+        });
 
-      process.env.PATH = originalPath;
-
-      expect(result.valid).to.be.false;
-      expect(result.errors.join('')).to.include('Codex CLI not available');
+        const errorText = result.errors.join('');
+        expect(result.valid).to.be.false;
+        expect(errorText).to.include("Command 'ccr code' not found");
+        expect(errorText).to.include(
+          'Update claudeCommand: zeroshot settings set claudeCommand "your-command"'
+        );
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
 
-    it('should fail when Gemini CLI is missing', async () => {
+    it('should fail when any registry-backed provider CLI is missing', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/nonexistent';
 
-      const result = await runPreflight({
-        requireGh: false,
-        requireDocker: false,
-        quiet: true,
-        provider: 'gemini',
-      });
+      try {
+        const registryBackedProviders = VALID_PROVIDERS.filter(
+          (provider) => getProviderMetadata(provider).command.kind !== 'configured-claude'
+        );
 
-      process.env.PATH = originalPath;
+        for (const provider of registryBackedProviders) {
+          const result = await runPreflight({
+            requireGh: false,
+            requireDocker: false,
+            quiet: true,
+            provider,
+          });
 
-      expect(result.valid).to.be.false;
-      expect(result.errors.join('')).to.include('Gemini CLI not available');
+          expect(result.valid).to.be.false;
+          expect(result.errors.join('')).to.include(
+            `${getProviderMetadata(provider).displayName} CLI not available`
+          );
+        }
+      } finally {
+        process.env.PATH = originalPath;
+      }
     });
 
     it('should not require Claude auth when CLI is installed', async function () {

@@ -1,61 +1,16 @@
 const BaseProvider = require('./base-provider');
-const { getClaudeCommand } = require('../../lib/settings');
-const { normalizeProviderName } = require('../../lib/provider-names');
+const {
+  getProviderMetadata,
+  normalizeProviderName,
+  resolveProviderCommand,
+} = require('../../lib/provider-names');
 const { commandExists, getCommandPath } = require('../../lib/provider-detection');
 const helper = require('../../lib/agent-cli-provider');
-
-const PROVIDER_METADATA = {
-  claude: {
-    displayName: 'Claude',
-    cliCommand: 'claude',
-    helpArgs: () => getClaudeCommand().args,
-    commandParts: () => getClaudeCommand(),
-    installInstructions:
-      'npm install -g @anthropic-ai/claude-code\nOr (macOS): brew install claude',
-    authInstructions: 'claude login',
-    credentialPaths: ['~/.claude'],
-    settingsFields: ['anthropicApiKey', 'bedrockApiKey', 'bedrockRegion'],
-  },
-  codex: {
-    displayName: 'Codex',
-    cliCommand: 'codex',
-    helpArgs: () => ['exec'],
-    commandParts: () => ({ command: 'codex', args: [] }),
-    installInstructions: 'npm install -g @openai/codex',
-    authInstructions: 'codex login',
-    credentialPaths: ['~/.config/codex', '~/.codex'],
-    settingsFields: [],
-  },
-  gemini: {
-    displayName: 'Gemini',
-    cliCommand: 'gemini',
-    helpArgs: () => [],
-    commandParts: () => ({ command: 'gemini', args: [] }),
-    installInstructions: 'npm install -g @google/gemini-cli',
-    authInstructions: 'gemini auth login',
-    credentialPaths: ['~/.config/gcloud', '~/.config/gemini', '~/.gemini'],
-    settingsFields: [],
-  },
-  opencode: {
-    displayName: 'Opencode',
-    cliCommand: 'opencode',
-    helpArgs: () => ['run'],
-    commandParts: () => ({ command: 'opencode', args: [] }),
-    installInstructions: 'See https://opencode.ai for installation instructions.',
-    authInstructions: 'opencode auth login',
-    credentialPaths: ['~/.local/share/opencode'],
-    settingsFields: [],
-  },
-};
 
 const warned = new Set();
 
 function metadataForProvider(name) {
-  const metadata = PROVIDER_METADATA[name];
-  if (!metadata) {
-    throw new Error(`Unknown provider: ${name}. Valid: ${listProviders().join(', ')}`);
-  }
-  return metadata;
+  return getProviderMetadata(name);
 }
 
 class RuntimeProvider extends BaseProvider {
@@ -65,7 +20,7 @@ class RuntimeProvider extends BaseProvider {
     super({
       name: normalized,
       displayName: metadata.displayName,
-      cliCommand: metadata.cliCommand,
+      cliCommand: metadata.binary,
     });
     this._metadata = metadata;
     this._adapter = helper.getProviderAdapter(normalized);
@@ -78,12 +33,12 @@ class RuntimeProvider extends BaseProvider {
   }
 
   isAvailable() {
-    const { command } = this._metadata.commandParts();
+    const { command } = resolveProviderCommand(this.name);
     return commandExists(command);
   }
 
   getCliPath() {
-    const { command } = this._metadata.commandParts();
+    const { command } = resolveProviderCommand(this.name);
     return getCommandPath(command) || command;
   }
 
@@ -169,30 +124,31 @@ class RuntimeProvider extends BaseProvider {
 
   getDefaultSettings() {
     const settings = super.getDefaultSettings();
-    if (this.name !== 'claude') return settings;
-    return {
-      ...settings,
-      anthropicApiKey: null,
-      bedrockApiKey: null,
-      bedrockRegion: null,
-    };
+    if (this._metadata.settingsFields.length === 0) return settings;
+    return this._metadata.settingsFields.reduce(
+      (result, field) => ({
+        ...result,
+        [field]: null,
+      }),
+      { ...settings }
+    );
   }
 
   validateSettings(settings) {
     const baseError = super.validateSettings(settings);
     if (baseError) return baseError;
-    if (this.name !== 'claude') return null;
-
-    const { isValidAnthropicKey, ANTHROPIC_KEY_PREFIX } = require('../../lib/settings/claude-auth');
     for (const field of this._metadata.settingsFields) {
       if (
         settings[field] !== undefined &&
         settings[field] !== null &&
         typeof settings[field] !== 'string'
       ) {
-        return `providerSettings.claude.${field} must be a string or null`;
+        return `providerSettings.${this.name}.${field} must be a string or null`;
       }
     }
+    if (this.name !== 'claude') return null;
+
+    const { isValidAnthropicKey, ANTHROPIC_KEY_PREFIX } = require('../../lib/settings/claude-auth');
     if (settings.anthropicApiKey && !isValidAnthropicKey(settings.anthropicApiKey)) {
       return `providerSettings.claude.anthropicApiKey must start with ${ANTHROPIC_KEY_PREFIX}`;
     }
@@ -206,7 +162,9 @@ class RuntimeProvider extends BaseProvider {
 
 function getProvider(name) {
   const normalized = normalizeProviderName(name || '');
-  if (!PROVIDER_METADATA[normalized]) {
+  try {
+    metadataForProvider(normalized);
+  } catch {
     throw new Error(`Unknown provider: ${name}. Valid: ${listProviders().join(', ')}`);
   }
   return new RuntimeProvider(normalized);

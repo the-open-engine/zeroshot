@@ -10,6 +10,7 @@
 
 const readline = require('readline');
 const { loadSettings, saveSettings } = require('../../lib/settings');
+const { listProviderMetadata } = require('../../lib/provider-names');
 const { detectProviders } = require('../../src/providers');
 
 /**
@@ -39,6 +40,16 @@ function createReadline() {
   });
 }
 
+function printProviderInstallChoices() {
+  for (const provider of listProviderMetadata()) {
+    const [firstLine, ...remainingLines] = provider.installInstructions.split('\n');
+    console.log(`  - ${provider.displayName}: ${firstLine}`);
+    for (const line of remainingLines) {
+      console.log(`    ${line}`);
+    }
+  }
+}
+
 /**
  * Prompt for provider selection
  * @param {readline.Interface} rl
@@ -52,9 +63,7 @@ function promptProvider(rl, detected) {
 
   if (available.length === 0) {
     console.log('No AI CLI tools detected. Please install one of:');
-    console.log('  - Claude Code: npm install -g @anthropic-ai/claude-code');
-    console.log('  - Codex CLI:   npm install -g @openai/codex');
-    console.log('  - Gemini CLI:  npm install -g @google/gemini-cli');
+    printProviderInstallChoices();
     process.exit(1);
   }
 
@@ -208,4 +217,6 @@ module.exports = {
   detectFirstRun,
   printWelcome,
   printComplete,
+  promptProvider,
+  printProviderInstallChoices,
 };

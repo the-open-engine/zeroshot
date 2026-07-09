@@ -1,48 +1,21 @@
-const { normalizeProviderName } = require('../../lib/provider-names');
+const {
+  PROVIDER_CAPABILITIES,
+  normalizeProviderName,
+  providerSupportsCapability,
+} = require('../../lib/provider-names');
 
-const CAPABILITIES = {
-  claude: {
-    dockerIsolation: true,
-    worktreeIsolation: true,
-    mcpServers: true,
-    jsonSchema: true,
-    streamJson: true,
-    thinkingMode: true,
-    reasoningEffort: false,
-  },
-  codex: {
-    dockerIsolation: true,
-    worktreeIsolation: true,
-    mcpServers: true,
-    jsonSchema: true,
-    streamJson: true,
-    thinkingMode: true,
-    reasoningEffort: true,
-  },
-  gemini: {
-    dockerIsolation: true,
-    worktreeIsolation: true,
-    mcpServers: true,
-    jsonSchema: 'experimental',
-    streamJson: true,
-    thinkingMode: true,
-    reasoningEffort: false,
-  },
-  opencode: {
-    dockerIsolation: true,
-    worktreeIsolation: true,
-    mcpServers: true,
-    jsonSchema: 'experimental',
-    streamJson: true,
-    thinkingMode: true,
-    reasoningEffort: true,
-  },
-};
+const CAPABILITIES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(PROVIDER_CAPABILITIES).map(([provider, capabilities]) => [
+      provider,
+      Object.freeze({ ...capabilities }),
+    ])
+  )
+);
 
 function checkCapability(provider, capability) {
-  const caps = CAPABILITIES[normalizeProviderName(provider)];
-  if (!caps) return false;
-  return caps[capability] === true;
+  if (!provider) return false;
+  return providerSupportsCapability(provider, capability);
 }
 
 function warnIfExperimental(provider, capability) {
