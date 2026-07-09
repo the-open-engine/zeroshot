@@ -122,23 +122,25 @@ describe('git-pusher --pr vs --ship (autoMerge)', function () {
     assert.notStrictEqual(prOptionsForPr, null);
   });
 
-  it('resolveAutoMerge is the single source for the autoMerge decision', function () {
-    assert.strictEqual(Orchestrator.resolveAutoMerge({ ship: true }), true);
-    assert.strictEqual(Orchestrator.resolveAutoMerge({ pr: true }), false);
-    assert.strictEqual(Orchestrator.resolveAutoMerge({ pr: true, autoMerge: true }), true);
+  it('resolveRunPlan is the single source for the autoMerge decision', function () {
+    assert.strictEqual(Orchestrator.resolveRunPlan({ ship: true }).autoMerge, true);
+    assert.strictEqual(Orchestrator.resolveRunPlan({ pr: true }).autoMerge, false);
+    // Explicit autoMerge is ship-equivalent and is NOT clobbered (the old
+    // normalizeRunOptions overwrite bug reset this to false).
+    assert.strictEqual(Orchestrator.resolveRunPlan({ pr: true, autoMerge: true }).autoMerge, true);
   });
 
-  it('buildPrOptions and git-pusher config cannot diverge (both derive from resolveAutoMerge)', function () {
+  it('buildPrOptions and git-pusher config cannot diverge (both derive from resolveRunPlan)', function () {
     const shipOptions = { ship: true };
     const prOptions = { pr: true };
 
     assert.strictEqual(
       Orchestrator.buildPrOptions(shipOptions, []).autoMerge,
-      Orchestrator.resolveAutoMerge(shipOptions)
+      Orchestrator.resolveRunPlan(shipOptions).autoMerge
     );
     assert.strictEqual(
       Orchestrator.buildPrOptions(prOptions, []).autoMerge,
-      Orchestrator.resolveAutoMerge(prOptions)
+      Orchestrator.resolveRunPlan(prOptions).autoMerge
     );
   });
 });
