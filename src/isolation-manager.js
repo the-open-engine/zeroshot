@@ -1042,7 +1042,7 @@ class IsolationManager {
     provisionClaudeCredentials({ sourceDir, destDir: configDir });
 
     // Copy hook script to block AskUserQuestion (CRITICAL for autonomous execution)
-    const hookScriptSrc = path.join(__dirname, '..', 'hooks', 'block-ask-user-question.py');
+    const hookScriptSrc = path.join(__dirname, '..', 'cluster-hooks', 'block-ask-user-question.py');
     const hookScriptDst = path.join(hooksDir, 'block-ask-user-question.py');
     if (fs.existsSync(hookScriptSrc)) {
       fs.copyFileSync(hookScriptSrc, hookScriptDst);

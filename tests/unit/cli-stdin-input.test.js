@@ -6,6 +6,8 @@
  */
 
 const assert = require('assert');
+const path = require('path');
+const { spawnSync } = require('child_process');
 const { Readable } = require('stream');
 const {
   isStdinInput,
@@ -14,6 +16,8 @@ const {
   decodeStdinEnv,
   buildTextInput,
 } = require('../../lib/start-cluster');
+
+const repoRoot = path.join(__dirname, '..', '..');
 
 describe('CLI stdin task input', function () {
   describe('isStdinInput', function () {
@@ -55,5 +59,33 @@ describe('CLI stdin task input', function () {
       const result = buildTextInput(decodeStdinEnv(encodeStdinEnv(text)));
       assert.deepStrictEqual(result, { text });
     });
+  });
+
+  it('preserves piped stdin through a real Node process boundary', function () {
+    const taskBody = [
+      '# Task',
+      '',
+      'Update `BrandContext.writingStyle` without evaluating $(shell) syntax.',
+    ].join('\n');
+    const script = `
+      const { readStdinText, buildTextInput } = require(${JSON.stringify(
+        path.join(repoRoot, 'lib/start-cluster')
+      )});
+      readStdinText()
+        .then((text) => process.stdout.write(JSON.stringify(buildTextInput(text))))
+        .catch((error) => {
+          console.error(error.stack || error.message);
+          process.exit(1);
+        });
+    `;
+
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repoRoot,
+      input: taskBody,
+      encoding: 'utf8',
+    });
+
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.deepStrictEqual(JSON.parse(result.stdout), { text: taskBody });
   });
 });

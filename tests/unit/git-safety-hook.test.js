@@ -18,8 +18,8 @@ const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-// Path to the hook script
-const HOOK_PATH = path.join(__dirname, '../../hooks/block-dangerous-git.py');
+// Path to the hook script used by runtime packaging/copy logic.
+const HOOK_PATH = path.join(__dirname, '../../cluster-hooks/block-dangerous-git.py');
 
 function resolvePython() {
   const candidates = [process.env.PYTHON, '/usr/bin/python3', 'python3', 'python'].filter(Boolean);

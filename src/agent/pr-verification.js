@@ -627,6 +627,13 @@ async function verifyPullRequest({ result, agent, autoMerge }) {
   if (!requireMerge) {
     // --pr mode: the PR/MR was created and verified to exist. It's left OPEN for human
     // review - do NOT poll for merge or treat an unmerged PR as a failure.
+    if (adapter.isMerged(prData)) {
+      throw new Error(
+        `VERIFICATION FAILED: ${adapter.itemName} #${prData.number} is already merged, ` +
+          'but this run was started in review mode (autoMerge=false).'
+      );
+    }
+
     agent._log(
       `✅ VERIFICATION PASSED: ${adapter.itemName} #${prData.number} created (open for human review)`
     );

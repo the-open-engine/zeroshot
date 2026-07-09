@@ -647,6 +647,34 @@ describe('verify_pull_request hook action', () => {
       assert.strictEqual(callCount, 1, `Expected exactly 1 gh call (got ${callCount})`);
     });
 
+    it('fails review mode when GitHub reports the PR is already merged', async function () {
+      const agent = createMockAgent();
+      const hook = { action: 'verify_pull_request', config: { autoMerge: false } };
+      const result = {
+        output: JSON.stringify({
+          pr_url: 'https://github.com/org/repo/pull/125',
+          pr_number: 125,
+          merged: false,
+        }),
+      };
+
+      mockSpawnSyncFn = () =>
+        spawnSuccess(
+          JSON.stringify({
+            number: 125,
+            state: 'MERGED',
+            mergedAt: '2026-07-08T20:00:00Z',
+            url: 'https://github.com/org/repo/pull/125',
+          })
+        );
+
+      await assert.rejects(
+        () => executeHook({ hook, agent, result }),
+        /already merged.*review mode \(autoMerge=false\)/i
+      );
+      assert.strictEqual(agent.lastPublished, null, 'merged review-mode PR must not complete');
+    });
+
     it('still throws when the PR does not exist (hallucination check still applies)', async function () {
       const agent = createMockAgent();
       const hook = { action: 'verify_pull_request', config: { autoMerge: false } };
