@@ -415,10 +415,11 @@ export const providerRegistry = [
     credentialEnvKeys: copilotAdapter.credentialEnvKeys,
     settingsFields: [],
     availabilityProbe: 'help-or-version',
-    // No MCP passthrough; no native output-schema or reasoning-effort flag.
+    // MCP servers pass through via the `--additional-mcp-config` CLI flag (see copilot adapter
+    // addMcpArgs). No native output-schema or reasoning-effort flag.
     capabilities: {
       ...STANDARD_CAPABILITIES,
-      mcpServers: false,
+      mcpServers: true,
       jsonSchema: false,
       reasoningEffort: false,
     },

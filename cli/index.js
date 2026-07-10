@@ -2693,6 +2693,12 @@ taskCmd
     'stream-json'
   )
   .option('--json-schema <schema>', 'JSON schema for structured output')
+  .option(
+    '--mcp-config <config>',
+    'MCP server config for providers that accept an MCP config flag (e.g. Copilot). ' +
+      'Inline JSON string ({"mcpServers":{...}}) or @<path>. Repeatable.',
+    (value, previous) => (previous || []).concat([value])
+  )
   .option('--silent-json-output', 'Log ONLY final structured output')
   .action(async (prompt, options) => {
     try {

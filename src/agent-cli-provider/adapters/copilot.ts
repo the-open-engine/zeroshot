@@ -59,6 +59,7 @@ function detectCliFeatures(helpText?: string | null): CopilotCliFeatures {
     supportsAllowAll: supports(help, /--allow-all\b/),
     supportsNoAskUser: supports(help, /--no-ask-user\b/),
     supportsAddDir: supports(help, /--add-dir\b/),
+    supportsMcpConfig: supports(help, /--additional-mcp-config\b/),
     unknown,
   };
 }
@@ -94,6 +95,21 @@ function addAutoApproveArgs(args: string[], options: BuildProviderCommandOptions
   if (features.supportsNoAskUser !== false) args.push('--no-ask-user');
 }
 
+// Copilot consumes MCP servers via the `--additional-mcp-config` CLI flag (each value augments the
+// session config from ~/.copilot/mcp-config.json). Unlike Claude — which reads a `.mcp.json` file
+// overlaid into its config dir — Copilot's config lives under $HOME/.copilot, unreachable by the
+// worktree overlay, so the CLI flag is the only delivery path. Copilot and Claude share the same
+// `{"mcpServers": {...}}` envelope, so entries are forwarded verbatim (inline JSON string or
+// `@<path>`) with no translation.
+function addMcpArgs(args: string[], options: BuildProviderCommandOptions): void {
+  const features = optionFeatures(options);
+  if (!options.mcpConfig || options.mcpConfig.length === 0) return;
+  if (features.supportsMcpConfig === false) return;
+  for (const entry of options.mcpConfig) {
+    args.push('--additional-mcp-config', entry);
+  }
+}
+
 function collectWarnings(options: BuildProviderCommandOptions): WarningMetadata[] {
   const features = optionFeatures(options);
   const warnings: WarningMetadata[] = unsupportedSessionControlWarnings('copilot', options);
@@ -116,6 +132,15 @@ function collectWarnings(options: BuildProviderCommandOptions): WarningMetadata[
       )
     );
   }
+  if (options.mcpConfig && options.mcpConfig.length > 0 && features.supportsMcpConfig === false) {
+    warnings.push(
+      warning(
+        'copilot',
+        'copilot-mcp-config',
+        'Copilot CLI does not advertise --additional-mcp-config; ignoring the requested MCP server config.'
+      )
+    );
+  }
   return warnings;
 }
 
@@ -129,6 +154,7 @@ function buildCommand(context: string, options: BuildProviderCommandOptions = {}
   addModelArgs(args, options);
   addAddDirArgs(args, options);
   addAutoApproveArgs(args, options);
+  addMcpArgs(args, options);
   args.push('-p', finalContext);
 
   return commandSpec({
