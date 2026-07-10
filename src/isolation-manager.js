@@ -1358,6 +1358,9 @@ class IsolationManager {
             cwd: repoRoot,
             encoding: 'utf8',
             stdio: 'inherit',
+            // No timeout: image builds legitimately take many minutes (apt, tool downloads,
+            // provider install). runSync's 30s default would kill every build (ETIMEDOUT).
+            timeout: 0,
           }
         );
 
