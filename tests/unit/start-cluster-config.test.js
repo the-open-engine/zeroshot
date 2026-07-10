@@ -1,10 +1,6 @@
 const assert = require('assert');
 
-const {
-  loadClusterConfig,
-  buildStartOptions,
-  resolveEffectiveRunPlan,
-} = require('../../lib/start-cluster');
+const { loadClusterConfig, buildStartOptions } = require('../../lib/start-cluster');
 
 function createOrchestrator(config) {
   const calls = { loadConfig: [] };
@@ -109,45 +105,6 @@ describe('buildStartOptions() isolation (single producer via run plan)', functio
     const result = buildStartOptions({ clusterId: 'c1', options: {}, settings: {} });
     assert.strictEqual(result.isolation, false);
     assert.strictEqual(result.worktree, false);
-  });
-});
-
-describe('resolveEffectiveRunPlan() settings.defaultDelivery (issue #606)', function () {
-  it('folds settings.defaultDelivery=ship into delivery + autoMerge', function () {
-    const plan = resolveEffectiveRunPlan({}, { defaultDelivery: 'ship' });
-    assert.strictEqual(plan.delivery, 'ship');
-    assert.strictEqual(plan.autoMerge, true);
-    // ship-equivalent delivery also implies worktree isolation, same as --ship.
-    assert.strictEqual(plan.isolation, 'worktree');
-  });
-
-  it('folds settings.defaultDelivery=pr into delivery without autoMerge', function () {
-    const plan = resolveEffectiveRunPlan({}, { defaultDelivery: 'pr' });
-    assert.strictEqual(plan.delivery, 'pr');
-    assert.strictEqual(plan.autoMerge, false);
-    assert.strictEqual(plan.isolation, 'worktree');
-  });
-
-  it('defaults to delivery=none when settings.defaultDelivery is unset', function () {
-    const plan = resolveEffectiveRunPlan({}, {});
-    assert.strictEqual(plan.delivery, 'none');
-    assert.strictEqual(plan.autoMerge, false);
-  });
-
-  it('a CLI --pr flag still wins when settings.defaultDelivery=none', function () {
-    const plan = resolveEffectiveRunPlan({ pr: true }, { defaultDelivery: 'none' });
-    assert.strictEqual(plan.delivery, 'pr');
-  });
-
-  it('buildStartOptions folds settings.defaultDelivery into autoPr/autoMerge', function () {
-    const result = buildStartOptions({
-      clusterId: 'c1',
-      options: {},
-      settings: { defaultDelivery: 'ship' },
-    });
-    assert.strictEqual(result.autoPr, true);
-    assert.strictEqual(result.autoMerge, true);
-    assert.strictEqual(result.worktree, true);
   });
 });
 

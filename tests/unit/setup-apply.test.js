@@ -7,7 +7,7 @@
  * - Writes confined to global settings, .zeroshot/settings.json, and the undo journal
  * - Dead settings keys (no consumer) are refused, not written
  * - No secret-shaped path is ever written
- * - defaultDelivery=ship requires explicit opt-in and is then live in resolveEffectiveRunPlan
+ * - defaultDelivery=ship requires explicit opt-in and is then live in startClusterFromText
  * - github issue-source hint prints a login command instead of storing anything
  */
 
@@ -185,7 +185,7 @@ describe('setup-apply', function () {
     assert.ok(!fs.existsSync(TEST_SETTINGS_FILE));
   });
 
-  it('stores defaultDelivery=ship with --allow-risky-defaults and it is live in resolveEffectiveRunPlan', function () {
+  it('stores defaultDelivery=ship with --allow-risky-defaults and it is live in startClusterFromText', function () {
     const decisions = decisionsFile({ defaultDelivery: 'ship' });
     const results = applyModule.applyDecisions({
       decisionsPath: decisions,
@@ -197,9 +197,21 @@ describe('setup-apply', function () {
     const settings = settingsModule.loadSettings();
     assert.strictEqual(settings.defaultDelivery, 'ship');
 
-    const plan = startClusterModule.resolveEffectiveRunPlan({}, settings);
-    assert.strictEqual(plan.delivery, 'ship');
-    assert.strictEqual(plan.autoMerge, true);
+    const startOptions = startClusterModule.startClusterFromText({
+      orchestrator: {
+        start(_config, _input, options) {
+          return options;
+        },
+      },
+      config: { agents: [] },
+      clusterId: 'c1',
+      text: 'hello',
+      options: {},
+      settings,
+    });
+    assert.strictEqual(startOptions.autoPr, true);
+    assert.strictEqual(startOptions.autoMerge, true);
+    assert.strictEqual(startOptions.worktree, true);
   });
 
   it('confines writes to global settings, repo .zeroshot/settings.json, and the undo journal', function () {
