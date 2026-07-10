@@ -249,9 +249,14 @@ test('build-command returns bundled gateway runner specs with redacted config en
   assert.equal(response.envelope.provider, 'gateway');
   assert.equal(response.envelope.result.commandSpec.binary, process.execPath);
   assert.match(response.envelope.result.commandSpec.args[0], /gateway-runner\.js$/);
-  assert.equal(response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(secret), false);
   assert.equal(
-    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes('custom-header-secret-42'),
+    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(secret),
+    false
+  );
+  assert.equal(
+    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(
+      'custom-header-secret-42'
+    ),
     false
   );
   assertNoSecret(response.envelope, secret);
@@ -830,6 +835,79 @@ process.exit(1);
       assert.deepEqual(args.slice(0, 2), ['--output-format', 'json']);
       assert.equal(args.at(-2), '-p');
       assert.equal(args.at(-1), 'Return JSON.');
+    }
+  );
+});
+
+test('build-command emits one Copilot --additional-mcp-config flag per mcpConfig entry', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Do work.',
+    options: {
+      autoApprove: true,
+      mcpConfig: ['{"mcpServers":{"a":{"command":"a-bin"}}}', '@/tmp/servers.json'],
+      cliFeatures: {
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsMcpConfig: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(commandSpec.args, [
+    '--allow-all',
+    '--no-ask-user',
+    '--additional-mcp-config',
+    '{"mcpServers":{"a":{"command":"a-bin"}}}',
+    '--additional-mcp-config',
+    '@/tmp/servers.json',
+    '-p',
+    'Do work.',
+  ]);
+  assert.equal(
+    response.envelope.warnings.some((warning) => warning.code === 'copilot-mcp-config'),
+    false
+  );
+});
+
+test('build-command gates Copilot MCP config on feature detection and warns when unsupported', () => {
+  withFakeProviderCli(
+    'copilot',
+    fakeCopilotScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: copilot -p <prompt> --output-format json --model <m> --allow-all --no-ask-user --add-dir <dir>\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('1.0.0\\n');
+  process.exit(0);
+}
+process.exit(0);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'copilot',
+        context: 'Do work.',
+        options: {
+          mcpConfig: ['{"mcpServers":{"a":{"command":"a-bin"}}}'],
+        },
+      });
+
+      const { commandSpec } = response.envelope.result;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(commandSpec.args.includes('--additional-mcp-config'), false);
+      assert.ok(
+        response.envelope.warnings.some((warning) => warning.code === 'copilot-mcp-config'),
+        'expected a copilot-mcp-config warning when the CLI lacks --additional-mcp-config'
+      );
     }
   );
 });

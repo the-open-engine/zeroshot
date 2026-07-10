@@ -16,6 +16,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 
 const {
   setupE2ERepo,
@@ -35,6 +36,21 @@ function installFakeCopilot(binDir) {
   const shim = path.join(binDir, 'copilot');
   fs.writeFileSync(shim, `#!/bin/sh\nexec node "${FAKE_COPILOT}" "$@"\n`, { mode: 0o755 });
   fs.chmodSync(shim, 0o755);
+}
+
+function gitCommitFile(repoDir, relPath, content, message) {
+  const absPath = path.join(repoDir, relPath);
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+  fs.writeFileSync(absPath, content);
+  for (const args of [
+    ['add', relPath],
+    ['commit', '-m', message],
+  ]) {
+    const result = spawnSync('git', args, { cwd: repoDir, encoding: 'utf8' });
+    if (result.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+    }
+  }
 }
 
 describe('e2e: copilot provider', function () {
@@ -95,6 +111,55 @@ describe('e2e: copilot provider', function () {
     assert.ok(
       completions.length >= 1,
       'expected a TASK_COMPLETE message from the worker onComplete hook'
+    );
+
+    fs.rmSync(issueDir, { recursive: true, force: true });
+  });
+
+  it('forwards the repo .mcp.json to copilot as --additional-mcp-config', async function () {
+    // The repo's `.claude/.mcp.json` (the same MCP source Claude consumes) must be committed so it
+    // lands in the HEAD-based worktree the worker runs in.
+    const mcpJson = JSON.stringify({
+      mcpServers: { demo: { command: 'demo-mcp-bin', args: ['--stdio'] } },
+    });
+    gitCommitFile(env.repoDir, path.join('.claude', '.mcp.json'), mcpJson, 'Add MCP config');
+
+    const issueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-e2e-issue-'));
+    const issuePath = path.join(issueDir, 'feature.md');
+    fs.writeFileSync(issuePath, '# Add feature\n\nDo X.\n');
+
+    const clusterId = 'e2e-copilot-mcp';
+    const result = runZeroshot(
+      env,
+      ['run', issuePath, '--worktree', '--provider', 'copilot', '--config', CONFIG_PATH],
+      { ZEROSHOT_CLUSTER_ID: clusterId }
+    );
+
+    assert.strictEqual(
+      result.status,
+      0,
+      `zeroshot run exited ${result.status}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`
+    );
+
+    const cluster = await waitForClusterState(env, clusterId, ['stopped', 'killed']);
+    assert.strictEqual(cluster.state, 'stopped', 'cluster should stop cleanly');
+
+    // The fake copilot records the exact argv it was spawned with, into the worktree cwd.
+    const worktreeDir = worktreePath(env, clusterId);
+    const argvLog = path.join(worktreeDir, 'copilot-received-argv.json');
+    assert.ok(fs.existsSync(argvLog), `expected ${argvLog} to exist`);
+
+    const argv = JSON.parse(fs.readFileSync(argvLog, 'utf8'));
+    const flagIndex = argv.indexOf('--additional-mcp-config');
+    assert.ok(
+      flagIndex >= 0,
+      `expected copilot to receive --additional-mcp-config; got argv: ${JSON.stringify(argv)}`
+    );
+    // The repo .mcp.json content is inlined verbatim as the flag value (no @path, no translation).
+    assert.strictEqual(
+      argv[flagIndex + 1],
+      mcpJson,
+      'the inlined MCP config value must equal the repo .mcp.json content'
     );
 
     fs.rmSync(issueDir, { recursive: true, force: true });

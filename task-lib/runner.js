@@ -80,9 +80,16 @@ function buildProviderOptions(options, outputFormat, jsonSchema, cwd) {
     cwd,
     autoApprove: true,
     ...modelSpecOption(options),
+    ...mcpConfigOption(options),
     ...(options.resume ? { resumeSessionId: options.resume } : {}),
     ...(options.continue ? { continueSession: true } : {}),
   };
+}
+
+function mcpConfigOption(options) {
+  const entries = options.mcpConfig;
+  if (!Array.isArray(entries) || entries.length === 0) return {};
+  return { mcpConfig: entries };
 }
 
 function modelSpecOption(options) {

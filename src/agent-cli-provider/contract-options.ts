@@ -40,6 +40,7 @@ const CLI_FEATURE_FIELDS = [
   'supportsAllowAll',
   'supportsNoAskUser',
   'supportsAddDir',
+  'supportsMcpConfig',
   'supportsBundledRunner',
   'supportsAcpStdio',
   'supportsPromptImages',
@@ -107,6 +108,25 @@ function optionalBooleanValue(value: unknown, field: string): boolean | undefine
   if (value === undefined) return undefined;
   if (typeof value === 'boolean') return value;
   invalidField(field, `${field} must be a boolean.`);
+}
+
+function optionalMcpConfig(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    invalidField('options.mcpConfig', 'options.mcpConfig must be an array of strings.');
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'string') {
+      invalidField(`options.mcpConfig[${index}]`, `options.mcpConfig[${index}] must be a string.`);
+    }
+    if (item.trim().length === 0) {
+      invalidField(
+        `options.mcpConfig[${index}]`,
+        `options.mcpConfig[${index}] must be a non-empty string.`
+      );
+    }
+    return item;
+  });
 }
 
 function optionalEnumValue<T extends string>(
@@ -188,6 +208,7 @@ function normalizeBuildOptions(value: Record<string, unknown>): BuildProviderCom
     optionalBooleanValue(value.continueSession, 'options.continueSession')
   );
   addDefined(result, 'cliFeatures', optionalCliFeatures(value.cliFeatures));
+  addDefined(result, 'mcpConfig', optionalMcpConfig(value.mcpConfig));
   addDefined(
     result,
     'strictSchema',

@@ -8,7 +8,9 @@ FROM node:20-slim
 
 # Upgrade npm to fix Arborist isDescendantOf bug (npm 10.x crash on complex peer deps)
 # See: https://github.com/npm/cli/issues/7682
-RUN npm install -g npm@latest
+# Pinned to npm@11 (the latest line that still supports the node:20-slim base); npm@latest (12.x)
+# now requires node >=22 and breaks the build with EBADENGINE.
+RUN npm install -g npm@11
 
 # Version pinning for infrastructure tools
 ARG AWS_CLI_VERSION=2.15.10
@@ -145,6 +147,14 @@ RUN mkdir -p /home/node/.claude /home/node/.config/gh \
 # Create workspace directory with node ownership
 RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
+
+# Install the running provider's CLI as a docker-cached layer (per-provider image variant).
+# Claude is baked in above, so its variant passes an empty PROVIDER_INSTALL and skips this step.
+# Kept last in the root phase so every heavy layer above is shared across all provider images;
+# Docker caches this layer keyed on the install command, so it builds once per provider and is
+# then reused. The command comes from the provider registry (docker.install), never hardcoded.
+ARG PROVIDER_INSTALL=""
+RUN if [ -n "$PROVIDER_INSTALL" ]; then sh -c "$PROVIDER_INSTALL"; fi
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

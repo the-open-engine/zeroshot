@@ -52,6 +52,21 @@ const invalidNestedOptionCases = [
     field: 'options.modelSpec.reasoningEffort',
   },
   {
+    name: 'mcpConfig array',
+    options: { mcpConfig: '{"mcpServers":{}}' },
+    field: 'options.mcpConfig',
+  },
+  {
+    name: 'mcpConfig entry type',
+    options: { mcpConfig: [123] },
+    field: 'options.mcpConfig[0]',
+  },
+  {
+    name: 'mcpConfig entry empty',
+    options: { mcpConfig: ['   '] },
+    field: 'options.mcpConfig[0]',
+  },
+  {
     name: 'gateway object',
     options: { gateway: 'http://localhost:11434' },
     field: 'options.gateway',

@@ -61,10 +61,6 @@ async function createValidatorIsolation(agent, isolationConfig) {
 
   const cluster = agent.cluster || {};
   const workDir = agent.config?.cwd || cluster.worktree?.path || cluster.cwd || process.cwd();
-  const image = isolationConfig.image;
-  await IsolationManager.ensureImage(image);
-
-  const manager = new IsolationManager({ image });
   const providerName = normalizeProviderName(
     (agent._resolveProvider && agent._resolveProvider()) ||
       cluster.config?.forceProvider ||
@@ -72,6 +68,11 @@ async function createValidatorIsolation(agent, isolationConfig) {
       loadSettings().defaultProvider ||
       'claude'
   );
+  // Run validators on the provider's image variant (installs its CLI as a Docker-cached layer).
+  const image = IsolationManager.imageForProvider(providerName, isolationConfig.image);
+  await IsolationManager.ensureImage(image, true, IsolationManager.providerBuildArgs(providerName));
+
+  const manager = new IsolationManager({ image });
 
   const isolationClusterId = `${cluster.id}-validators`;
   const containerId = await manager.createContainer(isolationClusterId, {

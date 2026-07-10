@@ -33,6 +33,7 @@ const USAGE = [
   '  --allow-all                Enable all permissions',
   '  --no-ask-user              Disable the ask_user tool',
   '  --add-dir <directory>      Add a directory to the allowed list',
+  '  --additional-mcp-config <json>  JSON string or @file MCP config (repeatable)',
 ].join('\n');
 
 function emit(event) {
@@ -67,6 +68,11 @@ function main() {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, content);
   process.stderr.write(`fake-copilot: wrote ${target} (prompt="${promptValue(argv)}")\n`);
+
+  // Record the exact argv this run received so the MCP e2e can assert that
+  // `--additional-mcp-config <config>` was forwarded through the whole stack.
+  const argvLog = path.resolve(process.cwd(), 'copilot-received-argv.json');
+  fs.writeFileSync(argvLog, JSON.stringify(argv));
 
   // Emit the real Copilot `--output-format json` JSONL shape (verified against copilot v1.0.69):
   // dot-namespaced types, payload under `data`, success derived from the terminal `exitCode`.
