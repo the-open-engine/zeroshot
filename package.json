@@ -1,6 +1,6 @@
 {
   "name": "@the-open-engine/zeroshot",
-  "version": "5.4.0",
+  "version": "6.4.0",
   "description": "Multi-agent orchestration engine for Claude, Codex, and Gemini",
   "main": "src/orchestrator.js",
   "bin": {
