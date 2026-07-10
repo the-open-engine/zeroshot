@@ -60,6 +60,10 @@ export interface ProviderDockerMetadata {
   readonly envPassthrough: readonly string[];
   // False when the mounted dir doesn't hold the secret (auth is via an envPassthrough token).
   readonly credentialInMount?: boolean;
+  // Shell command that installs this provider's CLI inside the Debian-based cluster image, run as
+  // a docker-cached build layer for the per-provider image variant. Omit for providers already
+  // baked into the base image (e.g. Claude) or not installable via a single command.
+  readonly install?: string;
 }
 
 export interface ProviderRegistryEntry {
@@ -204,6 +208,7 @@ export const providerRegistry = [
         container: '$HOME/.config/codex',
         readonly: true,
       },
+      install: 'npm install -g @openai/codex',
       envPassthrough: [],
     },
     defaultLevels: {
@@ -280,6 +285,7 @@ export const providerRegistry = [
         container: '$HOME/.config/gemini',
         readonly: true,
       },
+      install: 'npm install -g @google/gemini-cli',
       envPassthrough: [],
     },
     defaultLevels: {
@@ -433,6 +439,7 @@ export const providerRegistry = [
         container: '$HOME/.copilot',
         readonly: true,
       },
+      install: 'npm install -g @github/copilot',
       envPassthrough: ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN'],
       credentialInMount: false, // token is in the OS keychain, not ~/.copilot
     },

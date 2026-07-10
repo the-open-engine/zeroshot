@@ -1138,11 +1138,12 @@ class Orchestrator {
     const messageBus = new MessageBus(ledger);
 
     // Handle isolation mode (Docker container OR git worktree)
-    const { isolationManager, containerId, worktreeInfo } = await this._initializeIsolation(
-      options,
-      config,
-      clusterId
-    );
+    const {
+      isolationManager,
+      containerId,
+      worktreeInfo,
+      image: resolvedIsolationImage,
+    } = await this._initializeIsolation(options, config, clusterId);
     let requiredQualityGates = resolveClusterRequiredQualityGates(config, options);
     let commandProofs = resolveClusterCommandProofs(config, options);
     options.requiredQualityGates = requiredQualityGates;
@@ -1188,7 +1189,9 @@ class Orchestrator {
         ? {
             enabled: true,
             containerId,
-            image: options.isolationImage || 'zeroshot-cluster-base',
+            // Provider-specific image variant (resolved in _initializeIsolation) so resume
+            // recreates the container on the same image that has the provider CLI installed.
+            image: resolvedIsolationImage || options.isolationImage || 'zeroshot-cluster-base',
             manager: isolationManager,
             workDir: options.cwd || process.cwd(), // Persisted for resume
           }
@@ -1729,20 +1732,30 @@ class Orchestrator {
     let isolationManager = null;
     let containerId = null;
     let worktreeInfo = null;
+    let isolationImage = null;
 
     if (options.isolation) {
       if (!IsolationManager.isDockerAvailable()) {
         throw new Error('Docker is not available. Install Docker to use --docker mode.');
       }
 
-      const image = options.isolationImage || 'zeroshot-cluster-base';
-      await IsolationManager.ensureImage(image);
+      // Resolve the provider first so the cluster runs on that provider's image variant, which
+      // installs the provider CLI as a Docker-cached layer. Providers baked into the base image
+      // (e.g. Claude) resolve back to the base image unchanged.
+      const providerName = this._resolveClusterProvider(config);
+      const baseImage = options.isolationImage || 'zeroshot-cluster-base';
+      const image = IsolationManager.imageForProvider(providerName, baseImage);
+      await IsolationManager.ensureImage(
+        image,
+        true,
+        IsolationManager.providerBuildArgs(providerName)
+      );
+      isolationImage = image;
 
       isolationManager = new IsolationManager({ image });
       this._log(`[Orchestrator] Starting cluster in isolation mode (image: ${image})`);
 
       const workDir = options.cwd || process.cwd();
-      const providerName = this._resolveClusterProvider(config);
       containerId = await isolationManager.createContainer(clusterId, {
         workDir,
         image,
@@ -1770,7 +1783,7 @@ class Orchestrator {
       this._log(`[Orchestrator] Branch: ${worktreeInfo.branch}`);
     }
 
-    return { isolationManager, containerId, worktreeInfo };
+    return { isolationManager, containerId, worktreeInfo, image: isolationImage };
   }
 
   _applyAutoPrConfig(config, inputData, options) {
