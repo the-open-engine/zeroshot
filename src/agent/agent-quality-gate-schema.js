@@ -41,11 +41,11 @@ function buildQualityGateSchema() {
           required: ['command', 'exitCode', 'output'],
         },
         completedAt: {
-          type: ['string', 'number'],
+          anyOf: [{ type: 'string' }, { type: 'number' }],
           description: 'When the gate completed, as an ISO string or numeric timestamp.',
         },
         timestamp: {
-          type: ['string', 'number'],
+          anyOf: [{ type: 'string' }, { type: 'number' }],
           description: 'Alternate completion timestamp, as an ISO string or numeric timestamp.',
         },
         stale: {
