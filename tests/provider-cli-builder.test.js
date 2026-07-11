@@ -169,6 +169,14 @@ describe('Gemini provider helper builder', function () {
     assert.ok(result.args.includes('--output-format'));
     assert.ok(result.args.includes('stream-json'));
   });
+
+  it('marks headless workspaces trusted for noninteractive Gemini runs', function () {
+    const result = buildCommand('gemini', 'test', {
+      cwd: '/tmp/project',
+    });
+
+    assert.strictEqual(result.env.GEMINI_CLI_TRUST_WORKSPACE, 'true');
+  });
 });
 
 describe('Opencode provider helper builder', function () {
@@ -225,6 +233,66 @@ describe('Opencode provider helper builder', function () {
     assert.ok(result.args.includes('opencode/glm-4.7-free'));
     assert.ok(result.args.includes('--variant'));
     assert.ok(result.args.includes('high'));
+  });
+
+  it('prefers --dir over --cwd when opencode supports both', function () {
+    const result = buildCommand('opencode', 'test', {
+      cwd: '/tmp/worktree',
+      cliFeatures: { supportsDir: true, supportsCwd: true },
+    });
+
+    assert.ok(result.args.includes('--dir'));
+    assert.ok(!result.args.includes('--cwd'));
+    assert.deepStrictEqual(result.args.slice(1, 3), ['--dir', '/tmp/worktree']);
+  });
+
+  it('falls back to --cwd when opencode does not support --dir', function () {
+    const result = buildCommand('opencode', 'test', {
+      cwd: '/tmp/worktree',
+      cliFeatures: { supportsDir: false, supportsCwd: true },
+    });
+
+    assert.ok(!result.args.includes('--dir'));
+    assert.ok(result.args.includes('--cwd'));
+    assert.deepStrictEqual(result.args.slice(1, 3), ['--cwd', '/tmp/worktree']);
+  });
+});
+
+describe('Pi provider helper builder', function () {
+  it('fails closed when resume or continue session control is requested', function () {
+    assert.throws(
+      () =>
+        buildCommand('pi', 'test context', {
+          resumeSessionId: 'session-123',
+        }),
+      /does not support resume\/continue session control/
+    );
+
+    assert.throws(
+      () =>
+        buildCommand('pi', 'test context', {
+          continueSession: true,
+        }),
+      /does not support resume\/continue session control/
+    );
+  });
+});
+
+describe('Copilot provider helper builder', function () {
+  it('emits auto-approve flags when autoApprove is requested', function () {
+    const spec = buildCommand('copilot', 'test context', {
+      autoApprove: true,
+    });
+    assert.ok(spec.args.includes('--allow-all'));
+    assert.ok(spec.args.includes('--no-ask-user'));
+  });
+
+  it('warns and ignores unsupported session control instead of failing closed', function () {
+    const resumed = buildCommand('copilot', 'test context', {
+      resumeSessionId: 'session-123',
+    });
+    assert.ok(!resumed.args.includes('--resume'));
+    assert.ok(resumed.warnings.some((warning) => warning.code === 'unsupported-session-control'));
   });
 });
 

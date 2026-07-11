@@ -19,7 +19,12 @@ const {
   resolveClaudeAuth,
 } = require('../lib/settings/claude-auth.js');
 const { loadSettings, getClaudeCommand } = require('../lib/settings.js');
-const { normalizeProviderName } = require('../lib/provider-names');
+const {
+  VALID_PROVIDERS,
+  getProviderMetadata,
+  normalizeProviderName,
+  resolveProviderCommand,
+} = require('../lib/provider-names');
 const { detectGitContext } = require('../lib/git-remote-utils');
 const { readKeychainCredentials } = require('./claude-credentials');
 
@@ -343,10 +348,21 @@ function buildClaudeCommand(options) {
   return options.claudeCommand || [command, ...args].join(' ');
 }
 
+function buildRegistryInstallRecovery(metadata, command) {
+  return [
+    ...metadata.installInstructions.split('\n').filter(Boolean),
+    `Then run: ${command} --version`,
+  ];
+}
+
 function validateClaudeProvider(options) {
   const errors = [];
   const warnings = [];
+  const metadata = getProviderMetadata('claude');
   const claudeCommand = buildClaudeCommand(options);
+  const claudeCommandParts = claudeCommand.trim().split(/\s+/);
+  const usesDefaultClaudeCommand =
+    claudeCommandParts.length === 1 && claudeCommandParts[0] === metadata.binary;
 
   const claude = getClaudeVersion(claudeCommand);
   if (!claude.installed) {
@@ -354,12 +370,8 @@ function validateClaudeProvider(options) {
       formatError(
         'Claude command not available',
         claude.error,
-        claudeCommand === 'claude'
-          ? [
-              'Install Claude CLI: npm install -g @anthropic-ai/claude-code',
-              'Or: brew install claude (macOS)',
-              'Then run: claude --version',
-            ]
+        usesDefaultClaudeCommand
+          ? buildRegistryInstallRecovery(metadata, metadata.binary)
           : [
               `Command '${claudeCommand}' not found`,
               'Check settings: zeroshot settings',
@@ -404,41 +416,82 @@ function validateCliProvider(command, title, detail, recovery) {
   return { errors, warnings: [] };
 }
 
-function validateProvider(providerName, options) {
-  const validatorByProvider = {
-    claude: () => validateClaudeProvider(options),
-    codex: () =>
-      validateCliProvider('codex', 'Codex CLI not available', 'Command "codex" not installed', [
-        'Install Codex CLI: npm install -g @openai/codex',
-        'Then run: codex --version',
-      ]),
-    gemini: () =>
-      validateCliProvider('gemini', 'Gemini CLI not available', 'Command "gemini" not installed', [
-        'Install Gemini CLI: npm install -g @google/gemini-cli',
-        'Then run: gemini --version',
-      ]),
-    opencode: () =>
-      validateCliProvider(
-        'opencode',
-        'Opencode CLI not available',
-        'Command "opencode" not installed',
-        ['Install Opencode CLI: see https://opencode.ai', 'Then run: opencode --version']
+function validateGatewayProvider() {
+  const { getProvider } = require('./providers');
+  const provider = getProvider('gateway');
+  if (provider.isAvailable()) {
+    return { errors: [], warnings: [] };
+  }
+  return {
+    errors: [
+      formatError(
+        'Gateway provider not configured',
+        'providerSettings.gateway must define baseUrl, apiKey, model, and toolPolicy before gateway can run.',
+        [
+          'Run: zeroshot settings',
+          'Set providerSettings.gateway.baseUrl to your OpenAI-compatible endpoint base URL',
+          'Set providerSettings.gateway.apiKey and providerSettings.gateway.model',
+          'Set providerSettings.gateway.toolPolicy.roots and toolPolicy.commands explicitly',
+        ]
       ),
+    ],
+    warnings: [],
   };
+}
 
-  const validator = validatorByProvider[providerName];
-  if (!validator) {
+function validateProvider(providerName, options) {
+  let metadata;
+  try {
+    metadata = getProviderMetadata(providerName);
+  } catch {
     return {
       errors: [
         formatError('Unknown provider', `Provider "${providerName}" is not supported`, [
-          'Use claude, codex, gemini, or opencode',
+          `Use ${VALID_PROVIDERS.join(', ')}`,
         ]),
       ],
       warnings: [],
     };
   }
 
-  return validator();
+  if (metadata.command.kind === 'configured-claude') {
+    return validateClaudeProvider(options);
+  }
+  if (providerName === 'gateway') {
+    return validateGatewayProvider();
+  }
+
+  return validateRegistryCliProvider(providerName);
+}
+
+function validateRegistryCliProvider(providerName) {
+  const metadata = getProviderMetadata(providerName);
+  const { command } = resolveProviderCommand(providerName);
+  const installSteps = metadata.installInstructions.split('\n').filter(Boolean);
+  if (!commandExists(command)) {
+    return validateCliProvider(
+      command,
+      `${metadata.displayName} CLI not available`,
+      `Command "${command}" not installed`,
+      [...installSteps, `Then run: ${command} --version`]
+    );
+  }
+
+  const { getProvider } = require('./providers');
+  if (getProvider(providerName).isAvailable()) {
+    return { errors: [], warnings: [] };
+  }
+
+  return {
+    errors: [
+      formatError(
+        `${metadata.displayName} CLI not available`,
+        `Command "${command}" is installed but did not produce usable --help/--version output`,
+        [...installSteps, `Then run: ${command} --version`]
+      ),
+    ],
+    warnings: [],
+  };
 }
 
 function validateGhRequirement() {

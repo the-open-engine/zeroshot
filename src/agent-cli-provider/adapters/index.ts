@@ -1,4 +1,5 @@
 import { stripTimestampPrefix } from '../log-prefix';
+import { getProviderRegistryEntry, normalizeProviderName, providerIds } from '../provider-registry';
 import type {
   BuildProviderCommandOptions,
   CommandSpec,
@@ -11,7 +12,6 @@ import type {
   ProviderId,
   ResolvedModelSpec,
 } from '../types';
-import { claudeAdapter } from './claude';
 export {
   NO_MESSAGES_RETURNED,
   STREAMING_MODE_ERROR,
@@ -22,18 +22,6 @@ export {
   type StreamingModeError,
   type StructuredOutputRecovery,
 } from './claude-recovery';
-import { codexAdapter } from './codex';
-import { geminiAdapter } from './gemini';
-import { opencodeAdapter } from './opencode';
-
-const ADAPTERS: Readonly<Record<ProviderId, ProviderAdapter>> = {
-  claude: claudeAdapter,
-  codex: codexAdapter,
-  gemini: geminiAdapter,
-  opencode: opencodeAdapter,
-};
-
-const PROVIDER_IDS: readonly ProviderId[] = ['claude', 'codex', 'gemini', 'opencode'];
 
 function isOutputEventArray(
   event: OutputEvent | readonly OutputEvent[]
@@ -41,41 +29,22 @@ function isOutputEventArray(
   return Array.isArray(event);
 }
 
-function normalizeProviderName(name: string): ProviderId | string {
-  const normalized = name.toLowerCase();
-  switch (normalized) {
-    case 'anthropic':
-    case 'claude':
-      return 'claude';
-    case 'openai':
-    case 'codex':
-      return 'codex';
-    case 'google':
-    case 'gemini':
-      return 'gemini';
-    case 'opencode':
-      return 'opencode';
-    default:
-      return name;
-  }
-}
-
 function adapterForProviderId(provider: ProviderId): ProviderAdapter {
-  return ADAPTERS[provider];
+  return getProviderRegistryEntry(provider).adapter;
 }
 
 function isProviderId(name: string): name is ProviderId {
-  return name === 'claude' || name === 'codex' || name === 'gemini' || name === 'opencode';
+  return (providerIds as readonly string[]).includes(name);
 }
 
 export function getProviderAdapter(name: KnownProviderName | string): ProviderAdapter {
   const normalized = normalizeProviderName(name || '');
   if (isProviderId(normalized)) return adapterForProviderId(normalized);
-  throw new Error(`Unknown provider: ${name}. Valid: ${PROVIDER_IDS.join(', ')}`);
+  throw new Error(`Unknown provider: ${name}. Valid: ${providerIds.join(', ')}`);
 }
 
 export function listProviderAdapters(): readonly ProviderId[] {
-  return PROVIDER_IDS;
+  return providerIds;
 }
 
 export function buildProviderCommand(

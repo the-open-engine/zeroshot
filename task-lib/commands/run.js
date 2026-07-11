@@ -38,6 +38,7 @@ export async function runTask(prompt, options = {}) {
     continue: options.continue,
     outputFormat,
     jsonSchema,
+    mcpConfig: options.mcpConfig,
     silentJsonOutput,
   });
 

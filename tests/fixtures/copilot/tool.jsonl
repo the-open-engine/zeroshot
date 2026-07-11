@@ -1,0 +1,12 @@
+{"type":"session.tools_updated","data":{"model":"gpt-5.3-codex"},"ephemeral":true}
+{"type":"assistant.turn_start","data":{"turnId":"0","model":"gpt-5.3-codex"}}
+{"type":"assistant.message_start","data":{"messageId":"m1","phase":"commentary"},"ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m1","phase":"commentary","content":"Creating hello.txt now.","toolRequests":[{"toolCallId":"call_1","name":"apply_patch","arguments":"*** Begin Patch\n*** Add File: hello.txt\n+hi there\n*** End Patch\n","type":"custom"}],"outputTokens":181}}
+{"type":"assistant.tool_call_delta","data":{"toolCallId":"call_1","toolName":"apply_patch","inputDelta":"***"},"ephemeral":true}
+{"type":"tool.execution_start","data":{"toolCallId":"call_1","toolName":"apply_patch","arguments":"*** Begin Patch\n*** Add File: hello.txt\n+hi there\n*** End Patch\n","turnId":"0"}}
+{"type":"tool.execution_partial_result","data":{"toolCallId":"call_1","partialOutput":"hi there\n"}}
+{"type":"tool.execution_complete","data":{"toolCallId":"call_1","success":true,"result":{"content":"Added 1 file(s): hello.txt","detailedContent":"diff --git a/hello.txt b/hello.txt\n"}}}
+{"type":"assistant.message_start","data":{"messageId":"m2","phase":"final_answer"},"ephemeral":true}
+{"type":"assistant.message_delta","data":{"messageId":"m2","deltaContent":"Done. It printed: hi there"},"ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m2","phase":"final_answer","content":"Done. It printed: hi there","outputTokens":42}}
+{"type":"result","sessionId":"s1","exitCode":0,"usage":{"premiumRequests":0}}

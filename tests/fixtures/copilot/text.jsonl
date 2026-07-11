@@ -1,0 +1,9 @@
+{"type":"session.tools_updated","data":{"model":"gpt-5.3-codex"},"ephemeral":true}
+{"type":"user.message","data":{"content":"ping"}}
+{"type":"assistant.turn_start","data":{"turnId":"0","model":"gpt-5.3-codex"}}
+{"type":"assistant.message_start","data":{"messageId":"m1","phase":"final_answer"},"ephemeral":true}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"pong"},"ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m1","model":"gpt-5.3-codex","content":"pong","toolRequests":[],"outputTokens":21}}
+{"type":"assistant.turn_end","data":{"turnId":"0"}}
+{"type":"assistant.idle","data":{},"ephemeral":true}
+{"type":"result","sessionId":"s1","exitCode":0,"usage":{"premiumRequests":0}}

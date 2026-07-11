@@ -16,8 +16,13 @@ const os = require('os');
 const fs = require('fs');
 const { loadSettings } = require('../lib/settings');
 const { CLAUDE_AUTH_ENV_VARS, resolveClaudeAuth } = require('../lib/settings/claude-auth');
-const { normalizeProviderName } = require('../lib/provider-names');
-const { resolveMounts, resolveEnvs, expandEnvPatterns } = require('../lib/docker-config');
+const { normalizeProviderName, getProviderMetadata } = require('../lib/provider-names');
+const {
+  MOUNT_PRESETS,
+  resolveMounts,
+  resolveEnvs,
+  expandEnvPatterns,
+} = require('../lib/docker-config');
 const { getProvider } = require('./providers');
 const { readRepoSettings } = require('../lib/repo-settings');
 const { provisionClaudeCredentials } = require('./claude-credentials');
@@ -98,6 +103,24 @@ function resolveWorktreeSetupTimeoutMs(repoSettings = {}, options = {}) {
 
 const DEFAULT_IMAGE = 'zeroshot-cluster-base';
 
+/**
+ * Shell command that installs a provider's CLI inside the cluster image, or null when the
+ * provider is baked into the base image (e.g. Claude) or has no single-command installer.
+ * Sourced from the provider registry (docker.install) so nothing here is provider-specific.
+ * @param {string} providerName
+ * @returns {string|null}
+ */
+function providerDockerInstall(providerName) {
+  if (!providerName) return null;
+  try {
+    const metadata = getProviderMetadata(providerName);
+    const install = metadata && metadata.docker && metadata.docker.install;
+    return typeof install === 'string' && install.trim() ? install.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 class IsolationManager {
   constructor(options = {}) {
     this.image = options.image || DEFAULT_IMAGE;
@@ -171,7 +194,13 @@ class IsolationManager {
       clusterConfigDir,
     });
 
-    const mountedHosts = this._applyCredentialMounts(args, config, settings, containerHome);
+    const mountedHosts = this._applyCredentialMounts(
+      args,
+      config,
+      settings,
+      containerHome,
+      providerName
+    );
     this._warnMissingProviderCredentials(providerName, mountedHosts, config, containerHome);
 
     args.push('-w', '/workspace', image, 'tail', '-f', '/dev/null');
@@ -285,13 +314,25 @@ class IsolationManager {
     return settings.dockerMounts;
   }
 
-  _applyCredentialMounts(args, config, settings, containerHome) {
+  // Auto-activate the running provider's own credential preset (mount + env) so `--docker` works
+  // without listing it in dockerMounts. Claude is mounted separately, so skip it.
+  _withActiveProviderPreset(mountConfig, providerName) {
+    if (!providerName || providerName === 'claude') return mountConfig;
+    if (!MOUNT_PRESETS[providerName]) return mountConfig;
+    if (mountConfig.some((item) => item === providerName)) return mountConfig;
+    return [...mountConfig, providerName];
+  }
+
+  _applyCredentialMounts(args, config, settings, containerHome, providerName) {
     const mountedHosts = [];
     if (config.noMounts) {
       return mountedHosts;
     }
 
-    const mountConfig = this._resolveMountConfig(config, settings);
+    const mountConfig = this._withActiveProviderPreset(
+      this._resolveMountConfig(config, settings),
+      providerName
+    );
     const mounts = resolveMounts(mountConfig, { containerHome });
     const claudeContainerPath = path.posix.join(containerHome, '.claude');
 
@@ -363,16 +404,40 @@ class IsolationManager {
       return;
     }
 
+    const metadata = getProviderMetadata(providerName);
     const provider = getProvider(providerName);
+
+    // An env token (e.g. COPILOT_GITHUB_TOKEN) is a complete credential on its own.
+    const credentialEnvKeys = metadata.credentialEnvKeys || [];
+    if (credentialEnvKeys.some((key) => process.env[key])) {
+      return;
+    }
+
+    // A mount only counts if it carries the secret (credentialInMount !== false).
+    const credentialInMount = metadata.docker && metadata.docker.credentialInMount === false;
     const credentialPaths = provider.getCredentialPaths ? provider.getCredentialPaths() : [];
     const expandedCreds = credentialPaths.map((cred) => expandHomePath(cred));
-    const hasCredentialMount = mountedHosts.some((hostPath) =>
-      expandedCreds.some(
-        (credPath) => pathContains(hostPath, credPath) || pathContains(credPath, hostPath)
-      )
-    );
+    const hasCredentialMount =
+      !credentialInMount &&
+      mountedHosts.some((hostPath) =>
+        expandedCreds.some(
+          (credPath) => pathContains(hostPath, credPath) || pathContains(credPath, hostPath)
+        )
+      );
+    if (hasCredentialMount) {
+      return;
+    }
 
-    if (!hasCredentialMount && expandedCreds.length > 0) {
+    if (credentialInMount && credentialEnvKeys.length > 0) {
+      console.warn(
+        `[IsolationManager] ⚠️  ${provider.displayName} could not find credentials for Docker. ` +
+          `Its login token is not stored in a mountable file — export one of ` +
+          `${credentialEnvKeys.join(', ')} before running with --docker.`
+      );
+      return;
+    }
+
+    if (expandedCreds.length > 0) {
       const exampleHost = credentialPaths[0];
       const exampleContainer = exampleHost.replace(/^~(?=\/|$)/, containerHome);
       const mountNote = config.noMounts ? 'Credential mounts are disabled. ' : '';
@@ -1231,18 +1296,51 @@ class IsolationManager {
   }
 
   /**
+   * Resolve the cluster image tag for a provider. Providers baked into the base image (e.g.
+   * Claude) run on the base image directly; providers with a `docker.install` command get a
+   * per-provider image variant `<baseImage>-<providerId>` whose install step is a Docker-cached
+   * layer (built once, reused thereafter).
+   * @param {string} providerName
+   * @param {string} [baseImage]
+   * @returns {string}
+   */
+  static imageForProvider(providerName, baseImage = DEFAULT_IMAGE) {
+    if (!providerDockerInstall(providerName)) {
+      return baseImage;
+    }
+    return `${baseImage}-${normalizeProviderName(providerName)}`;
+  }
+
+  /**
+   * Docker `--build-arg` values that install a provider's CLI into its image variant, or [] when
+   * the provider is baked into the base image or has no installer.
+   * @param {string} providerName
+   * @returns {string[]}
+   */
+  static providerBuildArgs(providerName) {
+    const install = providerDockerInstall(providerName);
+    return install ? [`PROVIDER_INSTALL=${install}`] : [];
+  }
+
+  /**
    * Build the Docker image with retry logic
    * @param {string} [image] - Image name to build
    * @param {number} [maxRetries=3] - Maximum retry attempts
    * @returns {Promise<void>}
    */
-  static async buildImage(image = DEFAULT_IMAGE, maxRetries = 3) {
+  static async buildImage(image = DEFAULT_IMAGE, maxRetries = 3, buildArgs = []) {
     // Repository root is one level up from src/
     const repoRoot = path.join(__dirname, '..');
     const dockerfilePath = path.join(repoRoot, 'docker', 'zeroshot-cluster', 'Dockerfile');
 
     if (!fs.existsSync(dockerfilePath)) {
       throw new Error(`Dockerfile not found at ${dockerfilePath}`);
+    }
+
+    // Each buildArg becomes a `--build-arg KEY=VALUE` pair (e.g. the per-provider install command).
+    const buildArgFlags = [];
+    for (const arg of buildArgs) {
+      buildArgFlags.push('--build-arg', arg);
     }
 
     console.log(`[IsolationManager] Building Docker image '${image}'...`);
@@ -1253,11 +1351,18 @@ class IsolationManager {
       try {
         // CRITICAL: Run from repo root so build context includes package.json and src/
         // Use -f flag to specify Dockerfile location
-        runSync('docker', ['build', '-f', 'docker/zeroshot-cluster/Dockerfile', '-t', image, '.'], {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          stdio: 'inherit',
-        });
+        runSync(
+          'docker',
+          ['build', '-f', 'docker/zeroshot-cluster/Dockerfile', ...buildArgFlags, '-t', image, '.'],
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            stdio: 'inherit',
+            // No timeout: image builds legitimately take many minutes (apt, tool downloads,
+            // provider install). runSync's 30s default would kill every build (ETIMEDOUT).
+            timeout: 0,
+          }
+        );
 
         console.log(`[IsolationManager] ✓ Image '${image}' built successfully`);
         return;
@@ -1284,7 +1389,7 @@ class IsolationManager {
    * @param {boolean} [autoBuild=true] - Auto-build if missing
    * @returns {Promise<void>}
    */
-  static async ensureImage(image = DEFAULT_IMAGE, autoBuild = true) {
+  static async ensureImage(image = DEFAULT_IMAGE, autoBuild = true, buildArgs = []) {
     if (this.imageExists(image)) {
       return;
     }
@@ -1297,7 +1402,7 @@ class IsolationManager {
     }
 
     console.log(`[IsolationManager] Image '${image}' not found, building automatically...`);
-    await this.buildImage(image);
+    await this.buildImage(image, 3, buildArgs);
   }
 
   /**

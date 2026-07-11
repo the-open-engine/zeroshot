@@ -1,6 +1,7 @@
 import { isRecord } from './json';
 import { invalidField, contractError } from './contract-errors';
 import { stringRecord } from './contract-env';
+import { normalizeGatewayBuildOptions } from './gateway-tools';
 import type {
   BuildProviderCommandOptions,
   CliFeatureOverrides,
@@ -23,14 +24,46 @@ const CLI_FEATURE_FIELDS = [
   'supportsModel',
   'supportsJson',
   'supportsOutputSchema',
+  'supportsDir',
   'supportsCwd',
   'supportsConfigOverride',
   'supportsSkipGitRepoCheck',
   'supportsVariant',
+  'supportsJsonMode',
+  'supportsNoSession',
+  'supportsNoExtensions',
+  'supportsNoSkills',
+  'supportsNoPromptTemplates',
+  'supportsNoContextFiles',
+  'supportsNoApprove',
+  'supportsJsonOutput',
+  'supportsAllowAll',
+  'supportsNoAskUser',
+  'supportsAddDir',
+  'supportsMcpConfig',
+  'supportsBundledRunner',
+  'supportsAcpStdio',
+  'supportsPromptImages',
+  'supportsLoadSession',
+  'supportsSessionCancel',
+  'supportsSessionSetModel',
+  'supportsSessionSetMode',
+  'supportsRemoteTransport',
+  'supportsCustomTransport',
+  'supportsPermissionRequests',
+  'supportsFsTools',
+  'supportsTerminalTools',
   'unknown',
 ] as const;
 
 type CliFeatureField = (typeof CLI_FEATURE_FIELDS)[number];
+const FALSE_ONLY_CLI_FEATURE_FIELDS = new Set<CliFeatureField>([
+  'supportsRemoteTransport',
+  'supportsCustomTransport',
+  'supportsPermissionRequests',
+  'supportsFsTools',
+  'supportsTerminalTools',
+]);
 
 export function requestOptions(value: unknown): BuildProviderCommandOptions {
   if (value === undefined) return {};
@@ -77,6 +110,25 @@ function optionalBooleanValue(value: unknown, field: string): boolean | undefine
   invalidField(field, `${field} must be a boolean.`);
 }
 
+function optionalMcpConfig(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    invalidField('options.mcpConfig', 'options.mcpConfig must be an array of strings.');
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'string') {
+      invalidField(`options.mcpConfig[${index}]`, `options.mcpConfig[${index}] must be a string.`);
+    }
+    if (item.trim().length === 0) {
+      invalidField(
+        `options.mcpConfig[${index}]`,
+        `options.mcpConfig[${index}] must be a non-empty string.`
+      );
+    }
+    return item;
+  });
+}
+
 function optionalEnumValue<T extends string>(
   value: unknown,
   field: string,
@@ -119,12 +171,19 @@ function optionalCliFeatures(value: unknown): CliFeatureOverrides | undefined {
     invalidField('options.cliFeatures', 'options.cliFeatures must be an object.');
   }
 
-  const result: Partial<Record<CliFeatureField, boolean>> = {};
+  const result: Record<string, boolean> = {};
   for (const field of CLI_FEATURE_FIELDS) {
     const item = optionalBooleanValue(value[field], `options.cliFeatures.${field}`);
-    if (item !== undefined) result[field] = item;
+    if (item === undefined) continue;
+    if (item && FALSE_ONLY_CLI_FEATURE_FIELDS.has(field)) {
+      invalidField(
+        `options.cliFeatures.${field}`,
+        `options.cliFeatures.${field} must be false when provided.`
+      );
+    }
+    result[field] = item;
   }
-  return result;
+  return result as CliFeatureOverrides;
 }
 
 function normalizeBuildOptions(value: Record<string, unknown>): BuildProviderCommandOptions {
@@ -149,10 +208,20 @@ function normalizeBuildOptions(value: Record<string, unknown>): BuildProviderCom
     optionalBooleanValue(value.continueSession, 'options.continueSession')
   );
   addDefined(result, 'cliFeatures', optionalCliFeatures(value.cliFeatures));
+  addDefined(result, 'mcpConfig', optionalMcpConfig(value.mcpConfig));
   addDefined(
     result,
     'strictSchema',
     optionalBooleanValue(value.strictSchema, 'options.strictSchema')
+  );
+  addDefined(
+    result,
+    'gateway',
+    normalizeGatewayBuildOptions(
+      value.gateway,
+      'options.gateway',
+      optionalStringValue(value.cwd, 'options.cwd') ?? process.cwd()
+    )
   );
   if (Object.prototype.hasOwnProperty.call(value, 'authEnv')) {
     result.authEnv = stringRecord(value.authEnv, 'options.authEnv');

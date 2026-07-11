@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_thought_chunk","messageId":"msg-thought-1","content":{"type":"text","text":"Need a plan"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_thought_chunk","messageId":"msg-thought-1","content":{"type":"text","text":"Need a plan first"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-thought-1","content":{"type":"text","text":"Done"}}}}
+{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}

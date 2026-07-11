@@ -1,0 +1,4 @@
+{"type":"assistant.message_start","data":{"messageId":"m1","phase":"final_answer"},"ephemeral":true}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"I could not complete the request."},"ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m1","content":"I could not complete the request.","outputTokens":9}}
+{"type":"result","sessionId":"s1","exitCode":1,"usage":{}}

@@ -30,6 +30,11 @@ const invalidNestedOptionCases = [
     options: { cliFeatures: { supportsCwd: 'true' } },
     field: 'options.cliFeatures.supportsCwd',
   },
+  {
+    name: 'cliFeatures supportsDir boolean',
+    options: { cliFeatures: { supportsDir: 'true' } },
+    field: 'options.cliFeatures.supportsDir',
+  },
   { name: 'modelSpec object', options: { modelSpec: 'level2' }, field: 'options.modelSpec' },
   {
     name: 'modelSpec level enum',
@@ -45,6 +50,46 @@ const invalidNestedOptionCases = [
     name: 'modelSpec reasoningEffort enum',
     options: { modelSpec: { reasoningEffort: 'extreme' } },
     field: 'options.modelSpec.reasoningEffort',
+  },
+  {
+    name: 'mcpConfig array',
+    options: { mcpConfig: '{"mcpServers":{}}' },
+    field: 'options.mcpConfig',
+  },
+  {
+    name: 'mcpConfig entry type',
+    options: { mcpConfig: [123] },
+    field: 'options.mcpConfig[0]',
+  },
+  {
+    name: 'mcpConfig entry empty',
+    options: { mcpConfig: ['   '] },
+    field: 'options.mcpConfig[0]',
+  },
+  {
+    name: 'gateway object',
+    options: { gateway: 'http://localhost:11434' },
+    field: 'options.gateway',
+  },
+  {
+    name: 'gateway headers string values',
+    options: { gateway: { headers: { Authorization: 123 } } },
+    field: 'options.gateway.headers.Authorization',
+  },
+  {
+    name: 'gateway tool policy object',
+    options: { gateway: { toolPolicy: 'all-access' } },
+    field: 'options.gateway.toolPolicy',
+  },
+  {
+    name: 'gateway tool policy roots array',
+    options: { gateway: { toolPolicy: { roots: 'src', commands: [] } } },
+    field: 'options.gateway.toolPolicy.roots',
+  },
+  {
+    name: 'gateway tool policy command timeout',
+    options: { gateway: { toolPolicy: { roots: ['src'], commands: [], commandTimeoutMs: 0 } } },
+    field: 'options.gateway.toolPolicy.commandTimeoutMs',
   },
 ];
 

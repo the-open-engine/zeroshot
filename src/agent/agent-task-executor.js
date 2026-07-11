@@ -14,12 +14,15 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { parseProviderChunk } = require('../providers');
+const { parseProviderChunk, getProvider } = require('../providers');
 const { getTask } = require('../../task-lib/store.js');
 const { loadSettings } = require('../../lib/settings.js');
 const { resolveClaudeAuth } = require('../../lib/settings/claude-auth.js');
 const { prependWorktreeToolBinToEnv } = require('../worktree-tooling-env.js');
-const { prepareClaudeConfigDir } = require('../worktree-claude-config.js');
+const {
+  prepareClaudeConfigDir,
+  resolveRepoMcpConfigPath,
+} = require('../worktree-claude-config.js');
 const { buildRawLogOnlyMetadata } = require('./context-replay-policy');
 
 function runCommandWithTimeout(command, args, options = {}, callback = null) {
@@ -733,7 +736,43 @@ function buildTaskRunArgs({ agent, providerName, modelSpec, runOutputFormat }) {
     args.push('--json-schema', schema);
   }
 
+  // MCP servers: providers whose CLI accepts an MCP config flag (e.g. Copilot's
+  // --additional-mcp-config) cannot use the Claude config-dir overlay, so forward the repo's
+  // `.mcp.json` (the same MCP source Claude consumes) inline via `--mcp-config`.
+  for (const mcpArg of resolveMcpConfigArgs(agent, providerName)) {
+    args.push(mcpArg);
+  }
+
   return args;
+}
+
+/**
+ * Build the `--mcp-config` args for a task-run invocation, or [] when they don't apply.
+ *
+ * Only providers whose adapter models an MCP config CLI flag receive it — Claude consumes MCP via
+ * the config-dir `.mcp.json` overlay (see prepareClaudeConfigDir) and needs no flag. The repo
+ * `.mcp.json` content is inlined (not passed as an @<path> reference) so the identical value works
+ * under local, worktree, and Docker isolation without host/container path translation.
+ */
+function resolveMcpConfigArgs(agent, providerName) {
+  if (!providerModelsMcpConfigFlag(providerName)) return [];
+
+  const mcpPath = resolveRepoMcpConfigPath({
+    cwd: agent.config?.cwd || process.cwd(),
+    worktreePath: agent.worktree?.path || null,
+  });
+  if (!mcpPath) return [];
+
+  const content = fs.readFileSync(mcpPath, 'utf8').trim();
+  if (content.length === 0) return [];
+
+  return ['--mcp-config', content];
+}
+
+/** True when the provider's adapter models an MCP config CLI flag (currently only Copilot). */
+function providerModelsMcpConfigFlag(providerName) {
+  const adapter = getProvider(providerName).adapter;
+  return 'supportsMcpConfig' in adapter.detectCliFeatures('');
 }
 
 function maybeLogStreamJsonNotice(agent, runOutputFormat) {

@@ -1,10 +1,13 @@
 import { unlink } from 'node:fs/promises';
+import { buildAcpPrompt } from './adapters/acp';
+import { runAcpStdioPrompt } from './acp-stdio-runner';
 import { commandRedactions } from './contract-env';
 import { successEnvelope, type ContractEnvelope } from './contract-envelope';
 import { buildCommandSpec, optionalNumber, schemaMode, type RequestData } from './contract-support';
 import { providerFailureClassification } from './invoke-evidence';
 import { parseOutputEvents } from './contract-parse';
 import { unknownToMessage } from './json';
+import { getProviderRegistryEntry } from './provider-registry';
 import type { CommandSpec } from './types';
 import type { ProcessResult, ProcessRunner, ProcessRunnerOptions } from './process-runner';
 
@@ -51,10 +54,16 @@ export async function runInvoke(
   request: RequestData,
   runner: ProcessRunner
 ): Promise<ContractEnvelope> {
-  const { adapter, commandSpec, options } = buildCommandSpec(request);
+  const { adapter, commandSpec, context, options } = buildCommandSpec(request);
   const timeoutMs = optionalNumber(request.raw, 'timeoutMs');
   const runnerOptions = timeoutMs === undefined ? {} : { timeoutMs };
-  const { result, cleanup } = await runAndCleanup(commandSpec, runner, runnerOptions);
+  const invokeSpec = getProviderRegistryEntry(adapter.id).invoke;
+  const invokeRunner =
+    invokeSpec.lane === 'acp-stdio'
+      ? (spec: CommandSpec, invokeOptions?: ProcessRunnerOptions): Promise<ProcessResult> =>
+          runAcpStdioPrompt(adapter.id, spec, buildAcpPrompt(context, options), invokeOptions)
+      : runner;
+  const { result, cleanup } = await runAndCleanup(commandSpec, invokeRunner, runnerOptions);
   const parsed = parseOutputEvents(adapter, {
     chunk: [result.stdout, result.stderr].join('\n'),
     sources: [
@@ -62,7 +71,7 @@ export async function runInvoke(
       { name: 'stderr', value: result.stderr },
     ],
   });
-  const classification = providerFailureClassification(adapter, result);
+  const classification = providerFailureClassification(adapter, result, parsed.events);
   return successEnvelope({
     command: request.command ?? 'invoke',
     adapter,

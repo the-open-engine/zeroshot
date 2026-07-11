@@ -1,9 +1,32 @@
-export type ProviderId = 'claude' | 'codex' | 'gemini' | 'opencode';
-export type ProviderAlias = 'anthropic' | 'openai' | 'google';
+import type {
+  providerAliases,
+  providerIds,
+  ProviderCapabilities,
+  ProviderCapabilityState,
+  ProviderCommandSpec,
+  ProviderDockerMetadata,
+  ProviderDockerMountPreset,
+  ProviderDocsMetadata,
+  ProviderInvokeSpec,
+  ProviderRegistryEntry,
+} from './provider-registry';
+
+export type ProviderId = (typeof providerIds)[number];
+export type ProviderAlias = (typeof providerAliases)[number];
 export type KnownProviderName = ProviderId | ProviderAlias;
 export type ModelLevel = 'level1' | 'level2' | 'level3';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type OutputFormat = 'text' | 'json' | 'stream-json';
+export type {
+  ProviderCapabilities,
+  ProviderCapabilityState,
+  ProviderCommandSpec,
+  ProviderDockerMetadata,
+  ProviderDockerMountPreset,
+  ProviderDocsMetadata,
+  ProviderInvokeSpec,
+  ProviderRegistryEntry,
+};
 
 export interface AgentCliProviderHelperMetadata {
   readonly packageName: '@the-open-engine/zeroshot';
@@ -35,6 +58,28 @@ export interface ResolvedModelSpec {
 }
 
 export type LevelOverrides = Readonly<Partial<Record<ModelLevel, ModelSpec>>>;
+
+export interface GatewayToolPolicy {
+  readonly roots: readonly string[];
+  readonly commands: readonly string[];
+  readonly commandTimeoutMs?: number;
+}
+
+export interface GatewayBuildOptions {
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly model?: string | null;
+  readonly toolPolicy?: GatewayToolPolicy;
+}
+
+export interface ResolvedGatewayBuildOptions {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly model: string;
+  readonly toolPolicy: GatewayToolPolicy;
+}
 
 export interface BaseCliFeatures {
   readonly provider?: ProviderId;
@@ -76,15 +121,62 @@ export interface OpencodeCliFeatures extends BaseCliFeatures {
   readonly supportsJson: boolean;
   readonly supportsModel: boolean;
   readonly supportsVariant: boolean;
+  readonly supportsDir: boolean;
   readonly supportsCwd: boolean;
   readonly supportsAutoApprove: false;
+}
+
+export interface PiCliFeatures extends BaseCliFeatures {
+  readonly provider: 'pi';
+  readonly supportsJsonMode: boolean;
+  readonly supportsModel: boolean;
+  readonly supportsNoSession: boolean;
+  readonly supportsNoExtensions: boolean;
+  readonly supportsNoSkills: boolean;
+  readonly supportsNoPromptTemplates: boolean;
+  readonly supportsNoContextFiles: boolean;
+  readonly supportsNoApprove: boolean;
+}
+
+export interface CopilotCliFeatures extends BaseCliFeatures {
+  readonly provider: 'copilot';
+  readonly supportsJsonOutput: boolean;
+  readonly supportsModel: boolean;
+  readonly supportsAllowAll: boolean;
+  readonly supportsNoAskUser: boolean;
+  readonly supportsAddDir: boolean;
+  readonly supportsMcpConfig: boolean;
+}
+
+export interface GatewayCliFeatures extends BaseCliFeatures {
+  readonly provider: 'gateway';
+  readonly supportsBundledRunner: true;
+}
+
+export interface AcpCliFeatures extends BaseCliFeatures {
+  readonly provider: ProviderId;
+  readonly supportsAcpStdio: boolean;
+  readonly supportsPromptImages: boolean;
+  readonly supportsLoadSession: boolean;
+  readonly supportsSessionCancel: boolean;
+  readonly supportsSessionSetModel: boolean;
+  readonly supportsSessionSetMode: boolean;
+  readonly supportsRemoteTransport: false;
+  readonly supportsCustomTransport: false;
+  readonly supportsPermissionRequests: false;
+  readonly supportsFsTools: false;
+  readonly supportsTerminalTools: false;
 }
 
 export type ProviderCliFeatures =
   | ClaudeCliFeatures
   | CodexCliFeatures
   | GeminiCliFeatures
-  | OpencodeCliFeatures;
+  | OpencodeCliFeatures
+  | PiCliFeatures
+  | CopilotCliFeatures
+  | GatewayCliFeatures
+  | AcpCliFeatures;
 
 export interface CliFeatureOverrides {
   readonly supportsOutputFormat?: boolean;
@@ -96,10 +188,35 @@ export interface CliFeatureOverrides {
   readonly supportsModel?: boolean;
   readonly supportsJson?: boolean;
   readonly supportsOutputSchema?: boolean;
+  readonly supportsDir?: boolean;
   readonly supportsCwd?: boolean;
   readonly supportsConfigOverride?: boolean;
   readonly supportsSkipGitRepoCheck?: boolean;
   readonly supportsVariant?: boolean;
+  readonly supportsJsonMode?: boolean;
+  readonly supportsNoSession?: boolean;
+  readonly supportsNoExtensions?: boolean;
+  readonly supportsNoSkills?: boolean;
+  readonly supportsNoPromptTemplates?: boolean;
+  readonly supportsNoContextFiles?: boolean;
+  readonly supportsNoApprove?: boolean;
+  readonly supportsJsonOutput?: boolean;
+  readonly supportsAllowAll?: boolean;
+  readonly supportsNoAskUser?: boolean;
+  readonly supportsAddDir?: boolean;
+  readonly supportsMcpConfig?: boolean;
+  readonly supportsBundledRunner?: boolean;
+  readonly supportsAcpStdio?: boolean;
+  readonly supportsPromptImages?: boolean;
+  readonly supportsLoadSession?: boolean;
+  readonly supportsSessionCancel?: boolean;
+  readonly supportsSessionSetModel?: boolean;
+  readonly supportsSessionSetMode?: boolean;
+  readonly supportsRemoteTransport?: false;
+  readonly supportsCustomTransport?: false;
+  readonly supportsPermissionRequests?: false;
+  readonly supportsFsTools?: false;
+  readonly supportsTerminalTools?: false;
   readonly unknown?: boolean;
 }
 
@@ -144,6 +261,12 @@ export interface BuildProviderCommandOptions {
   readonly cliFeatures?: CliFeatureOverrides;
   readonly authEnv?: Readonly<Record<string, string>>;
   readonly strictSchema?: boolean;
+  readonly gateway?: GatewayBuildOptions;
+  // MCP server configs forwarded to providers that accept an MCP config CLI flag (currently
+  // Copilot's `--additional-mcp-config`). Each entry is an inline JSON string (the standard
+  // `{"mcpServers": {...}}` envelope) or an `@<path>` file reference; adapters emit one flag per
+  // entry. Providers whose adapter models no MCP flag ignore this field.
+  readonly mcpConfig?: readonly string[];
 }
 
 export interface TextEvent {
@@ -189,8 +312,26 @@ export type OutputEvent = TextEvent | ThinkingEvent | ToolCallEvent | ToolResult
 export type ProviderParseResult = OutputEvent | readonly OutputEvent[] | null;
 
 export interface ProviderParserState {
-  provider: ProviderId;
+  readonly provider: ProviderId;
   lastToolId: string | null | undefined;
+  lastAssistantText?: string;
+  lastAssistantThinking?: string;
+  messagePhaseById?: Map<string, string>;
+  assistantTextByMessageId?: Map<string, string>;
+  assistantThinkingByMessageId?: Map<string, string>;
+  toolCalls?: Map<
+    string,
+    {
+      name: string | null | undefined;
+      input: unknown;
+    }
+  >;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+  } | null;
 }
 
 export type ErrorClassificationKind =

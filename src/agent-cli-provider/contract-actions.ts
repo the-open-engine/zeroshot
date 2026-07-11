@@ -15,8 +15,9 @@ import {
   schemaMode,
   type RequestData,
 } from './contract-support';
-import { detectRuntimeProviderCliFeatures } from './single-agent-runtime';
-import { getNumber, getRecord, getString, isRecord, unknownToMessage } from './json';
+import { extractErrorStatus } from './errors';
+import { probeRuntimeProviderCli } from './single-agent-runtime';
+import { getString, isRecord, unknownToMessage } from './json';
 import type { ErrorClassification } from './types';
 import type { ProcessRunner } from './process-runner';
 
@@ -42,8 +43,11 @@ function runBuildCommand(request: RequestData): ContractEnvelope {
 function runProbe(request: RequestData): ContractEnvelope {
   const adapter = adapterForProvider(request.provider);
   const helpText = typeof request.raw.helpText === 'string' ? request.raw.helpText : null;
+  const runtimeProbe = helpText === null ? probeRuntimeProviderCli(adapter.id) : null;
   const capabilities =
-    helpText === null ? detectRuntimeProviderCliFeatures(adapter.id) : adapter.detectCliFeatures(helpText);
+    runtimeProbe === null
+      ? adapter.detectCliFeatures(helpText)
+      : runtimeProbe.capabilities;
   return successEnvelope({
     command: request.command ?? 'probe',
     adapter,
@@ -56,6 +60,9 @@ function runProbe(request: RequestData): ContractEnvelope {
       },
       contractVersion: providerExecutableSchemaVersion,
       adapterVersion: adapter.adapterVersion,
+      available: runtimeProbe?.available ?? true,
+      helpText: runtimeProbe?.helpText ?? helpText,
+      versionText: runtimeProbe?.versionText ?? null,
       capabilities,
       credentials: adapter.credentialEnvKeys.map((key) => ({
         key,
@@ -65,24 +72,14 @@ function runProbe(request: RequestData): ContractEnvelope {
   });
 }
 
-function statusFromError(error: unknown): number | null {
-  if (!isRecord(error)) return null;
-  const directStatus = getNumber(error, 'status') ?? getNumber(error, 'statusCode');
-  if (directStatus !== null) return directStatus;
-
-  const response = getRecord(error, 'response');
-  if (response === null) return null;
-  return getNumber(response, 'status') ?? getNumber(response, 'statusCode');
-}
-
 function categoryForClassification(classification: ErrorClassification, error: unknown): string {
-  const status = statusFromError(error);
+  const status = extractErrorStatus(error);
   if (status === 401 || status === 403) return 'auth';
   if (status === 429) return 'rate-limit';
   const message = unknownToMessage(error);
   if (/auth|api[_ -]?key|unauthorized|forbidden|permission/i.test(message)) return 'auth';
   if (/rate|429|quota|resource_exhausted/i.test(message)) return 'rate-limit';
-  if (/schema|json|parse|format/i.test(message)) return 'schema';
+  if (/schema|json|parse|format|malformed/i.test(message)) return 'schema';
   return classification.retryable ? 'retryable' : 'permanent';
 }
 
@@ -90,10 +87,10 @@ function errorEvidence(error: unknown): ContractEvidence {
   const evidence: Record<string, unknown> = {
     message: unknownToMessage(error),
   };
+  const status = extractErrorStatus(error);
+  if (status !== null) evidence.status = status;
   if (isRecord(error)) {
-    const status = statusFromError(error);
     const code = getString(error, 'code');
-    if (status !== null) evidence.status = status;
     if (code !== null) evidence.code = code;
   }
   return evidence;

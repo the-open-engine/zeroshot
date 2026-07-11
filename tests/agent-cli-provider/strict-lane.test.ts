@@ -31,13 +31,30 @@ test('provider helper metadata documents package and build output', (): void => 
 
 test('provider helper public API exposes typed provider adapters', (): void => {
   const providerIds: readonly ProviderId[] = listProviderAdapters();
-  assert.deepEqual(providerIds, ['claude', 'codex', 'gemini', 'opencode']);
+  assert.deepEqual(providerIds, [
+    'claude',
+    'codex',
+    'gateway',
+    'gemini',
+    'opencode',
+    'pi',
+    'kiro',
+    'copilot',
+  ]);
 
   const adapter = getProviderAdapter('openai');
   assert.equal(adapter.id, 'codex');
   assert.equal(adapter.displayName, 'Codex');
   assert.equal(typeof adapter.adapterVersion, 'string');
   assert.ok(adapter.credentialEnvKeys.length >= 0);
+
+  const kiroAdapter = getProviderAdapter('kiro');
+  assert.equal(kiroAdapter.id, 'kiro');
+  assert.equal(kiroAdapter.binary, 'kiro-cli');
+
+  const gatewayAdapter = getProviderAdapter('gateway');
+  assert.equal(gatewayAdapter.id, 'gateway');
+  assert.equal(gatewayAdapter.binary, process.execPath);
 });
 
 test('command specs preserve cleanup and warnings as typed metadata', (): void => {

@@ -12,7 +12,11 @@
  */
 
 const { loadSettings } = require('../lib/settings');
-const { VALID_PROVIDERS, normalizeProviderName } = require('../lib/provider-names');
+const {
+  VALID_PROVIDERS,
+  normalizeProviderName,
+  providerSupportsCapability,
+} = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const { CAPABILITIES } = require('./providers/capabilities');
 const { GUIDANCE_TOPICS } = require('./guidance-topics');
@@ -2026,6 +2030,10 @@ function validateProviderSettings(provider, providerSettings) {
   const providerModule = getProvider(provider);
   const levels = providerModule.getLevelMapping();
   const settings = providerSettings || {};
+  const providerError = providerModule.validateSettings(settings);
+  if (providerError) {
+    throw new Error(providerError);
+  }
 
   const minLevel = settings.minLevel || providerModule.getDefaultMinLevel?.();
   const maxLevel = settings.maxLevel || providerModule.getDefaultMaxLevel?.();
@@ -2042,7 +2050,10 @@ function validateProviderSettings(provider, providerSettings) {
         `Invalid model override (must be non-empty string) for provider "${provider}"`
       );
     }
-    if (override?.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
+    if (override?.model) {
+      providerModule.validateModelId(override.model);
+    }
+    if (override?.reasoningEffort && !providerSupportsCapability(provider, 'reasoningEffort')) {
       throw new Error(`reasoningEffort overrides are only supported for Codex and Opencode`);
     }
     if (
@@ -2068,7 +2079,6 @@ function resolveAgentProvider(agent, config, settings, errors) {
 function buildProviderContext(provider, settings) {
   const providerModule = getProvider(provider);
   const levels = providerModule.getLevelMapping();
-  const catalog = providerModule.getModelCatalog();
   const providerSettings = settings.providerSettings?.[provider] || {};
   const minLevel = providerSettings.minLevel;
   const maxLevel = providerSettings.maxLevel;
@@ -2077,7 +2087,6 @@ function buildProviderContext(provider, settings) {
   return {
     providerModule,
     levels,
-    catalog,
     providerSettings,
     minLevel,
     maxLevel,
@@ -2109,10 +2118,12 @@ function validateModelLevelSupport(agent, provider, levels, warnings) {
 }
 
 function validateModelSelection(agent, context, warnings) {
-  const { provider, catalog, minLevel, maxLevel, rank } = context;
+  const { provider, providerModule, minLevel, maxLevel, rank } = context;
 
   if (agent.model) {
-    if (!catalog[agent.model]) {
+    try {
+      providerModule.validateModelId(agent.model);
+    } catch {
       warnings.push(
         `Agent "${agent.id}" uses model "${agent.model}" which is not valid for ${provider}`
       );
@@ -2137,7 +2148,7 @@ function validateModelSelection(agent, context, warnings) {
   }
 }
 
-function validateModelRulesSupport(agent, provider, catalog, levels, warnings) {
+function validateModelRulesSupport(agent, provider, providerModule, levels, warnings) {
   if (!agent.modelRules || !Array.isArray(agent.modelRules)) return;
 
   for (const rule of agent.modelRules) {
@@ -2146,16 +2157,20 @@ function validateModelRulesSupport(agent, provider, catalog, levels, warnings) {
         `Agent "${agent.id}" uses modelLevel "${rule.modelLevel}" in modelRules which is not valid for ${provider}`
       );
     }
-    if (rule.model && !catalog[rule.model]) {
-      warnings.push(
-        `Agent "${agent.id}" uses model "${rule.model}" in modelRules which is not valid for ${provider}`
-      );
+    if (rule.model) {
+      try {
+        providerModule.validateModelId(rule.model);
+      } catch {
+        warnings.push(
+          `Agent "${agent.id}" uses model "${rule.model}" in modelRules which is not valid for ${provider}`
+        );
+      }
     }
   }
 }
 
 function validateReasoningEffortSupport(agent, provider, warnings) {
-  if (agent.reasoningEffort && !['codex', 'opencode'].includes(provider)) {
+  if (agent.reasoningEffort && !providerSupportsCapability(provider, 'reasoningEffort')) {
     warnings.push(`Agent "${agent.id}" sets reasoningEffort but ${provider} does not support it`);
   } else if (
     agent.reasoningEffort &&
@@ -2193,10 +2208,13 @@ function validateProviderFeatures(config, settings) {
     const provider = resolveAgentProvider(agent, config, settings, errors);
     if (!provider) continue;
 
-    const { levels, catalog, minLevel, maxLevel, rank } = buildProviderContext(provider, settings);
+    const { providerModule, levels, minLevel, maxLevel, rank } = buildProviderContext(
+      provider,
+      settings
+    );
     const modelSelectionContext = {
       provider,
-      catalog,
+      providerModule,
       minLevel,
       maxLevel,
       rank,
@@ -2205,7 +2223,7 @@ function validateProviderFeatures(config, settings) {
     validateJsonSchemaSupport(agent, provider, warnings);
     validateModelLevelSupport(agent, provider, levels, warnings);
     validateModelSelection(agent, modelSelectionContext, warnings);
-    validateModelRulesSupport(agent, provider, catalog, levels, warnings);
+    validateModelRulesSupport(agent, provider, providerModule, levels, warnings);
     validateReasoningEffortSupport(agent, provider, warnings);
   }
 

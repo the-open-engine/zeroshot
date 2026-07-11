@@ -42,6 +42,8 @@ describe('CLI Invalid Command Handling', function () {
       'claude',
       'gemini',
       'opencode',
+      'pi',
+      'copilot',
       'attach',
       'agents',
       'config',
@@ -126,6 +128,14 @@ describe('CLI Invalid Command Handling', function () {
 
     it('should not prepend run for "opencode" command', function () {
       assert.strictEqual(shouldPrependRun(['opencode']), false);
+    });
+
+    it('should not prepend run for "pi" command', function () {
+      assert.strictEqual(shouldPrependRun(['pi']), false);
+    });
+
+    it('should not prepend run for "copilot" command', function () {
+      assert.strictEqual(shouldPrependRun(['copilot']), false);
     });
   });
 

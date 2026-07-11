@@ -9,6 +9,7 @@
  */
 
 const assert = require('assert');
+const { listProviderMetadata } = require('../../lib/provider-names');
 const {
   MOUNT_PRESETS,
   ENV_PRESETS,
@@ -34,9 +35,25 @@ describe('Docker Configuration', function () {
 function registerMountPresetTests() {
   describe('MOUNT_PRESETS', function () {
     it('should have all expected presets', function () {
-      const expected = ['gh', 'git', 'ssh', 'aws', 'azure', 'kube', 'terraform', 'gcloud'];
+      const expected = [
+        'gh',
+        'git',
+        'ssh',
+        'aws',
+        'azure',
+        'kube',
+        'terraform',
+        'gcloud',
+        ...listProviderMetadata().map((metadata) => metadata.id),
+      ];
       for (const preset of expected) {
         assert.ok(MOUNT_PRESETS[preset], `Missing preset: ${preset}`);
+      }
+    });
+
+    it('should build provider mount presets from provider registry metadata', function () {
+      for (const metadata of listProviderMetadata()) {
+        assert.deepStrictEqual(MOUNT_PRESETS[metadata.id], metadata.docker.mount);
       }
     });
 
@@ -77,6 +94,9 @@ function registerEnvPresetTests() {
       assert.ok(ENV_PRESETS.gcloud);
       assert.ok(ENV_PRESETS.kube);
       assert.ok(ENV_PRESETS.terraform);
+      for (const metadata of listProviderMetadata()) {
+        assert.ok(ENV_PRESETS[metadata.id]);
+      }
     });
 
     it('should include AWS_PAGER= forced value for aws preset', function () {
@@ -91,6 +111,12 @@ function registerEnvPresetTests() {
         ENV_PRESETS.terraform.includes('TF_VAR_*'),
         'Terraform preset should include TF_VAR_* pattern'
       );
+    });
+
+    it('should build provider env presets from provider registry metadata', function () {
+      for (const metadata of listProviderMetadata()) {
+        assert.deepStrictEqual(ENV_PRESETS[metadata.id], metadata.docker.envPassthrough);
+      }
     });
   });
 }

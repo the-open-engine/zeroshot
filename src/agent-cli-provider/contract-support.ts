@@ -40,10 +40,10 @@ export function adapterForProvider(provider: string | null): ProviderAdapter {
   }
   try {
     return getProviderAdapter(provider);
-  } catch {
+  } catch (error) {
     throw contractError({
       code: 'unknown-provider',
-      message: `Unknown provider: ${provider}.`,
+      message: error instanceof Error ? error.message : `Unknown provider: ${provider}.`,
       exitCode: 4,
       field: 'provider',
     });
@@ -54,12 +54,37 @@ function mergeCommandSpec(
   commandSpec: CommandSpec,
   env: Readonly<Record<string, string>>
 ): CommandSpec {
-  const mergedEnv = { ...commandSpec.env, ...env };
+  const overriddenKey = findReservedCommandEnvKey(commandSpec.env, env);
+  if (overriddenKey !== null) {
+    throw contractError({
+      code: 'forbidden-field',
+      message: `env.${overriddenKey.requestKey} is not accepted by provider executable requests; provider adapters own ${overriddenKey.commandKey} and other runner control/auth environment variables.`,
+      exitCode: 2,
+      field: `env.${overriddenKey.requestKey}`,
+    });
+  }
+
+  const mergedEnv = { ...env, ...commandSpec.env };
   return {
     ...commandSpec,
     env: mergedEnv,
     redactions: mergeRedactions(commandSpec.redactions, envRedactions(mergedEnv)),
   };
+}
+
+function findReservedCommandEnvKey(
+  commandEnv: Readonly<Record<string, string>>,
+  requestedEnv: Readonly<Record<string, string>>
+): { readonly requestKey: string; readonly commandKey: string } | null {
+  const commandEnvKeys = new Map<string, string>();
+  for (const key of Object.keys(commandEnv)) {
+    commandEnvKeys.set(key.toLowerCase(), key);
+  }
+  for (const key of Object.keys(requestedEnv)) {
+    const commandKey = commandEnvKeys.get(key.toLowerCase());
+    if (commandKey !== undefined) return { requestKey: key, commandKey };
+  }
+  return null;
 }
 
 function buildOptions(request: RequestData): BuildProviderCommandOptions {
@@ -73,6 +98,7 @@ export function buildCommandSpec(request: RequestData): {
   readonly adapter: ProviderAdapter;
   readonly commandSpec: CommandSpec;
   readonly options: BuildProviderCommandOptions;
+  readonly context: string;
 } {
   const adapter = adapterForProvider(request.provider);
   const context = requiredString(request.raw, 'context');
@@ -84,6 +110,7 @@ export function buildCommandSpec(request: RequestData): {
   });
   return {
     adapter: prepared.adapter,
+    context,
     options: prepared.options,
     commandSpec: mergeCommandSpec(prepared.commandSpec, request.env),
   };

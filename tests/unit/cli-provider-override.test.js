@@ -6,15 +6,7 @@
  */
 
 const assert = require('assert');
-
-function normalizeProviderName(name) {
-  if (!name || typeof name !== 'string') return name;
-  const normalized = name.toLowerCase();
-  if (normalized === 'anthropic') return 'claude';
-  if (normalized === 'openai') return 'codex';
-  if (normalized === 'google') return 'gemini';
-  return normalized;
-}
+const { normalizeProviderName } = require('../../lib/provider-names');
 
 // Mirrors resolveProviderOverride in cli/index.js
 function resolveProviderOverride(options) {

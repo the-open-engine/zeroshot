@@ -119,6 +119,23 @@ function prepareClaudeConfigDir(options = {}) {
   return overlayDir;
 }
 
+/**
+ * Resolve the repo's `.mcp.json` path (the same MCP-server source Claude consumes via
+ * prepareClaudeConfigDir) for a given worktree/cwd, or null if none exists. Reused by providers
+ * that consume MCP servers through a CLI flag instead of the Claude config-dir overlay (e.g.
+ * Copilot's `--additional-mcp-config`), so both providers share one MCP config surface.
+ */
+function resolveRepoMcpConfigPath(options = {}) {
+  const worktreeRoot = resolveWorktreeRoot(options.worktreePath || options.cwd);
+  if (!worktreeRoot) {
+    return null;
+  }
+
+  const mcpPath = path.join(worktreeRoot, CLAUDE_DIRNAME, MCP_BASENAME);
+  return fs.existsSync(mcpPath) ? mcpPath : null;
+}
+
 module.exports = {
   prepareClaudeConfigDir,
+  resolveRepoMcpConfigPath,
 };

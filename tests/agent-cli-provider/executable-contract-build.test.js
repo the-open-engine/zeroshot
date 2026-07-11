@@ -6,6 +6,9 @@ const path = require('node:path');
 const {
   assertNoSecret,
   fakeCodexScript,
+  fakeCopilotScript,
+  fakeKiroScript,
+  fakePiScript,
   runExecutable,
   withFakeProviderCli,
   withTempEnv,
@@ -185,6 +188,382 @@ process.exit(17);
   );
 });
 
+test('build-command returns ACP stdio command specs without prompt argv coupling', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        options: {
+          cwd: '/tmp/kiro-worktree',
+        },
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.commandSpec.binary, 'kiro-cli');
+      assert.deepEqual(response.envelope.result.commandSpec.args, ['acp']);
+      assert.equal(response.envelope.result.commandSpec.cwd, '/tmp/kiro-worktree');
+      assert.equal(response.envelope.result.commandSpec.args.includes('Reply with OK'), false);
+    }
+  );
+});
+
+test('build-command returns bundled gateway runner specs with redacted config env', () => {
+  const secret = 'gateway-secret-token';
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'gateway',
+    context: 'Edit the target file.',
+    options: {
+      cwd: '/tmp/gateway-project',
+      gateway: {
+        baseUrl: 'http://127.0.0.1:4000',
+        apiKey: secret,
+        headers: {
+          'X-API-Key': 'custom-header-secret-42',
+        },
+        model: 'openrouter/test-model',
+        toolPolicy: {
+          roots: ['.'],
+          commands: ['node'],
+        },
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.provider, 'gateway');
+  assert.equal(response.envelope.result.commandSpec.binary, process.execPath);
+  assert.match(response.envelope.result.commandSpec.args[0], /gateway-runner\.js$/);
+  assert.equal(
+    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(secret),
+    false
+  );
+  assert.equal(
+    response.envelope.result.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST.includes(
+      'custom-header-secret-42'
+    ),
+    false
+  );
+  assertNoSecret(response.envelope, secret);
+  assertNoSecret(response.envelope, 'custom-header-secret-42');
+});
+
+test('build-command rejects caller env that collides with gateway runner control vars', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'gateway',
+    context: 'Edit the target file.',
+    env: {
+      ZEROSHOT_GATEWAY_API_KEY: 'attacker-key',
+    },
+    options: {
+      gateway: {
+        baseUrl: 'http://127.0.0.1:4000',
+        apiKey: 'gateway-secret-token',
+        model: 'openrouter/test-model',
+        toolPolicy: {
+          roots: ['.'],
+          commands: ['node'],
+        },
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 2);
+  assert.equal(response.envelope.ok, false);
+  assert.equal(response.envelope.error.code, 'forbidden-field');
+  assert.equal(response.envelope.error.field, 'env.ZEROSHOT_GATEWAY_API_KEY');
+  assert.match(response.envelope.error.message, /provider adapters own ZEROSHOT_GATEWAY_API_KEY/i);
+});
+
+test('build-command resolves gateway settings tool roots against options.cwd', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-gateway-settings-'));
+  const settingsFile = path.join(tempDir, 'settings.json');
+  const worktree = path.join(tempDir, 'worktree');
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(
+      {
+        providerSettings: {
+          gateway: {
+            baseUrl: 'http://127.0.0.1:4000',
+            apiKey: 'gateway-secret-token',
+            model: 'openrouter/test-model',
+            toolPolicy: {
+              roots: ['.'],
+              commands: ['node'],
+            },
+          },
+        },
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
+  try {
+    withTempEnv({ ZEROSHOT_SETTINGS_FILE: settingsFile }, () => {
+      const prepared = require('../../lib/agent-cli-provider').prepareSingleAgentProviderCommand({
+        context: 'Edit the target file.',
+        provider: 'gateway',
+        options: {
+          cwd: worktree,
+        },
+      });
+
+      const request = JSON.parse(prepared.commandSpec.env.ZEROSHOT_GATEWAY_REQUEST);
+      assert.deepEqual(request.gateway.toolPolicy.roots, [worktree]);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('build-command fails closed when ACP stdio support is not advertised', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
+    }
+  );
+});
+
+test('build-command ignores caller ACP support overrides when runtime probe rejects ACP stdio', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli --version\\n');
+  process.exit(0);
+}
+process.stderr.write('build-command should not execute kiro-cli acp');
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'kiro',
+        context: 'Reply with OK',
+        options: {
+          cliFeatures: {
+            supportsAcpStdio: true,
+          },
+        },
+      });
+
+      assert.equal(response.exitCode, 2);
+      assert.equal(response.envelope.ok, false);
+      assert.equal(response.envelope.error.code, 'invalid-field');
+      assert.equal(response.envelope.error.field, 'options.cliFeatures.supportsAcpStdio');
+      assert.match(response.envelope.error.message, /does not advertise ACP stdio support/i);
+    }
+  );
+});
+
+test('build-command uses Pi JSON mode with discovery disabled and schema prompt fallback', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cwd: '/tmp/worktree',
+      jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+      modelSpec: { model: 'openai/gpt-5.5' },
+      cliFeatures: {
+        supportsJsonMode: true,
+        supportsNoSession: true,
+        supportsNoExtensions: true,
+        supportsNoSkills: true,
+        supportsNoPromptTemplates: true,
+        supportsNoContextFiles: true,
+        supportsNoApprove: true,
+        supportsModel: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.schemaMode, 'prompt');
+  assert.equal(commandSpec.binary, 'pi');
+  assert.equal(commandSpec.cwd, '/tmp/worktree');
+  assert.deepEqual(commandSpec.args.slice(0, 11), [
+    '--mode',
+    'json',
+    '--no-session',
+    '--no-extensions',
+    '--no-skills',
+    '--no-prompt-templates',
+    '--no-context-files',
+    '--no-approve',
+    '--model',
+    'openai/gpt-5.5',
+    commandSpec.args.at(-1),
+  ]);
+  assert.ok(commandSpec.args.at(-1).includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
+  assert.ok(response.envelope.warnings.some((warning) => warning.code === 'pi-jsonschema'));
+});
+
+test('build-command rejects Pi resume/continue session control requests', () => {
+  const resumed = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: 'ignored-session',
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(resumed.exitCode, 2);
+  assert.equal(resumed.envelope.ok, false);
+  assert.equal(resumed.envelope.error.code, 'invalid-field');
+  assert.equal(resumed.envelope.error.field, 'options.resumeSessionId');
+
+  const emptyResumed = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: '',
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(emptyResumed.exitCode, 2);
+  assert.equal(emptyResumed.envelope.ok, false);
+  assert.equal(emptyResumed.envelope.error.code, 'invalid-field');
+  assert.equal(emptyResumed.envelope.error.field, 'options.resumeSessionId');
+
+  const continued = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      continueSession: true,
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(continued.exitCode, 2);
+  assert.equal(continued.envelope.ok, false);
+  assert.equal(continued.envelope.error.code, 'invalid-field');
+  assert.equal(continued.envelope.error.field, 'options.continueSession');
+});
+
+test('build-command ignores undefined Pi resumeSessionId values', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'pi',
+    context: 'Return JSON.',
+    options: {
+      resumeSessionId: undefined,
+      cliFeatures: {
+        supportsJsonMode: true,
+      },
+    },
+  });
+
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.commandSpec.binary, 'pi');
+  assert.equal(response.envelope.result.commandSpec.args.at(-1), 'Return JSON.');
+});
+
+test('build-command keeps Pi JSON-mode args when only version probe returns output', () => {
+  withFakeProviderCli(
+    'pi',
+    fakePiScript(`
+if (process.argv.includes('--help')) {
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('0.80.3\\n');
+  process.exit(0);
+}
+process.stderr.write('unknown option -h\\n');
+process.exit(1);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'pi',
+        context: 'Return JSON.',
+        options: {
+          outputFormat: 'json',
+        },
+      });
+
+      const args = response.envelope.result.commandSpec.args;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.deepEqual(args.slice(0, 8), [
+        '--mode',
+        'json',
+        '--no-session',
+        '--no-extensions',
+        '--no-skills',
+        '--no-prompt-templates',
+        '--no-context-files',
+        '--no-approve',
+      ]);
+      assert.equal(args.at(-1), 'Return JSON.');
+    }
+  );
+});
+
 test('build-command resolves Codex settings default level and model overrides', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-provider-settings-'));
   const settingsFile = path.join(tempDir, 'settings.json');
@@ -289,6 +668,246 @@ process.exit(17);
       assert.equal(response.envelope.result.capabilities.supportsJson, true);
       assert.equal(response.envelope.result.capabilities.supportsOutputSchema, false);
       assert.equal(response.envelope.result.capabilities.unknown, false);
+    }
+  );
+});
+
+test('probe requires Pi help or version output when helpText is not supplied', () => {
+  withFakeProviderCli(
+    'pi',
+    fakePiScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: pi --mode json --no-session --no-extensions --no-skills --no-prompt-templates --no-context-files --no-approve --model\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('0.80.3\\n');
+  process.exit(0);
+}
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'probe',
+        provider: 'pi',
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.available, true);
+      assert.equal(response.envelope.result.provider.id, 'pi');
+      assert.equal(response.envelope.result.capabilities.supportsJsonMode, true);
+      assert.equal(response.envelope.result.capabilities.supportsNoApprove, true);
+      assert.equal(response.envelope.result.versionText, '0.80.3');
+    }
+  );
+});
+
+test('probe exposes ACP CLI capabilities for Kiro', () => {
+  withFakeProviderCli(
+    'kiro-cli',
+    fakeKiroScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: kiro-cli acp\\n');
+  process.exit(0);
+}
+process.exit(17);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'probe',
+        provider: 'kiro',
+      });
+
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(response.envelope.result.available, true);
+      assert.equal(response.envelope.result.provider.id, 'kiro');
+      assert.equal(response.envelope.result.capabilities.supportsAcpStdio, true);
+      assert.equal(response.envelope.result.capabilities.supportsPermissionRequests, false);
+      assert.equal(response.envelope.result.capabilities.supportsTerminalTools, false);
+    }
+  );
+});
+
+test('build-command builds Copilot autonomous argv with schema prompt fallback', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cwd: '/tmp/worktree',
+      autoApprove: true,
+      jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+      modelSpec: { model: 'gpt-5.2' },
+      cliFeatures: {
+        supportsJsonOutput: true,
+        supportsModel: true,
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsAddDir: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(response.envelope.result.schemaMode, 'prompt');
+  assert.equal(commandSpec.binary, 'copilot');
+  assert.equal(commandSpec.cwd, '/tmp/worktree');
+  assert.deepEqual(commandSpec.args, [
+    '--output-format',
+    'json',
+    '--model',
+    'gpt-5.2',
+    '--add-dir',
+    '/tmp/worktree',
+    '--allow-all',
+    '--no-ask-user',
+    '-p',
+    commandSpec.args.at(-1),
+  ]);
+  assert.equal(commandSpec.args.at(-2), '-p');
+  assert.ok(commandSpec.args.at(-1).includes('## OUTPUT FORMAT (CRITICAL - REQUIRED)'));
+  assert.ok(response.envelope.warnings.some((warning) => warning.code === 'copilot-jsonschema'));
+});
+
+test('build-command omits Copilot approval flags when autoApprove is not requested', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Return JSON.',
+    options: {
+      outputFormat: 'json',
+      cliFeatures: {
+        supportsJsonOutput: true,
+        supportsModel: true,
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsAddDir: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.equal(commandSpec.args.includes('--allow-all'), false);
+  assert.equal(commandSpec.args.includes('--no-ask-user'), false);
+  assert.equal(commandSpec.args.at(-2), '-p');
+  assert.equal(commandSpec.args.at(-1), 'Return JSON.');
+});
+
+test('build-command keeps Copilot JSON output args when only version probe returns output', () => {
+  withFakeProviderCli(
+    'copilot',
+    fakeCopilotScript(`
+if (process.argv.includes('--help')) {
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('1.0.0\\n');
+  process.exit(0);
+}
+process.stderr.write('unknown option -h\\n');
+process.exit(1);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'copilot',
+        context: 'Return JSON.',
+        options: {
+          outputFormat: 'json',
+        },
+      });
+
+      const args = response.envelope.result.commandSpec.args;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.deepEqual(args.slice(0, 2), ['--output-format', 'json']);
+      assert.equal(args.at(-2), '-p');
+      assert.equal(args.at(-1), 'Return JSON.');
+    }
+  );
+});
+
+test('build-command emits one Copilot --additional-mcp-config flag per mcpConfig entry', () => {
+  const response = runExecutable({
+    schemaVersion: 1,
+    command: 'build-command',
+    provider: 'copilot',
+    context: 'Do work.',
+    options: {
+      autoApprove: true,
+      mcpConfig: ['{"mcpServers":{"a":{"command":"a-bin"}}}', '@/tmp/servers.json'],
+      cliFeatures: {
+        supportsAllowAll: true,
+        supportsNoAskUser: true,
+        supportsMcpConfig: true,
+      },
+    },
+  });
+
+  const { commandSpec } = response.envelope.result;
+  assert.equal(response.exitCode, 0);
+  assert.equal(response.envelope.ok, true);
+  assert.deepEqual(commandSpec.args, [
+    '--allow-all',
+    '--no-ask-user',
+    '--additional-mcp-config',
+    '{"mcpServers":{"a":{"command":"a-bin"}}}',
+    '--additional-mcp-config',
+    '@/tmp/servers.json',
+    '-p',
+    'Do work.',
+  ]);
+  assert.equal(
+    response.envelope.warnings.some((warning) => warning.code === 'copilot-mcp-config'),
+    false
+  );
+});
+
+test('build-command gates Copilot MCP config on feature detection and warns when unsupported', () => {
+  withFakeProviderCli(
+    'copilot',
+    fakeCopilotScript(`
+if (process.argv.includes('--help')) {
+  process.stdout.write('Usage: copilot -p <prompt> --output-format json --model <m> --allow-all --no-ask-user --add-dir <dir>\\n');
+  process.exit(0);
+}
+if (process.argv.includes('--version')) {
+  process.stdout.write('1.0.0\\n');
+  process.exit(0);
+}
+process.exit(0);
+`),
+    () => {
+      const response = runExecutable({
+        schemaVersion: 1,
+        command: 'build-command',
+        provider: 'copilot',
+        context: 'Do work.',
+        options: {
+          mcpConfig: ['{"mcpServers":{"a":{"command":"a-bin"}}}'],
+        },
+      });
+
+      const { commandSpec } = response.envelope.result;
+      assert.equal(response.exitCode, 0);
+      assert.equal(response.envelope.ok, true);
+      assert.equal(commandSpec.args.includes('--additional-mcp-config'), false);
+      assert.ok(
+        response.envelope.warnings.some((warning) => warning.code === 'copilot-mcp-config'),
+        'expected a copilot-mcp-config warning when the CLI lacks --additional-mcp-config'
+      );
     }
   );
 });

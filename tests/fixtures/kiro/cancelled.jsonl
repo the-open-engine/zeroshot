@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-3","content":{"type":"text","text":"stopped"}}}}
+{"jsonrpc":"2.0","id":5,"result":{"stopReason":"cancelled","error":"cancelled by user","usage":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}

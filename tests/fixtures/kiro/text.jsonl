@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-1","content":{"type":"text","text":"Hello"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg-1","content":{"type":"text","text":"Hello from Kiro"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kiro-session-1","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":7,"outputTokens":3,"cacheReadInputTokens":1,"cacheCreationInputTokens":0}}}}
+{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}
