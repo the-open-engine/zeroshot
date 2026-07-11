@@ -11,6 +11,32 @@
     "example": "examples",
     "test": "tests"
   },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "plugins": [
+      [
+        "@semantic-release/commit-analyzer",
+        {
+          "releaseRules": [
+            {
+              "type": "release",
+              "release": "minor"
+            }
+          ]
+        }
+      ],
+      "@semantic-release/release-notes-generator",
+      [
+        "@semantic-release/npm",
+        {
+          "npmPublish": true
+        }
+      ],
+      "@semantic-release/github"
+    ]
+  },
   "scripts": {
     "pretest": "npm run build:agent-cli-provider",
     "test": "node tests/run-tests.js",
