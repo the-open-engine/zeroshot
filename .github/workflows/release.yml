@@ -139,6 +139,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Release preflight
+        run: npm run release:preflight
+
       - name: Verify package before release
         run: |
           # Create tarball (respects 'files' array in package.json)
@@ -176,3 +179,7 @@ jobs:
             echo "🚀 Publishing release (triggered by CI passing)"
             npx semantic-release
           fi
+
+      - name: Assert release published
+        if: github.event_name == 'workflow_run'
+        run: npm run release:assert-published

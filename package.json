@@ -71,6 +71,8 @@
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
     "release": "semantic-release",
+    "release:preflight": "node scripts/release-preflight.js",
+    "release:assert-published": "node scripts/assert-release-published.js",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run check:agent-cli-provider:ci",
     "prepare": "npm run build:agent-cli-provider && husky"
   },

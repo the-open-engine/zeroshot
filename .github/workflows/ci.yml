@@ -216,3 +216,37 @@ jobs:
           footer.stop();
           console.log('✓ StatusFooter test passed');
           "
+
+  release-preflight:
+    name: Release preflight
+    needs: [enforce-main-pr-source]
+    if: |
+      always() &&
+      (needs.enforce-main-pr-source.result == 'success' || needs.enforce-main-pr-source.result == 'skipped') &&
+      (
+        (github.event_name == 'pull_request' && github.base_ref == 'main') ||
+        (github.event_name == 'merge_group' && (
+          github.event.merge_group.base_ref == 'main' ||
+          github.event.merge_group.base_ref == 'refs/heads/main' ||
+          startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+        ))
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release contract
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:preflight
