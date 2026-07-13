@@ -817,6 +817,41 @@ function defineLifecycleResumeTests() {
       );
     });
 
+    it('should recover a zombie cluster (state=running, dead pid) instead of rejecting resume', async function () {
+      const config = createSimpleConfig();
+      lifecycleMockRunner.when('worker').returns({ done: true });
+
+      const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
+      await lifecycleOrchestrator.stop(result.id);
+
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      cluster.failureInfo = {
+        agentId: 'worker',
+        iteration: 1,
+        error: 'boom',
+      };
+      // Simulate exactly the zombie condition getStatus()/listClusters() already
+      // detect: state says 'running' but the recorded PID belongs to a daemon
+      // that is no longer alive (e.g. it was killed by a caller timeout). Before
+      // the fix, resume() trusted `state` alone here and threw "still running",
+      // even though status would have reported this same cluster as a zombie.
+      cluster.state = 'running';
+      cluster.pid = 999999;
+
+      lifecycleMockRunner.when('worker').delays(500, { done: true, resumed: true });
+
+      const resumed = await lifecycleOrchestrator.resume(result.id);
+      const status = lifecycleOrchestrator.getStatus(result.id);
+
+      assert.strictEqual(resumed.resumeType, 'failure');
+      assert.strictEqual(cluster.pid, process.pid, 'Recovered cluster should record current PID');
+      assert.strictEqual(
+        status.state,
+        'running',
+        'Recovered cluster should be running, not zombie'
+      );
+    });
+
     it('should reject setup cluster resume with an actionable error', async function () {
       const { clusterId, cluster } = loadSetupCluster(lifecycleOrchestrator, {
         id: 'setup-resume-test',
