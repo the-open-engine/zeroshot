@@ -73,9 +73,13 @@ const { runInspectCommand } = require('./commands/inspect');
 const { runCmdproof } = require('./commands/cmdproof');
 const {
   markDetachedSetupFailed,
+  patchDetachedResumeCluster,
   registerDetachedSetupCluster,
   removeDetachedSetupCluster,
+  revertDetachedResumeCluster,
+  waitForResumeOwnership,
 } = require('../lib/detached-startup');
+const { isProcessRunning: isClusterProcessAlive } = require('../lib/process-liveness');
 // Setup wizard removed - use: zeroshot settings set <key> <value>
 const { checkForUpdates, printLegacyDistroNotice } = require('./lib/update-checker');
 const { checkBinDirOnPath, printPathWarning } = require('../lib/path-check');
@@ -245,12 +249,12 @@ function printDetachedClusterStart(options, clusterId, logPath) {
   console.log(`Attach:  zeroshot attach ${clusterId}`);
 }
 
-function createDaemonLogFile(clusterId) {
+function createDaemonLogFile(logName) {
   const storageDir = path.join(os.homedir(), '.zeroshot');
   if (!fs.existsSync(storageDir)) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
-  const logPath = path.join(storageDir, `${clusterId}-daemon.log`);
+  const logPath = path.join(storageDir, `${logName}-daemon.log`);
   return fs.openSync(logPath, 'w');
 }
 
@@ -291,17 +295,32 @@ function buildDaemonEnv(options, clusterId, targetCwd, stdinText) {
   };
 }
 
-async function spawnDetachedCluster(options, clusterId, stdinText) {
+// Generic detached-child primitive shared by `run --detach` and
+// `resume --detach`: spawn a re-invocation of this same CLI (same argv) with
+// daemon env vars set, detach it from this process, and return its PID.
+// Callers own registering/patching cluster state around the spawn - this
+// function knows nothing about run vs. resume.
+function spawnDetachedChild(env, cwd, logFd) {
   const { spawn } = require('child_process');
-  const logFd = createDaemonLogFile(clusterId);
-  const targetCwd = detectGitRepoRoot();
-  const logPath = path.join(os.homedir(), '.zeroshot', `${clusterId}-daemon.log`);
   const daemon = spawn(process.execPath, process.argv.slice(1), {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    cwd: targetCwd,
-    env: buildDaemonEnv(options, clusterId, targetCwd, stdinText),
+    cwd,
+    env,
   });
+  daemon.unref();
+  return daemon;
+}
+
+async function spawnDetachedCluster(options, clusterId, stdinText) {
+  const logFd = createDaemonLogFile(clusterId);
+  const targetCwd = detectGitRepoRoot();
+  const logPath = path.join(os.homedir(), '.zeroshot', `${clusterId}-daemon.log`);
+  const daemon = spawnDetachedChild(
+    buildDaemonEnv(options, clusterId, targetCwd, stdinText),
+    targetCwd,
+    logFd
+  );
   await registerDetachedSetupCluster({
     clusterId,
     pid: daemon.pid,
@@ -310,9 +329,51 @@ async function spawnDetachedCluster(options, clusterId, stdinText) {
     runOptions: options,
     cwd: targetCwd,
   });
-  daemon.unref();
   fs.closeSync(logFd);
   printDetachedClusterStart(options, clusterId, logPath);
+}
+
+// Resume's daemon env is deliberately NOT buildDaemonEnv: run-only keys like
+// ZEROSHOT_DOCKER/ZEROSHOT_WORKTREE/ZEROSHOT_PR are derived by resume from
+// the cluster's own persisted state, and spreading them here would fight
+// that. The resumed process needs only to know it's the daemon and which
+// cluster it owns; `id`/`prompt` already travel as plain argv (commander
+// re-parses the same argv in the child), not through env.
+function buildResumeDaemonEnv(clusterId, targetCwd) {
+  return {
+    ...process.env,
+    ZEROSHOT_DAEMON: '1',
+    ZEROSHOT_CLUSTER_ID: clusterId,
+    ZEROSHOT_CWD: targetCwd,
+  };
+}
+
+// Parent-side half of `resume --detach`: spawn the daemon, then atomically
+// hand it ownership of the cluster record (patchDetachedResumeCluster).
+// If another live daemon already owns this cluster (a concurrent resume
+// won the race), abort and kill the child we just spawned rather than
+// leaving a duplicate process running.
+async function spawnDetachedResume(clusterId) {
+  const logFd = createDaemonLogFile(`${clusterId}-resume`);
+  const targetCwd = detectGitRepoRoot();
+  const logPath = path.join(os.homedir(), '.zeroshot', `${clusterId}-resume-daemon.log`);
+  const storageDir = path.join(os.homedir(), '.zeroshot');
+  const daemon = spawnDetachedChild(buildResumeDaemonEnv(clusterId, targetCwd), targetCwd, logFd);
+
+  try {
+    await patchDetachedResumeCluster({ clusterId, daemonPid: daemon.pid, storageDir });
+  } catch (patchError) {
+    try {
+      process.kill(daemon.pid, 'SIGTERM');
+    } catch {
+      // Already gone - nothing to clean up.
+    }
+    fs.closeSync(logFd);
+    throw patchError;
+  }
+
+  fs.closeSync(logFd);
+  return { pid: daemon.pid, logPath };
 }
 
 function resolveClusterId(generateName) {
@@ -3214,9 +3275,70 @@ program
           provider: providerName,
         });
 
+        // === DETACH HANDOFF: hand the resume off to a daemon and return ===
+        // This is the parent's half only - it never calls orchestrator.resume()
+        // itself. Fail fast here (before spawning anything) on the same
+        // liveness check orchestrator.resume() would otherwise apply, so a
+        // cluster that's genuinely still running doesn't waste a daemon spawn.
+        if (shouldRunDetached(options)) {
+          if (cluster.state === 'running' && isClusterProcessAlive(cluster.pid)) {
+            throw new Error(
+              `Cluster ${id} is still running. Use 'zeroshot stop' first if you want to restart it.`
+            );
+          }
+          orchestrator.close();
+          const { pid, logPath } = await spawnDetachedResume(id);
+          console.log(chalk.green(`✓ Resume daemon started for ${id}`));
+          console.log(`  Daemon PID: ${pid}`);
+          console.log(`  Daemon log: ${logPath}`);
+          console.log('');
+          console.log(chalk.dim(`Monitor: zeroshot logs ${id} -f`));
+          console.log(chalk.dim(`Status:  zeroshot status ${id}`));
+          return;
+        }
+
+        // === DAEMON SIDE: this process IS the spawned resume daemon ===
+        // Wait for the parent's atomic pid/state patch to name *this* PID as
+        // owner before touching the cluster - closes the gap between spawn()
+        // returning a PID and that patch landing, so a daemon that lost a
+        // concurrent resume --detach race never gets to call resume() at all.
+        const isResumeDaemon =
+          Boolean(options.detach) &&
+          process.env.ZEROSHOT_DAEMON === '1' &&
+          process.env.ZEROSHOT_CLUSTER_ID === id;
+
+        if (isResumeDaemon) {
+          const storageDir = path.join(os.homedir(), '.zeroshot');
+          const owned = await waitForResumeOwnership({
+            clusterId: id,
+            daemonPid: process.pid,
+            storageDir,
+          });
+          if (!owned) {
+            console.error(
+              chalk.red(
+                `Resume daemon for ${id} never received ownership handoff from parent process; aborting.`
+              )
+            );
+            process.exit(1);
+          }
+        }
+
         // Resume cluster
         console.log(chalk.cyan(`Resuming cluster ${id}...`));
-        const result = await orchestrator.resume(id, prompt);
+        let result;
+        try {
+          result = await orchestrator.resume(id, prompt);
+        } catch (resumeError) {
+          if (isResumeDaemon) {
+            await revertDetachedResumeCluster({
+              clusterId: id,
+              storageDir: path.join(os.homedir(), '.zeroshot'),
+              error: resumeError,
+            });
+          }
+          throw resumeError;
+        }
 
         console.log(chalk.green(`✓ Cluster resumed`));
         if (result.resumeType === 'failure') {
@@ -3232,8 +3354,9 @@ program
           }
         }
 
-        // === DAEMON MODE: Exit and let cluster run in background ===
-        if (options.detach) {
+        // === DAEMON MODE: stay alive in the background, let signals stop the cluster ===
+        if (isResumeDaemon) {
+          setupDaemonCleanup(orchestrator, id);
           console.log('');
           console.log(chalk.dim(`Follow logs with: zeroshot logs ${id} -f`));
           return;
