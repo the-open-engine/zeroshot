@@ -116,23 +116,25 @@ where
             return serialize_error(None, INVALID_REQUEST, "Invalid Request", None);
         };
 
+        let method = match method.as_str() {
+            "initialize" => ImplementedMethod::Initialize,
+            "get" => ImplementedMethod::Get,
+            _ => {
+                return serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None);
+            }
+        };
+
         let params = match object.get("params") {
             Some(Value::Object(params)) => Value::Object(params.clone()),
             Some(_) => {
                 return serialize_error(Some(id), INVALID_PARAMS, "Invalid params", None);
             }
-            None => {
-                if method != "initialize" && method != "get" {
-                    return serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None);
-                }
-                return serialize_error(Some(id), INVALID_PARAMS, "Invalid params", None);
-            }
+            None => return serialize_error(Some(id), INVALID_PARAMS, "Invalid params", None),
         };
 
-        match method.as_str() {
-            "initialize" => self.dispatch_initialize(id, params).await,
-            "get" => self.dispatch_get(id, params).await,
-            _ => serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None),
+        match method {
+            ImplementedMethod::Initialize => self.dispatch_initialize(id, params).await,
+            ImplementedMethod::Get => self.dispatch_get(id, params).await,
         }
     }
 
@@ -183,6 +185,11 @@ where
             Err(error) => serialize_backend_error(id, error),
         }
     }
+}
+
+enum ImplementedMethod {
+    Initialize,
+    Get,
 }
 
 fn parse_request_id(value: &Value) -> Option<RequestId> {

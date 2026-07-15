@@ -3,21 +3,32 @@
     "ClusterStatus": {
       "properties": {
         "atCursor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "currentRunId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedGeneration": {
           "maximum": 9007199254740991,
           "minimum": 0,
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "phase": {
           "$ref": "#/$defs/Phase"
         }
       },
-      "required": ["phase"],
+      "required": [
+        "phase"
+      ],
       "type": "object"
     },
     "DomainErrorData": {
@@ -27,7 +38,9 @@
         },
         "details": true
       },
-      "required": ["code"],
+      "required": [
+        "code"
+      ],
       "type": "object"
     },
     "GetParams": {
@@ -35,7 +48,10 @@
       "properties": {
         "atCursor": {
           "default": null,
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -43,24 +59,32 @@
     "GetResult": {
       "properties": {
         "atCursor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "spec": true,
         "status": {
           "$ref": "#/$defs/ClusterStatus"
         }
       },
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "type": "object"
     },
     "InitializeParams": {
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
+          "const": "openengine.cluster/v1",
           "type": "string"
         }
       },
-      "required": ["protocolVersion"],
+      "required": [
+        "protocolVersion"
+      ],
       "type": "object"
     },
     "InitializeResult": {
@@ -76,7 +100,11 @@
           "$ref": "#/$defs/ClusterStatus"
         }
       },
-      "required": ["protocolVersion", "capabilities", "status"],
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "status"
+      ],
       "type": "object"
     },
     "JsonRpcError": {
@@ -99,7 +127,10 @@
           "type": "string"
         }
       },
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "type": "object"
     },
     "JsonRpcErrorResponse": {
@@ -121,7 +152,10 @@
           "type": "string"
         }
       },
-      "required": ["jsonrpc", "error"],
+      "required": [
+        "jsonrpc",
+        "error"
+      ],
       "type": "object"
     },
     "JsonRpcRequest": {
@@ -139,7 +173,12 @@
           "$ref": "#/$defs/InitializeParams"
         }
       },
-      "required": ["jsonrpc", "id", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
       "type": "object"
     },
     "JsonRpcRequest2": {
@@ -157,7 +196,12 @@
           "$ref": "#/$defs/GetParams"
         }
       },
-      "required": ["jsonrpc", "id", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
       "type": "object"
     },
     "JsonRpcResponse": {
@@ -192,7 +236,11 @@
           "$ref": "#/$defs/InitializeResult"
         }
       },
-      "required": ["jsonrpc", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
       "type": "object"
     },
     "JsonRpcSuccess2": {
@@ -207,11 +255,17 @@
           "$ref": "#/$defs/GetResult"
         }
       },
-      "required": ["jsonrpc", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
       "type": "object"
     },
     "Phase": {
-      "enum": ["empty"],
+      "enum": [
+        "empty"
+      ],
       "type": "string"
     },
     "RequestId": {
@@ -245,7 +299,12 @@
       "$ref": "#/$defs/JsonRpcResponse"
     }
   },
-  "required": ["initialize_request", "initialize_response", "get_request", "get_response"],
+  "required": [
+    "initialize_request",
+    "initialize_response",
+    "get_request",
+    "get_response"
+  ],
   "title": "ImplementedProtocolSchema",
   "type": "object"
 }

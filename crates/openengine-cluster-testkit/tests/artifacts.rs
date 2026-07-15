@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use openengine_cluster_protocol::PROTOCOL_VERSION;
 use openengine_cluster_testkit::artifacts::{
     ArtifactError, check_artifacts, generate_artifacts, write_artifacts,
 };
@@ -85,6 +86,11 @@ async fn schema_is_derived_from_canonical_envelopes_with_required_success_ids() 
         );
         assert_eq!(definition["properties"]["id"]["$ref"], "#/$defs/RequestId");
     }
+
+    assert_eq!(
+        definitions["InitializeParams"]["properties"]["protocolVersion"]["const"],
+        PROTOCOL_VERSION
+    );
 }
 
 #[tokio::test]

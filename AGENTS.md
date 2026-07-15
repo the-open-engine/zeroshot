@@ -51,7 +51,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 Cluster Protocol Rust types are the source of truth. Files under
 `protocol/openengine-cluster/v1/` are generated projections; update them with
 `cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --write` and
-verify byte-for-byte drift with `npm run protocol:check`.
+verify byte-for-byte drift with `npm run protocol:check`. These generator-formatted artifacts
+are excluded from Prettier; never format them independently.
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.

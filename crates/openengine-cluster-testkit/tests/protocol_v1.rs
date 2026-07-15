@@ -148,6 +148,25 @@ async fn rejects_invalid_jsonrpc_inputs_deterministically() {
 }
 
 #[tokio::test]
+async fn unknown_methods_ignore_parameter_shape() {
+    let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
+    let requests = [
+        r#"{"jsonrpc":"2.0","id":10,"method":"missing","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":"missing","params":[]}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":"missing","params":null}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":"missing","params":"scalar"}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":"missing"}"#,
+    ];
+
+    for request in requests {
+        let response: serde_json::Value =
+            serde_json::from_str(&dispatcher.dispatch(request).await).unwrap();
+        assert_eq!(response["id"], 10, "{request}");
+        assert_eq!(response["error"]["code"], -32601, "{request}");
+    }
+}
+
+#[tokio::test]
 async fn unsupported_protocol_version_has_stable_domain_code() {
     let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
     let client = ClusterClient::new(InProcessTransport::new(dispatcher));

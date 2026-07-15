@@ -92,6 +92,7 @@ impl DomainErrorData {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct InitializeParams {
+    #[schemars(schema_with = "protocol_version_schema")]
     pub protocol_version: String,
 }
 
