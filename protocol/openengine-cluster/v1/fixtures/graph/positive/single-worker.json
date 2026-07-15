@@ -1,0 +1,25 @@
+{
+  "initialInput": {
+    "kind": "null"
+  },
+  "policy": {
+    "default": "deny",
+    "policy": "policy.default@1"
+  },
+  "profile": "openengine.graph.single-worker/v1",
+  "root": {
+    "attempts": 1,
+    "input": {
+      "kind": "null"
+    },
+    "inputBindings": [],
+    "kind": "step",
+    "name": "worker",
+    "output": {
+      "kind": "null"
+    },
+    "timeoutMs": 60000,
+    "worker": "legacy.zeroshot.ship@1",
+    "writeBindings": []
+  }
+}

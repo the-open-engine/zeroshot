@@ -1,0 +1,1233 @@
+{
+  "$defs": {
+    "ChoiceBranch": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/GraphNode"
+        },
+        "when": {
+          "$ref": "#/$defs/Guard"
+        }
+      },
+      "required": [
+        "when",
+        "node"
+      ],
+      "type": "object"
+    },
+    "ControlSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/ControlSource"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ControlSource": {
+      "enum": [
+        "signal",
+        "error",
+        "group"
+      ],
+      "type": "string"
+    },
+    "DataSelector": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            },
+            "source": {
+              "const": "state",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            },
+            "source": {
+              "const": "item",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GraphNode": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "input": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "inputBindings": {
+              "items": {
+                "$ref": "#/$defs/InputBinding"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "step",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "timeoutMs": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "worker": {
+              "maxLength": 256,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*@[1-9][0-9]*$",
+              "type": "string"
+            },
+            "writeBindings": {
+              "items": {
+                "$ref": "#/$defs/WriteBinding"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "worker",
+            "input",
+            "output",
+            "inputBindings",
+            "writeBindings",
+            "timeoutMs",
+            "attempts"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "diagnostic": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "input": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "inputBindings": {
+              "items": {
+                "$ref": "#/$defs/InputBinding"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "verifier",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "signals": {
+              "additionalProperties": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 4096,
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "propertyNames": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "timeoutMs": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "worker": {
+              "maxLength": 256,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*@[1-9][0-9]*$",
+              "type": "string"
+            },
+            "writeBindings": {
+              "items": {
+                "$ref": "#/$defs/WriteBinding"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "worker",
+            "input",
+            "output",
+            "inputBindings",
+            "writeBindings",
+            "timeoutMs",
+            "attempts",
+            "signals",
+            "diagnostic"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "children": {
+              "$ref": "#/$defs/NonEmptyVec_of_GraphNode"
+            },
+            "kind": {
+              "const": "seq",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "promotedStatePaths": {
+              "items": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/PayloadType"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "state",
+            "children",
+            "promotedStatePaths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "branches": {
+              "$ref": "#/$defs/NonEmptyVec_of_ChoiceBranch"
+            },
+            "kind": {
+              "const": "choice",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "otherwise": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GraphNode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "promotedStatePaths": {
+              "items": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/PayloadType"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "state",
+            "branches",
+            "promotedStatePaths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "branches": {
+              "$ref": "#/$defs/NonEmptyVec_of_GraphNode"
+            },
+            "join": {
+              "$ref": "#/$defs/Join"
+            },
+            "kind": {
+              "const": "par",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "promotedStatePaths": {
+              "items": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/PayloadType"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "state",
+            "branches",
+            "promotedStatePaths",
+            "join"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/GraphNode"
+            },
+            "kind": {
+              "const": "loop",
+              "type": "string"
+            },
+            "maxIterations": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "promotedStatePaths": {
+              "items": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "until": {
+              "$ref": "#/$defs/Guard"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "state",
+            "body",
+            "until",
+            "maxIterations",
+            "promotedStatePaths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/GraphNode"
+            },
+            "kind": {
+              "const": "map",
+              "type": "string"
+            },
+            "maxItems": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "over": {
+              "$ref": "#/$defs/DataSelector"
+            },
+            "promotedStatePaths": {
+              "items": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/$defs/PayloadType"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "state",
+            "body",
+            "over",
+            "maxItems",
+            "promotedStatePaths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bindings": {
+              "items": {
+                "$ref": "#/$defs/InputBinding"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "succeed",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/$defs/PayloadType"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "output",
+            "bindings"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "fail",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            "reason": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^(?!unhandled$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GraphProfile": {
+      "enum": [
+        "openengine.graph.full/v1",
+        "openengine.graph.single-worker/v1"
+      ],
+      "type": "string"
+    },
+    "Guard": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "in",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "value": {
+              "$ref": "#/$defs/ControlSelector"
+            }
+          },
+          "required": [
+            "kind",
+            "value",
+            "labels"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "guards": {
+              "$ref": "#/$defs/NonEmptyVec_of_Guard"
+            },
+            "kind": {
+              "const": "all",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "guards"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "guards": {
+              "$ref": "#/$defs/NonEmptyVec_of_Guard"
+            },
+            "kind": {
+              "const": "any",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "guards"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "guard": {
+              "$ref": "#/$defs/Guard"
+            },
+            "kind": {
+              "const": "not",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "guard"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "k_of_n",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "values": {
+              "$ref": "#/$defs/NonEmptyVec_of_ControlSelector"
+            }
+          },
+          "required": [
+            "kind",
+            "count",
+            "values",
+            "labels"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "k_of_map",
+              "type": "string"
+            },
+            "labels": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "value": {
+              "$ref": "#/$defs/ControlSelector"
+            }
+          },
+          "required": [
+            "kind",
+            "count",
+            "value",
+            "labels"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "InputBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/$defs/DataSelector"
+        }
+      },
+      "required": [
+        "target",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Join": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "all",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "any",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "quorum",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "count"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "first",
+              "type": "string"
+            },
+            "when": {
+              "$ref": "#/$defs/Guard"
+            }
+          },
+          "required": [
+            "kind",
+            "when"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NodeOutputChannel": {
+      "enum": [
+        "out",
+        "signal",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "NodeOutputSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/NodeOutputChannel"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "node",
+        "channel",
+        "path"
+      ],
+      "type": "object"
+    },
+    "NonEmptyVec_of_ChoiceBranch": {
+      "items": {
+        "$ref": "#/$defs/ChoiceBranch"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "NonEmptyVec_of_ControlSelector": {
+      "items": {
+        "$ref": "#/$defs/ControlSelector"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "NonEmptyVec_of_FieldPath": {
+      "items": {
+        "items": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "NonEmptyVec_of_GraphNode": {
+      "items": {
+        "$ref": "#/$defs/GraphNode"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "NonEmptyVec_of_Guard": {
+      "items": {
+        "$ref": "#/$defs/Guard"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "NonEmptyVec_of_NodeName": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array"
+    },
+    "PayloadType": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "null",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "boolean",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "integer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "string",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "additionalProperties": {
+                "$ref": "#/$defs/RecordField"
+              },
+              "propertyNames": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "const": "record",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "fields"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "$ref": "#/$defs/PayloadType"
+            },
+            "kind": {
+              "const": "array",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "enum",
+              "type": "string"
+            },
+            "values": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "kind",
+            "values"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PolicyBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/PolicyDefault"
+        },
+        "policy": {
+          "maxLength": 256,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*@[1-9][0-9]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy",
+        "default"
+      ],
+      "type": "object"
+    },
+    "PolicyDefault": {
+      "enum": [
+        "deny"
+      ],
+      "type": "string"
+    },
+    "RecordField": {
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/PayloadType"
+        }
+      },
+      "required": [
+        "type",
+        "required"
+      ],
+      "type": "object"
+    },
+    "StructuralBounds": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptsPerNode": {
+          "additionalProperties": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "maxNodeExecutions": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "peakConcurrency": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "termination": {
+          "$ref": "#/$defs/TerminationWitness"
+        }
+      },
+      "required": [
+        "termination",
+        "maxNodeExecutions",
+        "peakConcurrency",
+        "attemptsPerNode"
+      ],
+      "type": "object"
+    },
+    "TerminationWitness": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "acyclic",
+              "type": "string"
+            },
+            "order": {
+              "$ref": "#/$defs/NonEmptyVec_of_NodeName"
+            }
+          },
+          "required": [
+            "kind",
+            "order"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "bounded",
+              "type": "string"
+            },
+            "maxIterations": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "ranking": {
+              "$ref": "#/$defs/NonEmptyVec_of_FieldPath"
+            }
+          },
+          "required": [
+            "kind",
+            "ranking",
+            "maxIterations"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WriteBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "value": {
+          "$ref": "#/$defs/NodeOutputSelector"
+        }
+      },
+      "required": [
+        "value",
+        "target"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Backend-produced, verified graph IR.\n\nConstructing or serializing this value does not verify or admit a graph. Only a backend\nverifier may promote graph syntax to admitted compiled IR.",
+  "properties": {
+    "bounds": {
+      "$ref": "#/$defs/StructuralBounds"
+    },
+    "initialInput": {
+      "$ref": "#/$defs/PayloadType"
+    },
+    "policy": {
+      "$ref": "#/$defs/PolicyBinding"
+    },
+    "profile": {
+      "$ref": "#/$defs/GraphProfile"
+    },
+    "root": {
+      "$ref": "#/$defs/GraphNode"
+    }
+  },
+  "required": [
+    "profile",
+    "initialInput",
+    "policy",
+    "root",
+    "bounds"
+  ],
+  "title": "CompiledGraphIr",
+  "type": "object"
+}

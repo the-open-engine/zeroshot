@@ -1,10 +1,21 @@
 //! Canonical Open Engine Cluster Protocol wire and domain types.
 
+pub mod artifact;
+pub mod canonical;
+pub mod diagnostic;
+pub mod graph;
+pub mod payload;
+mod value;
+
+pub use artifact::*;
+pub use canonical::*;
+pub use diagnostic::*;
+pub use graph::*;
+pub use payload::*;
+
 use std::borrow::Cow;
-use std::fmt;
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
-use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -241,32 +252,8 @@ impl<'de> Deserialize<'de> for Generation {
     where
         D: Deserializer<'de>,
     {
-        struct GenerationVisitor;
-
-        impl Visitor<'_> for GenerationVisitor {
-            type Value = Generation;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(formatter, "an integer from 0 through {MAX_SAFE_GENERATION}")
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Generation::new(value).map_err(E::custom)
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let value = u64::try_from(value).map_err(E::custom)?;
-                self.visit_u64(value)
-            }
-        }
-
-        deserializer.deserialize_u64(GenerationVisitor)
+        let value = value::deserialize_javascript_safe_u64(deserializer, 0)?;
+        Generation::new(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -280,11 +267,7 @@ impl JsonSchema for Generation {
     }
 
     fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "type": "integer",
-            "minimum": 0,
-            "maximum": MAX_SAFE_GENERATION
-        })
+        value::javascript_safe_integer_schema(0)
     }
 }
 

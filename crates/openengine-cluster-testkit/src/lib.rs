@@ -1,6 +1,7 @@
 //! Deterministic fixtures for Cluster Protocol conformance tests.
 
 pub mod artifacts;
+mod negative_graph_fixtures;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{

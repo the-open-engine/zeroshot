@@ -1,0 +1,21 @@
+{
+  "document": {
+    "artifactId": "artifact-123",
+    "byteLength": 42,
+    "lineage": {
+      "attempt": 1,
+      "generation": 7,
+      "runId": "run-9"
+    },
+    "mediaType": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+    "producer": {
+      "node": "work",
+      "worker": "legacy.zeroshot.ship@1"
+    },
+    "redaction": "internal",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "typeId": "openengine.result@1"
+  },
+  "expectedCode": "INVALID_ARTIFACT_VALUE",
+  "schema": "artifact"
+}

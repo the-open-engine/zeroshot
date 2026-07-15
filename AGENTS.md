@@ -21,38 +21,49 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                    | File                                          |
-| -------------------------- | --------------------------------------------- |
-| Conductor classification   | `src/conductor-bootstrap.js`                  |
-| Base templates             | `cluster-templates/base-templates/`           |
-| Message bus                | `src/message-bus.js`                          |
-| Ledger (SQLite)            | `src/ledger.js`                               |
-| Guidance topics            | `src/guidance-topics.js`                      |
-| Guidance mailbox helper    | `src/ledger.js`                               |
-| Guidance live injection    | `src/orchestrator.js`                         |
-| Trigger evaluation         | `src/logic-engine.js`                         |
-| Agent wrapper              | `src/agent-wrapper.js`                        |
-| Providers registry         | `src/providers/index.js`                      |
-| Provider implementations   | `src/providers/`                              |
-| Provider engine registry   | `src/agent-cli-provider/provider-registry.ts` |
-| Gateway runner             | `src/agent-cli-provider/gateway-runner.ts`    |
-| Gateway tools/policy       | `src/agent-cli-provider/gateway-tools.ts`     |
-| Provider detection         | `lib/provider-detection.js`                   |
-| Provider capabilities      | `src/providers/capabilities.js`               |
-| Start-cluster helper       | `lib/start-cluster.js`                        |
-| Docker mounts/env          | `lib/docker-config.js`                        |
-| Container lifecycle        | `src/isolation-manager.js`                    |
-| Settings                   | `lib/settings.js`                             |
-| Cluster wire/domain types  | `crates/openengine-cluster-protocol/`         |
-| Cluster dispatch/stdio     | `crates/openengine-cluster-server/`           |
-| Cluster typed transports   | `crates/openengine-cluster-client/`           |
-| Cluster fixtures/artifacts | `crates/openengine-cluster-testkit/`          |
+| Concept                    | File                                                               |
+| -------------------------- | ------------------------------------------------------------------ |
+| Conductor classification   | `src/conductor-bootstrap.js`                                       |
+| Base templates             | `cluster-templates/base-templates/`                                |
+| Message bus                | `src/message-bus.js`                                               |
+| Ledger (SQLite)            | `src/ledger.js`                                                    |
+| Guidance topics            | `src/guidance-topics.js`                                           |
+| Guidance mailbox helper    | `src/ledger.js`                                                    |
+| Guidance live injection    | `src/orchestrator.js`                                              |
+| Trigger evaluation         | `src/logic-engine.js`                                              |
+| Agent wrapper              | `src/agent-wrapper.js`                                             |
+| Providers registry         | `src/providers/index.js`                                           |
+| Provider implementations   | `src/providers/`                                                   |
+| Provider engine registry   | `src/agent-cli-provider/provider-registry.ts`                      |
+| Gateway runner             | `src/agent-cli-provider/gateway-runner.ts`                         |
+| Gateway tools/policy       | `src/agent-cli-provider/gateway-tools.ts`                          |
+| Provider detection         | `lib/provider-detection.js`                                        |
+| Provider capabilities      | `src/providers/capabilities.js`                                    |
+| Start-cluster helper       | `lib/start-cluster.js`                                             |
+| Docker mounts/env          | `lib/docker-config.js`                                             |
+| Container lifecycle        | `src/isolation-manager.js`                                         |
+| Settings                   | `lib/settings.js`                                                  |
+| Cluster wire/domain types  | `crates/openengine-cluster-protocol/`                              |
+| Graph AST/bindings/guards  | `crates/openengine-cluster-protocol/src/graph.rs`                  |
+| Closed payload algebra     | `crates/openengine-cluster-protocol/src/payload.rs`                |
+| Compiled IR/identity       | `crates/openengine-cluster-protocol/src/canonical.rs`              |
+| Artifact receipts          | `crates/openengine-cluster-protocol/src/artifact.rs`               |
+| Graph diagnostics/bounds   | `crates/openengine-cluster-protocol/src/diagnostic.rs`             |
+| Shared wire-value bounds   | `crates/openengine-cluster-protocol/src/value.rs`                  |
+| Cluster dispatch/stdio     | `crates/openengine-cluster-server/`                                |
+| Cluster typed transports   | `crates/openengine-cluster-client/`                                |
+| Cluster fixtures/artifacts | `crates/openengine-cluster-testkit/`                               |
+| Negative graph vectors     | `crates/openengine-cluster-testkit/src/negative_graph_fixtures.rs` |
+| Graph contract prose       | `docs/openengine-cluster-protocol/v1/graph-contract.md`            |
+| Generated graph fixtures   | `protocol/openengine-cluster/v1/fixtures/graph/`                   |
 
 Cluster Protocol Rust types are the source of truth. Files under
 `protocol/openengine-cluster/v1/` are generated projections; update them with
 `cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --write` and
 verify byte-for-byte drift with `npm run protocol:check`. These generator-formatted artifacts
 are excluded from Prettier; never format them independently.
+Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
+authoritative contract types only. They do not provide graph admission, verification, or execution.
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.

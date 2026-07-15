@@ -1,0 +1,1166 @@
+{
+  "document": {
+    "initialInput": {
+      "fields": {
+        "count": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "enabled": {
+          "required": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "kind": "string"
+            },
+            "kind": "array"
+          }
+        },
+        "nothing": {
+          "required": false,
+          "type": {
+            "kind": "null"
+          }
+        },
+        "ratio": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "text": {
+          "required": true,
+          "type": {
+            "kind": "string"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.default@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 2,
+          "input": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "inputBindings": [
+            {
+              "target": [
+                "text"
+              ],
+              "value": {
+                "path": [
+                  "text"
+                ],
+                "source": "state"
+              }
+            },
+            {
+              "target": [
+                "text"
+              ],
+              "value": {
+                "path": [
+                  "text"
+                ],
+                "source": "item"
+              }
+            }
+          ],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "kind": "string"
+          },
+          "timeoutMs": 1000,
+          "worker": "legacy.zeroshot.ship@1",
+          "writeBindings": [
+            {
+              "target": [
+                "text"
+              ],
+              "value": {
+                "channel": "out",
+                "node": "work",
+                "path": [
+                  "text"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "attempts": 1,
+          "diagnostic": {
+            "fields": {},
+            "kind": "record"
+          },
+          "input": {
+            "kind": "string"
+          },
+          "inputBindings": [],
+          "kind": "verifier",
+          "name": "verify",
+          "output": {
+            "kind": "boolean"
+          },
+          "signals": {
+            "verdict": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "timeoutMs": 500,
+          "worker": "worker.validator@1",
+          "writeBindings": []
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice0",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "accepted"
+                ],
+                "regex": ".*",
+                "value": {
+                  "field": "verdict",
+                  "name": "verify",
+                  "source": "signal"
+                }
+              }
+            },
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice1",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "guards": [
+                  {
+                    "kind": "in",
+                    "labels": [
+                      "accepted"
+                    ],
+                    "value": {
+                      "field": "verdict",
+                      "name": "verify",
+                      "source": "signal"
+                    }
+                  }
+                ],
+                "kind": "all"
+              }
+            },
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice2",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "guards": [
+                  {
+                    "kind": "in",
+                    "labels": [
+                      "accepted"
+                    ],
+                    "value": {
+                      "field": "verdict",
+                      "name": "verify",
+                      "source": "signal"
+                    }
+                  }
+                ],
+                "kind": "any"
+              }
+            },
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice3",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "guard": {
+                  "kind": "in",
+                  "labels": [
+                    "accepted"
+                  ],
+                  "value": {
+                    "field": "verdict",
+                    "name": "verify",
+                    "source": "signal"
+                  }
+                },
+                "kind": "not"
+              }
+            },
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice4",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "count": 1,
+                "kind": "k_of_n",
+                "labels": [
+                  "accepted",
+                  "refusal"
+                ],
+                "values": [
+                  {
+                    "field": "verdict",
+                    "name": "verify",
+                    "source": "signal"
+                  },
+                  {
+                    "field": null,
+                    "name": "verify",
+                    "source": "error"
+                  }
+                ]
+              }
+            },
+            {
+              "node": {
+                "bindings": [
+                  {
+                    "target": [
+                      "text"
+                    ],
+                    "value": {
+                      "path": [
+                        "text"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "succeed",
+                "name": "choice5",
+                "output": {
+                  "kind": "string"
+                }
+              },
+              "when": {
+                "count": 1,
+                "kind": "k_of_map",
+                "labels": [
+                  "accepted"
+                ],
+                "value": {
+                  "field": "verdict",
+                  "name": "verify",
+                  "source": "group"
+                }
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "choose",
+          "otherwise": {
+            "kind": "fail",
+            "name": "failed",
+            "reason": "rejected"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinAllLeft",
+              "output": {
+                "kind": "string"
+              }
+            },
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinAllRight",
+              "output": {
+                "kind": "string"
+              }
+            }
+          ],
+          "join": {
+            "kind": "all"
+          },
+          "kind": "par",
+          "name": "joinAll",
+          "promotedStatePaths": [
+            [
+              "text"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinAnyLeft",
+              "output": {
+                "kind": "string"
+              }
+            },
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinAnyRight",
+              "output": {
+                "kind": "string"
+              }
+            }
+          ],
+          "join": {
+            "kind": "any"
+          },
+          "kind": "par",
+          "name": "joinAny",
+          "promotedStatePaths": [
+            [
+              "text"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinQuorumLeft",
+              "output": {
+                "kind": "string"
+              }
+            },
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinQuorumRight",
+              "output": {
+                "kind": "string"
+              }
+            }
+          ],
+          "join": {
+            "count": 1,
+            "kind": "quorum"
+          },
+          "kind": "par",
+          "name": "joinQuorum",
+          "promotedStatePaths": [
+            [
+              "text"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinFirstLeft",
+              "output": {
+                "kind": "string"
+              }
+            },
+            {
+              "bindings": [
+                {
+                  "target": [
+                    "text"
+                  ],
+                  "value": {
+                    "path": [
+                      "text"
+                    ],
+                    "source": "state"
+                  }
+                }
+              ],
+              "kind": "succeed",
+              "name": "joinFirstRight",
+              "output": {
+                "kind": "string"
+              }
+            }
+          ],
+          "join": {
+            "kind": "first",
+            "when": {
+              "kind": "in",
+              "labels": [
+                "accepted"
+              ],
+              "value": {
+                "field": "verdict",
+                "name": "verify",
+                "source": "signal"
+              }
+            }
+          },
+          "kind": "par",
+          "name": "joinFirst",
+          "promotedStatePaths": [
+            [
+              "text"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "body": {
+            "bindings": [
+              {
+                "target": [
+                  "text"
+                ],
+                "value": {
+                  "path": [
+                    "text"
+                  ],
+                  "source": "state"
+                }
+              }
+            ],
+            "kind": "succeed",
+            "name": "loopBody",
+            "output": {
+              "kind": "string"
+            }
+          },
+          "kind": "loop",
+          "maxIterations": 3,
+          "name": "repeat",
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "until": {
+            "kind": "in",
+            "labels": [
+              "accepted"
+            ],
+            "value": {
+              "field": "verdict",
+              "name": "verify",
+              "source": "signal"
+            }
+          }
+        },
+        {
+          "body": {
+            "bindings": [
+              {
+                "target": [
+                  "text"
+                ],
+                "value": {
+                  "path": [
+                    "text"
+                  ],
+                  "source": "state"
+                }
+              }
+            ],
+            "kind": "succeed",
+            "name": "mapBody",
+            "output": {
+              "kind": "string"
+            }
+          },
+          "kind": "map",
+          "maxItems": 32,
+          "name": "each",
+          "over": {
+            "path": [
+              "items"
+            ],
+            "source": "state"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "count": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "enabled": {
+                "required": true,
+                "type": {
+                  "kind": "boolean"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              },
+              "nothing": {
+                "required": false,
+                "type": {
+                  "kind": "null"
+                }
+              },
+              "ratio": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "text": {
+                "required": true,
+                "type": {
+                  "kind": "string"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [
+        [
+          "text"
+        ]
+      ],
+      "state": {
+        "fields": {
+          "count": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "enabled": {
+            "required": true,
+            "type": {
+              "kind": "boolean"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "kind": "string"
+              },
+              "kind": "array"
+            }
+          },
+          "nothing": {
+            "required": false,
+            "type": {
+              "kind": "null"
+            }
+          },
+          "ratio": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "text": {
+            "required": true,
+            "type": {
+              "kind": "string"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  },
+  "expectedCode": "EXECUTABLE_GUARD",
+  "schema": "graph"
+}

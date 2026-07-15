@@ -74,6 +74,8 @@ fn generation_is_bounded_to_javascript_safe_integers() {
     assert!(Generation::new(9_007_199_254_740_991).is_ok());
     assert!(Generation::new(9_007_199_254_740_992).is_err());
     assert!(serde_json::from_str::<Generation>("9007199254740992").is_err());
+    assert_eq!(serde_json::from_str::<Generation>("7.0").unwrap().get(), 7);
+    assert!(serde_json::from_str::<Generation>("7.5").is_err());
 }
 
 #[tokio::test]
