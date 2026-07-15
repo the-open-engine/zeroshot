@@ -72,6 +72,7 @@
     "dupcheck": "jscpd src/ --min-lines 5 --min-tokens 50 --threshold 5",
     "check": "npm run typecheck && npm run lint",
     "check:all": "npm run check && npm run deadcode:all",
+    "commitlint": "commitlint",
     "release": "semantic-release",
     "release:preflight": "node scripts/release-preflight.js",
     "release:assert-published": "node scripts/assert-release-published.js",
@@ -147,6 +148,8 @@
     "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^11.0.6",
