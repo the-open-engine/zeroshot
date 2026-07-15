@@ -1,6 +1,7 @@
 //! Backend-neutral Cluster Protocol dispatcher.
 
 pub mod stdio;
+pub mod worker_registry;
 
 use std::sync::Arc;
 

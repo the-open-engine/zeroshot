@@ -1,0 +1,17 @@
+{
+  "artifactId": "worker-result",
+  "byteLength": 42,
+  "lineage": {
+    "attempt": 1,
+    "generation": 1,
+    "runId": "run-1"
+  },
+  "mediaType": "application/json",
+  "producer": {
+    "node": "worker",
+    "worker": "mock.acp@1"
+  },
+  "redaction": "internal",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "typeId": "openengine.result@1"
+}

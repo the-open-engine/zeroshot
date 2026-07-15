@@ -1,0 +1,9 @@
+{
+  "normalized": {
+    "code": "refusal",
+    "reason": "authentication_required",
+    "status": "error"
+  },
+  "profile": "openengine.worker.a2a/1.0",
+  "version": "1.0"
+}
