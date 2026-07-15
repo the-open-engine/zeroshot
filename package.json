@@ -12,6 +12,8 @@
     "test": "tests"
   },
   "scripts": {
+    "protocol:check": "cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check",
+    "rust:check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "pretest": "npm run build:agent-cli-provider",
     "test": "node tests/run-tests.js",
     "test:unit": "node tests/run-tests.js",

@@ -53,6 +53,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -61,6 +67,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check generated cluster protocol artifacts
+        run: npm run protocol:check
+
+      - name: Check Rust workspace
+        run: npm run rust:check
 
       - name: Security audit
         run: npm audit --audit-level=moderate --omit=dev

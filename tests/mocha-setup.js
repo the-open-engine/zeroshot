@@ -12,6 +12,16 @@
  * so the test:coverage script handles it at the process level.
  */
 const origFatal = process._fatalException.bind(process);
+const isolatedSettingsFile = process.env.ZEROSHOT_SETTINGS_FILE;
+
+exports.mochaHooks = {
+  beforeEach() {
+    if (isolatedSettingsFile && !process.env.ZEROSHOT_SETTINGS_FILE) {
+      process.env.ZEROSHOT_SETTINGS_FILE = isolatedSettingsFile;
+    }
+  },
+};
+
 process._fatalException = function (err, fromPromise) {
   if (
     err instanceof TypeError &&

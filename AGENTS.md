@@ -21,25 +21,34 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 
 ## Where to Look
 
-| Concept                  | File                                |
-| ------------------------ | ----------------------------------- |
-| Conductor classification | `src/conductor-bootstrap.js`        |
-| Base templates           | `cluster-templates/base-templates/` |
-| Message bus              | `src/message-bus.js`                |
-| Ledger (SQLite)          | `src/ledger.js`                     |
-| Guidance topics          | `src/guidance-topics.js`            |
-| Guidance mailbox helper  | `src/ledger.js`                     |
-| Guidance live injection  | `src/orchestrator.js`               |
-| Trigger evaluation       | `src/logic-engine.js`               |
-| Agent wrapper            | `src/agent-wrapper.js`              |
-| Providers registry       | `src/providers/index.js`            |
-| Provider implementations | `src/providers/`                    |
-| Provider detection       | `lib/provider-detection.js`         |
-| Provider capabilities    | `src/providers/capabilities.js`     |
-| Start-cluster helper     | `lib/start-cluster.js`              |
-| Docker mounts/env        | `lib/docker-config.js`              |
-| Container lifecycle      | `src/isolation-manager.js`          |
-| Settings                 | `lib/settings.js`                   |
+| Concept                     | File                                  |
+| --------------------------- | ------------------------------------- |
+| Conductor classification    | `src/conductor-bootstrap.js`          |
+| Base templates              | `cluster-templates/base-templates/`   |
+| Message bus                 | `src/message-bus.js`                  |
+| Ledger (SQLite)             | `src/ledger.js`                       |
+| Guidance topics             | `src/guidance-topics.js`              |
+| Guidance mailbox helper     | `src/ledger.js`                       |
+| Guidance live injection     | `src/orchestrator.js`                 |
+| Trigger evaluation          | `src/logic-engine.js`                 |
+| Agent wrapper               | `src/agent-wrapper.js`                |
+| Providers registry          | `src/providers/index.js`              |
+| Provider implementations    | `src/providers/`                      |
+| Provider detection          | `lib/provider-detection.js`           |
+| Provider capabilities       | `src/providers/capabilities.js`       |
+| Start-cluster helper        | `lib/start-cluster.js`                |
+| Docker mounts/env           | `lib/docker-config.js`                |
+| Container lifecycle         | `src/isolation-manager.js`            |
+| Settings                    | `lib/settings.js`                     |
+| Rust formatting/toolchain   | `rustfmt.toml`, `rust-toolchain.toml` |
+| Protocol wire types         | `crates/openengine-cluster-protocol/` |
+| Protocol dispatch/stdio     | `crates/openengine-cluster-server/`   |
+| Protocol client/transports  | `crates/openengine-cluster-client/`   |
+| Protocol fixtures/artifacts | `crates/openengine-cluster-testkit/`  |
+
+Cluster Protocol source of truth: Rust types define machine-readable wire shape; normative prose
+defines semantics. Generated files in `protocol/openengine-cluster/v1/` are projections and must
+be changed through `generate-cluster-protocol --write`, never edited by hand.
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
@@ -392,6 +401,7 @@ npm run test
 ```
 
 Mocha config: `.mocharc.cjs` applies defaults; passing explicit `*.test.js` files on the CLI skips the default `tests/**/*.test.js` spec.
+`tests/run-tests.js` isolates `ZEROSHOT_SETTINGS_FILE`, and the root Mocha hook restores that baseline between tests so user settings never affect the suite.
 
 Workers are now explicitly ordered to treat every `VALIDATION_RESULT` line as non-negotiable law before typing again. Failing to read and address each validator complaint before claiming completion will be rejected automatically.
 

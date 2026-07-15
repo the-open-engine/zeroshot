@@ -1,0 +1,2 @@
+{"id":1,"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"openengine.cluster/v1"}}
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"openengine.cluster/v1","capabilities":{},"status":{"phase":"empty","observedGeneration":null,"currentRunId":null,"atCursor":null}}}

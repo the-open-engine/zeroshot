@@ -8,6 +8,9 @@
  * tests passed.
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 
@@ -28,8 +31,14 @@ const args = process.argv.slice(2).flatMap((arg) => {
 const defaultTestFiles = ['tests/unit/**/*.test.js', 'tests/*.test.js'];
 const hasExplicitTestFile = args.some((arg) => !arg.startsWith('-'));
 const mochaArgs = hasExplicitTestFile ? args : [...defaultTestFiles, ...args];
+const explicitSettingsFile = process.env.ZEROSHOT_SETTINGS_FILE;
+const isolatedSettingsDirectory = explicitSettingsFile
+  ? null
+  : fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-test-settings-'));
+const settingsFile = explicitSettingsFile || path.join(isolatedSettingsDirectory, 'settings.json');
 const child = spawn('npx', ['mocha', '--parallel', ...mochaArgs], {
   stdio: ['inherit', 'pipe', 'pipe'],
+  env: { ...process.env, ZEROSHOT_SETTINGS_FILE: settingsFile },
 });
 
 let stdout = '';
@@ -46,6 +55,10 @@ child.stderr.on('data', (data) => {
 });
 
 child.on('close', (code) => {
+  if (isolatedSettingsDirectory) {
+    fs.rmSync(isolatedSettingsDirectory, { recursive: true, force: true });
+  }
+
   if (code === 0) {
     process.exit(0);
   }

@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":4,"method":"unknown","params":{}}
+{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}

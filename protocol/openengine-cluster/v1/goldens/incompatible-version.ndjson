@@ -1,0 +1,2 @@
+{"id":2,"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"openengine.cluster/v0"}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"Unsupported protocol version","data":{"code":"UNSUPPORTED_PROTOCOL_VERSION"}}}

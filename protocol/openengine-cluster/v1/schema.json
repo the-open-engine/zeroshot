@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImplementedProtocolSchema",
+  "type": "object",
+  "properties": {
+    "error_response": {
+      "$ref": "#/$defs/JsonRpcErrorResponse"
+    },
+    "get_params": {
+      "$ref": "#/$defs/GetParams"
+    },
+    "get_request": {
+      "$ref": "#/$defs/JsonRpcRequest2"
+    },
+    "get_response": {
+      "$ref": "#/$defs/JsonRpcSuccess2"
+    },
+    "initialize_params": {
+      "$ref": "#/$defs/InitializeParams"
+    },
+    "initialize_request": {
+      "$ref": "#/$defs/JsonRpcRequest"
+    },
+    "initialize_response": {
+      "$ref": "#/$defs/JsonRpcSuccess"
+    }
+  },
+  "required": [
+    "initialize_request",
+    "initialize_params",
+    "initialize_response",
+    "get_request",
+    "get_params",
+    "get_response",
+    "error_response"
+  ],
+  "$defs": {
+    "ClusterStatus": {
+      "type": "object",
+      "properties": {
+        "atCursor": {
+          "type": ["string", "null"]
+        },
+        "currentRunId": {
+          "type": ["string", "null"]
+        },
+        "observedGeneration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Generation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        }
+      },
+      "required": ["phase", "observedGeneration", "currentRunId", "atCursor"]
+    },
+    "DomainErrorData": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": true
+      },
+      "required": ["code"]
+    },
+    "Generation": {
+      "type": "integer",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 0
+    },
+    "GetParams": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "GetResult": {
+      "type": "object",
+      "properties": {
+        "atCursor": {
+          "type": ["string", "null"]
+        },
+        "spec": true,
+        "status": {
+          "$ref": "#/$defs/ClusterStatus"
+        }
+      },
+      "required": ["spec", "status", "atCursor"]
+    },
+    "InitializeParams": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["protocolVersion"]
+    },
+    "InitializeResult": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/ServerCapabilities"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ClusterStatus"
+        }
+      },
+      "required": ["protocolVersion", "capabilities", "status"]
+    },
+    "JsonRpcError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["code", "message"]
+    },
+    "JsonRpcErrorResponse": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/JsonRpcError"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "type": "string"
+        }
+      },
+      "required": ["jsonrpc", "id", "error"]
+    },
+    "JsonRpcRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/InitializeParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"]
+    },
+    "JsonRpcRequest2": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/GetParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"]
+    },
+    "JsonRpcSuccess": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/InitializeResult"
+        }
+      },
+      "required": ["jsonrpc", "id", "result"]
+    },
+    "JsonRpcSuccess2": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/GetResult"
+        }
+      },
+      "required": ["jsonrpc", "id", "result"]
+    },
+    "Phase": {
+      "type": "string",
+      "enum": ["empty"]
+    },
+    "RequestId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer",
+          "format": "int64"
+        }
+      ]
+    },
+    "ServerCapabilities": {
+      "type": "object",
+      "additionalProperties": false
+    }
+  }
+}

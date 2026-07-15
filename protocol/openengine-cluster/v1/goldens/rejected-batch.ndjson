@@ -1,0 +1,2 @@
+[{"jsonrpc":"2.0","id":6,"method":"get","params":{}}]
+{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid Request"}}

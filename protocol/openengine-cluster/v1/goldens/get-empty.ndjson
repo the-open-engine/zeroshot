@@ -1,0 +1,2 @@
+{"id":"get-1","jsonrpc":"2.0","method":"get","params":{}}
+{"jsonrpc":"2.0","id":"get-1","result":{"spec":null,"status":{"phase":"empty","observedGeneration":null,"currentRunId":null,"atCursor":null},"atCursor":null}}
