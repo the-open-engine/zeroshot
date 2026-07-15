@@ -1,0 +1,48 @@
+{
+  "info": {
+    "title": "Open Engine Cluster Protocol",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "initialize",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "protocolVersion",
+          "required": true,
+          "schema": {
+            "const": "openengine.cluster/v1",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "initializeResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/InitializeResult"
+        }
+      }
+    },
+    {
+      "name": "get",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "atCursor",
+          "required": false,
+          "schema": {
+            "type": ["string", "null"]
+          }
+        }
+      ],
+      "result": {
+        "name": "getResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/GetResult"
+        }
+      }
+    }
+  ],
+  "openrpc": "1.3.2"
+}

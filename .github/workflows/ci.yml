@@ -59,8 +59,26 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Setup Rust 1.97.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          components: clippy,rustfmt
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Check generated Cluster Protocol artifacts
+        run: npm run protocol:check
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test Rust workspace
+        run: cargo test --workspace
 
       - name: Security audit
         run: npm audit --audit-level=moderate --omit=dev
