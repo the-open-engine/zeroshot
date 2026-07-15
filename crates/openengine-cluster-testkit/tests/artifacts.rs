@@ -14,24 +14,40 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
         .iter()
         .map(|artifact| artifact.relative_path.as_str())
         .collect();
-    assert_eq!(
-        paths,
-        [
-            "protocol/openengine-cluster/v1/schema.json",
-            "protocol/openengine-cluster/v1/openrpc.json",
-            "protocol/openengine-cluster/v1/goldens/initialize.ndjson",
-            "protocol/openengine-cluster/v1/goldens/get-empty.ndjson",
-            "protocol/openengine-cluster/v1/goldens/incompatible-version.ndjson",
-            "protocol/openengine-cluster/v1/goldens/invalid-params.ndjson",
-            "protocol/openengine-cluster/v1/goldens/unknown-method.ndjson",
-            "protocol/openengine-cluster/v1/goldens/malformed-request.ndjson",
-            "protocol/openengine-cluster/v1/goldens/rejected-batch.ndjson",
-        ]
-    );
-    let all_newline_terminated = artifacts
-        .iter()
-        .all(|artifact| artifact.bytes.ends_with(b"\n"));
-    assert!(all_newline_terminated);
+    for required in [
+        "protocol/openengine-cluster/v1/schema.json",
+        "protocol/openengine-cluster/v1/graph.schema.json",
+        "protocol/openengine-cluster/v1/compiled-ir.schema.json",
+        "protocol/openengine-cluster/v1/openrpc.json",
+        "protocol/openengine-cluster/v1/fixtures/graph/positive/full-all-nodes.json",
+        "protocol/openengine-cluster/v1/fixtures/graph/positive/single-worker.json",
+        "protocol/openengine-cluster/v1/fixtures/graph/canonical/base.canonical.json",
+        "protocol/openengine-cluster/v1/fixtures/graph/canonical/base.sha256",
+        "protocol/openengine-cluster/v1/fixtures/graph/negative/unknown-node.json",
+        "protocol/openengine-cluster/v1/goldens/initialize.ndjson",
+        "protocol/openengine-cluster/v1/goldens/get-empty.ndjson",
+    ] {
+        assert!(paths.contains(&required), "missing {required}");
+    }
+    let unique: std::collections::BTreeSet<_> = paths.iter().copied().collect();
+    assert_eq!(unique.len(), paths.len(), "artifact paths must be unique");
+    for artifact in &artifacts {
+        if artifact
+            .relative_path
+            .ends_with("/canonical/base.canonical.json")
+        {
+            assert!(
+                !artifact.bytes.ends_with(b"\n"),
+                "canonical-byte golden must contain exactly the hashed bytes"
+            );
+        } else {
+            assert!(
+                artifact.bytes.ends_with(b"\n"),
+                "{} must be newline terminated",
+                artifact.relative_path
+            );
+        }
+    }
 
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -40,6 +56,32 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
         .unwrap()
         .to_path_buf();
     check_artifacts(&workspace).await.unwrap();
+}
+
+#[tokio::test]
+async fn openrpc_exposes_contract_components_without_advertising_future_methods() {
+    let artifacts = generate_artifacts().await;
+    let openrpc = artifacts
+        .iter()
+        .find(|artifact| artifact.relative_path.ends_with("/openrpc.json"))
+        .unwrap();
+    let openrpc: serde_json::Value = serde_json::from_slice(&openrpc.bytes).unwrap();
+    let methods: Vec<_> = openrpc["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|method| method["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(methods, ["initialize", "get"]);
+    for component in [
+        "GraphSpec",
+        "CompiledGraphIr",
+        "GraphDiagnostic",
+        "StructuralBounds",
+        "ArtifactRef",
+    ] {
+        assert!(openrpc["components"]["schemas"].get(component).is_some());
+    }
 }
 
 #[tokio::test]

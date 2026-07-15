@@ -1,0 +1,23 @@
+{
+  "code": "write_conflict",
+  "message": "two writes target state.result",
+  "path": [
+    {
+      "kind": "node",
+      "name": "parallel"
+    },
+    {
+      "kind": "field",
+      "name": "writeBindings"
+    },
+    {
+      "index": 1,
+      "kind": "index"
+    }
+  ],
+  "relatedNodes": [
+    "left",
+    "right"
+  ],
+  "severity": "error"
+}

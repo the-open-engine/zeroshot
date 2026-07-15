@@ -1,4 +1,23 @@
 {
+  "components": {
+    "schemas": {
+      "ArtifactRef": {
+        "$ref": "graph.schema.json#/$defs/ArtifactRef"
+      },
+      "CompiledGraphIr": {
+        "$ref": "compiled-ir.schema.json"
+      },
+      "GraphDiagnostic": {
+        "$ref": "graph.schema.json#/$defs/GraphDiagnostic"
+      },
+      "GraphSpec": {
+        "$ref": "graph.schema.json"
+      },
+      "StructuralBounds": {
+        "$ref": "graph.schema.json#/$defs/StructuralBounds"
+      }
+    }
+  },
   "info": {
     "title": "Open Engine Cluster Protocol",
     "version": "1.0.0"

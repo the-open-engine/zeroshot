@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    GetParams, GetResult, InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse,
+    ArtifactRef, CompiledGraphIr, GetParams, GetResult, GraphDiagnostic, GraphSpec,
+    InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse, StructuralBounds,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -10,6 +11,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 use crate::EmptyBackend;
+use crate::negative_graph_fixtures::{diagnostic_fixture, negative_graph_fixtures};
 
 const ROOT: &str = "protocol/openengine-cluster/v1";
 
@@ -43,6 +45,9 @@ pub struct ImplementedProtocolSchema {
 pub async fn generate_artifacts() -> Vec<Artifact> {
     let schema = serde_json::to_value(schema_for!(ImplementedProtocolSchema))
         .expect("JSON Schema serialization must succeed");
+    let graph_schema = graph_schema();
+    let compiled_ir_schema = serde_json::to_value(schema_for!(CompiledGraphIr))
+        .expect("compiled IR JSON Schema serialization must succeed");
     let openrpc = openrpc_document();
     let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
 
@@ -76,8 +81,14 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
 
     let mut artifacts = vec![
         json_artifact(format!("{ROOT}/schema.json"), schema),
+        json_artifact(format!("{ROOT}/graph.schema.json"), graph_schema),
+        json_artifact(
+            format!("{ROOT}/compiled-ir.schema.json"),
+            compiled_ir_schema,
+        ),
         json_artifact(format!("{ROOT}/openrpc.json"), openrpc),
     ];
+    artifacts.extend(graph_fixture_artifacts());
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {
@@ -177,6 +188,305 @@ fn openrpc_document() -> Value {
                     "schema": { "$ref": "schema.json#/$defs/GetResult" }
                 }
             }
-        ]
+        ],
+        "components": {
+            "schemas": {
+                "GraphSpec": { "$ref": "graph.schema.json" },
+                "CompiledGraphIr": { "$ref": "compiled-ir.schema.json" },
+                "GraphDiagnostic": { "$ref": "graph.schema.json#/$defs/GraphDiagnostic" },
+                "StructuralBounds": { "$ref": "graph.schema.json#/$defs/StructuralBounds" },
+                "ArtifactRef": { "$ref": "graph.schema.json#/$defs/ArtifactRef" }
+            }
+        }
+    })
+}
+
+fn graph_schema() -> Value {
+    let mut root = serde_json::to_value(schema_for!(GraphSpec))
+        .expect("graph JSON Schema serialization must succeed");
+    for (name, schema) in [
+        (
+            "GraphDiagnostic",
+            serde_json::to_value(schema_for!(GraphDiagnostic))
+                .expect("diagnostic schema serialization must succeed"),
+        ),
+        (
+            "StructuralBounds",
+            serde_json::to_value(schema_for!(StructuralBounds))
+                .expect("bounds schema serialization must succeed"),
+        ),
+        (
+            "ArtifactRef",
+            serde_json::to_value(schema_for!(ArtifactRef))
+                .expect("artifact schema serialization must succeed"),
+        ),
+    ] {
+        merge_schema(&mut root, name, schema);
+    }
+    root
+}
+
+fn merge_schema(root: &mut Value, name: &str, mut component: Value) {
+    if let Some(definitions) = component.get_mut("$defs").and_then(Value::as_object_mut) {
+        let definitions = std::mem::take(definitions);
+        root["$defs"]
+            .as_object_mut()
+            .expect("root schema has definitions")
+            .extend(definitions);
+    }
+    component
+        .as_object_mut()
+        .expect("schema root is an object")
+        .remove("$schema");
+    component
+        .as_object_mut()
+        .expect("schema root is an object")
+        .remove("$defs");
+    root["$defs"][name] = component;
+}
+
+fn graph_fixture_artifacts() -> Vec<Artifact> {
+    let full = full_graph_fixture();
+    let single = single_worker_fixture();
+    let compiled = compiled_fixture(&["right", "left"], &["first", "second"]);
+    let reordered = compiled_fixture(&["left", "right"], &["first", "second"]);
+    let mutated = compiled_fixture(&["left", "right"], &["second", "first"]);
+    let compiled_ir: CompiledGraphIr = serde_json::from_value(compiled.clone())
+        .expect("generated compiled fixture must deserialize");
+    let canonical_bytes = compiled_ir
+        .canonical_bytes()
+        .expect("generated compiled fixture must canonicalize");
+    let digest = compiled_ir
+        .identity()
+        .expect("generated compiled fixture must hash")
+        .to_string();
+
+    let mut artifacts = vec![
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/full-all-nodes.json"),
+            full.clone(),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/single-worker.json"),
+            single,
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/compiled-ir.json"),
+            compiled.clone(),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/diagnostic.json"),
+            diagnostic_fixture(),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/artifact-ref.json"),
+            artifact_ref_fixture(),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/canonical/base.json"),
+            compiled.clone(),
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/canonical/reordered.json"),
+            reordered,
+        ),
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/canonical/sequence-mutated.json"),
+            mutated,
+        ),
+        Artifact {
+            relative_path: format!("{ROOT}/fixtures/graph/canonical/base.canonical.json"),
+            bytes: canonical_bytes,
+        },
+        Artifact {
+            relative_path: format!("{ROOT}/fixtures/graph/canonical/base.sha256"),
+            bytes: format!("{digest}\n").into_bytes(),
+        },
+    ];
+
+    for (name, code, schema, document) in
+        negative_graph_fixtures(full, compiled, artifact_ref_fixture())
+    {
+        artifacts.push(json_artifact(
+            format!("{ROOT}/fixtures/graph/negative/{name}.json"),
+            json!({ "expectedCode": code, "schema": schema, "document": document }),
+        ));
+    }
+    artifacts
+}
+
+fn all_payload_type() -> Value {
+    json!({
+        "kind": "record",
+        "fields": {
+            "nothing": { "type": { "kind": "null" }, "required": false },
+            "enabled": { "type": { "kind": "boolean" }, "required": true },
+            "count": { "type": { "kind": "integer" }, "required": true },
+            "ratio": { "type": { "kind": "number" }, "required": false },
+            "text": { "type": { "kind": "string" }, "required": true },
+            "items": { "type": { "kind": "array", "items": { "kind": "string" } }, "required": true },
+            "verdict": { "type": { "kind": "enum", "values": ["accepted", "rejected"] }, "required": false }
+        }
+    })
+}
+
+fn control_selector(source: &str) -> Value {
+    json!({
+        "name": "verify",
+        "source": source,
+        "field": if source == "error" { Value::Null } else { json!("verdict") }
+    })
+}
+
+fn guard_fixture(kind: &str) -> Value {
+    match kind {
+        "in" => {
+            json!({ "kind": "in", "value": control_selector("signal"), "labels": ["accepted"] })
+        }
+        "all" => json!({ "kind": "all", "guards": [guard_fixture("in")] }),
+        "any" => json!({ "kind": "any", "guards": [guard_fixture("in")] }),
+        "not" => json!({ "kind": "not", "guard": guard_fixture("in") }),
+        "k_of_n" => json!({
+            "kind": "k_of_n", "count": 1,
+            "values": [control_selector("signal"), control_selector("error")],
+            "labels": ["accepted", "refusal"]
+        }),
+        "k_of_map" => json!({
+            "kind": "k_of_map", "count": 1, "value": control_selector("group"),
+            "labels": ["accepted"]
+        }),
+        _ => unreachable!("fixture guard kind is closed"),
+    }
+}
+
+fn succeed_fixture(name: &str) -> Value {
+    json!({
+        "kind": "succeed", "name": name, "output": { "kind": "string" },
+        "bindings": [{ "target": ["text"], "value": { "source": "state", "path": ["text"] } }]
+    })
+}
+
+fn full_graph_fixture() -> Value {
+    let branches = ["in", "all", "any", "not", "k_of_n", "k_of_map"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, kind)| {
+            json!({
+                "when": guard_fixture(kind),
+                "node": succeed_fixture(&format!("choice{index}"))
+            })
+        })
+        .collect::<Vec<_>>();
+    let par = |name: &str, join: Value| {
+        json!({
+            "kind": "par", "name": name, "state": all_payload_type(),
+            "branches": [succeed_fixture(&format!("{name}Left")), succeed_fixture(&format!("{name}Right"))],
+            "promotedStatePaths": [["text"]], "join": join
+        })
+    };
+    json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": all_payload_type(),
+        "policy": { "policy": "policy.default@1", "default": "deny" },
+        "root": {
+            "kind": "seq", "name": "root", "state": all_payload_type(),
+            "children": [
+                {
+                    "kind": "step", "name": "work", "worker": "legacy.zeroshot.ship@1",
+                    "input": all_payload_type(), "output": { "kind": "string" },
+                    "inputBindings": [
+                        { "target": ["text"], "value": { "source": "state", "path": ["text"] } },
+                        { "target": ["text"], "value": { "source": "item", "path": ["text"] } }
+                    ],
+                    "writeBindings": [{
+                        "value": { "node": "work", "channel": "out", "path": ["text"] },
+                        "target": ["text"]
+                    }],
+                    "timeoutMs": 1000, "attempts": 2
+                },
+                {
+                    "kind": "verifier", "name": "verify", "worker": "worker.validator@1",
+                    "input": { "kind": "string" }, "output": { "kind": "boolean" },
+                    "inputBindings": [], "writeBindings": [], "timeoutMs": 500, "attempts": 1,
+                    "signals": { "verdict": ["accepted", "rejected"] },
+                    "diagnostic": { "kind": "record", "fields": {} }
+                },
+                {
+                    "kind": "choice", "name": "choose", "state": all_payload_type(),
+                    "branches": branches,
+                    "otherwise": { "kind": "fail", "name": "failed", "reason": "rejected" },
+                    "promotedStatePaths": []
+                },
+                par("joinAll", json!({ "kind": "all" })),
+                par("joinAny", json!({ "kind": "any" })),
+                par("joinQuorum", json!({ "kind": "quorum", "count": 1 })),
+                par("joinFirst", json!({ "kind": "first", "when": guard_fixture("in") })),
+                {
+                    "kind": "loop", "name": "repeat", "state": all_payload_type(),
+                    "body": succeed_fixture("loopBody"), "until": guard_fixture("in"),
+                    "maxIterations": 3, "promotedStatePaths": []
+                },
+                {
+                    "kind": "map", "name": "each", "state": all_payload_type(),
+                    "body": succeed_fixture("mapBody"),
+                    "over": { "source": "state", "path": ["items"] },
+                    "maxItems": 32, "promotedStatePaths": []
+                }
+            ],
+            "promotedStatePaths": [["text"]]
+        }
+    })
+}
+
+fn single_worker_fixture() -> Value {
+    json!({
+        "profile": "openengine.graph.single-worker/v1",
+        "initialInput": { "kind": "null" },
+        "policy": { "policy": "policy.default@1", "default": "deny" },
+        "root": {
+            "kind": "step", "name": "worker", "worker": "legacy.zeroshot.ship@1",
+            "input": { "kind": "null" }, "output": { "kind": "null" },
+            "inputBindings": [], "writeBindings": [], "timeoutMs": 60000, "attempts": 1
+        }
+    })
+}
+
+fn compiled_fixture(par_order: &[&str], sequence_order: &[&str]) -> Value {
+    let terminal = |name: &&str| json!({ "kind": "succeed", "name": name, "output": { "kind": "null" }, "bindings": [] });
+    json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": { "kind": "record", "fields": {} },
+        "policy": { "policy": "policy.default@1", "default": "deny" },
+        "root": {
+            "kind": "seq", "name": "root", "state": { "kind": "record", "fields": {} },
+            "children": [
+                {
+                    "kind": "par", "name": "parallel", "state": { "kind": "record", "fields": {} },
+                    "branches": par_order.iter().map(terminal).collect::<Vec<_>>(),
+                    "promotedStatePaths": [], "join": { "kind": "all" }
+                },
+                {
+                    "kind": "seq", "name": "ordered", "state": { "kind": "record", "fields": {} },
+                    "children": sequence_order.iter().map(terminal).collect::<Vec<_>>(),
+                    "promotedStatePaths": []
+                }
+            ],
+            "promotedStatePaths": []
+        },
+        "bounds": {
+            "termination": { "kind": "bounded", "ranking": [["count"]], "maxIterations": 4 },
+            "maxNodeExecutions": 12, "peakConcurrency": 2,
+            "attemptsPerNode": { "parallel": 1, "ordered": 1 }
+        }
+    })
+}
+
+fn artifact_ref_fixture() -> Value {
+    json!({
+        "artifactId": "artifact-123", "sha256": "a".repeat(64), "byteLength": 42,
+        "mediaType": "application/json", "typeId": "openengine.result@1",
+        "producer": { "node": "work", "worker": "legacy.zeroshot.ship@1" },
+        "lineage": { "generation": 7, "runId": "run-9", "attempt": 1 },
+        "redaction": "internal"
     })
 }

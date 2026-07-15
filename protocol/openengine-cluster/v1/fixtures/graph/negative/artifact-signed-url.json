@@ -1,0 +1,22 @@
+{
+  "document": {
+    "artifactId": "artifact-123",
+    "byteLength": 42,
+    "lineage": {
+      "attempt": 1,
+      "generation": 7,
+      "runId": "run-9"
+    },
+    "mediaType": "application/json",
+    "producer": {
+      "node": "work",
+      "worker": "legacy.zeroshot.ship@1"
+    },
+    "redaction": "internal",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "signedUrl": "forbidden",
+    "typeId": "openengine.result@1"
+  },
+  "expectedCode": "FORBIDDEN_ARTIFACT_FIELD",
+  "schema": "artifact"
+}

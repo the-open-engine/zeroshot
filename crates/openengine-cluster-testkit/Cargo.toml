@@ -18,4 +18,6 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+jsonschema.workspace = true
+sha2.workspace = true
 tokio.workspace = true
