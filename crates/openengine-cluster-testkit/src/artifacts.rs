@@ -2,8 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    ArtifactRef, CompiledGraphIr, GetParams, GetResult, GraphDiagnostic, GraphSpec,
-    InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse, StructuralBounds,
+    ApplyParams, ApplyResult, ArtifactRef, CompiledGraphIr, GetParams, GetResult, GraphDiagnostic,
+    GraphSpec, InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse, PlanParams,
+    PlanResult, StructuralBounds,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -12,6 +13,8 @@ use thiserror::Error;
 
 use crate::EmptyBackend;
 use crate::negative_graph_fixtures::{diagnostic_fixture, negative_graph_fixtures};
+
+mod openrpc;
 
 const ROOT: &str = "protocol/openengine-cluster/v1";
 
@@ -38,6 +41,10 @@ pub enum ArtifactError {
 pub struct ImplementedProtocolSchema {
     pub initialize_request: JsonRpcRequest<InitializeParams>,
     pub initialize_response: JsonRpcResponse<InitializeResult>,
+    pub plan_request: JsonRpcRequest<PlanParams>,
+    pub plan_response: JsonRpcResponse<PlanResult>,
+    pub apply_request: JsonRpcRequest<ApplyParams>,
+    pub apply_response: JsonRpcResponse<ApplyResult>,
     pub get_request: JsonRpcRequest<GetParams>,
     pub get_response: JsonRpcResponse<GetResult>,
 }
@@ -48,7 +55,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     let graph_schema = graph_schema();
     let compiled_ir_schema = serde_json::to_value(schema_for!(CompiledGraphIr))
         .expect("compiled IR JSON Schema serialization must succeed");
-    let openrpc = openrpc_document();
+    let openrpc = openrpc::document();
     let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
 
     let cases = [
@@ -89,6 +96,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
         json_artifact(format!("{ROOT}/openrpc.json"), openrpc),
     ];
     artifacts.extend(graph_fixture_artifacts());
+    artifacts.extend(crate::admission_artifacts::generate_admission_goldens().await);
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {
@@ -147,58 +155,6 @@ fn json_artifact(relative_path: String, value: Value) -> Artifact {
         relative_path,
         bytes,
     }
-}
-
-fn openrpc_document() -> Value {
-    json!({
-        "openrpc": "1.3.2",
-        "info": {
-            "title": "Open Engine Cluster Protocol",
-            "version": "1.0.0"
-        },
-        "methods": [
-            {
-                "name": "initialize",
-                "paramStructure": "by-name",
-                "params": [{
-                    "name": "protocolVersion",
-                    "required": true,
-                    "schema": {
-                        "type": "string",
-                        "const": "openengine.cluster/v1"
-                    }
-                }],
-                "result": {
-                    "name": "initializeResult",
-                    "schema": { "$ref": "schema.json#/$defs/InitializeResult" }
-                }
-            },
-            {
-                "name": "get",
-                "paramStructure": "by-name",
-                "params": [{
-                    "name": "atCursor",
-                    "required": false,
-                    "schema": {
-                        "type": ["string", "null"]
-                    }
-                }],
-                "result": {
-                    "name": "getResult",
-                    "schema": { "$ref": "schema.json#/$defs/GetResult" }
-                }
-            }
-        ],
-        "components": {
-            "schemas": {
-                "GraphSpec": { "$ref": "graph.schema.json" },
-                "CompiledGraphIr": { "$ref": "compiled-ir.schema.json" },
-                "GraphDiagnostic": { "$ref": "graph.schema.json#/$defs/GraphDiagnostic" },
-                "StructuralBounds": { "$ref": "graph.schema.json#/$defs/StructuralBounds" },
-                "ArtifactRef": { "$ref": "graph.schema.json#/$defs/ArtifactRef" }
-            }
-        }
-    })
 }
 
 fn graph_schema() -> Value {

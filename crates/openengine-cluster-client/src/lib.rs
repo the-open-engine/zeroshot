@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    GetParams, GetResult, InitializeParams, InitializeResult, JsonRpcError, JsonRpcErrorResponse,
-    JsonRpcRequest, JsonRpcSuccess, RequestId, JSON_RPC_VERSION, PROTOCOL_VERSION,
+    ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
+    JsonRpcError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccess, PlanParams, PlanResult,
+    RequestId, JSON_RPC_VERSION, PROTOCOL_VERSION,
 };
 use openengine_cluster_server::{ClusterBackend, Dispatcher};
 use serde::de::DeserializeOwned;
@@ -148,8 +149,16 @@ where
         Ok(result)
     }
 
-    pub async fn get(&self) -> Result<GetResult, ClientError> {
-        self.call("get", GetParams::default()).await
+    pub async fn plan(&self, params: PlanParams) -> Result<PlanResult, ClientError> {
+        self.call("plan", params).await
+    }
+
+    pub async fn apply(&self, params: ApplyParams) -> Result<ApplyResult, ClientError> {
+        self.call("apply", params).await
+    }
+
+    pub async fn get(&self, params: GetParams) -> Result<GetResult, ClientError> {
+        self.call("get", params).await
     }
 
     async fn call<P, R>(&self, method: &str, params: P) -> Result<R, ClientError>

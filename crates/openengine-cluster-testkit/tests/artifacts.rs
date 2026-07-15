@@ -26,6 +26,8 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
         "protocol/openengine-cluster/v1/fixtures/graph/negative/unknown-node.json",
         "protocol/openengine-cluster/v1/goldens/initialize.ndjson",
         "protocol/openengine-cluster/v1/goldens/get-empty.ndjson",
+        "protocol/openengine-cluster/v1/goldens/admission-lifecycle.ndjson",
+        "protocol/openengine-cluster/v1/goldens/admission-errors.ndjson",
     ] {
         assert!(paths.contains(&required), "missing {required}");
     }
@@ -59,7 +61,7 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
 }
 
 #[tokio::test]
-async fn openrpc_exposes_contract_components_without_advertising_future_methods() {
+async fn openrpc_exposes_only_the_implemented_protocol_methods() {
     let artifacts = generate_artifacts().await;
     let openrpc = artifacts
         .iter()
@@ -72,7 +74,7 @@ async fn openrpc_exposes_contract_components_without_advertising_future_methods(
         .iter()
         .map(|method| method["name"].as_str().unwrap())
         .collect();
-    assert_eq!(methods, ["initialize", "get"]);
+    assert_eq!(methods, ["initialize", "plan", "apply", "get"]);
     for component in [
         "GraphSpec",
         "CompiledGraphIr",
@@ -82,6 +84,53 @@ async fn openrpc_exposes_contract_components_without_advertising_future_methods(
     ] {
         assert!(openrpc["components"]["schemas"].get(component).is_some());
     }
+}
+
+#[tokio::test]
+async fn openrpc_apply_controls_match_the_authoritative_apply_schema() {
+    let artifacts = generate_artifacts().await;
+    let parse_artifact = |suffix: &str| {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.relative_path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("missing generated artifact {suffix}"));
+        serde_json::from_slice::<serde_json::Value>(&artifact.bytes).unwrap()
+    };
+    let openrpc = parse_artifact("/openrpc.json");
+    let schema = parse_artifact("/schema.json");
+    let apply = openrpc["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "apply")
+        .unwrap();
+
+    for property in ["dryRun", "ifGeneration", "idempotencyKey"] {
+        let advertised = apply["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|parameter| parameter["name"] == property)
+            .unwrap_or_else(|| panic!("OpenRPC apply is missing {property}"));
+        assert_eq!(
+            advertised["schema"], schema["$defs"]["ApplyParams"]["properties"][property],
+            "OpenRPC drifted from ApplyParams for {property}"
+        );
+    }
+
+    let idempotency_schema = apply["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|parameter| parameter["name"] == "idempotencyKey")
+        .unwrap()["schema"]
+        .clone();
+    assert!(
+        !jsonschema::validator_for(&idempotency_schema)
+            .unwrap()
+            .is_valid(&serde_json::json!("bad\nkey")),
+        "OpenRPC must reject idempotency-key control characters"
+    );
 }
 
 #[tokio::test]

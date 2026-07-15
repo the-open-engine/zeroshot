@@ -1,5 +1,7 @@
 //! Deterministic fixtures for Cluster Protocol conformance tests.
 
+pub mod admission;
+mod admission_artifacts;
 pub mod artifacts;
 mod negative_graph_fixtures;
 
