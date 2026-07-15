@@ -1,15 +1,17 @@
 //! Backend-neutral Cluster Protocol dispatcher.
 
+pub mod admission;
 pub mod stdio;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    DomainErrorData, GetParams, GetResult, InitializeParams, InitializeResult, JsonRpcError,
-    JsonRpcErrorResponse, JsonRpcSuccess, RequestId, APPLICATION_ERROR, INTERNAL_ERROR,
-    INTERNAL_ERROR_CODE, INVALID_PARAMS, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND,
-    PARSE_ERROR, PROTOCOL_VERSION, UNSUPPORTED_PROTOCOL_VERSION,
+    ApplyParams, ApplyResult, DomainErrorData, GetParams, GetResult, InitializeParams,
+    InitializeResult, JsonRpcError, JsonRpcErrorResponse, JsonRpcSuccess, PlanParams, PlanResult,
+    RequestId, APPLICATION_ERROR, INTERNAL_ERROR, INTERNAL_ERROR_CODE, INVALID_PARAMS,
+    INVALID_PHASE, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
+    PROTOCOL_VERSION, SCHEMA_VIOLATION, UNSUPPORTED_PROTOCOL_VERSION,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -17,11 +19,20 @@ use thiserror::Error;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConnectionContext {
     pub peer_label: Option<String>,
+    pub cancellation: admission::CancellationSignal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackendErrorKind {
+    Internal,
+    InvalidParams,
+    Application,
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 #[error("{message}")]
 pub struct BackendError {
+    pub kind: BackendErrorKind,
     pub code: String,
     pub message: String,
     pub details: Option<Value>,
@@ -31,9 +42,38 @@ impl BackendError {
     #[must_use]
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
+            kind: BackendErrorKind::Internal,
             code: code.into(),
             message: message.into(),
             details: None,
+        }
+    }
+
+    #[must_use]
+    pub fn invalid_params(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: Option<Value>,
+    ) -> Self {
+        Self {
+            kind: BackendErrorKind::InvalidParams,
+            code: code.into(),
+            message: message.into(),
+            details,
+        }
+    }
+
+    #[must_use]
+    pub fn application(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: Option<Value>,
+    ) -> Self {
+        Self {
+            kind: BackendErrorKind::Application,
+            code: code.into(),
+            message: message.into(),
+            details,
         }
     }
 }
@@ -45,6 +85,30 @@ pub trait ClusterBackend: Send + Sync + 'static {
         context: &ConnectionContext,
         params: InitializeParams,
     ) -> Result<InitializeResult, BackendError>;
+
+    async fn plan(
+        &self,
+        _context: &ConnectionContext,
+        _params: PlanParams,
+    ) -> Result<PlanResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not admit graphs",
+            None,
+        ))
+    }
+
+    async fn apply(
+        &self,
+        _context: &ConnectionContext,
+        _params: ApplyParams,
+    ) -> Result<ApplyResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not admit graphs",
+            None,
+        ))
+    }
 
     async fn get(
         &self,
@@ -118,6 +182,8 @@ where
 
         let method = match method.as_str() {
             "initialize" => ImplementedMethod::Initialize,
+            "plan" => ImplementedMethod::Plan,
+            "apply" => ImplementedMethod::Apply,
             "get" => ImplementedMethod::Get,
             _ => {
                 return serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None);
@@ -134,7 +200,45 @@ where
 
         match method {
             ImplementedMethod::Initialize => self.dispatch_initialize(id, params).await,
+            ImplementedMethod::Plan => self.dispatch_plan(id, params).await,
+            ImplementedMethod::Apply => self.dispatch_apply(id, params).await,
             ImplementedMethod::Get => self.dispatch_get(id, params).await,
+        }
+    }
+
+    async fn dispatch_plan(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<PlanParams>(params) {
+            Ok(params) => params,
+            Err(_) => {
+                return serialize_error(
+                    Some(id),
+                    INVALID_PARAMS,
+                    "Invalid params",
+                    Some(DomainErrorData::new(SCHEMA_VIOLATION)),
+                );
+            }
+        };
+        match self.backend.plan(&self.context, params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_apply(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<ApplyParams>(params) {
+            Ok(params) => params,
+            Err(_) => {
+                return serialize_error(
+                    Some(id),
+                    INVALID_PARAMS,
+                    "Invalid params",
+                    Some(DomainErrorData::new(SCHEMA_VIOLATION)),
+                );
+            }
+        };
+        match self.backend.apply(&self.context, params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
         }
     }
 
@@ -189,6 +293,8 @@ where
 
 enum ImplementedMethod {
     Initialize,
+    Plan,
+    Apply,
     Get,
 }
 
@@ -213,19 +319,40 @@ where
 }
 
 fn serialize_backend_error(id: RequestId, error: BackendError) -> String {
-    serialize_error(
-        Some(id),
-        INTERNAL_ERROR,
-        "Internal error",
-        Some(DomainErrorData {
-            code: if error.code.is_empty() {
-                INTERNAL_ERROR_CODE.to_owned()
-            } else {
-                error.code
-            },
-            details: Some(json!({ "message": error.message, "details": error.details })),
-        }),
-    )
+    let code = if error.code.is_empty() {
+        INTERNAL_ERROR_CODE.to_owned()
+    } else {
+        error.code
+    };
+    match error.kind {
+        BackendErrorKind::Internal => serialize_error(
+            Some(id),
+            INTERNAL_ERROR,
+            "Internal error",
+            Some(DomainErrorData {
+                code,
+                details: None,
+            }),
+        ),
+        BackendErrorKind::InvalidParams => serialize_error(
+            Some(id),
+            INVALID_PARAMS,
+            "Invalid params",
+            Some(DomainErrorData {
+                code,
+                details: error.details,
+            }),
+        ),
+        BackendErrorKind::Application => serialize_error(
+            Some(id),
+            APPLICATION_ERROR,
+            &error.message,
+            Some(DomainErrorData {
+                code,
+                details: error.details,
+            }),
+        ),
+    }
 }
 
 fn serialize_error(

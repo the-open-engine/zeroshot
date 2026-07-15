@@ -4,11 +4,18 @@ use openengine_cluster_client::{
     TransportError,
 };
 use openengine_cluster_protocol::{
-    ClusterStatus, Generation, GetResult, InitializeResult, ServerCapabilities, PROTOCOL_VERSION,
+    ApplyParams, ClusterStatus, Generation, GetParams, GetResult, IdempotencyKey, InitializeResult,
+    PlanParams, ServerCapabilities, PROTOCOL_VERSION,
 };
+use openengine_cluster_server::admission::AdmissionCoordinator;
 use openengine_cluster_server::{BackendError, ClusterBackend};
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use openengine_cluster_testkit::EmptyBackend;
+use openengine_cluster_testkit::admission::{
+    compiled_from_graph_fixture, graph_fixture, InMemoryAdmissionStore, ScriptedOutcome,
+    ScriptedVerifier,
+};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
@@ -100,9 +107,15 @@ async fn initialize_and_get_match_across_transports() {
     let stdio = ClusterClient::new(NdjsonTransport::new(stdout, stdin));
 
     let in_process_initialize = in_process.initialize().await.unwrap();
-    let in_process_get = in_process.get().await.unwrap();
+    let in_process_get = in_process
+        .get(openengine_cluster_protocol::GetParams::default())
+        .await
+        .unwrap();
     let stdio_initialize = stdio.initialize().await.unwrap();
-    let stdio_get = stdio.get().await.unwrap();
+    let stdio_get = stdio
+        .get(openengine_cluster_protocol::GetParams::default())
+        .await
+        .unwrap();
 
     assert_eq!(stdio_initialize, in_process_initialize);
     assert_eq!(stdio_get, in_process_get);
@@ -112,6 +125,76 @@ async fn initialize_and_get_match_across_transports() {
     assert_eq!(stdio_get.spec, None);
     assert_eq!(stdio_get.status, ClusterStatus::empty());
     assert_eq!(stdio_get.at_cursor, None);
+
+    drop(stdio);
+    assert!(child.wait().await.unwrap().success());
+    assert_eq!(stderr_task.await.unwrap(), b"");
+}
+
+#[tokio::test]
+async fn admission_transcript_matches_in_process_and_stdio() {
+    let graph = graph_fixture("worker", serde_json::json!({"kind":"null"}));
+    let compiled = compiled_from_graph_fixture(&graph);
+    let verifier = Arc::new(ScriptedVerifier::new(vec![
+        ScriptedOutcome::approve(compiled.clone(), vec![]),
+        ScriptedOutcome::approve(compiled, vec![]),
+    ]));
+    let store = Arc::new(InMemoryAdmissionStore::default());
+    let backend = AdmissionCoordinator::from_shared(verifier, Arc::clone(&store));
+    let in_process = ClusterClient::new(InProcessTransport::new(Dispatcher::new(
+        backend,
+        ConnectionContext::default(),
+    )));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_openengine-cluster-stdio"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let stderr_task = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).await.unwrap();
+        bytes
+    });
+    let stdio = ClusterClient::new(NdjsonTransport::new(stdout, stdin));
+
+    assert_eq!(
+        stdio.initialize().await.unwrap(),
+        in_process.initialize().await.unwrap()
+    );
+    let plan = PlanParams {
+        graph: graph.clone(),
+    };
+    assert_eq!(
+        stdio.plan(plan.clone()).await.unwrap(),
+        in_process.plan(plan).await.unwrap()
+    );
+    let apply = ApplyParams {
+        graph: graph.clone(),
+        input: Some(serde_json::Value::Null),
+        dry_run: false,
+        if_generation: Some(Generation::new(0).unwrap()),
+        idempotency_key: Some(IdempotencyKey::new("transcript-create").unwrap()),
+    };
+    assert_eq!(
+        stdio.apply(apply.clone()).await.unwrap(),
+        in_process.apply(apply).await.unwrap()
+    );
+    let stdio_get = stdio.get(GetParams::default()).await.unwrap();
+    let in_process_get = in_process.get(GetParams::default()).await.unwrap();
+    assert_eq!(stdio_get, in_process_get);
+    assert_eq!(stdio_get.spec, Some(graph));
+    let effects = store.inspect().await;
+    assert_eq!(effects.control_journal.len(), 1);
+    assert_eq!(effects.seed_ledger[0].input, serde_json::Value::Null);
+    assert_eq!(
+        effects.control.cursor,
+        Some(effects.seed_ledger[0].cursor.clone())
+    );
 
     drop(stdio);
     assert!(child.wait().await.unwrap().success());

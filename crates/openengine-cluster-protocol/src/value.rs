@@ -22,10 +22,11 @@ where
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
-pub(crate) struct BoundedString256(String);
+pub struct BoundedString256(String);
 
 impl BoundedString256 {
-    pub(crate) fn new(value: String) -> Result<Self, &'static str> {
+    pub fn new(value: impl Into<String>) -> Result<Self, &'static str> {
+        let value = value.into();
         if value.is_empty() {
             Err("value must not be empty")
         } else if value.chars().count() > 256 || value.chars().any(char::is_control) {
@@ -35,8 +36,14 @@ impl BoundedString256 {
         }
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl fmt::Display for BoundedString256 {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
     }
 }
 

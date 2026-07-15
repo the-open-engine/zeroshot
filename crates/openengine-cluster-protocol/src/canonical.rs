@@ -1,5 +1,6 @@
 //! Canonical compiled IR serialization and graph identities.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::PayloadType;
+use crate::{GraphDiff, NodeName, PayloadType};
 use crate::{
     ChoiceBranch, ChoiceNode, ControlSelector, GraphNode, GraphProfile, Guard, InputBinding, Join,
     LoopNode, MapNode, NonEmptyVec, ParNode, PolicyBinding, SeqNode, Sha256Digest,
@@ -57,6 +58,8 @@ pub enum CanonicalError {
     Serialize(serde_json::Error),
     #[error("canonical IR cannot contain floating-point values")]
     FloatingPoint,
+    #[error("compiled graph contains duplicate node name {0}")]
+    DuplicateNodeName(NodeName),
 }
 
 #[derive(
@@ -89,6 +92,129 @@ impl FromStr for GraphIdentity {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value)
     }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(transparent)]
+#[schemars(transparent)]
+pub struct RequestFingerprint(Sha256Digest);
+
+impl RequestFingerprint {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Display for RequestFingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Hash a method and its validated parameters using recursively key-sorted JSON.
+pub fn admission_fingerprint(
+    method: &str,
+    parameters: &serde_json::Value,
+) -> Result<RequestFingerprint, CanonicalError> {
+    let envelope = serde_json::json!({ "method": method, "params": parameters });
+    let digest = Sha256::digest(canonical_value_bytes(&envelope)?);
+    Ok(RequestFingerprint(
+        Sha256Digest::new(format!("{digest:x}"))
+            .expect("SHA-256 encoder always emits a valid digest"),
+    ))
+}
+
+/// Canonical JSON bytes for validated request values.
+pub fn canonical_value_bytes(value: &serde_json::Value) -> Result<Vec<u8>, CanonicalError> {
+    let mut bytes = Vec::new();
+    write_canonical_json(value, &mut bytes, true)?;
+    Ok(bytes)
+}
+
+/// Compute a stable node-name diff between verified compiled graphs.
+pub fn diff_compiled_graphs(
+    current: Option<&CompiledGraphIr>,
+    desired: &CompiledGraphIr,
+) -> Result<GraphDiff, CanonicalError> {
+    let current = current
+        .map(node_fingerprints)
+        .transpose()?
+        .unwrap_or_default();
+    let desired = node_fingerprints(desired)?;
+    Ok(GraphDiff {
+        added: desired
+            .keys()
+            .filter(|name| !current.contains_key(*name))
+            .cloned()
+            .collect(),
+        removed: current
+            .keys()
+            .filter(|name| !desired.contains_key(*name))
+            .cloned()
+            .collect(),
+        changed: desired
+            .iter()
+            .filter_map(|(name, bytes)| {
+                current
+                    .get(name)
+                    .filter(|current| *current != bytes)
+                    .map(|_| name.clone())
+            })
+            .collect(),
+    })
+}
+
+fn node_fingerprints(
+    graph: &CompiledGraphIr,
+) -> Result<BTreeMap<NodeName, Vec<u8>>, CanonicalError> {
+    let mut nodes = BTreeMap::new();
+    collect_node_fingerprints(&graph.root, &mut nodes)?;
+    Ok(nodes)
+}
+
+fn collect_node_fingerprints(
+    node: &GraphNode,
+    nodes: &mut BTreeMap<NodeName, Vec<u8>>,
+) -> Result<(), CanonicalError> {
+    let mut normalized = node.clone();
+    normalize_node(&mut normalized)?;
+    let name = node.name().clone();
+    if nodes
+        .insert(name.clone(), canonical_json_bytes(&normalized)?)
+        .is_some()
+    {
+        return Err(CanonicalError::DuplicateNodeName(name));
+    }
+    match node {
+        GraphNode::Seq(node) => {
+            for child in node.children.as_slice() {
+                collect_node_fingerprints(child, nodes)?;
+            }
+        }
+        GraphNode::Choice(node) => {
+            for branch in node.branches.as_slice() {
+                collect_node_fingerprints(&branch.node, nodes)?;
+            }
+            if let Some(otherwise) = &node.otherwise {
+                collect_node_fingerprints(otherwise, nodes)?;
+            }
+        }
+        GraphNode::Par(node) => {
+            for branch in node.branches.as_slice() {
+                collect_node_fingerprints(branch, nodes)?;
+            }
+        }
+        GraphNode::Loop(node) => collect_node_fingerprints(&node.body, nodes)?,
+        GraphNode::Map(node) => collect_node_fingerprints(&node.body, nodes)?,
+        GraphNode::Step(_)
+        | GraphNode::Verifier(_)
+        | GraphNode::Succeed(_)
+        | GraphNode::Fail(_) => {}
+    }
+    Ok(())
 }
 
 fn take_sorted_by_canonical_json<T>(
@@ -174,24 +300,30 @@ where
 {
     let value = serde_json::to_value(value).map_err(CanonicalError::Serialize)?;
     let mut bytes = Vec::new();
-    write_canonical_json(&value, &mut bytes)?;
+    write_canonical_json(&value, &mut bytes, false)?;
     Ok(bytes)
 }
 
 fn write_canonical_json(
     value: &serde_json::Value,
     output: &mut Vec<u8>,
+    allow_floating_point: bool,
 ) -> Result<(), CanonicalError> {
     match value {
-        serde_json::Value::Array(values) => write_canonical_array(values, output),
-        serde_json::Value::Object(values) => write_canonical_object(values, output),
-        value => write_canonical_scalar(value, output),
+        serde_json::Value::Array(values) => {
+            write_canonical_array(values, output, allow_floating_point)
+        }
+        serde_json::Value::Object(values) => {
+            write_canonical_object(values, output, allow_floating_point)
+        }
+        value => write_canonical_scalar(value, output, allow_floating_point),
     }
 }
 
 fn write_canonical_scalar(
     value: &serde_json::Value,
     output: &mut Vec<u8>,
+    allow_floating_point: bool,
 ) -> Result<(), CanonicalError> {
     match value {
         serde_json::Value::Null => output.extend_from_slice(b"null"),
@@ -199,7 +331,7 @@ fn write_canonical_scalar(
             output.extend_from_slice(if *value { b"true" } else { b"false" });
         }
         serde_json::Value::Number(number) => {
-            if number.is_f64() {
+            if number.is_f64() && !allow_floating_point {
                 return Err(CanonicalError::FloatingPoint);
             }
             serde_json::to_writer(output, number).map_err(CanonicalError::Serialize)?;
@@ -217,13 +349,14 @@ fn write_canonical_scalar(
 fn write_canonical_array(
     values: &[serde_json::Value],
     output: &mut Vec<u8>,
+    allow_floating_point: bool,
 ) -> Result<(), CanonicalError> {
     output.push(b'[');
     for (index, value) in values.iter().enumerate() {
         if index != 0 {
             output.push(b',');
         }
-        write_canonical_json(value, output)?;
+        write_canonical_json(value, output, allow_floating_point)?;
     }
     output.push(b']');
     Ok(())
@@ -232,6 +365,7 @@ fn write_canonical_array(
 fn write_canonical_object(
     values: &serde_json::Map<String, serde_json::Value>,
     output: &mut Vec<u8>,
+    allow_floating_point: bool,
 ) -> Result<(), CanonicalError> {
     output.push(b'{');
     let mut entries = values.iter().collect::<Vec<_>>();
@@ -242,7 +376,7 @@ fn write_canonical_object(
         }
         serde_json::to_writer(&mut *output, key).map_err(CanonicalError::Serialize)?;
         output.push(b':');
-        write_canonical_json(value, output)?;
+        write_canonical_json(value, output, allow_floating_point)?;
     }
     output.push(b'}');
     Ok(())

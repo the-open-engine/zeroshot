@@ -1,17 +1,21 @@
 //! Canonical Open Engine Cluster Protocol wire and domain types.
 
+pub mod admission;
 pub mod artifact;
 pub mod canonical;
 pub mod diagnostic;
 pub mod graph;
 pub mod payload;
+mod payload_value;
 mod value;
 
 pub use artifact::*;
+pub use admission::*;
 pub use canonical::*;
 pub use diagnostic::*;
 pub use graph::*;
 pub use payload::*;
+pub use payload_value::*;
 
 use std::borrow::Cow;
 
@@ -160,7 +164,7 @@ pub struct GetParams {
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetResult {
-    pub spec: Option<Value>,
+    pub spec: Option<GraphSpec>,
     pub status: ClusterStatus,
     pub at_cursor: Option<Cursor>,
 }
@@ -194,6 +198,8 @@ impl ClusterStatus {
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     Empty,
+    Admitting,
+    Running,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

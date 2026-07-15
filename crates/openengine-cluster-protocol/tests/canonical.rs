@@ -1,4 +1,6 @@
-use openengine_cluster_protocol::{CompiledGraphIr, GraphIdentity};
+use openengine_cluster_protocol::{
+    admission_fingerprint, diff_compiled_graphs, CanonicalError, CompiledGraphIr, GraphIdentity,
+};
 use serde_json::{json, Value};
 
 #[test]
@@ -251,4 +253,46 @@ fn canonical_ir_preserves_duplicate_binding_and_selector_multiplicity() {
         one_selector.identity().unwrap(),
         duplicate_selector.identity().unwrap()
     );
+}
+
+#[test]
+fn admission_fingerprint_sorts_json_keys_and_binds_the_method() {
+    let left = admission_fingerprint(
+        "apply",
+        &json!({"input":{"z":1,"a":[true,null]},"dryRun":false}),
+    )
+    .unwrap();
+    let reordered = admission_fingerprint(
+        "apply",
+        &json!({"dryRun":false,"input":{"a":[true,null],"z":1}}),
+    )
+    .unwrap();
+    assert_eq!(left, reordered);
+    assert_ne!(
+        left,
+        admission_fingerprint(
+            "plan",
+            &json!({"dryRun":false,"input":{"a":[true,null],"z":1}})
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn compiled_node_diff_is_sorted_and_rejects_duplicate_names() {
+    let baseline = ir(&["a", "b"], &["one", "two"]);
+    let created = diff_compiled_graphs(None, &baseline).unwrap();
+    let created_names: Vec<_> = created.added.iter().map(|name| name.as_str()).collect();
+    assert_eq!(
+        created_names,
+        ["a", "b", "one", "ordered", "parallel", "root", "two"]
+    );
+
+    let mut duplicate = serde_json::to_value(&baseline).unwrap();
+    duplicate["root"]["children"][1]["children"][1]["name"] = json!("one");
+    let duplicate: CompiledGraphIr = serde_json::from_value(duplicate).unwrap();
+    assert!(matches!(
+        diff_compiled_graphs(None, &duplicate),
+        Err(CanonicalError::DuplicateNodeName(name)) if name.as_str() == "one"
+    ));
 }
