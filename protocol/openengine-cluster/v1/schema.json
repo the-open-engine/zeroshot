@@ -39,10 +39,16 @@
       "type": "object",
       "properties": {
         "atCursor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "currentRunId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "observedGeneration": {
           "anyOf": [
@@ -58,7 +64,12 @@
           "$ref": "#/$defs/Phase"
         }
       },
-      "required": ["phase", "observedGeneration", "currentRunId", "atCursor"]
+      "required": [
+        "phase",
+        "observedGeneration",
+        "currentRunId",
+        "atCursor"
+      ]
     },
     "DomainErrorData": {
       "type": "object",
@@ -68,7 +79,9 @@
         },
         "details": true
       },
-      "required": ["code"]
+      "required": [
+        "code"
+      ]
     },
     "Generation": {
       "type": "integer",
@@ -84,14 +97,21 @@
       "type": "object",
       "properties": {
         "atCursor": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "spec": true,
         "status": {
           "$ref": "#/$defs/ClusterStatus"
         }
       },
-      "required": ["spec", "status", "atCursor"]
+      "required": [
+        "spec",
+        "status",
+        "atCursor"
+      ]
     },
     "InitializeParams": {
       "type": "object",
@@ -101,7 +121,9 @@
         }
       },
       "additionalProperties": false,
-      "required": ["protocolVersion"]
+      "required": [
+        "protocolVersion"
+      ]
     },
     "InitializeResult": {
       "type": "object",
@@ -116,7 +138,11 @@
           "$ref": "#/$defs/ClusterStatus"
         }
       },
-      "required": ["protocolVersion", "capabilities", "status"]
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "status"
+      ]
     },
     "JsonRpcError": {
       "type": "object",
@@ -139,7 +165,10 @@
           "type": "string"
         }
       },
-      "required": ["code", "message"]
+      "required": [
+        "code",
+        "message"
+      ]
     },
     "JsonRpcErrorResponse": {
       "type": "object",
@@ -161,7 +190,11 @@
           "type": "string"
         }
       },
-      "required": ["jsonrpc", "id", "error"]
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ]
     },
     "JsonRpcRequest": {
       "type": "object",
@@ -180,7 +213,12 @@
         }
       },
       "additionalProperties": false,
-      "required": ["jsonrpc", "id", "method", "params"]
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ]
     },
     "JsonRpcRequest2": {
       "type": "object",
@@ -199,7 +237,12 @@
         }
       },
       "additionalProperties": false,
-      "required": ["jsonrpc", "id", "method", "params"]
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ]
     },
     "JsonRpcSuccess": {
       "type": "object",
@@ -214,7 +257,11 @@
           "$ref": "#/$defs/InitializeResult"
         }
       },
-      "required": ["jsonrpc", "id", "result"]
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ]
     },
     "JsonRpcSuccess2": {
       "type": "object",
@@ -229,11 +276,17 @@
           "$ref": "#/$defs/GetResult"
         }
       },
-      "required": ["jsonrpc", "id", "result"]
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ]
     },
     "Phase": {
       "type": "string",
-      "enum": ["empty"]
+      "enum": [
+        "empty"
+      ]
     },
     "RequestId": {
       "anyOf": [

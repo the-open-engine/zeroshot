@@ -4,3 +4,4 @@ coverage
 .tsbuildinfo
 .eslintcache
 lib/agent-cli-provider
+protocol/openengine-cluster/v1/

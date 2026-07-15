@@ -6,6 +6,16 @@ const Ajv2020 = require('ajv/dist/2020');
 const artifactDirectory = path.join(__dirname, '..', 'protocol', 'openengine-cluster', 'v1');
 
 describe('generated cluster protocol artifacts', () => {
+  it('excludes generated files from formatter rewrites', async () => {
+    const prettier = await import('prettier');
+    const schemaPath = path.join(artifactDirectory, 'schema.json');
+    const fileInfo = await prettier.getFileInfo(schemaPath, {
+      ignorePath: path.join(__dirname, '..', '.prettierignore'),
+    });
+
+    assert.strictEqual(fileInfo.ignored, true);
+  });
+
   it('validates every golden response against its generated schema definition', () => {
     const schema = JSON.parse(fs.readFileSync(path.join(artifactDirectory, 'schema.json'), 'utf8'));
     const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
