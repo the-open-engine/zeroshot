@@ -232,6 +232,7 @@ module.exports = {
   setupE2ERepo,
   cleanupE2ERepo,
   runZeroshot,
+  buildEnv,
   clustersFilePath,
   readClusters,
   readCluster,

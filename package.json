@@ -1,6 +1,6 @@
 {
   "name": "@the-open-engine/zeroshot",
-  "version": "6.4.0",
+  "version": "6.6.0",
   "description": "Multi-agent orchestration engine for Claude, Codex, and Gemini",
   "main": "src/orchestrator.js",
   "bin": {
@@ -63,6 +63,8 @@
     "validate:templates": "node scripts/validate-templates.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "protocol:check": "cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check",
+    "rust:check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "deadcode": "ts-prune --skip node_modules",
     "deadcode:files": "unimported",
     "deadcode:deps": "depcheck",

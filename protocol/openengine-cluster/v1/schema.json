@@ -1,0 +1,310 @@
+{
+  "$defs": {
+    "ClusterStatus": {
+      "properties": {
+        "atCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observedGeneration": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "type": "object"
+    },
+    "DomainErrorData": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "details": true
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    },
+    "GetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "atCursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GetResult": {
+      "properties": {
+        "atCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spec": true,
+        "status": {
+          "$ref": "#/$defs/ClusterStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "InitializeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": "openengine.cluster/v1",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion"
+      ],
+      "type": "object"
+    },
+    "InitializeResult": {
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/ServerCapabilities"
+        },
+        "protocolVersion": {
+          "const": "openengine.cluster/v1",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ClusterStatus"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "capabilities",
+        "status"
+      ],
+      "type": "object"
+    },
+    "JsonRpcError": {
+      "properties": {
+        "code": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "JsonRpcErrorResponse": {
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/JsonRpcError"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "error"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/InitializeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest2": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/GetParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcResponse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse2": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess2"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcSuccess": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/InitializeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess2": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/GetResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "Phase": {
+      "enum": [
+        "empty"
+      ],
+      "type": "string"
+    },
+    "RequestId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "format": "int64",
+          "type": "integer"
+        }
+      ]
+    },
+    "ServerCapabilities": {
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "get_request": {
+      "$ref": "#/$defs/JsonRpcRequest2"
+    },
+    "get_response": {
+      "$ref": "#/$defs/JsonRpcResponse2"
+    },
+    "initialize_request": {
+      "$ref": "#/$defs/JsonRpcRequest"
+    },
+    "initialize_response": {
+      "$ref": "#/$defs/JsonRpcResponse"
+    }
+  },
+  "required": [
+    "initialize_request",
+    "initialize_response",
+    "get_request",
+    "get_response"
+  ],
+  "title": "ImplementedProtocolSchema",
+  "type": "object"
+}

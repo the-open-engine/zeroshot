@@ -1,0 +1,322 @@
+//! Canonical compiled IR serialization and graph identities.
+
+use std::fmt;
+use std::str::FromStr;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use thiserror::Error;
+
+use crate::PayloadType;
+use crate::{
+    ChoiceBranch, ChoiceNode, ControlSelector, GraphNode, GraphProfile, Guard, InputBinding, Join,
+    LoopNode, MapNode, NonEmptyVec, ParNode, PolicyBinding, SeqNode, Sha256Digest,
+    Sha256DigestError, StructuralBounds, WriteBinding,
+};
+
+/// Backend-produced, verified graph IR.
+///
+/// Constructing or serializing this value does not verify or admit a graph. Only a backend
+/// verifier may promote graph syntax to admitted compiled IR.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CompiledGraphIr {
+    pub profile: GraphProfile,
+    pub initial_input: PayloadType,
+    pub policy: PolicyBinding,
+    pub root: GraphNode,
+    pub bounds: StructuralBounds,
+}
+
+impl CompiledGraphIr {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, CanonicalError> {
+        let mut normalized = self.clone();
+        normalize_node(&mut normalized.root)?;
+        normalized.bounds.attempts_per_node =
+            normalized.bounds.attempts_per_node.into_iter().collect();
+        canonical_json_bytes(&normalized)
+    }
+
+    pub fn identity(&self) -> Result<GraphIdentity, CanonicalError> {
+        let digest = Sha256::digest(self.canonical_bytes()?);
+        let mut encoded = String::with_capacity(64);
+        for byte in digest {
+            use fmt::Write as _;
+            write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        Ok(GraphIdentity(
+            Sha256Digest::new(encoded).expect("SHA-256 encoder always emits a valid digest"),
+        ))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum CanonicalError {
+    #[error("canonical IR serialization failed: {0}")]
+    Serialize(serde_json::Error),
+    #[error("canonical IR cannot contain floating-point values")]
+    FloatingPoint,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(transparent)]
+#[schemars(transparent)]
+pub struct GraphIdentity(Sha256Digest);
+
+impl GraphIdentity {
+    pub fn new(value: impl Into<String>) -> Result<Self, Sha256DigestError> {
+        Sha256Digest::new(value).map(Self)
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Display for GraphIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for GraphIdentity {
+    type Err = Sha256DigestError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+fn take_sorted_by_canonical_json<T>(
+    values: &mut Vec<T>,
+) -> Result<Vec<(Vec<u8>, T)>, CanonicalError>
+where
+    T: Serialize,
+{
+    let mut keyed = values
+        .drain(..)
+        .map(|value| canonical_json_bytes(&value).map(|key| (key, value)))
+        .collect::<Result<Vec<_>, _>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(keyed)
+}
+
+fn sort_by_canonical_json<T>(values: &mut Vec<T>) -> Result<(), CanonicalError>
+where
+    T: Serialize,
+{
+    let keyed = take_sorted_by_canonical_json(values)?;
+    values.extend(keyed.into_iter().map(|(_, value)| value));
+    Ok(())
+}
+
+fn sort_and_deduplicate_by_canonical_json<T>(values: &mut Vec<T>) -> Result<(), CanonicalError>
+where
+    T: Serialize,
+{
+    let mut keyed = take_sorted_by_canonical_json(values)?;
+    keyed.dedup_by(|left, right| left.0 == right.0);
+    values.extend(keyed.into_iter().map(|(_, value)| value));
+    Ok(())
+}
+
+fn normalize_guard(guard: &mut Guard) -> Result<(), CanonicalError> {
+    match guard {
+        Guard::In { .. } | Guard::KOfMap { .. } => {}
+        Guard::KOfN { values, .. } => normalize_selectors(values)?,
+        Guard::Not { guard } => normalize_guard(guard)?,
+        Guard::All { guards } => normalize_commutative_guards(guards, GuardOperation::All)?,
+        Guard::Any { guards } => normalize_commutative_guards(guards, GuardOperation::Any)?,
+    }
+    Ok(())
+}
+
+fn normalize_selectors(values: &mut NonEmptyVec<ControlSelector>) -> Result<(), CanonicalError> {
+    let mut selectors = values.clone().into_vec();
+    sort_by_canonical_json(&mut selectors)?;
+    *values = NonEmptyVec::new(selectors)
+        .expect("normalizing non-empty selectors cannot produce an empty collection");
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum GuardOperation {
+    All,
+    Any,
+}
+
+fn normalize_commutative_guards(
+    guards: &mut NonEmptyVec<Guard>,
+    operation: GuardOperation,
+) -> Result<(), CanonicalError> {
+    let mut flattened = Vec::new();
+    for mut value in guards.clone().into_vec() {
+        normalize_guard(&mut value)?;
+        match (operation, value) {
+            (GuardOperation::All, Guard::All { guards })
+            | (GuardOperation::Any, Guard::Any { guards }) => flattened.extend(guards.into_vec()),
+            (_, value) => flattened.push(value),
+        }
+    }
+    sort_and_deduplicate_by_canonical_json(&mut flattened)?;
+    *guards = NonEmptyVec::new(flattened)
+        .expect("normalizing a non-empty guard cannot produce an empty guard");
+    Ok(())
+}
+
+fn canonical_json_bytes<T>(value: &T) -> Result<Vec<u8>, CanonicalError>
+where
+    T: Serialize,
+{
+    let value = serde_json::to_value(value).map_err(CanonicalError::Serialize)?;
+    let mut bytes = Vec::new();
+    write_canonical_json(&value, &mut bytes)?;
+    Ok(bytes)
+}
+
+fn write_canonical_json(
+    value: &serde_json::Value,
+    output: &mut Vec<u8>,
+) -> Result<(), CanonicalError> {
+    match value {
+        serde_json::Value::Array(values) => write_canonical_array(values, output),
+        serde_json::Value::Object(values) => write_canonical_object(values, output),
+        value => write_canonical_scalar(value, output),
+    }
+}
+
+fn write_canonical_scalar(
+    value: &serde_json::Value,
+    output: &mut Vec<u8>,
+) -> Result<(), CanonicalError> {
+    match value {
+        serde_json::Value::Null => output.extend_from_slice(b"null"),
+        serde_json::Value::Bool(value) => {
+            output.extend_from_slice(if *value { b"true" } else { b"false" });
+        }
+        serde_json::Value::Number(number) => {
+            if number.is_f64() {
+                return Err(CanonicalError::FloatingPoint);
+            }
+            serde_json::to_writer(output, number).map_err(CanonicalError::Serialize)?;
+        }
+        serde_json::Value::String(value) => {
+            serde_json::to_writer(output, value).map_err(CanonicalError::Serialize)?;
+        }
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            unreachable!("arrays and objects are handled by write_canonical_json")
+        }
+    }
+    Ok(())
+}
+
+fn write_canonical_array(
+    values: &[serde_json::Value],
+    output: &mut Vec<u8>,
+) -> Result<(), CanonicalError> {
+    output.push(b'[');
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            output.push(b',');
+        }
+        write_canonical_json(value, output)?;
+    }
+    output.push(b']');
+    Ok(())
+}
+
+fn write_canonical_object(
+    values: &serde_json::Map<String, serde_json::Value>,
+    output: &mut Vec<u8>,
+) -> Result<(), CanonicalError> {
+    output.push(b'{');
+    let mut entries = values.iter().collect::<Vec<_>>();
+    entries.sort_unstable_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    for (index, (key, value)) in entries.into_iter().enumerate() {
+        if index != 0 {
+            output.push(b',');
+        }
+        serde_json::to_writer(&mut *output, key).map_err(CanonicalError::Serialize)?;
+        output.push(b':');
+        write_canonical_json(value, output)?;
+    }
+    output.push(b'}');
+    Ok(())
+}
+
+fn normalize_node(node: &mut GraphNode) -> Result<(), CanonicalError> {
+    match node {
+        GraphNode::Step(node) => {
+            normalize_worker_bindings(&mut node.input_bindings, &mut node.write_bindings)
+        }
+        GraphNode::Verifier(node) => {
+            normalize_worker_bindings(&mut node.input_bindings, &mut node.write_bindings)
+        }
+        GraphNode::Seq(node) => normalize_sequence(node),
+        GraphNode::Choice(node) => normalize_choice(node),
+        GraphNode::Par(node) => normalize_parallel(node),
+        GraphNode::Loop(node) => normalize_loop(node),
+        GraphNode::Map(node) => normalize_map(node),
+        GraphNode::Succeed(node) => sort_by_canonical_json(&mut node.bindings),
+        GraphNode::Fail(_) => Ok(()),
+    }
+}
+
+fn normalize_worker_bindings(
+    input_bindings: &mut Vec<InputBinding>,
+    write_bindings: &mut Vec<WriteBinding>,
+) -> Result<(), CanonicalError> {
+    sort_by_canonical_json(input_bindings)?;
+    sort_by_canonical_json(write_bindings)
+}
+
+fn normalize_sequence(node: &mut SeqNode) -> Result<(), CanonicalError> {
+    let mut children = node.children.clone().into_vec();
+    for child in &mut children {
+        normalize_node(child)?;
+    }
+    node.children = NonEmptyVec::new(children).expect("sequence stays non-empty");
+    sort_and_deduplicate_by_canonical_json(&mut node.promoted_state_paths)
+}
+
+fn normalize_choice(node: &mut ChoiceNode) -> Result<(), CanonicalError> {
+    let mut branches = node.branches.clone().into_vec();
+    for ChoiceBranch { when, node } in &mut branches {
+        normalize_guard(when)?;
+        normalize_node(node)?;
+    }
+    node.branches = NonEmptyVec::new(branches).expect("choice stays non-empty");
+    if let Some(otherwise) = &mut node.otherwise {
+        normalize_node(otherwise)?;
+    }
+    sort_and_deduplicate_by_canonical_json(&mut node.promoted_state_paths)
+}
+
+fn normalize_parallel(node: &mut ParNode) -> Result<(), CanonicalError> {
+    let mut branches = node.branches.clone().into_vec();
+    for branch in &mut branches {
+        normalize_node(branch)?;
+    }
+    branches.sort_by(|left, right| left.name().cmp(right.name()));
+    node.branches = NonEmptyVec::new(branches).expect("parallel stays non-empty");
+    sort_and_deduplicate_by_canonical_json(&mut node.promoted_state_paths)?;
+    if let Join::First { when } = &mut node.join {
+        normalize_guard(when)?;
+    }
+    Ok(())
+}
+
+fn normalize_loop(node: &mut LoopNode) -> Result<(), CanonicalError> {
+    normalize_node(&mut node.body)?;
+    normalize_guard(&mut node.until)?;
+    sort_and_deduplicate_by_canonical_json(&mut node.promoted_state_paths)
+}
+
+fn normalize_map(node: &mut MapNode) -> Result<(), CanonicalError> {
+    normalize_node(&mut node.body)?;
+    sort_and_deduplicate_by_canonical_json(&mut node.promoted_state_paths)
+}

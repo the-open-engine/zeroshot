@@ -1,0 +1,70 @@
+{
+  "components": {
+    "schemas": {
+      "ArtifactRef": {
+        "$ref": "graph.schema.json#/$defs/ArtifactRef"
+      },
+      "CompiledGraphIr": {
+        "$ref": "compiled-ir.schema.json"
+      },
+      "GraphDiagnostic": {
+        "$ref": "graph.schema.json#/$defs/GraphDiagnostic"
+      },
+      "GraphSpec": {
+        "$ref": "graph.schema.json"
+      },
+      "StructuralBounds": {
+        "$ref": "graph.schema.json#/$defs/StructuralBounds"
+      }
+    }
+  },
+  "info": {
+    "title": "Open Engine Cluster Protocol",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "initialize",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "protocolVersion",
+          "required": true,
+          "schema": {
+            "const": "openengine.cluster/v1",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "initializeResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/InitializeResult"
+        }
+      }
+    },
+    {
+      "name": "get",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "atCursor",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "getResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/GetResult"
+        }
+      }
+    }
+  ],
+  "openrpc": "1.3.2"
+}

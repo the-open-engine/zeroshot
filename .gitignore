@@ -8,6 +8,7 @@ yarn-error.log*
 # Build output
 dist/
 build/
+/target/
 *.tsbuildinfo
 
 # Environment

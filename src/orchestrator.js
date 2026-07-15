@@ -48,6 +48,7 @@ const TemplateResolver = require('./template-resolver');
 const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { resolveRunPlan } = require('../lib/run-plan');
+const { isProcessRunning } = require('../lib/process-liveness');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const { resolveClusterRequiredQualityGates } = require('./quality-gates');
@@ -758,21 +759,13 @@ class Orchestrator {
       if (inactiveStates.includes(cluster.state)) continue;
 
       // Check if process is still running (zombie detection)
-      if (cluster.pid) {
-        try {
-          // process.kill with signal 0 checks if process exists
-          process.kill(cluster.pid, 0);
-          // Process exists - cluster is active
-          activeClusters.push({
-            id: clusterId,
-            state: cluster.state,
-            createdAt: cluster.createdAt,
-            pid: cluster.pid,
-          });
-        } catch {
-          // Process doesn't exist - cluster is a zombie (stale entry)
-          // Don't include in active list
-        }
+      if (cluster.pid && this._isProcessRunning(cluster.pid)) {
+        activeClusters.push({
+          id: clusterId,
+          state: cluster.state,
+          createdAt: cluster.createdAt,
+          pid: cluster.pid,
+        });
       }
     }
 
@@ -2369,8 +2362,17 @@ class Orchestrator {
     }
 
     if (cluster.state === 'running') {
-      throw new Error(
-        `Cluster ${clusterId} is still running. Use 'zeroshot stop' first if you want to restart it.`
+      if (this._isProcessRunning(cluster.pid)) {
+        throw new Error(
+          `Cluster ${clusterId} is still running. Use 'zeroshot stop' first if you want to restart it.`
+        );
+      }
+      // state says running but the recorded PID is dead: this is the same
+      // zombie condition getStatus()/listClusters() already detect. Recover
+      // it here instead of forcing a manual `stop` for a process that no
+      // longer exists.
+      this._log(
+        `[Orchestrator] Cluster ${clusterId} was marked running with dead PID ${cluster.pid}; recovering as a zombie instead of rejecting resume.`
       );
     }
 
@@ -3632,15 +3634,7 @@ Continue from where you left off. Review your previous output to understand what
    * @private
    */
   _isProcessRunning(pid) {
-    if (!pid) return false;
-    try {
-      // Signal 0 doesn't kill, just checks if process exists
-      process.kill(pid, 0);
-      return true;
-    } catch (e) {
-      // ESRCH = No such process, EPERM = process exists but no permission
-      return e.code === 'EPERM';
-    }
+    return isProcessRunning(pid);
   }
 
   /**

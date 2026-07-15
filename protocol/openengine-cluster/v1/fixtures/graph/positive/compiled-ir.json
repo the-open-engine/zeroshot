@@ -1,0 +1,96 @@
+{
+  "bounds": {
+    "attemptsPerNode": {
+      "ordered": 1,
+      "parallel": 1
+    },
+    "maxNodeExecutions": 12,
+    "peakConcurrency": 2,
+    "termination": {
+      "kind": "bounded",
+      "maxIterations": 4,
+      "ranking": [
+        [
+          "count"
+        ]
+      ]
+    }
+  },
+  "initialInput": {
+    "fields": {},
+    "kind": "record"
+  },
+  "policy": {
+    "default": "deny",
+    "policy": "policy.default@1"
+  },
+  "profile": "openengine.graph.full/v1",
+  "root": {
+    "children": [
+      {
+        "branches": [
+          {
+            "bindings": [],
+            "kind": "succeed",
+            "name": "right",
+            "output": {
+              "kind": "null"
+            }
+          },
+          {
+            "bindings": [],
+            "kind": "succeed",
+            "name": "left",
+            "output": {
+              "kind": "null"
+            }
+          }
+        ],
+        "join": {
+          "kind": "all"
+        },
+        "kind": "par",
+        "name": "parallel",
+        "promotedStatePaths": [],
+        "state": {
+          "fields": {},
+          "kind": "record"
+        }
+      },
+      {
+        "children": [
+          {
+            "bindings": [],
+            "kind": "succeed",
+            "name": "first",
+            "output": {
+              "kind": "null"
+            }
+          },
+          {
+            "bindings": [],
+            "kind": "succeed",
+            "name": "second",
+            "output": {
+              "kind": "null"
+            }
+          }
+        ],
+        "kind": "seq",
+        "name": "ordered",
+        "promotedStatePaths": [],
+        "state": {
+          "fields": {},
+          "kind": "record"
+        }
+      }
+    ],
+    "kind": "seq",
+    "name": "root",
+    "promotedStatePaths": [],
+    "state": {
+      "fields": {},
+      "kind": "record"
+    }
+  }
+}
