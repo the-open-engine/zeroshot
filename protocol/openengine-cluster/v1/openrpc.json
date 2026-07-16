@@ -13,8 +13,20 @@
       "GraphSpec": {
         "$ref": "graph.schema.json"
       },
+      "LegacyShipRequest": {
+        "$ref": "worker.schema.json#/$defs/LegacyShipRequest"
+      },
+      "LegacyShipResult": {
+        "$ref": "worker.schema.json#/$defs/LegacyShipResult"
+      },
       "StructuralBounds": {
         "$ref": "graph.schema.json#/$defs/StructuralBounds"
+      },
+      "WorkerDescriptor": {
+        "$ref": "worker.schema.json"
+      },
+      "WorkerOutcome": {
+        "$ref": "worker.schema.json#/$defs/WorkerOutcome"
       }
     }
   },

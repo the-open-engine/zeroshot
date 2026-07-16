@@ -13,6 +13,8 @@ use thiserror::Error;
 
 use crate::EmptyBackend;
 use crate::negative_graph_fixtures::{diagnostic_fixture, negative_graph_fixtures};
+use crate::schema_helpers::merge_schema;
+use crate::worker_artifacts::{with_worker_components, worker_fixture_artifacts, worker_schema};
 
 mod openrpc;
 
@@ -52,6 +54,7 @@ pub struct ImplementedProtocolSchema {
 pub async fn generate_artifacts() -> Vec<Artifact> {
     let schema = serde_json::to_value(schema_for!(ImplementedProtocolSchema))
         .expect("JSON Schema serialization must succeed");
+    let worker_schema = worker_schema();
     let graph_schema = graph_schema();
     let compiled_ir_schema = serde_json::to_value(schema_for!(CompiledGraphIr))
         .expect("compiled IR JSON Schema serialization must succeed");
@@ -93,8 +96,13 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
             format!("{ROOT}/compiled-ir.schema.json"),
             compiled_ir_schema,
         ),
-        json_artifact(format!("{ROOT}/openrpc.json"), openrpc),
+        json_artifact(
+            format!("{ROOT}/openrpc.json"),
+            with_worker_components(openrpc),
+        ),
+        json_artifact(format!("{ROOT}/worker.schema.json"), worker_schema),
     ];
+    artifacts.extend(worker_fixture_artifacts());
     artifacts.extend(graph_fixture_artifacts());
     artifacts.extend(crate::admission_artifacts::generate_admission_goldens().await);
     for (name, request) in cases {
@@ -180,25 +188,6 @@ fn graph_schema() -> Value {
         merge_schema(&mut root, name, schema);
     }
     root
-}
-
-fn merge_schema(root: &mut Value, name: &str, mut component: Value) {
-    if let Some(definitions) = component.get_mut("$defs").and_then(Value::as_object_mut) {
-        let definitions = std::mem::take(definitions);
-        root["$defs"]
-            .as_object_mut()
-            .expect("root schema has definitions")
-            .extend(definitions);
-    }
-    component
-        .as_object_mut()
-        .expect("schema root is an object")
-        .remove("$schema");
-    component
-        .as_object_mut()
-        .expect("schema root is an object")
-        .remove("$defs");
-    root["$defs"][name] = component;
 }
 
 fn graph_fixture_artifacts() -> Vec<Artifact> {

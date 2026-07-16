@@ -4,6 +4,9 @@ pub mod admission;
 mod admission_artifacts;
 pub mod artifacts;
 mod negative_graph_fixtures;
+mod schema_helpers;
+pub mod worker_artifacts;
+pub mod worker_profiles;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{

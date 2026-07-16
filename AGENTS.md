@@ -80,6 +80,23 @@ complete matching control/seed tuple, and transient `admitting` preserves one of
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
 
+### Cluster Worker Contracts
+
+| Concept                    | File                                                       |
+| -------------------------- | ---------------------------------------------------------- |
+| Worker descriptors         | `crates/openengine-cluster-protocol/src/worker.rs`         |
+| Normalized worker outcomes | `crates/openengine-cluster-protocol/src/worker/outcome.rs` |
+| Worker registry boundary   | `crates/openengine-cluster-server/src/worker_registry.rs`  |
+| Mock worker profiles       | `crates/openengine-cluster-testkit/src/worker_profiles.rs` |
+
+Worker descriptors and registry compatibility checks are contract/pre-admission ports only.
+ACP/A2A modules in the testkit are mock conformance profiles, never production transports.
+Descriptors must declare all four closed runtime errors (`timeout`, `crash`, `malformed`, `refusal`).
+The reserved legacy descriptor is valid only with its canonical request/result payload types, while
+mock verifier completions must validate output, signals, diagnostics, and artifacts before emission.
+Worker JSON Schema must mirror descriptor cross-field/uniqueness validation and the closed
+error-code/reason matrix; registry compatibility must reject verifier contracts on step nodes.
+
 ## CLI Quick Reference
 
 ```bash

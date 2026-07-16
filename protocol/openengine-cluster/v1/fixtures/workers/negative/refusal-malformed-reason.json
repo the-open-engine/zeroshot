@@ -1,0 +1,9 @@
+{
+  "document": {
+    "code": "refusal",
+    "reason": "malformed_result",
+    "status": "error"
+  },
+  "expectedCode": "INVALID_FAILURE_PAIR",
+  "fixtureKind": "outcome"
+}

@@ -8,7 +8,9 @@ pub mod graph;
 pub mod payload;
 mod payload_value;
 mod value;
+pub mod worker;
 
+pub use worker::*;
 pub use artifact::*;
 pub use admission::*;
 pub use canonical::*;

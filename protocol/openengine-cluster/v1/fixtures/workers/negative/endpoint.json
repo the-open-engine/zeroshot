@@ -1,0 +1,47 @@
+{
+  "document": {
+    "artifactProfile": {
+      "allowedMediaTypes": [
+        "application/json"
+      ],
+      "allowedTypeIds": [
+        "openengine.result@1"
+      ],
+      "minimumRedaction": "internal"
+    },
+    "binding": {
+      "profile": "openengine.worker.acp/v1",
+      "protocol": "acp",
+      "version": "1"
+    },
+    "capabilityPolicy": {
+      "autonomy": "strict",
+      "permissionPolicy": "policy.strict@1"
+    },
+    "contract": {
+      "errors": [
+        "timeout",
+        "crash",
+        "malformed",
+        "refusal"
+      ],
+      "input": {
+        "kind": "string"
+      },
+      "output": {
+        "kind": "string"
+      },
+      "verifier": null
+    },
+    "credentialRequirements": [
+      "credential.test@1"
+    ],
+    "endpoint": "https://example.invalid",
+    "graphProfiles": [
+      "openengine.graph.full/v1"
+    ],
+    "worker": "mock.acp@1"
+  },
+  "expectedCode": "FORBIDDEN_FIELD",
+  "fixtureKind": "descriptor"
+}

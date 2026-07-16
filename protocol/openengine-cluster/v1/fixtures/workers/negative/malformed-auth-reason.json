@@ -1,0 +1,9 @@
+{
+  "document": {
+    "code": "malformed",
+    "reason": "authentication_required",
+    "status": "error"
+  },
+  "expectedCode": "INVALID_FAILURE_PAIR",
+  "fixtureKind": "outcome"
+}

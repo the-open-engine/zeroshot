@@ -2,6 +2,7 @@
 
 pub mod admission;
 pub mod stdio;
+pub mod worker_registry;
 
 use std::sync::Arc;
 

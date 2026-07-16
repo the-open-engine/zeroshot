@@ -1,0 +1,9 @@
+{
+  "normalized": {
+    "code": "refusal",
+    "reason": "interactive_input_required",
+    "status": "error"
+  },
+  "profile": "openengine.worker.acp/v1",
+  "version": "1"
+}
