@@ -4,6 +4,9 @@ use openengine_cluster_protocol::{
 };
 use openengine_cluster_server::{BackendError, ClusterBackend, ConnectionContext, Dispatcher};
 
+pub mod fault;
+pub mod observability;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeBackend;
 

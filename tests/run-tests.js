@@ -8,8 +8,15 @@
  * tests passed.
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+
+// Unit tests must never inherit operator credentials or model overrides.
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-unit-home-'));
+const testSettingsFile = path.join(testHome, '.zeroshot', 'settings.json');
 
 const testFileAliases = new Map([
   ['provider-cli-builder', ['tests/provider-cli-builder.test.js']],
@@ -30,6 +37,12 @@ const hasExplicitTestFile = args.some((arg) => !arg.startsWith('-'));
 const mochaArgs = hasExplicitTestFile ? args : [...defaultTestFiles, ...args];
 const child = spawn('npx', ['mocha', '--parallel', ...mochaArgs], {
   stdio: ['inherit', 'pipe', 'pipe'],
+  env: {
+    ...process.env,
+    HOME: testHome,
+    USERPROFILE: testHome,
+    ZEROSHOT_SETTINGS_FILE: testSettingsFile,
+  },
 });
 
 let stdout = '';
@@ -46,6 +59,8 @@ child.stderr.on('data', (data) => {
 });
 
 child.on('close', (code) => {
+  fs.rmSync(testHome, { recursive: true, force: true });
+
   if (code === 0) {
     process.exit(0);
   }
