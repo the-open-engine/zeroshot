@@ -53,6 +53,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Graph diagnostics/bounds    | `crates/openengine-cluster-protocol/src/diagnostic.rs`             |
 | Shared wire-value bounds    | `crates/openengine-cluster-protocol/src/value.rs`                  |
 | Cluster dispatch/stdio      | `crates/openengine-cluster-server/`                                |
+| Native product construction | `zeroshot-rust/`                                                   |
 | Admission coordinator       | `crates/openengine-cluster-server/src/admission.rs`                |
 | Admission durable ports     | `crates/openengine-cluster-server/src/admission/ports.rs`          |
 | Admission snapshot folding  | `crates/openengine-cluster-server/src/admission/snapshot.rs`       |
@@ -76,6 +77,9 @@ Cluster Protocol Rust types are the source of truth. Files under
 `cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --write` and
 verify byte-for-byte drift with `npm run protocol:check`. These generator-formatted artifacts
 are excluded from Prettier; never format them independently.
+The protocol and server crates own wire contracts, backend traits, the dispatcher, and transports.
+`zeroshot-rust/` owns only the concrete `NativeBackend` and product-local `NativeBackendFactory`
+construction root; keep protocol, transport, daemon, and compatibility behavior outside it.
 Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
 authoritative contract types only. They do not provide graph admission, verification, or execution.
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
