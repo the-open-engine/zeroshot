@@ -7,7 +7,7 @@ use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use openengine_cluster_testkit::admission::{InMemoryAdmissionStore, ScriptedOutcome, ScriptedVerifier};
 
 type FixtureBackend = AdmissionCoordinator<ScriptedVerifier, InMemoryAdmissionStore>;
-type FixtureClient = ClusterClient<InProcessTransport<FixtureBackend>>;
+pub type FixtureClient = ClusterClient<InProcessTransport<FixtureBackend>>;
 
 pub fn client(
     outcomes: Vec<ScriptedOutcome>,

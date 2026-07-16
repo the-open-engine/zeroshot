@@ -3,18 +3,24 @@
 use std::sync::Arc;
 
 mod ports;
+mod snapshot;
 pub use ports::*;
+use snapshot::validate_snapshot;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    admission_fingerprint, diff_compiled_graphs, ApplyParams, ApplyResult, CompiledGraphIr,
-    Generation, GetParams, GetResult, GraphSpec, IdempotencyKey, InitializeParams,
-    InitializeResult, Phase, PlanParams, PlanResult, RequestFingerprint, ServerCapabilities,
-    CANCELLED, GENERATION_CONFLICT, GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE,
-    INVALID_PHASE, SCHEMA_VIOLATION,
+    diff_compiled_graphs, ApplyParams, ApplyResult, CompiledGraphIr, Generation, GetParams,
+    GetResult, GraphSpec, IdempotencyKey, InitializeParams, InitializeResult, PlanParams,
+    PlanResult, RequestFingerprint, ServerCapabilities, StopParams, StopResult, UpdateParams,
+    UpdateResult, CANCELLED, GENERATION_CONFLICT, GRAPH_INVALID, IDEMPOTENCY_REUSE,
+    INTERNAL_ERROR_CODE, INVALID_PHASE, SCHEMA_VIOLATION,
 };
 use serde_json::{json, Value};
 
+use crate::lifecycle::{
+    method_fingerprint, stop_fingerprint, update_fingerprint, LifecycleSnapshot, MutationReceipt,
+    StopProposal, UpdateProposal,
+};
 use crate::{BackendError, ClusterBackend, ConnectionContext};
 
 pub struct AdmissionCoordinator<V, S> {
@@ -68,14 +74,16 @@ where
     V: GraphVerifier,
     S: AdmissionStore,
 {
-    async fn read_valid_snapshot(&self) -> Result<AdmissionSnapshot, BackendError> {
-        let snapshot = self
+    async fn read_valid_snapshot(
+        &self,
+    ) -> Result<(AdmissionSnapshot, LifecycleSnapshot), BackendError> {
+        let (snapshot, lifecycle) = self
             .store
-            .read_snapshot()
+            .read_aggregate()
             .await
             .map_err(store_error_to_backend)?;
-        validate_snapshot(&snapshot)?;
-        Ok(snapshot)
+        validate_snapshot(&snapshot, &lifecycle)?;
+        Ok((snapshot, lifecycle))
     }
 
     async fn verify_for_apply(&self, graph: &GraphSpec) -> Result<VerifiedGraph, BackendError> {
@@ -113,7 +121,13 @@ where
             .map_err(store_error_to_backend)?;
         match record {
             Some(record) if record.fingerprint == *fingerprint => {
-                let mut receipt = record.receipt;
+                let MutationReceipt::Apply(mut receipt) = record.receipt else {
+                    return Err(BackendError::application(
+                        IDEMPOTENCY_REUSE,
+                        "Idempotency key was reused by a different method",
+                        None,
+                    ));
+                };
                 receipt.deduped = true;
                 Ok(Some(receipt))
             }
@@ -185,10 +199,10 @@ where
         _context: &ConnectionContext,
         _params: InitializeParams,
     ) -> Result<InitializeResult, BackendError> {
-        let snapshot = self.read_valid_snapshot().await?;
+        let (snapshot, lifecycle) = self.read_valid_snapshot().await?;
         Ok(InitializeResult::new(
             ServerCapabilities::default(),
-            snapshot.control.status(),
+            snapshot.control.status_with_lifecycle(&lifecycle),
         ))
     }
 
@@ -229,14 +243,14 @@ where
         params: ApplyParams,
     ) -> Result<ApplyResult, BackendError> {
         validate_apply_mode(&params)?;
-        let fingerprint = apply_fingerprint(&params)?;
+        let fingerprint = method_fingerprint("apply", &params)?;
 
         if let Some(receipt) = self.replay_apply(&params, &fingerprint).await? {
             return Ok(receipt);
         }
 
         let verified = self.verify_for_apply(&params.graph).await?;
-        let snapshot = self.read_valid_snapshot().await?;
+        let (snapshot, _) = self.read_valid_snapshot().await?;
         precheck_generation(params.if_generation, snapshot.control.generation)?;
 
         let diff =
@@ -276,89 +290,58 @@ where
         _context: &ConnectionContext,
         params: GetParams,
     ) -> Result<GetResult, BackendError> {
-        let snapshot = self.read_valid_snapshot().await?;
+        let (snapshot, lifecycle) = self.read_valid_snapshot().await?;
         if let Some(requested) = params.at_cursor {
-            if snapshot.control.cursor.as_ref() != Some(&requested) {
+            let current_cursor = lifecycle
+                .latest_cursor
+                .as_ref()
+                .or(snapshot.control.cursor.as_ref());
+            if current_cursor != Some(&requested) {
                 return Err(BackendError::application(
                     INVALID_PHASE,
                     "Requested cursor is not available",
-                    Some(json!({ "currentCursor": snapshot.control.cursor })),
+                    Some(json!({ "currentCursor": current_cursor })),
                 ));
             }
         }
-        let status = snapshot.control.status();
+        let status = snapshot.control.status_with_lifecycle(&lifecycle);
         Ok(GetResult {
             spec: snapshot.control.spec,
             status,
-            at_cursor: snapshot.control.cursor,
+            at_cursor: lifecycle.latest_cursor.or(snapshot.control.cursor),
         })
     }
-}
 
-fn apply_fingerprint(params: &ApplyParams) -> Result<RequestFingerprint, BackendError> {
-    let value = serde_json::to_value(params)
-        .map_err(|error| BackendError::new(INTERNAL_ERROR_CODE, error.to_string()))?;
-    let Value::Object(mut parameters) = value else {
-        return Err(BackendError::new(
-            INTERNAL_ERROR_CODE,
-            "serialized apply parameters were not an object",
-        ));
-    };
-    parameters.remove("idempotencyKey");
-    admission_fingerprint("apply", &Value::Object(parameters))
-        .map_err(|error| BackendError::new(INTERNAL_ERROR_CODE, error.to_string()))
-}
-
-fn validate_snapshot(snapshot: &AdmissionSnapshot) -> Result<(), BackendError> {
-    let is_empty = snapshot_is_empty(snapshot);
-    let is_committed = snapshot_is_committed(snapshot);
-    let valid = match snapshot.control.phase {
-        Phase::Empty => is_empty,
-        Phase::Admitting => is_empty || is_committed,
-        Phase::Running => is_committed,
-    };
-    if valid {
-        Ok(())
-    } else {
-        Err(BackendError::new(
-            INTERNAL_ERROR_CODE,
-            "admission store returned an inconsistent phase snapshot",
-        ))
+    async fn update(
+        &self,
+        _context: &ConnectionContext,
+        params: UpdateParams,
+    ) -> Result<UpdateResult, BackendError> {
+        params.validate().map_err(schema_error)?;
+        let fingerprint = update_fingerprint(&params)?;
+        self.store
+            .update_lifecycle(UpdateProposal {
+                params,
+                fingerprint,
+            })
+            .await
+            .map_err(store_error_to_backend)
     }
-}
 
-fn snapshot_is_empty(snapshot: &AdmissionSnapshot) -> bool {
-    snapshot.control.spec.is_none()
-        && snapshot.control.compiled_ir.is_none()
-        && snapshot.control.generation.is_none()
-        && snapshot.control.run_id.is_none()
-        && snapshot.control.cursor.is_none()
-        && snapshot.seed.is_none()
-}
-
-fn snapshot_is_committed(snapshot: &AdmissionSnapshot) -> bool {
-    matches!(
-        (
-            snapshot.control.spec.as_ref(),
-            snapshot.control.compiled_ir.as_ref(),
-            snapshot.control.generation,
-            snapshot.control.run_id.as_ref(),
-            snapshot.control.cursor.as_ref(),
-            snapshot.seed.as_ref(),
-        ),
-        (
-            Some(spec),
-            Some(compiled_ir),
-            Some(generation),
-            Some(run_id),
-            Some(cursor),
-            Some(seed),
-        ) if generation.get() > 0
-            && seed.run_id == *run_id
-            && seed.cursor == *cursor
-            && spec.initial_input.validate_value(&seed.input).is_ok()
-            && compiled_ir.identity().is_ok()
-    )
+    async fn stop(
+        &self,
+        _context: &ConnectionContext,
+        params: StopParams,
+    ) -> Result<StopResult, BackendError> {
+        let fingerprint = stop_fingerprint(&params)?;
+        self.store
+            .stop_lifecycle(StopProposal {
+                params,
+                fingerprint,
+            })
+            .await
+            .map_err(store_error_to_backend)
+    }
 }
 
 fn validate_apply_mode(params: &ApplyParams) -> Result<(), BackendError> {
@@ -455,5 +438,18 @@ fn store_error_to_backend(error: StoreError) -> BackendError {
         ),
         StoreError::SchemaViolation(message) => schema_error(&message),
         StoreError::Cancelled => cancelled_error(),
+        StoreError::DispatchDenied { current } => BackendError::application(
+            INVALID_PHASE,
+            "Lifecycle state denies successor dispatch",
+            Some(json!({ "dispatchState": current })),
+        ),
+        StoreError::UnknownLease => {
+            BackendError::application(INVALID_PHASE, "Dispatch lease does not exist", None)
+        }
+        StoreError::CompletionRejected => BackendError::application(
+            CANCELLED,
+            "Dispatch completion was rejected after cancellation or terminalization",
+            None,
+        ),
     }
 }

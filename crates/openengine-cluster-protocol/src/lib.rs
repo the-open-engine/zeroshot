@@ -5,6 +5,7 @@ pub mod artifact;
 pub mod canonical;
 pub mod diagnostic;
 pub mod graph;
+pub mod lifecycle;
 pub mod payload;
 mod payload_value;
 mod value;
@@ -14,6 +15,7 @@ pub use admission::*;
 pub use canonical::*;
 pub use diagnostic::*;
 pub use graph::*;
+pub use lifecycle::*;
 pub use payload::*;
 pub use payload_value::*;
 
@@ -180,6 +182,8 @@ pub struct ClusterStatus {
     pub observed_generation: Option<Generation>,
     pub current_run_id: Option<RunId>,
     pub at_cursor: Option<Cursor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operational: Option<OperationalStatus>,
 }
 
 impl ClusterStatus {
@@ -190,6 +194,7 @@ impl ClusterStatus {
             observed_generation: None,
             current_run_id: None,
             at_cursor: None,
+            operational: None,
         }
     }
 }
@@ -200,6 +205,7 @@ pub enum Phase {
     Empty,
     Admitting,
     Running,
+    Finished,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

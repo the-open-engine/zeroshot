@@ -24,10 +24,13 @@ idempotency record and never writes the control journal or verified-I/O ledger.
 `get({atCursor?})` returns the committed `GraphSpec`, status, and cursor from one atomic aggregate
 snapshot. The logical control journal and verified-I/O seed ledger must identify the same current
 run and cursor. An `empty` snapshot has no spec, compiled IR, generation, run, cursor, or seed. A
-`running` snapshot has all six, uses a positive generation, and has a seed matching its run and
-cursor. Transient `admitting` preserves either the complete prior committed snapshot or the complete
-empty snapshot; it never exposes partially staged state. `initialize` and `get` fail closed when a
-store violates these invariants. V1 does not synthesize execution completion.
+`running` or `finished` snapshot has all six, uses a positive generation, and has a seed matching
+its run and admission cursor. Its operational lifecycle snapshot has a matching durable latest
+cursor and metadata; lifecycle events advance that cursor without changing the admission cursor.
+Transient `admitting` preserves either the complete prior committed snapshot or the complete empty
+snapshot; it never exposes partially staged state. `initialize` and `get` fail closed when a store
+violates these invariants. Operational lifecycle semantics are defined in
+[`lifecycle.md`](./lifecycle.md); they do not synthesize a native graph executor.
 
 ## Diff and identity
 
@@ -45,7 +48,8 @@ is upsert. Final CAS evaluation occurs inside the atomic commit and conflicts re
 The idempotency fingerprint is SHA-256 over canonical JSON containing the method and validated
 parameters, excluding `idempotencyKey`. Object keys are recursively sorted. Same key and same
 fingerprint returns the original receipt with `deduped:true`; different parameters return
-`IDEMPOTENCY_REUSE` without verification or writes. Racing first uses may both verify, but only one
+`IDEMPOTENCY_REUSE` without verification or writes. Keys share one namespace across apply, update,
+and stop, so cross-method reuse also conflicts. Racing first uses may both verify, but only one
 commits.
 
 ## Atomicity and cancellation

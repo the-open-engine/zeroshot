@@ -1,6 +1,7 @@
 //! Backend-neutral Cluster Protocol dispatcher.
 
 pub mod admission;
+pub mod lifecycle;
 pub mod stdio;
 
 use std::sync::Arc;
@@ -11,7 +12,8 @@ use openengine_cluster_protocol::{
     InitializeResult, JsonRpcError, JsonRpcErrorResponse, JsonRpcSuccess, PlanParams, PlanResult,
     RequestId, APPLICATION_ERROR, INTERNAL_ERROR, INTERNAL_ERROR_CODE, INVALID_PARAMS,
     INVALID_PHASE, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
-    PROTOCOL_VERSION, SCHEMA_VIOLATION, UNSUPPORTED_PROTOCOL_VERSION,
+    PROTOCOL_VERSION, SCHEMA_VIOLATION, StopParams, StopResult, UNSUPPORTED_PROTOCOL_VERSION,
+    UpdateParams, UpdateResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -115,6 +117,30 @@ pub trait ClusterBackend: Send + Sync + 'static {
         context: &ConnectionContext,
         params: GetParams,
     ) -> Result<GetResult, BackendError>;
+
+    async fn update(
+        &self,
+        _context: &ConnectionContext,
+        _params: UpdateParams,
+    ) -> Result<UpdateResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support lifecycle updates",
+            None,
+        ))
+    }
+
+    async fn stop(
+        &self,
+        _context: &ConnectionContext,
+        _params: StopParams,
+    ) -> Result<StopResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support lifecycle stop",
+            None,
+        ))
+    }
 }
 
 pub struct Dispatcher<B> {
@@ -185,6 +211,8 @@ where
             "plan" => ImplementedMethod::Plan,
             "apply" => ImplementedMethod::Apply,
             "get" => ImplementedMethod::Get,
+            "update" => ImplementedMethod::Update,
+            "stop" => ImplementedMethod::Stop,
             _ => {
                 return serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None);
             }
@@ -203,6 +231,8 @@ where
             ImplementedMethod::Plan => self.dispatch_plan(id, params).await,
             ImplementedMethod::Apply => self.dispatch_apply(id, params).await,
             ImplementedMethod::Get => self.dispatch_get(id, params).await,
+            ImplementedMethod::Update => self.dispatch_update(id, params).await,
+            ImplementedMethod::Stop => self.dispatch_stop(id, params).await,
         }
     }
 
@@ -289,6 +319,48 @@ where
             Err(error) => serialize_backend_error(id, error),
         }
     }
+
+    async fn dispatch_update(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<UpdateParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return serialize_error(
+                    Some(id),
+                    INVALID_PARAMS,
+                    "Invalid params",
+                    Some(DomainErrorData {
+                        code: SCHEMA_VIOLATION.to_owned(),
+                        details: Some(json!({ "reason": error.to_string() })),
+                    }),
+                );
+            }
+        };
+        match self.backend.update(&self.context, params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_stop(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<StopParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return serialize_error(
+                    Some(id),
+                    INVALID_PARAMS,
+                    "Invalid params",
+                    Some(DomainErrorData {
+                        code: SCHEMA_VIOLATION.to_owned(),
+                        details: Some(json!({ "reason": error.to_string() })),
+                    }),
+                );
+            }
+        };
+        match self.backend.stop(&self.context, params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
 }
 
 enum ImplementedMethod {
@@ -296,6 +368,8 @@ enum ImplementedMethod {
     Plan,
     Apply,
     Get,
+    Update,
+    Stop,
 }
 
 fn parse_request_id(value: &Value) -> Option<RequestId> {

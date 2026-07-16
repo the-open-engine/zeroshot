@@ -28,6 +28,7 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
         "protocol/openengine-cluster/v1/goldens/get-empty.ndjson",
         "protocol/openengine-cluster/v1/goldens/admission-lifecycle.ndjson",
         "protocol/openengine-cluster/v1/goldens/admission-errors.ndjson",
+        "protocol/openengine-cluster/v1/goldens/lifecycle-controls.ndjson",
     ] {
         assert!(paths.contains(&required), "missing {required}");
     }
@@ -74,7 +75,10 @@ async fn openrpc_exposes_only_the_implemented_protocol_methods() {
         .iter()
         .map(|method| method["name"].as_str().unwrap())
         .collect();
-    assert_eq!(methods, ["initialize", "plan", "apply", "get"]);
+    assert_eq!(
+        methods,
+        ["initialize", "plan", "apply", "update", "stop", "get"]
+    );
     for component in [
         "GraphSpec",
         "CompiledGraphIr",
@@ -131,6 +135,67 @@ async fn openrpc_apply_controls_match_the_authoritative_apply_schema() {
             .is_valid(&serde_json::json!("bad\nkey")),
         "OpenRPC must reject idempotency-key control characters"
     );
+}
+
+#[tokio::test]
+async fn openrpc_exposes_closed_lifecycle_controls() {
+    let artifacts = generate_artifacts().await;
+    let parse_artifact = |suffix: &str| {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.relative_path.ends_with(suffix))
+            .unwrap_or_else(|| panic!("missing generated artifact {suffix}"));
+        serde_json::from_slice::<serde_json::Value>(&artifact.bytes).unwrap()
+    };
+    let openrpc = parse_artifact("/openrpc.json");
+    let schema = parse_artifact("/schema.json");
+    for (method_name, required) in [
+        ("update", vec!["ifGeneration", "idempotencyKey"]),
+        ("stop", vec!["mode", "ifGeneration", "idempotencyKey"]),
+    ] {
+        let method = openrpc["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|method| method["name"] == method_name)
+            .unwrap();
+        for name in required {
+            assert_eq!(
+                method["params"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|parameter| parameter["name"] == name)
+                    .unwrap()["required"],
+                true
+            );
+        }
+    }
+    let mut update_schema = schema["$defs"]["UpdateParams"].clone();
+    update_schema["$defs"] = schema["$defs"].clone();
+    let update_validator = jsonschema::validator_for(&update_schema).unwrap();
+    let update_method = openrpc["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|method| method["name"] == "update")
+        .unwrap();
+    let advertised_update_validator =
+        jsonschema::validator_for(&update_method["x-params-schema"]).unwrap();
+    let empty_operational_update = serde_json::json!({
+        "ifGeneration":1,"idempotencyKey":"empty"
+    });
+    assert!(!update_validator.is_valid(&empty_operational_update));
+    assert!(!advertised_update_validator.is_valid(&empty_operational_update));
+    assert!(advertised_update_validator.is_valid(&serde_json::json!({
+        "suspended":true,"ifGeneration":1,"idempotencyKey":"suspend"
+    })));
+    assert!(!update_validator.is_valid(&serde_json::json!({
+        "labels":null,"ifGeneration":1,"idempotencyKey":"null"
+    })));
+    assert!(!update_validator.is_valid(&serde_json::json!({
+        "graph":{},"ifGeneration":1,"idempotencyKey":"graph"
+    })));
 }
 
 #[tokio::test]
