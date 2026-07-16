@@ -18,7 +18,8 @@ path = "src/main.rs"
 async-trait.workspace = true
 openengine-cluster-protocol.workspace = true
 openengine-cluster-server.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio.workspace = true

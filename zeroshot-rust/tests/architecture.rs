@@ -88,10 +88,16 @@ fn product_uses_the_root_workspace_and_fixed_layout() {
         files,
         BTreeSet::from([
             "Cargo.toml".to_owned(),
+            "src/fault/redaction.rs".to_owned(),
+            "src/fault/taxonomy.rs".to_owned(),
+            "src/fault.rs".to_owned(),
             "src/lib.rs".to_owned(),
             "src/main.rs".to_owned(),
+            "src/observability.rs".to_owned(),
             "tests/architecture.rs".to_owned(),
             "tests/backend_boundary.rs".to_owned(),
+            "tests/fault_contract.rs".to_owned(),
+            "tests/observability_contract.rs".to_owned(),
         ])
     );
 }
@@ -119,6 +125,8 @@ fn workspace_metadata_exposes_the_fixed_product_identity() {
         BTreeSet::from([
             ("architecture".to_owned(), "test".to_owned()),
             ("backend_boundary".to_owned(), "test".to_owned()),
+            ("fault_contract".to_owned(), "test".to_owned()),
+            ("observability_contract".to_owned(), "test".to_owned()),
             ("zeroshot-rust".to_owned(), "bin".to_owned()),
             ("zeroshot_engine".to_owned(), "lib".to_owned()),
         ])
@@ -151,7 +159,8 @@ fn product_has_only_focused_rust_dependencies() {
                 "normal".to_owned(),
             ),
             ("openengine-cluster-server".to_owned(), "normal".to_owned()),
-            ("serde_json".to_owned(), "dev".to_owned()),
+            ("serde".to_owned(), "normal".to_owned()),
+            ("serde_json".to_owned(), "normal".to_owned()),
             ("tokio".to_owned(), "dev".to_owned()),
         ])
     );
