@@ -1129,6 +1129,7 @@ dependencies = [
  "openengine-cluster-server",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 

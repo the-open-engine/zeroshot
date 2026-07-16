@@ -72,8 +72,26 @@ fn runtime_source() -> String {
     )
 }
 
+fn rust_sources(relative_roots: &[&str]) -> String {
+    let product = product_root();
+    let mut files = BTreeSet::new();
+    for relative_root in relative_roots {
+        let path = product.join(relative_root);
+        if path.is_dir() {
+            relative_files(&product, &path, &mut files);
+        } else {
+            files.insert((*relative_root).to_owned());
+        }
+    }
+    files
+        .into_iter()
+        .map(|path| read(&product.join(path)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
-fn product_uses_the_root_workspace_and_fixed_layout() {
+fn product_uses_the_root_workspace_and_a_rust_only_layout() {
     let root = repository_root();
     let product = product_root();
     assert!(root.join("Cargo.toml").is_file());
@@ -84,26 +102,36 @@ fn product_uses_the_root_workspace_and_fixed_layout() {
 
     let mut files = BTreeSet::new();
     relative_files(&product, &product, &mut files);
-    assert_eq!(
-        files,
-        BTreeSet::from([
-            "Cargo.toml".to_owned(),
-            "src/fault/redaction.rs".to_owned(),
-            "src/fault/taxonomy.rs".to_owned(),
-            "src/fault.rs".to_owned(),
-            "src/lib.rs".to_owned(),
-            "src/main.rs".to_owned(),
-            "src/observability.rs".to_owned(),
-            "tests/architecture.rs".to_owned(),
-            "tests/backend_boundary.rs".to_owned(),
-            "tests/fault_contract.rs".to_owned(),
-            "tests/observability_contract.rs".to_owned(),
-        ])
-    );
+    for required in [
+        "Cargo.toml",
+        "src/fault.rs",
+        "src/fault/redaction.rs",
+        "src/fault/taxonomy.rs",
+        "src/lib.rs",
+        "src/main.rs",
+        "src/observability.rs",
+        "src/provider_value.rs",
+        "src/issue_provider.rs",
+        "src/source_code_provider.rs",
+        "tests/architecture.rs",
+        "tests/backend_boundary.rs",
+        "tests/fault_contract.rs",
+        "tests/observability_contract.rs",
+        "tests/provider_contracts.rs",
+        "tests/provider_bounds.rs",
+    ] {
+        assert!(files.contains(required), "missing product file: {required}");
+    }
+    for file in files {
+        assert!(
+            file == "Cargo.toml" || file.ends_with(".rs"),
+            "native product must remain Rust-only: {file}"
+        );
+    }
 }
 
 #[test]
-fn workspace_metadata_exposes_the_fixed_product_identity() {
+fn workspace_metadata_preserves_package_lib_and_bin_identity() {
     let metadata = workspace_metadata();
     assert_eq!(
         metadata["workspace_root"],
@@ -127,6 +155,8 @@ fn workspace_metadata_exposes_the_fixed_product_identity() {
             ("backend_boundary".to_owned(), "test".to_owned()),
             ("fault_contract".to_owned(), "test".to_owned()),
             ("observability_contract".to_owned(), "test".to_owned()),
+            ("provider_bounds".to_owned(), "test".to_owned()),
+            ("provider_contracts".to_owned(), "test".to_owned()),
             ("zeroshot-rust".to_owned(), "bin".to_owned()),
             ("zeroshot_engine".to_owned(), "lib".to_owned()),
         ])
@@ -134,7 +164,7 @@ fn workspace_metadata_exposes_the_fixed_product_identity() {
 }
 
 #[test]
-fn product_has_only_focused_rust_dependencies() {
+fn product_dependencies_stay_inside_native_contract_and_backend_boundaries() {
     let metadata = workspace_metadata();
     let dependencies = product_package(&metadata)["dependencies"]
         .as_array()
@@ -150,20 +180,19 @@ fn product_has_only_focused_rust_dependencies() {
             )
         })
         .collect::<BTreeSet<_>>();
-    assert_eq!(
-        dependencies,
-        BTreeSet::from([
-            ("async-trait".to_owned(), "normal".to_owned()),
-            (
-                "openengine-cluster-protocol".to_owned(),
-                "normal".to_owned(),
-            ),
-            ("openengine-cluster-server".to_owned(), "normal".to_owned()),
-            ("serde".to_owned(), "normal".to_owned()),
-            ("serde_json".to_owned(), "normal".to_owned()),
-            ("tokio".to_owned(), "dev".to_owned()),
-        ])
-    );
+    let allowed = BTreeSet::from([
+        ("async-trait".to_owned(), "normal".to_owned()),
+        (
+            "openengine-cluster-protocol".to_owned(),
+            "normal".to_owned(),
+        ),
+        ("openengine-cluster-server".to_owned(), "normal".to_owned()),
+        ("serde".to_owned(), "normal".to_owned()),
+        ("serde_json".to_owned(), "normal".to_owned()),
+        ("thiserror".to_owned(), "normal".to_owned()),
+        ("tokio".to_owned(), "dev".to_owned()),
+    ]);
+    assert_eq!(dependencies, allowed);
 }
 
 #[test]
@@ -250,11 +279,53 @@ fn runtime_has_no_future_product_concerns() {
         "worker",
         "workspace",
         "artifact",
-        "provider",
     ] {
         assert!(
             !words.contains(forbidden_word),
             "forbidden future product concern: {forbidden_word}"
+        );
+    }
+}
+
+#[test]
+fn provider_contracts_add_no_ledger_workspace_worker_protocol_adapter_or_fault_behavior() {
+    let product = product_root();
+    let provider_value = rust_sources(&["src/provider_value.rs", "src/provider_value"]);
+    let contracts = rust_sources(&[
+        "src/issue_provider.rs",
+        "src/issue_provider",
+        "src/source_code_provider.rs",
+        "src/source_code_provider",
+    ]);
+    assert!(
+        read(&product.join("src/lib.rs")).contains("mod provider_value;"),
+        "bounded provider helpers must remain product-private"
+    );
+    for forbidden in [
+        "pub trait Provider",
+        "PlatformProfile",
+        "ChangeProvider",
+        "CommonProviderId",
+    ] {
+        assert!(
+            !provider_value.contains(forbidden),
+            "provider_value must not expose a common provider abstraction: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "ClusterLedger",
+        "rusqlite",
+        "WorkspaceLease",
+        "WorkerRegistry",
+        "WorkerProvider",
+        "EngineFault",
+        "openengine_cluster_protocol",
+        "openengine_cluster_server",
+        "Adapter",
+    ] {
+        assert!(
+            !contracts.contains(forbidden),
+            "provider contracts crossed an owned boundary: {forbidden}"
         );
     }
 }

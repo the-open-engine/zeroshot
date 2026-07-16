@@ -292,7 +292,7 @@ function defineLifecycleStartTests() {
       assert.strictEqual(callCount, 2, 'Expected SIGTERM failure to trigger one retry');
     });
 
-    it('should restart implementation agent after retries exhausted', async function () {
+    it('should stop after implementation agent retries are exhausted', async function () {
       const config = {
         agents: [
           {
@@ -304,12 +304,7 @@ function defineLifecycleStartTests() {
             hooks: {
               onComplete: {
                 action: 'publish_message',
-                config: {
-                  topic: 'CLUSTER_COMPLETE',
-                  content: {
-                    data: { reason: 'restart-after-exhausted-retries-test' },
-                  },
-                },
+                config: { topic: 'CLUSTER_COMPLETE' },
               },
             },
           },
@@ -319,10 +314,7 @@ function defineLifecycleStartTests() {
       let callCount = 0;
       lifecycleMockRunner.when('worker').calls(() => {
         callCount += 1;
-        if (callCount <= 3) {
-          return { success: false, output: '', error: 'Request timed out' };
-        }
-        return { success: true, output: 'ok' };
+        return { success: false, output: '', error: 'Request timed out' };
       });
 
       const result = await lifecycleOrchestrator.start(config, { text: 'Fix bug' });
@@ -330,9 +322,9 @@ function defineLifecycleStartTests() {
 
       const cluster = lifecycleOrchestrator.getCluster(result.id);
       const ledger = new LedgerAssertions(cluster.ledger, result.id);
-      ledger.assertCount('AGENT_RESTART_ATTEMPT', 1);
+      ledger.assertCount('AGENT_ERROR', 1);
 
-      assert.ok(callCount >= 4, `Expected worker to be invoked at least 4 times, got ${callCount}`);
+      assert.strictEqual(callCount, 3, 'Expected the worker to stop after three failed attempts');
     });
 
     it('should inject worktree cwd when worktree enabled', function () {
@@ -475,15 +467,15 @@ function defineLifecycleStartTests() {
         'Should reject missing input'
       );
 
-      // Regression: startup failures must be persisted for supervisor visibility (no "invisible" clusters).
+      // Input rejection precedes cluster, ledger, and isolation allocation.
       const clustersFile = path.join(lifecycleStorageDir, 'clusters.json');
-      assert.ok(fs.existsSync(clustersFile), 'clusters.json should exist after failed start');
-      const persisted = JSON.parse(fs.readFileSync(clustersFile, 'utf8'));
-      const ids = Object.keys(persisted);
-      assert.equal(ids.length, 1, 'Expected exactly one persisted cluster entry');
-      const c = persisted[ids[0]];
-      assert.equal(c.state, 'failed', 'Failed start should persist state=failed');
-      assert.equal(c.pid, null, 'Failed start should persist pid=null');
+      assert.strictEqual(lifecycleOrchestrator.clusters.size, 0);
+      assert.ok(!fs.existsSync(clustersFile), 'Rejected input must not create clusters.json');
+      assert.deepStrictEqual(
+        fs.readdirSync(lifecycleStorageDir).filter((entry) => entry.endsWith('.db')),
+        [],
+        'Rejected input must not allocate a ledger database'
+      );
     });
 
     it('should auto-generate unique cluster IDs', async function () {
@@ -562,11 +554,23 @@ function defineLifecycleStopTests() {
       const result = await lifecycleOrchestrator.start(config, { text: 'Task' });
       const clusterId = result.id;
 
-      // Simulate --pr/--ship mode by setting autoPr on the cluster
+      // Simulate --pr/--ship mode with the worktree resource that stop() owns.
       const cluster = lifecycleOrchestrator.getCluster(clusterId);
       cluster.autoPr = true;
+      let cleanupCalls = 0;
+      cluster.worktree = {
+        branch: 'test-branch',
+        manager: {
+          cleanupWorktreeIsolation(cleanupClusterId, options) {
+            assert.strictEqual(cleanupClusterId, clusterId);
+            assert.deepStrictEqual(options, { preserveBranch: true });
+            cleanupCalls += 1;
+          },
+        },
+      };
 
       await lifecycleOrchestrator.stop(clusterId, { completedSuccessfully: true });
+      assert.strictEqual(cleanupCalls, 1, 'Worktree should be cleaned exactly once');
 
       // Verify: Cluster removed from memory (same as kill behavior)
       const afterStop = lifecycleOrchestrator.getCluster(clusterId);
