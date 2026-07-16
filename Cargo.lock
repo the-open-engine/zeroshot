@@ -1127,7 +1127,9 @@ dependencies = [
  "async-trait",
  "openengine-cluster-protocol",
  "openengine-cluster-server",
+ "serde",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 

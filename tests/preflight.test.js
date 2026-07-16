@@ -257,16 +257,25 @@ function defineClaudeAuthTests() {
 function defineGhAuthTests() {
   describe('checkGhAuth()', () => {
     it('should detect gh CLI when installed', function () {
-      try {
-        execSync(`${whichCmd} gh`, { stdio: 'pipe' });
-      } catch {
-        this.skip();
-      }
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gh-'));
+      const originalPath = process.env.PATH;
+      const executable = path.join(tempDir, process.platform === 'win32' ? 'gh.cmd' : 'gh');
+      const contents =
+        process.platform === 'win32'
+          ? '@echo off\r\nif "%1 %2"=="auth status" exit /b 0\r\nexit /b 1\r\n'
+          : '#!/bin/sh\n[ "$1 $2" = "auth status" ]\n';
+      fs.writeFileSync(executable, contents, { mode: 0o755 });
+      process.env.PATH = `${tempDir}${path.delimiter}${originalPath || ''}`;
 
-      const result = checkGhAuth();
-      expect(result.installed).to.be.true;
-      // Auth status depends on environment
-      expect(result).to.have.property('authenticated');
+      try {
+        const result = checkGhAuth();
+        expect(result.installed).to.be.true;
+        expect(result.authenticated).to.be.true;
+        expect(result.error).to.be.null;
+      } finally {
+        process.env.PATH = originalPath;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('should report not installed when gh CLI is missing', () => {
