@@ -48,9 +48,6 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Closed payload algebra     | `crates/openengine-cluster-protocol/src/payload.rs`                |
 | Compiled IR/identity       | `crates/openengine-cluster-protocol/src/canonical.rs`              |
 | Artifact receipts          | `crates/openengine-cluster-protocol/src/artifact.rs`               |
-| Worker descriptors         | `crates/openengine-cluster-protocol/src/worker.rs`                 |
-| Worker registry boundary   | `crates/openengine-cluster-server/src/worker_registry.rs`          |
-| Mock worker profiles       | `crates/openengine-cluster-testkit/src/worker_profiles.rs`         |
 | Graph diagnostics/bounds   | `crates/openengine-cluster-protocol/src/diagnostic.rs`             |
 | Shared wire-value bounds   | `crates/openengine-cluster-protocol/src/value.rs`                  |
 | Cluster dispatch/stdio     | `crates/openengine-cluster-server/`                                |
@@ -67,14 +64,26 @@ verify byte-for-byte drift with `npm run protocol:check`. These generator-format
 are excluded from Prettier; never format them independently.
 Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
 authoritative contract types only. They do not provide graph admission, verification, or execution.
-Worker descriptors and registry compatibility checks are also contract/pre-admission ports only.
+
+The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
+and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
+
+### Cluster Worker Contracts
+
+| Concept                    | File                                                       |
+| -------------------------- | ---------------------------------------------------------- |
+| Worker descriptors         | `crates/openengine-cluster-protocol/src/worker.rs`         |
+| Normalized worker outcomes | `crates/openengine-cluster-protocol/src/worker/outcome.rs` |
+| Worker registry boundary   | `crates/openengine-cluster-server/src/worker_registry.rs`  |
+| Mock worker profiles       | `crates/openengine-cluster-testkit/src/worker_profiles.rs` |
+
+Worker descriptors and registry compatibility checks are contract/pre-admission ports only.
 ACP/A2A modules in the testkit are mock conformance profiles, never production transports.
 Descriptors must declare all four closed runtime errors (`timeout`, `crash`, `malformed`, `refusal`).
 The reserved legacy descriptor is valid only with its canonical request/result payload types, while
 mock verifier completions must validate output, signals, diagnostics, and artifacts before emission.
-
-The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
-and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.
+Worker JSON Schema must mirror descriptor cross-field/uniqueness validation and the closed
+error-code/reason matrix; registry compatibility must reject verifier contracts on step nodes.
 
 ## CLI Quick Reference
 

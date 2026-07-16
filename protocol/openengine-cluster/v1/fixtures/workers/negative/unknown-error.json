@@ -38,5 +38,6 @@
     ],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "UNKNOWN_WORKER_ERROR"
+  "expectedCode": "UNKNOWN_WORKER_ERROR",
+  "fixtureKind": "descriptor"
 }

@@ -12,6 +12,11 @@ emit. Verifier completions are distinct from ordinary completions: their output,
 labels, diagnostic payload, and artifact receipts are all validated before a durable verifier outcome
 is produced; any mismatch becomes `malformed`.
 
+Normalized error pairs are closed. Declared worker failures use `declared_failure` with one of the
+four error codes. Policy denial, interactive input, and authentication requirements use `refusal`
+with their matching reason. Rejected output, signal, diagnostic, or artifact data uses `malformed`
+with `malformed_result`. Rust serialization/deserialization and JSON Schema reject every other pair.
+
 ## Portable bindings
 
 | Protocol        | Version | Profile                     | Scope                           |
@@ -35,6 +40,8 @@ The reusable pre-admission check traverses steps and verifiers in source order a
 3. Descriptor verifier signal fields and labels are subsets of graph declarations; its diagnostic
    is a subtype of the graph diagnostic.
 4. The descriptor identity is the exact requested `WorkerRef` and allows the graph profile.
+5. Step nodes resolve only to non-verifier descriptors, and verifier nodes only to descriptors with
+   a verifier contract.
 
 The check returns deterministic diagnostics. It does not admit, persist, schedule, or execute a
 graph.

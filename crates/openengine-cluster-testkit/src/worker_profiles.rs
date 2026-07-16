@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
     ArtifactRef, EnumLabel, FieldName, PayloadType, RedactionClass, VerifierContract,
-    WorkerDescriptor, WorkerErrorCode, WorkerFailureReason, WorkerOutcome, WorkerProtocol,
-    A2A_PROFILE, A2A_VERSION, ACP_PROFILE, ACP_VERSION,
+    WorkerDescriptor, WorkerErrorCode, WorkerOutcome, WorkerProtocol, A2A_PROFILE, A2A_VERSION,
+    ACP_PROFILE, ACP_VERSION,
 };
 use serde_json::Value;
 
@@ -99,10 +99,8 @@ pub fn normalize_mock_acp_v1(
         MockAcpV1Result::PermissionRequest {
             decision: MockPolicyDecision::Deny,
             ..
-        } => WorkerOutcome::refusal(WorkerFailureReason::PolicyDenied),
-        MockAcpV1Result::InputRequest => {
-            WorkerOutcome::refusal(WorkerFailureReason::InteractiveInputRequired)
-        }
+        } => WorkerOutcome::policy_refusal(),
+        MockAcpV1Result::InputRequest => WorkerOutcome::interactive_refusal(),
         MockAcpV1Result::Malformed(_) => WorkerOutcome::malformed(),
     }
 }
@@ -134,12 +132,8 @@ pub fn normalize_mock_a2a_1_0(
             },
         ),
         MockA2a1_0Result::Failed(code) => normalize_declared_error(descriptor, code),
-        MockA2a1_0Result::InputRequired => {
-            WorkerOutcome::refusal(WorkerFailureReason::InteractiveInputRequired)
-        }
-        MockA2a1_0Result::AuthRequired => {
-            WorkerOutcome::refusal(WorkerFailureReason::AuthenticationRequired)
-        }
+        MockA2a1_0Result::InputRequired => WorkerOutcome::interactive_refusal(),
+        MockA2a1_0Result::AuthRequired => WorkerOutcome::authentication_refusal(),
         MockA2a1_0Result::MalformedArtifact(_) => WorkerOutcome::malformed(),
     }
 }
@@ -158,10 +152,7 @@ fn descriptor_uses_profile(
 
 fn normalize_declared_error(descriptor: &WorkerDescriptor, code: WorkerErrorCode) -> WorkerOutcome {
     if descriptor.contract.errors.contains(&code) {
-        WorkerOutcome::Error {
-            code,
-            reason: WorkerFailureReason::DeclaredFailure,
-        }
+        WorkerOutcome::declared_failure(code)
     } else {
         WorkerOutcome::malformed()
     }
@@ -248,7 +239,13 @@ fn payload_matches(value: &Value, payload_type: &PayloadType) -> bool {
     match payload_type {
         PayloadType::Null => value.is_null(),
         PayloadType::Boolean => value.is_boolean(),
-        PayloadType::Integer => value.as_i64().is_some() || value.as_u64().is_some(),
+        PayloadType::Integer => {
+            value.as_i64().is_some()
+                || value.as_u64().is_some()
+                || value
+                    .as_f64()
+                    .is_some_and(|number| number.is_finite() && number.fract() == 0.0)
+        }
         PayloadType::Number => value.is_number(),
         PayloadType::String => value.is_string(),
         PayloadType::Array { items } => value

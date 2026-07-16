@@ -72,6 +72,17 @@ fn descriptor_rejects_empty_duplicate_sets_and_nonopaque_handles() {
     duplicate["graphProfiles"] = json!(["openengine.graph.full/v1", "openengine.graph.full/v1"]);
     assert!(serde_json::from_value::<WorkerDescriptor>(duplicate).is_err());
 
+    let mut duplicate_credentials = descriptor();
+    duplicate_credentials["credentialRequirements"] =
+        json!(["credential.mock@1", "credential.mock@1"]);
+    assert!(serde_json::from_value::<WorkerDescriptor>(duplicate_credentials.clone()).is_err());
+    let schema = serde_json::to_value(schemars::schema_for!(WorkerDescriptor)).unwrap();
+    assert!(
+        !jsonschema::validator_for(&schema)
+            .unwrap()
+            .is_valid(&duplicate_credentials)
+    );
+
     let mut incomplete_errors = descriptor();
     incomplete_errors["contract"]["errors"] = json!(["timeout", "crash", "malformed"]);
     assert!(serde_json::from_value::<WorkerDescriptor>(incomplete_errors.clone()).is_err());
@@ -90,18 +101,53 @@ fn descriptor_rejects_empty_duplicate_sets_and_nonopaque_handles() {
 }
 
 #[test]
+fn descriptor_schema_matches_legacy_cross_field_validation() {
+    let schema = serde_json::to_value(schemars::schema_for!(WorkerDescriptor)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let mut legacy = descriptor();
+    legacy["worker"] = json!(LEGACY_ZEROSHOT_WORKER);
+    legacy["graphProfiles"] = json!([GraphProfile::SingleWorker.as_str()]);
+    legacy["binding"] =
+        serde_json::to_value(WorkerProtocolBinding::legacy_zeroshot_ship_v1()).unwrap();
+    legacy["contract"]["input"] = serde_json::to_value(legacy_ship_request_payload_type()).unwrap();
+    legacy["contract"]["output"] = serde_json::to_value(legacy_ship_result_payload_type()).unwrap();
+    assert!(validator.is_valid(&legacy));
+
+    for (pointer, replacement) in [
+        ("/worker", json!("wrong.legacy@1")),
+        ("/graphProfiles", json!([GraphProfile::Full.as_str()])),
+        ("/contract/input", json!({ "kind": "string" })),
+        ("/contract/output", json!({ "kind": "string" })),
+        (
+            "/contract/errors",
+            json!(["crash", "timeout", "malformed", "refusal"]),
+        ),
+    ] {
+        let mut invalid = legacy.clone();
+        *invalid.pointer_mut(pointer).unwrap() = replacement;
+        assert!(serde_json::from_value::<WorkerDescriptor>(invalid.clone()).is_err());
+        assert!(
+            !validator.is_valid(&invalid),
+            "schema accepted invalid legacy descriptor mutation at {pointer}"
+        );
+    }
+
+    let mut mismatched_identity = descriptor();
+    mismatched_identity["worker"] = json!(LEGACY_ZEROSHOT_WORKER);
+    assert!(serde_json::from_value::<WorkerDescriptor>(mismatched_identity.clone()).is_err());
+    assert!(!validator.is_valid(&mismatched_identity));
+}
+
+#[test]
 fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
     for (outcome, reason) in [
+        (WorkerOutcome::policy_refusal(), "policy_denied"),
         (
-            WorkerOutcome::refusal(WorkerFailureReason::PolicyDenied),
-            "policy_denied",
-        ),
-        (
-            WorkerOutcome::refusal(WorkerFailureReason::InteractiveInputRequired),
+            WorkerOutcome::interactive_refusal(),
             "interactive_input_required",
         ),
         (
-            WorkerOutcome::refusal(WorkerFailureReason::AuthenticationRequired),
+            WorkerOutcome::authentication_refusal(),
             "authentication_required",
         ),
     ] {
@@ -115,6 +161,32 @@ fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
         serde_json::to_value(WorkerOutcome::malformed()).unwrap()["code"],
         "malformed"
     );
+
+    let schema = serde_json::to_value(schemars::schema_for!(WorkerOutcome)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for code in RUNTIME_WORKER_ERRORS {
+        let outcome = WorkerOutcome::declared_failure(code);
+        let value = serde_json::to_value(&outcome).unwrap();
+        assert!(validator.is_valid(&value));
+        assert_eq!(
+            serde_json::from_value::<WorkerOutcome>(value).unwrap(),
+            outcome
+        );
+    }
+    for invalid in [
+        json!({ "status": "error", "code": "timeout", "reason": "policy_denied" }),
+        json!({ "status": "error", "code": "malformed", "reason": "authentication_required" }),
+        json!({ "status": "error", "code": "refusal", "reason": "malformed_result" }),
+    ] {
+        assert!(serde_json::from_value::<WorkerOutcome>(invalid.clone()).is_err());
+        assert!(!validator.is_valid(&invalid));
+    }
+
+    let invalid_rust_value = WorkerOutcome::Error {
+        code: openengine_cluster_protocol::WorkerErrorCode::Timeout,
+        reason: WorkerFailureReason::PolicyDenied,
+    };
+    assert!(serde_json::to_value(invalid_rust_value).is_err());
 }
 
 #[test]

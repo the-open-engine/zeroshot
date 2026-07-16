@@ -35,6 +35,31 @@ pub fn worker_schema() -> Value {
 }
 
 #[must_use]
+pub fn with_worker_components(mut document: Value) -> Value {
+    let schemas = document["components"]["schemas"]
+        .as_object_mut()
+        .expect("OpenRPC components.schemas must be an object");
+    for (name, schema) in [
+        ("WorkerDescriptor", json!({ "$ref": "worker.schema.json" })),
+        (
+            "WorkerOutcome",
+            json!({ "$ref": "worker.schema.json#/$defs/WorkerOutcome" }),
+        ),
+        (
+            "LegacyShipRequest",
+            json!({ "$ref": "worker.schema.json#/$defs/LegacyShipRequest" }),
+        ),
+        (
+            "LegacyShipResult",
+            json!({ "$ref": "worker.schema.json#/$defs/LegacyShipResult" }),
+        ),
+    ] {
+        schemas.insert(name.to_owned(), schema);
+    }
+    document
+}
+
+#[must_use]
 pub fn worker_fixture_artifacts() -> Vec<Artifact> {
     let acp = descriptor("mock.acp@1", "acp", "1", "openengine.worker.acp/v1");
     let a2a = descriptor("mock.a2a@1", "a2a", "1.0", "openengine.worker.a2a/1.0");
@@ -49,8 +74,10 @@ pub fn worker_fixture_artifacts() -> Vec<Artifact> {
     legacy["contract"]["output"] = serde_json::to_value(legacy_ship_result_payload_type()).unwrap();
 
     let mut artifacts = positive_worker_artifacts(acp.clone(), a2a, legacy.clone());
-    artifacts.extend(negative_contract_artifacts(&acp));
+    artifacts.extend(negative_contract_artifacts(&acp, &legacy));
     artifacts.extend(negative_secret_artifacts(&acp));
+    artifacts.extend(negative_outcome_artifacts());
+    artifacts.extend(compatibility_artifacts(&acp));
     artifacts
 }
 
@@ -92,8 +119,8 @@ fn positive_worker_artifacts(acp: Value, a2a: Value, legacy: Value) -> Vec<Artif
     ]
 }
 
-fn negative_contract_artifacts(acp: &Value) -> Vec<Artifact> {
-    negative_artifacts(
+fn negative_contract_artifacts(acp: &Value, legacy: &Value) -> Vec<Artifact> {
+    let mut artifacts = negative_descriptor_artifacts(
         acp,
         vec![
             (
@@ -132,12 +159,42 @@ fn negative_contract_artifacts(acp: &Value) -> Vec<Artifact> {
                 "/contract/errors",
                 json!(["timeout", "crash", "malformed"]),
             ),
+            (
+                "duplicate-credentials",
+                "DUPLICATE_CREDENTIAL_REQUIREMENTS",
+                "/credentialRequirements",
+                json!(["credential.test@1", "credential.test@1"]),
+            ),
         ],
-    )
+    );
+    artifacts.extend(negative_descriptor_artifacts(
+        legacy,
+        vec![
+            (
+                "legacy-wrong-worker",
+                "INVALID_LEGACY_BINDING",
+                "/worker",
+                json!("mock.legacy@1"),
+            ),
+            (
+                "legacy-wrong-profile",
+                "INVALID_LEGACY_BINDING",
+                "/graphProfiles",
+                json!(["openengine.graph.full/v1"]),
+            ),
+            (
+                "legacy-wrong-contract",
+                "INVALID_LEGACY_BINDING",
+                "/contract/output",
+                json!({ "kind": "string" }),
+            ),
+        ],
+    ));
+    artifacts
 }
 
 fn negative_secret_artifacts(acp: &Value) -> Vec<Artifact> {
-    negative_artifacts(
+    negative_descriptor_artifacts(
         acp,
         vec![
             ("command", "FORBIDDEN_FIELD", "/command", json!("execute")),
@@ -183,7 +240,10 @@ fn negative_secret_artifacts(acp: &Value) -> Vec<Artifact> {
     )
 }
 
-fn negative_artifacts(base: &Value, vectors: Vec<(&str, &str, &str, Value)>) -> Vec<Artifact> {
+fn negative_descriptor_artifacts(
+    base: &Value,
+    vectors: Vec<(&str, &str, &str, Value)>,
+) -> Vec<Artifact> {
     vectors
         .into_iter()
         .map(|(name, expected_code, pointer, replacement)| {
@@ -191,10 +251,171 @@ fn negative_artifacts(base: &Value, vectors: Vec<(&str, &str, &str, Value)>) -> 
             set_pointer(&mut document, pointer, replacement);
             json_artifact(
                 &format!("negative/{name}.json"),
-                json!({ "expectedCode": expected_code, "document": document }),
+                json!({
+                    "fixtureKind": "descriptor",
+                    "expectedCode": expected_code,
+                    "document": document
+                }),
             )
         })
         .collect()
+}
+
+fn negative_outcome_artifacts() -> Vec<Artifact> {
+    [
+        (
+            "timeout-policy-reason",
+            json!({ "status": "error", "code": "timeout", "reason": "policy_denied" }),
+        ),
+        (
+            "malformed-auth-reason",
+            json!({
+                "status": "error", "code": "malformed", "reason": "authentication_required"
+            }),
+        ),
+        (
+            "refusal-malformed-reason",
+            json!({ "status": "error", "code": "refusal", "reason": "malformed_result" }),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, document)| {
+        json_artifact(
+            &format!("negative/{name}.json"),
+            json!({
+                "fixtureKind": "outcome",
+                "expectedCode": "INVALID_FAILURE_PAIR",
+                "document": document
+            }),
+        )
+    })
+    .collect()
+}
+
+fn compatibility_artifacts(acp: &Value) -> Vec<Artifact> {
+    let step_graph = compatibility_graph(false);
+    let verifier_graph = compatibility_graph(true);
+    let mut step = acp.clone();
+    step["contract"]["input"] = json!({ "kind": "number" });
+    step["contract"]["output"] = json!({ "kind": "integer" });
+    let mut verifier = step.clone();
+    verifier["worker"] = json!("mock.verifier@1");
+    verifier["contract"]["verifier"] = json!({
+        "signals": { "verdict": ["accepted"] },
+        "diagnostic": { "kind": "integer" }
+    });
+
+    let cases = [
+        (
+            "compatibility-input",
+            "INPUT",
+            step_graph.clone(),
+            mutate(&step, "/contract/input", json!({ "kind": "string" })),
+        ),
+        (
+            "compatibility-output",
+            "OUTPUT",
+            step_graph.clone(),
+            mutate(&step, "/contract/output", json!({ "kind": "string" })),
+        ),
+        (
+            "compatibility-step-verifier",
+            "VERIFIER_CONTRACT",
+            step_graph,
+            mutate(
+                &step,
+                "/contract/verifier",
+                json!({
+                    "signals": { "verdict": ["accepted"] },
+                    "diagnostic": { "kind": "integer" }
+                }),
+            ),
+        ),
+        (
+            "compatibility-signal-field",
+            "SIGNAL_FIELD",
+            verifier_graph.clone(),
+            mutate(
+                &verifier,
+                "/contract/verifier/signals",
+                json!({ "missing": ["accepted"] }),
+            ),
+        ),
+        (
+            "compatibility-signal-labels",
+            "SIGNAL_LABELS",
+            verifier_graph.clone(),
+            mutate(
+                &verifier,
+                "/contract/verifier/signals",
+                json!({ "verdict": ["undeclared"] }),
+            ),
+        ),
+        (
+            "compatibility-diagnostic",
+            "DIAGNOSTIC",
+            verifier_graph,
+            mutate(
+                &verifier,
+                "/contract/verifier/diagnostic",
+                json!({ "kind": "string" }),
+            ),
+        ),
+    ];
+
+    cases
+        .into_iter()
+        .map(|(name, expected_code, graph, descriptor)| {
+            let requested_worker = graph["root"]["worker"].clone();
+            json_artifact(
+                &format!("negative/{name}.json"),
+                json!({
+                    "fixtureKind": "compatibility",
+                    "expectedCode": expected_code,
+                    "graph": graph,
+                    "registry": [{
+                        "requestedWorker": requested_worker,
+                        "descriptor": descriptor
+                    }]
+                }),
+            )
+        })
+        .collect()
+}
+
+fn compatibility_graph(verifier: bool) -> Value {
+    let worker = if verifier {
+        "mock.verifier@1"
+    } else {
+        "mock.acp@1"
+    };
+    let mut root = json!({
+        "kind": if verifier { "verifier" } else { "step" },
+        "name": if verifier { "verify" } else { "work" },
+        "worker": worker,
+        "input": { "kind": "integer" },
+        "output": { "kind": "number" },
+        "inputBindings": [],
+        "writeBindings": [],
+        "timeoutMs": 10,
+        "attempts": 1
+    });
+    if verifier {
+        root["signals"] = json!({ "verdict": ["accepted", "rejected"] });
+        root["diagnostic"] = json!({ "kind": "number" });
+    }
+    json!({
+        "profile": "openengine.graph.full/v1",
+        "initialInput": { "kind": "null" },
+        "policy": { "policy": "policy.strict@1", "default": "deny" },
+        "root": root
+    })
+}
+
+fn mutate(base: &Value, pointer: &str, replacement: Value) -> Value {
+    let mut value = base.clone();
+    set_pointer(&mut value, pointer, replacement);
+    value
 }
 
 fn descriptor(worker: &str, protocol: &str, version: &str, profile: &str) -> Value {

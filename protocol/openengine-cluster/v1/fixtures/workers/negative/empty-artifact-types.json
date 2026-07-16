@@ -39,5 +39,6 @@
     ],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "EMPTY_ARTIFACT_TYPES"
+  "expectedCode": "EMPTY_ARTIFACT_TYPES",
+  "fixtureKind": "descriptor"
 }

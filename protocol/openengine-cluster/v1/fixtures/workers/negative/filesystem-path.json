@@ -42,5 +42,6 @@
     "path": "/tmp/secret",
     "worker": "mock.acp@1"
   },
-  "expectedCode": "FORBIDDEN_FIELD"
+  "expectedCode": "FORBIDDEN_FIELD",
+  "fixtureKind": "descriptor"
 }

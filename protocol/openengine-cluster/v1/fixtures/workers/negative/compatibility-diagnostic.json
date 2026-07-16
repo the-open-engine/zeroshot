@@ -1,0 +1,94 @@
+{
+  "expectedCode": "DIAGNOSTIC",
+  "fixtureKind": "compatibility",
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "attempts": 1,
+      "diagnostic": {
+        "kind": "number"
+      },
+      "input": {
+        "kind": "integer"
+      },
+      "inputBindings": [],
+      "kind": "verifier",
+      "name": "verify",
+      "output": {
+        "kind": "number"
+      },
+      "signals": {
+        "verdict": [
+          "accepted",
+          "rejected"
+        ]
+      },
+      "timeoutMs": 10,
+      "worker": "mock.verifier@1",
+      "writeBindings": []
+    }
+  },
+  "registry": [
+    {
+      "descriptor": {
+        "artifactProfile": {
+          "allowedMediaTypes": [
+            "application/json"
+          ],
+          "allowedTypeIds": [
+            "openengine.result@1"
+          ],
+          "minimumRedaction": "internal"
+        },
+        "binding": {
+          "profile": "openengine.worker.acp/v1",
+          "protocol": "acp",
+          "version": "1"
+        },
+        "capabilityPolicy": {
+          "autonomy": "strict",
+          "permissionPolicy": "policy.strict@1"
+        },
+        "contract": {
+          "errors": [
+            "timeout",
+            "crash",
+            "malformed",
+            "refusal"
+          ],
+          "input": {
+            "kind": "number"
+          },
+          "output": {
+            "kind": "integer"
+          },
+          "verifier": {
+            "diagnostic": {
+              "kind": "string"
+            },
+            "signals": {
+              "verdict": [
+                "accepted"
+              ]
+            }
+          }
+        },
+        "credentialRequirements": [
+          "credential.test@1"
+        ],
+        "graphProfiles": [
+          "openengine.graph.full/v1"
+        ],
+        "worker": "mock.verifier@1"
+      },
+      "requestedWorker": "mock.verifier@1"
+    }
+  ]
+}

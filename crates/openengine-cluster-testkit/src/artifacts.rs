@@ -13,7 +13,7 @@ use thiserror::Error;
 use crate::EmptyBackend;
 use crate::negative_graph_fixtures::{diagnostic_fixture, negative_graph_fixtures};
 use crate::schema_helpers::merge_schema;
-use crate::worker_artifacts::{worker_fixture_artifacts, worker_schema};
+use crate::worker_artifacts::{with_worker_components, worker_fixture_artifacts, worker_schema};
 
 const ROOT: &str = "protocol/openengine-cluster/v1";
 
@@ -47,10 +47,10 @@ pub struct ImplementedProtocolSchema {
 pub async fn generate_artifacts() -> Vec<Artifact> {
     let schema = serde_json::to_value(schema_for!(ImplementedProtocolSchema))
         .expect("JSON Schema serialization must succeed");
+    let worker_schema = worker_schema();
     let graph_schema = graph_schema();
     let compiled_ir_schema = serde_json::to_value(schema_for!(CompiledGraphIr))
         .expect("compiled IR JSON Schema serialization must succeed");
-    let worker_schema = worker_schema();
     let openrpc = openrpc_document();
     let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
 
@@ -89,11 +89,14 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
             format!("{ROOT}/compiled-ir.schema.json"),
             compiled_ir_schema,
         ),
-        json_artifact(format!("{ROOT}/openrpc.json"), openrpc),
+        json_artifact(
+            format!("{ROOT}/openrpc.json"),
+            with_worker_components(openrpc),
+        ),
         json_artifact(format!("{ROOT}/worker.schema.json"), worker_schema),
     ];
-    artifacts.extend(graph_fixture_artifacts());
     artifacts.extend(worker_fixture_artifacts());
+    artifacts.extend(graph_fixture_artifacts());
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {
@@ -201,10 +204,6 @@ fn openrpc_document() -> Value {
                 "GraphDiagnostic": { "$ref": "graph.schema.json#/$defs/GraphDiagnostic" },
                 "StructuralBounds": { "$ref": "graph.schema.json#/$defs/StructuralBounds" },
                 "ArtifactRef": { "$ref": "graph.schema.json#/$defs/ArtifactRef" }
-                ,"WorkerDescriptor": { "$ref": "worker.schema.json" }
-                ,"WorkerOutcome": { "$ref": "worker.schema.json#/$defs/WorkerOutcome" }
-                ,"LegacyShipRequest": { "$ref": "worker.schema.json#/$defs/LegacyShipRequest" }
-                ,"LegacyShipResult": { "$ref": "worker.schema.json#/$defs/LegacyShipResult" }
             }
         }
     })

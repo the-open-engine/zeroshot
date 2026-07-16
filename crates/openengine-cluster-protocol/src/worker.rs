@@ -9,17 +9,17 @@ use std::collections::BTreeMap;
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    ArtifactRef, EnumLabel, FieldName, GraphProfile, MediaType, NonEmptyEnumSet, PayloadType,
-    RedactionClass, TypeId, WorkerErrorCode, WorkerRef, LEGACY_ZEROSHOT_WORKER,
-    SINGLE_WORKER_GRAPH_PROFILE,
+    FieldName, GraphProfile, MediaType, NonEmptyEnumSet, PayloadType, RedactionClass, TypeId,
+    WorkerErrorCode, WorkerRef, LEGACY_ZEROSHOT_WORKER, SINGLE_WORKER_GRAPH_PROFILE,
 };
 
 mod legacy;
+mod outcome;
 pub use legacy::*;
+pub use outcome::*;
 
 pub const ACP_VERSION: &str = "1";
 pub const ACP_PROFILE: &str = "openengine.worker.acp/v1";
@@ -231,11 +231,10 @@ pub struct ArtifactResultProfile {
     pub minimum_redaction: RedactionClass,
 }
 
-#[derive(Clone, Debug, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkerDescriptor {
     pub worker: WorkerRef,
-    #[schemars(schema_with = "nonempty_unique_array_schema::<GraphProfile>")]
     pub graph_profiles: Vec<GraphProfile>,
     pub binding: WorkerProtocolBinding,
     pub contract: WorkerContract,
@@ -244,15 +243,17 @@ pub struct WorkerDescriptor {
     pub credential_requirements: Vec<CredentialHandle>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WorkerDescriptorWire {
     worker: WorkerRef,
+    #[schemars(schema_with = "nonempty_unique_array_schema::<GraphProfile>")]
     graph_profiles: Vec<GraphProfile>,
     binding: WorkerProtocolBinding,
     contract: WorkerContract,
     capability_policy: CapabilityPolicy,
     artifact_profile: ArtifactResultProfile,
+    #[schemars(schema_with = "unique_array_schema::<CredentialHandle>")]
     credential_requirements: Vec<CredentialHandle>,
 }
 
@@ -318,6 +319,63 @@ impl<'de> Deserialize<'de> for WorkerDescriptor {
     }
 }
 
+impl JsonSchema for WorkerDescriptor {
+    fn schema_name() -> Cow<'static, str> {
+        "WorkerDescriptor".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let base = generator.subschema_for::<WorkerDescriptorWire>();
+        let legacy_binding = serde_json::to_value(WorkerProtocolBinding::legacy_zeroshot_ship_v1())
+            .expect("built-in legacy binding must serialize");
+        let legacy_input = serde_json::to_value(legacy_ship_request_payload_type())
+            .expect("legacy input payload type must serialize");
+        let legacy_output = serde_json::to_value(legacy_ship_result_payload_type())
+            .expect("legacy output payload type must serialize");
+        let runtime_errors = serde_json::to_value(RUNTIME_WORKER_ERRORS)
+            .expect("runtime worker errors must serialize");
+
+        json_schema!({
+            "allOf": [
+                base,
+                {
+                    "oneOf": [
+                        {
+                            "required": ["worker", "graphProfiles", "binding", "contract"],
+                            "properties": {
+                                "worker": { "const": LEGACY_ZEROSHOT_WORKER },
+                                "graphProfiles": { "const": [SINGLE_WORKER_GRAPH_PROFILE] },
+                                "binding": { "const": legacy_binding },
+                                "contract": {
+                                    "required": ["input", "output", "verifier", "errors"],
+                                    "properties": {
+                                        "input": { "const": legacy_input },
+                                        "output": { "const": legacy_output },
+                                        "verifier": { "type": "null" },
+                                        "errors": { "const": runtime_errors }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "required": ["worker", "binding"],
+                            "properties": {
+                                "worker": { "not": { "const": LEGACY_ZEROSHOT_WORKER } },
+                                "binding": {
+                                    "required": ["protocol"],
+                                    "properties": {
+                                        "protocol": { "enum": ["acp", "a2a"] }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        })
+    }
+}
+
 fn require_unique_nonempty<T>(values: &[T], kind: &'static str) -> Result<(), WorkerContractError>
 where
     T: PartialEq,
@@ -355,6 +413,17 @@ where
     })
 }
 
+fn unique_array_schema<T>(generator: &mut SchemaGenerator) -> Schema
+where
+    T: JsonSchema,
+{
+    json_schema!({
+        "type": "array",
+        "uniqueItems": true,
+        "items": generator.subschema_for::<T>()
+    })
+}
+
 fn closed_worker_errors_schema(_generator: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "type": "array",
@@ -365,56 +434,6 @@ fn closed_worker_errors_schema(_generator: &mut SchemaGenerator) -> Schema {
             "enum": ["timeout", "crash", "malformed", "refusal"]
         }
     })
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerFailureReason {
-    DeclaredFailure,
-    PolicyDenied,
-    InteractiveInputRequired,
-    AuthenticationRequired,
-    MalformedResult,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, tag = "status", rename_all = "snake_case")]
-pub enum WorkerOutcome {
-    Verified {
-        output: Value,
-        artifacts: Vec<ArtifactRef>,
-    },
-    Verifier {
-        output: Value,
-        #[schemars(
-            schema_with = "crate::value::identifier_keyed_map_schema::<FieldName, EnumLabel>"
-        )]
-        signals: BTreeMap<FieldName, EnumLabel>,
-        diagnostic: Value,
-        artifacts: Vec<ArtifactRef>,
-    },
-    Error {
-        code: WorkerErrorCode,
-        reason: WorkerFailureReason,
-    },
-}
-
-impl WorkerOutcome {
-    #[must_use]
-    pub const fn refusal(reason: WorkerFailureReason) -> Self {
-        Self::Error {
-            code: WorkerErrorCode::Refusal,
-            reason,
-        }
-    }
-
-    #[must_use]
-    pub const fn malformed() -> Self {
-        Self::Error {
-            code: WorkerErrorCode::Malformed,
-            reason: WorkerFailureReason::MalformedResult,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -433,4 +452,6 @@ pub enum WorkerContractError {
     InvalidLegacyBinding,
     #[error("legacy ship source fields are inconsistent")]
     InvalidLegacySource,
+    #[error("worker error code and failure reason are inconsistent")]
+    InvalidFailurePair,
 }

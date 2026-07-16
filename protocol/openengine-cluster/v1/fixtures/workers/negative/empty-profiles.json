@@ -39,5 +39,6 @@
     "graphProfiles": [],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "EMPTY_GRAPH_PROFILES"
+  "expectedCode": "EMPTY_GRAPH_PROFILES",
+  "fixtureKind": "descriptor"
 }

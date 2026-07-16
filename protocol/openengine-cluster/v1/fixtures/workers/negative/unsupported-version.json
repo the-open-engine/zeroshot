@@ -41,5 +41,6 @@
     ],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "UNSUPPORTED_WORKER_BINDING"
+  "expectedCode": "UNSUPPORTED_WORKER_BINDING",
+  "fixtureKind": "descriptor"
 }

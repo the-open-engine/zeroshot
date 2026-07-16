@@ -541,6 +541,53 @@
       ],
       "type": "object"
     },
+    "WorkerDescriptorWire": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactProfile": {
+          "$ref": "#/$defs/ArtifactResultProfile"
+        },
+        "binding": {
+          "$ref": "#/$defs/WorkerProtocolBinding"
+        },
+        "capabilityPolicy": {
+          "$ref": "#/$defs/CapabilityPolicy"
+        },
+        "contract": {
+          "$ref": "#/$defs/WorkerContract"
+        },
+        "credentialRequirements": {
+          "items": {
+            "$ref": "#/$defs/CredentialHandle"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "graphProfiles": {
+          "items": {
+            "$ref": "#/$defs/GraphProfile"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "worker": {
+          "maxLength": 256,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*@[1-9][0-9]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "worker",
+        "graphProfiles",
+        "binding",
+        "contract",
+        "capabilityPolicy",
+        "artifactProfile",
+        "credentialRequirements"
+      ],
+      "type": "object"
+    },
     "WorkerErrorCode": {
       "enum": [
         "timeout",
@@ -561,6 +608,72 @@
       "type": "string"
     },
     "WorkerOutcome": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/WorkerOutcomeWire"
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "error"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "oneOf": [
+              {
+                "properties": {
+                  "reason": {
+                    "const": "declared_failure"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              {
+                "properties": {
+                  "code": {
+                    "const": "refusal"
+                  },
+                  "reason": {
+                    "enum": [
+                      "policy_denied",
+                      "interactive_input_required",
+                      "authentication_required"
+                    ]
+                  }
+                },
+                "required": [
+                  "code",
+                  "reason"
+                ]
+              },
+              {
+                "properties": {
+                  "code": {
+                    "const": "malformed"
+                  },
+                  "reason": {
+                    "const": "malformed_result"
+                  }
+                },
+                "required": [
+                  "code",
+                  "reason"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "title": "WorkerOutcome"
+    },
+    "WorkerOutcomeWire": {
       "oneOf": [
         {
           "additionalProperties": false,
@@ -645,8 +758,7 @@
           ],
           "type": "object"
         }
-      ],
-      "title": "WorkerOutcome"
+      ]
     },
     "WorkerProtocolBinding": {
       "oneOf": [
@@ -714,49 +826,349 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "artifactProfile": {
-      "$ref": "#/$defs/ArtifactResultProfile"
+  "allOf": [
+    {
+      "$ref": "#/$defs/WorkerDescriptorWire"
     },
-    "binding": {
-      "$ref": "#/$defs/WorkerProtocolBinding"
-    },
-    "capabilityPolicy": {
-      "$ref": "#/$defs/CapabilityPolicy"
-    },
-    "contract": {
-      "$ref": "#/$defs/WorkerContract"
-    },
-    "credentialRequirements": {
-      "items": {
-        "$ref": "#/$defs/CredentialHandle"
-      },
-      "type": "array"
-    },
-    "graphProfiles": {
-      "items": {
-        "$ref": "#/$defs/GraphProfile"
-      },
-      "minItems": 1,
-      "type": "array",
-      "uniqueItems": true
-    },
-    "worker": {
-      "maxLength": 256,
-      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*@[1-9][0-9]*$",
-      "type": "string"
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "binding": {
+              "const": {
+                "profile": "legacy.zeroshot.ship/v1",
+                "protocol": "legacy_zeroshot",
+                "version": "1"
+              }
+            },
+            "contract": {
+              "properties": {
+                "errors": {
+                  "const": [
+                    "timeout",
+                    "crash",
+                    "malformed",
+                    "refusal"
+                  ]
+                },
+                "input": {
+                  "const": {
+                    "fields": {
+                      "artifacts": {
+                        "required": true,
+                        "type": {
+                          "items": {
+                            "fields": {
+                              "artifactId": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "byteLength": {
+                                "required": true,
+                                "type": {
+                                  "kind": "integer"
+                                }
+                              },
+                              "lineage": {
+                                "required": true,
+                                "type": {
+                                  "fields": {
+                                    "attempt": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "integer"
+                                      }
+                                    },
+                                    "generation": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "integer"
+                                      }
+                                    },
+                                    "runId": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    }
+                                  },
+                                  "kind": "record"
+                                }
+                              },
+                              "mediaType": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "producer": {
+                                "required": true,
+                                "type": {
+                                  "fields": {
+                                    "node": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    },
+                                    "worker": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    }
+                                  },
+                                  "kind": "record"
+                                }
+                              },
+                              "redaction": {
+                                "required": true,
+                                "type": {
+                                  "kind": "enum",
+                                  "values": [
+                                    "confidential",
+                                    "internal",
+                                    "public",
+                                    "restricted"
+                                  ]
+                                }
+                              },
+                              "sha256": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "typeId": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              }
+                            },
+                            "kind": "record"
+                          },
+                          "kind": "array"
+                        }
+                      },
+                      "isolationProfile": {
+                        "required": true,
+                        "type": {
+                          "kind": "string"
+                        }
+                      },
+                      "issue": {
+                        "required": false,
+                        "type": {
+                          "kind": "string"
+                        }
+                      },
+                      "prompt": {
+                        "required": false,
+                        "type": {
+                          "kind": "string"
+                        }
+                      },
+                      "providerProfile": {
+                        "required": true,
+                        "type": {
+                          "kind": "string"
+                        }
+                      },
+                      "source": {
+                        "required": true,
+                        "type": {
+                          "kind": "enum",
+                          "values": [
+                            "artifact",
+                            "issue",
+                            "prompt"
+                          ]
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  }
+                },
+                "output": {
+                  "const": {
+                    "fields": {
+                      "artifacts": {
+                        "required": true,
+                        "type": {
+                          "items": {
+                            "fields": {
+                              "artifactId": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "byteLength": {
+                                "required": true,
+                                "type": {
+                                  "kind": "integer"
+                                }
+                              },
+                              "lineage": {
+                                "required": true,
+                                "type": {
+                                  "fields": {
+                                    "attempt": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "integer"
+                                      }
+                                    },
+                                    "generation": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "integer"
+                                      }
+                                    },
+                                    "runId": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    }
+                                  },
+                                  "kind": "record"
+                                }
+                              },
+                              "mediaType": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "producer": {
+                                "required": true,
+                                "type": {
+                                  "fields": {
+                                    "node": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    },
+                                    "worker": {
+                                      "required": true,
+                                      "type": {
+                                        "kind": "string"
+                                      }
+                                    }
+                                  },
+                                  "kind": "record"
+                                }
+                              },
+                              "redaction": {
+                                "required": true,
+                                "type": {
+                                  "kind": "enum",
+                                  "values": [
+                                    "confidential",
+                                    "internal",
+                                    "public",
+                                    "restricted"
+                                  ]
+                                }
+                              },
+                              "sha256": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              },
+                              "typeId": {
+                                "required": true,
+                                "type": {
+                                  "kind": "string"
+                                }
+                              }
+                            },
+                            "kind": "record"
+                          },
+                          "kind": "array"
+                        }
+                      },
+                      "status": {
+                        "required": true,
+                        "type": {
+                          "kind": "enum",
+                          "values": [
+                            "failed",
+                            "succeeded"
+                          ]
+                        }
+                      },
+                      "summary": {
+                        "required": true,
+                        "type": {
+                          "kind": "string"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  }
+                },
+                "verifier": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "input",
+                "output",
+                "verifier",
+                "errors"
+              ]
+            },
+            "graphProfiles": {
+              "const": [
+                "openengine.graph.single-worker/v1"
+              ]
+            },
+            "worker": {
+              "const": "legacy.zeroshot.ship@1"
+            }
+          },
+          "required": [
+            "worker",
+            "graphProfiles",
+            "binding",
+            "contract"
+          ]
+        },
+        {
+          "properties": {
+            "binding": {
+              "properties": {
+                "protocol": {
+                  "enum": [
+                    "acp",
+                    "a2a"
+                  ]
+                }
+              },
+              "required": [
+                "protocol"
+              ]
+            },
+            "worker": {
+              "not": {
+                "const": "legacy.zeroshot.ship@1"
+              }
+            }
+          },
+          "required": [
+            "worker",
+            "binding"
+          ]
+        }
+      ]
     }
-  },
-  "required": [
-    "worker",
-    "graphProfiles",
-    "binding",
-    "contract",
-    "capabilityPolicy",
-    "artifactProfile",
-    "credentialRequirements"
   ],
-  "title": "WorkerDescriptor",
-  "type": "object"
+  "title": "WorkerDescriptor"
 }

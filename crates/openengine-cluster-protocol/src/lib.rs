@@ -8,12 +8,12 @@ pub mod payload;
 mod value;
 pub mod worker;
 
+pub use worker::*;
 pub use artifact::*;
 pub use canonical::*;
 pub use diagnostic::*;
 pub use graph::*;
 pub use payload::*;
-pub use worker::*;
 
 use std::borrow::Cow;
 

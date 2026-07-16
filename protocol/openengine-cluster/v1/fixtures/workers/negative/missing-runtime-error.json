@@ -40,5 +40,6 @@
     ],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "INCOMPLETE_WORKER_ERRORS"
+  "expectedCode": "INCOMPLETE_WORKER_ERRORS",
+  "fixtureKind": "descriptor"
 }

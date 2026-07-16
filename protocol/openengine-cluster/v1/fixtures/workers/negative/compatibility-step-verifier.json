@@ -1,0 +1,85 @@
+{
+  "expectedCode": "VERIFIER_CONTRACT",
+  "fixtureKind": "compatibility",
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "attempts": 1,
+      "input": {
+        "kind": "integer"
+      },
+      "inputBindings": [],
+      "kind": "step",
+      "name": "work",
+      "output": {
+        "kind": "number"
+      },
+      "timeoutMs": 10,
+      "worker": "mock.acp@1",
+      "writeBindings": []
+    }
+  },
+  "registry": [
+    {
+      "descriptor": {
+        "artifactProfile": {
+          "allowedMediaTypes": [
+            "application/json"
+          ],
+          "allowedTypeIds": [
+            "openengine.result@1"
+          ],
+          "minimumRedaction": "internal"
+        },
+        "binding": {
+          "profile": "openengine.worker.acp/v1",
+          "protocol": "acp",
+          "version": "1"
+        },
+        "capabilityPolicy": {
+          "autonomy": "strict",
+          "permissionPolicy": "policy.strict@1"
+        },
+        "contract": {
+          "errors": [
+            "timeout",
+            "crash",
+            "malformed",
+            "refusal"
+          ],
+          "input": {
+            "kind": "number"
+          },
+          "output": {
+            "kind": "integer"
+          },
+          "verifier": {
+            "diagnostic": {
+              "kind": "integer"
+            },
+            "signals": {
+              "verdict": [
+                "accepted"
+              ]
+            }
+          }
+        },
+        "credentialRequirements": [
+          "credential.test@1"
+        ],
+        "graphProfiles": [
+          "openengine.graph.full/v1"
+        ],
+        "worker": "mock.acp@1"
+      },
+      "requestedWorker": "mock.acp@1"
+    }
+  ]
+}

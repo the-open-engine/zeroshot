@@ -42,5 +42,6 @@
     ],
     "worker": "mock.acp@1"
   },
-  "expectedCode": "DUPLICATE_GRAPH_PROFILES"
+  "expectedCode": "DUPLICATE_GRAPH_PROFILES",
+  "fixtureKind": "descriptor"
 }

@@ -219,6 +219,18 @@ pub enum WorkerErrorCode {
     Refusal,
 }
 
+impl WorkerErrorCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Crash => "crash",
+            Self::Malformed => "malformed",
+            Self::Refusal => "refusal",
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
 )]

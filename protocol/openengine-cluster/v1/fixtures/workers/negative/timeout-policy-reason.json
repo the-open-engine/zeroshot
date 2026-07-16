@@ -1,0 +1,9 @@
+{
+  "document": {
+    "code": "timeout",
+    "reason": "policy_denied",
+    "status": "error"
+  },
+  "expectedCode": "INVALID_FAILURE_PAIR",
+  "fixtureKind": "outcome"
+}

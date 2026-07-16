@@ -153,10 +153,56 @@ async fn missing_exact_version_is_a_stable_registry_diagnostic() {
     assert!(diagnostics[0].message.contains("mock.worker@2"));
 }
 
+#[tokio::test]
+async fn step_rejects_verifier_only_descriptor() {
+    let mut registry = registry();
+    let worker = WorkerRef::new("mock.worker@1").unwrap();
+    registry.0.insert(
+        worker,
+        serde_json::from_value(descriptor("mock.worker@1", true)).unwrap(),
+    );
+    let graph: GraphSpec = serde_json::from_value(graph()).unwrap();
+    let diagnostics = check_graph_workers(&graph, &registry).await.unwrap_err();
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.path == ["root", "work"]
+            && diagnostic.code == WorkerCompatibilityCode::VerifierContract
+            && diagnostic
+                .message
+                .contains("step node resolved to a verifier-only descriptor")
+    }));
+}
+
 #[test]
 fn policy_refusal_routes_as_error() {
-    assert_eq!(WorkerErrorCode::Refusal, WorkerErrorCode::Refusal);
-    assert_eq!(ControlSource::Error, ControlSource::Error);
-    let selector = json!({ "name": "work", "source": "error", "field": null });
-    assert_eq!(selector["source"], "error");
+    use openengine_cluster_protocol::{EnumLabel, GraphNode, Guard, WorkerOutcome};
+
+    let mut value = graph();
+    value["root"] = json!({
+        "kind": "choice", "name": "route", "state": { "kind": "null" },
+        "branches": [{
+            "when": {
+                "kind": "in",
+                "value": { "name": "work", "source": "error", "field": null },
+                "labels": ["refusal"]
+            },
+            "node": { "kind": "fail", "name": "refused", "reason": "policy_denied" }
+        }],
+        "otherwise": { "kind": "succeed", "name": "continued", "output": { "kind": "null" }, "bindings": [] },
+        "promotedStatePaths": []
+    });
+    let graph: GraphSpec = serde_json::from_value(value).unwrap();
+    let GraphNode::Choice(choice) = graph.root else {
+        panic!("fixture must be a choice")
+    };
+    let Guard::In { value, labels } = &choice.branches.as_slice()[0].when else {
+        panic!("refusal branch must use an in guard")
+    };
+    let outcome = WorkerOutcome::policy_refusal();
+    assert_eq!(value.source, ControlSource::Error);
+    assert_eq!(outcome.error_code(), Some(WorkerErrorCode::Refusal));
+    assert!(
+        labels
+            .values()
+            .contains(&EnumLabel::new(outcome.error_code().unwrap().as_str()).unwrap())
+    );
 }

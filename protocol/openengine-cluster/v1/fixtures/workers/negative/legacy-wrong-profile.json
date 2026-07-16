@@ -1,0 +1,299 @@
+{
+  "document": {
+    "artifactProfile": {
+      "allowedMediaTypes": [
+        "application/json"
+      ],
+      "allowedTypeIds": [
+        "openengine.result@1"
+      ],
+      "minimumRedaction": "internal"
+    },
+    "binding": {
+      "profile": "legacy.zeroshot.ship/v1",
+      "protocol": "legacy_zeroshot",
+      "version": "1"
+    },
+    "capabilityPolicy": {
+      "autonomy": "strict",
+      "permissionPolicy": "policy.strict@1"
+    },
+    "contract": {
+      "errors": [
+        "timeout",
+        "crash",
+        "malformed",
+        "refusal"
+      ],
+      "input": {
+        "fields": {
+          "artifacts": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "artifactId": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "byteLength": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  },
+                  "lineage": {
+                    "required": true,
+                    "type": {
+                      "fields": {
+                        "attempt": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        },
+                        "generation": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        },
+                        "runId": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    }
+                  },
+                  "mediaType": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "producer": {
+                    "required": true,
+                    "type": {
+                      "fields": {
+                        "node": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        },
+                        "worker": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    }
+                  },
+                  "redaction": {
+                    "required": true,
+                    "type": {
+                      "kind": "enum",
+                      "values": [
+                        "confidential",
+                        "internal",
+                        "public",
+                        "restricted"
+                      ]
+                    }
+                  },
+                  "sha256": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "typeId": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "isolationProfile": {
+            "required": true,
+            "type": {
+              "kind": "string"
+            }
+          },
+          "issue": {
+            "required": false,
+            "type": {
+              "kind": "string"
+            }
+          },
+          "prompt": {
+            "required": false,
+            "type": {
+              "kind": "string"
+            }
+          },
+          "providerProfile": {
+            "required": true,
+            "type": {
+              "kind": "string"
+            }
+          },
+          "source": {
+            "required": true,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "artifact",
+                "issue",
+                "prompt"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      },
+      "output": {
+        "fields": {
+          "artifacts": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "artifactId": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "byteLength": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  },
+                  "lineage": {
+                    "required": true,
+                    "type": {
+                      "fields": {
+                        "attempt": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        },
+                        "generation": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        },
+                        "runId": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    }
+                  },
+                  "mediaType": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "producer": {
+                    "required": true,
+                    "type": {
+                      "fields": {
+                        "node": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        },
+                        "worker": {
+                          "required": true,
+                          "type": {
+                            "kind": "string"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    }
+                  },
+                  "redaction": {
+                    "required": true,
+                    "type": {
+                      "kind": "enum",
+                      "values": [
+                        "confidential",
+                        "internal",
+                        "public",
+                        "restricted"
+                      ]
+                    }
+                  },
+                  "sha256": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  },
+                  "typeId": {
+                    "required": true,
+                    "type": {
+                      "kind": "string"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "status": {
+            "required": true,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "failed",
+                "succeeded"
+              ]
+            }
+          },
+          "summary": {
+            "required": true,
+            "type": {
+              "kind": "string"
+            }
+          }
+        },
+        "kind": "record"
+      },
+      "verifier": null
+    },
+    "credentialRequirements": [
+      "credential.test@1"
+    ],
+    "graphProfiles": [
+      "openengine.graph.full/v1"
+    ],
+    "worker": "legacy.zeroshot.ship@1"
+  },
+  "expectedCode": "INVALID_LEGACY_BINDING",
+  "fixtureKind": "descriptor"
+}

@@ -10,7 +10,6 @@ use openengine_cluster_testkit::worker_profiles::{
     normalize_mock_a2a_1_0, normalize_mock_acp_v1, MockA2a1_0Result, MockAcpV1Result,
     MockPolicyDecision,
 };
-use openengine_cluster_testkit::worker_artifacts::{worker_fixture_artifacts, worker_schema};
 use serde_json::json;
 
 #[test]
@@ -144,6 +143,20 @@ fn acp_v1_normal_error_permission_input_and_malformed_are_closed() {
         normalize_mock_acp_v1(
             &descriptor,
             MockAcpV1Result::Malformed(json!({"raw": true})),
+        ),
+        WorkerErrorCode::Malformed,
+        WorkerFailureReason::MalformedResult,
+    );
+
+    let mut under_redacted_receipt = receipt();
+    under_redacted_receipt.redaction = RedactionClass::Public;
+    assert_error(
+        normalize_mock_acp_v1(
+            &descriptor,
+            MockAcpV1Result::Completed {
+                output: json!("ok"),
+                artifacts: vec![under_redacted_receipt],
+            },
         ),
         WorkerErrorCode::Malformed,
         WorkerFailureReason::MalformedResult,
@@ -299,34 +312,56 @@ fn verifier_completions_validate_output_signals_diagnostic_and_artifacts() {
 }
 
 #[test]
-fn generated_descriptor_vectors_prove_compatibility_and_secret_rejection() {
-    let schema = worker_schema();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    for artifact in worker_fixture_artifacts() {
-        let value: serde_json::Value = serde_json::from_slice(&artifact.bytes).unwrap();
-        if artifact.relative_path.contains("/positive/")
-            && (artifact.relative_path.ends_with("acp-v1.json")
-                || artifact.relative_path.ends_with("a2a-1.0.json")
-                || artifact
-                    .relative_path
-                    .ends_with("legacy-zeroshot-ship-v1.json"))
-        {
-            assert!(
-                validator.is_valid(&value),
-                "schema rejected {}",
-                artifact.relative_path
-            );
-            serde_json::from_value::<WorkerDescriptor>(value.clone()).unwrap();
+fn integral_json_numbers_match_integer_contracts_recursively() {
+    let mut acp = serde_json::to_value(verifier_descriptor("acp")).unwrap();
+    acp["contract"]["output"] = json!({
+        "kind": "record",
+        "fields": {
+            "values": {
+                "type": { "kind": "array", "items": { "kind": "integer" } },
+                "required": true
+            }
         }
-        if artifact.relative_path.contains("/negative/") {
-            let document = &value["document"];
-            assert!(
-                !validator.is_valid(document),
-                "schema accepted {}",
-                artifact.relative_path
-            );
-            assert!(serde_json::from_value::<WorkerDescriptor>(document.clone()).is_err());
-            assert!(value["expectedCode"].is_string());
+    });
+    acp["contract"]["verifier"]["diagnostic"] = json!({
+        "kind": "record",
+        "fields": {
+            "details": {
+                "type": {
+                    "kind": "record",
+                    "fields": {
+                        "count": { "type": { "kind": "integer" }, "required": true }
+                    }
+                },
+                "required": true
+            }
         }
-    }
+    });
+    let acp: WorkerDescriptor = serde_json::from_value(acp).unwrap();
+    assert!(matches!(
+        normalize_mock_acp_v1(
+            &acp,
+            MockAcpV1Result::VerifierCompleted {
+                output: json!({ "values": [42.0, -3.0] }),
+                signals: signals(&[("verdict", "accepted")]),
+                diagnostic: json!({ "details": { "count": 7.0 } }),
+                artifacts: vec![],
+            }
+        ),
+        WorkerOutcome::Verifier { .. }
+    ));
+
+    assert_error(
+        normalize_mock_acp_v1(
+            &acp,
+            MockAcpV1Result::VerifierCompleted {
+                output: json!({ "values": [42.5] }),
+                signals: signals(&[("verdict", "accepted")]),
+                diagnostic: json!({ "details": { "count": 7.0 } }),
+                artifacts: vec![],
+            },
+        ),
+        WorkerErrorCode::Malformed,
+        WorkerFailureReason::MalformedResult,
+    );
 }

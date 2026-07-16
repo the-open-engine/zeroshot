@@ -175,8 +175,16 @@ fn check_descriptor(
         );
     }
 
-    if let WorkerNode::Verifier { contract, .. } = &located.node {
-        match &descriptor.contract.verifier {
+    match &located.node {
+        WorkerNode::Step { .. } => {
+            if descriptor.contract.verifier.is_some() {
+                report(
+                    WorkerCompatibilityCode::VerifierContract,
+                    "step node resolved to a verifier-only descriptor".to_owned(),
+                );
+            }
+        }
+        WorkerNode::Verifier { contract, .. } => match &descriptor.contract.verifier {
             Some(descriptor_verifier) => {
                 check_verifier(located, contract, descriptor_verifier, diagnostics);
             }
@@ -184,7 +192,7 @@ fn check_descriptor(
                 WorkerCompatibilityCode::VerifierContract,
                 "verifier node resolved to a non-verifier descriptor".to_owned(),
             ),
-        }
+        },
     }
 }
 
