@@ -57,6 +57,10 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Issue provider contracts    | `zeroshot-rust/src/issue_provider.rs`, `issue_provider/`             |
 | Source provider contracts   | `zeroshot-rust/src/source_code_provider.rs`, `source_code_provider/` |
 | Provider value bounds       | `zeroshot-rust/src/provider_value.rs`, `provider_value/`             |
+| Native safe faults          | `zeroshot-rust/src/fault.rs`                                         |
+| Native fault taxonomy       | `zeroshot-rust/src/fault/taxonomy.rs`                                |
+| Native diagnostic redaction | `zeroshot-rust/src/fault/redaction.rs`                               |
+| Native observability        | `zeroshot-rust/src/observability.rs`                                 |
 | Admission coordinator       | `crates/openengine-cluster-server/src/admission.rs`                  |
 | Admission durable ports     | `crates/openengine-cluster-server/src/admission/ports.rs`            |
 | Admission snapshot folding  | `crates/openengine-cluster-server/src/admission/snapshot.rs`         |
@@ -86,6 +90,13 @@ construction root, and product-private, secret-free issue/source provider contra
 source registries and identifiers remain independent; neither is a worker/model provider. Keep
 protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and workspace
 behavior outside it.
+Native engine faults must be constructed only by `FaultFactory` from closed `ModuleEvidence`.
+Decoded faults must match the canonical semantics derived from their required primary source frame.
+Raw diagnostic values are replaced wholesale with typed markers and remain ephemeral; never put
+them in `EngineFault`, observations, protocol responses, persistence, or exports. Observability is
+injected through `ObservationSink` and uses only the fixed metrics and closed dimensions in
+`observability.rs`; retry disposition is descriptive data, not retry authorization. Do not install
+global telemetry state or caller-defined labels.
 Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
 authoritative contract types only. They do not provide graph admission, verification, or execution.
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
@@ -466,6 +477,7 @@ Run validation for:
 - When user explicitly requests
 
 Trust pre-commit hooks for trivial changes.
+`npm run test:unit` uses a temporary home and settings path; operator settings must not affect it.
 
 ```bash
 npm run lint

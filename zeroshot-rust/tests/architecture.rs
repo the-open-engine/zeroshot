@@ -104,13 +104,19 @@ fn product_uses_the_root_workspace_and_a_rust_only_layout() {
     relative_files(&product, &product, &mut files);
     for required in [
         "Cargo.toml",
+        "src/fault.rs",
+        "src/fault/redaction.rs",
+        "src/fault/taxonomy.rs",
         "src/lib.rs",
         "src/main.rs",
+        "src/observability.rs",
         "src/provider_value.rs",
         "src/issue_provider.rs",
         "src/source_code_provider.rs",
         "tests/architecture.rs",
         "tests/backend_boundary.rs",
+        "tests/fault_contract.rs",
+        "tests/observability_contract.rs",
         "tests/provider_contracts.rs",
         "tests/provider_bounds.rs",
     ] {
@@ -142,17 +148,18 @@ fn workspace_metadata_preserves_package_lib_and_bin_identity() {
             )
         })
         .collect::<BTreeSet<_>>();
-    assert!(targets.contains(&("zeroshot-rust".to_owned(), "bin".to_owned())));
-    assert!(targets.contains(&("zeroshot_engine".to_owned(), "lib".to_owned())));
     assert_eq!(
-        targets.iter().filter(|(_, kind)| kind == "bin").count(),
-        1,
-        "product must retain one executable construction root"
-    );
-    assert_eq!(
-        targets.iter().filter(|(_, kind)| kind == "lib").count(),
-        1,
-        "product must retain one library boundary"
+        targets,
+        BTreeSet::from([
+            ("architecture".to_owned(), "test".to_owned()),
+            ("backend_boundary".to_owned(), "test".to_owned()),
+            ("fault_contract".to_owned(), "test".to_owned()),
+            ("observability_contract".to_owned(), "test".to_owned()),
+            ("provider_bounds".to_owned(), "test".to_owned()),
+            ("provider_contracts".to_owned(), "test".to_owned()),
+            ("zeroshot-rust".to_owned(), "bin".to_owned()),
+            ("zeroshot_engine".to_owned(), "lib".to_owned()),
+        ])
     );
 }
 
