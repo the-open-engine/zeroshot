@@ -55,13 +55,20 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Cluster dispatch/stdio      | `crates/openengine-cluster-server/`                                |
 | Admission coordinator       | `crates/openengine-cluster-server/src/admission.rs`                |
 | Admission durable ports     | `crates/openengine-cluster-server/src/admission/ports.rs`          |
+| Admission snapshot folding  | `crates/openengine-cluster-server/src/admission/snapshot.rs`       |
+| Lifecycle state machine     | `crates/openengine-cluster-server/src/lifecycle.rs`                |
+| Lifecycle durable ports     | `crates/openengine-cluster-server/src/lifecycle/ports.rs`          |
 | Cluster typed transports    | `crates/openengine-cluster-client/`                                |
 | Cluster fixtures/artifacts  | `crates/openengine-cluster-testkit/`                               |
 | Scripted admission fixtures | `crates/openengine-cluster-testkit/src/admission.rs`               |
+| Fixture inspection controls | `crates/openengine-cluster-testkit/src/admission/inspection.rs`    |
+| Scripted lifecycle helpers  | `crates/openengine-cluster-testkit/src/lifecycle.rs`               |
+| Lifecycle fixture params    | `crates/openengine-cluster-testkit/src/lifecycle/params.rs`        |
 | Admission transcript output | `crates/openengine-cluster-testkit/src/admission_artifacts.rs`     |
 | Negative graph vectors      | `crates/openengine-cluster-testkit/src/negative_graph_fixtures.rs` |
 | Graph contract prose        | `docs/openengine-cluster-protocol/v1/graph-contract.md`            |
 | Admission contract prose    | `docs/openengine-cluster-protocol/v1/admission.md`                 |
+| Lifecycle contract prose    | `docs/openengine-cluster-protocol/v1/lifecycle.md`                 |
 | Generated graph fixtures    | `protocol/openengine-cluster/v1/fixtures/graph/`                   |
 
 Cluster Protocol Rust types are the source of truth. Files under
@@ -76,6 +83,11 @@ Testkit scripted approval and `running` phase mean admitted state, not native ve
 production full-graph executor.
 Authoritative admission snapshots fail closed: `empty` has no durable fields, `running` has the
 complete matching control/seed tuple, and transient `admitting` preserves one of those two shapes.
+Operational suspend is a dispatch gate: existing leases may land verified I/O, but successors wait
+for resume. Drain waits without inventing graph hooks; force cancels and voids leases without
+fabricating output. Each stopped run has one final `finished` event. Stop acknowledgements never
+claim rollback or absence of external side effects. These are deterministic scripted-backend
+semantics, not a native graph scheduler or worker executor.
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.

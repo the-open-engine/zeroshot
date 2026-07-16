@@ -1,24 +1,27 @@
 //! Deterministic admission fixtures. These types script verifier assertions and admission state;
 //! they are not a native graph verifier or production executor.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ApplyResult, CompiledGraphIr, Cursor, Generation, GraphDiagnostic, GraphSpec, IdempotencyKey,
-    Phase, RunId,
+    ApplyResult, CompiledGraphIr, Cursor, DispatchState, Generation, GraphDiagnostic, GraphSpec,
+    IdempotencyKey, OperationalStatus, Phase, RunId,
 };
 use openengine_cluster_server::admission::{
     AdmissionSnapshot, AdmissionStore, CancellationSignal, CommitProposal, ControlJournal,
     ControlSnapshot, GraphVerifier, IdempotencyRecord, StoreError, VerificationError,
     VerifiedGraph, VerifiedIoLedger, VerifiedSeed,
 };
+use openengine_cluster_server::lifecycle::{LeaseId, LifecycleSnapshot, MutationReceipt, TurnId};
 use tokio::sync::{Mutex, Notify};
 
 mod fixtures;
+mod inspection;
 pub use fixtures::*;
+pub use inspection::StoreInspection;
 
 #[derive(Clone, Debug)]
 pub enum ScriptedOutcome {
@@ -161,6 +164,9 @@ pub enum AppendKind {
     Control,
     VerifiedSeed,
     Idempotency,
+    Lifecycle,
+    VerifiedOutput,
+    Void,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -178,41 +184,31 @@ pub struct ControlReceipt {
     pub spec: GraphSpec,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct StoreInspection {
-    pub control: ControlSnapshot,
-    pub control_journal: Vec<ControlReceipt>,
-    pub seed_ledger: Vec<VerifiedSeed>,
-    pub idempotency_records: BTreeMap<IdempotencyKey, IdempotencyRecord>,
-    pub append_order: Vec<AppendReceipt>,
-}
-
-impl StoreInspection {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.control == ControlSnapshot::default()
-            && self.control_journal.is_empty()
-            && self.seed_ledger.is_empty()
-            && self.idempotency_records.is_empty()
-            && self.append_order.is_empty()
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct InMemoryAdmissionStore {
-    state: Mutex<StoreState>,
+    pub(crate) state: Mutex<StoreState>,
 }
 
 #[derive(Debug, Default)]
-struct StoreState {
-    control: ControlSnapshot,
-    control_journal: Vec<ControlReceipt>,
-    seed_ledger: Vec<VerifiedSeed>,
-    idempotency_records: BTreeMap<IdempotencyKey, IdempotencyRecord>,
-    append_order: Vec<AppendReceipt>,
+pub(crate) struct StoreState {
+    pub(crate) control: ControlSnapshot,
+    pub(crate) control_journal: Vec<ControlReceipt>,
+    pub(crate) seed_ledger: Vec<VerifiedSeed>,
+    pub(crate) idempotency_records: BTreeMap<IdempotencyKey, IdempotencyRecord>,
+    pub(crate) append_order: Vec<AppendReceipt>,
     next_sequence: u64,
     next_run: u64,
-    next_cursor: u64,
+    pub(crate) next_cursor: u64,
+    pub(crate) lifecycle: LifecycleSnapshot,
+    pub(crate) leases: BTreeMap<LeaseId, ActiveLease>,
+    pub(crate) cancelled_leases: BTreeSet<LeaseId>,
+    pub(crate) next_lease: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveLease {
+    pub(crate) turn_id: TurnId,
+    pub(crate) cancellation: CancellationSignal,
 }
 
 impl StoreState {
@@ -231,6 +227,19 @@ impl StoreState {
             });
         }
         let unchanged = self.is_unchanged(&proposal.compiled_ir)?;
+        if self.control.phase == Phase::Running {
+            let dispatch_state = self
+                .lifecycle
+                .operational
+                .as_ref()
+                .ok_or_else(|| StoreError::Internal("running lifecycle metadata is absent".into()))?
+                .dispatch_state;
+            if dispatch_state != DispatchState::Active || (!unchanged && !self.leases.is_empty()) {
+                return Err(StoreError::InvalidPhase {
+                    current: self.control.phase,
+                });
+            }
+        }
         validate_commit_input(&proposal, unchanged)?;
         if cancellation.is_cancelled() {
             return Err(StoreError::Cancelled);
@@ -251,7 +260,9 @@ impl StoreState {
         if existing.fingerprint != proposal.fingerprint {
             return Err(StoreError::IdempotencyReuse);
         }
-        let mut receipt = existing.receipt.clone();
+        let MutationReceipt::Apply(mut receipt) = existing.receipt.clone() else {
+            return Err(StoreError::IdempotencyReuse);
+        };
         receipt.deduped = true;
         Ok(Some(receipt))
     }
@@ -305,6 +316,18 @@ impl StoreState {
             phase: Phase::Running,
             cursor: Some(cursor.clone()),
         };
+        for lease in self.leases.values() {
+            lease.cancellation.cancel();
+        }
+        self.leases.clear();
+        self.cancelled_leases.clear();
+        self.lifecycle = LifecycleSnapshot {
+            operational: Some(OperationalStatus::default()),
+            latest_cursor: Some(cursor.clone()),
+            records: Vec::new(),
+            verified_turns: Vec::new(),
+            void_turns: Vec::new(),
+        };
         self.control_journal.push(ControlReceipt {
             generation,
             run_id: run_id.clone(),
@@ -332,7 +355,7 @@ impl StoreState {
             proposal.idempotency_key,
             IdempotencyRecord {
                 fingerprint: proposal.fingerprint,
-                receipt: result.clone(),
+                receipt: MutationReceipt::Apply(result.clone()),
             },
         );
         append(self, self.control.cursor.clone(), AppendKind::Idempotency);
@@ -357,37 +380,6 @@ fn validate_commit_input(proposal: &CommitProposal, unchanged: bool) -> Result<(
         .initial_input
         .validate_value(input)
         .map_err(|error| StoreError::SchemaViolation(error.to_string()))
-}
-
-impl InMemoryAdmissionStore {
-    pub async fn inspect(&self) -> StoreInspection {
-        let state = self.state.lock().await;
-        StoreInspection {
-            control: state.control.clone(),
-            control_journal: state.control_journal.clone(),
-            seed_ledger: state.seed_ledger.clone(),
-            idempotency_records: state.idempotency_records.clone(),
-            append_order: state.append_order.clone(),
-        }
-    }
-
-    /// Corrupts this test fixture by removing the active run's verified seed.
-    /// This exists only to prove that authoritative reads reject torn logical stores.
-    pub async fn remove_active_seed_for_test(&self) {
-        let mut state = self.state.lock().await;
-        let active_run_id = state.control.run_id.clone();
-        state
-            .seed_ledger
-            .retain(|seed| Some(&seed.run_id) != active_run_id.as_ref());
-    }
-
-    /// Replaces the logical aggregate snapshot in this test fixture.
-    /// This exists only to prove that authoritative reads reject malformed durable state.
-    pub async fn replace_snapshot_for_test(&self, snapshot: AdmissionSnapshot) {
-        let mut state = self.state.lock().await;
-        state.control = snapshot.control;
-        state.seed_ledger = snapshot.seed.into_iter().collect();
-    }
 }
 
 #[async_trait]
@@ -429,18 +421,12 @@ impl VerifiedIoLedger for InMemoryAdmissionStore {
 impl AdmissionStore for InMemoryAdmissionStore {
     async fn read_snapshot(&self) -> Result<AdmissionSnapshot, StoreError> {
         let state = self.state.lock().await;
-        let seed = state.control.run_id.as_ref().and_then(|run_id| {
-            state
-                .seed_ledger
-                .iter()
-                .rev()
-                .find(|seed| seed.run_id == *run_id)
-                .cloned()
-        });
-        Ok(AdmissionSnapshot {
-            control: state.control.clone(),
-            seed,
-        })
+        Ok(admission_snapshot(&state))
+    }
+
+    async fn read_aggregate(&self) -> Result<(AdmissionSnapshot, LifecycleSnapshot), StoreError> {
+        let state = self.state.lock().await;
+        Ok((admission_snapshot(&state), state.lifecycle.clone()))
     }
 
     async fn commit(
@@ -452,7 +438,22 @@ impl AdmissionStore for InMemoryAdmissionStore {
     }
 }
 
-fn append(state: &mut StoreState, cursor: Option<Cursor>, kind: AppendKind) {
+fn admission_snapshot(state: &StoreState) -> AdmissionSnapshot {
+    let seed = state.control.run_id.as_ref().and_then(|run_id| {
+        state
+            .seed_ledger
+            .iter()
+            .rev()
+            .find(|seed| seed.run_id == *run_id)
+            .cloned()
+    });
+    AdmissionSnapshot {
+        control: state.control.clone(),
+        seed,
+    }
+}
+
+pub(crate) fn append(state: &mut StoreState, cursor: Option<Cursor>, kind: AppendKind) {
     state.next_sequence += 1;
     state.append_order.push(AppendReceipt {
         sequence: state.next_sequence,
@@ -461,7 +462,7 @@ fn append(state: &mut StoreState, cursor: Option<Cursor>, kind: AppendKind) {
     });
 }
 
-fn enforce_generation(
+pub(crate) fn enforce_generation(
     expected: Option<Generation>,
     current: Option<Generation>,
 ) -> Result<(), StoreError> {

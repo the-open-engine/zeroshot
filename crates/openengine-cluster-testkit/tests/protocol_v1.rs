@@ -5,7 +5,7 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ApplyParams, ClusterStatus, Generation, GetParams, GetResult, IdempotencyKey, InitializeResult,
-    PlanParams, ServerCapabilities, PROTOCOL_VERSION,
+    PlanParams, ServerCapabilities, StopMode, StopParams, UpdateParams, PROTOCOL_VERSION,
 };
 use openengine_cluster_server::admission::AdmissionCoordinator;
 use openengine_cluster_server::{BackendError, ClusterBackend};
@@ -194,6 +194,34 @@ async fn admission_transcript_matches_in_process_and_stdio() {
     assert_eq!(
         effects.control.cursor,
         Some(effects.seed_ledger[0].cursor.clone())
+    );
+
+    let update = UpdateParams {
+        labels: None,
+        log_level: Some(openengine_cluster_protocol::LogLevel::Debug),
+        suspended: Some(false),
+        if_generation: Generation::new(1).unwrap(),
+        idempotency_key: IdempotencyKey::new("transport-update").unwrap(),
+    };
+    assert_eq!(
+        stdio.update(update.clone()).await.unwrap(),
+        in_process.update(update).await.unwrap()
+    );
+    let stop = StopParams {
+        mode: StopMode::Drain,
+        if_generation: Generation::new(1).unwrap(),
+        idempotency_key: IdempotencyKey::new("transport-stop").unwrap(),
+    };
+    assert_eq!(
+        stdio.stop(stop.clone()).await.unwrap(),
+        in_process.stop(stop).await.unwrap()
+    );
+    let stdio_finished = stdio.get(GetParams::default()).await.unwrap();
+    let in_process_finished = in_process.get(GetParams::default()).await.unwrap();
+    assert_eq!(stdio_finished, in_process_finished);
+    assert_eq!(
+        stdio_finished.status.phase,
+        openengine_cluster_protocol::Phase::Finished
     );
 
     drop(stdio);

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, ArtifactRef, CompiledGraphIr, GetParams, GetResult, GraphDiagnostic,
     GraphSpec, InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse, PlanParams,
-    PlanResult, StructuralBounds,
+    PlanResult, StopParams, StopResult, StructuralBounds, UpdateParams, UpdateResult,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -49,6 +49,10 @@ pub struct ImplementedProtocolSchema {
     pub apply_response: JsonRpcResponse<ApplyResult>,
     pub get_request: JsonRpcRequest<GetParams>,
     pub get_response: JsonRpcResponse<GetResult>,
+    pub update_request: JsonRpcRequest<UpdateParams>,
+    pub update_response: JsonRpcResponse<UpdateResult>,
+    pub stop_request: JsonRpcRequest<StopParams>,
+    pub stop_response: JsonRpcResponse<StopResult>,
 }
 
 pub async fn generate_artifacts() -> Vec<Artifact> {
@@ -105,6 +109,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     artifacts.extend(worker_fixture_artifacts());
     artifacts.extend(graph_fixture_artifacts());
     artifacts.extend(crate::admission_artifacts::generate_admission_goldens().await);
+    artifacts.extend(crate::lifecycle_artifacts::generate_lifecycle_goldens().await);
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {

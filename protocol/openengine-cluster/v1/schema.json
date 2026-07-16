@@ -106,6 +106,16 @@
             "null"
           ]
         },
+        "operational": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OperationalStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "phase": {
           "$ref": "#/$defs/Phase"
         }
@@ -274,6 +284,16 @@
         "error",
         "warning",
         "info"
+      ],
+      "type": "string"
+    },
+    "DispatchState": {
+      "enum": [
+        "active",
+        "suspended",
+        "draining",
+        "force_stopping",
+        "stopped"
       ],
       "type": "string"
     },
@@ -1330,6 +1350,52 @@
       ],
       "type": "object"
     },
+    "JsonRpcRequest5": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/UpdateParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest6": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/StopParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
     "JsonRpcResponse": {
       "anyOf": [
         {
@@ -1364,6 +1430,26 @@
       "anyOf": [
         {
           "$ref": "#/$defs/JsonRpcSuccess4"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse5": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess5"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse6": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess6"
         },
         {
           "$ref": "#/$defs/JsonRpcErrorResponse"
@@ -1445,6 +1531,70 @@
         "result"
       ],
       "type": "object"
+    },
+    "JsonRpcSuccess5": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/UpdateResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess6": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/StopResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "Labels": {
+      "additionalProperties": {
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+        "type": "string"
+      },
+      "maxProperties": 64,
+      "propertyNames": {
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "LogLevel": {
+      "enum": [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "type": "string"
     },
     "NodeOutputChannel": {
       "enum": [
@@ -1543,6 +1693,42 @@
       "maxItems": 4096,
       "minItems": 1,
       "type": "array"
+    },
+    "OperationalStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatchState": {
+          "$ref": "#/$defs/DispatchState"
+        },
+        "inFlight": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "labels": {
+          "$ref": "#/$defs/Labels"
+        },
+        "logLevel": {
+          "$ref": "#/$defs/LogLevel"
+        },
+        "stopMode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "labels",
+        "logLevel",
+        "dispatchState",
+        "inFlight"
+      ],
+      "type": "object"
     },
     "PayloadType": {
       "oneOf": [
@@ -1686,7 +1872,8 @@
       "enum": [
         "empty",
         "admitting",
-        "running"
+        "running",
+        "finished"
       ],
       "type": "string"
     },
@@ -1786,6 +1973,80 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "StopMode": {
+      "enum": [
+        "drain",
+        "force"
+      ],
+      "type": "string"
+    },
+    "StopParams": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotencyKey": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "ifGeneration": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/StopMode"
+        }
+      },
+      "required": [
+        "mode",
+        "ifGeneration",
+        "idempotencyKey"
+      ],
+      "type": "object"
+    },
+    "StopResult": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptedMode": {
+          "$ref": "#/$defs/StopMode"
+        },
+        "atCursor": {
+          "type": "string"
+        },
+        "deduped": {
+          "type": "boolean"
+        },
+        "effectiveMode": {
+          "$ref": "#/$defs/StopMode"
+        },
+        "generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operational": {
+          "$ref": "#/$defs/OperationalStatus"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "runId",
+        "phase",
+        "acceptedMode",
+        "effectiveMode",
+        "operational",
+        "atCursor",
+        "deduped"
+      ],
+      "type": "object"
+    },
     "StructuralBounds": {
       "additionalProperties": false,
       "properties": {
@@ -1869,6 +2130,87 @@
         }
       ]
     },
+    "UpdateParams": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "labels"
+          ]
+        },
+        {
+          "required": [
+            "logLevel"
+          ]
+        },
+        {
+          "required": [
+            "suspended"
+          ]
+        }
+      ],
+      "properties": {
+        "idempotencyKey": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "ifGeneration": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "labels": {
+          "$ref": "#/$defs/Labels"
+        },
+        "logLevel": {
+          "$ref": "#/$defs/LogLevel"
+        },
+        "suspended": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ifGeneration",
+        "idempotencyKey"
+      ],
+      "type": "object"
+    },
+    "UpdateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "atCursor": {
+          "type": "string"
+        },
+        "deduped": {
+          "type": "boolean"
+        },
+        "generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operational": {
+          "$ref": "#/$defs/OperationalStatus"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "runId",
+        "phase",
+        "operational",
+        "atCursor",
+        "deduped"
+      ],
+      "type": "object"
+    },
     "WriteBinding": {
       "additionalProperties": false,
       "properties": {
@@ -1919,6 +2261,18 @@
     },
     "plan_response": {
       "$ref": "#/$defs/JsonRpcResponse2"
+    },
+    "stop_request": {
+      "$ref": "#/$defs/JsonRpcRequest6"
+    },
+    "stop_response": {
+      "$ref": "#/$defs/JsonRpcResponse6"
+    },
+    "update_request": {
+      "$ref": "#/$defs/JsonRpcRequest5"
+    },
+    "update_response": {
+      "$ref": "#/$defs/JsonRpcResponse5"
     }
   },
   "required": [
@@ -1929,7 +2283,11 @@
     "apply_request",
     "apply_response",
     "get_request",
-    "get_response"
+    "get_response",
+    "update_request",
+    "update_response",
+    "stop_request",
+    "stop_response"
   ],
   "title": "ImplementedProtocolSchema",
   "type": "object"

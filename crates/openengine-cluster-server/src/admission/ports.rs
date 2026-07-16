@@ -6,11 +6,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ApplyResult, ClusterStatus, CompiledGraphIr, Cursor, Generation, GraphDiagnostic, GraphSpec,
-    IdempotencyKey, Phase, RequestFingerprint, RunId,
+    ApplyResult, ClusterStatus, CompiledGraphIr, Cursor, DispatchState, Generation,
+    GraphDiagnostic, GraphSpec, IdempotencyKey, Phase, RequestFingerprint, RunId,
 };
 use serde_json::Value;
 use thiserror::Error;
+
+use crate::lifecycle::{LifecycleSnapshot, LifecycleStore, MutationReceipt};
 
 #[derive(Clone, Default)]
 pub struct CancellationSignal(Arc<AtomicBool>);
@@ -23,6 +25,11 @@ impl CancellationSignal {
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Acquire)
+    }
+
+    #[must_use]
+    pub fn observer(&self) -> CancellationObserver {
+        CancellationObserver(Arc::clone(&self.0))
     }
 }
 
@@ -42,6 +49,34 @@ impl PartialEq for CancellationSignal {
 }
 
 impl Eq for CancellationSignal {}
+
+/// Read-only cancellation state exposed to dispatch permit holders.
+#[derive(Clone, Default)]
+pub struct CancellationObserver(Arc<AtomicBool>);
+
+impl CancellationObserver {
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+impl fmt::Debug for CancellationObserver {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CancellationObserver")
+            .field("cancelled", &self.is_cancelled())
+            .finish()
+    }
+}
+
+impl PartialEq for CancellationObserver {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_cancelled() == other.is_cancelled()
+    }
+}
+
+impl Eq for CancellationObserver {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedGraph {
@@ -93,6 +128,21 @@ impl ControlSnapshot {
             observed_generation: self.generation,
             current_run_id: self.run_id.clone(),
             at_cursor: self.cursor.clone(),
+            operational: None,
+        }
+    }
+
+    #[must_use]
+    pub fn status_with_lifecycle(&self, lifecycle: &LifecycleSnapshot) -> ClusterStatus {
+        ClusterStatus {
+            phase: self.phase,
+            observed_generation: self.generation,
+            current_run_id: self.run_id.clone(),
+            at_cursor: lifecycle
+                .latest_cursor
+                .clone()
+                .or_else(|| self.cursor.clone()),
+            operational: lifecycle.operational.clone(),
         }
     }
 }
@@ -113,7 +163,7 @@ pub struct AdmissionSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdempotencyRecord {
     pub fingerprint: RequestFingerprint,
-    pub receipt: ApplyResult,
+    pub receipt: MutationReceipt,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -140,6 +190,12 @@ pub enum StoreError {
     SchemaViolation(String),
     #[error("admission was cancelled before atomic commit")]
     Cancelled,
+    #[error("dispatch is denied while lifecycle state is {current:?}")]
+    DispatchDenied { current: DispatchState },
+    #[error("dispatch lease does not exist")]
+    UnknownLease,
+    #[error("dispatch completion was rejected because the lease is cancelled or terminal")]
+    CompletionRejected,
 }
 
 /// Logical durable control-journal view.
@@ -161,8 +217,11 @@ pub trait VerifiedIoLedger: Send + Sync {
 /// Atomic aggregate port. Implementations allocate one ordering across both logical stores and
 /// check cancellation immediately before writing any effect.
 #[async_trait]
-pub trait AdmissionStore: ControlJournal + VerifiedIoLedger + Send + Sync + 'static {
+pub trait AdmissionStore:
+    ControlJournal + VerifiedIoLedger + LifecycleStore + Send + Sync + 'static
+{
     async fn read_snapshot(&self) -> Result<AdmissionSnapshot, StoreError>;
+    async fn read_aggregate(&self) -> Result<(AdmissionSnapshot, LifecycleSnapshot), StoreError>;
     async fn commit(
         &self,
         proposal: CommitProposal,

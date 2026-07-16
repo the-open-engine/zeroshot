@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::ApplyParams;
+use openengine_cluster_protocol::{ApplyParams, StopParams, UpdateParams};
 use schemars::schema_for;
 use serde_json::{json, Value};
 
@@ -13,6 +13,8 @@ pub(super) fn document() -> Value {
             initialize_method(),
             plan_method(),
             apply_method(),
+            update_method(),
+            stop_method(),
             get_method(),
         ],
         "components": {
@@ -98,6 +100,52 @@ fn apply_property_schema(apply_schema: &Value, property: &str) -> Value {
     apply_schema["properties"]
         .get(property)
         .unwrap_or_else(|| panic!("ApplyParams schema is missing {property}"))
+        .clone()
+}
+
+fn update_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(UpdateParams))
+        .expect("update parameter JSON Schema serialization must succeed");
+    json!({
+        "name": "update",
+        "paramStructure": "by-name",
+        "x-params-schema": schema,
+        "params": [
+            { "name": "labels", "required": false, "schema": { "$ref": "schema.json#/$defs/Labels" } },
+            { "name": "logLevel", "required": false, "schema": { "$ref": "schema.json#/$defs/LogLevel" } },
+            { "name": "suspended", "required": false, "schema": { "type": "boolean" } },
+            { "name": "ifGeneration", "required": true, "schema": property_schema(&schema, "ifGeneration") },
+            { "name": "idempotencyKey", "required": true, "schema": property_schema(&schema, "idempotencyKey") }
+        ],
+        "result": {
+            "name": "updateResult",
+            "schema": { "$ref": "schema.json#/$defs/UpdateResult" }
+        }
+    })
+}
+
+fn stop_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(StopParams))
+        .expect("stop parameter JSON Schema serialization must succeed");
+    json!({
+        "name": "stop",
+        "paramStructure": "by-name",
+        "params": [
+            { "name": "mode", "required": true, "schema": { "$ref": "schema.json#/$defs/StopMode" } },
+            { "name": "ifGeneration", "required": true, "schema": property_schema(&schema, "ifGeneration") },
+            { "name": "idempotencyKey", "required": true, "schema": property_schema(&schema, "idempotencyKey") }
+        ],
+        "result": {
+            "name": "stopResult",
+            "schema": { "$ref": "schema.json#/$defs/StopResult" }
+        }
+    })
+}
+
+fn property_schema(schema: &Value, property: &str) -> Value {
+    schema["properties"]
+        .get(property)
+        .unwrap_or_else(|| panic!("parameter schema is missing {property}"))
         .clone()
 }
 

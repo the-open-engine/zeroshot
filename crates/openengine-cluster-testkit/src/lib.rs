@@ -3,6 +3,8 @@
 pub mod admission;
 mod admission_artifacts;
 pub mod artifacts;
+pub mod lifecycle;
+mod lifecycle_artifacts;
 mod negative_graph_fixtures;
 mod schema_helpers;
 pub mod worker_artifacts;
