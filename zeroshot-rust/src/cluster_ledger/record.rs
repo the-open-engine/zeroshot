@@ -1,0 +1,499 @@
+use std::error::Error;
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
+
+use super::store::{MutationReceipt, Position, ResourceId};
+
+pub const RECORD_VERSION_V1: u16 = 1;
+pub const MAX_RECORD_PAYLOAD_BYTES: usize = 1024 * 1024;
+pub const MAX_APPEND_RECORDS: usize = 1_024;
+pub const MAX_APPEND_BATCH_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_RANGE_RECORDS: usize = 4_096;
+const HASH_DOMAIN: &[u8] = b"openengine.cluster-ledger.record/v1\0";
+
+macro_rules! durable_id {
+    ($name:ident) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+        #[serde(transparent)]
+        pub struct $name(u64);
+
+        impl $name {
+            pub fn new(value: u64) -> Result<Self, RecordError> {
+                if value == 0 || value > i64::MAX as u64 {
+                    return Err(RecordError::IdentityOutOfRange);
+                }
+                Ok(Self(value))
+            }
+
+            #[must_use]
+            pub const fn get(self) -> u64 {
+                self.0
+            }
+
+            pub fn checked_next(self) -> Result<Self, RecordError> {
+                Self::new(
+                    self.0
+                        .checked_add(1)
+                        .ok_or(RecordError::IdentityOutOfRange)?,
+                )
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                Self::new(u64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+            }
+        }
+    };
+}
+
+durable_id!(GenerationId);
+durable_id!(RunSequence);
+durable_id!(NodeInstanceId);
+durable_id!(ExecutionId);
+durable_id!(EffectId);
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IdentityCounters {
+    pub next_generation: u64,
+    pub next_run: u64,
+    pub next_node_instance: u64,
+    pub next_execution: u64,
+    pub next_effect: u64,
+}
+
+impl Default for IdentityCounters {
+    fn default() -> Self {
+        Self::initial()
+    }
+}
+
+impl IdentityCounters {
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self {
+            next_generation: 1,
+            next_run: 1,
+            next_node_instance: 1,
+            next_execution: 1,
+            next_effect: 1,
+        }
+    }
+
+    pub fn allocate_generation(&mut self) -> Result<GenerationId, RecordError> {
+        let value = GenerationId::new(self.next_generation)?;
+        self.next_generation = checked_counter(self.next_generation)?;
+        Ok(value)
+    }
+
+    pub fn allocate_run(&mut self) -> Result<RunSequence, RecordError> {
+        let value = RunSequence::new(self.next_run)?;
+        self.next_run = checked_counter(self.next_run)?;
+        Ok(value)
+    }
+
+    pub fn allocate_node_instance(&mut self) -> Result<NodeInstanceId, RecordError> {
+        let value = NodeInstanceId::new(self.next_node_instance)?;
+        self.next_node_instance = checked_counter(self.next_node_instance)?;
+        Ok(value)
+    }
+
+    pub fn allocate_execution(&mut self) -> Result<ExecutionId, RecordError> {
+        let value = ExecutionId::new(self.next_execution)?;
+        self.next_execution = checked_counter(self.next_execution)?;
+        Ok(value)
+    }
+
+    pub fn allocate_effect(&mut self) -> Result<EffectId, RecordError> {
+        let value = EffectId::new(self.next_effect)?;
+        self.next_effect = checked_counter(self.next_effect)?;
+        Ok(value)
+    }
+}
+
+fn checked_counter(value: u64) -> Result<u64, RecordError> {
+    let next = value
+        .checked_add(1)
+        .ok_or(RecordError::IdentityOutOfRange)?;
+    if next > i64::MAX as u64 {
+        return Err(RecordError::IdentityOutOfRange);
+    }
+    Ok(next)
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct CanonicalDigest([u8; 32]);
+
+impl CanonicalDigest {
+    #[must_use]
+    pub const fn new(value: [u8; 32]) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub fn of(bytes: &[u8]) -> Self {
+        Self(Sha256::digest(bytes).into())
+    }
+
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordFamily {
+    Control,
+    VerifiedIo,
+}
+
+impl RecordFamily {
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Control => 1,
+            Self::VerifiedIo => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordKind {
+    Admission,
+    Dispatch,
+    Settlement,
+    SafeFault,
+    EffectIntent,
+    EffectReceipt,
+    Terminal,
+    CleanupReceipt,
+    VerifiedInput,
+    VerifiedOutput,
+    MutationReceipt,
+}
+
+impl RecordKind {
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Admission => 1,
+            Self::Dispatch => 2,
+            Self::Settlement => 3,
+            Self::SafeFault => 4,
+            Self::EffectIntent => 5,
+            Self::EffectReceipt => 6,
+            Self::Terminal => 7,
+            Self::CleanupReceipt => 8,
+            Self::VerifiedInput => 9,
+            Self::VerifiedOutput => 10,
+            Self::MutationReceipt => 11,
+        }
+    }
+
+    #[must_use]
+    pub const fn family(self) -> RecordFamily {
+        match self {
+            Self::VerifiedInput | Self::VerifiedOutput => RecordFamily::VerifiedIo,
+            _ => RecordFamily::Control,
+        }
+    }
+
+    #[must_use]
+    pub const fn allowed_after_terminal(self) -> bool {
+        matches!(self, Self::CleanupReceipt | Self::MutationReceipt)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RecordPayload {
+    Admission {
+        generation: GenerationId,
+        run: RunSequence,
+        graph_digest: CanonicalDigest,
+        input_digest: CanonicalDigest,
+        policy_digest: CanonicalDigest,
+        catalog_digest: CanonicalDigest,
+        profile_digest: CanonicalDigest,
+        absolute_deadline_ms: u64,
+        canonical_graph: Vec<u8>,
+        canonical_compiled_ir: Vec<u8>,
+    },
+    Dispatch {
+        run: RunSequence,
+        node_instance: NodeInstanceId,
+        execution: ExecutionId,
+    },
+    Settlement {
+        run: RunSequence,
+        execution: ExecutionId,
+        outcome_digest: CanonicalDigest,
+        accepted: bool,
+    },
+    SafeFault {
+        run: RunSequence,
+        execution: Option<ExecutionId>,
+        encoded_fault: Vec<u8>,
+    },
+    EffectIntent {
+        run: RunSequence,
+        effect: EffectId,
+        request_digest: CanonicalDigest,
+    },
+    EffectReceipt {
+        run: RunSequence,
+        effect: EffectId,
+        receipt_digest: CanonicalDigest,
+    },
+    Terminal {
+        run: RunSequence,
+        outcome_digest: CanonicalDigest,
+    },
+    CleanupReceipt {
+        cleanup_digest: CanonicalDigest,
+    },
+    VerifiedInput {
+        run: RunSequence,
+        digest: CanonicalDigest,
+        canonical_bytes: Vec<u8>,
+    },
+    VerifiedOutput {
+        run: RunSequence,
+        execution: ExecutionId,
+        digest: CanonicalDigest,
+        canonical_bytes: Vec<u8>,
+    },
+    MutationReceipt {
+        receipt: MutationReceipt,
+    },
+}
+
+impl RecordPayload {
+    #[must_use]
+    pub const fn kind(&self) -> RecordKind {
+        match self {
+            Self::Admission { .. } => RecordKind::Admission,
+            Self::Dispatch { .. } => RecordKind::Dispatch,
+            Self::Settlement { .. } => RecordKind::Settlement,
+            Self::SafeFault { .. } => RecordKind::SafeFault,
+            Self::EffectIntent { .. } => RecordKind::EffectIntent,
+            Self::EffectReceipt { .. } => RecordKind::EffectReceipt,
+            Self::Terminal { .. } => RecordKind::Terminal,
+            Self::CleanupReceipt { .. } => RecordKind::CleanupReceipt,
+            Self::VerifiedInput { .. } => RecordKind::VerifiedInput,
+            Self::VerifiedOutput { .. } => RecordKind::VerifiedOutput,
+            Self::MutationReceipt { .. } => RecordKind::MutationReceipt,
+        }
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecordError> {
+        let encoded = serde_json::to_vec(self).map_err(|_| RecordError::Encoding)?;
+        if encoded.len() > MAX_RECORD_PAYLOAD_BYTES {
+            return Err(RecordError::PayloadTooLarge);
+        }
+        Ok(encoded)
+    }
+
+    pub fn decode(kind: RecordKind, version: u16, bytes: &[u8]) -> Result<Self, RecordError> {
+        if version != RECORD_VERSION_V1 {
+            return Err(RecordError::UnknownVersion);
+        }
+        if bytes.len() > MAX_RECORD_PAYLOAD_BYTES {
+            return Err(RecordError::PayloadTooLarge);
+        }
+        let value: Self = serde_json::from_slice(bytes).map_err(|_| RecordError::Encoding)?;
+        if value.kind() != kind {
+            return Err(RecordError::KindMismatch);
+        }
+        if value.canonical_bytes()? != bytes {
+            return Err(RecordError::NonCanonicalPayload);
+        }
+        match &value {
+            Self::VerifiedInput {
+                digest,
+                canonical_bytes,
+                ..
+            }
+            | Self::VerifiedOutput {
+                digest,
+                canonical_bytes,
+                ..
+            } if *digest != CanonicalDigest::of(canonical_bytes) => {
+                return Err(RecordError::DigestMismatch);
+            }
+            _ => {}
+        }
+        if let Self::Admission {
+            graph_digest,
+            canonical_graph,
+            ..
+        } = &value
+        {
+            if !canonical_graph.is_empty() && *graph_digest != CanonicalDigest::of(canonical_graph)
+            {
+                return Err(RecordError::DigestMismatch);
+            }
+        }
+        Ok(value)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StoredRecord {
+    pub resource: ResourceId,
+    pub sequence: Position,
+    pub family: RecordFamily,
+    pub kind: RecordKind,
+    pub version: u16,
+    pub payload: Vec<u8>,
+    pub previous_hash: [u8; 32],
+    pub record_hash: [u8; 32],
+}
+
+impl StoredRecord {
+    pub fn build(
+        resource: ResourceId,
+        sequence: Position,
+        payload: &RecordPayload,
+        previous_hash: [u8; 32],
+    ) -> Result<Self, RecordError> {
+        if sequence == Position::ZERO {
+            return Err(RecordError::SequenceOutOfRange);
+        }
+        let kind = payload.kind();
+        let family = kind.family();
+        let payload = payload.canonical_bytes()?;
+        let record_hash = calculate_record_hash(
+            &resource,
+            sequence,
+            family,
+            kind,
+            RECORD_VERSION_V1,
+            &payload,
+            previous_hash,
+        );
+        Ok(Self {
+            resource,
+            sequence,
+            family,
+            kind,
+            version: RECORD_VERSION_V1,
+            payload,
+            previous_hash,
+            record_hash,
+        })
+    }
+
+    pub fn validate(
+        &self,
+        expected_resource: &ResourceId,
+        expected_sequence: Position,
+        expected_previous_hash: [u8; 32],
+    ) -> Result<RecordPayload, RecordError> {
+        if &self.resource != expected_resource {
+            return Err(RecordError::ResourceMismatch);
+        }
+        if self.sequence != expected_sequence {
+            return Err(RecordError::SequenceGap);
+        }
+        if self.version != RECORD_VERSION_V1 {
+            return Err(RecordError::UnknownVersion);
+        }
+        if self.family != self.kind.family() {
+            return Err(RecordError::FamilyMismatch);
+        }
+        if self.previous_hash != expected_previous_hash {
+            return Err(RecordError::PreviousHashMismatch);
+        }
+        let calculated = calculate_record_hash(
+            &self.resource,
+            self.sequence,
+            self.family,
+            self.kind,
+            self.version,
+            &self.payload,
+            self.previous_hash,
+        );
+        if self.record_hash != calculated {
+            return Err(RecordError::RecordHashMismatch);
+        }
+        RecordPayload::decode(self.kind, self.version, &self.payload)
+    }
+
+    #[must_use]
+    pub fn encoded_len(&self) -> usize {
+        self.payload
+            .len()
+            .checked_add(self.resource.as_str().len())
+            .and_then(|length| length.checked_add(96))
+            .unwrap_or(usize::MAX)
+    }
+}
+
+fn calculate_record_hash(
+    resource: &ResourceId,
+    sequence: Position,
+    family: RecordFamily,
+    kind: RecordKind,
+    version: u16,
+    payload: &[u8],
+    previous_hash: [u8; 32],
+) -> [u8; 32] {
+    let payload_digest = Sha256::digest(payload);
+    let mut hasher = Sha256::new();
+    hasher.update(HASH_DOMAIN);
+    hasher.update((resource.as_str().len() as u64).to_be_bytes());
+    hasher.update(resource.as_str().as_bytes());
+    hasher.update(sequence.get().to_be_bytes());
+    hasher.update([family.tag()]);
+    hasher.update([kind.tag()]);
+    hasher.update(version.to_be_bytes());
+    hasher.update(payload_digest);
+    hasher.update(previous_hash);
+    hasher.finalize().into()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecordError {
+    IdentityOutOfRange,
+    SequenceOutOfRange,
+    PayloadTooLarge,
+    Encoding,
+    UnknownVersion,
+    KindMismatch,
+    FamilyMismatch,
+    NonCanonicalPayload,
+    DigestMismatch,
+    ResourceMismatch,
+    SequenceGap,
+    PreviousHashMismatch,
+    RecordHashMismatch,
+}
+
+impl fmt::Display for RecordError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::IdentityOutOfRange => "durable identity is outside the supported range",
+            Self::SequenceOutOfRange => "record sequence is outside the supported range",
+            Self::PayloadTooLarge => "record payload exceeds 1 MiB",
+            Self::Encoding => "record payload encoding is invalid",
+            Self::UnknownVersion => "record version is unknown",
+            Self::KindMismatch => "record kind does not match its payload",
+            Self::FamilyMismatch => "record family does not match its kind",
+            Self::NonCanonicalPayload => "record payload is not canonically encoded",
+            Self::DigestMismatch => "verified I/O digest does not match canonical bytes",
+            Self::ResourceMismatch => "record resource does not match its ledger",
+            Self::SequenceGap => "record sequence is not contiguous",
+            Self::PreviousHashMismatch => "record previous hash does not match the prefix",
+            Self::RecordHashMismatch => "record hash is invalid",
+        })
+    }
+}
+
+impl Error for RecordError {}

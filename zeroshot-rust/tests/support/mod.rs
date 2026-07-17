@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::io::Cursor;
 
 use openengine_cluster_protocol::{
@@ -37,3 +39,4 @@ pub fn test_intent(bytes: &[u8], run_id: &str) -> ArtifactIntent {
 pub fn byte_stream(bytes: Vec<u8>) -> ArtifactByteStream {
     Box::new(Cursor::new(bytes))
 }
+pub mod ledger;
