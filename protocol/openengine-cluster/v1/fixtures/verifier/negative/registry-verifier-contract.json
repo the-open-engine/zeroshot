@@ -1,0 +1,88 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "invalid_graph_shape",
+        "message": "step node resolved to a verifier-only descriptor",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          }
+        ],
+        "relatedNodes": [
+          "work"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.verifier@1",
+          "writeBindings": []
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

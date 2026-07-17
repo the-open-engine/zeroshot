@@ -1,0 +1,331 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "choice_exhaustiveness",
+        "message": "choice otherwise is unreachable because earlier branches cover every legal control assignment",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 1,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "decision"
+          },
+          {
+            "kind": "field",
+            "name": "otherwise"
+          },
+          {
+            "kind": "node",
+            "name": "deadOtherwise"
+          }
+        ],
+        "relatedNodes": [
+          "decision"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "diagnostic": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "result": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "value": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "diagnostic": {
+            "fields": {
+              "code": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "verifier",
+          "name": "verify",
+          "output": {
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "signals": {
+            "verdict": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.verifier@1",
+          "writeBindings": []
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "bindings": [],
+                "kind": "succeed",
+                "name": "accepted",
+                "output": {
+                  "kind": "null"
+                }
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "accepted"
+                ],
+                "value": {
+                  "field": "verdict",
+                  "name": "verify",
+                  "source": "signal"
+                }
+              }
+            },
+            {
+              "node": {
+                "kind": "fail",
+                "name": "rejected",
+                "reason": "rejected"
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "rejected"
+                ],
+                "value": {
+                  "field": "verdict",
+                  "name": "verify",
+                  "source": "signal"
+                }
+              }
+            },
+            {
+              "node": {
+                "kind": "fail",
+                "name": "workerFailed",
+                "reason": "rejected"
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "timeout",
+                  "crash",
+                  "malformed",
+                  "refusal"
+                ],
+                "value": {
+                  "field": null,
+                  "name": "verify",
+                  "source": "error"
+                }
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "decision",
+          "otherwise": {
+            "attempts": 1,
+            "input": {
+              "kind": "null"
+            },
+            "inputBindings": [],
+            "kind": "step",
+            "name": "deadOtherwise",
+            "output": {
+              "kind": "null"
+            },
+            "timeoutMs": 1,
+            "worker": "fixture.worker@1",
+            "writeBindings": []
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

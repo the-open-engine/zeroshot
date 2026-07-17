@@ -1,0 +1,276 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "schema_safety",
+        "message": "write value is not a subtype of its state target",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "map"
+          },
+          {
+            "kind": "field",
+            "name": "body"
+          },
+          {
+            "kind": "node",
+            "name": "mapWork"
+          },
+          {
+            "kind": "field",
+            "name": "writeBindings"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          }
+        ],
+        "relatedNodes": [
+          "mapWork"
+        ],
+        "severity": "error"
+      },
+      {
+        "code": "schema_safety",
+        "message": "promoted value is not a subtype of its enclosing state target",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "map"
+          },
+          {
+            "kind": "field",
+            "name": "promotedStatePaths"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          }
+        ],
+        "relatedNodes": [],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "results": {
+          "required": false,
+          "type": {
+            "items": {
+              "kind": "string"
+            },
+            "kind": "array"
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "body": {
+            "attempts": 1,
+            "input": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "inputBindings": [
+              {
+                "target": [
+                  "value"
+                ],
+                "value": {
+                  "path": [
+                    "value"
+                  ],
+                  "source": "item"
+                }
+              }
+            ],
+            "kind": "step",
+            "name": "mapWork",
+            "output": {
+              "fields": {
+                "result": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "timeoutMs": 1,
+            "worker": "fixture.data@1",
+            "writeBindings": [
+              {
+                "target": [
+                  "results"
+                ],
+                "value": {
+                  "channel": "out",
+                  "node": "mapWork",
+                  "path": [
+                    "result"
+                  ]
+                }
+              }
+            ]
+          },
+          "kind": "map",
+          "maxItems": 2,
+          "name": "map",
+          "over": {
+            "path": [
+              "items"
+            ],
+            "source": "state"
+          },
+          "promotedStatePaths": [
+            [
+              "results"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "results": {
+                "required": false,
+                "type": {
+                  "items": {
+                    "kind": "string"
+                  },
+                  "kind": "array"
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "results": {
+            "required": false,
+            "type": {
+              "items": {
+                "kind": "string"
+              },
+              "kind": "array"
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

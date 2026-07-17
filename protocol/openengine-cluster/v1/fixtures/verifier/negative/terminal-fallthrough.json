@@ -1,0 +1,46 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "reachability",
+        "message": "normal-success path falls through without explicit succeed or fail terminal",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          }
+        ],
+        "relatedNodes": [
+          "work"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "attempts": 1,
+      "input": {
+        "kind": "null"
+      },
+      "inputBindings": [],
+      "kind": "step",
+      "name": "work",
+      "output": {
+        "kind": "null"
+      },
+      "timeoutMs": 1,
+      "worker": "fixture.worker@1",
+      "writeBindings": []
+    }
+  }
+}

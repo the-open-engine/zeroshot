@@ -1,0 +1,80 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "invalid_graph_shape",
+        "message": "worker descriptor version is unavailable: fixture.version-unavailable@2",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          }
+        ],
+        "relatedNodes": [
+          "work"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "kind": "null"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.version-unavailable@2",
+          "writeBindings": []
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

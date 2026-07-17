@@ -1,0 +1,82 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "schema_safety",
+        "message": "v1 field bindings cannot construct a whole non-record payload; use null or record",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          },
+          {
+            "kind": "field",
+            "name": "input"
+          }
+        ],
+        "relatedNodes": [],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "input": {
+            "kind": "string"
+          },
+          "inputBindings": [],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "kind": "null"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.worker@1",
+          "writeBindings": []
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

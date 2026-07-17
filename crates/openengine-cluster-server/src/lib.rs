@@ -1,6 +1,7 @@
 //! Backend-neutral Cluster Protocol dispatcher.
 
 pub mod admission;
+pub mod graph_verifier;
 pub mod lifecycle;
 pub mod stdio;
 pub mod worker_registry;

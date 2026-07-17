@@ -1,0 +1,656 @@
+{
+  "expected": {
+    "compiledIr": {
+      "bounds": {
+        "attemptsPerNode": {
+          "mapVerify": 1
+        },
+        "maxNodeExecutions": 2,
+        "peakConcurrency": 2,
+        "termination": {
+          "kind": "acyclic",
+          "order": [
+            "root",
+            "map",
+            "mapVerify",
+            "mapControl",
+            "done",
+            "mapControlOtherwise"
+          ]
+        }
+      },
+      "initialInput": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      },
+      "policy": {
+        "default": "deny",
+        "policy": "policy.strict@1"
+      },
+      "profile": "openengine.graph.full/v1",
+      "root": {
+        "children": [
+          {
+            "body": {
+              "attempts": 1,
+              "diagnostic": {
+                "fields": {
+                  "code": {
+                    "required": true,
+                    "type": {
+                      "kind": "number"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "input": {
+                "kind": "null"
+              },
+              "inputBindings": [],
+              "kind": "verifier",
+              "name": "mapVerify",
+              "output": {
+                "fields": {
+                  "result": {
+                    "required": true,
+                    "type": {
+                      "kind": "number"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "signals": {
+                "verdict": [
+                  "accepted",
+                  "rejected"
+                ]
+              },
+              "timeoutMs": 1,
+              "worker": "fixture.verifier@1",
+              "writeBindings": []
+            },
+            "kind": "map",
+            "maxItems": 2,
+            "name": "map",
+            "over": {
+              "path": [
+                "items"
+              ],
+              "source": "state"
+            },
+            "promotedStatePaths": [],
+            "state": {
+              "fields": {
+                "diagnostic": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "items": {
+                  "required": true,
+                  "type": {
+                    "items": {
+                      "fields": {
+                        "value": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    },
+                    "kind": "array"
+                  }
+                },
+                "result": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                },
+                "verdict": {
+                  "required": false,
+                  "type": {
+                    "kind": "enum",
+                    "values": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  }
+                }
+              },
+              "kind": "record"
+            }
+          },
+          {
+            "branches": [
+              {
+                "node": {
+                  "bindings": [],
+                  "kind": "succeed",
+                  "name": "done",
+                  "output": {
+                    "kind": "null"
+                  }
+                },
+                "when": {
+                  "guards": [
+                    {
+                      "count": 1,
+                      "kind": "k_of_map",
+                      "labels": [
+                        "accepted"
+                      ],
+                      "value": {
+                        "field": "verdict",
+                        "name": "mapVerify",
+                        "source": "signal"
+                      }
+                    },
+                    {
+                      "kind": "in",
+                      "labels": [
+                        "overflow"
+                      ],
+                      "value": {
+                        "field": "overflow",
+                        "name": "map",
+                        "source": "group"
+                      }
+                    }
+                  ],
+                  "kind": "any"
+                }
+              }
+            ],
+            "kind": "choice",
+            "name": "mapControl",
+            "otherwise": {
+              "kind": "fail",
+              "name": "mapControlOtherwise",
+              "reason": "rejected"
+            },
+            "promotedStatePaths": [],
+            "state": {
+              "fields": {
+                "diagnostic": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "items": {
+                  "required": true,
+                  "type": {
+                    "items": {
+                      "fields": {
+                        "value": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    },
+                    "kind": "array"
+                  }
+                },
+                "result": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                },
+                "verdict": {
+                  "required": false,
+                  "type": {
+                    "kind": "enum",
+                    "values": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  }
+                }
+              },
+              "kind": "record"
+            }
+          }
+        ],
+        "kind": "seq",
+        "name": "root",
+        "promotedStatePaths": [],
+        "state": {
+          "fields": {
+            "diagnostic": {
+              "required": false,
+              "type": {
+                "kind": "number"
+              }
+            },
+            "items": {
+              "required": true,
+              "type": {
+                "items": {
+                  "fields": {
+                    "value": {
+                      "required": true,
+                      "type": {
+                        "kind": "integer"
+                      }
+                    }
+                  },
+                  "kind": "record"
+                },
+                "kind": "array"
+              }
+            },
+            "result": {
+              "required": false,
+              "type": {
+                "kind": "number"
+              }
+            },
+            "value": {
+              "required": true,
+              "type": {
+                "kind": "integer"
+              }
+            },
+            "verdict": {
+              "required": false,
+              "type": {
+                "kind": "enum",
+                "values": [
+                  "accepted",
+                  "rejected"
+                ]
+              }
+            }
+          },
+          "kind": "record"
+        }
+      }
+    },
+    "diagnostics": [],
+    "status": "verified"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "diagnostic": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "result": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "value": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "body": {
+            "attempts": 1,
+            "diagnostic": {
+              "fields": {
+                "code": {
+                  "required": true,
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "input": {
+              "kind": "null"
+            },
+            "inputBindings": [],
+            "kind": "verifier",
+            "name": "mapVerify",
+            "output": {
+              "fields": {
+                "result": {
+                  "required": true,
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "signals": {
+              "verdict": [
+                "accepted",
+                "rejected"
+              ]
+            },
+            "timeoutMs": 1,
+            "worker": "fixture.verifier@1",
+            "writeBindings": []
+          },
+          "kind": "map",
+          "maxItems": 2,
+          "name": "map",
+          "over": {
+            "path": [
+              "items"
+            ],
+            "source": "state"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "bindings": [],
+                "kind": "succeed",
+                "name": "done",
+                "output": {
+                  "kind": "null"
+                }
+              },
+              "when": {
+                "guards": [
+                  {
+                    "count": 1,
+                    "kind": "k_of_map",
+                    "labels": [
+                      "accepted"
+                    ],
+                    "value": {
+                      "field": "verdict",
+                      "name": "mapVerify",
+                      "source": "signal"
+                    }
+                  },
+                  {
+                    "kind": "in",
+                    "labels": [
+                      "overflow"
+                    ],
+                    "value": {
+                      "field": "overflow",
+                      "name": "map",
+                      "source": "group"
+                    }
+                  }
+                ],
+                "kind": "any"
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "mapControl",
+          "otherwise": {
+            "kind": "fail",
+            "name": "mapControlOtherwise",
+            "reason": "rejected"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

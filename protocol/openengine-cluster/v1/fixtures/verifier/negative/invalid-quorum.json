@@ -1,0 +1,117 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "invalid_graph_shape",
+        "message": "parallel quorum exceeds branch count",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "parallel"
+          },
+          {
+            "kind": "field",
+            "name": "join"
+          },
+          {
+            "kind": "field",
+            "name": "count"
+          }
+        ],
+        "relatedNodes": [
+          "parallel"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "branches": [
+            {
+              "attempts": 1,
+              "input": {
+                "kind": "null"
+              },
+              "inputBindings": [],
+              "kind": "step",
+              "name": "left",
+              "output": {
+                "kind": "null"
+              },
+              "timeoutMs": 1,
+              "worker": "fixture.worker@1",
+              "writeBindings": []
+            },
+            {
+              "attempts": 1,
+              "input": {
+                "kind": "null"
+              },
+              "inputBindings": [],
+              "kind": "step",
+              "name": "right",
+              "output": {
+                "kind": "null"
+              },
+              "timeoutMs": 1,
+              "worker": "fixture.worker@1",
+              "writeBindings": []
+            }
+          ],
+          "join": {
+            "count": 3,
+            "kind": "quorum"
+          },
+          "kind": "par",
+          "name": "parallel",
+          "promotedStatePaths": [],
+          "state": {
+            "kind": "null"
+          }
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}
