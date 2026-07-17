@@ -40,6 +40,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Provider detection          | `lib/provider-detection.js`                                          |
 | Provider capabilities       | `src/providers/capabilities.js`                                      |
 | Start-cluster helper        | `lib/start-cluster.js`                                               |
+| Legacy worker facade        | `lib/cluster-worker/`                                                 |
+| Legacy worker executable    | `bin/zeroshot-cluster-worker.js`                                     |
 | Docker mounts/env           | `lib/docker-config.js`                                               |
 | Container lifecycle         | `src/isolation-manager.js`                                           |
 | Settings                    | `lib/settings.js`                                                    |
@@ -135,6 +137,21 @@ The reserved legacy descriptor is valid only with its canonical request/result p
 mock verifier completions must validate output, signals, diagnostics, and artifacts before emission.
 Worker JSON Schema must mirror descriptor cross-field/uniqueness validation and the closed
 error-code/reason matrix; registry compatibility must reject verifier contracts on step nodes.
+
+The legacy cluster worker is the bounded Node implementation of `legacy.zeroshot.ship@1`.
+Its public facade is exactly `start`, `status`, `events`, `stop`, and `result`; do not add
+guidance, permission callbacks, writable attach, raw output, credential fields, or caller launch
+flags. Registry resolution must produce a frozen worktree/docker plan before engine allocation.
+Lifecycle and terminal truth comes from cluster records plus durable ledger topics; PID state is
+diagnostic only. Explicit stop is bounded by the registry shutdown deadline and never claims that
+provider or tool side effects were rolled back.
+Completion events require a canonical result or explicit bounded summary, and failure events require
+a valid closed code/reason pair; missing or corrupt terminal data fails as `malformed`. Engine status
+observation is synchronous and fails closed when durable truth cannot be read.
+Profile resolution, artifact staging, engine start, and receipt collection remain cancellable under
+the registry execution bound; stop may win before engine allocation. A caller shutdown deadline
+bounds stop acknowledgement, not cleanup ownership: the engine adapter must still stop a cluster
+that allocates late while start remains pending.
 
 ## CLI Quick Reference
 

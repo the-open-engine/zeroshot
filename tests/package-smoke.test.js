@@ -42,9 +42,19 @@ describe('npm package smoke', function () {
       pkg.bin['zeroshot-agent-provider'],
       './lib/agent-cli-provider/executable.js'
     );
+    assert.strictEqual(pkg.bin['zeroshot-cluster-worker'], './bin/zeroshot-cluster-worker.js');
 
     for (const requiredFile of [
       'cli/index.js',
+      'bin/zeroshot-cluster-worker.js',
+      'lib/cluster-worker/index.js',
+      'lib/cluster-worker/index.d.ts',
+      'lib/cluster-worker/executable.js',
+      'lib/cluster-worker/terminal-normalizer.js',
+      'lib/cluster-worker/process-stdio.js',
+      'lib/cluster-worker/runtime-support.js',
+      'protocol/openengine-cluster/v1/worker.schema.json',
+      'docs/openengine-cluster-protocol/v1/legacy-worker.md',
       'lib/start-cluster.js',
       'lib/path-check.js',
       'scripts/check-path.js',
