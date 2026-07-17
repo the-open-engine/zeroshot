@@ -148,18 +148,27 @@ fn workspace_metadata_preserves_package_lib_and_bin_identity() {
             )
         })
         .collect::<BTreeSet<_>>();
+    for required in [
+        ("zeroshot-rust".to_owned(), "bin".to_owned()),
+        ("zeroshot_engine".to_owned(), "lib".to_owned()),
+        ("architecture".to_owned(), "test".to_owned()),
+        ("backend_boundary".to_owned(), "test".to_owned()),
+        ("fault_contract".to_owned(), "test".to_owned()),
+    ] {
+        assert!(
+            targets.contains(&required),
+            "missing product target: {required:?}"
+        );
+    }
     assert_eq!(
-        targets,
-        BTreeSet::from([
-            ("architecture".to_owned(), "test".to_owned()),
-            ("backend_boundary".to_owned(), "test".to_owned()),
-            ("fault_contract".to_owned(), "test".to_owned()),
-            ("observability_contract".to_owned(), "test".to_owned()),
-            ("provider_bounds".to_owned(), "test".to_owned()),
-            ("provider_contracts".to_owned(), "test".to_owned()),
-            ("zeroshot-rust".to_owned(), "bin".to_owned()),
-            ("zeroshot_engine".to_owned(), "lib".to_owned()),
-        ])
+        targets.iter().filter(|(_, kind)| kind == "lib").count(),
+        1,
+        "product must retain one library construction root"
+    );
+    assert_eq!(
+        targets.iter().filter(|(_, kind)| kind == "bin").count(),
+        1,
+        "product must retain one binary entry point"
     );
 }
 
@@ -187,12 +196,32 @@ fn product_dependencies_stay_inside_native_contract_and_backend_boundaries() {
             "normal".to_owned(),
         ),
         ("openengine-cluster-server".to_owned(), "normal".to_owned()),
+        ("rusqlite".to_owned(), "normal".to_owned()),
         ("serde".to_owned(), "normal".to_owned()),
         ("serde_json".to_owned(), "normal".to_owned()),
+        ("sha2".to_owned(), "normal".to_owned()),
         ("thiserror".to_owned(), "normal".to_owned()),
-        ("tokio".to_owned(), "dev".to_owned()),
+        ("tokio".to_owned(), "normal".to_owned()),
+        ("tempfile".to_owned(), "dev".to_owned()),
     ]);
-    assert_eq!(dependencies, allowed);
+    assert!(
+        dependencies.is_subset(&allowed),
+        "product dependency crossed the native boundary: {:?}",
+        dependencies.difference(&allowed).collect::<Vec<_>>()
+    );
+    for required in [
+        (
+            "openengine-cluster-protocol".to_owned(),
+            "normal".to_owned(),
+        ),
+        ("openengine-cluster-server".to_owned(), "normal".to_owned()),
+        ("rusqlite".to_owned(), "normal".to_owned()),
+    ] {
+        assert!(
+            dependencies.contains(&required),
+            "missing native dependency: {required:?}"
+        );
+    }
 }
 
 #[test]

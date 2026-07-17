@@ -61,6 +61,11 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Native fault taxonomy       | `zeroshot-rust/src/fault/taxonomy.rs`                                |
 | Native diagnostic redaction | `zeroshot-rust/src/fault/redaction.rs`                               |
 | Native observability        | `zeroshot-rust/src/observability.rs`                                 |
+| Native cluster ledger       | `zeroshot-rust/src/ledger.rs`, `ledger/fold.rs`, `ledger/record.rs`  |
+| Ledger value validation     | `zeroshot-rust/src/ledger/validation.rs`                             |
+| Ledger storage port         | `zeroshot-rust/src/ledger/store.rs`                                  |
+| SQLite ledger backend       | `zeroshot-rust/src/ledger/sqlite.rs`                                 |
+| Protocol store adapters     | `zeroshot-rust/src/ledger/adapters.rs`                               |
 | Admission coordinator       | `crates/openengine-cluster-server/src/admission.rs`                  |
 | Admission durable ports     | `crates/openengine-cluster-server/src/admission/ports.rs`            |
 | Admission snapshot folding  | `crates/openengine-cluster-server/src/admission/snapshot.rs`         |
@@ -86,10 +91,10 @@ verify byte-for-byte drift with `npm run protocol:check`. These generator-format
 are excluded from Prettier; never format them independently.
 The protocol and server crates own wire contracts, backend traits, the dispatcher, and transports.
 `zeroshot-rust/` owns the concrete `NativeBackend`, product-local `NativeBackendFactory`
-construction root, and product-private, secret-free issue/source provider contracts. Issue and
-source registries and identifiers remain independent; neither is a worker/model provider. Keep
-protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and workspace
-behavior outside it.
+construction root, native cluster ledger, SQLite store adapter, and product-private, secret-free
+issue/source provider contracts. Issue and source registries and identifiers remain independent;
+neither is a worker/model provider. Keep protocol, transport, daemon, compatibility, credential
+resolution, and workspace behavior outside it.
 Native engine faults must be constructed only by `FaultFactory` from closed `ModuleEvidence`.
 Decoded faults must match the canonical semantics derived from their required primary source frame.
 Raw diagnostic values are replaced wholesale with typed markers and remain ephemeral; never put
@@ -97,6 +102,27 @@ them in `EngineFault`, observations, protocol responses, persistence, or exports
 injected through `ObservationSink` and uses only the fixed metrics and closed dimensions in
 `observability.rs`; retry disposition is descriptive data, not retry authorization. Do not install
 global telemetry state or caller-defined labels.
+`ClusterLedger` owns native lifecycle, CAS, idempotency, identity allocation, and exact replay;
+`LedgerStore` stays backend-neutral and contains no domain invariants. Control and verified-I/O
+records share one checked, hash-chained order and transaction. Replay folds only committed
+engine-owned records and verified I/O and must perform no provider, verifier, workspace, network,
+or runtime calls. Each domain mutation ends in a closed typed receipt whose variant validates the
+required atomic record sequence; opaque receipt bytes exist only at the storage port. SQLite uses
+one digest-named database per resource beneath the injected native
+data root with WAL, `synchronous=FULL`, foreign keys, a 5-second busy timeout, and an exact
+resource-local owner fence. Discovery retains only one bounded page plus its continuation marker,
+scans at most 4,096 root entries, and fails closed instead of returning a partial page past that
+bound. Unknown versions, gaps, hash mismatches, receipt corruption, and stale fences fail closed;
+raw storage diagnostics never enter records or protocol responses.
+Each mutation method has exactly one closed receipt variant; do not add generic update/stop paths
+beside the protocol adapters. Opaque receipt rows are position-linked one-to-one with their final
+mutation-receipt records, and coherent prefix reads validate the complete receipt set. Bounded
+range reads validate only the requested records, their chain anchor, and position-indexed receipts;
+advancement waits periodically reread durable position because notifications are advisory and
+store-instance-local. Dispatch idempotency is scoped to the admitted generation and run. Unresolved
+external-effect intents survive re-admission and terminalization, accept authoritative
+reconciliation receipts without changing the terminal outcome, and prevent fenced removal until
+reconciled.
 Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
 authoritative contract types only. They do not provide graph admission, verification, or execution.
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
