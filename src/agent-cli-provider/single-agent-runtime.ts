@@ -218,6 +218,9 @@ function resolveRuntimeGatewayOptions(
       ? settingsGateway.headers
       : { ...(settingsGateway.headers ?? {}), ...requestGateway.headers };
   const mergedGateway: GatewayBuildOptions = {
+    ...(requestGateway.protocol ?? settingsGateway.protocol
+      ? { protocol: requestGateway.protocol ?? settingsGateway.protocol }
+      : {}),
     ...(requestGateway.baseUrl ?? settingsGateway.baseUrl
       ? { baseUrl: requestGateway.baseUrl ?? settingsGateway.baseUrl }
       : {}),
@@ -226,6 +229,9 @@ function resolveRuntimeGatewayOptions(
       : {}),
     ...(mergedHeaders === undefined ? {} : { headers: mergedHeaders }),
     model: requestGateway.model ?? modelSpec.model ?? settingsGateway.model ?? null,
+    ...(requestGateway.maxTokens ?? settingsGateway.maxTokens
+      ? { maxTokens: requestGateway.maxTokens ?? settingsGateway.maxTokens }
+      : {}),
     ...(requestGateway.toolPolicy ?? settingsGateway.toolPolicy
       ? { toolPolicy: requestGateway.toolPolicy ?? settingsGateway.toolPolicy }
       : {}),
