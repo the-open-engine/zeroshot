@@ -118,17 +118,34 @@ configuration. Node timeouts use the wire `PositiveInteger` range and have no 24
 ceiling.
 Full-v1 finite control enumeration couples each executable's signals and error as mutually
 exclusive outcomes, including per-item map aggregates. Choice residual assignments govern output
-channel availability; terminal alternatives do not flow into later nodes. An `otherwise` node is
-illegal when earlier branches exhaust the legal control space and is excluded from flow analysis.
+channel availability; terminal alternatives do not flow into later nodes. Mapped control flow
+preserves per-item execution correlation: guaranteed sequential, full-completion parallel, and
+do-while descendants emit an outcome, while conditional descendants emit one exactly on their
+selected residual route. An `otherwise` node is illegal when earlier branches exhaust the legal
+control space and is excluded from flow analysis.
 `k_of_n` and `k_of_map` labels never widen their selectors' closed domains. Executable writes
 remain success-conditional until residual control excludes every runtime error; state reads and
 promotions preserve that outcome provenance. Definition flow carries exact path/type guarantees
 from required initial input through nested groups. A successful output/diagnostic binding defines
 only its required selected path and required descendants, never optional producer paths.
+V1 has no whole-payload binding: executable inputs and `succeed` outputs must be `null` or records.
+Scalar, enum, and array payloads remain valid in other algebra positions and as nested record
+fields. A map body write to a promoted `array<T>` path writes one `T` at the current input index;
+the result is input-ordered and total, with empty input defining `[]`, while mapped executable
+success/error provenance remains until control excludes every mapped runtime error.
 Parallel continuation requires all branches for `all`, one for `any`/`first`, and `count` for
 `quorum`; quorum flow and promotions are guaranteed only when present in every jointly satisfiable
 size-`count` completion set. Shared guard correlations can make independently possible branch
-completions mutually exclusive and must be preserved during that analysis.
+completions mutually exclusive and must be preserved during that analysis. Correlate
+`joined=reached|quorum_unreachable` for `all`/`any`/`quorum` with the required branch-completion
+predicate; mapped join controls retain that correlation with branch controls per item before their
+counts are aggregated. Impossible status/control combinations are excluded from guard analysis. Parallel failure labels
+`quorum_unreachable` and `no_satisfier` restore the incoming pre-par definitions and expose no
+winner or branch-promotion data. Unguarded continuation cannot consume success-only parallel
+writes. Preserve target-granular conditional ownership through nested parallels, choice merges,
+and later sequential writers; descendant writes must invalidate stale ancestor type facts.
+For `first`, only a completing branch that guarantees the controls read by `when` and satisfies the
+predicate is a winner; correlate `raced=satisfied|no_satisfier` with those winner assignments.
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
 Testkit scripted approval and `running` phase mean admitted state, not native verification or a
 production full-graph executor.

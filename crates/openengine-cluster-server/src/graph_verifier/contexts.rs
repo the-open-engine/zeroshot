@@ -5,6 +5,7 @@ pub(super) struct NodeValidationContext<'a> {
     pub(super) incoming: &'a Flow,
     pub(super) state: &'a PayloadType,
     pub(super) item: Option<&'a PayloadType>,
+    pub(super) map_index_targets: Option<&'a BTreeMap<FieldPath, PayloadType>>,
 }
 
 pub(super) struct LocatedNodeValidationContext<'a> {
@@ -29,6 +30,7 @@ pub(super) struct InputBindingsValidationContext<'a> {
     pub(super) node: NodeValidationContext<'a>,
     pub(super) node_path: &'a [DiagnosticPathSegment],
     pub(super) field: &'a str,
+    pub(super) target_field: &'a str,
 }
 
 #[derive(Clone, Copy)]
@@ -37,6 +39,7 @@ pub(super) struct WriteBindingsValidationContext<'a> {
     pub(super) output: &'a PayloadType,
     pub(super) incoming: &'a Flow,
     pub(super) state: &'a PayloadType,
+    pub(super) map_index_targets: Option<&'a BTreeMap<FieldPath, PayloadType>>,
     pub(super) path: &'a [DiagnosticPathSegment],
 }
 
@@ -103,6 +106,7 @@ pub(super) struct PromotionValidationContext<'a> {
     pub(super) effects: &'a mut Effects,
     pub(super) path: &'a [DiagnosticPathSegment],
     pub(super) rule: PromotionRule,
+    pub(super) target_overrides: Option<&'a BTreeMap<FieldPath, PayloadType>>,
 }
 
 pub(super) struct DiagnosticDetails {

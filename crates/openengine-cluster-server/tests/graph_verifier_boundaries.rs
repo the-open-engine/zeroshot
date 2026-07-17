@@ -306,7 +306,14 @@ fn group_assignment_choice(groups: u64) -> Value {
             })
         })
         .collect::<Vec<_>>();
-    choice_with_guard(json!({"kind":"all","guards":guards}))
+    json!({
+        "kind":"choice","name":"choose","state":state(),
+        "branches":[{
+            "when":{"kind":"all","guards":guards},
+            "node":{"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
+        }],
+        "promotedStatePaths":[]
+    })
 }
 
 #[tokio::test]
@@ -367,6 +374,51 @@ async fn ceiling_compliant_map_aggregate_does_not_exhaust_the_call_stack() {
     ]);
 
     verify(&graph).await.unwrap();
+}
+
+#[tokio::test]
+async fn signal_product_is_rejected_before_materializing_over_limit_assignments() {
+    let left_labels = enum_labels("left", 4_096);
+    let right_labels = enum_labels("right", 4_096);
+    let graph = graph(vec![
+        json!({
+            "kind":"verifier","name":"wideVerify","worker":"worker.wide-verify@1",
+            "input":{"kind":"null"},"output":{"kind":"null"},
+            "inputBindings":[],"writeBindings":[],"timeoutMs":1,"attempts":1,
+            "signals":{"left":left_labels,"right":right_labels},
+            "diagnostic":{"kind":"null"}
+        }),
+        choice_with_guard(json!({
+            "kind":"all",
+            "guards":[
+                {
+                    "kind":"in",
+                    "value":{
+                        "name":"wideVerify",
+                        "source":"signal",
+                        "field":"left"
+                    },
+                    "labels":["left_0"]
+                },
+                {
+                    "kind":"in",
+                    "value":{
+                        "name":"wideVerify",
+                        "source":"signal",
+                        "field":"right"
+                    },
+                    "labels":["right_0"]
+                }
+            ]
+        })),
+    ]);
+
+    let error = verify(&graph).await.unwrap_err();
+    assert!(
+        diagnostics(error)
+            .iter()
+            .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
+    );
 }
 
 fn exact_fold_map() -> Value {

@@ -23,6 +23,8 @@ impl<'a> Analyzer<'a> {
             GraphNode::Succeed(terminal) => self.validate_succeed(terminal, &located),
             GraphNode::Fail(terminal) => terminal_effects(&terminal.name, context.incoming),
         };
+        self.node_completion
+            .insert(node.name().clone(), effects.completion.clone());
         self.node_fallthrough
             .insert(node_identity(node), effects.falls_through);
         effects
@@ -72,6 +74,7 @@ impl<'a> Analyzer<'a> {
                 node: context.node,
                 node_path: &context.path,
                 field: "bindings",
+                target_field: "output",
             },
         );
         terminal_effects(&terminal.name, context.node.incoming)
@@ -110,7 +113,7 @@ impl<'a> Analyzer<'a> {
                 NodeValidationContext {
                     incoming: &flow,
                     state: &group.state,
-                    item: context.node.item,
+                    ..context.node
                 },
             );
             if falls_through {
@@ -125,9 +128,7 @@ impl<'a> Analyzer<'a> {
             effects
                 .definite_nodes
                 .extend(child_effects.definite_nodes.clone());
-            effects
-                .definite_writes
-                .extend(child_effects.definite_writes.clone());
+            compose_writes(&mut effects.definite_writes, &child_effects.definite_writes);
             effects
                 .possible_writes
                 .extend(child_effects.possible_writes);
@@ -135,7 +136,24 @@ impl<'a> Analyzer<'a> {
                 &mut effects.possible_write_types,
                 &child_effects.possible_write_types,
             );
-            merge_outcome_writes(&mut effects.outcome_writes, &child_effects.outcome_writes);
+            merge_outcome_writes(
+                &mut effects.outcome_writes,
+                &mut effects.outcome_order,
+                &child_effects.outcome_writes,
+                &child_effects.outcome_order,
+            );
+            merge_parallel_definition_effects(
+                &mut effects.parallel_definition_effects,
+                &child_effects.definite_writes,
+                &child_effects.parallel_definition_effects,
+            );
+            effects
+                .unavailable_nodes
+                .extend(child_effects.unavailable_nodes.clone());
+            merge_conditional_nodes(
+                &mut effects.conditional_nodes,
+                &child_effects.conditional_nodes,
+            );
             if falls_through {
                 effects.resolve_successful_writes(&flow.failed);
             }
@@ -151,6 +169,7 @@ impl<'a> Analyzer<'a> {
             effects: &mut effects,
             path: &context.path,
             rule: PromotionRule::Definite,
+            target_overrides: context.node.map_index_targets,
         });
         effects
     }
@@ -175,7 +194,7 @@ impl<'a> Analyzer<'a> {
                 NodeValidationContext {
                     incoming: &branch_flow,
                     state: &group.state,
-                    item: context.node.item,
+                    ..context.node
                 },
             );
             self.restrict_completion(
@@ -183,6 +202,9 @@ impl<'a> Analyzer<'a> {
                 control.branch_completion[index].clone(),
                 &context.path,
             );
+            effects
+                .unavailable_nodes
+                .extend(branch_flow.unavailable.clone());
             alternatives.push(effects);
         }
         match &group.otherwise {
@@ -194,7 +216,7 @@ impl<'a> Analyzer<'a> {
                     NodeValidationContext {
                         incoming: &otherwise_flow,
                         state: &group.state,
-                        item: context.node.item,
+                        ..context.node
                     },
                 );
                 self.restrict_completion(
@@ -202,10 +224,14 @@ impl<'a> Analyzer<'a> {
                     control.otherwise_completion.clone(),
                     &context.path,
                 );
+                effects
+                    .unavailable_nodes
+                    .extend(otherwise_flow.unavailable.clone());
                 alternatives.push(effects);
             }
             _ if !control.exhaustive => {
                 alternatives.push(Effects {
+                    unavailable_nodes: context.node.incoming.unavailable.clone(),
                     exit_failed: context.node.incoming.failed.clone(),
                     falls_through: true,
                     completion: control.otherwise_completion.clone(),
@@ -223,105 +249,9 @@ impl<'a> Analyzer<'a> {
             effects: &mut effects,
             path: &context.path,
             rule: PromotionRule::EveryAlternative,
+            target_overrides: context.node.map_index_targets,
         });
         effects
-    }
-
-    pub(super) fn validate_par(
-        &mut self,
-        group: &ParNode,
-        context: &LocatedNodeValidationContext<'_>,
-    ) -> Effects {
-        self.validate_join(group, context.node.incoming, &context.path);
-        let branches = group
-            .branches
-            .as_slice()
-            .iter()
-            .map(|branch| {
-                self.validate_node(
-                    branch,
-                    NodeValidationContext {
-                        incoming: context.node.incoming,
-                        state: &group.state,
-                        item: context.node.item,
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        self.validate_parallel_writes(group, &branches, &context.path);
-        let mut effects = self.merge_parallel(&group.join, &branches, &context.path);
-        effects.definite_nodes.insert(group.name.clone());
-        let rule = if matches!(group.join, Join::All {}) {
-            PromotionRule::Definite
-        } else {
-            PromotionRule::EveryAlternative
-        };
-        self.restrict_promotions(PromotionValidationContext {
-            group_state: &group.state,
-            enclosing_state: context.node.state,
-            promoted: &group.promoted_state_paths,
-            effects: &mut effects,
-            path: &context.path,
-            rule,
-        });
-        effects
-    }
-
-    pub(super) fn merge_parallel(
-        &mut self,
-        join: &Join,
-        branches: &[Effects],
-        path: &[DiagnosticPathSegment],
-    ) -> Effects {
-        let required = parallel_required_completions(join, branches.len());
-        if required > branches.len() as u64 {
-            // Shape validation owns the invalid quorum diagnostic. Assume continuation so
-            // terminal analysis does not cascade it into a misleading reachability error.
-            return Effects {
-                falls_through: true,
-                completion: CompletionPredicate::Always,
-                ..merge_parallel_scenarios(branches, required, &[])
-            };
-        }
-
-        let predicates = branches
-            .iter()
-            .map(|branch| &branch.completion)
-            .collect::<Vec<_>>();
-        let Some(assignments) =
-            self.assignments_for_completion_predicates(&predicates, &with_field(path, "join"))
-        else {
-            // The assignment ceiling diagnostic is sufficient. Keep later passes conservative.
-            return Effects {
-                falls_through: true,
-                completion: CompletionPredicate::Always,
-                ..merge_parallel_scenarios(branches, required, &[])
-            };
-        };
-        let scenarios = assignments
-            .iter()
-            .filter_map(|assignment| {
-                let completing = branches
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, branch)| {
-                        branch.completion.evaluate(assignment).then_some(index)
-                    })
-                    .collect::<BTreeSet<_>>();
-                (completing.len() as u64 >= required).then_some(completing)
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let mut merged = merge_parallel_scenarios(branches, required, &scenarios);
-        merged.completion = CompletionPredicate::at_least(
-            required,
-            branches
-                .iter()
-                .map(|branch| branch.completion.clone())
-                .collect(),
-        );
-        merged
     }
 
     pub(super) fn validate_loop(
@@ -343,7 +273,7 @@ impl<'a> Analyzer<'a> {
             NodeValidationContext {
                 incoming: context.node.incoming,
                 state: &group.state,
-                item: context.node.item,
+                ..context.node
             },
         );
         self.validate_loop_exit(group, context, &effects);
@@ -355,6 +285,7 @@ impl<'a> Analyzer<'a> {
             effects: &mut effects,
             path: &context.path,
             rule: PromotionRule::Definite,
+            target_overrides: context.node.map_index_targets,
         });
         effects
     }
@@ -404,65 +335,5 @@ impl<'a> Analyzer<'a> {
                 vec![group.name.clone()],
             );
         }
-    }
-
-    pub(super) fn validate_map(
-        &mut self,
-        group: &MapNode,
-        context: &LocatedNodeValidationContext<'_>,
-    ) -> Effects {
-        if group.max_items.get() > FULL_V1_MAX_MAP_ITEMS {
-            emit_diagnostic!(
-                self,
-                GraphDiagnosticCode::CeilingExceeded,
-                format!("maxItems exceeds full-v1 limit {FULL_V1_MAX_MAP_ITEMS}"),
-                with_field(&context.path, "maxItems"),
-                vec![group.name.clone()],
-            );
-        }
-        let item_type = self.validate_map_selector(group, context);
-        let body = self.validate_node(
-            &group.body,
-            NodeValidationContext {
-                incoming: context.node.incoming,
-                state: &group.state,
-                item: item_type.as_ref(),
-            },
-        );
-        let mut effects = Effects {
-            definite_nodes: BTreeSet::from([group.name.clone()]),
-            possible_writes: body.possible_writes.clone(),
-            possible_write_types: body.possible_write_types.clone(),
-            exit_failed: context
-                .node
-                .incoming
-                .failed
-                .union(&body.exit_failed)
-                .cloned()
-                .collect(),
-            falls_through: true,
-            completion: CompletionPredicate::Always,
-            ..Effects::default()
-        };
-        for promoted in &group.promoted_state_paths {
-            if is_required_path(&group.state, promoted)
-                && path_type(&group.state, promoted).is_some()
-            {
-                if let Some(write) = body.possible_writes.get(promoted) {
-                    effects
-                        .definite_writes
-                        .insert(promoted.clone(), write.clone());
-                }
-            }
-        }
-        self.restrict_promotions(PromotionValidationContext {
-            group_state: &group.state,
-            enclosing_state: context.node.state,
-            promoted: &group.promoted_state_paths,
-            effects: &mut effects,
-            path: &context.path,
-            rule: PromotionRule::Map,
-        });
-        effects
     }
 }

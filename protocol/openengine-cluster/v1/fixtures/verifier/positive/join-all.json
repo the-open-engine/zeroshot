@@ -16,8 +16,7 @@
             "left",
             "right",
             "joinControl",
-            "done",
-            "joinControlOtherwise"
+            "done"
           ]
         }
       },
@@ -194,11 +193,7 @@
             ],
             "kind": "choice",
             "name": "joinControl",
-            "otherwise": {
-              "kind": "fail",
-              "name": "joinControlOtherwise",
-              "reason": "rejected"
-            },
+            "otherwise": null,
             "promotedStatePaths": [],
             "state": {
               "fields": {
@@ -484,11 +479,7 @@
           ],
           "kind": "choice",
           "name": "joinControl",
-          "otherwise": {
-            "kind": "fail",
-            "name": "joinControlOtherwise",
-            "reason": "rejected"
-          },
+          "otherwise": null,
           "promotedStatePaths": [],
           "state": {
             "fields": {

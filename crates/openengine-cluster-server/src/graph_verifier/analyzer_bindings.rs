@@ -12,6 +12,7 @@ impl<'a> Analyzer<'a> {
                 node: context.node,
                 node_path: context.path,
                 field: "inputBindings",
+                target_field: "input",
             },
         );
         let writes = self.validate_write_bindings(
@@ -21,6 +22,7 @@ impl<'a> Analyzer<'a> {
                 output: context.output,
                 incoming: context.node.incoming,
                 state: context.node.state,
+                map_index_targets: context.node.map_index_targets,
                 path: context.path,
             },
         );
@@ -28,6 +30,11 @@ impl<'a> Analyzer<'a> {
             BTreeMap::new()
         } else {
             BTreeMap::from([(context.name.clone(), writes.clone())])
+        };
+        let outcome_order = if outcome_writes.is_empty() {
+            Vec::new()
+        } else {
+            vec![context.name.clone()]
         };
         let possible_write_types = writes
             .iter()
@@ -38,6 +45,7 @@ impl<'a> Analyzer<'a> {
             possible_writes: writes,
             possible_write_types,
             outcome_writes,
+            outcome_order,
             exit_failed: context
                 .node
                 .incoming
@@ -86,8 +94,8 @@ impl<'a> Analyzer<'a> {
         binding: &WriteBinding,
         context: &WriteBindingsValidationContext<'_>,
     ) -> Option<WriteFact> {
-        let target = path_type(context.state, &binding.target);
-        if target.is_none() {
+        let declared_target = path_type(context.state, &binding.target);
+        if declared_target.is_none() {
             emit_diagnostic!(
                 self,
                 GraphDiagnosticCode::SchemaSafety,
@@ -96,6 +104,10 @@ impl<'a> Analyzer<'a> {
                 vec![context.name.clone()],
             );
         }
+        let target = context
+            .map_index_targets
+            .and_then(|targets| targets.get(&binding.target))
+            .or(declared_target);
         let producer = self.validate_output_selector(
             &binding.value,
             &OutputSelectorValidationContext {
@@ -133,6 +145,18 @@ impl<'a> Analyzer<'a> {
         bindings: &[InputBinding],
         context: InputBindingsValidationContext<'_>,
     ) {
+        if !matches!(
+            context.target_payload,
+            PayloadType::Null | PayloadType::Record { .. }
+        ) {
+            emit_diagnostic!(
+                self,
+                GraphDiagnosticCode::SchemaSafety,
+                "v1 field bindings cannot construct a whole non-record payload; use null or record",
+                with_field(context.node_path, context.target_field),
+                Vec::new(),
+            );
+        }
         let mut targets = Vec::<FieldPath>::new();
         for (index, binding) in bindings.iter().enumerate() {
             let binding_path = indexed_field_path(context.node_path, context.field, index);
@@ -238,16 +262,36 @@ impl<'a> Analyzer<'a> {
         context: NodeValidationContext<'b>,
         path: &[DiagnosticPathSegment],
     ) -> Option<PayloadType> {
-        let (payload, selected, defined) = match selector {
-            DataSelector::State { path: selected } => (
-                Some(context.state),
-                selected,
-                is_required_path(context.state, selected)
-                    || is_defined(&context.incoming.defined, selected),
-            ),
+        let (payload, selected, selected_override, indexed_definition, defined) = match selector {
+            DataSelector::State { path: selected } => {
+                let selected_override = context
+                    .map_index_targets
+                    .and_then(|targets| targets.get(selected));
+                let indexed_definition = selected_override.and_then(|expected| {
+                    context
+                        .incoming
+                        .defined
+                        .get(selected)
+                        .filter(|actual| compatible_types(actual, expected))
+                });
+                (
+                    Some(context.state),
+                    selected,
+                    selected_override,
+                    indexed_definition,
+                    if selected_override.is_some() {
+                        indexed_definition.is_some()
+                    } else {
+                        is_required_path(context.state, selected)
+                            || is_defined(&context.incoming.defined, selected)
+                    },
+                )
+            }
             DataSelector::Item { path: selected } => (
                 context.item,
                 selected,
+                None,
+                None,
                 context
                     .item
                     .is_some_and(|payload| is_required_path(payload, selected)),
@@ -263,7 +307,7 @@ impl<'a> Analyzer<'a> {
             );
             return None;
         };
-        let selected_type = path_type(payload, selected);
+        let selected_type = selected_override.or_else(|| path_type(payload, selected));
         if selected_type.is_none() {
             emit_diagnostic!(
                 self,
@@ -282,12 +326,20 @@ impl<'a> Analyzer<'a> {
             );
         }
         match selector {
-            DataSelector::State { .. } => context
-                .incoming
-                .defined
-                .get(selected)
-                .cloned()
-                .or_else(|| selected_type.cloned()),
+            DataSelector::State { .. } => {
+                if selected_override.is_some() {
+                    indexed_definition
+                        .cloned()
+                        .or_else(|| selected_type.cloned())
+                } else {
+                    context
+                        .incoming
+                        .defined
+                        .get(selected)
+                        .cloned()
+                        .or_else(|| selected_type.cloned())
+                }
+            }
             DataSelector::Item { .. } => selected_type.cloned(),
         }
     }
@@ -316,7 +368,9 @@ impl<'a> Analyzer<'a> {
         selector: &NodeOutputSelector,
         context: &OutputSelectorValidationContext<'_>,
     ) {
-        if selector.node != *context.current && !context.incoming.available.contains(&selector.node)
+        if selector.node != *context.current
+            && (!context.incoming.available.contains(&selector.node)
+                || context.incoming.unavailable.contains(&selector.node))
         {
             emit_diagnostic!(
                 self,

@@ -6,15 +6,9 @@ impl<'a> Analyzer<'a> {
         dimensions: &[Vec<Assignment>],
         path: &[DiagnosticPathSegment],
     ) -> bool {
-        let mut total = 1_u64;
-        for dimension in dimensions {
-            total = match total.checked_mul(dimension.len() as u64) {
-                Some(value) if value <= FULL_V1_MAX_GUARD_ASSIGNMENTS => value,
-                _ => {
-                    self.assignment_ceiling(path);
-                    return false;
-                }
-            };
+        if !compatible_assignment_count_is_bounded(dimensions, FULL_V1_MAX_GUARD_ASSIGNMENTS) {
+            self.assignment_ceiling(path);
+            return false;
         }
         true
     }
@@ -166,6 +160,14 @@ impl<'a> Analyzer<'a> {
             return;
         }
         self.validate_promotion_target(context, promoted_path, &diagnostic_path);
+        if matches!(context.rule, PromotionRule::Map)
+            && !matches!(
+                path_type(context.group_state, promoted_path),
+                Some(PayloadType::Array { .. })
+            )
+        {
+            return;
+        }
         if !self.promotion_is_defined(context, promoted_path) {
             emit_diagnostic!(
                 self,
@@ -183,7 +185,11 @@ impl<'a> Analyzer<'a> {
         promoted_path: &FieldPath,
         diagnostic_path: &[DiagnosticPathSegment],
     ) {
-        match path_type(context.enclosing_state, promoted_path) {
+        match context
+            .target_overrides
+            .and_then(|targets| targets.get(promoted_path))
+            .or_else(|| path_type(context.enclosing_state, promoted_path))
+        {
             None => emit_diagnostic!(
                 self,
                 GraphDiagnosticCode::SchemaSafety,
@@ -217,12 +223,24 @@ impl<'a> Analyzer<'a> {
         context: &PromotionValidationContext<'_>,
         promoted_path: &FieldPath,
     ) -> bool {
-        is_required_path(context.group_state, promoted_path)
-            || context
-                .effects
-                .definite_writes
-                .values()
-                .any(|write| write.guaranteed_paths.contains_key(promoted_path))
+        let written = context
+            .effects
+            .definite_writes
+            .values()
+            .any(|write| write.guaranteed_paths.contains_key(promoted_path));
+        if matches!(context.rule, PromotionRule::Map) {
+            written
+                || context.effects.outcome_writes.values().any(|writes| {
+                    writes
+                        .values()
+                        .any(|write| write.guaranteed_paths.contains_key(promoted_path))
+                })
+        } else {
+            let indexed = context
+                .target_overrides
+                .is_some_and(|targets| targets.contains_key(promoted_path));
+            (!indexed && is_required_path(context.group_state, promoted_path)) || written
+        }
     }
 }
 
@@ -231,7 +249,7 @@ fn promotion_undefined_message(rule: PromotionRule) -> &'static str {
         PromotionRule::EveryAlternative => {
             "promoted path is not defined by every completing alternative"
         }
-        PromotionRule::Map => "map promotion is not defined for the empty-map completion",
+        PromotionRule::Map => "map promoted path has no indexed body write",
         PromotionRule::Definite => "promoted path is not definitely defined on completion",
     }
 }

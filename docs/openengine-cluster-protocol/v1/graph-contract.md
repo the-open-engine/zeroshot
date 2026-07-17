@@ -46,7 +46,14 @@ Normal-success continuation requires every branch for `all`, one branch for `any
 size-`count` completing branch set. A set is valid only when its branch-completion predicates are
 jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
 outcomes never fabricate a completion set. Quorum one behaves as alternatives, while quorum over
-every branch carries the same completion guarantees as `all`.
+every branch carries the same completion guarantees as `all`. For `all`, `any`, and `quorum`,
+`joined=reached|quorum_unreachable` is correlated with that required-completion predicate;
+assignments combining `reached` with an unsatisfied predicate or `quorum_unreachable` with a
+satisfied predicate are not legal control assignments. Inside a map, this correlation is applied
+to each item's joint join/branch-control outcome before `k_of_map` aggregates label counts.
+For `first`, a winning branch must complete, guarantee the controls read by `when`, and make
+`when` true. The `raced=satisfied|no_satisfier` control is correlated with those legal winner
+assignments; a non-satisfying completion cannot contribute promotion guarantees.
 
 ## Data and control separation
 
@@ -54,6 +61,11 @@ No selector or guard is source text. `DataSelector` is tagged by `source` and re
 non-empty `FieldPath` from `state` or the current map `item`. An input binding has an explicit target
 path and data selector. A write binding has an explicit target and a `NodeOutputSelector` naming a
 node, the closed channel `out`, `signal`, or `diagnostic`, and a field path.
+
+V1 has no whole-payload binding: executable inputs and `succeed` outputs must be `null` or records
+that bindings can construct through non-empty field paths. Scalar, enum, and array payloads remain
+valid elsewhere in the closed algebra and as nested record fields; they are not implicitly copied
+or defaulted at a payload root.
 
 Control guards use a separate AST and cannot contain `DataSelector`:
 
@@ -119,17 +131,30 @@ when earlier branches cover that space and does not participate in flow analysis
 do-while and their exit guard must use a verifier guaranteed to execute on every iteration.
 Signal and error controls from one executable are mutually exclusive outcomes. Map aggregates
 count joint per-item outcomes, so one mapped execution cannot contribute both a success signal and
-an error. Choice residual assignments determine channel availability: `out`, `signal`, and
-`diagnostic` are unavailable on every reaching error path, while terminal alternatives do not
-contaminate later fall-through flow. Every `k_of_n`/`k_of_map` label must belong to the applicable
-closed selector domains. Executable write bindings are success-outcome effects: an output-backed
-optional state path remains undefined while that executable's runtime-error outcomes can reach the
-reader. A residual branch that excludes every runtime error makes the write definite. State
-promotion preserves this outcome provenance and cannot turn a conditional write into a definite
-one. Definition flow retains exact path/type guarantees from required initial input through nested
-group-state widening. After successful routing, a binding defines its target only when the selected
-output or diagnostic path is required; writing a required record defines only its required
-descendants, never optional descendants.
+an error. They also preserve per-item execution flow: guaranteed sequential successors,
+descendants of a full-completion parallel, and do-while body descendants must emit one success or
+error outcome. A conditional successor emits an outcome exactly when its first-true choice residual
+selects that route. For a promoted map path `p: array<T>`, a body write to `p` writes one `T` at the
+current input index; indexed values are collected in input order. The promotion is total, so an
+empty selected input defines `p` as `[]`, but the promoted array retains each mapped executable's
+success/error provenance until control excludes every mapped runtime error. Choice residual
+assignments determine channel availability:
+`out`, `signal`, and `diagnostic` are unavailable on every reaching error path, while terminal
+alternatives do not contaminate later fall-through flow. Every `k_of_n`/`k_of_map` label must belong
+to the applicable closed selector domains. Executable write bindings are success-outcome effects:
+an output-backed optional state path remains undefined while that executable's runtime-error
+outcomes can reach the reader. A residual branch that excludes every runtime error makes the write
+definite. State promotion preserves this outcome provenance and cannot turn a conditional write
+into a definite one. Definition flow retains exact path/type guarantees from required initial input
+through nested group-state widening. A descendant write invalidates stale ancestor refinements.
+Parallel promotions remain conditional until a `reached` or `satisfied` residual excludes the
+group failure outcome; unguarded continuation cannot consume success-only branch writes.
+Conditional ownership is target-granular across nested parallel groups, choice merges, and later
+sequential writers. Parallel failure labels `quorum_unreachable` and
+`no_satisfier` restore the incoming pre-par definitions and expose no winner or branch-promotion
+data. After successful routing, a binding defines its target only when the selected output or
+diagnostic path is required; writing a required record defines only its required descendants, never
+optional descendants.
 
 Full-v1 has fixed protocol-version ceilings:
 

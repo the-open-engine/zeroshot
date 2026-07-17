@@ -326,15 +326,28 @@ impl<'a> Analyzer<'a> {
         context: KOfMapLabelsValidationContext<'_>,
     ) -> bool {
         let mut valid = true;
-        if context.count > self.map_control_cardinality(context.selector).unwrap_or(1) {
-            emit_diagnostic!(
-                self,
-                context.guard.code,
-                "k_of_map count exceeds the selected map bound",
-                with_field(context.guard.path, "count"),
-                vec![context.selector.name.clone()],
-            );
-            valid = false;
+        match self.map_control_cardinality(context.selector) {
+            Some(cardinality) if context.count > cardinality => {
+                emit_diagnostic!(
+                    self,
+                    context.guard.code,
+                    "k_of_map count exceeds the selected map bound",
+                    with_field(context.guard.path, "count"),
+                    vec![context.selector.name.clone()],
+                );
+                valid = false;
+            }
+            None => {
+                emit_diagnostic!(
+                    self,
+                    context.guard.code,
+                    "k_of_map selector has no bounded enclosing map scope",
+                    with_field(context.guard.path, "value"),
+                    vec![context.selector.name.clone()],
+                );
+                valid = false;
+            }
+            Some(_) => {}
         }
         let labels_valid = self.validate_selector_labels(
             context.selector,
@@ -373,107 +386,23 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(super) fn map_control_cardinality(&self, selector: &ControlSelector) -> Option<u64> {
-        match self.nodes.get(&selector.name)?.node {
-            GraphNode::Map(map) => Some(map.max_items.get()),
-            _ => self.map_owner(&selector.name).and_then(|owner| {
-                self.nodes.get(owner).and_then(|info| match info.node {
-                    GraphNode::Map(map) => Some(map.max_items.get()),
-                    _ => None,
-                })
+        self.map_control_scope(selector)
+            .map(|aggregate| aggregate.maximum)
+    }
+
+    pub(super) fn map_control_scope(&self, selector: &ControlSelector) -> Option<MapAggregate> {
+        self.nodes.get(&selector.name)?;
+        let owner = self.map_owner(&selector.name)?.clone();
+        self.nodes.get(&owner).and_then(|info| match info.node {
+            GraphNode::Map(map) => Some(MapAggregate {
+                owner,
+                maximum: map.max_items.get(),
             }),
-        }
+            _ => None,
+        })
     }
 
     pub(super) fn map_owner(&self, target: &NodeName) -> Option<&NodeName> {
         find_map_owner(&self.graph.root, target, None)
-    }
-
-    pub(super) fn guard_has_satisfying_assignment(
-        &mut self,
-        guard: &Guard,
-        path: &[DiagnosticPathSegment],
-    ) -> bool {
-        self.assignments_for_guards(&[guard], path)
-            .is_some_and(|assignments| {
-                assignments
-                    .iter()
-                    .any(|assignment| evaluate_guard(guard, assignment))
-            })
-    }
-
-    pub(super) fn restrict_completion(
-        &mut self,
-        effects: &mut Effects,
-        condition: CompletionPredicate,
-        path: &[DiagnosticPathSegment],
-    ) {
-        effects.completion = CompletionPredicate::all([condition, effects.completion.clone()]);
-        effects.falls_through = effects.falls_through
-            && self
-                .completion_is_satisfiable(&effects.completion, path)
-                .unwrap_or(true);
-    }
-
-    pub(super) fn completion_is_satisfiable(
-        &mut self,
-        predicate: &CompletionPredicate,
-        path: &[DiagnosticPathSegment],
-    ) -> Option<bool> {
-        self.assignments_for_completion_predicates(&[predicate], path)
-            .map(|assignments| {
-                assignments
-                    .iter()
-                    .any(|assignment| predicate.evaluate(assignment))
-            })
-    }
-
-    pub(super) fn assignments_for_completion_predicates(
-        &mut self,
-        predicates: &[&CompletionPredicate],
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Vec<Assignment>> {
-        let mut guards = Vec::new();
-        for predicate in predicates {
-            predicate.collect_guards(&mut guards);
-        }
-        self.assignments_for_guards(&guards, path)
-    }
-
-    pub(super) fn assignments_for_guards(
-        &mut self,
-        guards: &[&Guard],
-        path: &[DiagnosticPathSegment],
-    ) -> Option<Vec<Assignment>> {
-        let (selectors, map_aggregates) = self.assignment_inputs(guards);
-        let Some(dimensions) = build_dimensions(&selectors, &self.nodes, &map_aggregates) else {
-            self.assignment_ceiling(path);
-            return None;
-        };
-        if !self.assignment_count_is_bounded(&dimensions, path) {
-            return None;
-        }
-        Some(enumerate_assignments(dimensions))
-    }
-
-    pub(super) fn assignment_inputs(
-        &self,
-        guards: &[&Guard],
-    ) -> (Vec<ControlSelector>, BTreeMap<SelectorKey, u64>) {
-        let selectors = guards
-            .iter()
-            .flat_map(|guard| guard_selectors(guard))
-            .cloned()
-            .collect::<Vec<_>>();
-        let aggregates = guards
-            .iter()
-            .flat_map(|guard| guard_selector_uses(guard))
-            .filter_map(|(selector, aggregate)| {
-                aggregate
-                    .then(|| self.map_control_cardinality(selector))
-                    .flatten()
-                    .map(|maximum| (SelectorKey::from(selector), maximum))
-            })
-            .collect();
-        (selectors, aggregates)
     }
 }

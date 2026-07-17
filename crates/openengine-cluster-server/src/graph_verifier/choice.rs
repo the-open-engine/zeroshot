@@ -18,7 +18,13 @@ impl OutcomeRefinement {
         for name in &self.success {
             flow.failed.remove(name);
         }
+        for name in &self.failed {
+            if let Some(nodes) = flow.conditional_nodes.get(name) {
+                flow.unavailable.extend(nodes.clone());
+            }
+        }
         flow.failed.extend(self.failed.clone());
+        flow.reconcile_parallel_definitions();
         flow.resolve_successful_writes();
     }
 }
@@ -107,6 +113,7 @@ pub(super) enum ControlSourceKey {
     Signal,
     Error,
     Group,
+    Execution,
 }
 
 impl From<&ControlSelector> for SelectorKey {
@@ -123,9 +130,15 @@ impl From<&ControlSelector> for SelectorKey {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) struct AssignedControl {
     pub(super) counts: BTreeMap<EnumLabel, u64>,
+}
+
+#[derive(Clone)]
+pub(super) struct MapAggregate {
+    pub(super) owner: NodeName,
+    pub(super) maximum: u64,
 }
 
 pub(super) type Assignment = BTreeMap<SelectorKey, AssignedControl>;

@@ -124,18 +124,26 @@ struct NodeInfo<'a> {
 #[derive(Clone, Default)]
 struct Flow {
     available: BTreeSet<NodeName>,
+    unavailable: BTreeSet<NodeName>,
+    conditional_nodes: BTreeMap<NodeName, BTreeSet<NodeName>>,
     defined: BTreeMap<FieldPath, PayloadType>,
     failed: BTreeSet<NodeName>,
     outcome_writes: OutcomeWrites,
+    outcome_order: Vec<NodeName>,
+    parallel_definition_effects: Vec<ParallelDefinitionEffect>,
 }
 
 #[derive(Clone, Default)]
 struct Effects {
     definite_nodes: BTreeSet<NodeName>,
+    unavailable_nodes: BTreeSet<NodeName>,
+    conditional_nodes: BTreeMap<NodeName, BTreeSet<NodeName>>,
     definite_writes: Writes,
     possible_writes: Writes,
     possible_write_types: BTreeMap<FieldPath, Vec<PayloadType>>,
     outcome_writes: OutcomeWrites,
+    outcome_order: Vec<NodeName>,
+    parallel_definition_effects: Vec<ParallelDefinitionEffect>,
     exit_failed: BTreeSet<NodeName>,
     falls_through: bool,
     completion: CompletionPredicate,
@@ -154,6 +162,45 @@ enum CompletionPredicate {
         count: u64,
         predicates: Vec<Self>,
     },
+}
+
+#[derive(Clone)]
+enum ParallelJoinCorrelation {
+    Joined {
+        completion: CompletionPredicate,
+    },
+    First {
+        satisfaction: CompletionPredicate,
+        all_completions: CompletionPredicate,
+    },
+}
+
+#[derive(Clone)]
+struct MapExecutionCorrelation {
+    owner: NodeName,
+    presence: CompletionPredicate,
+}
+
+impl ParallelJoinCorrelation {
+    fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
+        match self {
+            Self::Joined { completion } => completion.collect_guards(guards),
+            Self::First {
+                satisfaction,
+                all_completions,
+            } => {
+                satisfaction.collect_guards(guards);
+                all_completions.collect_guards(guards);
+            }
+        }
+    }
+
+    fn field(&self) -> &'static str {
+        match self {
+            Self::Joined { .. } => "joined",
+            Self::First { .. } => "raced",
+        }
+    }
 }
 
 impl CompletionPredicate {
@@ -261,25 +308,101 @@ struct SelectedOutput {
 type Writes = BTreeMap<FieldPath, WriteFact>;
 type OutcomeWrites = BTreeMap<NodeName, Writes>;
 
+#[derive(Clone, PartialEq, Eq)]
+struct DefinitionTransition {
+    before: Option<PayloadType>,
+    after: Option<PayloadType>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ParallelDefinitionEffect {
+    name: NodeName,
+    targets: BTreeSet<FieldPath>,
+    transitions: BTreeMap<FieldPath, DefinitionTransition>,
+}
+
 impl Flow {
     fn apply_effects(&mut self, effects: &Effects) {
         self.available.extend(effects.definite_nodes.clone());
+        self.unavailable.extend(effects.unavailable_nodes.clone());
+        merge_conditional_nodes(&mut self.conditional_nodes, &effects.conditional_nodes);
+        retain_parallel_definition_effects(
+            &mut self.parallel_definition_effects,
+            &effects.definite_writes,
+            &effects.parallel_definition_effects,
+        );
         apply_write_facts(&mut self.defined, &effects.definite_writes);
-        merge_outcome_writes(&mut self.outcome_writes, &effects.outcome_writes);
+        self.parallel_definition_effects
+            .extend(effects.parallel_definition_effects.clone());
+        merge_outcome_writes(
+            &mut self.outcome_writes,
+            &mut self.outcome_order,
+            &effects.outcome_writes,
+            &effects.outcome_order,
+        );
         self.failed = effects.exit_failed.clone();
+        self.reconcile_parallel_definitions();
         self.resolve_successful_writes();
     }
 
     fn resolve_successful_writes(&mut self) {
         let successful = self
-            .outcome_writes
-            .keys()
+            .outcome_order
+            .iter()
             .filter(|name| !self.failed.contains(*name))
             .cloned()
             .collect::<Vec<_>>();
         for name in successful {
             if let Some(writes) = self.outcome_writes.remove(&name) {
+                retain_parallel_definition_effects(
+                    &mut self.parallel_definition_effects,
+                    &writes,
+                    &[],
+                );
                 apply_write_facts(&mut self.defined, &writes);
+            }
+        }
+        self.outcome_order
+            .retain(|name| self.outcome_writes.contains_key(name));
+    }
+
+    fn reconcile_parallel_definitions(&mut self) {
+        let effects = self
+            .parallel_definition_effects
+            .iter()
+            .filter(|effect| self.available.contains(&effect.name))
+            .collect::<Vec<_>>();
+        let mut definitions = BTreeMap::<FieldPath, Option<PayloadType>>::new();
+        for effect in &effects {
+            for (path, transition) in &effect.transitions {
+                definitions
+                    .entry(path.clone())
+                    .or_insert_with(|| transition.before.clone());
+            }
+        }
+        for effect in effects {
+            if self.failed.contains(&effect.name) {
+                continue;
+            }
+            for target in &effect.targets {
+                for (path, definition) in &mut definitions {
+                    if paths_overlap(target, path) {
+                        *definition = None;
+                    }
+                }
+            }
+            for (path, transition) in &effect.transitions {
+                definitions.insert(path.clone(), transition.after.clone());
+            }
+        }
+        for (path, definition) in definitions {
+            match definition {
+                Some(definition) => {
+                    self.defined.insert(path, definition);
+                }
+                None => {
+                    self.defined.remove(&path);
+                }
             }
         }
     }
@@ -288,16 +411,23 @@ impl Flow {
 impl Effects {
     fn resolve_successful_writes(&mut self, failed: &BTreeSet<NodeName>) {
         let successful = self
-            .outcome_writes
-            .keys()
+            .outcome_order
+            .iter()
             .filter(|name| !failed.contains(*name))
             .cloned()
             .collect::<Vec<_>>();
         for name in successful {
             if let Some(writes) = self.outcome_writes.remove(&name) {
-                self.definite_writes.extend(writes);
+                retain_parallel_definition_effects(
+                    &mut self.parallel_definition_effects,
+                    &writes,
+                    &[],
+                );
+                compose_writes(&mut self.definite_writes, &writes);
             }
         }
+        self.outcome_order
+            .retain(|name| self.outcome_writes.contains_key(name));
     }
 }
 
@@ -319,6 +449,9 @@ struct Analyzer<'a> {
     guard_nodes: u64,
     exhaustive_choices: BTreeSet<NodeName>,
     choice_reachability: BTreeMap<NodeName, ChoiceReachability>,
+    parallel_join_correlations: BTreeMap<NodeName, ParallelJoinCorrelation>,
+    map_execution_correlations: BTreeMap<NodeName, MapExecutionCorrelation>,
+    node_completion: BTreeMap<NodeName, CompletionPredicate>,
     node_fallthrough: BTreeMap<usize, bool>,
 }
 
@@ -333,69 +466,32 @@ macro_rules! emit_diagnostic {
     };
 }
 
+mod analyzer_assignments;
 mod analyzer_bindings;
 mod analyzer_bounds;
 mod analyzer_guards;
 mod analyzer_index;
+mod analyzer_maps;
 mod analyzer_nodes;
 mod analyzer_parallel;
+mod analyzer_parallel_flow;
 mod analyzer_terminal;
 mod assignments;
 mod choice;
 mod contexts;
 mod diagnostics;
 mod effects;
+mod effects_tree;
+mod effects_writes;
 mod payload;
+#[cfg(test)]
+mod tests;
 
 use assignments::*;
 use choice::*;
 use contexts::*;
 use diagnostics::*;
 use effects::*;
+use effects_tree::*;
+use effects_writes::*;
 use payload::*;
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use openengine_cluster_protocol::{
-        GraphSpec, NodeName, NonEmptyVec, PositiveInteger, StructuralBounds, TerminationWitness,
-    };
-    use serde_json::json;
-
-    use super::{VerificationError, finalize_verified_with_invariant_probe};
-
-    #[test]
-    fn post_validation_invariant_failure_is_internal() {
-        let graph: GraphSpec = serde_json::from_value(json!({
-            "profile":"openengine.graph.full/v1",
-            "initialInput":{"kind":"null"},
-            "policy":{"policy":"policy.strict@1","default":"deny"},
-            "root":{
-                "kind":"seq","name":"duplicate","state":{"kind":"null"},
-                "children":[
-                    {"kind":"step","name":"duplicate","worker":"worker@1","input":{"kind":"null"},"output":{"kind":"null"},"inputBindings":[],"writeBindings":[],"timeoutMs":1,"attempts":1},
-                    {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
-                ],
-                "promotedStatePaths":[]
-            }
-        }))
-        .unwrap();
-        let one = PositiveInteger::new(1).unwrap();
-        let bounds = StructuralBounds {
-            termination: TerminationWitness::Acyclic {
-                order: NonEmptyVec::new(vec![NodeName::new("duplicate").unwrap()]).unwrap(),
-            },
-            max_node_executions: one,
-            peak_concurrency: one,
-            attempts_per_node: BTreeMap::from([(NodeName::new("duplicate").unwrap(), one)]),
-        };
-
-        assert_eq!(
-            finalize_verified_with_invariant_probe(&graph, bounds, true),
-            Err(VerificationError::Internal(
-                "injected post-validation invariant failure".to_owned()
-            ))
-        );
-    }
-}

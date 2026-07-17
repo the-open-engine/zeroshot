@@ -67,11 +67,15 @@ function walkFiles(dirPath) {
     'tmp',
   ]);
   const files = [];
-  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-    const fullPath = path.join(dirPath, entry.name);
-    if (entry.isDirectory()) files.push(...walkFiles(fullPath));
-    else files.push(fullPath);
+  const pending = [dirPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(fullPath);
+      else files.push(fullPath);
+    }
   }
   return files;
 }

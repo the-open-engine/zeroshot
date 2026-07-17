@@ -13,6 +13,9 @@ impl<'a> Analyzer<'a> {
             guard_nodes: 0,
             exhaustive_choices: BTreeSet::new(),
             choice_reachability: BTreeMap::new(),
+            parallel_join_correlations: BTreeMap::new(),
+            map_execution_correlations: BTreeMap::new(),
+            node_completion: BTreeMap::new(),
             node_fallthrough: BTreeMap::new(),
         }
     }
@@ -33,6 +36,7 @@ impl<'a> Analyzer<'a> {
                 incoming: &initial,
                 state: &self.graph.initial_input,
                 item: None,
+                map_index_targets: None,
             },
         );
         self.validate_terminal_coverage();

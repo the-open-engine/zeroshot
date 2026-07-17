@@ -3,7 +3,7 @@
     "diagnostics": [
       {
         "code": "schema_safety",
-        "message": "graph input is not a subtype of descriptor input",
+        "message": "v1 field bindings cannot construct a whole non-record payload; use null or record",
         "path": [
           {
             "kind": "field",
@@ -24,11 +24,13 @@
           {
             "kind": "node",
             "name": "work"
+          },
+          {
+            "kind": "field",
+            "name": "input"
           }
         ],
-        "relatedNodes": [
-          "work"
-        ],
+        "relatedNodes": [],
         "severity": "error"
       }
     ],
@@ -48,8 +50,7 @@
         {
           "attempts": 1,
           "input": {
-            "fields": {},
-            "kind": "record"
+            "kind": "string"
           },
           "inputBindings": [],
           "kind": "step",
