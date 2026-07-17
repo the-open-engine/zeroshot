@@ -104,6 +104,11 @@ fn product_uses_the_root_workspace_and_a_rust_only_layout() {
     relative_files(&product, &product, &mut files);
     for required in [
         "Cargo.toml",
+        "src/artifact_store.rs",
+        "src/artifact_store/fake.rs",
+        "src/artifact_store/local_cas.rs",
+        "src/artifact_store/local_cas/filesystem.rs",
+        "src/artifact_store/local_cas/operations.rs",
         "src/fault.rs",
         "src/fault/redaction.rs",
         "src/fault/taxonomy.rs",
@@ -114,10 +119,13 @@ fn product_uses_the_root_workspace_and_a_rust_only_layout() {
         "src/issue_provider.rs",
         "src/source_code_provider.rs",
         "tests/architecture.rs",
+        "tests/artifact_store.rs",
         "tests/backend_boundary.rs",
         "tests/fault_contract.rs",
+        "tests/local_cas.rs",
         "tests/observability_contract.rs",
         "tests/provider_contracts.rs",
+        "tests/support/mod.rs",
         "tests/provider_bounds.rs",
     ] {
         assert!(files.contains(required), "missing product file: {required}");
@@ -152,8 +160,10 @@ fn workspace_metadata_preserves_package_lib_and_bin_identity() {
         targets,
         BTreeSet::from([
             ("architecture".to_owned(), "test".to_owned()),
+            ("artifact_store".to_owned(), "test".to_owned()),
             ("backend_boundary".to_owned(), "test".to_owned()),
             ("fault_contract".to_owned(), "test".to_owned()),
+            ("local_cas".to_owned(), "test".to_owned()),
             ("observability_contract".to_owned(), "test".to_owned()),
             ("provider_bounds".to_owned(), "test".to_owned()),
             ("provider_contracts".to_owned(), "test".to_owned()),
@@ -182,6 +192,7 @@ fn product_dependencies_stay_inside_native_contract_and_backend_boundaries() {
         .collect::<BTreeSet<_>>();
     let allowed = BTreeSet::from([
         ("async-trait".to_owned(), "normal".to_owned()),
+        ("fs2".to_owned(), "normal".to_owned()),
         (
             "openengine-cluster-protocol".to_owned(),
             "normal".to_owned(),
@@ -189,8 +200,9 @@ fn product_dependencies_stay_inside_native_contract_and_backend_boundaries() {
         ("openengine-cluster-server".to_owned(), "normal".to_owned()),
         ("serde".to_owned(), "normal".to_owned()),
         ("serde_json".to_owned(), "normal".to_owned()),
+        ("sha2".to_owned(), "normal".to_owned()),
         ("thiserror".to_owned(), "normal".to_owned()),
-        ("tokio".to_owned(), "dev".to_owned()),
+        ("tokio".to_owned(), "normal".to_owned()),
     ]);
     assert_eq!(dependencies, allowed);
 }
@@ -278,11 +290,84 @@ fn runtime_has_no_future_product_concerns() {
         "scheduler",
         "worker",
         "workspace",
-        "artifact",
     ] {
         assert!(
             !words.contains(forbidden_word),
             "forbidden future product concern: {forbidden_word}"
+        );
+    }
+}
+
+#[test]
+fn artifact_storage_stays_product_private_and_receipts_stay_byte_free() {
+    let product = product_root();
+    let repository = repository_root();
+    let artifact_contract =
+        read(&repository.join("crates/openengine-cluster-protocol/src/artifact.rs"));
+    for forbidden in [
+        "Vec<u8>",
+        "AsyncRead",
+        "PathBuf",
+        "StagedArtifact",
+        "ArtifactStore",
+        "signed_url",
+        "download_url",
+        "storage_root",
+        "manifest_path",
+    ] {
+        assert!(
+            !artifact_contract.contains(forbidden),
+            "protocol artifact receipt exposed storage detail: {forbidden}"
+        );
+    }
+
+    for relative in [
+        "protocol/openengine-cluster/v1/schema.json",
+        "protocol/openengine-cluster/v1/worker.schema.json",
+        "protocol/openengine-cluster/v1/fixtures/graph/positive/artifact-ref.json",
+    ] {
+        let projection = read(&repository.join(relative));
+        for forbidden in [
+            "localPath",
+            "signedUrl",
+            "downloadUrl",
+            "storageRoot",
+            "stagePath",
+            "manifestPath",
+        ] {
+            assert!(
+                !projection.contains(forbidden),
+                "generated artifact projection exposed storage detail: {relative}: {forbidden}"
+            );
+        }
+    }
+
+    let lib = read(&product.join("src/lib.rs"));
+    assert!(
+        lib.contains("pub struct NativeBackend;"),
+        "NativeBackend must remain uninjected until composition issue #693"
+    );
+    assert!(!lib.contains("ArtifactStore>"));
+    assert!(!lib.contains("artifact_store:"));
+
+    let lifecycle_and_backend = format!(
+        "{}\n{}\n{}",
+        read(&repository.join("crates/openengine-cluster-protocol/src/lifecycle.rs")),
+        read(&repository.join("crates/openengine-cluster-server/src/lifecycle.rs")),
+        read(&repository.join("crates/openengine-cluster-server/src/lib.rs"))
+    );
+    for forbidden in [
+        "StagedArtifact",
+        "ArtifactByteStream",
+        "LocalCasArtifactStore",
+        "manifest_path",
+        "storage_root",
+        "signed_url",
+        "download_url",
+    ] {
+        assert!(
+            !lifecycle_and_backend.contains(forbidden),
+            "lifecycle/backend parameter exposed artifact storage detail: {forbidden}"
         );
     }
 }
