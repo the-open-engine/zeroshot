@@ -1,0 +1,31 @@
+{
+  "defaultProvider": "claude",
+  "agents": [
+    {
+      "id": "worker",
+      "role": "implementation",
+      "timeout": 0,
+      "maxRetries": 1,
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=worker Execute the bounded test task.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_FAILED",
+            "content": {
+              "text": "Declared worker failure.",
+              "data": { "code": "refusal", "workerReason": "policy_denied" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "failure-stop",
+      "role": "orchestrator",
+      "timeout": 0,
+      "triggers": [{ "topic": "CLUSTER_FAILED", "action": "stop_cluster" }]
+    }
+  ]
+}

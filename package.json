@@ -5,7 +5,8 @@
   "main": "src/orchestrator.js",
   "bin": {
     "zeroshot": "./cli/index.js",
-    "zeroshot-agent-provider": "./lib/agent-cli-provider/executable.js"
+    "zeroshot-agent-provider": "./lib/agent-cli-provider/executable.js",
+    "zeroshot-cluster-worker": "./bin/zeroshot-cluster-worker.js"
   },
   "directories": {
     "example": "examples",
@@ -125,12 +126,15 @@
   "files": [
     "src/",
     "lib/",
+    "bin/",
     "cli/",
     "task-lib/",
     "cluster-templates/",
     "cluster-hooks/",
     "docker/",
     "scripts/",
+    "protocol/openengine-cluster/v1/worker.schema.json",
+    "docs/openengine-cluster-protocol/v1/legacy-worker.md",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

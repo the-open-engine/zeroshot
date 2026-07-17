@@ -1,6 +1,11 @@
 const assert = require('assert');
 
-const { loadClusterConfig, buildStartOptions } = require('../../lib/start-cluster');
+const {
+  loadClusterConfig,
+  buildStartOptions,
+  buildTrustedStartOptions,
+} = require('../../lib/start-cluster');
+const { resolveRunPlan } = require('../../lib/run-plan');
 
 function createOrchestrator(config) {
   const calls = { loadConfig: [] };
@@ -127,5 +132,50 @@ describe('buildStartOptions() autoMerge', function () {
     } finally {
       delete process.env.ZEROSHOT_MERGE;
     }
+  });
+});
+
+describe('buildTrustedStartOptions()', function () {
+  it('uses only the frozen registry plan and options, ignoring ambient run flags', function () {
+    const previous = process.env.ZEROSHOT_RUN_OPTIONS;
+    process.env.ZEROSHOT_RUN_OPTIONS = JSON.stringify({ docker: true, ship: true, autoPush: true });
+    try {
+      const result = buildTrustedStartOptions({
+        clusterId: 'trusted-1',
+        plan: resolveRunPlan({ worktree: true }),
+        options: { cwd: '/registry/repo' },
+      });
+      assert.strictEqual(result.cwd, '/registry/repo');
+      assert.strictEqual(result.worktree, true);
+      assert.strictEqual(result.isolation, false);
+      assert.strictEqual(result.autoPr, false);
+      assert.strictEqual(result.autoPush, false);
+    } finally {
+      if (previous === undefined) delete process.env.ZEROSHOT_RUN_OPTIONS;
+      else process.env.ZEROSHOT_RUN_OPTIONS = previous;
+    }
+  });
+
+  it('rejects mutable, non-isolated, and non-canonical plans', function () {
+    assert.throws(
+      () =>
+        buildTrustedStartOptions({
+          clusterId: 'x',
+          plan: { ...resolveRunPlan({ worktree: true }) },
+        }),
+      /frozen canonical run plan/
+    );
+    assert.throws(
+      () => buildTrustedStartOptions({ clusterId: 'x', plan: resolveRunPlan({}) }),
+      /requires worktree or docker isolation/
+    );
+    assert.throws(
+      () =>
+        buildTrustedStartOptions({
+          clusterId: 'x',
+          plan: Object.freeze({ isolation: 'worktree', delivery: 'none', autoMerge: true }),
+        }),
+      /not canonical/
+    );
   });
 });

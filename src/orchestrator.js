@@ -1119,11 +1119,7 @@ class Orchestrator {
     // Resolve input (issue/file/text) and reject duplicate active runs on the same issue
     // BEFORE allocating any resources. A duplicate-run rejection must have zero side
     // effects: no ledger db file, no worktree/container, no clusters.json entry.
-    const { inputData, issueProviderId } = await this._resolveClusterInput(
-      input,
-      options,
-      clusterId
-    );
+    let { inputData, issueProviderId } = await this._resolveClusterInput(input, options, clusterId);
 
     // Create ledger and message bus with persistent storage
     const dbPath = config.dbPath || path.join(this.storageDir, `${clusterId}.db`);
@@ -1213,6 +1209,34 @@ class Orchestrator {
     });
 
     try {
+      if (typeof options.prepareIsolatedInput === 'function') {
+        const dockerWorkspace =
+          isolationManager?.isolatedDirs?.get(clusterId)?.path || options.cwd || process.cwd();
+        const isolation = worktreeInfo
+          ? Object.freeze({
+              kind: 'worktree',
+              hostRoot: worktreeInfo.path,
+              runtimeRoot: worktreeInfo.path,
+            })
+          : containerId && dockerWorkspace
+            ? Object.freeze({
+                kind: 'docker',
+                hostRoot: dockerWorkspace,
+                runtimeRoot: '/workspace',
+              })
+            : null;
+        if (!isolation) {
+          throw new Error('Prepared input requires an allocated worktree or Docker workspace');
+        }
+        const preparedText = await options.prepareIsolatedInput(
+          Object.freeze({ clusterId, isolation })
+        );
+        if (typeof preparedText !== 'string' || preparedText.trim().length === 0) {
+          throw new Error('Prepared isolated input must be a nonempty string');
+        }
+        inputData = InputHelpers.createTextInput(preparedText);
+      }
+
       // Input (issue/file/text) was already resolved and duplicate-checked in
       // _resolveClusterInput() before any resource was allocated (see above).
       commandProofs = mergeCommandProofs(
