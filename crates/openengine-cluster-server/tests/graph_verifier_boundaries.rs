@@ -18,16 +18,27 @@ struct PermissiveRegistry;
 #[async_trait]
 impl WorkerRegistry for PermissiveRegistry {
     async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError> {
+        let verifier_contract = match worker.as_str() {
+            "worker.wide-verify@1" => json!({
+                "signals": {
+                    "left": enum_labels("left", 253),
+                    "right": enum_labels("right", 259)
+                },
+                "diagnostic": {"kind":"null"}
+            }),
+            worker if worker.contains("verify") => json!({
+                "signals":{"verdict":["accepted","rejected"]},
+                "diagnostic":{"kind":"null"}
+            }),
+            _ => Value::Null,
+        };
         serde_json::from_value(json!({
             "worker": worker.as_str(),
             "graphProfiles": ["openengine.graph.full/v1"],
             "binding": { "protocol": "acp", "version": "1", "profile": "openengine.worker.acp/v1" },
             "contract": {
                 "input": {"kind":"null"}, "output": {"kind":"null"},
-                "verifier": if worker.as_str().contains("verify") { json!({
-                    "signals":{"verdict":["accepted","rejected"]},
-                    "diagnostic":{"kind":"null"}
-                }) } else { Value::Null },
+                "verifier": verifier_contract,
                 "errors": ["timeout", "crash", "malformed", "refusal"]
             },
             "capabilityPolicy": { "autonomy": "strict", "permissionPolicy": "policy.strict@1" },
@@ -42,6 +53,12 @@ impl WorkerRegistry for PermissiveRegistry {
             worker: worker.clone(),
         })
     }
+}
+
+fn enum_labels(prefix: &str, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|index| format!("{prefix}_{index}"))
+        .collect()
 }
 
 fn null_step(name: &str, attempts: u64) -> Value {
@@ -307,6 +324,49 @@ async fn finite_guard_space_accepts_exact_assignment_limit_and_rejects_next_dime
             .iter()
             .any(|diagnostic| diagnostic.code == GraphDiagnosticCode::CeilingExceeded)
     );
+}
+
+#[tokio::test]
+async fn ceiling_compliant_map_aggregate_does_not_exhaust_the_call_stack() {
+    let left_labels = enum_labels("left", 253);
+    let right_labels = enum_labels("right", 259);
+    let per_item_outcomes = left_labels.len() * right_labels.len() + 4;
+    let aggregate_assignments = per_item_outcomes + 1;
+    assert_eq!(per_item_outcomes, 65_531);
+    assert_eq!(aggregate_assignments, 65_532);
+    assert!(aggregate_assignments as u64 <= FULL_V1_MAX_GUARD_ASSIGNMENTS);
+
+    let graph = graph(vec![
+        json!({
+            "kind":"map","name":"wideMap","state":state(),
+            "over":{"source":"state","path":["items"]},"maxItems":1,
+            "body":{
+                "kind":"verifier","name":"wideVerify","worker":"worker.wide-verify@1",
+                "input":{"kind":"null"},"output":{"kind":"null"},
+                "inputBindings":[],"writeBindings":[],"timeoutMs":1,"attempts":1,
+                "signals":{"left":left_labels,"right":right_labels},
+                "diagnostic":{"kind":"null"}
+            },
+            "promotedStatePaths":[]
+        }),
+        choice_with_guard(json!({
+            "kind":"all",
+            "guards":[
+                {
+                    "kind":"k_of_map","count":1,
+                    "value":{"name":"wideVerify","source":"signal","field":"left"},
+                    "labels":["left_0"]
+                },
+                {
+                    "kind":"k_of_map","count":1,
+                    "value":{"name":"wideVerify","source":"signal","field":"right"},
+                    "labels":["right_0"]
+                }
+            ]
+        })),
+    ]);
+
+    verify(&graph).await.unwrap();
 }
 
 fn exact_fold_map() -> Value {

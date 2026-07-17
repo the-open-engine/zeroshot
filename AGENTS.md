@@ -55,7 +55,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Graph diagnostics/bounds    | `crates/openengine-cluster-protocol/src/diagnostic.rs`               |
 | Shared wire-value bounds    | `crates/openengine-cluster-protocol/src/value.rs`                    |
 | Cluster dispatch/stdio      | `crates/openengine-cluster-server/`                                  |
-| Production graph verifier   | `crates/openengine-cluster-server/src/graph_verifier.rs`             |
+| Graph verifier facade       | `crates/openengine-cluster-server/src/graph_verifier.rs`             |
+| Graph verifier analysis     | `crates/openengine-cluster-server/src/graph_verifier/`               |
 | Native product construction | `zeroshot-rust/`                                                     |
 | Artifact store port/fake    | `zeroshot-rust/src/artifact_store.rs`, `artifact_store/fake.rs`      |
 | Product-local artifact CAS  | `zeroshot-rust/src/artifact_store/local_cas.rs`, `local_cas/`        |
@@ -97,9 +98,9 @@ secret-free issue/source provider contracts. Artifact stages, bytes, roots, file
 locks, and manifests remain product-private; only verified protocol `ArtifactRef` receipts cross
 the engine boundary. `LocalCasArtifactStore` takes an explicit root, is a single-writer local
 filesystem store, and must preserve ref-first release plus synchronized blob-then-ref publication.
-Issue and source registries and identifiers remain independent; neither is a worker/model provider. Keep
-protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and workspace
-behavior outside it.
+Issue and source registries and identifiers remain independent; neither is a worker/model provider.
+Keep protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and
+workspace behavior outside it.
 Native engine faults must be constructed only by `FaultFactory` from closed `ModuleEvidence`.
 Decoded faults must match the canonical semantics derived from their required primary source frame.
 Raw diagnostic values are replaced wholesale with typed markers and remain ephemeral; never put
