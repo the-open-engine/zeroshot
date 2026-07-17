@@ -1,0 +1,340 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "undefined_read",
+        "message": "promoted path is not defined by every completing alternative",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 1,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "promote"
+          },
+          {
+            "kind": "field",
+            "name": "promotedStatePaths"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          }
+        ],
+        "relatedNodes": [],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "diagnostic": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "result": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "value": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "diagnostic": {
+            "fields": {
+              "code": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "verifier",
+          "name": "verify",
+          "output": {
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "signals": {
+            "verdict": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.verifier@1",
+          "writeBindings": []
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "attempts": 2,
+                "input": {
+                  "fields": {
+                    "value": {
+                      "required": true,
+                      "type": {
+                        "kind": "integer"
+                      }
+                    }
+                  },
+                  "kind": "record"
+                },
+                "inputBindings": [
+                  {
+                    "target": [
+                      "value"
+                    ],
+                    "value": {
+                      "path": [
+                        "value"
+                      ],
+                      "source": "state"
+                    }
+                  }
+                ],
+                "kind": "step",
+                "name": "work",
+                "output": {
+                  "fields": {
+                    "result": {
+                      "required": true,
+                      "type": {
+                        "kind": "number"
+                      }
+                    }
+                  },
+                  "kind": "record"
+                },
+                "timeoutMs": 1,
+                "worker": "fixture.data@1",
+                "writeBindings": [
+                  {
+                    "target": [
+                      "result"
+                    ],
+                    "value": {
+                      "channel": "out",
+                      "node": "work",
+                      "path": [
+                        "result"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "accepted"
+                ],
+                "value": {
+                  "field": "verdict",
+                  "name": "verify",
+                  "source": "signal"
+                }
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "promote",
+          "otherwise": {
+            "kind": "fail",
+            "name": "failed",
+            "reason": "rejected"
+          },
+          "promotedStatePaths": [
+            [
+              "result"
+            ]
+          ],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "choice_exhaustiveness",
+        "message": "illegal control selector for node work",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 1,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "decision"
+          },
+          {
+            "kind": "field",
+            "name": "branches"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "field",
+            "name": "when"
+          }
+        ],
+        "relatedNodes": [
+          "work"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "kind": "null"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.worker@1",
+          "writeBindings": []
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "bindings": [],
+                "kind": "succeed",
+                "name": "selected",
+                "output": {
+                  "kind": "null"
+                }
+              },
+              "when": {
+                "kind": "in",
+                "labels": [
+                  "accepted"
+                ],
+                "value": {
+                  "field": "verdict",
+                  "name": "work",
+                  "source": "signal"
+                }
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "decision",
+          "otherwise": {
+            "kind": "fail",
+            "name": "decisionOtherwise",
+            "reason": "rejected"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

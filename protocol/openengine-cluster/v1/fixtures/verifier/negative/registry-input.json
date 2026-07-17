@@ -1,0 +1,80 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "schema_safety",
+        "message": "graph input is not a subtype of descriptor input",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          }
+        ],
+        "relatedNodes": [
+          "work"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "input": {
+            "kind": "number"
+          },
+          "inputBindings": [],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "kind": "null"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.worker@1",
+          "writeBindings": []
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

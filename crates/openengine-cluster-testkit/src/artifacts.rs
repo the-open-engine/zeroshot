@@ -108,6 +108,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     ];
     artifacts.extend(worker_fixture_artifacts());
     artifacts.extend(graph_fixture_artifacts());
+    artifacts.extend(crate::graph_verifier_artifacts::graph_verifier_fixture_artifacts().await);
     artifacts.extend(crate::admission_artifacts::generate_admission_goldens().await);
     artifacts.extend(crate::lifecycle_artifacts::generate_lifecycle_goldens().await);
     for (name, request) in cases {

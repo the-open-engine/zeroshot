@@ -1,0 +1,97 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "schema_safety",
+        "message": "descriptor diagnostic is not a subtype of graph diagnostic",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "verify"
+          }
+        ],
+        "relatedNodes": [
+          "verify"
+        ],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "kind": "null"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 1,
+          "diagnostic": {
+            "kind": "string"
+          },
+          "input": {
+            "kind": "null"
+          },
+          "inputBindings": [],
+          "kind": "verifier",
+          "name": "verify",
+          "output": {
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "signals": {
+            "verdict": [
+              "accepted",
+              "rejected"
+            ]
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.verifier@1",
+          "writeBindings": []
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "kind": "null"
+      }
+    }
+  }
+}

@@ -55,6 +55,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Graph diagnostics/bounds    | `crates/openengine-cluster-protocol/src/diagnostic.rs`               |
 | Shared wire-value bounds    | `crates/openengine-cluster-protocol/src/value.rs`                    |
 | Cluster dispatch/stdio      | `crates/openengine-cluster-server/`                                  |
+| Production graph verifier   | `crates/openengine-cluster-server/src/graph_verifier.rs`             |
 | Native product construction | `zeroshot-rust/`                                                     |
 | Artifact store port/fake    | `zeroshot-rust/src/artifact_store.rs`, `artifact_store/fake.rs`      |
 | Product-local artifact CAS  | `zeroshot-rust/src/artifact_store/local_cas.rs`, `local_cas/`        |
@@ -78,6 +79,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Lifecycle fixture params    | `crates/openengine-cluster-testkit/src/lifecycle/params.rs`          |
 | Admission transcript output | `crates/openengine-cluster-testkit/src/admission_artifacts.rs`       |
 | Negative graph vectors      | `crates/openengine-cluster-testkit/src/negative_graph_fixtures.rs`   |
+| Verifier vectors            | `crates/openengine-cluster-testkit/src/graph_verifier_artifacts.rs`  |
 | Graph contract prose        | `docs/openengine-cluster-protocol/v1/graph-contract.md`              |
 | Admission contract prose    | `docs/openengine-cluster-protocol/v1/admission.md`                   |
 | Lifecycle contract prose    | `docs/openengine-cluster-protocol/v1/lifecycle.md`                   |
@@ -105,8 +107,27 @@ them in `EngineFault`, observations, protocol responses, persistence, or exports
 injected through `ObservationSink` and uses only the fixed metrics and closed dimensions in
 `observability.rs`; retry disposition is descriptive data, not retry authorization. Do not install
 global telemetry state or caller-defined labels.
-Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types are
-authoritative contract types only. They do not provide graph admission, verification, or execution.
+Graph syntax, payload subtyping, compiled IR, diagnostics, and artifact receipt Rust types remain
+authoritative protocol contracts. `ProductionGraphVerifier` is the one reusable production
+semantic verifier for `openengine.graph.full/v1`; it resolves workers through `WorkerRegistry` and
+adds proven `StructuralBounds` without replacing the authoritative AST/IR. It does not admit,
+store, schedule, or execute graphs. `ScriptedVerifier` remains a test-only admission fixture.
+Full-v1 ceilings are fixed public constants beside `ProductionGraphVerifier`, not product
+configuration. Node timeouts use the wire `PositiveInteger` range and have no 24-hour verifier
+ceiling.
+Full-v1 finite control enumeration couples each executable's signals and error as mutually
+exclusive outcomes, including per-item map aggregates. Choice residual assignments govern output
+channel availability; terminal alternatives do not flow into later nodes. An `otherwise` node is
+illegal when earlier branches exhaust the legal control space and is excluded from flow analysis.
+`k_of_n` and `k_of_map` labels never widen their selectors' closed domains. Executable writes
+remain success-conditional until residual control excludes every runtime error; state reads and
+promotions preserve that outcome provenance. Definition flow carries exact path/type guarantees
+from required initial input through nested groups. A successful output/diagnostic binding defines
+only its required selected path and required descendants, never optional producer paths.
+Parallel continuation requires all branches for `all`, one for `any`/`first`, and `count` for
+`quorum`; quorum flow and promotions are guaranteed only when present in every jointly satisfiable
+size-`count` completion set. Shared guard correlations can make independently possible branch
+completions mutually exclusive and must be preserved during that analysis.
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
 Testkit scripted approval and `running` phase mean admitted state, not native verification or a
 production full-graph executor.

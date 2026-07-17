@@ -1,0 +1,261 @@
+{
+  "expected": {
+    "diagnostics": [
+      {
+        "code": "schema_safety",
+        "message": "binding source is not a subtype of its target",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          },
+          {
+            "kind": "field",
+            "name": "inputBindings"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          }
+        ],
+        "relatedNodes": [],
+        "severity": "error"
+      },
+      {
+        "code": "undefined_read",
+        "message": "selector path is not definitely defined on every reaching path",
+        "path": [
+          {
+            "kind": "field",
+            "name": "root"
+          },
+          {
+            "kind": "node",
+            "name": "root"
+          },
+          {
+            "kind": "field",
+            "name": "children"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "node",
+            "name": "work"
+          },
+          {
+            "kind": "field",
+            "name": "inputBindings"
+          },
+          {
+            "index": 0,
+            "kind": "index"
+          },
+          {
+            "kind": "field",
+            "name": "value"
+          }
+        ],
+        "relatedNodes": [],
+        "severity": "error"
+      }
+    ],
+    "status": "rejected"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "diagnostic": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "result": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "value": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "attempts": 2,
+          "input": {
+            "fields": {
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "inputBindings": [
+            {
+              "target": [
+                "value"
+              ],
+              "value": {
+                "path": [
+                  "result"
+                ],
+                "source": "state"
+              }
+            }
+          ],
+          "kind": "step",
+          "name": "work",
+          "output": {
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
+          },
+          "timeoutMs": 1,
+          "worker": "fixture.data@1",
+          "writeBindings": [
+            {
+              "target": [
+                "result"
+              ],
+              "value": {
+                "channel": "out",
+                "node": "work",
+                "path": [
+                  "result"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "bindings": [],
+          "kind": "succeed",
+          "name": "done",
+          "output": {
+            "kind": "null"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

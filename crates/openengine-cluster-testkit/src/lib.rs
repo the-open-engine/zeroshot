@@ -3,6 +3,7 @@
 pub mod admission;
 mod admission_artifacts;
 pub mod artifacts;
+pub mod graph_verifier_artifacts;
 pub mod lifecycle;
 mod lifecycle_artifacts;
 mod negative_graph_fixtures;

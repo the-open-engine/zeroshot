@@ -1,0 +1,630 @@
+{
+  "expected": {
+    "compiledIr": {
+      "bounds": {
+        "attemptsPerNode": {
+          "mapWork": 1
+        },
+        "maxNodeExecutions": 2,
+        "peakConcurrency": 2,
+        "termination": {
+          "kind": "acyclic",
+          "order": [
+            "root",
+            "map",
+            "mapWork",
+            "afterMap",
+            "selected",
+            "afterMapOtherwise"
+          ]
+        }
+      },
+      "initialInput": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      },
+      "policy": {
+        "default": "deny",
+        "policy": "policy.strict@1"
+      },
+      "profile": "openengine.graph.full/v1",
+      "root": {
+        "children": [
+          {
+            "body": {
+              "attempts": 1,
+              "input": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "inputBindings": [
+                {
+                  "target": [
+                    "value"
+                  ],
+                  "value": {
+                    "path": [
+                      "value"
+                    ],
+                    "source": "item"
+                  }
+                }
+              ],
+              "kind": "step",
+              "name": "mapWork",
+              "output": {
+                "fields": {
+                  "result": {
+                    "required": true,
+                    "type": {
+                      "kind": "number"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "timeoutMs": 1,
+              "worker": "fixture.data@1",
+              "writeBindings": []
+            },
+            "kind": "map",
+            "maxItems": 2,
+            "name": "map",
+            "over": {
+              "path": [
+                "items"
+              ],
+              "source": "state"
+            },
+            "promotedStatePaths": [],
+            "state": {
+              "fields": {
+                "diagnostic": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "items": {
+                  "required": true,
+                  "type": {
+                    "items": {
+                      "fields": {
+                        "value": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    },
+                    "kind": "array"
+                  }
+                },
+                "result": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                },
+                "verdict": {
+                  "required": false,
+                  "type": {
+                    "kind": "enum",
+                    "values": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  }
+                }
+              },
+              "kind": "record"
+            }
+          },
+          {
+            "branches": [
+              {
+                "node": {
+                  "bindings": [],
+                  "kind": "succeed",
+                  "name": "selected",
+                  "output": {
+                    "kind": "null"
+                  }
+                },
+                "when": {
+                  "count": 1,
+                  "kind": "k_of_map",
+                  "labels": [
+                    "timeout"
+                  ],
+                  "value": {
+                    "field": null,
+                    "name": "mapWork",
+                    "source": "error"
+                  }
+                }
+              }
+            ],
+            "kind": "choice",
+            "name": "afterMap",
+            "otherwise": {
+              "kind": "fail",
+              "name": "afterMapOtherwise",
+              "reason": "rejected"
+            },
+            "promotedStatePaths": [],
+            "state": {
+              "fields": {
+                "diagnostic": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "items": {
+                  "required": true,
+                  "type": {
+                    "items": {
+                      "fields": {
+                        "value": {
+                          "required": true,
+                          "type": {
+                            "kind": "integer"
+                          }
+                        }
+                      },
+                      "kind": "record"
+                    },
+                    "kind": "array"
+                  }
+                },
+                "result": {
+                  "required": false,
+                  "type": {
+                    "kind": "number"
+                  }
+                },
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                },
+                "verdict": {
+                  "required": false,
+                  "type": {
+                    "kind": "enum",
+                    "values": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  }
+                }
+              },
+              "kind": "record"
+            }
+          }
+        ],
+        "kind": "seq",
+        "name": "root",
+        "promotedStatePaths": [],
+        "state": {
+          "fields": {
+            "diagnostic": {
+              "required": false,
+              "type": {
+                "kind": "number"
+              }
+            },
+            "items": {
+              "required": true,
+              "type": {
+                "items": {
+                  "fields": {
+                    "value": {
+                      "required": true,
+                      "type": {
+                        "kind": "integer"
+                      }
+                    }
+                  },
+                  "kind": "record"
+                },
+                "kind": "array"
+              }
+            },
+            "result": {
+              "required": false,
+              "type": {
+                "kind": "number"
+              }
+            },
+            "value": {
+              "required": true,
+              "type": {
+                "kind": "integer"
+              }
+            },
+            "verdict": {
+              "required": false,
+              "type": {
+                "kind": "enum",
+                "values": [
+                  "accepted",
+                  "rejected"
+                ]
+              }
+            }
+          },
+          "kind": "record"
+        }
+      }
+    },
+    "diagnostics": [],
+    "status": "verified"
+  },
+  "graph": {
+    "initialInput": {
+      "fields": {
+        "diagnostic": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "items": {
+          "required": true,
+          "type": {
+            "items": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "kind": "array"
+          }
+        },
+        "result": {
+          "required": false,
+          "type": {
+            "kind": "number"
+          }
+        },
+        "value": {
+          "required": true,
+          "type": {
+            "kind": "integer"
+          }
+        },
+        "verdict": {
+          "required": false,
+          "type": {
+            "kind": "enum",
+            "values": [
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      },
+      "kind": "record"
+    },
+    "policy": {
+      "default": "deny",
+      "policy": "policy.strict@1"
+    },
+    "profile": "openengine.graph.full/v1",
+    "root": {
+      "children": [
+        {
+          "body": {
+            "attempts": 1,
+            "input": {
+              "fields": {
+                "value": {
+                  "required": true,
+                  "type": {
+                    "kind": "integer"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "inputBindings": [
+              {
+                "target": [
+                  "value"
+                ],
+                "value": {
+                  "path": [
+                    "value"
+                  ],
+                  "source": "item"
+                }
+              }
+            ],
+            "kind": "step",
+            "name": "mapWork",
+            "output": {
+              "fields": {
+                "result": {
+                  "required": true,
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              },
+              "kind": "record"
+            },
+            "timeoutMs": 1,
+            "worker": "fixture.data@1",
+            "writeBindings": []
+          },
+          "kind": "map",
+          "maxItems": 2,
+          "name": "map",
+          "over": {
+            "path": [
+              "items"
+            ],
+            "source": "state"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        },
+        {
+          "branches": [
+            {
+              "node": {
+                "bindings": [],
+                "kind": "succeed",
+                "name": "selected",
+                "output": {
+                  "kind": "null"
+                }
+              },
+              "when": {
+                "count": 1,
+                "kind": "k_of_map",
+                "labels": [
+                  "timeout"
+                ],
+                "value": {
+                  "field": null,
+                  "name": "mapWork",
+                  "source": "error"
+                }
+              }
+            }
+          ],
+          "kind": "choice",
+          "name": "afterMap",
+          "otherwise": {
+            "kind": "fail",
+            "name": "afterMapOtherwise",
+            "reason": "rejected"
+          },
+          "promotedStatePaths": [],
+          "state": {
+            "fields": {
+              "diagnostic": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "items": {
+                "required": true,
+                "type": {
+                  "items": {
+                    "fields": {
+                      "value": {
+                        "required": true,
+                        "type": {
+                          "kind": "integer"
+                        }
+                      }
+                    },
+                    "kind": "record"
+                  },
+                  "kind": "array"
+                }
+              },
+              "result": {
+                "required": false,
+                "type": {
+                  "kind": "number"
+                }
+              },
+              "value": {
+                "required": true,
+                "type": {
+                  "kind": "integer"
+                }
+              },
+              "verdict": {
+                "required": false,
+                "type": {
+                  "kind": "enum",
+                  "values": [
+                    "accepted",
+                    "rejected"
+                  ]
+                }
+              }
+            },
+            "kind": "record"
+          }
+        }
+      ],
+      "kind": "seq",
+      "name": "root",
+      "promotedStatePaths": [],
+      "state": {
+        "fields": {
+          "diagnostic": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "items": {
+            "required": true,
+            "type": {
+              "items": {
+                "fields": {
+                  "value": {
+                    "required": true,
+                    "type": {
+                      "kind": "integer"
+                    }
+                  }
+                },
+                "kind": "record"
+              },
+              "kind": "array"
+            }
+          },
+          "result": {
+            "required": false,
+            "type": {
+              "kind": "number"
+            }
+          },
+          "value": {
+            "required": true,
+            "type": {
+              "kind": "integer"
+            }
+          },
+          "verdict": {
+            "required": false,
+            "type": {
+              "kind": "enum",
+              "values": [
+                "accepted",
+                "rejected"
+              ]
+            }
+          }
+        },
+        "kind": "record"
+      }
+    }
+  }
+}

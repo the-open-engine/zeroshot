@@ -11,11 +11,13 @@ Cluster Protocol v1 defines two profiles:
 | Full graph    | `openengine.graph.full/v1`          |
 | Single worker | `openengine.graph.single-worker/v1` |
 
-There is no production backend or production static verifier for the full-graph profile yet.
-Parsing, schema validation, fixture round trips, construction of `CompiledGraphIr`, and canonical
-hashing are not graph verification or admission. Only a future backend verifier may promote graph
-syntax to admitted compiled IR. The protocol still implements only `initialize` and `get`, and
-`initialize` advertises no capabilities.
+`openengine-cluster-server::graph_verifier::ProductionGraphVerifier` is the reusable production
+semantic verifier for the full-graph profile. It consumes the authoritative `GraphSpec`, resolves
+workers through `WorkerRegistry`, and returns the authoritative `CompiledGraphIr` with proven
+`StructuralBounds`. Parsing, schema validation, fixture round trips, direct construction of
+`CompiledGraphIr`, and canonical hashing alone are not verification or admission. The verifier
+does not admit, store, schedule, or execute graphs; `ScriptedVerifier` remains a test-only admission
+fixture. The protocol methods and advertised backend capabilities remain separate concerns.
 
 ## Graph wire format
 
@@ -36,8 +38,15 @@ Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
-exit satisfiability, and selector type correctness are future-verifier responsibilities, not parser
-claims.
+exit satisfiability, selector typing, dominance, promotion safety, and structural folds are
+production-verifier responsibilities, not parser claims. `timeoutMs` accepts exactly the
+`PositiveInteger` wire range; the verifier imposes no superseded 24-hour product ceiling.
+Normal-success continuation requires every branch for `all`, one branch for `any`/`first`, and
+`count` branches for `quorum`. Quorum flow and promotion guarantees range over every valid
+size-`count` completing branch set. A set is valid only when its branch-completion predicates are
+jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
+outcomes never fabricate a completion set. Quorum one behaves as alternatives, while quorum over
+every branch carries the same completion guarantees as `all`.
 
 ## Data and control separation
 
@@ -93,9 +102,67 @@ target value. A required source field may satisfy an optional target field. An o
 never satisfies a required target field. Extra source fields are allowed. The relation is recursive,
 deterministic, side-effect free, and never delegates to general JSON Schema evaluation.
 
+## Production full-v1 verification
+
+The verifier runs deterministic synchronous structural and semantic passes before accessing the
+worker registry. Any structural diagnostic prevents registry lookup. Worker absence, unavailable
+versions, descriptor mismatch, profile mismatch, verifier-contract mismatch, and schema
+incompatibility are graph rejections. Internal errors are reserved for impossible invariant or
+compiled-IR construction failures after successful validation.
+
+Selectors use closed finite domains: verifier signals use their declared labels; worker errors are
+`timeout|crash|malformed|refusal`; loop `terminated` is `converged|exhausted`; map `overflow` is
+`ok|overflow`; `all|any|quorum` parallel `joined` is `reached|quorum_unreachable`; and `first`
+parallel `raced` is `satisfied|no_satisfier`. Choices are first-true in authored order and are
+checked over the bounded legal control space. An `otherwise` alternative is rejected as unreachable
+when earlier branches cover that space and does not participate in flow analysis. Loops are
+do-while and their exit guard must use a verifier guaranteed to execute on every iteration.
+Signal and error controls from one executable are mutually exclusive outcomes. Map aggregates
+count joint per-item outcomes, so one mapped execution cannot contribute both a success signal and
+an error. Choice residual assignments determine channel availability: `out`, `signal`, and
+`diagnostic` are unavailable on every reaching error path, while terminal alternatives do not
+contaminate later fall-through flow. Every `k_of_n`/`k_of_map` label must belong to the applicable
+closed selector domains. Executable write bindings are success-outcome effects: an output-backed
+optional state path remains undefined while that executable's runtime-error outcomes can reach the
+reader. A residual branch that excludes every runtime error makes the write definite. State
+promotion preserves this outcome provenance and cannot turn a conditional write into a definite
+one. Definition flow retains exact path/type guarantees from required initial input through nested
+group-state widening. After successful routing, a binding defines its target only when the selected
+output or diagnostic path is required; writing a required record defines only its required
+descendants, never optional descendants.
+
+Full-v1 has fixed protocol-version ceilings:
+
+| Bound                         | Maximum |
+| ----------------------------- | ------: |
+| Graph nodes                   |   4,096 |
+| Graph depth                   |      64 |
+| Guard nodes                   |   4,096 |
+| Assignments per finite check  |  65,536 |
+| Loop iterations               |     100 |
+| Map items                     |   1,024 |
+| Attempts per executable node  |     100 |
+| One-run executable node count |  65,536 |
+| Total loop-body entries       |  65,536 |
+| Peak concurrency              |   1,024 |
+
+All structural arithmetic is checked. Authored values, computed folds, and arithmetic overflow
+above a ceiling produce `ceiling_exceeded` at the narrowest combining node or field. These bounds
+are public constants beside `ProductionGraphVerifier`; they are not backend configuration or
+product policy. `missing_bound` is reserved for a future typed graph form that can omit a required
+proof bound.
+
+Only `step` and `verifier` count as executions. Sequence sums executions, choice takes the maximum,
+parallel sums, map multiplies by `maxItems`, and loop multiplies by `maxIterations`. Parallel and
+map multiplication determine peak concurrency; loop body concurrency is unchanged. Loop-entry
+folds use sum for sequence/parallel, maximum for choice, map multiplication, and
+`maxIterations * (1 + bodyLoopEntries)` for loops. Attempts are recorded per executable and do not
+multiply the one-run execution bound. Loop-free graphs receive a stable reference-topological
+acyclic witness; graphs with loops receive deterministic outer-to-inner ranking identifiers.
+
 ## Diagnostics, bounds, and artifact receipts
 
-Future verifier output uses structured `GraphDiagnostic` values. Severity and diagnostic code are
+Verifier output uses structured `GraphDiagnostic` values. Severity and diagnostic code are
 closed enums. Paths are arrays of field, index, or node segments, never JSONPath strings. V1 codes
 cover schema safety, reachability, choice exhaustiveness, loop exit satisfiability, missing bounds,
 write conflicts, ceiling excess, cyclic references, undefined reads, and invalid graph shape.
@@ -142,6 +209,7 @@ reference, binding content or multiplicity, or `k_of_n` selector multiplicity ch
 `graph.schema.json` is rooted at `GraphSpec`; `compiled-ir.schema.json` is rooted at
 `CompiledGraphIr`. OpenRPC exposes these and the graph diagnostic, bounds, and artifact component
 schemas, but adds no future protocol method. Files under
-`protocol/openengine-cluster/v1/fixtures/graph/` are deterministic conformance vectors. Their Rust
-parser and JSON Schema checks are fixture validation only and must not be described as the native or
-production verifier for `openengine.graph.full/v1`.
+`protocol/openengine-cluster/v1/fixtures/graph/` are deterministic syntax/canonicalization vectors.
+Their Rust parser and JSON Schema checks are fixture validation only. Exact production-verifier
+success and rejection envelopes live under `protocol/openengine-cluster/v1/fixtures/verifier/` and
+are generated through the reusable server verifier.
