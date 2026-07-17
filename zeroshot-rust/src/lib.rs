@@ -1,4 +1,5 @@
 pub mod artifact_store;
+pub mod cluster_ledger;
 pub mod issue_provider;
 mod provider_value;
 pub mod source_code_provider;
