@@ -106,6 +106,40 @@ describe('legacy cluster worker facade', () => {
     });
   });
 
+  it('arms bounded cleanup when engine start returns a mismatched cluster id', async () => {
+    const engine = fakeEngine();
+    const mismatchedAdapter = Object.freeze({
+      ...engine.adapter,
+      start(value) {
+        engine.calls.starts.push(value);
+        return { clusterId: 'unexpected-cluster' };
+      },
+    });
+    const worker = workerWith({ ...engine, adapter: mismatchedAdapter });
+
+    await assert.rejects(worker.start(request()), /different id/);
+
+    assert.strictEqual(engine.calls.stops, 1);
+    assert.strictEqual((await worker.result()).state, 'failed');
+  });
+
+  it('arms bounded cleanup when engine start rejects after allocation begins', async () => {
+    const engine = fakeEngine();
+    const rejectingAdapter = Object.freeze({
+      ...engine.adapter,
+      start(value) {
+        engine.calls.starts.push(value);
+        throw new Error('allocation failed after resource creation');
+      },
+    });
+    const worker = workerWith({ ...engine, adapter: rejectingAdapter });
+
+    await assert.rejects(worker.start(request()), /allocation failed/);
+
+    assert.strictEqual(engine.calls.stops, 1);
+    assert.strictEqual((await worker.result()).state, 'failed');
+  });
+
   it('rejects asynchronous engine status ports without losing their rejection', async () => {
     const engine = fakeEngine();
     const invalidAdapter = Object.freeze({

@@ -1,6 +1,10 @@
 'use strict';
 
 const assert = require('assert');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { PassThrough } = require('stream');
 const { runClusterWorkerExecutable } = require('../../lib/cluster-worker/executable');
 const { createLegacyClusterWorker } = require('../../lib/cluster-worker');
@@ -111,4 +115,82 @@ describe('legacy cluster worker executable EOF cancellation', () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
     assert.strictEqual(stopped, 1);
   });
+
+  it('keeps the process alive until a late-allocated cluster is cleaned up', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cluster-worker-cleanup-'));
+    const markerPath = path.join(directory, 'stopped');
+    const fixture = path.join(__dirname, 'fixtures', 'late-allocation-worker.js');
+    const child = spawn(process.execPath, [fixture, markerPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    const exited = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolve({ code, signal }));
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 2000);
+
+    try {
+      child.stdin.end(
+        `${JSON.stringify({ id: 1, method: 'start', params: { request: request() } })}\n`
+      );
+      const exit = await exited;
+      assert.deepStrictEqual(exit, { code: 0, signal: null }, stderr);
+      assert.strictEqual(fs.readFileSync(markerPath, 'utf8'), 'stopped\n');
+    } finally {
+      clearTimeout(timeout);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    it(`exits after ${signal} cleanup while the parent keeps stdin open`, async () => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cluster-worker-signal-'));
+      const markerPath = path.join(directory, 'stopped');
+      const fixture = path.join(__dirname, 'fixtures', 'late-allocation-worker.js');
+      const child = spawn(process.execPath, [fixture, markerPath], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      let resolveReady;
+      const ready = new Promise((resolve) => {
+        resolveReady = resolve;
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+        if (stderr.includes('ready\n')) resolveReady();
+      });
+      const exited = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (code, exitSignal) => resolve({ code, signal: exitSignal }));
+      });
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 2000);
+
+      try {
+        child.stdin.write(
+          `${JSON.stringify({ id: 1, method: 'start', params: { request: request() } })}\n`
+        );
+        await Promise.race([
+          ready,
+          exited.then((exit) => {
+            throw new Error(
+              `Child exited before signal handler readiness: ${JSON.stringify(exit)}`
+            );
+          }),
+        ]);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        assert.strictEqual(child.kill(signal), true);
+        const exit = await exited;
+        assert.deepStrictEqual(exit, { code: 0, signal: null }, stderr);
+        assert.strictEqual(fs.readFileSync(markerPath, 'utf8'), 'stopped\n');
+      } finally {
+        clearTimeout(timeout);
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  }
 });
