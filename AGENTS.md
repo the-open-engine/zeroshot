@@ -54,6 +54,8 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Shared wire-value bounds    | `crates/openengine-cluster-protocol/src/value.rs`                    |
 | Cluster dispatch/stdio      | `crates/openengine-cluster-server/`                                  |
 | Native product construction | `zeroshot-rust/`                                                     |
+| Artifact store port/fake    | `zeroshot-rust/src/artifact_store.rs`, `artifact_store/fake.rs`      |
+| Product-local artifact CAS  | `zeroshot-rust/src/artifact_store/local_cas.rs`, `local_cas/`        |
 | Issue provider contracts    | `zeroshot-rust/src/issue_provider.rs`, `issue_provider/`             |
 | Source provider contracts   | `zeroshot-rust/src/source_code_provider.rs`, `source_code_provider/` |
 | Provider value bounds       | `zeroshot-rust/src/provider_value.rs`, `provider_value/`             |
@@ -86,8 +88,12 @@ verify byte-for-byte drift with `npm run protocol:check`. These generator-format
 are excluded from Prettier; never format them independently.
 The protocol and server crates own wire contracts, backend traits, the dispatcher, and transports.
 `zeroshot-rust/` owns the concrete `NativeBackend`, product-local `NativeBackendFactory`
-construction root, and product-private, secret-free issue/source provider contracts. Issue and
-source registries and identifiers remain independent; neither is a worker/model provider. Keep
+construction root, product-private artifact byte-store port/local CAS, and product-private,
+secret-free issue/source provider contracts. Artifact stages, bytes, roots, filesystem paths,
+locks, and manifests remain product-private; only verified protocol `ArtifactRef` receipts cross
+the engine boundary. `LocalCasArtifactStore` takes an explicit root, is a single-writer local
+filesystem store, and must preserve ref-first release plus synchronized blob-then-ref publication.
+Issue and source registries and identifiers remain independent; neither is a worker/model provider. Keep
 protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and workspace
 behavior outside it.
 Native engine faults must be constructed only by `FaultFactory` from closed `ModuleEvidence`.
