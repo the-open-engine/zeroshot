@@ -233,6 +233,7 @@ describe('legacy cluster worker engine adapter', () => {
 
   it('keeps cleanup armed when allocation occurs after the caller shutdown deadline', async () => {
     let cluster = null;
+    let closeCalls = 0;
     let stopCalls = 0;
     const orchestrator = {
       start() {
@@ -248,7 +249,9 @@ describe('legacy cluster worker engine adapter', () => {
         stopCalls += 1;
         cluster.state = 'stopped';
       },
-      close() {},
+      close() {
+        closeCalls += 1;
+      },
     };
     const adapter = createCurrentEngineAdapter({
       orchestrator,
@@ -271,9 +274,11 @@ describe('legacy cluster worker engine adapter', () => {
       onEvent() {},
     });
     assert.deepStrictEqual(await adapter.stop(), { effective: false });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await adapter.waitForCleanup();
     assert.strictEqual(stopCalls, 1);
     assert.strictEqual(cluster.state, 'stopped');
+    assert.strictEqual(closeCalls, 1);
     adapter.close();
+    assert.strictEqual(closeCalls, 1);
   });
 });

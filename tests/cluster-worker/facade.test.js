@@ -30,6 +30,9 @@ describe('legacy cluster worker facade', () => {
       result: { summary: 'bounded success', status: 'succeeded', artifacts: [] },
     });
     assert.strictEqual(JSON.stringify(receipt).includes('must not escape'), false);
+    assert.strictEqual(engine.calls.closes, 0);
+    assert.deepStrictEqual(await worker.stop(), receipt);
+    assert.strictEqual(engine.calls.closes, 1);
   });
 
   it('does not accept engine-declared artifact receipts without a receipt sink', async () => {
@@ -217,6 +220,8 @@ describe('legacy cluster worker facade', () => {
     assert.strictEqual(receipt.outcome.code, 'timeout');
     await new Promise((resolve) => setImmediate(resolve));
     assert.strictEqual(engine.calls.stops, 1);
+    assert.deepStrictEqual(await worker.stop(), receipt);
+    assert.strictEqual(engine.calls.closes, 1);
   });
 
   it('makes explicit cancellation final without claiming rollback', async () => {
@@ -231,6 +236,7 @@ describe('legacy cluster worker facade', () => {
       externalEffectsRolledBack: false,
     });
     assert.strictEqual((await worker.result()).state, 'stopped');
+    assert.strictEqual(engine.calls.closes, 1);
   });
 
   it('records an ineffective stop without claiming rollback when engine stop fails', async () => {

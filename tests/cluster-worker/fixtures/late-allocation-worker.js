@@ -13,11 +13,16 @@ const { createDeploymentProfileRegistry } = require('../../../lib/cluster-worker
 redirectConsoleToStderr();
 
 const markerPath = process.argv[2];
+const mode = process.argv[3] || 'late';
 let cluster = null;
+let closeCalls = 0;
 const orchestrator = {
   start() {
+    if (mode === 'never') return new Promise(() => {});
+    process.stderr.write('allocating\n');
     setTimeout(() => {
       cluster = { state: 'initializing' };
+      process.stderr.write('allocated\n');
     }, 100);
     return new Promise(() => {});
   },
@@ -25,10 +30,18 @@ const orchestrator = {
     return cluster;
   },
   stop() {
+    process.stderr.write('stopping\n');
     cluster.state = 'stopped';
     fs.writeFileSync(markerPath, 'stopped\n', 'utf8');
   },
-  close() {},
+  close() {
+    closeCalls += 1;
+    if (mode === 'never') {
+      fs.writeFileSync(markerPath, `closed:${closeCalls}\n`, 'utf8');
+      return;
+    }
+    process.stderr.write('closed\n');
+  },
 };
 const startCluster = {
   prepareClusterConfig(config) {
@@ -50,6 +63,6 @@ const worker = createLegacyClusterWorker({
   engineAdapter,
   idFactory: () => 'late-allocation-cluster',
 });
-const runtime = runClusterWorkerExecutable({ worker, shutdownMs: 10 });
+const runtime = runClusterWorkerExecutable({ worker, shutdownMs: mode === 'never' ? 100 : 200 });
 bindProcessLifecycle(runtime);
 process.stderr.write('ready\n');

@@ -108,7 +108,9 @@ Responses are `{ "type": "response", "id", "ok", "result" }` or contain a closed
 An `events` subscription also receives `{ "type": "event", "id", "event" }` frames. Arrays,
 malformed or oversized JSON, unknown methods, unknown parameters, and duplicate starts fail closed.
 EOF, SIGINT, and SIGTERM request explicit stop and wait no longer than the shutdown deadline. They do
-not imply rollback.
+not imply rollback. Cleanup that settles inside that executable deadline is drained; if allocation
+never registers or settles, the process invokes its internal adapter-release port and exits at the
+deadline without adding a sixth public worker operation.
 
 `result` and `stop` race the in-flight `start` operation against terminal receipt availability. A
 startup timeout or allocated-engine start failure therefore returns canonical terminal truth even

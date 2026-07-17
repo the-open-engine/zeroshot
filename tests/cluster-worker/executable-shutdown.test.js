@@ -124,6 +124,44 @@ describe('legacy cluster worker executable EOF cancellation', () => {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
+    let resolveAllocating;
+    const allocating = new Promise((resolve) => {
+      resolveAllocating = resolve;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.includes('allocating\n')) resolveAllocating();
+    });
+    const exited = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolve({ code, signal }));
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 2000);
+
+    try {
+      child.stdin.write(
+        `${JSON.stringify({ id: 1, method: 'start', params: { request: request() } })}\n`
+      );
+      await allocating;
+      child.stdin.end();
+      const exit = await exited;
+      assert.deepStrictEqual(exit, { code: 0, signal: null }, stderr);
+      assert.ok(fs.existsSync(markerPath), stderr);
+      assert.strictEqual(fs.readFileSync(markerPath, 'utf8'), 'stopped\n');
+    } finally {
+      clearTimeout(timeout);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('releases and exits when engine allocation never registers or settles', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cluster-worker-never-allocates-'));
+    const markerPath = path.join(directory, 'closed');
+    const fixture = path.join(__dirname, 'fixtures', 'late-allocation-worker.js');
+    const child = spawn(process.execPath, [fixture, markerPath, 'never'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
@@ -139,9 +177,10 @@ describe('legacy cluster worker executable EOF cancellation', () => {
       );
       const exit = await exited;
       assert.deepStrictEqual(exit, { code: 0, signal: null }, stderr);
-      assert.strictEqual(fs.readFileSync(markerPath, 'utf8'), 'stopped\n');
+      assert.strictEqual(fs.readFileSync(markerPath, 'utf8'), 'closed:1\n');
     } finally {
       clearTimeout(timeout);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -151,7 +151,9 @@ observation is synchronous and fails closed when durable truth cannot be read.
 Profile resolution, artifact staging, engine start, and receipt collection remain cancellable under
 the registry execution bound; stop may win before engine allocation. A caller shutdown deadline
 bounds stop acknowledgement, not cleanup ownership: the engine adapter must still stop a cluster
-that allocates late while start remains pending.
+that allocates late while start remains pending, then release its orchestrator exactly once so
+process EOF cannot retain engine handles. The executable may wait for that cleanup only until its
+own shutdown deadline; at the deadline it invokes the internal release port and exits.
 Artifact input has no echo-only default resolver. The current engine allocates isolation first,
 then runs the injected resolver before agents start; the resolver must materialize read-only content
 inside that workspace. Cancelled profile, staging, and receipt operations retain late cleanup

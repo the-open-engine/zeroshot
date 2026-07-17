@@ -31,7 +31,7 @@ function registry(bounds = {}) {
 }
 
 function fakeEngine() {
-  const calls = { starts: [], stops: 0, statuses: 0 };
+  const calls = { starts: [], stops: 0, statuses: 0, closes: 0 };
   let onEvent;
   return {
     calls,
@@ -61,6 +61,9 @@ function fakeEngine() {
       stop() {
         calls.stops += 1;
         return { effective: true };
+      },
+      close() {
+        calls.closes += 1;
       },
     }),
     emit(event) {

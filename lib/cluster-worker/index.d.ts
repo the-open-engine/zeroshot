@@ -188,6 +188,8 @@ export interface EngineAdapter {
     | Promise<{ clusterId?: string; artifactsStaged?: boolean }>;
   status?(): Readonly<Record<string, unknown>> | null;
   stop(): { effective?: boolean } | Promise<{ effective?: boolean }>;
+  waitForCleanup?(): void | Promise<void>;
+  close?(): void | Promise<void>;
 }
 
 export type LegacyClusterWorkerDependencies = {
