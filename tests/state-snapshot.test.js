@@ -327,7 +327,7 @@ describe('Snapshotter orchestration integration', () => {
     mockRunner.assertContextIncludes('worker', 'STATE_SNAPSHOT');
   });
 
-  it('should publish STATE_SNAPSHOT when loading legacy clusters', async () => {
+  it('should defer legacy STATE_SNAPSHOT publication until a valid resume plan', async () => {
     const clusterId = 'legacy-cluster';
     const clusterDir = tempDir;
     const dbPath = path.join(clusterDir, `${clusterId}.db`);
@@ -350,6 +350,7 @@ describe('Snapshotter orchestration integration', () => {
 
     const fixturePath = path.join(__dirname, 'fixtures', 'single-worker.json');
     const config = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+    config.agents[0].triggers = [{ topic: 'PLAN_READY', action: 'execute_task' }];
     const clustersFile = path.join(clusterDir, 'clusters.json');
     fs.writeFileSync(
       clustersFile,
@@ -368,14 +369,31 @@ describe('Snapshotter orchestration integration', () => {
       )
     );
 
-    orchestrator = await Orchestrator.create({ storageDir: clusterDir, quiet: true });
+    const taskRunner = new MockTaskRunner();
+    taskRunner.when('worker').returns('resumed');
+    orchestrator = await Orchestrator.create({
+      storageDir: clusterDir,
+      quiet: true,
+      taskRunner,
+    });
     const cluster = orchestrator.getCluster(clusterId);
+    const snapshotBeforeResume = cluster.messageBus.findLast({
+      cluster_id: clusterId,
+      topic: 'STATE_SNAPSHOT',
+    });
+    assert.strictEqual(
+      snapshotBeforeResume,
+      null,
+      'loading a stopped legacy cluster must not mutate its ledger'
+    );
+
+    await orchestrator.resume(clusterId);
     const snapshot = cluster.messageBus.findLast({
       cluster_id: clusterId,
       topic: 'STATE_SNAPSHOT',
     });
 
-    assert.ok(snapshot, 'STATE_SNAPSHOT should be created during load');
+    assert.ok(snapshot, 'STATE_SNAPSHOT should be created only after the resume plan succeeds');
     assert.strictEqual(snapshot.content.data.plan.text, 'Legacy plan');
   });
 });

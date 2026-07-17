@@ -582,7 +582,9 @@ class Orchestrator {
         isolationManager,
         containerId: isolation?.containerId || null,
       });
-      this._startSnapshotter(clusterContext);
+      if (clusterContext.state === 'running' && this._isProcessRunning(clusterContext.pid)) {
+        this._startSnapshotter(clusterContext);
+      }
     }
     this._log(`[Orchestrator] Loaded cluster: ${clusterId} with ${agents.length} agents`);
 
@@ -627,7 +629,12 @@ class Orchestrator {
       id: clusterId,
       quiet: this.quiet,
       modelOverride: clusterData.modelOverride || null,
+      testMode: Boolean(this.taskRunner),
     };
+
+    if (this.taskRunner) {
+      agentOptions.taskRunner = this.taskRunner;
+    }
 
     if (isolation?.enabled && isolationManager) {
       agentOptions.isolation = {
@@ -2414,19 +2421,28 @@ class Orchestrator {
     }
 
     const failureInfo = this._resolveFailureInfo(cluster, clusterId);
+    const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);
+    const cleanResumePlan = failureInfo ? null : this._buildCleanResumePlan(clusterId, cluster);
+
+    if (cleanResumePlan?.kind === 'failure') {
+      return this._failResumeReconstruction(clusterId, cluster, cleanResumePlan);
+    }
+
+    if (failureInfo) {
+      this._requireFailedAgent(clusterId, cluster, failureInfo);
+    }
 
     await this._ensureIsolationForResume(clusterId, cluster);
     this._ensureWorktreeForResume(clusterId, cluster);
     this._startSnapshotter(cluster);
+    this._clearTransientAgentState(cluster);
     await this._restartClusterAgents(cluster);
-
-    const recentMessages = this._loadRecentMessages(cluster, clusterId, 50);
 
     if (failureInfo) {
       return this._resumeFailedCluster(clusterId, cluster, failureInfo, recentMessages, prompt);
     }
 
-    return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt);
+    return this._resumeCleanCluster(clusterId, cluster, recentMessages, prompt, cleanResumePlan);
   }
 
   _validateGuidanceAgentArgs(clusterId, agentId, text) {
@@ -2622,7 +2638,7 @@ class Orchestrator {
 
   _resolveFailureInfo(cluster, clusterId) {
     if (cluster.failureInfo) {
-      return cluster.failureInfo;
+      return cluster.failureInfo.agentId ? cluster.failureInfo : null;
     }
 
     const errors = cluster.messageBus.query({
@@ -2646,6 +2662,15 @@ class Orchestrator {
     };
     this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
     return failureInfo;
+  }
+
+  _requireFailedAgent(clusterId, cluster, failureInfo) {
+    const failedAgent = cluster.agents.find((agent) => agent.id === failureInfo.agentId);
+    if (!failedAgent) {
+      throw new Error(
+        `Cannot resume cluster ${clusterId}: Failed agent '${failureInfo.agentId}' is not present in the restored configuration.`
+      );
+    }
   }
 
   _checkContainerExists(containerId) {
@@ -2741,12 +2766,35 @@ class Orchestrator {
       .reverse();
   }
 
+  _findLastDurableWorkflowTrigger(cluster, clusterId) {
+    let latest = null;
+
+    for (const topic of WORKFLOW_TRIGGERS) {
+      const candidate = cluster.messageBus.findLast({
+        cluster_id: clusterId,
+        topic,
+      });
+      if (candidate && (!latest || candidate.timestamp > latest.timestamp)) {
+        latest = candidate;
+      }
+    }
+
+    return latest;
+  }
+
   _buildResumeContext(recentMessages, prompt, options) {
     const resumePrompt = prompt || 'Continue from where you left off. Complete the task.';
     let context = `${options.header}\n\n`;
 
     if (options.error) {
       context += `Previous error: ${options.error}\n\n`;
+    }
+
+    if (options.durableMessages?.length > 0) {
+      context += `## Durable Workflow Context\n\n`;
+      for (const msg of options.durableMessages) {
+        context += `[${msg.topic}] [${msg.sender}]\n${msg.content?.text || ''}\n\n`;
+      }
     }
 
     context += `## Recent Context\n\n`;
@@ -2771,7 +2819,8 @@ class Orchestrator {
   }
 
   _selectAgentsToResume(cluster, lastTrigger) {
-    const agentsToResume = [];
+    const matching = [];
+    const eligible = [];
 
     for (const agent of cluster.agents) {
       if (!agent.config.triggers) continue;
@@ -2781,15 +2830,365 @@ class Orchestrator {
       );
       if (!matchingTrigger) continue;
 
+      const candidate = { agent, message: lastTrigger, trigger: matchingTrigger };
+      matching.push(candidate);
+
       if (matchingTrigger.logic?.script) {
         const shouldTrigger = agent._evaluateTrigger(matchingTrigger, lastTrigger);
         if (!shouldTrigger) continue;
       }
 
-      agentsToResume.push({ agent, message: lastTrigger, trigger: matchingTrigger });
+      eligible.push(candidate);
     }
 
-    return agentsToResume;
+    return { matching, eligible };
+  }
+
+  _findDurableTriggerBefore(cluster, clusterId, topic, timestamp) {
+    if (!topic || topic === 'AGENT_RESUME') {
+      return null;
+    }
+
+    return cluster.messageBus.findLast({
+      cluster_id: clusterId,
+      topic,
+      until: timestamp - 1,
+    });
+  }
+
+  _collectDurableResumeContext(cluster, clusterId, messages = []) {
+    const durableMessages = [
+      cluster.messageBus.findLast({ cluster_id: clusterId, topic: 'ISSUE_OPENED' }),
+      cluster.messageBus.findLast({ cluster_id: clusterId, topic: 'PLAN_READY' }),
+      cluster.messageBus.findLast({ cluster_id: clusterId, topic: 'IMPLEMENTATION_READY' }),
+      ...messages,
+    ].filter(Boolean);
+    const uniqueById = new Map(durableMessages.map((message) => [message.id, message]));
+    return [...uniqueById.values()].sort((left, right) => left.timestamp - right.timestamp);
+  }
+
+  _findInterruptedResumeTargets(clusterId, cluster) {
+    const targets = [];
+    const invalid = [];
+    const issueMessage = cluster.messageBus.findLast({
+      cluster_id: clusterId,
+      topic: 'ISSUE_OPENED',
+    });
+
+    for (const agent of cluster.agents) {
+      if (agent.state !== 'executing_task') {
+        continue;
+      }
+
+      const lifecycle = cluster.messageBus.query({
+        cluster_id: clusterId,
+        topic: 'AGENT_LIFECYCLE',
+        sender: agent.id,
+      });
+      const startedIndex = lifecycle.findLastIndex(
+        (message) => message.content?.data?.event === 'TASK_STARTED'
+      );
+      const lastStarted = startedIndex >= 0 ? lifecycle[startedIndex] : null;
+      const lifecycleAfterStart = startedIndex >= 0 ? lifecycle.slice(startedIndex + 1) : [];
+      const completedAfterStart = lifecycleAfterStart.some(
+        (message) => message.content?.data?.event === 'TASK_COMPLETED'
+      );
+      const lastTaskIdAssigned = [...lifecycleAfterStart]
+        .reverse()
+        .find((message) => message.content?.data?.event === 'TASK_ID_ASSIGNED');
+      const assignedTaskId = lastTaskIdAssigned?.content?.data?.taskId || null;
+      const startedIteration = lastStarted?.content?.data?.iteration;
+      const triggeredBy = lastStarted?.content?.data?.triggeredBy;
+      const triggeringMessage = lastStarted
+        ? this._findDurableTriggerBefore(cluster, clusterId, triggeredBy, lastStarted.timestamp)
+        : null;
+
+      if (
+        !agent.currentTaskId ||
+        !lastStarted ||
+        completedAfterStart ||
+        startedIteration !== agent.iteration ||
+        !assignedTaskId ||
+        assignedTaskId !== agent.currentTaskId ||
+        !issueMessage
+      ) {
+        invalid.push({
+          agentId: agent.id,
+          reason: !issueMessage ? 'missing_durable_context' : 'ambiguous_task_identity',
+          state: agent.state,
+          iteration: agent.iteration,
+          currentTaskId: agent.currentTaskId || null,
+          assignedTaskId,
+          lastStartedIteration: startedIteration ?? null,
+          completedAfterStart: Boolean(completedAfterStart),
+        });
+        continue;
+      }
+
+      targets.push({
+        agent,
+        message: triggeringMessage || issueMessage,
+        lifecycleMessage: lastStarted,
+        issueMessage,
+        trigger: null,
+        reason: 'interrupted_task',
+      });
+    }
+
+    const interruptedRoles = new Set(targets.map(({ agent }) => agent.role));
+    if (interruptedRoles.size > 1) {
+      invalid.push({
+        reason: 'multiple_interrupted_phases',
+        agents: targets.map(({ agent }) => agent.id),
+      });
+    }
+
+    return { targets, invalid };
+  }
+
+  _findPartialValidationTargets(clusterId, cluster, lastTrigger) {
+    if (
+      !lastTrigger ||
+      !['IMPLEMENTATION_READY', 'VALIDATION_RESULT'].includes(lastTrigger.topic)
+    ) {
+      return null;
+    }
+
+    const implementationReady = cluster.messageBus.findLast({
+      cluster_id: clusterId,
+      topic: 'IMPLEMENTATION_READY',
+      until: lastTrigger.timestamp,
+    });
+    if (!implementationReady) {
+      return null;
+    }
+
+    const validators = cluster.agents.filter((agent) => agent.role === 'validator');
+    if (validators.length === 0) {
+      return null;
+    }
+
+    const validatorIds = new Set(validators.map((agent) => agent.id));
+    const validationResults = cluster.messageBus
+      .query({
+        cluster_id: clusterId,
+        topic: 'VALIDATION_RESULT',
+        since: implementationReady.timestamp,
+      })
+      .filter(
+        (message) =>
+          message.timestamp > implementationReady.timestamp && validatorIds.has(message.sender)
+      );
+    const responded = new Set(validationResults.map((message) => message.sender));
+    const missing = validators.filter((agent) => !responded.has(agent.id));
+    if (missing.length === 0) {
+      return { kind: 'complete', validationResults, implementationReady };
+    }
+
+    const missingIds = new Set(missing.map((agent) => agent.id));
+    const selection = this._selectAgentsToResume(cluster, implementationReady);
+    const matching = selection.matching.filter(({ agent }) => missingIds.has(agent.id));
+    const eligible = selection.eligible.filter(({ agent }) => missingIds.has(agent.id));
+
+    if (eligible.length !== missing.length) {
+      return {
+        kind: 'failure',
+        missingAgentIds: missing.map((agent) => agent.id),
+        matchingAgentIds: matching.map(({ agent }) => agent.id),
+        implementationReady,
+        validationResults,
+      };
+    }
+
+    return {
+      kind: 'agents',
+      agentsToResume: eligible.map((target) => ({
+        ...target,
+        reason: 'missing_validation_result',
+      })),
+      implementationReady,
+      validationResults,
+    };
+  }
+
+  _buildCleanResumePlan(clusterId, cluster) {
+    const interrupted = this._findInterruptedResumeTargets(clusterId, cluster);
+    if (interrupted.invalid.length > 0) {
+      const missingContext = interrupted.invalid.some(
+        (entry) => entry.reason === 'missing_durable_context'
+      );
+      return {
+        kind: 'failure',
+        error: missingContext
+          ? `Cannot resume cluster ${clusterId}: interrupted work has no durable workflow context. ` +
+            `No agents were started and the preserved cluster remains stopped. ` +
+            `Inspect it with 'zeroshot export ${clusterId}' before repairing its persisted state; do not launch a duplicate run.`
+          : `Cannot resume cluster ${clusterId}: persisted interrupted-task state is ambiguous. ` +
+            `No agents were started; inspect failureInfo for reconstruction details.`,
+        details: {
+          reason: missingContext ? 'missing_workflow_history' : 'ambiguous_interrupted_task',
+          interrupted: interrupted.invalid,
+        },
+      };
+    }
+
+    const lastTrigger = this._findLastDurableWorkflowTrigger(cluster, clusterId);
+    const partialValidation = this._findPartialValidationTargets(clusterId, cluster, lastTrigger);
+    if (partialValidation?.kind === 'failure') {
+      return {
+        kind: 'failure',
+        error:
+          `Cannot resume cluster ${clusterId}: validators ${partialValidation.missingAgentIds.join(
+            ', '
+          )} are missing results, but not every missing validator has an eligible IMPLEMENTATION_READY handler. ` +
+          `No agents were started.`,
+        details: {
+          reason: 'partial_validation_handlers_ineligible',
+          missingAgentIds: partialValidation.missingAgentIds,
+          matchingAgentIds: partialValidation.matchingAgentIds,
+        },
+      };
+    }
+
+    if (interrupted.targets.length > 0) {
+      const interruptedValidators = interrupted.targets.filter(
+        ({ agent }) => agent.role === 'validator'
+      );
+      if (interruptedValidators.length > 0 && partialValidation?.kind !== 'agents') {
+        return {
+          kind: 'failure',
+          error:
+            `Cannot resume cluster ${clusterId}: interrupted validator state does not match an active validation cycle. ` +
+            `No agents were started.`,
+          details: {
+            reason: 'ambiguous_validation_cycle',
+            interruptedAgentIds: interruptedValidators.map(({ agent }) => agent.id),
+          },
+        };
+      }
+
+      const targets =
+        interruptedValidators.length > 0 ? partialValidation.agentsToResume : interrupted.targets;
+      return {
+        kind: 'agents',
+        reason: interruptedValidators.length > 0 ? 'partial_validation' : 'interrupted_tasks',
+        agentsToResume: targets,
+        lastTrigger,
+        durableMessages: this._collectDurableResumeContext(
+          cluster,
+          clusterId,
+          targets.map(({ message }) => message)
+        ),
+      };
+    }
+
+    if (partialValidation?.kind === 'agents') {
+      return {
+        kind: 'agents',
+        reason: 'partial_validation',
+        agentsToResume: partialValidation.agentsToResume,
+        lastTrigger,
+        durableMessages: this._collectDurableResumeContext(
+          cluster,
+          clusterId,
+          partialValidation.validationResults
+        ),
+      };
+    }
+
+    if (!lastTrigger) {
+      const issueMessage = cluster.messageBus.findLast({
+        cluster_id: clusterId,
+        topic: 'ISSUE_OPENED',
+      });
+      if (issueMessage) {
+        return {
+          kind: 'bootstrap',
+          reason: 'missing_workflow_trigger',
+          issueMessage,
+          agentsToResume: [],
+          lastTrigger: null,
+          durableMessages: [issueMessage],
+        };
+      }
+
+      return {
+        kind: 'failure',
+        error:
+          `Cannot resume cluster ${clusterId}: no workflow trigger or ISSUE_OPENED message exists. ` +
+          `No agents were started and the preserved cluster remains stopped. ` +
+          `Inspect it with 'zeroshot export ${clusterId}' before repairing its persisted state; do not launch a duplicate run.`,
+        details: { reason: 'missing_workflow_history' },
+      };
+    }
+
+    const selection = this._selectAgentsToResume(cluster, lastTrigger);
+    if (selection.eligible.length > 0) {
+      return {
+        kind: 'agents',
+        reason: 'eligible_handlers',
+        agentsToResume: selection.eligible,
+        lastTrigger,
+        durableMessages: this._collectDurableResumeContext(
+          cluster,
+          clusterId,
+          selection.eligible.map(({ message }) => message)
+        ),
+      };
+    }
+
+    const matchingAgentIds = selection.matching.map(({ agent }) => agent.id);
+    if (matchingAgentIds.length > 0) {
+      return {
+        kind: 'failure',
+        error:
+          `Cannot resume cluster ${clusterId}: trigger ${lastTrigger.topic} is registered by ` +
+          `${matchingAgentIds.join(', ')}, but no handler is currently eligible and no interrupted task can be reconstructed. ` +
+          `No agents were started.`,
+        details: {
+          reason: 'registered_handlers_ineligible',
+          trigger: lastTrigger.topic,
+          matchingAgentIds,
+        },
+      };
+    }
+
+    return {
+      kind: 'failure',
+      error:
+        `Cannot resume cluster ${clusterId}: no restored agent registers trigger ${lastTrigger.topic}. ` +
+        `No agents were started; check the persisted agent configuration.`,
+      details: {
+        reason: 'unhandled_trigger',
+        trigger: lastTrigger.topic,
+      },
+    };
+  }
+
+  async _failResumeReconstruction(clusterId, cluster, plan) {
+    cluster.state = 'stopped';
+    cluster.pid = null;
+    cluster.failureInfo = {
+      type: 'resume_reconstruction',
+      error: plan.error,
+      ...plan.details,
+      timestamp: Date.now(),
+    };
+    await this._saveClusters();
+
+    const error = new Error(plan.error);
+    error.code = 'RESUME_RECONSTRUCTION_FAILED';
+    throw error;
+  }
+
+  _clearTransientAgentState(cluster) {
+    for (const agent of cluster.agents) {
+      agent.currentTask = null;
+      agent.currentTaskId = null;
+      agent.processPid = null;
+      agent._currentExecution = null;
+      agent.state = 'idle';
+    }
   }
 
   _resumeAgents(agentsToResume, context) {
@@ -2855,15 +3254,16 @@ class Orchestrator {
     };
   }
 
-  async _resumeCleanCluster(clusterId, cluster, recentMessages, prompt) {
+  async _resumeCleanCluster(clusterId, cluster, recentMessages, prompt, plan) {
     this._log(`[Orchestrator] Resuming stopped cluster ${clusterId} (no failure)`);
 
     const context = this._buildResumeContext(recentMessages, prompt, {
       header: 'Resuming cluster from previous session.',
       topics: ['AGENT_OUTPUT', 'VALIDATION_RESULT', 'ISSUE_OPENED'],
+      durableMessages: plan.durableMessages,
     });
 
-    const lastTrigger = this._findLastWorkflowTrigger(recentMessages);
+    const lastTrigger = plan.lastTrigger;
     if (lastTrigger) {
       this._log(
         `[Orchestrator] Last workflow trigger: ${lastTrigger.topic} (${new Date(lastTrigger.timestamp).toISOString()})`
@@ -2872,31 +3272,16 @@ class Orchestrator {
       this._log(`[Orchestrator] No workflow triggers found in ledger`);
     }
 
-    const agentsToResume = lastTrigger ? this._selectAgentsToResume(cluster, lastTrigger) : [];
-    if (agentsToResume.length === 0) {
-      if (!lastTrigger) {
-        this._log(
-          `[Orchestrator] WARNING: No workflow triggers in ledger. Cluster may not have started properly.`
-        );
-        this._log(`[Orchestrator] Publishing ISSUE_OPENED to bootstrap workflow...`);
-
-        if (!this._republishIssue(cluster, clusterId, recentMessages)) {
-          throw new Error(
-            `Cannot resume cluster ${clusterId}: No workflow triggers found and no ISSUE_OPENED message. ` +
-              `The cluster may not have started properly. Try: zeroshot run <issue> instead.`
-          );
-        }
-      } else {
-        throw new Error(
-          `Cannot resume cluster ${clusterId}: Found trigger ${lastTrigger.topic} but no agents handle it. ` +
-            `Check agent trigger configurations.`
-        );
-      }
+    const agentsToResume = plan.agentsToResume;
+    if (plan.kind === 'bootstrap') {
+      this._log(`[Orchestrator] Publishing ISSUE_OPENED to bootstrap workflow...`);
+      this._republishIssue(cluster, clusterId, [plan.issueMessage]);
     } else {
       this._log(`[Orchestrator] Resuming ${agentsToResume.length} agent(s) based on ledger state`);
       this._resumeAgents(agentsToResume, context);
     }
 
+    cluster.failureInfo = null;
     await this._saveClusters();
     this._log(`[Orchestrator] Cluster ${clusterId} resumed`);
 

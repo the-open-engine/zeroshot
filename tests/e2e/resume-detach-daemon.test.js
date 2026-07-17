@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const Ledger = require('../../src/ledger');
 
 const {
   setupE2ERepo,
@@ -21,11 +22,18 @@ const {
   CLI_ENTRY,
   readCluster,
   clustersFilePath,
+  clusterDbPath,
+  readLedgerMessages,
   worktreePath,
   scenarioPath,
 } = require('./helpers/e2e-harness');
 
 const CONFIG_PATH = path.join(__dirname, 'fixtures', 'single-worker-config.json');
+const PARTIAL_VALIDATION_CONFIG_PATH = path.join(
+  __dirname,
+  'fixtures',
+  'resume-partial-validation-config.json'
+);
 
 function pollUntil(predicate, timeoutMs, intervalMs = 200) {
   const start = Date.now();
@@ -58,6 +66,100 @@ function overwriteClusterRecord(env, clusterId, patch) {
   fs.writeFileSync(file, JSON.stringify(clusters, null, 2));
 }
 
+function appendLedgerMessage(ledger, clusterId, topic, sender, data = {}) {
+  ledger.append({
+    cluster_id: clusterId,
+    topic,
+    sender,
+    receiver: 'broadcast',
+    content: {
+      text: `${sender}: ${topic}`,
+      data,
+    },
+  });
+}
+
+function seedPartialValidationState(env, clusterId) {
+  const ledger = new Ledger(clusterDbPath(env, clusterId));
+  try {
+    appendLedgerMessage(ledger, clusterId, 'IMPLEMENTATION_READY', 'worker');
+    appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'validator-requirements', {
+      event: 'TASK_STARTED',
+      agent: 'validator-requirements',
+      role: 'validator',
+      state: 'executing_task',
+      iteration: 3,
+      triggeredBy: 'IMPLEMENTATION_READY',
+    });
+    appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'validator-requirements', {
+      event: 'TASK_ID_ASSIGNED',
+      agent: 'validator-requirements',
+      role: 'validator',
+      state: 'executing_task',
+      taskId: 'interrupted-validator-task',
+    });
+    appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'validator-code', {
+      event: 'TASK_STARTED',
+      agent: 'validator-code',
+      role: 'validator',
+      state: 'executing_task',
+      iteration: 3,
+    });
+    appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'validator-code', {
+      event: 'TASK_COMPLETED',
+      agent: 'validator-code',
+      role: 'validator',
+      state: 'idle',
+      iteration: 3,
+      taskId: 'completed-validator-task',
+    });
+    appendLedgerMessage(ledger, clusterId, 'VALIDATION_RESULT', 'validator-code', {
+      approved: false,
+      errors: ['repair this'],
+    });
+  } finally {
+    ledger.close();
+  }
+
+  const cluster = readCluster(env, clusterId);
+  const agentStates = cluster.agentStates.map((agent) => {
+    if (agent.id === 'validator-requirements') {
+      return {
+        ...agent,
+        state: 'executing_task',
+        iteration: 3,
+        currentTask: false,
+        currentTaskId: 'interrupted-validator-task',
+        processPid: 4242,
+      };
+    }
+    if (agent.id === 'validator-code') {
+      return {
+        ...agent,
+        state: 'idle',
+        iteration: 3,
+        currentTask: false,
+        currentTaskId: 'completed-validator-task',
+        processPid: null,
+      };
+    }
+    return { ...agent, state: 'idle', currentTask: false };
+  });
+
+  overwriteClusterRecord(env, clusterId, {
+    state: 'stopped',
+    pid: null,
+    failureInfo: null,
+    agentStates,
+  });
+}
+
+function countLifecycleEvents(env, clusterId, agentId, event) {
+  return readLedgerMessages(env, clusterId, 'AGENT_LIFECYCLE').filter(
+    (message) => message.sender === agentId && message.content?.data?.event === event
+  ).length;
+}
+
 describe('e2e: resume --detach daemon handoff', function () {
   this.timeout(60000);
 
@@ -70,6 +172,90 @@ describe('e2e: resume --detach daemon handoff', function () {
   afterEach(() => {
     cleanupE2ERepo(env);
   });
+
+  for (const detached of [false, true]) {
+    const mode = detached ? 'detached' : 'foreground';
+    it(`recovers partial validation exactly once in ${mode} mode`, async function () {
+      const issueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-e2e-issue-'));
+      const issuePath = path.join(issueDir, 'feature.md');
+      fs.writeFileSync(issuePath, '# Repair validation\n\nAddress the rejected findings.\n');
+
+      const clusterId = `e2e-partial-validation-${mode}`;
+      const initialRun = runZeroshot(
+        env,
+        ['run', issuePath, '--worktree', '--config', PARTIAL_VALIDATION_CONFIG_PATH],
+        {
+          ZEROSHOT_CLUSTER_ID: clusterId,
+          FAKE_AGENT_SCENARIO: scenarioPath('validator-approve'),
+          timeout: 30000,
+        }
+      );
+      assert.strictEqual(
+        initialRun.status,
+        0,
+        `initial fixture run failed\nSTDOUT:\n${initialRun.stdout}\nSTDERR:\n${initialRun.stderr}`
+      );
+      assert.strictEqual(readCluster(env, clusterId)?.state, 'stopped');
+
+      seedPartialValidationState(env, clusterId);
+      const completionCountBeforeResume = readLedgerMessages(
+        env,
+        clusterId,
+        'CLUSTER_COMPLETE'
+      ).length;
+      const resumeArgs = ['resume', clusterId];
+      if (detached) {
+        resumeArgs.push('-d');
+      }
+      const resumed = runZeroshot(env, resumeArgs, {
+        FAKE_AGENT_SCENARIO: scenarioPath('worker-success'),
+        FAKE_AGENT_SCENARIO_VALIDATOR_REQUIREMENTS: scenarioPath('validator-approve'),
+        FAKE_AGENT_SCENARIO_WORKER: scenarioPath('worker-success'),
+        timeout: 30000,
+      });
+      assert.strictEqual(
+        resumed.status,
+        0,
+        `${mode} resume failed\nSTDOUT:\n${resumed.stdout}\nSTDERR:\n${resumed.stderr}`
+      );
+
+      if (detached) {
+        await pollUntil(
+          () =>
+            readLedgerMessages(env, clusterId, 'CLUSTER_COMPLETE').length ===
+            completionCountBeforeResume + 1,
+          30000
+        );
+      }
+      await pollUntil(() => readCluster(env, clusterId)?.state === 'stopped', 30000);
+
+      const validationResults = readLedgerMessages(env, clusterId, 'VALIDATION_RESULT');
+      assert.strictEqual(validationResults.length, 2);
+      assert.strictEqual(
+        validationResults.filter((message) => message.sender === 'validator-code').length,
+        1
+      );
+      assert.strictEqual(
+        validationResults.filter((message) => message.sender === 'validator-requirements').length,
+        1
+      );
+      assert.strictEqual(countLifecycleEvents(env, clusterId, 'validator-code', 'TASK_STARTED'), 1);
+      assert.strictEqual(
+        countLifecycleEvents(env, clusterId, 'validator-requirements', 'TASK_STARTED'),
+        2
+      );
+      assert.strictEqual(countLifecycleEvents(env, clusterId, 'worker', 'TASK_STARTED'), 1);
+      assert.strictEqual(
+        readLedgerMessages(env, clusterId, 'CLUSTER_COMPLETE').length,
+        completionCountBeforeResume + 1,
+        'worker repair completion must be emitted exactly once'
+      );
+      assert.ok(
+        fs.existsSync(path.join(worktreePath(env, clusterId), 'implementation.txt')),
+        'recovered worker must execute in the preserved worktree'
+      );
+    });
+  }
 
   it('recovers a zombie (state=running, dead pid) via a real detached daemon without a manual stop', async function () {
     const issueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-e2e-issue-'));

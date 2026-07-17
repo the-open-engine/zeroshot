@@ -1,0 +1,102 @@
+{
+  "agents": [
+    {
+      "id": "bootstrap",
+      "role": "planning",
+      "timeout": 0,
+      "triggers": [{ "topic": "ISSUE_OPENED", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=bootstrap Persist the resumable test cluster.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "FIXTURE_READY",
+            "content": { "text": "Initial fixture persisted." }
+          }
+        }
+      }
+    },
+    {
+      "id": "worker",
+      "role": "implementation",
+      "timeout": 0,
+      "triggers": [
+        {
+          "topic": "VALIDATION_RESULT",
+          "logic": {
+            "engine": "javascript",
+            "script": "const validators = cluster.getAgentsByRole('validator');\nconst lastPush = ledger.findLast({ topic: 'IMPLEMENTATION_READY' });\nif (!lastPush) return false;\nconst responses = ledger.query({ topic: 'VALIDATION_RESULT', since: lastPush.timestamp });\nconst validatorIds = new Set(validators.map((validator) => validator.id));\nconst latestByValidator = new Map();\nfor (const response of responses) {\n  if (validatorIds.has(response.sender)) latestByValidator.set(response.sender, response);\n}\nif (latestByValidator.size < validators.length) return false;\nreturn Array.from(latestByValidator.values()).some((response) => response.content?.data?.approved === false || response.content?.data?.approved === 'false');"
+          },
+          "action": "execute_task"
+        }
+      ],
+      "prompt": "FAKE_AGENT_ID=worker Repair rejected validation findings.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "WORKER_REPAIRED",
+            "content": { "text": "Validation findings repaired." }
+          }
+        }
+      }
+    },
+    {
+      "id": "finisher",
+      "role": "completion",
+      "timeout": 0,
+      "triggers": [
+        { "topic": "FIXTURE_READY", "action": "execute_task" },
+        { "topic": "WORKER_REPAIRED", "action": "execute_task" }
+      ],
+      "prompt": "FAKE_AGENT_ID=finisher Stop the completed test cluster.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "CLUSTER_COMPLETE",
+            "content": { "text": "Test workflow completed." }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-requirements",
+      "role": "validator",
+      "timeout": 0,
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=validator-requirements Validate requirements.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "Requirements approved.",
+              "data": { "approved": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "validator-code",
+      "role": "validator",
+      "timeout": 0,
+      "triggers": [{ "topic": "IMPLEMENTATION_READY", "action": "execute_task" }],
+      "prompt": "FAKE_AGENT_ID=validator-code Validate code.",
+      "hooks": {
+        "onComplete": {
+          "action": "publish_message",
+          "config": {
+            "topic": "VALIDATION_RESULT",
+            "content": {
+              "text": "Code rejected.",
+              "data": { "approved": false }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
