@@ -47,10 +47,13 @@ filesystem paths, commands, or launch flags. The production deployment registry 
 worktree, Docker, PR, or ship isolation. A missing, unknown, or non-isolated profile fails before
 the engine allocates a ledger, worktree, or container.
 
-Artifact resolvers stage declared input receipts into an internal read-only manifest. Artifact
-receipt sinks convert declared durable output to canonical byte-free receipts. Without a sink,
-successful output contains an empty artifact list. Raw provider and agent output remains engine
-diagnostic data and never enters the stable result.
+Artifact input fails before allocation unless the embedding product injects a real resolver. After
+the engine allocates the worktree or Docker workspace but before any agent starts, that resolver
+materializes declared receipts as read-only content inside the allocated isolation and returns an
+engine-private, byte-free manifest. Echoing receipts without making their content readable is not a
+resolver. Artifact receipt sinks convert declared durable output to canonical byte-free receipts.
+Without a sink, successful output contains an empty artifact list. Raw provider and agent output
+remains engine diagnostic data and never enters the stable result.
 
 ## Lifecycle and termination
 
@@ -64,7 +67,15 @@ stop race under one terminal latch. The first accepted authority is immutable; l
 change the receipt or emit another terminal event. Profile resolution, artifact staging, engine
 start, and artifact receipt collection all remain within that deadline and can be preempted by
 explicit stop. Completion becomes authoritative only after its canonical receipt has been bounded
-and validated, so a stalled receipt sink cannot suppress timeout or stop.
+and validated, so a stalled receipt sink cannot suppress timeout or stop. Profile resolution,
+artifact staging, and receipt collection receive one cancellation signal. If an injected operation
+ignores that signal and completes late, its registry `release` or port `cleanup` hook retains
+resource ownership and runs after the terminal receipt is fixed. A late operation or cleanup
+failure is reported through the injected cleanup-failure reporter, or as a process warning when no
+reporter is configured; it is never silently discarded or allowed to rewrite terminal truth.
+
+A synchronous pre-allocation rejection leaves the facade idle and releases its one-start claim.
+`stop()` and `result()` then reject as not started, and the caller may retry with a valid request.
 
 `stop()` delegates to the engine stop path and waits no longer than the deployment profile's
 shutdown deadline. It reports `effective: false` when the engine rejects or does not acknowledge

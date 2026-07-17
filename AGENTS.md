@@ -40,7 +40,7 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Provider detection          | `lib/provider-detection.js`                                          |
 | Provider capabilities       | `src/providers/capabilities.js`                                      |
 | Start-cluster helper        | `lib/start-cluster.js`                                               |
-| Legacy worker facade        | `lib/cluster-worker/`                                                 |
+| Legacy worker facade        | `lib/cluster-worker/`                                                |
 | Legacy worker executable    | `bin/zeroshot-cluster-worker.js`                                     |
 | Docker mounts/env           | `lib/docker-config.js`                                               |
 | Container lifecycle         | `src/isolation-manager.js`                                           |
@@ -152,6 +152,11 @@ Profile resolution, artifact staging, engine start, and receipt collection remai
 the registry execution bound; stop may win before engine allocation. A caller shutdown deadline
 bounds stop acknowledgement, not cleanup ownership: the engine adapter must still stop a cluster
 that allocates late while start remains pending.
+Artifact input has no echo-only default resolver. The current engine allocates isolation first,
+then runs the injected resolver before agents start; the resolver must materialize read-only content
+inside that workspace. Cancelled profile, staging, and receipt operations retain late cleanup
+ownership through their injected `release`/`cleanup` hooks. Late operation and cleanup failures must
+reach the cleanup-failure reporter (default: process warning); never detach them with an empty catch.
 
 ## CLI Quick Reference
 

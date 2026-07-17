@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   createLegacyClusterWorker,
   createDeploymentProfileRegistry,
@@ -10,8 +12,17 @@ const { runClusterWorkerExecutable } = require('../../../lib/cluster-worker/exec
 let currentEventSink = null;
 
 const engineAdapter = Object.freeze({
-  start({ request, clusterId, onEvent }) {
+  async start({ request, clusterId, onEvent, prepareArtifacts }) {
     currentEventSink = onEvent;
+    if (request.source === 'artifact') {
+      await prepareArtifacts(
+        Object.freeze({
+          kind: 'worktree',
+          hostRoot: process.cwd(),
+          runtimeRoot: process.cwd(),
+        })
+      );
+    }
     const scenario = request.source === 'prompt' ? request.prompt : request.source;
     if (scenario === 'success' || scenario === 'artifact') {
       setImmediate(() => onEvent({ type: 'complete', summary: `${scenario} complete` }));
@@ -25,7 +36,7 @@ const engineAdapter = Object.freeze({
         })
       );
     }
-    return { clusterId };
+    return { clusterId, artifactsStaged: true };
   },
   status() {
     return { state: currentEventSink ? 'running' : 'idle' };
@@ -43,6 +54,28 @@ const worker = createLegacyClusterWorker({
     },
     bounds: { executionMs: 25, shutdownMs: 25, frameBytes: 4096 },
   }),
+  artifactResolver: {
+    stage(artifacts, { isolation }) {
+      const artifactDirectory = path.join(isolation.hostRoot, '.openengine', 'artifacts');
+      fs.mkdirSync(artifactDirectory, { recursive: true });
+      const artifactPath = path.join(artifactDirectory, `${artifacts[0].artifactId}.txt`);
+      fs.writeFileSync(artifactPath, 'hello', { mode: 0o400 });
+      fs.chmodSync(artifactPath, 0o400);
+      return {
+        artifacts: [
+          {
+            artifactId: artifacts[0].artifactId,
+            path: path.join(
+              isolation.runtimeRoot,
+              '.openengine',
+              'artifacts',
+              path.basename(artifactPath)
+            ),
+          },
+        ],
+      };
+    },
+  },
   engineAdapter,
   idFactory: () => 'fake-cluster-1',
 });

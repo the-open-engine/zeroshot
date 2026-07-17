@@ -256,6 +256,7 @@ function registerWorktreeCleanupTest() {
 function registerAgentExecutionTests() {
   describe('Agent Execution in Worktree', function () {
     registerAgentExecutionCwdTest();
+    registerPreparedArtifactInputTest();
     registerAgentExecutionLedgerTest();
   });
 }
@@ -279,6 +280,48 @@ function registerAgentExecutionCwdTest() {
 
     const calls = mockRunner.getCalls('worker');
     assert(calls[0].context.includes('Test task'), 'Context should include task text');
+  });
+}
+
+function registerPreparedArtifactInputTest() {
+  it('stages prepared input inside isolation before the fake agent reads it', async function () {
+    const artifactContent = 'registry-owned artifact contents';
+    let stagedPath;
+    mockRunner.when('worker').calls((context) => {
+      const pathMatch = context.match(/ARTIFACT_PATH=(.+)/);
+      assert(pathMatch, 'Fake agent context should contain the staged artifact path');
+      const runtimePath = pathMatch[1].trim();
+      assert.strictEqual(runtimePath, stagedPath);
+      assert.strictEqual(fs.readFileSync(runtimePath, 'utf8'), artifactContent);
+      assert.strictEqual(
+        fs.statSync(runtimePath).mode & 0o222,
+        0,
+        'Staged artifact must be read-only'
+      );
+      return { success: true, output: '{"done":true}', error: null };
+    });
+
+    const result = await orchestrator.start(
+      simpleConfig,
+      { text: 'Artifact preparation pending' },
+      {
+        worktree: true,
+        cwd: testRepoDir,
+        prepareIsolatedInput({ isolation }) {
+          assert.strictEqual(isolation.kind, 'worktree');
+          assert.strictEqual(isolation.hostRoot, isolation.runtimeRoot);
+          const artifactDirectory = path.join(isolation.hostRoot, '.openengine', 'artifacts');
+          fs.mkdirSync(artifactDirectory, { recursive: true });
+          stagedPath = path.join(artifactDirectory, 'artifact-1.txt');
+          fs.writeFileSync(stagedPath, artifactContent, { mode: 0o400 });
+          fs.chmodSync(stagedPath, 0o400);
+          return `Read the staged artifact before completing.\nARTIFACT_PATH=${stagedPath}`;
+        },
+      }
+    );
+
+    await waitForClusterState(orchestrator, result.id, 'stopped', 30000);
+    mockRunner.assertCalled('worker', 1);
   });
 }
 

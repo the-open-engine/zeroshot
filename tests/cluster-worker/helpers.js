@@ -36,10 +36,23 @@ function fakeEngine() {
   return {
     calls,
     adapter: Object.freeze({
-      start(value) {
-        calls.starts.push(value);
+      async start(value) {
         onEvent = value.onEvent;
-        return { clusterId: value.clusterId };
+        const artifactManifest =
+          value.request.source === 'artifact'
+            ? await value.prepareArtifacts(
+                Object.freeze({
+                  kind: 'worktree',
+                  hostRoot: '/isolated/worktree',
+                  runtimeRoot: '/isolated/worktree',
+                })
+              )
+            : { artifacts: [] };
+        calls.starts.push({ ...value, artifactManifest });
+        return {
+          clusterId: value.clusterId,
+          artifactsStaged: value.request.source !== 'artifact' || Boolean(artifactManifest),
+        };
       },
       status() {
         calls.statuses += 1;

@@ -102,26 +102,69 @@ export type ResolvedDeploymentProfile = Readonly<{
   bounds: ExecutionBounds;
 }>;
 
+export type CancellationContext = Readonly<{ signal: AbortSignal }>;
+
+export type CleanupFailure = Readonly<{
+  phase: 'profile_resolution' | 'artifact_staging' | 'receipt_collection';
+  kind: 'operation' | 'cleanup';
+  clusterId: string | null;
+  error: unknown;
+}>;
+
+export type IsolationWorkspace = Readonly<{
+  kind: 'worktree' | 'docker';
+  hostRoot: string;
+  runtimeRoot: string;
+}>;
+
 export interface DeploymentProfileRegistry {
   readonly bounds?: ExecutionBounds;
   resolve(
     isolationProfile: string,
-    providerProfile: string
+    providerProfile: string,
+    context: CancellationContext
   ): ResolvedDeploymentProfile | Promise<ResolvedDeploymentProfile>;
+  release?(profile: ResolvedDeploymentProfile, context: CancellationContext): void | Promise<void>;
 }
 
 export interface ArtifactResolver {
   stage(
     artifacts: readonly ArtifactRef[],
-    context: Readonly<{ clusterId: string; profile: ResolvedDeploymentProfile }>
+    context: Readonly<{
+      clusterId: string;
+      profile: ResolvedDeploymentProfile;
+      isolation: IsolationWorkspace;
+      signal: AbortSignal;
+    }>
   ): Readonly<Record<string, unknown>> | Promise<Readonly<Record<string, unknown>>>;
+  cleanup?(
+    manifest: Readonly<Record<string, unknown>>,
+    context: Readonly<{
+      clusterId: string;
+      profile: ResolvedDeploymentProfile;
+      isolation: IsolationWorkspace;
+      signal: AbortSignal;
+    }>
+  ): void | Promise<void>;
 }
 
 export interface ArtifactReceiptSink {
   collect(
     declared: readonly unknown[],
-    context: Readonly<{ clusterId: string; profile: ResolvedDeploymentProfile }>
+    context: Readonly<{
+      clusterId: string;
+      profile: ResolvedDeploymentProfile;
+      signal: AbortSignal;
+    }>
   ): readonly ArtifactRef[] | Promise<readonly ArtifactRef[]>;
+  cleanup?(
+    receipts: readonly ArtifactRef[],
+    context: Readonly<{
+      clusterId: string;
+      profile: ResolvedDeploymentProfile;
+      signal: AbortSignal;
+    }>
+  ): void | Promise<void>;
 }
 
 export type EngineEvent =
@@ -137,10 +180,12 @@ export interface EngineAdapter {
   start(input: {
     request: LegacyShipRequest;
     profile: ResolvedDeploymentProfile;
-    artifactManifest: Readonly<Record<string, unknown>>;
+    prepareArtifacts?(isolation: IsolationWorkspace): Promise<Readonly<Record<string, unknown>>>;
     clusterId: string;
     onEvent(event: EngineEvent): void;
-  }): { clusterId?: string } | Promise<{ clusterId?: string }>;
+  }):
+    | { clusterId?: string; artifactsStaged?: boolean }
+    | Promise<{ clusterId?: string; artifactsStaged?: boolean }>;
   status?(): Readonly<Record<string, unknown>> | null;
   stop(): { effective?: boolean } | Promise<{ effective?: boolean }>;
 }
@@ -156,6 +201,7 @@ export type LegacyClusterWorkerDependencies = {
     clearTimeout(handle: unknown): void;
   };
   idFactory?: () => string;
+  cleanupFailureReporter?: (failure: CleanupFailure) => void | Promise<void>;
 };
 
 export interface LegacyClusterWorker {

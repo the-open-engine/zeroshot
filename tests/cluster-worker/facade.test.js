@@ -198,33 +198,6 @@ describe('legacy cluster worker facade', () => {
     assert.strictEqual(engine.calls.starts.length, 0);
   });
 
-  it('stages artifact receipts and emits only receipt-sink outputs', async () => {
-    const engine = fakeEngine();
-    let staged;
-    const worker = workerWith(engine, {
-      artifactResolver: {
-        stage(artifacts) {
-          staged = artifacts;
-          return { artifacts, internal: 'read-only-staging-handle' };
-        },
-      },
-      artifactReceiptSink: {
-        collect() {
-          return [ARTIFACT];
-        },
-      },
-    });
-    await worker.start(request('artifact'));
-    assert.deepStrictEqual(staged, [ARTIFACT]);
-    assert.ok(Object.isFrozen(engine.calls.starts[0].artifactManifest));
-    engine.emit({
-      type: 'complete',
-      summary: 'artifact output complete',
-      artifacts: [{ bytes: 'engine-private' }],
-    });
-    assert.deepStrictEqual((await worker.result()).result.artifacts, [ARTIFACT]);
-  });
-
   it('makes timeout the single terminal authority and requests engine stop', async () => {
     const engine = fakeEngine();
     let timerCallback;
