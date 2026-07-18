@@ -2242,13 +2242,16 @@ describe('Orchestrator - Edge Cases', function () {
     const config = loadFixture('single-worker.json');
     mockRunner.when('worker').returns({ done: true });
 
-    await orchestrator.start(config, { text: 'Task' });
+    const result = await orchestrator.start(config, { text: 'Task' });
+    const cluster = orchestrator.getCluster(result.id);
 
     // Close orchestrator
     orchestrator.close();
 
     // Verify: closed flag set
     assert.strictEqual(orchestrator.closed, true, 'Orchestrator should be closed');
+    assert.strictEqual(cluster.messageBus._closed, true, 'Message bus should be closed');
+    assert.strictEqual(cluster.ledger._closed, true, 'Ledger should be closed');
 
     // _saveClusters should be a no-op now (prevents race conditions)
     // No assertion needed - just verify it doesn't throw

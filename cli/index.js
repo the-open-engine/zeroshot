@@ -3248,10 +3248,12 @@ program
   .description('Resume a failed task or cluster')
   .option('-d, --detach', 'Resume in background (daemon mode)')
   .action(async (id, prompt, options) => {
+    let orchestrator = null;
+    let keepOrchestratorOpen = false;
     try {
       // Try cluster first, then task (both use same ID format: "adjective-noun-number")
       const OrchestratorModule = require('../src/orchestrator');
-      const orchestrator = await OrchestratorModule.create();
+      orchestrator = await OrchestratorModule.create();
 
       // Check if cluster exists
       const cluster = orchestrator.getCluster(id);
@@ -3356,6 +3358,7 @@ program
         // === DAEMON MODE: stay alive in the background, let signals stop the cluster ===
         if (isResumeDaemon) {
           setupDaemonCleanup(orchestrator, id);
+          keepOrchestratorOpen = true;
           console.log('');
           console.log(chalk.dim(`Follow logs with: zeroshot logs ${id} -f`));
           return;
@@ -3474,7 +3477,11 @@ program
       }
     } catch (error) {
       console.error(chalk.red('Error resuming:'), error.message);
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (orchestrator && !keepOrchestratorOpen) {
+        orchestrator.close();
+      }
     }
   });
 

@@ -440,6 +440,19 @@ Fix: added `onComplete` publish of `CLUSTER_COMPLETE` in
 `src/agents/git-pusher-agent.json`.
 Test: `tests/integration/orchestrator-flow.test.js`.
 
+### Foreground Resume Exit Delay (2026-07-17)
+
+Bug: foreground `zeroshot resume` could print cluster completion but remain alive until a
+five-second task-shutdown timer expired.
+
+Root cause: agent shutdown raced in-flight execution against a bounded timeout without clearing the
+losing timer, and the resume CLI omitted the foreground orchestrator cleanup used by `run`.
+
+Fix: clear the bounded-wait timer, close non-daemon resume orchestrators in `finally`, and make
+orchestrator close release snapshotter, message-bus, and ledger resources.
+Tests: `tests/unit/agent-lifecycle-stop.test.js` and
+`tests/e2e/resume-detach-daemon.test.js`.
+
 ## Enforcement Philosophy
 
 **ENFORCE > DOCUMENT. If enforceable, don't document.**

@@ -18,6 +18,7 @@ const {
   setupE2ERepo,
   cleanupE2ERepo,
   runZeroshot,
+  runZeroshotUntilNaturalExit,
   buildEnv,
   CLI_ENTRY,
   readCluster,
@@ -207,17 +208,30 @@ describe('e2e: resume --detach daemon handoff', function () {
       if (detached) {
         resumeArgs.push('-d');
       }
-      const resumed = runZeroshot(env, resumeArgs, {
+      const resumeEnv = {
         FAKE_AGENT_SCENARIO: scenarioPath('worker-success'),
         FAKE_AGENT_SCENARIO_VALIDATOR_REQUIREMENTS: scenarioPath('validator-approve'),
         FAKE_AGENT_SCENARIO_WORKER: scenarioPath('worker-success'),
-        timeout: 30000,
-      });
+        // Validator recovery includes deliberate 0-15s jitter plus three
+        // sequential fake tasks. Process-exit latency is asserted separately.
+        timeout: detached ? 30000 : 60000,
+      };
+      const resumed = detached
+        ? runZeroshot(env, resumeArgs, resumeEnv)
+        : await runZeroshotUntilNaturalExit(
+            env,
+            resumeArgs,
+            resumeEnv,
+            `Cluster ${clusterId} completed.`
+          );
       assert.strictEqual(
         resumed.status,
         0,
         `${mode} resume failed\nSTDOUT:\n${resumed.stdout}\nSTDERR:\n${resumed.stderr}`
       );
+      if (!detached) {
+        assert.notStrictEqual(resumed.completionToExitMs, null);
+      }
 
       if (detached) {
         await pollUntil(
