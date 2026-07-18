@@ -1597,21 +1597,87 @@ function reportNoActiveAgents(status, id) {
   }
 }
 
-function printAttachableAgentList(id, activeAgents) {
-  console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
-  for (const agent of activeAgents) {
-    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
-    if (agent.currentTaskId) {
-      console.log(
-        `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
-      );
-      console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
-    } else {
-      console.log(`  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow('starting...')}`);
-      console.log(chalk.dim(`    (task ID not yet assigned, try again in a moment)`));
-    }
+async function inspectAgentAttachment(agent, socketDiscovery, readTask = readTaskFromDisk) {
+  if (!agent.currentTaskId) {
+    return { agent, state: 'starting', task: null, socketPath: null };
   }
-  console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
+
+  const task = await readTask(agent.currentTaskId);
+  if (task?.pid && !task.attachable) {
+    return { agent, state: 'non_attachable', task, socketPath: null };
+  }
+
+  const socketPath = task?.socketPath || socketDiscovery.getTaskSocketPath(agent.currentTaskId);
+  if (await socketDiscovery.isSocketAlive(socketPath)) {
+    return { agent, state: 'attachable', task, socketPath };
+  }
+  return { agent, state: 'unavailable', task, socketPath };
+}
+
+function printLiveAttachableAgents(attachments) {
+  for (const { agent } of attachments) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    console.log(
+      `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}`
+    );
+    console.log(chalk.dim(`    zeroshot attach ${agent.currentTaskId}`));
+  }
+}
+
+function printNonAttachableAgents(id, attachments) {
+  if (attachments.length === 0) {
+    return;
+  }
+
+  console.log(chalk.yellow('\nRunning without PTY attach support:'));
+  for (const { agent, task } of attachments) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    const providerLabel = task?.provider ? chalk.dim(` [provider: ${task.provider}]`) : '';
+    console.log(
+      `  ${chalk.cyan(agent.id)}${modelLabel} → task ${chalk.green(agent.currentTaskId)}${providerLabel}`
+    );
+  }
+  console.log(chalk.dim(`  Follow output instead: zeroshot logs ${id} -f`));
+}
+
+function printUnavailableAgents(attachments) {
+  if (attachments.length === 0) {
+    return;
+  }
+
+  console.log(chalk.yellow('\nActive agents without a live attach socket:'));
+  for (const { agent, state } of attachments) {
+    const modelLabel = agent.model ? chalk.dim(` [${agent.model}]`) : '';
+    const detail =
+      state === 'starting'
+        ? 'task ID not yet assigned'
+        : `task ${agent.currentTaskId} socket not ready`;
+    console.log(`  ${chalk.cyan(agent.id)}${modelLabel} → ${chalk.yellow(detail)}`);
+  }
+}
+
+async function printAttachableAgentList(
+  id,
+  activeAgents,
+  socketDiscovery,
+  readTask = readTaskFromDisk
+) {
+  const inspected = await Promise.all(
+    activeAgents.map((agent) => inspectAgentAttachment(agent, socketDiscovery, readTask))
+  );
+  const attachable = inspected.filter(({ state }) => state === 'attachable');
+  const nonAttachable = inspected.filter(({ state }) => state === 'non_attachable');
+  const unavailable = inspected.filter(({ state }) => ['starting', 'unavailable'].includes(state));
+
+  console.log(chalk.yellow(`\nCluster ${id} - attachable agents:\n`));
+  if (attachable.length === 0) {
+    console.log(chalk.dim('  No live attach sockets.'));
+  } else {
+    printLiveAttachableAgents(attachable);
+    console.log(chalk.dim('\nAttach to an agent by running: zeroshot attach <taskId>'));
+  }
+  printNonAttachableAgents(id, nonAttachable);
+  printUnavailableAgents(unavailable);
 }
 
 function reportMissingAgent(agentName, status) {
@@ -1683,7 +1749,7 @@ async function resolveClusterSocketPath(id, options, socketDiscovery) {
     }
 
     if (!options.agent) {
-      printAttachableAgentList(id, activeAgents);
+      await printAttachableAgentList(id, activeAgents, socketDiscovery);
       return null;
     }
 
@@ -5886,4 +5952,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { applyModelOverrideToConfig, renderRecentMessagesToTerminal, resolveRunMode };
+module.exports = {
+  applyModelOverrideToConfig,
+  inspectAgentAttachment,
+  printAttachableAgentList,
+  renderRecentMessagesToTerminal,
+  resolveRunMode,
+};
