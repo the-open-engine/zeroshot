@@ -7,12 +7,11 @@
 
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const net = require('net');
 const { readClustersFileSync } = require('../../lib/clusters-registry');
 const socketPaths = require('./socket-paths');
 
-const ZEROSHOT_DIR = path.join(os.homedir(), '.zeroshot');
+const ZEROSHOT_DIR = path.join(socketPaths.resolveHomeDir(), '.zeroshot');
 const SOCKET_DIR = socketPaths.getSocketDir();
 
 /**

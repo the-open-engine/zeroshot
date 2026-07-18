@@ -25,7 +25,11 @@ function userNamespace() {
   return shortHash(os.userInfo().username);
 }
 
-function getSocketDir(homeDir = os.homedir()) {
+function resolveHomeDir(env = process.env) {
+  return env.ZEROSHOT_HOME || env.HOME || env.USERPROFILE || os.homedir();
+}
+
+function getSocketDir(homeDir = resolveHomeDir()) {
   if (process.platform === 'win32') {
     return path.join(homeDir, '.zeroshot', 'sockets');
   }
@@ -42,8 +46,7 @@ function assertSafeSocketDir(socketDir) {
   }
 }
 
-function ensureSocketDir(homeDir = os.homedir()) {
-  const socketDir = getSocketDir(homeDir);
+function ensureOwnedDirectory(socketDir) {
   fs.mkdirSync(socketDir, { recursive: true, mode: SOCKET_DIR_MODE });
   assertSafeSocketDir(socketDir);
   if (process.platform !== 'win32') {
@@ -52,22 +55,28 @@ function ensureSocketDir(homeDir = os.homedir()) {
   return socketDir;
 }
 
-function getTaskSocketPath(taskId, homeDir = os.homedir()) {
+function ensureSocketDir(homeDir = resolveHomeDir()) {
+  const socketDir = getSocketDir(homeDir);
+  return ensureOwnedDirectory(socketDir);
+}
+
+function getTaskSocketPath(taskId, homeDir = resolveHomeDir()) {
   return path.join(ensureSocketDir(homeDir), `${taskId}.sock`);
 }
 
-function getAgentSocketPath(clusterId, agentId, homeDir = os.homedir()) {
+function getAgentSocketPath(clusterId, agentId, homeDir = resolveHomeDir()) {
   const clusterDir = path.join(ensureSocketDir(homeDir), clusterId);
-  fs.mkdirSync(clusterDir, { recursive: true, mode: SOCKET_DIR_MODE });
+  ensureOwnedDirectory(clusterDir);
   return path.join(clusterDir, `${agentId}.sock`);
 }
 
-function getClusterSocketPath(clusterId, homeDir = os.homedir()) {
+function getClusterSocketPath(clusterId, homeDir = resolveHomeDir()) {
   return path.join(ensureSocketDir(homeDir), `${clusterId}.sock`);
 }
 
 module.exports = {
   SOCKET_DIR_MODE,
+  resolveHomeDir,
   getSocketDir,
   ensureSocketDir,
   getTaskSocketPath,
