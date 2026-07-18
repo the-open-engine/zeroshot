@@ -1,9 +1,12 @@
-#[path = "support/mod.rs"]
-pub mod support;
+#[path = "support/ledger.rs"]
+mod ledger;
+#[path = "support/ledger_admission.rs"]
+mod ledger_admission;
 
 use std::sync::Arc;
 
-use support::ledger::{admission_request, key, owner, resource, temp_root};
+use ledger::{key, owner, resource, temp_root};
+use ledger_admission::admission_request;
 use tokio::sync::Barrier;
 use zeroshot_engine::cluster_ledger::mutations::{AdmissionAllocation, AdmissionRequest};
 use zeroshot_engine::cluster_ledger::record::CanonicalDigest;

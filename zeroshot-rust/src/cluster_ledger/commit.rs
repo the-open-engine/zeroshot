@@ -7,8 +7,7 @@ use super::mutations::CommitResult;
 use super::record::{RecordPayload, StoredRecord};
 use super::replay::ReplayState;
 use super::store::{
-    AppendBatch, AppendGuard, AppendOutcome, AppendRequest, IdempotencyId, MutationReceipt,
-    StoreError,
+    AppendBatch, AppendGuard, AppendOutcome, IdempotencyId, MutationReceipt, StoreError,
 };
 use super::{ClusterLedger, LedgerError, LedgerErrorKind};
 
@@ -111,14 +110,12 @@ impl ClusterLedger {
         let prepared = self.prepare_commit(&request)?;
         let outcome = self
             .store
-            .compare_and_append(
-                AppendRequest::new(
-                    &self.resource,
-                    &self.fence(),
-                    request.state.position,
-                    prepared.batch.clone(),
-                )
-                .guarded(request.guard),
+            .compare_and_append_guarded(
+                &self.resource,
+                &self.fence(),
+                request.state.position,
+                prepared.batch.clone(),
+                request.guard,
             )
             .await;
         self.resolve_commit(request.context, prepared, outcome)

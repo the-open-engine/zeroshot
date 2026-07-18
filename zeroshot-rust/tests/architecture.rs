@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
-#[path = "support/mod.rs"]
-pub mod support;
+#[path = "support/architecture.rs"]
+mod architecture_support;
 
-use support::architecture::{
+use architecture_support::{
     product_package, product_root, read, relative_files, repository_root, rust_sources,
     runtime_source, workspace_metadata,
 };

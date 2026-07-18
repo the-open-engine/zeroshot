@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 mod append;
 mod clock;
+mod lifecycle;
 
 use async_trait::async_trait;
 use tokio::sync::Notify;
@@ -10,9 +11,12 @@ use tokio::sync::Notify;
 use append::{apply_append, existing_outcome, take_failpoint, validate_append, validate_fence};
 pub use clock::ManualLedgerClock;
 use super::{
-    completed_wait_position, fence_expiry, AppendOutcome, AppendRequest, DiscoveryPage, FailPoint,
-    Fence, IdempotencyId, LedgerClock, LedgerStore, MutationReceipt, OwnerId, Position,
-    PrefixSnapshot, ResourceId, ResourceInfo, StoreError, WaitProbe, MAX_DISCOVERY_PAGE,
+    completed_wait_position, fence_expiry, AppendRequest, FailPoint, LedgerClock, WaitProbe,
+    MAX_DISCOVERY_PAGE,
+};
+use super::{
+    AppendBatch, AppendGuard, AppendOutcome, DiscoveryPage, Fence, IdempotencyId, LedgerStore,
+    MutationReceipt, OwnerId, Position, PrefixSnapshot, ResourceId, ResourceInfo, StoreError,
 };
 use crate::cluster_ledger::record::{StoredRecord, MAX_RANGE_RECORDS};
 
@@ -45,34 +49,6 @@ pub struct FakeLedgerStore {
 }
 
 impl FakeLedgerStore {
-    #[must_use]
-    pub fn new(clock: impl LedgerClock + 'static) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(FakeState::default())),
-            clock: Arc::new(clock),
-        }
-    }
-
-    #[must_use]
-    pub fn with_shared_clock(clock: Arc<dyn LedgerClock>) -> Self {
-        Self {
-            state: Arc::new(Mutex::new(FakeState::default())),
-            clock,
-        }
-    }
-
-    #[must_use]
-    pub fn restart(&self) -> Self {
-        self.clone()
-    }
-
-    pub fn fail_next(&self, point: FailPoint) {
-        self.state
-            .lock()
-            .expect("fake ledger mutex must not be poisoned")
-            .next_failpoint = Some(point);
-    }
-
     fn fence(&self, request: FenceRequest<'_>) -> Result<Fence, StoreError> {
         let FenceRequest {
             resource,
@@ -108,7 +84,9 @@ impl FakeLedgerStore {
             return Err(StoreError::FailureInjected(FailPoint::BeforeCommit));
         }
         let outcome = self.append_locked(&mut state, request)?;
-        if take_failpoint(&mut state, FailPoint::AfterCommitBeforeResponse) {
+        if outcome.is_new_commit()
+            && take_failpoint(&mut state, FailPoint::AfterCommitBeforeResponse)
+        {
             return Err(StoreError::FailureInjected(
                 FailPoint::AfterCommitBeforeResponse,
             ));
@@ -392,11 +370,27 @@ impl LedgerStore for FakeLedgerStore {
         Ok(data.records[start..].iter().take(limit).cloned().collect())
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
     async fn compare_and_append(
         &self,
-        request: AppendRequest<'_>,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
     ) -> Result<AppendOutcome, StoreError> {
-        self.append(request)
+        self.append(AppendRequest::new(resource, fence, expected, batch))
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
+    async fn compare_and_append_guarded(
+        &self,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
+        guard: AppendGuard,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.append(AppendRequest::new(resource, fence, expected, batch).guarded(guard))
     }
 
     async fn lookup_receipt(
@@ -485,11 +479,5 @@ impl LedgerStore for FakeLedgerStore {
             ));
         }
         Ok(())
-    }
-}
-
-impl Default for FakeLedgerStore {
-    fn default() -> Self {
-        Self::new(ManualLedgerClock::new(0))
     }
 }

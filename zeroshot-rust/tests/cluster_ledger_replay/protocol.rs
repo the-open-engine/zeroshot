@@ -191,7 +191,9 @@ async fn generation_cas_allocates_exact_sequential_run_identities() {
         .settle(
             key("first-settlement"),
             [3; 32],
-            SettlementRequest::new(first_dispatch.value.execution, first_outcome, None),
+            first_dispatch.value.execution,
+            first_outcome,
+            None,
         )
         .await
         .unwrap();
@@ -201,10 +203,8 @@ async fn generation_cas_allocates_exact_sequential_run_identities() {
             .admit_next(
                 key("wrong-cas"),
                 [4; 32],
-                NextAdmission::new(
-                    zeroshot_engine::cluster_ledger::GenerationId::new(99).unwrap(),
-                    admission(b"graph-two"),
-                ),
+                zeroshot_engine::cluster_ledger::GenerationId::new(99).unwrap(),
+                admission(b"graph-two"),
             )
             .await
             .is_err()
@@ -215,7 +215,8 @@ async fn generation_cas_allocates_exact_sequential_run_identities() {
         .admit_next(
             key("second"),
             [5; 32],
-            NextAdmission::new(first.value.generation, admission(b"graph-two")),
+            first.value.generation,
+            admission(b"graph-two"),
         )
         .await
         .unwrap();
@@ -229,11 +230,9 @@ async fn generation_cas_allocates_exact_sequential_run_identities() {
         .settle(
             key("late-first-settlement"),
             [6; 32],
-            SettlementRequest::new(
-                first_dispatch.value.execution,
-                CanonicalDigest::of(b"late-outcome"),
-                None,
-            ),
+            first_dispatch.value.execution,
+            CanonicalDigest::of(b"late-outcome"),
+            None,
         )
         .await
         .unwrap();
@@ -264,7 +263,9 @@ async fn identical_prefix_replays_to_byte_identical_public_state() {
         .settle(
             key("settle"),
             [3; 32],
-            SettlementRequest::new(dispatched.value.execution, output_digest, Some(output)),
+            dispatched.value.execution,
+            output_digest,
+            Some(output),
         )
         .await
         .unwrap();
@@ -273,11 +274,9 @@ async fn identical_prefix_replays_to_byte_identical_public_state() {
         .settle(
             key("late"),
             [4; 32],
-            SettlementRequest::new(
-                dispatched.value.execution,
-                CanonicalDigest::of(b"late"),
-                None,
-            ),
+            dispatched.value.execution,
+            CanonicalDigest::of(b"late"),
+            None,
         )
         .await
         .unwrap();

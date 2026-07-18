@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -9,15 +9,16 @@ use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use tokio::sync::Notify;
 
 use super::{
-    completed_wait_position, fence_expiry, AppendOutcome, AppendRequest, DiscoveryPage, FailPoint,
-    Fence, IdempotencyId, LedgerClock, LedgerStore, MutationReceipt, OwnerId, Position,
-    PrefixSnapshot, ResourceId, ResourceInfo, StoreError, SystemLedgerClock, WaitProbe,
+    completed_wait_position, fence_expiry, AppendBatch, AppendGuard, AppendOutcome, AppendRequest,
+    DiscoveryPage, FailPoint, Fence, IdempotencyId, LedgerClock, LedgerStore, MutationReceipt,
+    OwnerId, Position, PrefixSnapshot, ResourceId, ResourceInfo, StoreError, WaitProbe,
     MAX_DISCOVERY_PAGE,
 };
 use crate::cluster_ledger::record::{StoredRecord, MAX_RANGE_RECORDS};
 
 mod creation;
 mod discovery;
+mod lifecycle;
 mod operations;
 mod queries;
 mod schema;
@@ -55,42 +56,6 @@ struct RemovalRequest<'a> {
 }
 
 impl SqliteLedgerStore {
-    pub fn new(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
-        Self::with_clock(root, SystemLedgerClock)
-    }
-
-    pub fn with_clock(
-        root: impl Into<PathBuf>,
-        clock: impl LedgerClock + 'static,
-    ) -> Result<Self, StoreError> {
-        let root = root.into();
-        fs::create_dir_all(&root).map_err(|_| StoreError::Storage)?;
-        Ok(Self {
-            root: Arc::new(root),
-            clock: Arc::new(clock),
-            writer: Arc::new(Mutex::new(())),
-            notifications: Arc::new(Mutex::new(BTreeMap::new())),
-            next_failpoint: Arc::new(Mutex::new(None)),
-        })
-    }
-
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        self.root.as_ref()
-    }
-
-    #[must_use]
-    pub fn path_for(&self, resource: &ResourceId) -> PathBuf {
-        database_path(&self.root, resource)
-    }
-
-    pub fn fail_next(&self, point: FailPoint) {
-        *self
-            .next_failpoint
-            .lock()
-            .expect("SQLite failpoint mutex must not be poisoned") = Some(point);
-    }
-
     fn take_failpoint(&self, point: FailPoint) -> bool {
         let mut value = self
             .next_failpoint
@@ -176,11 +141,11 @@ impl SqliteLedgerStore {
         transaction.commit().map_err(|_| StoreError::Storage)?;
         if decision.notify {
             self.notify_for(resource).notify_waiters();
-        }
-        if self.take_failpoint(FailPoint::AfterCommitBeforeResponse) {
-            return Err(StoreError::FailureInjected(
-                FailPoint::AfterCommitBeforeResponse,
-            ));
+            if self.take_failpoint(FailPoint::AfterCommitBeforeResponse) {
+                return Err(StoreError::FailureInjected(
+                    FailPoint::AfterCommitBeforeResponse,
+                ));
+            }
         }
         Ok(decision.outcome)
     }
@@ -415,11 +380,27 @@ impl LedgerStore for SqliteLedgerStore {
         Ok(records)
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
     async fn compare_and_append(
         &self,
-        request: AppendRequest<'_>,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
     ) -> Result<AppendOutcome, StoreError> {
-        self.append(request)
+        self.append(AppendRequest::new(resource, fence, expected, batch))
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
+    async fn compare_and_append_guarded(
+        &self,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
+        guard: AppendGuard,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.append(AppendRequest::new(resource, fence, expected, batch).guarded(guard))
     }
 
     async fn lookup_receipt(

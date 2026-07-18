@@ -12,8 +12,8 @@ pub mod replay;
 pub mod store;
 
 pub use mutations::{
-    AdmissionRequest, CommitResult, DispatchAllocation, EffectReconciliation, SafeFaultConsequence,
-    SafeFaultRecord, SafeFaultResult, SettlementResult,
+    AdmissionRequest, CommitResult, DispatchAllocation, SafeFaultConsequence, SafeFaultResult,
+    SettlementResult,
 };
 pub use error::{LedgerError, LedgerErrorKind};
 pub use record::{CanonicalDigest, EffectId, ExecutionId, GenerationId, NodeInstanceId, RunSequence};
@@ -34,7 +34,7 @@ pub struct ClusterLedger {
 }
 
 #[derive(Clone)]
-pub struct LedgerAccess {
+struct LedgerAccess {
     owner: OwnerId,
     fence_ttl_ms: u64,
     observations: Arc<dyn ObservationSink>,
@@ -42,7 +42,7 @@ pub struct LedgerAccess {
 
 impl LedgerAccess {
     #[must_use]
-    pub fn new(owner: OwnerId, fence_ttl_ms: u64, observations: Arc<dyn ObservationSink>) -> Self {
+    fn new(owner: OwnerId, fence_ttl_ms: u64, observations: Arc<dyn ObservationSink>) -> Self {
         Self {
             owner,
             fence_ttl_ms,
@@ -61,12 +61,30 @@ impl ClusterLedger {
         Self::create_with_observations(
             store,
             resource,
-            LedgerAccess::new(owner, fence_ttl_ms, Arc::new(NoopObservationSink)),
+            owner,
+            fence_ttl_ms,
+            Arc::new(NoopObservationSink),
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn create_with_observations(
+        store: Arc<dyn LedgerStore>,
+        resource: ResourceId,
+        owner: OwnerId,
+        fence_ttl_ms: u64,
+        observations: Arc<dyn ObservationSink>,
+    ) -> Result<Self, LedgerError> {
+        Self::create_with_access(
+            store,
+            resource,
+            LedgerAccess::new(owner, fence_ttl_ms, observations),
+        )
+        .await
+    }
+
+    async fn create_with_access(
         store: Arc<dyn LedgerStore>,
         resource: ResourceId,
         access: LedgerAccess,
@@ -99,12 +117,30 @@ impl ClusterLedger {
         Self::open_with_observations(
             store,
             resource,
-            LedgerAccess::new(owner, fence_ttl_ms, Arc::new(NoopObservationSink)),
+            owner,
+            fence_ttl_ms,
+            Arc::new(NoopObservationSink),
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn open_with_observations(
+        store: Arc<dyn LedgerStore>,
+        resource: ResourceId,
+        owner: OwnerId,
+        fence_ttl_ms: u64,
+        observations: Arc<dyn ObservationSink>,
+    ) -> Result<Self, LedgerError> {
+        Self::open_with_access(
+            store,
+            resource,
+            LedgerAccess::new(owner, fence_ttl_ms, observations),
+        )
+        .await
+    }
+
+    async fn open_with_access(
         store: Arc<dyn LedgerStore>,
         resource: ResourceId,
         access: LedgerAccess,

@@ -143,7 +143,9 @@ async fn concurrent_settlements_cas_against_the_validated_prefix() {
             .settle(
                 key("settle-a"),
                 [3; 32],
-                SettlementRequest::new(execution, CanonicalDigest::of(b"outcome-a"), None),
+                execution,
+                CanonicalDigest::of(b"outcome-a"),
+                None,
             )
             .await
     });
@@ -153,7 +155,9 @@ async fn concurrent_settlements_cas_against_the_validated_prefix() {
             .settle(
                 key("settle-b"),
                 [4; 32],
-                SettlementRequest::new(execution, CanonicalDigest::of(b"outcome-b"), None),
+                execution,
+                CanonicalDigest::of(b"outcome-b"),
+                None,
             )
             .await
     });
@@ -218,13 +222,11 @@ async fn concurrent_safe_faults_cas_against_the_validated_prefix() {
             .record_safe_fault(
                 key("safe-fault-a"),
                 [3; 32],
-                SafeFaultRecord::new(
-                    &first_fault,
-                    SafeFaultConsequence::Settle {
-                        execution,
-                        outcome_digest: CanonicalDigest::of(b"outcome-a"),
-                    },
-                ),
+                &first_fault,
+                SafeFaultConsequence::Settle {
+                    execution,
+                    outcome_digest: CanonicalDigest::of(b"outcome-a"),
+                },
             )
             .await
     });
@@ -234,13 +236,11 @@ async fn concurrent_safe_faults_cas_against_the_validated_prefix() {
             .record_safe_fault(
                 key("safe-fault-b"),
                 [4; 32],
-                SafeFaultRecord::new(
-                    &fault,
-                    SafeFaultConsequence::Settle {
-                        execution,
-                        outcome_digest: CanonicalDigest::of(b"outcome-b"),
-                    },
-                ),
+                &fault,
+                SafeFaultConsequence::Settle {
+                    execution,
+                    outcome_digest: CanonicalDigest::of(b"outcome-b"),
+                },
             )
             .await
     });
@@ -314,7 +314,8 @@ async fn concurrent_effect_receipts_cas_against_the_validated_prefix() {
             .reconcile_effect(
                 key("effect-receipt-a"),
                 [3; 32],
-                EffectReconciliation::new(effect, CanonicalDigest::of(b"receipt-a")),
+                effect,
+                CanonicalDigest::of(b"receipt-a"),
             )
             .await
     });
@@ -324,7 +325,8 @@ async fn concurrent_effect_receipts_cas_against_the_validated_prefix() {
             .reconcile_effect(
                 key("effect-receipt-b"),
                 [4; 32],
-                EffectReconciliation::new(effect, CanonicalDigest::of(b"receipt-b")),
+                effect,
+                CanonicalDigest::of(b"receipt-b"),
             )
             .await
     });

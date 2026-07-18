@@ -2,15 +2,17 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::record::{
     StoredRecord, MAX_APPEND_BATCH_BYTES, MAX_APPEND_RECORDS, MAX_RECORD_PAYLOAD_BYTES,
 };
 
+mod contract;
 pub mod fake;
 pub mod sqlite;
+
+pub use contract::LedgerStore;
 
 pub const MAX_IDENTIFIER_BYTES: usize = 256;
 pub const MAX_DISCOVERY_PAGE: usize = 1_024;
@@ -290,6 +292,12 @@ pub enum AppendOutcome {
     CommittedWithoutReceipt(Position),
 }
 
+impl AppendOutcome {
+    const fn is_new_commit(&self) -> bool {
+        matches!(self, Self::Committed(_) | Self::CommittedWithoutReceipt(_))
+    }
+}
+
 #[derive(Clone)]
 pub struct AppendGuard(Option<Arc<dyn Fn() -> bool + Send + Sync>>);
 
@@ -319,7 +327,7 @@ impl Default for AppendGuard {
     }
 }
 
-pub struct AppendRequest<'a> {
+pub(crate) struct AppendRequest<'a> {
     pub(crate) resource: &'a ResourceId,
     pub(crate) fence: &'a Fence,
     pub(crate) expected: Position,
@@ -329,7 +337,7 @@ pub struct AppendRequest<'a> {
 
 impl<'a> AppendRequest<'a> {
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         resource: &'a ResourceId,
         fence: &'a Fence,
         expected: Position,
@@ -345,7 +353,7 @@ impl<'a> AppendRequest<'a> {
     }
 
     #[must_use]
-    pub fn guarded(mut self, guard: AppendGuard) -> Self {
+    pub(crate) fn guarded(mut self, guard: AppendGuard) -> Self {
         self.guard = guard;
         self
     }
@@ -418,63 +426,6 @@ impl LedgerClock for SystemLedgerClock {
             .try_into()
             .expect("system clock milliseconds must fit in u64")
     }
-}
-
-#[async_trait]
-pub trait LedgerStore: Send + Sync + 'static {
-    async fn discover(
-        &self,
-        after: Option<&ResourceId>,
-        limit: usize,
-    ) -> Result<DiscoveryPage, StoreError>;
-    async fn create(&self, resource: &ResourceId) -> Result<ResourceInfo, StoreError>;
-    async fn create_fenced(
-        &self,
-        resource: &ResourceId,
-        owner: &OwnerId,
-        ttl_ms: u64,
-    ) -> Result<(ResourceInfo, Fence), StoreError>;
-    async fn open(&self, resource: &ResourceId) -> Result<ResourceInfo, StoreError>;
-    async fn acquire_fence(
-        &self,
-        resource: &ResourceId,
-        owner: &OwnerId,
-        ttl_ms: u64,
-    ) -> Result<Fence, StoreError>;
-    async fn renew_fence(&self, fence: &Fence, ttl_ms: u64) -> Result<Fence, StoreError>;
-    async fn check_fence(&self, fence: &Fence) -> Result<(), StoreError>;
-    async fn read_prefix(
-        &self,
-        resource: &ResourceId,
-        through: Option<Position>,
-    ) -> Result<PrefixSnapshot, StoreError>;
-    async fn read_range(
-        &self,
-        resource: &ResourceId,
-        after: Position,
-        limit: usize,
-    ) -> Result<Vec<StoredRecord>, StoreError>;
-    async fn compare_and_append(
-        &self,
-        request: AppendRequest<'_>,
-    ) -> Result<AppendOutcome, StoreError>;
-    async fn lookup_receipt(
-        &self,
-        resource: &ResourceId,
-        key: &IdempotencyId,
-    ) -> Result<Option<MutationReceipt>, StoreError>;
-    async fn wait_for_advance(
-        &self,
-        resource: &ResourceId,
-        after: Position,
-        deadline_ms: u64,
-    ) -> Result<Position, StoreError>;
-    async fn remove(
-        &self,
-        resource: &ResourceId,
-        fence: &Fence,
-        expected: Position,
-    ) -> Result<(), StoreError>;
 }
 
 pub(crate) async fn completed_wait_position(

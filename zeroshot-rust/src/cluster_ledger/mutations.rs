@@ -27,14 +27,14 @@ pub struct AdmissionRequest {
     pub canonical_compiled_ir: Vec<u8>,
 }
 
-pub struct NextAdmission {
+pub(crate) struct NextAdmission {
     pub if_generation: GenerationId,
     pub request: AdmissionRequest,
 }
 
 impl NextAdmission {
     #[must_use]
-    pub const fn new(if_generation: GenerationId, request: AdmissionRequest) -> Self {
+    pub(crate) const fn new(if_generation: GenerationId, request: AdmissionRequest) -> Self {
         Self {
             if_generation,
             request,
@@ -67,7 +67,7 @@ pub struct SettlementResult {
     pub authoritative_digest: CanonicalDigest,
 }
 
-pub struct SettlementRequest {
+pub(crate) struct SettlementRequest {
     pub execution: ExecutionId,
     pub outcome_digest: CanonicalDigest,
     pub verified_output: Option<Vec<u8>>,
@@ -75,7 +75,7 @@ pub struct SettlementRequest {
 
 impl SettlementRequest {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
         execution: ExecutionId,
         outcome_digest: CanonicalDigest,
         verified_output: Option<Vec<u8>>,
@@ -119,14 +119,14 @@ pub enum SafeFaultConsequence {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EffectReconciliation {
+pub(crate) struct EffectReconciliation {
     pub effect: EffectId,
     pub receipt_digest: CanonicalDigest,
 }
 
 impl EffectReconciliation {
     #[must_use]
-    pub const fn new(effect: EffectId, receipt_digest: CanonicalDigest) -> Self {
+    pub(crate) const fn new(effect: EffectId, receipt_digest: CanonicalDigest) -> Self {
         Self {
             effect,
             receipt_digest,
@@ -135,14 +135,14 @@ impl EffectReconciliation {
 }
 
 #[derive(Clone, Copy)]
-pub struct SafeFaultRecord<'a> {
+pub(crate) struct SafeFaultRecord<'a> {
     pub fault: &'a EngineFault,
     pub consequence: SafeFaultConsequence,
 }
 
 impl<'a> SafeFaultRecord<'a> {
     #[must_use]
-    pub const fn new(fault: &'a EngineFault, consequence: SafeFaultConsequence) -> Self {
+    pub(crate) const fn new(fault: &'a EngineFault, consequence: SafeFaultConsequence) -> Self {
         Self { fault, consequence }
     }
 }
@@ -241,7 +241,19 @@ impl ClusterLedger {
         .await
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn admit_next(
+        &self,
+        key: IdempotencyId,
+        fingerprint: [u8; 32],
+        if_generation: GenerationId,
+        request: AdmissionRequest,
+    ) -> Result<CommitResult<AdmissionAllocation>, LedgerError> {
+        self.admit_next_request(key, fingerprint, NextAdmission::new(if_generation, request))
+            .await
+    }
+
+    async fn admit_next_request(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],
@@ -380,7 +392,24 @@ impl ClusterLedger {
         Ok((run, false, authoritative_digest))
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn settle(
+        &self,
+        key: IdempotencyId,
+        fingerprint: [u8; 32],
+        execution: ExecutionId,
+        outcome_digest: CanonicalDigest,
+        verified_output: Option<Vec<u8>>,
+    ) -> Result<CommitResult<SettlementResult>, LedgerError> {
+        self.settle_request(
+            key,
+            fingerprint,
+            SettlementRequest::new(execution, outcome_digest, verified_output),
+        )
+        .await
+    }
+
+    async fn settle_request(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],

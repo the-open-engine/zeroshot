@@ -1,8 +1,10 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-#[path = "support/mod.rs"]
-pub mod support;
+#[path = "support/execution_contract.rs"]
+mod execution_contract;
+#[path = "support/execution_runtime.rs"]
+mod execution_runtime;
 
 use tokio::sync::Notify;
 use zeroshot_engine::execution::local::LocalExecutionRuntime;
@@ -11,8 +13,8 @@ use zeroshot_engine::execution::{
 };
 use zeroshot_engine::fault::EvidenceClass;
 
-use support::execution_contract::{agent_target, builtin_target};
-use support::execution_runtime::{
+use execution_contract::{agent_target, builtin_target};
+use execution_runtime::{
     CommandSpec, FakeResolver, ResolverOutcome, Scenario, command, empty_driver, fault, result,
     runtime_for,
 };

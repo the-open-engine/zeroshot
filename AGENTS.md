@@ -597,6 +597,12 @@ touch tests/new-feature.test.js  # FIRST
 
 ### Validation Workflow
 
+Rust APIs are mechanically capped at four parameters by `clippy.toml`. The only
+symbol-level exceptions are frozen pre-6.7.2 public compatibility declarations
+and their exact implementations, each carrying a rationale. Opcore remains at
+six because it has no per-symbol override; new and internal APIs must use request
+structs rather than raising or bypassing the Clippy ceiling.
+
 Run validation for:
 
 - Significant changes (>50 lines)
@@ -660,3 +666,4 @@ Do NOT assume single root cause.
 | Git stash usage            | Pre-commit hook    |
 | lint-staged backup stashes | Pre-commit wrapper |
 | Rust formatting drift      | Pre-commit hook    |
+| Rust APIs over 4 params    | Clippy error       |

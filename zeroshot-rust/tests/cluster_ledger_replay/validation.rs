@@ -119,7 +119,9 @@ async fn replay_rejects_verified_io_that_contradicts_authoritative_records() {
         .settle(
             key("settle"),
             [3; 32],
-            SettlementRequest::new(execution, CanonicalDigest::of(&output), Some(output)),
+            execution,
+            CanonicalDigest::of(&output),
+            Some(output),
         )
         .await
         .unwrap();
@@ -199,7 +201,8 @@ async fn pending_effects_block_every_terminal_transition() {
         .reconcile_effect(
             key("effect-receipt"),
             [5; 32],
-            EffectReconciliation::new(effect, CanonicalDigest::of(b"receipt")),
+            effect,
+            CanonicalDigest::of(b"receipt"),
         )
         .await
         .unwrap();
@@ -219,12 +222,10 @@ async fn assert_pending_fault_rejected(ledger: &ClusterLedger) {
         .record_safe_fault(
             key("fault-terminal"),
             [4; 32],
-            SafeFaultRecord::new(
-                &fault,
-                SafeFaultConsequence::Terminal {
-                    outcome_digest: CanonicalDigest::of(b"faulted"),
-                },
-            ),
+            &fault,
+            SafeFaultConsequence::Terminal {
+                outcome_digest: CanonicalDigest::of(b"faulted"),
+            },
         )
         .await
         .unwrap_err();
@@ -271,13 +272,11 @@ async fn persisted_safe_fault_never_contains_ephemeral_diagnostic_bytes() {
         .record_safe_fault(
             key("fault"),
             [3; 32],
-            SafeFaultRecord::new(
-                &fault,
-                SafeFaultConsequence::Settle {
-                    execution,
-                    outcome_digest: CanonicalDigest::of(b"faulted"),
-                },
-            ),
+            &fault,
+            SafeFaultConsequence::Settle {
+                execution,
+                outcome_digest: CanonicalDigest::of(b"faulted"),
+            },
         )
         .await
         .unwrap();

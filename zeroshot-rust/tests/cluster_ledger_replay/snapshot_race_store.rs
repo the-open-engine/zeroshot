@@ -101,9 +101,27 @@ impl LedgerStore for SnapshotRaceStore {
         self.inner.read_range(resource, after, limit).await
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
     async fn compare_and_append(
         &self,
-        request: AppendRequest<'_>,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
+    ) -> Result<AppendOutcome, StoreError> {
+        self.inner
+            .compare_and_append(resource, fence, expected, batch)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 trait API")]
+    async fn compare_and_append_guarded(
+        &self,
+        resource: &ResourceId,
+        fence: &Fence,
+        expected: Position,
+        batch: AppendBatch,
+        guard: AppendGuard,
     ) -> Result<AppendOutcome, StoreError> {
         if let Some(cancellation) = self
             .cancel_before_append
@@ -113,7 +131,9 @@ impl LedgerStore for SnapshotRaceStore {
         {
             cancellation.cancel();
         }
-        self.inner.compare_and_append(request).await
+        self.inner
+            .compare_and_append_guarded(resource, fence, expected, batch, guard)
+            .await
     }
 
     async fn lookup_receipt(

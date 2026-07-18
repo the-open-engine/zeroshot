@@ -1,6 +1,6 @@
-use crate::fault::FaultContext;
+use crate::fault::{EngineFault, FaultContext};
 
-use super::super::record::{CanonicalDigest, RecordPayload, RunSequence};
+use super::super::record::{CanonicalDigest, EffectId, RecordPayload, RunSequence};
 use super::super::store::IdempotencyId;
 use super::super::{
     ClusterLedger, CommitRequest, LedgerError, LedgerErrorKind, MutationIdentity,
@@ -93,7 +93,19 @@ impl ClusterLedger {
         Ok(run)
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn record_safe_fault(
+        &self,
+        key: IdempotencyId,
+        fingerprint: [u8; 32],
+        fault: &EngineFault,
+        consequence: SafeFaultConsequence,
+    ) -> Result<CommitResult<SafeFaultResult>, LedgerError> {
+        self.record_safe_fault_request(key, fingerprint, SafeFaultRecord::new(fault, consequence))
+            .await
+    }
+
+    async fn record_safe_fault_request(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],
@@ -177,7 +189,23 @@ impl ClusterLedger {
         .await
     }
 
+    #[allow(clippy::too_many_arguments, reason = "frozen pre-6.7.2 public API")]
     pub async fn reconcile_effect(
+        &self,
+        key: IdempotencyId,
+        fingerprint: [u8; 32],
+        effect: EffectId,
+        receipt_digest: CanonicalDigest,
+    ) -> Result<CommitResult<EffectIntentResult>, LedgerError> {
+        self.reconcile_effect_request(
+            key,
+            fingerprint,
+            EffectReconciliation::new(effect, receipt_digest),
+        )
+        .await
+    }
+
+    async fn reconcile_effect_request(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],

@@ -6,6 +6,7 @@ use sha2::{Digest as _, Sha256};
 use super::store::{MutationReceipt, Position, ResourceId};
 
 mod error;
+mod payload;
 
 pub use error::RecordError;
 
@@ -282,100 +283,6 @@ pub enum RecordPayload {
     MutationReceipt {
         receipt: MutationReceipt,
     },
-}
-
-impl RecordPayload {
-    #[must_use]
-    pub fn kind(&self) -> RecordKind {
-        self.control_kind()
-            .or_else(|| self.io_kind())
-            .expect("every record payload has a kind")
-    }
-
-    fn control_kind(&self) -> Option<RecordKind> {
-        match self {
-            Self::Admission { .. } => Some(RecordKind::Admission),
-            Self::Dispatch { .. } => Some(RecordKind::Dispatch),
-            Self::Settlement { .. } => Some(RecordKind::Settlement),
-            Self::SafeFault { .. } => Some(RecordKind::SafeFault),
-            Self::EffectIntent { .. } => Some(RecordKind::EffectIntent),
-            Self::EffectReceipt { .. } => Some(RecordKind::EffectReceipt),
-            Self::Terminal { .. } => Some(RecordKind::Terminal),
-            Self::CleanupReceipt { .. } => Some(RecordKind::CleanupReceipt),
-            _ => None,
-        }
-    }
-
-    fn io_kind(&self) -> Option<RecordKind> {
-        match self {
-            Self::VerifiedInput { .. } => Some(RecordKind::VerifiedInput),
-            Self::VerifiedOutput { .. } => Some(RecordKind::VerifiedOutput),
-            Self::MutationReceipt { .. } => Some(RecordKind::MutationReceipt),
-            _ => None,
-        }
-    }
-
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecordError> {
-        let encoded = serde_json::to_vec(self).map_err(|_| RecordError::Encoding)?;
-        if encoded.len() > MAX_RECORD_PAYLOAD_BYTES {
-            return Err(RecordError::PayloadTooLarge);
-        }
-        Ok(encoded)
-    }
-
-    pub fn decode(kind: RecordKind, version: u16, bytes: &[u8]) -> Result<Self, RecordError> {
-        if version != RECORD_VERSION_V1 {
-            return Err(RecordError::UnknownVersion);
-        }
-        if bytes.len() > MAX_RECORD_PAYLOAD_BYTES {
-            return Err(RecordError::PayloadTooLarge);
-        }
-        let value: Self = serde_json::from_slice(bytes).map_err(|_| RecordError::Encoding)?;
-        if value.kind() != kind {
-            return Err(RecordError::KindMismatch);
-        }
-        if value.canonical_bytes()? != bytes {
-            return Err(RecordError::NonCanonicalPayload);
-        }
-        value.validate_verified_digest()?;
-        value.validate_graph_digest()?;
-        Ok(value)
-    }
-
-    fn validate_verified_digest(&self) -> Result<(), RecordError> {
-        let digest_and_bytes = match self {
-            Self::VerifiedInput {
-                digest,
-                canonical_bytes,
-                ..
-            }
-            | Self::VerifiedOutput {
-                digest,
-                canonical_bytes,
-                ..
-            } => Some((*digest, canonical_bytes)),
-            _ => None,
-        };
-        if digest_and_bytes.is_some_and(|(digest, bytes)| digest != CanonicalDigest::of(bytes)) {
-            return Err(RecordError::DigestMismatch);
-        }
-        Ok(())
-    }
-
-    fn validate_graph_digest(&self) -> Result<(), RecordError> {
-        let Self::Admission {
-            graph_digest,
-            canonical_graph,
-            ..
-        } = self
-        else {
-            return Ok(());
-        };
-        if !canonical_graph.is_empty() && *graph_digest != CanonicalDigest::of(canonical_graph) {
-            return Err(RecordError::DigestMismatch);
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
