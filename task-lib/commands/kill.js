@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { getTask, updateTask } from '../store.js';
-import { isOwnedProcessTreeRunning, terminateProcess } from '../runner.js';
+import { terminateProcess } from '../runner.js';
 
 export async function killTaskCommand(taskId, options = {}) {
   const task = getTask(taskId);
@@ -21,7 +21,9 @@ export async function killTaskCommand(taskId, options = {}) {
     terminationStrategy: task.terminationStrategy || 'process',
   };
 
-  if (!isOwnedProcessTreeRunning(task.pid, terminationOptions)) {
+  const result = await terminateProcess(task.pid, terminationOptions);
+
+  if (result.terminated && result.alreadyDead) {
     console.log(chalk.yellow('Process already dead, updating status...'));
     updateTask(taskId, {
       status: 'stale',
@@ -31,8 +33,6 @@ export async function killTaskCommand(taskId, options = {}) {
     });
     return;
   }
-
-  const result = await terminateProcess(task.pid, terminationOptions);
 
   if (result.terminated) {
     const suffix = result.escalated ? ' after SIGKILL escalation' : ' with SIGTERM';

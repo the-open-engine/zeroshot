@@ -1740,7 +1740,7 @@ function buildIsolatedLifecycleHandle({
     if (state.resolved || state.taskExited) return;
     if (state.terminationPromise) return state.terminationPromise;
 
-    state.terminationPromise = (async () => {
+    const terminationPromise = (async () => {
       const termination = await terminateIsolatedTask(manager, clusterId, taskId);
       if (termination.alreadyTerminal) return;
 
@@ -1759,8 +1759,14 @@ function buildIsolatedLifecycleHandle({
         },
       });
     })();
+    state.terminationPromise = terminationPromise;
+    terminationPromise.catch(() => {
+      if (state.terminationPromise === terminationPromise) {
+        state.terminationPromise = null;
+      }
+    });
 
-    return state.terminationPromise;
+    return terminationPromise;
   };
 
   return {
@@ -2200,28 +2206,15 @@ function normalizeTermination(termination) {
 }
 
 async function killTask(agent, termination = 'Task killed') {
-  agent._stopLivenessCheck?.();
-
   const { reason, code } = normalizeTermination(termination);
   const currentTask = agent.currentTask;
   const taskId = agent.currentTaskId;
 
   if (agent.isolation?.enabled && taskId) {
-    if (currentTask && typeof currentTask.terminate === 'function') {
-      await currentTask.terminate(reason, { code });
-    } else {
-      await terminateIsolatedTask(agent.isolation.manager, agent.isolation.clusterId, taskId);
-      if (currentTask && typeof currentTask.kill === 'function') {
-        currentTask.kill(reason, { code });
-      }
-    }
-    agent.currentTask = null;
-    agent.currentTaskId = null;
-    agent.processPid = null;
-    agent.lastOutputTime = null;
-    agent.taskStartedAt = null;
-    return;
+    return killIsolatedTask(agent, currentTask, taskId, reason, code);
   }
+
+  agent._stopLivenessCheck?.();
 
   // Kill the underlying task before resolving the local follower. This keeps
   // retries from racing a provider process that is still shutting down.
@@ -2242,6 +2235,31 @@ async function killTask(agent, termination = 'Task killed') {
     currentTask.kill(reason, { code });
   }
 
+  agent.currentTask = null;
+  agent.currentTaskId = null;
+  agent.processPid = null;
+  agent.lastOutputTime = null;
+  agent.taskStartedAt = null;
+}
+
+async function killIsolatedTask(agent, currentTask, taskId, reason, code) {
+  try {
+    if (currentTask && typeof currentTask.terminate === 'function') {
+      await currentTask.terminate(reason, { code });
+    } else {
+      await terminateIsolatedTask(agent.isolation.manager, agent.isolation.clusterId, taskId);
+      if (currentTask && typeof currentTask.kill === 'function') {
+        currentTask.kill(reason, { code });
+      }
+    }
+  } catch (error) {
+    // The status follower remains active. Re-arm the existing watchdog so a
+    // later bounded interval can retry without overlapping this attempt.
+    agent.livenessTerminationStarted = false;
+    throw error;
+  }
+
+  agent._stopLivenessCheck?.();
   agent.currentTask = null;
   agent.currentTaskId = null;
   agent.processPid = null;

@@ -12,14 +12,18 @@ export function showStatus(taskId) {
 
   // Verify running status
   let status = task.status;
-  if (
-    status === 'running' &&
-    !isOwnedProcessTreeRunning(task.pid, {
-      processGroupId: task.processGroupId,
-      terminationStrategy: task.terminationStrategy || 'process',
-    })
-  ) {
-    status = 'stale (process died)';
+  if (status === 'running') {
+    try {
+      const running = isOwnedProcessTreeRunning(task.pid, {
+        processGroupId: task.processGroupId,
+        terminationStrategy: task.terminationStrategy || 'process',
+      });
+      if (!running) {
+        status = 'stale (process died)';
+      }
+    } catch (error) {
+      status = `stale (invalid process ownership: ${error.message})`;
+    }
   }
 
   const statusColor =

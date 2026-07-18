@@ -25,12 +25,19 @@ function createFakeProcess() {
   };
 }
 
-function createIsolationManager({ status = 'running' } = {}) {
+function createIsolationManager({
+  status = 'running',
+  killCommandFailures = 0,
+  unverifiableKillAttempts = 0,
+} = {}) {
   const commands = [];
   let taskStatus = status;
+  let activeKillCalls = 0;
+  let pendingStatusFailures = 0;
   return {
     commands,
     killCalls: 0,
+    maxConcurrentKillCalls: 0,
     setStatus(nextStatus) {
       taskStatus = nextStatus;
     },
@@ -45,11 +52,28 @@ function createIsolationManager({ status = 'running' } = {}) {
       }
       if (commandText.includes('kill')) {
         this.killCalls += 1;
-        taskStatus = 'killed';
-        await sleep(10);
-        return { code: 0, stdout: 'killed\n', stderr: '' };
+        activeKillCalls += 1;
+        this.maxConcurrentKillCalls = Math.max(this.maxConcurrentKillCalls, activeKillCalls);
+        try {
+          await sleep(10);
+          if (this.killCalls <= killCommandFailures) {
+            return { code: 1, stdout: '', stderr: 'kill command failed' };
+          }
+          if (this.killCalls <= killCommandFailures + unverifiableKillAttempts) {
+            pendingStatusFailures += 1;
+            return { code: 0, stdout: 'kill requested\n', stderr: '' };
+          }
+          taskStatus = 'killed';
+          return { code: 0, stdout: 'killed\n', stderr: '' };
+        } finally {
+          activeKillCalls -= 1;
+        }
       }
       if (commandText.includes('status')) {
+        if (pendingStatusFailures > 0) {
+          pendingStatusFailures -= 1;
+          return { code: 1, stdout: '', stderr: 'status verification failed' };
+        }
         return {
           code: 0,
           stdout: `Status: ${taskStatus}\n`,
@@ -107,8 +131,8 @@ function createIsolatedAgent(manager, overrides = {}) {
   return { agent, events };
 }
 
-async function runWatchdogRecovery(overrides) {
-  const manager = createIsolationManager();
+async function runWatchdogRecovery(overrides, managerOptions = {}) {
+  const manager = createIsolationManager(managerOptions);
   const { agent, events } = createIsolatedAgent(manager, overrides);
   const execution = followClaudeTaskLogsIsolated(agent, agent.currentTaskId);
 
@@ -158,6 +182,38 @@ describe('Isolated task recovery', function () {
       recovered.events.some(({ event }) => event === 'AGENT_TASK_TIMEOUT'),
       'durable absolute-timeout recovery event should be emitted'
     );
+  });
+
+  it('re-arms lifecycle recovery after an in-container kill command fails', async function () {
+    const recovered = await runWatchdogRecovery(
+      {
+        lastOutputTime: Date.now() - 100,
+        taskStartedAt: Date.now() - 100,
+      },
+      { killCommandFailures: 1 }
+    );
+
+    assert.strictEqual(recovered.manager.killCalls, 2);
+    assert.strictEqual(recovered.manager.maxConcurrentKillCalls, 1);
+    assert.strictEqual(recovered.result.success, false);
+    assert.strictEqual(recovered.agent.currentTask, null);
+    assert.strictEqual(recovered.agent.currentTaskId, null);
+  });
+
+  it('re-arms lifecycle recovery when kill status cannot be verified', async function () {
+    const recovered = await runWatchdogRecovery(
+      {
+        lastOutputTime: Date.now() - 100,
+        taskStartedAt: Date.now() - 100,
+      },
+      { unverifiableKillAttempts: 1 }
+    );
+
+    assert.strictEqual(recovered.manager.killCalls, 2);
+    assert.strictEqual(recovered.manager.maxConcurrentKillCalls, 1);
+    assert.strictEqual(recovered.result.success, false);
+    assert.strictEqual(recovered.agent.currentTask, null);
+    assert.strictEqual(recovered.agent.currentTaskId, null);
   });
 
   it('does not ignore a tracked isolated task while its local handle is briefly absent', async function () {

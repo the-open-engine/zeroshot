@@ -297,11 +297,11 @@ export function addTask(task) {
     INSERT INTO tasks (
       id, prompt, full_prompt, cwd, status, pid, session_id, log_file,
       created_at, updated_at, exit_code, error, provider, model,
-      schedule_id, socket_path, attachable
+      schedule_id, socket_path, attachable, process_group_id, termination_strategy
     ) VALUES (
       @id, @prompt, @fullPrompt, @cwd, @status, @pid, @sessionId, @logFile,
       @createdAt, @updatedAt, @exitCode, @error, @provider, @model,
-      @scheduleId, @socketPath, @attachable
+      @scheduleId, @socketPath, @attachable, @processGroupId, @terminationStrategy
     )
   `
     )
@@ -323,6 +323,8 @@ export function addTask(task) {
       scheduleId: fullTask.scheduleId || null,
       socketPath: fullTask.socketPath || null,
       attachable: fullTask.attachable ? 1 : 0,
+      processGroupId: fullTask.processGroupId || null,
+      terminationStrategy: fullTask.terminationStrategy || null,
     });
 
   return fullTask;
