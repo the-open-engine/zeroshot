@@ -87,6 +87,9 @@ class AgentWrapper {
     this.livenessCheckInterval = null; // Interval for health checks
     this.consecutiveStaleWarnings = 0;
     this.livenessTerminationStarted = false;
+    this.livenessTerminationContext = null;
+    this.livenessTerminationAttempts = 0;
+    this.livenessTerminationRetryAt = 0;
     this.staleDuration = normalizedConfig.staleDuration;
     this.enableLivenessCheck = normalizedConfig.enableLivenessCheck;
 

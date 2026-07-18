@@ -1,152 +1,18 @@
 const assert = require('assert');
-const { PassThrough } = require('stream');
 
 const { startLivenessCheck, stopLivenessCheck } = require('../src/agent/agent-lifecycle');
-const { followClaudeTaskLogsIsolated, killTask } = require('../src/agent/agent-task-executor');
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function waitFor(predicate, timeoutMs = 1000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await sleep(5);
-  }
-  throw new Error('Timed out waiting for condition');
-}
-
-function createFakeProcess() {
-  return {
-    pid: 9012,
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    kill() {},
-    on() {},
-  };
-}
-
-function createIsolationManager({
-  status = 'running',
-  killCommandFailures = 0,
-  unverifiableKillAttempts = 0,
-} = {}) {
-  const commands = [];
-  let taskStatus = status;
-  let activeKillCalls = 0;
-  let pendingStatusFailures = 0;
-  return {
-    commands,
-    killCalls: 0,
-    maxConcurrentKillCalls: 0,
-    setStatus(nextStatus) {
-      taskStatus = nextStatus;
-    },
-    spawnInContainer() {
-      return createFakeProcess();
-    },
-    async execInContainer(_clusterId, command) {
-      commands.push(command);
-      const commandText = command.join(' ');
-      if (commandText.includes('get-log-path')) {
-        return { code: 0, stdout: '/tmp/provider.log\n', stderr: '' };
-      }
-      if (commandText.includes('kill')) {
-        this.killCalls += 1;
-        activeKillCalls += 1;
-        this.maxConcurrentKillCalls = Math.max(this.maxConcurrentKillCalls, activeKillCalls);
-        try {
-          await sleep(10);
-          if (this.killCalls <= killCommandFailures) {
-            return { code: 1, stdout: '', stderr: 'kill command failed' };
-          }
-          if (this.killCalls <= killCommandFailures + unverifiableKillAttempts) {
-            pendingStatusFailures += 1;
-            return { code: 0, stdout: 'kill requested\n', stderr: '' };
-          }
-          taskStatus = 'killed';
-          return { code: 0, stdout: 'killed\n', stderr: '' };
-        } finally {
-          activeKillCalls -= 1;
-        }
-      }
-      if (commandText.includes('status')) {
-        if (pendingStatusFailures > 0) {
-          pendingStatusFailures -= 1;
-          return { code: 1, stdout: '', stderr: 'status verification failed' };
-        }
-        return {
-          code: 0,
-          stdout: `Status: ${taskStatus}\n`,
-          stderr: '',
-        };
-      }
-      if (commandText.includes('cat')) {
-        return { code: 0, stdout: '{"summary":"done","result":"ok"}\n', stderr: '' };
-      }
-      throw new Error(`Unexpected isolated command: ${command.join(' ')}`);
-    },
-  };
-}
-
-function createIsolatedAgent(manager, overrides = {}) {
-  const events = [];
-  const agent = {
-    id: 'isolated-worker',
-    role: 'implementation',
-    isolation: {
-      enabled: true,
-      manager,
-      clusterId: 'isolated-cluster',
-    },
-    cluster: { id: 'cluster' },
-    config: { cwd: '/tmp/work' },
-    worktree: null,
-    iteration: 1,
-    timeout: 0,
-    staleDuration: 20,
-    enableLivenessCheck: true,
-    currentTask: null,
-    currentTaskId: 'isolated-task',
-    processPid: 9012,
-    lastOutputTime: Date.now(),
-    taskStartedAt: Date.now(),
-    livenessCheckInterval: null,
-    livenessTerminationStarted: false,
-    consecutiveStaleWarnings: 0,
-    messageBus: { publish() {} },
-    _resolveProvider: () => 'codex',
-    _parseResultOutput: () => Promise.resolve({ summary: 'done', result: 'ok' }),
-    _log() {},
-    _publishLifecycle(event, data) {
-      events.push({ event, data });
-    },
-    _stopLivenessCheck() {
-      stopLivenessCheck(this);
-    },
-    _killTask(termination) {
-      return killTask(this, termination);
-    },
-    ...overrides,
-  };
-  return { agent, events };
-}
-
-async function runWatchdogRecovery(overrides, managerOptions = {}) {
-  const manager = createIsolationManager(managerOptions);
-  const { agent, events } = createIsolatedAgent(manager, overrides);
-  const execution = followClaudeTaskLogsIsolated(agent, agent.currentTaskId);
-
-  await waitFor(() => agent.currentTask);
-  startLivenessCheck(agent);
-  const result = await execution;
-  await sleep(80);
-  stopLivenessCheck(agent);
-
-  return { agent, events, manager, result };
-}
+const { followClaudeTaskLogsIsolated } = require('../src/agent/agent-task-executor');
+const {
+  createIsolatedAgent,
+  createIsolationManager,
+  runWatchdogRecovery,
+  useZeroBackoffSettings,
+  waitFor,
+} = require('./helpers/isolated-task-recovery-fixture');
 
 describe('Isolated task recovery', function () {
   this.timeout(7000);
+  useZeroBackoffSettings();
 
   it('terminates a stale task inside its container exactly once', async function () {
     const recovered = await runWatchdogRecovery({
@@ -215,6 +81,11 @@ describe('Isolated task recovery', function () {
     assert.strictEqual(recovered.agent.currentTask, null);
     assert.strictEqual(recovered.agent.currentTaskId, null);
   });
+});
+
+describe('Isolated task lifecycle handles', function () {
+  this.timeout(7000);
+  useZeroBackoffSettings();
 
   it('does not ignore a tracked isolated task while its local handle is briefly absent', async function () {
     const manager = createIsolationManager();

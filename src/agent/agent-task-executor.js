@@ -1735,6 +1735,7 @@ function buildIsolatedLifecycleHandle({
   state,
   cleanup,
   resolve,
+  reject,
 }) {
   const terminate = (reason = 'Task killed', details = {}) => {
     if (state.resolved || state.taskExited) return;
@@ -1773,6 +1774,9 @@ function buildIsolatedLifecycleHandle({
     isolated: true,
     terminate,
     kill: terminate,
+    failClosed(error) {
+      rejectIsolatedFollower({ agent, state, cleanup, reject, error });
+    },
   };
 }
 
@@ -1989,6 +1993,7 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
       state,
       cleanup,
       resolve,
+      reject,
     });
     agent.currentTask = state.lifecycleHandle;
 
@@ -2243,20 +2248,13 @@ async function killTask(agent, termination = 'Task killed') {
 }
 
 async function killIsolatedTask(agent, currentTask, taskId, reason, code) {
-  try {
-    if (currentTask && typeof currentTask.terminate === 'function') {
-      await currentTask.terminate(reason, { code });
-    } else {
-      await terminateIsolatedTask(agent.isolation.manager, agent.isolation.clusterId, taskId);
-      if (currentTask && typeof currentTask.kill === 'function') {
-        currentTask.kill(reason, { code });
-      }
+  if (currentTask && typeof currentTask.terminate === 'function') {
+    await currentTask.terminate(reason, { code });
+  } else {
+    await terminateIsolatedTask(agent.isolation.manager, agent.isolation.clusterId, taskId);
+    if (currentTask && typeof currentTask.kill === 'function') {
+      currentTask.kill(reason, { code });
     }
-  } catch (error) {
-    // The status follower remains active. Re-arm the existing watchdog so a
-    // later bounded interval can retry without overlapping this attempt.
-    agent.livenessTerminationStarted = false;
-    throw error;
   }
 
   agent._stopLivenessCheck?.();
