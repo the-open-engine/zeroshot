@@ -17,7 +17,7 @@ if git diff --cached --name-only --diff-filter=ACM -- '*.rs' | grep -q .; then
 fi
 
 # Lint and format only staged files
-npx lint-staged
+node scripts/run-lint-staged-no-stash.js
 
 # Type check the entire project (can't be limited to staged files)
 npm run typecheck
