@@ -1648,6 +1648,27 @@ async function reportClusterStatusUnavailable(err, socketDiscovery) {
   }
 }
 
+async function readTaskFromDisk(taskId) {
+  try {
+    const { getTask } = await import('../task-lib/store.js');
+    return getTask(taskId);
+  } catch {
+    return null;
+  }
+}
+
+function reportAgentTaskNotAttachable(id, agent, task) {
+  console.error(
+    chalk.yellow(
+      `Agent '${agent.id}' is running task ${agent.currentTaskId} without PTY attach support`
+    )
+  );
+  if (task.provider) {
+    console.error(chalk.dim(`Provider: ${task.provider}`));
+  }
+  console.error(chalk.dim(`Follow output instead: zeroshot logs ${id} -f`));
+}
+
 async function resolveClusterSocketPath(id, options, socketDiscovery) {
   const cluster = readClusterFromDisk(id);
   ensureClusterRunning(cluster, id);
@@ -1680,7 +1701,12 @@ async function resolveClusterSocketPath(id, options, socketDiscovery) {
     console.log(
       chalk.dim(`Attaching to agent ${options.agent} via task ${agent.currentTaskId}...`)
     );
-    return socketDiscovery.getTaskSocketPath(agent.currentTaskId);
+    const task = await readTaskFromDisk(agent.currentTaskId);
+    if (task?.pid && !task.attachable) {
+      reportAgentTaskNotAttachable(id, agent, task);
+      return null;
+    }
+    return task?.socketPath || socketDiscovery.getTaskSocketPath(agent.currentTaskId);
   } catch (err) {
     await reportClusterStatusUnavailable(err, socketDiscovery);
     return null;
