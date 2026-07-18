@@ -439,6 +439,10 @@ Clusters survive crashes. Resume: `zeroshot resume <id>`.
 Bash subprocess output not streamed: Claude CLI returns `tool_result` after subprocess completes.
 Long scripts show no output until done.
 
+Strict structured-output Codex tasks use the attachable PTY watcher. Claude strict
+structured-output tasks keep the non-PTY watcher because PTY notifications can be
+interpreted as streaming commands; use `zeroshot logs` for those tasks.
+
 ### Kubernetes / Network Storage (SQLite Ledger)
 
 Zeroshot’s message ledger is SQLite (`~/.zeroshot/<id>.db`). On Kubernetes, putting this on a
