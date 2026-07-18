@@ -1592,6 +1592,59 @@ function defineLifecycleResumeTests() {
       assert.strictEqual(resumed.previousError, 'current failure');
     });
 
+    it('should skip every recovered error and select the newest unresolved failure from complete history', async function () {
+      const worktreeDir = fs.mkdtempSync(
+        path.join(lifecycleStorageDir, 'resume-failure-ordering-')
+      );
+      const result = await lifecycleOrchestrator.start(
+        createPartialValidationResumeConfig(worktreeDir),
+        { text: 'Task' },
+        { worktreeDir }
+      );
+      await lifecycleOrchestrator.stop(result.id);
+
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      cluster.messageBus.publish({
+        cluster_id: result.id,
+        topic: 'AGENT_ERROR',
+        sender: 'validator-code',
+        content: {
+          text: 'Older validator failure',
+          data: {
+            agent: 'validator-code',
+            error: 'older unresolved validator failure',
+            iteration: 3,
+            taskId: 'older-unresolved-validator-task',
+          },
+        },
+      });
+      cluster.messageBus.publish({
+        cluster_id: result.id,
+        topic: 'AGENT_ERROR',
+        sender: 'validator-requirements',
+        content: {
+          text: 'Validator still failed',
+          data: {
+            agent: 'validator-requirements',
+            error: 'unresolved validator failure',
+            iteration: 4,
+            taskId: 'unresolved-validator-task',
+          },
+        },
+      });
+
+      for (let index = 0; index < 12; index += 1) {
+        publishRecoveredWorkerFailureHistory(cluster, result.id);
+      }
+      cluster.failureInfo = null;
+
+      const failureInfo = lifecycleOrchestrator._resolveFailureInfo(cluster, result.id);
+
+      assert.strictEqual(failureInfo.agentId, 'validator-requirements');
+      assert.strictEqual(failureInfo.taskId, 'unresolved-validator-task');
+      assert.strictEqual(failureInfo.error, 'unresolved validator failure');
+    });
+
     it('should not restore serialized currentTask handles from disk', async function () {
       const config = createSimpleConfig();
       lifecycleMockRunner.when('worker').delays(1000, { done: true });

@@ -2656,54 +2656,52 @@ class Orchestrator {
     const errors = cluster.messageBus.query({
       cluster_id: clusterId,
       topic: 'AGENT_ERROR',
-      limit: 10,
       order: 'desc',
     });
 
-    if (errors.length === 0) {
-      return null;
-    }
+    for (const error of errors) {
+      const errorIteration = error.content?.data?.iteration;
+      const durableProgress = cluster.messageBus
+        .query({
+          cluster_id: clusterId,
+          topic: 'AGENT_LIFECYCLE',
+          sender: error.sender,
+          since: error.timestamp,
+        })
+        .some((message) => {
+          const event = message.content?.data?.event;
+          if (!['TASK_STARTED', 'TASK_COMPLETED'].includes(event)) {
+            return false;
+          }
 
-    const firstError = errors[0];
-    const errorIteration = firstError.content?.data?.iteration;
-    const durableProgress = cluster.messageBus
-      .query({
-        cluster_id: clusterId,
-        topic: 'AGENT_LIFECYCLE',
-        sender: firstError.sender,
-        since: firstError.timestamp,
-      })
-      .some((message) => {
-        const event = message.content?.data?.event;
-        if (!['TASK_STARTED', 'TASK_COMPLETED'].includes(event)) {
-          return false;
-        }
+          const iteration = message.content?.data?.iteration;
+          return (
+            message.timestamp > error.timestamp ||
+            (Number.isInteger(errorIteration) &&
+              Number.isInteger(iteration) &&
+              iteration > errorIteration)
+          );
+        });
 
-        const iteration = message.content?.data?.iteration;
-        return (
-          message.timestamp > firstError.timestamp ||
-          (Number.isInteger(errorIteration) &&
-            Number.isInteger(iteration) &&
-            iteration > errorIteration)
+      if (durableProgress) {
+        this._log(
+          `[Orchestrator] Ignoring recovered ledger failure from ${error.sender}; durable task progress followed it`
         );
-      });
+        continue;
+      }
 
-    if (durableProgress) {
-      this._log(
-        `[Orchestrator] Ignoring recovered ledger failure from ${firstError.sender}; durable task progress followed it`
-      );
-      return null;
+      const failureInfo = {
+        agentId: error.sender,
+        taskId: error.content?.data?.taskId || null,
+        iteration: error.content?.data?.iteration || 0,
+        error: error.content?.data?.error || error.content?.text,
+        timestamp: error.timestamp,
+      };
+      this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
+      return failureInfo;
     }
 
-    const failureInfo = {
-      agentId: firstError.sender,
-      taskId: firstError.content?.data?.taskId || null,
-      iteration: firstError.content?.data?.iteration || 0,
-      error: firstError.content?.data?.error || firstError.content?.text,
-      timestamp: firstError.timestamp,
-    };
-    this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
-    return failureInfo;
+    return null;
   }
 
   _requireFailedAgent(clusterId, cluster, failureInfo) {
