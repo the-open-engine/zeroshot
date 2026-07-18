@@ -1,8 +1,10 @@
+#[path = "support/mod.rs"]
 mod support;
 
 use std::sync::Arc;
 
-use support::ledger::{owner, resource, run_store_contract, temp_root};
+use support::ledger::temp_root;
+use support::ledger_contract::{owner, resource, run_store_contract};
 use zeroshot_engine::cluster_ledger::store::fake::{FakeLedgerStore, ManualLedgerClock};
 use zeroshot_engine::cluster_ledger::store::sqlite::SqliteLedgerStore;
 use zeroshot_engine::cluster_ledger::store::{LedgerStore, StoreError};
