@@ -2665,6 +2665,36 @@ class Orchestrator {
     }
 
     const firstError = errors[0];
+    const errorIteration = firstError.content?.data?.iteration;
+    const durableProgress = cluster.messageBus
+      .query({
+        cluster_id: clusterId,
+        topic: 'AGENT_LIFECYCLE',
+        sender: firstError.sender,
+        since: firstError.timestamp,
+      })
+      .some((message) => {
+        const event = message.content?.data?.event;
+        if (!['TASK_STARTED', 'TASK_COMPLETED'].includes(event)) {
+          return false;
+        }
+
+        const iteration = message.content?.data?.iteration;
+        return (
+          message.timestamp > firstError.timestamp ||
+          (Number.isInteger(errorIteration) &&
+            Number.isInteger(iteration) &&
+            iteration > errorIteration)
+        );
+      });
+
+    if (durableProgress) {
+      this._log(
+        `[Orchestrator] Ignoring recovered ledger failure from ${firstError.sender}; durable task progress followed it`
+      );
+      return null;
+    }
+
     const failureInfo = {
       agentId: firstError.sender,
       taskId: firstError.content?.data?.taskId || null,
