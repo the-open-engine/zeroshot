@@ -592,12 +592,13 @@ Do NOT assume single root cause.
 
 ## Mechanical Enforcement
 
-| Antipattern               | Enforcement      |
-| ------------------------- | ---------------- |
-| Dangerous fallbacks       | ESLint ERROR     |
-| Manual git tags           | Pre-push hook    |
-| Git in validator prompts  | Config validator |
-| Multiple impl files (-v2) | Pre-commit hook  |
-| Spawn without permission  | Runtime check    |
-| Git stash usage           | Pre-commit hook  |
-| Rust formatting drift     | Pre-commit hook  |
+| Antipattern                | Enforcement        |
+| -------------------------- | ------------------ |
+| Dangerous fallbacks        | ESLint ERROR       |
+| Manual git tags            | Pre-push hook      |
+| Git in validator prompts   | Config validator   |
+| Multiple impl files (-v2)  | Pre-commit hook    |
+| Spawn without permission   | Runtime check      |
+| Git stash usage            | Pre-commit hook    |
+| lint-staged backup stashes | Pre-commit wrapper |
+| Rust formatting drift      | Pre-commit hook    |
