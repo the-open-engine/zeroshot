@@ -50,7 +50,9 @@ function getDb() {
       model TEXT,
       schedule_id TEXT,
       socket_path TEXT,
-      attachable INTEGER DEFAULT 0
+      attachable INTEGER DEFAULT 0,
+      process_group_id INTEGER,
+      termination_strategy TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -75,7 +77,17 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
   `);
 
+  ensureTaskColumn(db, 'process_group_id', 'INTEGER');
+  ensureTaskColumn(db, 'termination_strategy', 'TEXT');
+
   return db;
+}
+
+function ensureTaskColumn(database, name, definition) {
+  const columns = database.pragma('table_info(tasks)');
+  if (!columns.some((column) => column.name === name)) {
+    database.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`);
+  }
 }
 
 export function ensureDirs() {
@@ -110,6 +122,8 @@ function rowToTask(row) {
     scheduleId: row.schedule_id,
     socketPath: row.socket_path,
     attachable: Boolean(row.attachable),
+    processGroupId: row.process_group_id,
+    terminationStrategy: row.termination_strategy,
   };
 }
 
@@ -137,11 +151,11 @@ export function saveTasks(tasks) {
     INSERT OR REPLACE INTO tasks (
       id, prompt, full_prompt, cwd, status, pid, session_id, log_file,
       created_at, updated_at, exit_code, error, provider, model,
-      schedule_id, socket_path, attachable
+      schedule_id, socket_path, attachable, process_group_id, termination_strategy
     ) VALUES (
       @id, @prompt, @fullPrompt, @cwd, @status, @pid, @sessionId, @logFile,
       @createdAt, @updatedAt, @exitCode, @error, @provider, @model,
-      @scheduleId, @socketPath, @attachable
+      @scheduleId, @socketPath, @attachable, @processGroupId, @terminationStrategy
     )
   `);
 
@@ -168,6 +182,8 @@ export function saveTasks(tasks) {
         scheduleId: task.scheduleId || null,
         socketPath: task.socketPath || null,
         attachable: task.attachable ? 1 : 0,
+        processGroupId: task.processGroupId || null,
+        terminationStrategy: task.terminationStrategy || null,
       });
     }
   });
@@ -232,7 +248,9 @@ export function updateTask(id, updates) {
       model = @model,
       schedule_id = @scheduleId,
       socket_path = @socketPath,
-      attachable = @attachable
+      attachable = @attachable,
+      process_group_id = @processGroupId,
+      termination_strategy = @terminationStrategy
     WHERE id = @id
   `
     )
@@ -253,6 +271,8 @@ export function updateTask(id, updates) {
       scheduleId: updated.scheduleId || null,
       socketPath: updated.socketPath || null,
       attachable: updated.attachable ? 1 : 0,
+      processGroupId: updated.processGroupId || null,
+      terminationStrategy: updated.terminationStrategy || null,
     });
 
   return updated;
@@ -277,11 +297,11 @@ export function addTask(task) {
     INSERT INTO tasks (
       id, prompt, full_prompt, cwd, status, pid, session_id, log_file,
       created_at, updated_at, exit_code, error, provider, model,
-      schedule_id, socket_path, attachable
+      schedule_id, socket_path, attachable, process_group_id, termination_strategy
     ) VALUES (
       @id, @prompt, @fullPrompt, @cwd, @status, @pid, @sessionId, @logFile,
       @createdAt, @updatedAt, @exitCode, @error, @provider, @model,
-      @scheduleId, @socketPath, @attachable
+      @scheduleId, @socketPath, @attachable, @processGroupId, @terminationStrategy
     )
   `
     )
@@ -303,6 +323,8 @@ export function addTask(task) {
       scheduleId: fullTask.scheduleId || null,
       socketPath: fullTask.socketPath || null,
       attachable: fullTask.attachable ? 1 : 0,
+      processGroupId: fullTask.processGroupId || null,
+      terminationStrategy: fullTask.terminationStrategy || null,
     });
 
   return fullTask;

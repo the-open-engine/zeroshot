@@ -616,11 +616,12 @@ async function handleLockContention() {
 }
 
 async function handleFinalFailure(agent, triggeringMessage, error, maxRetries) {
+  const failureAttempts = error?.terminationAttempts ?? maxRetries;
   console.error(`
 ${'='.repeat(80)}`);
   console.error(`🔴🔴🔴 MAX RETRIES EXHAUSTED - AGENT: ${agent.id} 🔴🔴🔴`);
   console.error(`${'='.repeat(80)}`);
-  console.error(`All ${maxRetries} attempts failed`);
+  console.error(`All ${failureAttempts} attempts failed`);
   console.error(`Final error: ${error.message}`);
   console.error(`Stack: ${error.stack}`);
   console.error(`${'='.repeat(80)}
@@ -634,7 +635,7 @@ ${'='.repeat(80)}`);
 ${'='.repeat(80)}`);
     console.error(`❌ VALIDATOR CRASHED - REJECTING (NOT AUTO-APPROVING)`);
     console.error(`${'='.repeat(80)}`);
-    console.error(`Validator ${agent.id} crashed ${maxRetries} times`);
+    console.error(`Validator ${agent.id} crashed ${failureAttempts} times`);
     console.error(`Error: ${error.message}`);
     console.error(`REJECTING validation - broken code will NOT be merged`);
     console.error(`Investigation required before retry`);
@@ -648,16 +649,16 @@ ${'='.repeat(80)}`);
         topic: hook.config.topic,
         receiver: hook.config.receiver || 'broadcast',
         content: {
-          text: `REJECTED: Validator crashed ${maxRetries} times - ${error.message}`,
+          text: `REJECTED: Validator crashed ${failureAttempts} times - ${error.message}`,
           data: {
             approved: false, // REJECT!
             crashedAfterRetries: true,
             errors: JSON.stringify([
-              `VALIDATOR CRASHED ${maxRetries}x: ${error.message}`,
+              `VALIDATOR CRASHED ${failureAttempts}x: ${error.message}`,
               `Validation could not be performed - REJECTING to prevent broken code merge`,
               `Investigation required before retry`,
             ]),
-            attempts: maxRetries,
+            attempts: failureAttempts,
             requiresInvestigation: true,
           },
         },
@@ -691,13 +692,32 @@ ${'='.repeat(80)}`);
     });
   }
 
+  if (error?.terminationExhausted) {
+    agent._publish({
+      topic: 'CLUSTER_FAILED',
+      receiver: 'broadcast',
+      content: {
+        text: `Cluster failed: task termination could not be verified for ${agent.id}`,
+        data: {
+          reason: 'task_termination_unverified',
+          agentId: agent.id,
+          role: agent.role,
+          taskId: error.taskId || agent.currentTaskId,
+          attempts: failureAttempts,
+          error: error.message,
+        },
+      },
+    });
+  }
+
   // Save failure info to cluster for resume capability
   agent.cluster.failureInfo = {
+    ...(error?.terminationExhausted ? agent.cluster.failureInfo : {}),
     agentId: agent.id,
     taskId: error?.taskId || agent.currentTaskId,
     iteration: agent.iteration,
     error: error.message,
-    attempts: maxRetries,
+    attempts: failureAttempts,
     timestamp: Date.now(),
   };
 
@@ -706,19 +726,20 @@ ${'='.repeat(80)}`);
     topic: 'AGENT_ERROR',
     receiver: 'broadcast',
     content: {
-      text: `Task execution failed after ${maxRetries} attempts: ${error.message}`,
+      text: `Task execution failed after ${failureAttempts} attempts: ${error.message}`,
       data: {
         error: error.message,
         stack: error.stack,
         hookFailure: error?.hookFailure === true,
         restartExhausted: error?.restartExhausted === true,
+        terminationExhausted: error?.terminationExhausted === true,
         hookRetries: error?.hookRetries ?? undefined,
         originalHookError: error?.originalHookError ?? undefined,
         agent: agent.id,
         role: agent.role,
         iteration: agent.iteration,
         taskId: error?.taskId || agent.currentTaskId,
-        attempts: maxRetries,
+        attempts: failureAttempts,
         hookFailureContext: error.message.includes('Hook uses result')
           ? {
               taskId: agent.currentTaskId || 'UNKNOWN',
@@ -745,7 +766,9 @@ ${'='.repeat(80)}`);
     orchestrator: agent.orchestrator,
   });
 
-  agent.state = 'idle';
+  if (!error?.terminationExhausted) {
+    agent.state = 'idle';
+  }
 }
 
 async function scheduleRetry(agent, error, attempt, maxRetries, _baseDelay) {
@@ -1026,28 +1049,36 @@ function startLivenessCheck(agent) {
 
   agent.consecutiveStaleWarnings = 0;
   agent.livenessTerminationStarted = false;
+  agent.livenessTerminationContext = null;
+  agent.livenessTerminationAttempts = 0;
+  agent.livenessTerminationRetryAt = 0;
 
   agent.livenessCheckInterval = setInterval(() => {
-    if (!agent.currentTask || agent.livenessTerminationStarted) {
+    const hasRecoverableTask =
+      Boolean(agent.currentTask) || Boolean(agent.isolation?.enabled && agent.currentTaskId);
+    if (!hasRecoverableTask || agent.livenessTerminationStarted) {
       return;
     }
 
     const now = Date.now();
+    if (agent.livenessTerminationContext) {
+      if (now >= agent.livenessTerminationRetryAt) {
+        attemptLivenessTermination(agent, settings);
+      }
+      return;
+    }
+
     const taskStartedAt = agent.taskStartedAt || agent.lastOutputTime || now;
     const lastOutputTime = agent.lastOutputTime || taskStartedAt;
     const taskRuntime = now - taskStartedAt;
     const timeSinceLastOutput = now - lastOutputTime;
 
     if (configuredTimeout && taskRuntime >= configuredTimeout) {
-      agent.livenessTerminationStarted = true;
       const reason = `Task timed out after ${configuredTimeout}ms`;
-      agent._publishLifecycle('AGENT_TASK_TIMEOUT', {
+      beginLivenessTermination(agent, settings, reason, 'AGENT_TASK_TIMEOUT', {
         taskId: agent.currentTaskId,
         taskRuntime,
         timeout: configuredTimeout,
-      });
-      Promise.resolve(agent._killTask({ reason, code: 'AGENT_TASK_TIMEOUT' })).catch((error) => {
-        agent._log(`[${agent.id}] Failed to terminate timed-out task: ${error.message}`);
       });
       return;
     }
@@ -1073,20 +1104,135 @@ function startLivenessCheck(agent) {
       return;
     }
 
-    agent.livenessTerminationStarted = true;
     const reason = `Provider produced no output for ${timeSinceLastOutput}ms`;
-    agent._publishLifecycle('AGENT_INACTIVITY_TIMEOUT', {
+    beginLivenessTermination(agent, settings, reason, 'PROVIDER_INACTIVITY_TIMEOUT', {
       taskId: agent.currentTaskId,
       timeSinceLastOutput,
       staleDuration,
       consecutiveWarnings: agent.consecutiveStaleWarnings,
     });
-    Promise.resolve(agent._killTask({ reason, code: 'PROVIDER_INACTIVITY_TIMEOUT' })).catch(
-      (error) => {
-        agent._log(`[${agent.id}] Failed to terminate inactive task: ${error.message}`);
-      }
-    );
   }, checkIntervalMs);
+}
+
+const MAX_LIVENESS_TERMINATION_ATTEMPTS = 3;
+
+function beginLivenessTermination(agent, settings, reason, code, eventData) {
+  agent.livenessTerminationContext = {
+    taskId: agent.currentTaskId,
+    reason,
+    code,
+    eventData,
+    eventPublished: false,
+  };
+  agent.livenessTerminationAttempts = 0;
+  agent.livenessTerminationRetryAt = 0;
+  attemptLivenessTermination(agent, settings);
+}
+
+function publishLivenessTerminationEvent(agent, context) {
+  if (context.eventPublished) return;
+  context.eventPublished = true;
+  agent._publishLifecycle(
+    context.code === 'AGENT_TASK_TIMEOUT' ? 'AGENT_TASK_TIMEOUT' : 'AGENT_INACTIVITY_TIMEOUT',
+    context.eventData
+  );
+}
+
+function terminationRetryDelay(settings, attempt) {
+  const baseDelay = Math.max(0, settings.backoffBaseMs ?? 2000);
+  const maxDelay = Math.max(0, settings.backoffMaxMs ?? 30000);
+  return Math.min(maxDelay, baseDelay * Math.pow(2, Math.max(0, attempt - 1)));
+}
+
+function attemptLivenessTermination(agent, settings) {
+  const context = agent.livenessTerminationContext;
+  if (!context || agent.livenessTerminationStarted) return;
+
+  agent.livenessTerminationStarted = true;
+  agent.livenessTerminationAttempts += 1;
+  const attempt = agent.livenessTerminationAttempts;
+
+  Promise.resolve()
+    .then(() => agent._killTask({ reason: context.reason, code: context.code }))
+    .then((termination) => {
+      if (termination?.forced === false) return;
+      publishLivenessTerminationEvent(agent, context);
+    })
+    .catch((error) => {
+      if (agent.livenessTerminationContext !== context) return;
+      if (attempt >= MAX_LIVENESS_TERMINATION_ATTEMPTS) {
+        exhaustLivenessTermination(agent, context, error);
+        return;
+      }
+
+      const delayMs = terminationRetryDelay(settings, attempt);
+      agent.livenessTerminationRetryAt = Date.now() + delayMs;
+      agent.livenessTerminationStarted = false;
+      agent._publishLifecycle('AGENT_TERMINATION_RETRY', {
+        taskId: context.taskId,
+        reason: context.reason,
+        code: context.code,
+        error: error.message,
+        attempt,
+        nextAttempt: attempt + 1,
+        maxAttempts: MAX_LIVENESS_TERMINATION_ATTEMPTS,
+        delayMs,
+      });
+      agent._log(
+        `[${agent.id}] Failed to terminate task (attempt ${attempt}/${MAX_LIVENESS_TERMINATION_ATTEMPTS}); ` +
+          `retrying in ${delayMs}ms: ${error.message}`
+      );
+    });
+}
+
+function exhaustLivenessTermination(agent, context, terminationError) {
+  if (agent.livenessCheckInterval) {
+    clearInterval(agent.livenessCheckInterval);
+    agent.livenessCheckInterval = null;
+  }
+
+  const attempts = agent.livenessTerminationAttempts;
+  publishLivenessTerminationEvent(agent, context);
+  const error = new Error(
+    `Failed to terminate isolated task ${context.taskId} after ${attempts} attempts; ` +
+      `the provider task may still be running. Manual recovery is required before resume. ` +
+      `Last error: ${terminationError.message}`
+  );
+  error.code = 'ISOLATED_TASK_TERMINATION_EXHAUSTED';
+  error.taskId = context.taskId;
+  error.permanent = true;
+  error.restartExhausted = true;
+  error.terminationExhausted = true;
+  error.terminationAttempts = attempts;
+
+  agent.state = 'error';
+  agent.cluster.failureInfo = {
+    agentId: agent.id,
+    taskId: context.taskId,
+    iteration: agent.iteration,
+    type: 'task_termination',
+    reason: 'termination_unverified',
+    error: error.message,
+    attempts,
+    timestamp: Date.now(),
+  };
+  agent._publishLifecycle('AGENT_TERMINATION_EXHAUSTED', {
+    taskId: context.taskId,
+    reason: context.reason,
+    code: error.code,
+    terminationCode: context.code,
+    attempts,
+    maxAttempts: MAX_LIVENESS_TERMINATION_ATTEMPTS,
+    error: terminationError.message,
+    requiresManualRecovery: true,
+  });
+
+  if (typeof agent.currentTask?.failClosed === 'function') {
+    agent.currentTask.failClosed(error);
+    return;
+  }
+
+  agent._log(`[${agent.id}] ${error.message}`);
 }
 
 /**
@@ -1100,6 +1246,9 @@ function stopLivenessCheck(agent) {
   }
   agent.consecutiveStaleWarnings = 0;
   agent.livenessTerminationStarted = false;
+  agent.livenessTerminationContext = null;
+  agent.livenessTerminationAttempts = 0;
+  agent.livenessTerminationRetryAt = 0;
 }
 
 module.exports = {

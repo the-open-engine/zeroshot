@@ -283,6 +283,10 @@ Agent A -> publish() -> SQLite Ledger -> LogicEngine -> trigger match -> Agent B
 
 Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledger so restart limits survive orchestrator restarts.
 
+Provider task ownership: task watchers persist an owned termination boundary with each active task.
+POSIX providers run in a dedicated process group; Windows providers use the exact root PID with
+`taskkill /T`. Recovery must terminate that recorded boundary before retrying work.
+
 ### Guidance Messaging
 
 - Topics: `USER_GUIDANCE_CLUSTER`, `USER_GUIDANCE_AGENT` (see `src/guidance-topics.js`).
