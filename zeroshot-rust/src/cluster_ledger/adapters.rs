@@ -1,9 +1,11 @@
 //! Protocol store adapters backed by one coherent ordered-prefix fold.
 
+mod protocol;
+mod state;
+
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    canonical_value_bytes, ApplyResult, CompiledGraphIr, Cursor, Generation, GraphSpec, Phase,
-    RequestFingerprint, RunId,
+    canonical_value_bytes, ApplyResult, Generation, Phase, RunId, StopResult, UpdateResult,
 };
 use openengine_cluster_server::admission::{
     AdmissionSnapshot, AdmissionStore, CancellationSignal, CommitProposal, ControlJournal,
@@ -11,14 +13,18 @@ use openengine_cluster_server::admission::{
     VerifiedSeed,
 };
 use openengine_cluster_server::lifecycle::{
-    CompletionResult, DispatchPermit, LifecycleSnapshot, LifecycleStore,
-    MutationReceipt as ProtocolMutationReceipt, StopProposal, UpdateProposal, VerifiedCompletion,
+    CompletionResult, DispatchPermit, LifecycleSnapshot, LifecycleStore, StopProposal,
+    UpdateProposal, VerifiedCompletion,
 };
-use openengine_cluster_protocol::{StopResult, UpdateResult};
 
 use super::record::{CanonicalDigest, RecordPayload};
-use super::store::{AppendGuard, IdempotencyId, MutationReceipt, StoreError};
-use super::{ClusterLedger, LedgerError, LedgerErrorKind, MutationIdentity};
+use super::store::IdempotencyId;
+use super::{ClusterLedger, CommitRequest, MutationIdentity, ReceiptExpectation};
+use protocol::{
+    cancellation_guard, fingerprint_bytes, protocol_cursor, protocol_error,
+    protocol_idempotency_record, protocol_run_id,
+};
+use state::FoldedProtocolState;
 
 #[derive(Clone)]
 pub struct ClusterLedgerAdapters {
@@ -49,11 +55,13 @@ impl ClusterLedgerAdapters {
     ) -> Result<Option<ApplyResult>, ProtocolStoreError> {
         self.ledger
             .existing_receipt::<ApplyResult>(
-                crate::fault::FaultContext::Admission,
                 state,
                 key,
-                "protocol_apply",
-                fingerprint,
+                ReceiptExpectation::new(
+                    crate::fault::FaultContext::Admission,
+                    "protocol_apply",
+                    fingerprint,
+                ),
             )
             .map(|existing| {
                 existing.map(|existing| {
@@ -65,90 +73,49 @@ impl ClusterLedgerAdapters {
             .map_err(protocol_error)
     }
 
-    async fn commit_unchanged(
-        &self,
-        state: &super::ReplayState,
-        proposal: CommitProposal,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        generation: Option<Generation>,
-        cancellation: &CancellationSignal,
-    ) -> Result<ApplyResult, ProtocolStoreError> {
-        if proposal.input.is_some() {
-            return Err(ProtocolStoreError::SchemaViolation(
-                "unchanged admission cannot replace verified input".into(),
-            ));
-        }
-        let current = state
-            .admission
-            .as_ref()
-            .expect("unchanged admission requires current state");
-        let result = ApplyResult {
-            generation,
-            run_id: Some(protocol_run_id(current.run)),
-            phase: Phase::Running,
-            deduped: false,
-            diff: None,
-        };
-        if cancellation.is_cancelled() {
-            return Err(ProtocolStoreError::Cancelled);
-        }
-        self.commit_protocol_apply(state, key, fingerprint, Vec::new(), result, cancellation)
-            .await
-    }
-
-    async fn commit_changed(
+    async fn commit_plan(
         &self,
         state: &mut super::ReplayState,
-        proposal: CommitProposal,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        canonical_compiled_ir: Vec<u8>,
-        cancellation: &CancellationSignal,
+        plan: ApplyPlan,
+        commit: ApplyCommit<'_>,
     ) -> Result<ApplyResult, ProtocolStoreError> {
-        if !state.active_dispatches.is_empty()
-            || state
-                .effects
-                .values()
-                .any(|effect| effect.receipt_digest.is_none())
-        {
-            return Err(ProtocolStoreError::InvalidPhase {
-                current: Phase::Running,
-            });
-        }
-        let changed = prepare_changed_apply(state, proposal, canonical_compiled_ir)?;
-        if cancellation.is_cancelled() {
+        let changed = match plan {
+            ApplyPlan::Unchanged {
+                proposal,
+                generation,
+            } => prepare_unchanged_apply(state, proposal, generation)?,
+            ApplyPlan::Changed {
+                proposal,
+                canonical_compiled_ir,
+            } => {
+                ensure_change_is_safe(state)?;
+                prepare_changed_apply(state, proposal, canonical_compiled_ir)?
+            }
+        };
+        if commit.cancellation.is_cancelled() {
             return Err(ProtocolStoreError::Cancelled);
         }
-        self.commit_protocol_apply(
-            state,
-            key,
-            fingerprint,
-            changed.payloads,
-            changed.result,
-            cancellation,
-        )
-        .await
+        self.commit_protocol_apply(state, changed, commit).await
     }
 
     async fn commit_protocol_apply(
         &self,
         state: &super::ReplayState,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        payloads: Vec<RecordPayload>,
-        result: ApplyResult,
-        cancellation: &CancellationSignal,
+        changed: ChangedApply,
+        commit: ApplyCommit<'_>,
     ) -> Result<ApplyResult, ProtocolStoreError> {
+        let ChangedApply { result, payloads } = changed;
         let committed = self
             .ledger
-            .commit_guarded(
-                crate::fault::FaultContext::Admission,
-                state,
-                MutationIdentity::new(key, "protocol_apply", fingerprint),
-                payloads,
-                &result,
-                cancellation_guard(cancellation),
+            .commit(
+                CommitRequest::new(
+                    crate::fault::FaultContext::Admission,
+                    state,
+                    MutationIdentity::new(commit.key, "protocol_apply", commit.fingerprint),
+                    &result,
+                )
+                .with_payloads(payloads)
+                .guarded(cancellation_guard(commit.cancellation)),
             )
             .await
             .map_err(protocol_error)?;
@@ -158,9 +125,66 @@ impl ClusterLedgerAdapters {
     }
 }
 
+struct ApplyCommit<'a> {
+    key: IdempotencyId,
+    fingerprint: [u8; 32],
+    cancellation: &'a CancellationSignal,
+}
+
+enum ApplyPlan {
+    Unchanged {
+        proposal: CommitProposal,
+        generation: Option<Generation>,
+    },
+    Changed {
+        proposal: CommitProposal,
+        canonical_compiled_ir: Vec<u8>,
+    },
+}
+
 struct ChangedApply {
     result: ApplyResult,
     payloads: Vec<RecordPayload>,
+}
+
+fn prepare_unchanged_apply(
+    state: &super::ReplayState,
+    proposal: CommitProposal,
+    generation: Option<Generation>,
+) -> Result<ChangedApply, ProtocolStoreError> {
+    if proposal.input.is_some() {
+        return Err(ProtocolStoreError::SchemaViolation(
+            "unchanged admission cannot replace verified input".into(),
+        ));
+    }
+    let current = state
+        .admission
+        .as_ref()
+        .expect("unchanged admission requires current state");
+    Ok(ChangedApply {
+        result: ApplyResult {
+            generation,
+            run_id: Some(protocol_run_id(current.run)),
+            phase: Phase::Running,
+            deduped: false,
+            diff: None,
+        },
+        payloads: Vec::new(),
+    })
+}
+
+fn ensure_change_is_safe(state: &super::ReplayState) -> Result<(), ProtocolStoreError> {
+    if !state.active_dispatches.is_empty()
+        || state
+            .effects
+            .values()
+            .any(|effect| effect.receipt_digest.is_none())
+    {
+        return Err(ProtocolStoreError::InvalidPhase {
+            current: Phase::Running,
+        });
+    }
+    Ok(())
 }
 
 fn prepare_changed_apply(
@@ -185,12 +209,14 @@ fn prepare_changed_apply(
     let input_digest = CanonicalDigest::of(&canonical_input);
     let payloads = changed_apply_payloads(
         &proposal,
-        generation,
-        run,
-        canonical_graph,
-        canonical_input,
-        input_digest,
-        canonical_compiled_ir,
+        ChangedPayloads {
+            generation,
+            run,
+            canonical_graph,
+            canonical_input,
+            input_digest,
+            canonical_compiled_ir,
+        },
     );
     Ok(ChangedApply {
         result: ApplyResult {
@@ -206,15 +232,27 @@ fn prepare_changed_apply(
     })
 }
 
-fn changed_apply_payloads(
-    proposal: &CommitProposal,
+struct ChangedPayloads {
     generation: super::GenerationId,
     run: super::RunSequence,
     canonical_graph: Vec<u8>,
     canonical_input: Vec<u8>,
     input_digest: CanonicalDigest,
     canonical_compiled_ir: Vec<u8>,
+}
+
+fn changed_apply_payloads(
+    proposal: &CommitProposal,
+    changed: ChangedPayloads,
 ) -> Vec<RecordPayload> {
+    let ChangedPayloads {
+        generation,
+        run,
+        canonical_graph,
+        canonical_input,
+        input_digest,
+        canonical_compiled_ir,
+    } = changed;
     vec![
         RecordPayload::Admission {
             generation,
@@ -275,103 +313,31 @@ fn ensure_apply_phase(state: &super::ReplayState) -> Result<(), ProtocolStoreErr
     }
 }
 
-struct FoldedProtocolState {
-    admission: AdmissionSnapshot,
-    lifecycle: LifecycleSnapshot,
-}
-
-impl FoldedProtocolState {
-    fn from_replay(state: &super::ReplayState) -> Result<Self, ProtocolStoreError> {
-        let Some(admission) = &state.admission else {
-            return Ok(Self {
-                admission: AdmissionSnapshot::default(),
-                lifecycle: LifecycleSnapshot::default(),
-            });
-        };
-        let generation = Generation::new(admission.generation.get())
-            .map_err(|_| ProtocolStoreError::Internal("durable generation is invalid".into()))?;
-        let run_id = protocol_run_id(admission.run);
-        let cursor = protocol_cursor(state.position);
-        let phase = if state.terminal_outcome.is_some() {
-            Phase::Finished
-        } else {
-            Phase::Running
-        };
-        let control = ControlSnapshot {
-            spec: decode_graph(&admission.canonical_graph)?,
-            compiled_ir: decode_compiled_ir(&admission.canonical_compiled_ir)?,
-            generation: Some(generation),
-            run_id: Some(run_id.clone()),
-            phase,
-            cursor: Some(cursor.clone()),
-        };
-        Ok(Self {
-            admission: AdmissionSnapshot {
-                control,
-                seed: verified_seed(state, admission.run, run_id)?,
-            },
-            lifecycle: lifecycle_snapshot(state, cursor)?,
-        })
-    }
-}
-
-fn decode_graph(bytes: &[u8]) -> Result<Option<GraphSpec>, ProtocolStoreError> {
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-    serde_json::from_slice(bytes)
-        .map(Some)
-        .map_err(|_| ProtocolStoreError::Internal("durable graph encoding is invalid".into()))
-}
-
-fn decode_compiled_ir(bytes: &[u8]) -> Result<Option<CompiledGraphIr>, ProtocolStoreError> {
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-    serde_json::from_slice(bytes).map(Some).map_err(|_| {
-        ProtocolStoreError::Internal("durable compiled graph encoding is invalid".into())
-    })
-}
-
-fn verified_seed(
+fn prepare_apply_plan(
     state: &super::ReplayState,
-    run: super::RunSequence,
-    run_id: RunId,
-) -> Result<Option<VerifiedSeed>, ProtocolStoreError> {
-    state
-        .verified_inputs
-        .get(&run)
-        .map(|verified| {
-            Ok(VerifiedSeed {
-                run_id,
-                input: serde_json::from_slice(&verified.canonical_bytes).map_err(|_| {
-                    ProtocolStoreError::Internal(
-                        "durable verified input encoding is invalid".into(),
-                    )
-                })?,
-                cursor: protocol_cursor(verified.position),
-            })
-        })
-        .transpose()
-}
-
-fn lifecycle_snapshot(
-    state: &super::ReplayState,
-    cursor: Cursor,
-) -> Result<LifecycleSnapshot, ProtocolStoreError> {
-    let in_flight = u32::try_from(state.active_dispatches.len())
-        .map_err(|_| ProtocolStoreError::Internal("dispatch count exceeds u32".into()))?;
-    let mut operational = openengine_cluster_protocol::OperationalStatus {
-        in_flight,
-        ..Default::default()
-    };
-    if state.terminal_outcome.is_some() {
-        operational.dispatch_state = openengine_cluster_protocol::DispatchState::Stopped;
-    }
-    Ok(LifecycleSnapshot {
-        operational: Some(operational),
-        latest_cursor: Some(cursor),
-        ..Default::default()
+    proposal: CommitProposal,
+) -> Result<ApplyPlan, ProtocolStoreError> {
+    ensure_apply_phase(state)?;
+    let current_generation = current_protocol_generation(state)?;
+    validate_protocol_generation(proposal.if_generation, current_generation)?;
+    let canonical_compiled_ir = proposal
+        .compiled_ir
+        .canonical_bytes()
+        .map_err(|_| ProtocolStoreError::Internal("compiled graph encoding failed".into()))?;
+    let unchanged = state
+        .admission
+        .as_ref()
+        .is_some_and(|admission| admission.canonical_compiled_ir == canonical_compiled_ir);
+    Ok(if unchanged {
+        ApplyPlan::Unchanged {
+            proposal,
+            generation: current_generation,
+        }
+    } else {
+        ApplyPlan::Changed {
+            proposal,
+            canonical_compiled_ir,
+        }
     })
 }
 
@@ -439,36 +405,15 @@ impl AdmissionStore for ClusterLedgerAdapters {
         if let Some(existing) = self.existing_protocol_apply(&state, &key, fingerprint)? {
             return Ok(existing);
         }
-        ensure_apply_phase(&state)?;
-        let current_generation = current_protocol_generation(&state)?;
-        validate_protocol_generation(proposal.if_generation, current_generation)?;
-        let canonical_compiled_ir = proposal
-            .compiled_ir
-            .canonical_bytes()
-            .map_err(|_| ProtocolStoreError::Internal("compiled graph encoding failed".into()))?;
-        let unchanged = state
-            .admission
-            .as_ref()
-            .is_some_and(|admission| admission.canonical_compiled_ir == canonical_compiled_ir);
-        if unchanged {
-            return self
-                .commit_unchanged(
-                    &state,
-                    proposal,
-                    key,
-                    fingerprint,
-                    current_generation,
-                    cancellation,
-                )
-                .await;
-        }
-        self.commit_changed(
+        let plan = prepare_apply_plan(&state, proposal)?;
+        self.commit_plan(
             &mut state,
-            proposal,
-            key,
-            fingerprint,
-            canonical_compiled_ir,
-            cancellation,
+            plan,
+            ApplyCommit {
+                key,
+                fingerprint,
+                cancellation,
+            },
         )
         .await
     }
@@ -518,88 +463,4 @@ impl LifecycleStore for ClusterLedgerAdapters {
     ) -> Result<CompletionResult, ProtocolStoreError> {
         Err(ProtocolStoreError::UnknownLease)
     }
-}
-
-fn protocol_error(error: LedgerError) -> ProtocolStoreError {
-    match error.kind() {
-        LedgerErrorKind::IdempotencyConflict => ProtocolStoreError::IdempotencyReuse,
-        LedgerErrorKind::Storage(StoreError::AppendCancelled) => ProtocolStoreError::Cancelled,
-        _ => ProtocolStoreError::Internal("native cluster ledger operation failed".into()),
-    }
-}
-
-fn cancellation_guard(cancellation: &CancellationSignal) -> AppendGuard {
-    let observer = cancellation.observer();
-    AppendGuard::cancelled_when(move || observer.is_cancelled())
-}
-
-fn protocol_cursor(position: super::store::Position) -> Cursor {
-    Cursor::new(format!("ledger:{}", position.get()))
-}
-
-fn protocol_run_id(run: super::RunSequence) -> RunId {
-    RunId::new(format!("run:{}", run.get()))
-}
-
-fn fingerprint_bytes(fingerprint: &RequestFingerprint) -> Result<[u8; 32], ProtocolStoreError> {
-    decode_hex_32(fingerprint.as_str())
-        .ok_or_else(|| ProtocolStoreError::Internal("request fingerprint is invalid".into()))
-}
-
-fn protocol_idempotency_record(
-    receipt: MutationReceipt,
-) -> Result<Option<IdempotencyRecord>, ProtocolStoreError> {
-    let fingerprint =
-        serde_json::from_value(serde_json::Value::String(hex_32(receipt.fingerprint)))
-            .map_err(|_| ProtocolStoreError::Internal("durable fingerprint is invalid".into()))?;
-    let mutation_receipt = match receipt.method.as_str() {
-        "protocol_apply" => ProtocolMutationReceipt::Apply(
-            serde_json::from_slice(&receipt.response)
-                .map_err(|_| ProtocolStoreError::Internal("apply receipt is invalid".into()))?,
-        ),
-        "protocol_update" => ProtocolMutationReceipt::Update(
-            serde_json::from_slice(&receipt.response)
-                .map_err(|_| ProtocolStoreError::Internal("update receipt is invalid".into()))?,
-        ),
-        "protocol_stop" => ProtocolMutationReceipt::Stop(
-            serde_json::from_slice(&receipt.response)
-                .map_err(|_| ProtocolStoreError::Internal("stop receipt is invalid".into()))?,
-        ),
-        _ => return Ok(None),
-    };
-    Ok(Some(IdempotencyRecord {
-        fingerprint,
-        receipt: mutation_receipt,
-    }))
-}
-
-fn decode_hex_32(value: &str) -> Option<[u8; 32]> {
-    if value.len() != 64 {
-        return None;
-    }
-    let mut result = [0_u8; 32];
-    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-        let high = hex_digit(pair[0])?;
-        let low = hex_digit(pair[1])?;
-        result[index] = (high << 4) | low;
-    }
-    Some(result)
-}
-
-const fn hex_digit(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
-}
-
-fn hex_32(value: [u8; 32]) -> String {
-    let mut result = String::with_capacity(64);
-    for byte in value {
-        use std::fmt::Write as _;
-        write!(&mut result, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    result
 }

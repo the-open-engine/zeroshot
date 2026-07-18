@@ -10,7 +10,7 @@ use zeroshot_engine::artifact_store::{
 use zeroshot_engine::fault::{EvidenceClass, FaultContext, FaultModule};
 
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use support::artifacts::{byte_stream as stream, test_intent as intent};
 

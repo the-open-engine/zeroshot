@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use zeroshot_engine::cluster_ledger::mutations::AdmissionRequest;
+use zeroshot_engine::cluster_ledger::record::CanonicalDigest;
 use zeroshot_engine::cluster_ledger::store::{IdempotencyId, OwnerId, ResourceId};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
@@ -28,4 +30,23 @@ pub fn owner(value: &str) -> OwnerId {
 
 pub fn key(value: &str) -> IdempotencyId {
     IdempotencyId::new(value).expect("test idempotency key must be valid")
+}
+
+pub fn admission_request(
+    graph: Vec<u8>,
+    input: Vec<u8>,
+    compiled_ir: Vec<u8>,
+    absolute_deadline_ms: u64,
+) -> AdmissionRequest {
+    AdmissionRequest {
+        graph_digest: CanonicalDigest::of(&graph),
+        input_digest: CanonicalDigest::of(&input),
+        policy_digest: CanonicalDigest::of(b"policy"),
+        catalog_digest: CanonicalDigest::of(b"catalog"),
+        profile_digest: CanonicalDigest::of(b"profile"),
+        absolute_deadline_ms,
+        verified_input: input,
+        canonical_graph: graph,
+        canonical_compiled_ir: compiled_ir,
+    }
 }

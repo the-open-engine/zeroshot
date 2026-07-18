@@ -1,5 +1,5 @@
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use std::sync::Arc;
 

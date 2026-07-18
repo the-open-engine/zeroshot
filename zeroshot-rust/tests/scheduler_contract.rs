@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use tokio::time::Duration;
 use zeroshot_engine::execution::WorkspaceAccessMode;

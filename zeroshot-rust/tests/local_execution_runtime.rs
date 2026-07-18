@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use tokio::sync::Notify;
 use zeroshot_engine::execution::local::LocalExecutionRuntime;

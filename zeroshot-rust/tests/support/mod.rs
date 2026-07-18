@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod architecture;
 pub mod artifacts;
 pub mod execution_contract;

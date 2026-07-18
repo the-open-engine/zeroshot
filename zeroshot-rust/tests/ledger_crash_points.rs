@@ -1,9 +1,13 @@
-mod support;
+#[path = "support/mod.rs"]
+pub mod support;
 
 use std::sync::Arc;
 
-use support::ledger::{key, owner, resource, temp_root};
-use zeroshot_engine::cluster_ledger::mutations::{AdmissionRequest, SafeFaultConsequence};
+use support::ledger::{admission_request, key, owner, resource, temp_root};
+use zeroshot_engine::cluster_ledger::mutations::{
+    AdmissionRequest, EffectReconciliation, SafeFaultConsequence, SafeFaultRecord,
+    SettlementRequest,
+};
 use zeroshot_engine::cluster_ledger::record::CanonicalDigest;
 use zeroshot_engine::cluster_ledger::store::fake::{FakeLedgerStore, ManualLedgerClock};
 use zeroshot_engine::cluster_ledger::store::sqlite::SqliteLedgerStore;
@@ -13,19 +17,12 @@ use zeroshot_engine::fault::{EvidenceClass, FaultContext, FaultFactory, FaultMod
 use zeroshot_engine::observability::NoopObservationSink;
 
 fn admission() -> AdmissionRequest {
-    let graph = b"canonical-graph".to_vec();
-    let input = br#"{"verified":true}"#.to_vec();
-    AdmissionRequest {
-        graph_digest: CanonicalDigest::of(&graph),
-        input_digest: CanonicalDigest::of(&input),
-        policy_digest: CanonicalDigest::of(b"policy"),
-        catalog_digest: CanonicalDigest::of(b"catalog"),
-        profile_digest: CanonicalDigest::of(b"profile"),
-        absolute_deadline_ms: 10_000,
-        verified_input: input,
-        canonical_graph: graph,
-        canonical_compiled_ir: b"compiled".to_vec(),
-    }
+    admission_request(
+        b"canonical-graph".to_vec(),
+        br#"{"verified":true}"#.to_vec(),
+        b"compiled".to_vec(),
+        10_000,
+    )
 }
 
 fn safe_fault() -> zeroshot_engine::fault::EngineFault {
@@ -45,7 +42,13 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
     )
     .await
     .unwrap();
+    before_admission_dispatch_settlement(&ledger, &fail).await;
+    before_effect_reconciliation(&ledger, &fail).await;
+    before_safe_fault(&ledger, &fail).await;
+    before_terminal_removal(store.as_ref(), &ledger, &fail).await;
+}
 
+async fn before_admission_dispatch_settlement(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     fail(FailPoint::BeforeCommit);
     assert!(
         ledger
@@ -77,9 +80,11 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
             .settle(
                 key("settle-before"),
                 [5; 32],
-                dispatch.value.execution,
-                CanonicalDigest::of(b"settled"),
-                None,
+                SettlementRequest::new(
+                    dispatch.value.execution,
+                    CanonicalDigest::of(b"settled"),
+                    None,
+                ),
             )
             .await
             .is_err()
@@ -89,13 +94,17 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
         .settle(
             key("settle"),
             [6; 32],
-            dispatch.value.execution,
-            CanonicalDigest::of(b"settled"),
-            None,
+            SettlementRequest::new(
+                dispatch.value.execution,
+                CanonicalDigest::of(b"settled"),
+                None,
+            ),
         )
         .await
         .unwrap();
+}
 
+async fn before_effect_reconciliation(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     let before = ledger.state().await.unwrap().position;
     fail(FailPoint::BeforeCommit);
     assert!(
@@ -125,8 +134,7 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
             .reconcile_effect(
                 key("effect-receipt-before"),
                 [9; 32],
-                effect.value.effect,
-                CanonicalDigest::of(b"receipt"),
+                EffectReconciliation::new(effect.value.effect, CanonicalDigest::of(b"receipt"),),
             )
             .await
             .is_err()
@@ -136,12 +144,13 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
         .reconcile_effect(
             key("effect-receipt"),
             [10; 32],
-            effect.value.effect,
-            CanonicalDigest::of(b"receipt"),
+            EffectReconciliation::new(effect.value.effect, CanonicalDigest::of(b"receipt")),
         )
         .await
         .unwrap();
+}
 
+async fn before_safe_fault(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     let dispatch = ledger
         .dispatch(key("fault-dispatch"), [11; 32])
         .await
@@ -153,11 +162,13 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
             .record_safe_fault(
                 key("fault-before"),
                 [12; 32],
-                &safe_fault(),
-                SafeFaultConsequence::Settle {
-                    execution: dispatch.value.execution,
-                    outcome_digest: CanonicalDigest::of(b"faulted"),
-                },
+                SafeFaultRecord::new(
+                    &safe_fault(),
+                    SafeFaultConsequence::Settle {
+                        execution: dispatch.value.execution,
+                        outcome_digest: CanonicalDigest::of(b"faulted"),
+                    }
+                ),
             )
             .await
             .is_err()
@@ -167,15 +178,23 @@ async fn before_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoi
         .record_safe_fault(
             key("fault"),
             [13; 32],
-            &safe_fault(),
-            SafeFaultConsequence::Settle {
-                execution: dispatch.value.execution,
-                outcome_digest: CanonicalDigest::of(b"faulted"),
-            },
+            SafeFaultRecord::new(
+                &safe_fault(),
+                SafeFaultConsequence::Settle {
+                    execution: dispatch.value.execution,
+                    outcome_digest: CanonicalDigest::of(b"faulted"),
+                },
+            ),
         )
         .await
         .unwrap();
+}
 
+async fn before_terminal_removal(
+    store: &dyn LedgerStore,
+    ledger: &ClusterLedger,
+    fail: &impl Fn(FailPoint),
+) {
     let before = ledger.state().await.unwrap().position;
     fail(FailPoint::BeforeCommit);
     assert!(
@@ -208,7 +227,16 @@ async fn after_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoin
     )
     .await
     .unwrap();
+    after_admission_dispatch_settlement(&ledger, &fail).await;
+    after_effect_reconciliation(&ledger, &fail).await;
+    after_safe_fault(&ledger, &fail).await;
+    after_terminal_cleanup(&ledger, &fail).await;
+    fail(FailPoint::AfterCommitBeforeResponse);
+    assert!(ledger.remove_terminal().await.is_err());
+    assert!(store.open(ledger.resource()).await.is_err());
+}
 
+async fn after_admission_dispatch_settlement(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     fail(FailPoint::AfterCommitBeforeResponse);
     assert!(
         ledger
@@ -226,15 +254,19 @@ async fn after_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoin
             .settle(
                 key("settle"),
                 [3; 32],
-                dispatch.value.execution,
-                CanonicalDigest::of(b"settled"),
-                None,
+                SettlementRequest::new(
+                    dispatch.value.execution,
+                    CanonicalDigest::of(b"settled"),
+                    None,
+                ),
             )
             .await
             .unwrap()
             .replayed
     );
+}
 
+async fn after_effect_reconciliation(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     fail(FailPoint::AfterCommitBeforeResponse);
     let effect = ledger
         .record_effect_intent(
@@ -251,14 +283,15 @@ async fn after_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoin
             .reconcile_effect(
                 key("effect-receipt"),
                 [5; 32],
-                effect.value.effect,
-                CanonicalDigest::of(b"receipt"),
+                EffectReconciliation::new(effect.value.effect, CanonicalDigest::of(b"receipt"),),
             )
             .await
             .unwrap()
             .replayed
     );
+}
 
+async fn after_safe_fault(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     let dispatch = ledger
         .dispatch(key("fault-dispatch"), [6; 32])
         .await
@@ -269,17 +302,21 @@ async fn after_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoin
             .record_safe_fault(
                 key("fault"),
                 [7; 32],
-                &safe_fault(),
-                SafeFaultConsequence::Settle {
-                    execution: dispatch.value.execution,
-                    outcome_digest: CanonicalDigest::of(b"faulted"),
-                },
+                SafeFaultRecord::new(
+                    &safe_fault(),
+                    SafeFaultConsequence::Settle {
+                        execution: dispatch.value.execution,
+                        outcome_digest: CanonicalDigest::of(b"faulted"),
+                    }
+                ),
             )
             .await
             .unwrap()
             .replayed
     );
+}
 
+async fn after_terminal_cleanup(ledger: &ClusterLedger, fail: &impl Fn(FailPoint)) {
     fail(FailPoint::AfterCommitBeforeResponse);
     assert!(
         ledger
@@ -296,10 +333,6 @@ async fn after_commit_matrix(store: Arc<dyn LedgerStore>, fail: impl Fn(FailPoin
             .unwrap()
             .replayed
     );
-
-    fail(FailPoint::AfterCommitBeforeResponse);
-    assert!(ledger.remove_terminal().await.is_err());
-    assert!(store.open(ledger.resource()).await.is_err());
 }
 
 #[tokio::test]

@@ -9,7 +9,7 @@ use zeroshot_engine::artifact_store::{ArtifactStore, ArtifactStoreFailureKind, R
 #[path = "local_cas/recovery.rs"]
 mod recovery;
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use support::artifacts::{byte_stream as stream, test_intent as intent};
 

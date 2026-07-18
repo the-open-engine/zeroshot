@@ -4,8 +4,8 @@ use zeroshot_engine::cluster_ledger::record::{
     CanonicalDigest, RecordPayload, StoredRecord, MAX_RECORD_PAYLOAD_BYTES,
 };
 use zeroshot_engine::cluster_ledger::store::{
-    AppendBatch, AppendGuard, AppendOutcome, Fence, LedgerStore, MutationReceipt, OwnerId,
-    Position, PrefixSnapshot, ResourceId, StoreError,
+    AppendBatch, AppendGuard, AppendOutcome, AppendRequest, Fence, LedgerStore, MutationReceipt,
+    OwnerId, Position, PrefixSnapshot, ResourceId, StoreError,
 };
 
 pub use super::ledger::{key, owner, resource};
@@ -40,6 +40,15 @@ pub fn one_record_batch(resource: &ResourceId, spec: OneRecordSpec<'_>) -> Appen
         committed_position: sequence,
     };
     AppendBatch::new(vec![record], Some(receipt)).expect("test batch must be valid")
+}
+
+fn append_request<'a>(
+    resource: &'a ResourceId,
+    fence: &'a Fence,
+    expected: Position,
+    batch: AppendBatch,
+) -> AppendRequest<'a> {
+    AppendRequest::new(resource, fence, expected, batch)
 }
 
 pub async fn run_store_contract(store: Arc<dyn LedgerStore>, resource_id: &str) {
@@ -103,12 +112,9 @@ async fn assert_fence_and_cancelled_guard(
     );
     assert!(matches!(
         store
-            .compare_and_append_guarded(
-                resource,
-                &renewed,
-                Position::ZERO,
-                cancelled_batch,
-                AppendGuard::cancelled_when(|| true),
+            .compare_and_append(
+                append_request(resource, &renewed, Position::ZERO, cancelled_batch,)
+                    .guarded(AppendGuard::cancelled_when(|| true)),
             )
             .await,
         Err(StoreError::AppendCancelled)
@@ -135,7 +141,12 @@ async fn assert_zero_position_receipt_is_rejected(
     assert!(invalid_zero_batch.validate().is_err());
     assert!(
         store
-            .compare_and_append(resource, renewed, Position::ZERO, invalid_zero_batch)
+            .compare_and_append(append_request(
+                resource,
+                renewed,
+                Position::ZERO,
+                invalid_zero_batch,
+            ))
             .await
             .is_err()
     );
@@ -174,17 +185,19 @@ async fn append_and_replay_initial_record(
         },
     );
     let committed = store
-        .compare_and_append(resource, renewed, Position::ZERO, batch.clone())
+        .compare_and_append(append_request(
+            resource,
+            renewed,
+            Position::ZERO,
+            batch.clone(),
+        ))
         .await
         .unwrap();
     assert!(matches!(committed, AppendOutcome::Committed(_)));
     let replayed = store
-        .compare_and_append_guarded(
-            resource,
-            renewed,
-            Position::ZERO,
-            batch,
-            AppendGuard::cancelled_when(|| true),
+        .compare_and_append(
+            append_request(resource, renewed, Position::ZERO, batch)
+                .guarded(AppendGuard::cancelled_when(|| true)),
         )
         .await
         .unwrap();
@@ -240,7 +253,12 @@ async fn append_second_record_and_wait(
         },
     );
     store
-        .compare_and_append(resource, renewed, Position::new(1).unwrap(), second)
+        .compare_and_append(append_request(
+            resource,
+            renewed,
+            Position::new(1).unwrap(),
+            second,
+        ))
         .await
         .unwrap();
     assert_eq!(waiter.await.unwrap().get(), 2);
@@ -261,7 +279,7 @@ async fn assert_receipt_only_and_invalid_appends(
     latest: PrefixSnapshot,
 ) {
     store
-        .compare_and_append(
+        .compare_and_append(append_request(
             resource,
             renewed,
             Position::new(2).unwrap(),
@@ -276,7 +294,7 @@ async fn assert_receipt_only_and_invalid_appends(
                 }),
             )
             .unwrap(),
-        )
+        ))
         .await
         .unwrap();
     assert_eq!(store.open(resource).await.unwrap().position.get(), 2);
@@ -307,12 +325,12 @@ async fn assert_oversized_record_is_rejected(
     };
     assert!(
         store
-            .compare_and_append(
+            .compare_and_append(append_request(
                 resource,
                 renewed,
                 Position::new(2).unwrap(),
-                oversized_batch
-            )
+                oversized_batch,
+            ))
             .await
             .is_err()
     );
@@ -337,7 +355,12 @@ async fn assert_reused_receipt_is_rejected(
     reused.receipt.as_mut().unwrap().fingerprint = [9; 32];
     assert!(
         store
-            .compare_and_append(resource, renewed, Position::new(2).unwrap(), reused)
+            .compare_and_append(append_request(
+                resource,
+                renewed,
+                Position::new(2).unwrap(),
+                reused,
+            ))
             .await
             .is_err()
     );
@@ -361,7 +384,12 @@ async fn assert_conflicting_append_is_rejected(
     );
     assert!(
         store
-            .compare_and_append(resource, renewed, Position::ZERO, conflicting)
+            .compare_and_append(append_request(
+                resource,
+                renewed,
+                Position::ZERO,
+                conflicting,
+            ))
             .await
             .is_err()
     );

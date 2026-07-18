@@ -9,7 +9,7 @@ use zeroshot_engine::execution::{
 };
 
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use support::execution_contract::{CommandSpec, agent_target, builtin_target, command_with_input};
 

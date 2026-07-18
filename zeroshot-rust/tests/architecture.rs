@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 #[path = "support/mod.rs"]
-mod support;
+pub mod support;
 
 use support::architecture::{
     product_package, product_root, read, relative_files, repository_root, rust_sources,

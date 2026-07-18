@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+mod effects;
+
 use crate::fault::{EngineFault, FaultContext};
 
 use super::record::{
@@ -7,7 +9,10 @@ use super::record::{
     RunSequence,
 };
 use super::store::{IdempotencyId, Position};
-use super::{ClusterLedger, LedgerError, LedgerErrorKind, MutationIdentity};
+use super::{
+    ClusterLedger, CommitRequest, LedgerError, LedgerErrorKind, MutationIdentity,
+    ReceiptExpectation,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdmissionRequest {
@@ -20,6 +25,26 @@ pub struct AdmissionRequest {
     pub verified_input: Vec<u8>,
     pub canonical_graph: Vec<u8>,
     pub canonical_compiled_ir: Vec<u8>,
+}
+
+pub struct NextAdmission {
+    pub if_generation: GenerationId,
+    pub request: AdmissionRequest,
+}
+
+impl NextAdmission {
+    #[must_use]
+    pub const fn new(if_generation: GenerationId, request: AdmissionRequest) -> Self {
+        Self {
+            if_generation,
+            request,
+        }
+    }
+}
+
+struct AdmissionCas {
+    if_generation: Option<GenerationId>,
+    request: AdmissionRequest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -40,6 +65,27 @@ pub struct SettlementResult {
     pub execution: ExecutionId,
     pub accepted: bool,
     pub authoritative_digest: CanonicalDigest,
+}
+
+pub struct SettlementRequest {
+    pub execution: ExecutionId,
+    pub outcome_digest: CanonicalDigest,
+    pub verified_output: Option<Vec<u8>>,
+}
+
+impl SettlementRequest {
+    #[must_use]
+    pub const fn new(
+        execution: ExecutionId,
+        outcome_digest: CanonicalDigest,
+        verified_output: Option<Vec<u8>>,
+    ) -> Self {
+        Self {
+            execution,
+            outcome_digest,
+            verified_output,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,11 +118,33 @@ pub enum SafeFaultConsequence {
     },
 }
 
-struct SafeFaultPlan {
-    run: RunSequence,
-    execution: Option<ExecutionId>,
-    consequence_payload: RecordPayload,
-    response: SafeFaultResult,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EffectReconciliation {
+    pub effect: EffectId,
+    pub receipt_digest: CanonicalDigest,
+}
+
+impl EffectReconciliation {
+    #[must_use]
+    pub const fn new(effect: EffectId, receipt_digest: CanonicalDigest) -> Self {
+        Self {
+            effect,
+            receipt_digest,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct SafeFaultRecord<'a> {
+    pub fault: &'a EngineFault,
+    pub consequence: SafeFaultConsequence,
+}
+
+impl<'a> SafeFaultRecord<'a> {
+    #[must_use]
+    pub const fn new(fault: &'a EngineFault, consequence: SafeFaultConsequence) -> Self {
+        Self { fault, consequence }
+    }
 }
 
 fn admission_is_legal(state: &super::ReplayState, if_generation: Option<GenerationId>) -> bool {
@@ -128,11 +196,14 @@ fn admission_payloads(
 
 fn settlement_payloads(
     run: RunSequence,
-    execution: ExecutionId,
-    outcome_digest: CanonicalDigest,
+    request: SettlementRequest,
     accepted: bool,
-    verified_output: Option<Vec<u8>>,
 ) -> Vec<RecordPayload> {
+    let SettlementRequest {
+        execution,
+        outcome_digest,
+        verified_output,
+    } = request;
     let mut payloads = vec![RecordPayload::Settlement {
         run,
         execution,
@@ -159,31 +230,50 @@ impl ClusterLedger {
         fingerprint: [u8; 32],
         request: AdmissionRequest,
     ) -> Result<CommitResult<AdmissionAllocation>, LedgerError> {
-        self.admit_cas(key, fingerprint, None, request).await
+        self.admit_cas(
+            key,
+            fingerprint,
+            AdmissionCas {
+                if_generation: None,
+                request,
+            },
+        )
+        .await
     }
 
     pub async fn admit_next(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],
-        if_generation: GenerationId,
-        request: AdmissionRequest,
+        next: NextAdmission,
     ) -> Result<CommitResult<AdmissionAllocation>, LedgerError> {
-        self.admit_cas(key, fingerprint, Some(if_generation), request)
-            .await
+        self.admit_cas(
+            key,
+            fingerprint,
+            AdmissionCas {
+                if_generation: Some(next.if_generation),
+                request: next.request,
+            },
+        )
+        .await
     }
 
     async fn admit_cas(
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],
-        if_generation: Option<GenerationId>,
-        request: AdmissionRequest,
+        admission: AdmissionCas,
     ) -> Result<CommitResult<AdmissionAllocation>, LedgerError> {
+        let AdmissionCas {
+            if_generation,
+            request,
+        } = admission;
         let mut state = self.validated_state(FaultContext::Admission).await?;
-        if let Some(receipt) =
-            self.existing_receipt(FaultContext::Admission, &state, &key, "admit", fingerprint)?
-        {
+        if let Some(receipt) = self.existing_receipt(
+            &state,
+            &key,
+            ReceiptExpectation::new(FaultContext::Admission, "admit", fingerprint),
+        )? {
             return Ok(receipt);
         }
         if !admission_is_legal(&state, if_generation) {
@@ -203,11 +293,13 @@ impl ClusterLedger {
         let response = AdmissionAllocation { generation, run };
         let payloads = admission_payloads(generation, run, request);
         self.commit(
-            FaultContext::Admission,
-            &state,
-            MutationIdentity::new(key, "admit", fingerprint),
-            payloads,
-            &response,
+            CommitRequest::new(
+                FaultContext::Admission,
+                &state,
+                MutationIdentity::new(key, "admit", fingerprint),
+                &response,
+            )
+            .with_payloads(payloads),
         )
         .await
     }
@@ -219,11 +311,9 @@ impl ClusterLedger {
     ) -> Result<CommitResult<DispatchAllocation>, LedgerError> {
         let mut state = self.validated_state(FaultContext::Execution).await?;
         if let Some(receipt) = self.existing_receipt(
-            FaultContext::Execution,
             &state,
             &key,
-            "dispatch",
-            fingerprint,
+            ReceiptExpectation::new(FaultContext::Execution, "dispatch", fingerprint),
         )? {
             return Ok(receipt);
         }
@@ -248,15 +338,17 @@ impl ClusterLedger {
             execution,
         };
         self.commit(
-            FaultContext::Execution,
-            &state,
-            MutationIdentity::new(key, "dispatch", fingerprint),
-            vec![RecordPayload::Dispatch {
+            CommitRequest::new(
+                FaultContext::Execution,
+                &state,
+                MutationIdentity::new(key, "dispatch", fingerprint),
+                &response,
+            )
+            .with_payloads(vec![RecordPayload::Dispatch {
                 run,
                 node_instance,
                 execution,
-            }],
-            &response,
+            }]),
         )
         .await
     }
@@ -292,22 +384,21 @@ impl ClusterLedger {
         &self,
         key: IdempotencyId,
         fingerprint: [u8; 32],
-        execution: ExecutionId,
-        outcome_digest: CanonicalDigest,
-        verified_output: Option<Vec<u8>>,
+        request: SettlementRequest,
     ) -> Result<CommitResult<SettlementResult>, LedgerError> {
+        let execution = request.execution;
+        let outcome_digest = request.outcome_digest;
         let state = self.validated_state(FaultContext::Settlement).await?;
         if let Some(receipt) = self.existing_receipt(
-            FaultContext::Settlement,
             &state,
             &key,
-            "settle",
-            fingerprint,
+            ReceiptExpectation::new(FaultContext::Settlement, "settle", fingerprint),
         )? {
             return Ok(receipt);
         }
         self.require_settleable(&state)?;
-        if verified_output
+        if request
+            .verified_output
             .as_ref()
             .is_some_and(|bytes| CanonicalDigest::of(bytes) != outcome_digest)
         {
@@ -320,296 +411,15 @@ impl ClusterLedger {
             accepted,
             authoritative_digest,
         };
-        let payloads =
-            settlement_payloads(run, execution, outcome_digest, accepted, verified_output);
+        let payloads = settlement_payloads(run, request, accepted);
         self.commit(
-            FaultContext::Settlement,
-            &state,
-            MutationIdentity::new(key, "settle", fingerprint),
-            payloads,
-            &response,
-        )
-        .await
-    }
-
-    fn safe_fault_plan(
-        &self,
-        state: &super::ReplayState,
-        consequence: SafeFaultConsequence,
-    ) -> Result<SafeFaultPlan, LedgerError> {
-        let run = self.safe_fault_run(state, consequence)?;
-        let (execution, terminal, outcome_digest, consequence_payload) = match consequence {
-            SafeFaultConsequence::Settle {
-                execution,
-                outcome_digest,
-            } if state.active_dispatches.contains_key(&execution) => (
-                Some(execution),
-                false,
-                outcome_digest,
-                RecordPayload::Settlement {
-                    run,
-                    execution,
-                    outcome_digest,
-                    accepted: true,
-                },
-            ),
-            SafeFaultConsequence::Settle { .. } => {
-                return Err(
-                    self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidSettlement)
-                );
-            }
-            SafeFaultConsequence::Terminal { outcome_digest } => (
-                None,
-                true,
-                outcome_digest,
-                RecordPayload::Terminal {
-                    run,
-                    outcome_digest,
-                },
-            ),
-        };
-        Ok(SafeFaultPlan {
-            run,
-            execution,
-            consequence_payload,
-            response: SafeFaultResult {
-                execution,
-                terminal,
-                outcome_digest,
-            },
-        })
-    }
-
-    fn safe_fault_run(
-        &self,
-        state: &super::ReplayState,
-        consequence: SafeFaultConsequence,
-    ) -> Result<RunSequence, LedgerError> {
-        let run = state
-            .admission
-            .as_ref()
-            .filter(|_| state.terminal_outcome.is_none())
-            .ok_or_else(|| {
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            })?
-            .run;
-        if matches!(consequence, SafeFaultConsequence::Terminal { .. })
-            && state
-                .effects
-                .values()
-                .any(|effect| effect.receipt_digest.is_none())
-        {
-            return Err(
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            );
-        }
-        Ok(run)
-    }
-
-    pub async fn record_safe_fault(
-        &self,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        fault: &EngineFault,
-        consequence: SafeFaultConsequence,
-    ) -> Result<CommitResult<SafeFaultResult>, LedgerError> {
-        let state = self.validated_state(FaultContext::Settlement).await?;
-        if let Some(receipt) = self.existing_receipt(
-            FaultContext::Settlement,
-            &state,
-            &key,
-            "safe_fault",
-            fingerprint,
-        )? {
-            return Ok(receipt);
-        }
-        let plan = self.safe_fault_plan(&state, consequence)?;
-        let encoded_fault = fault
-            .encode_json()
-            .map_err(|_| self.domain_error(FaultContext::Settlement, LedgerErrorKind::Encoding))?;
-        self.commit(
-            FaultContext::Settlement,
-            &state,
-            MutationIdentity::new(key, "safe_fault", fingerprint),
-            vec![
-                RecordPayload::SafeFault {
-                    run: plan.run,
-                    execution: plan.execution,
-                    encoded_fault,
-                },
-                plan.consequence_payload,
-            ],
-            &plan.response,
-        )
-        .await
-    }
-
-    pub async fn record_effect_intent(
-        &self,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        request_digest: CanonicalDigest,
-    ) -> Result<CommitResult<EffectIntentResult>, LedgerError> {
-        let mut state = self.validated_state(FaultContext::Execution).await?;
-        if let Some(receipt) = self.existing_receipt(
-            FaultContext::Execution,
-            &state,
-            &key,
-            "effect_intent",
-            fingerprint,
-        )? {
-            return Ok(receipt);
-        }
-        let run = state
-            .admission
-            .as_ref()
-            .ok_or_else(|| {
-                self.domain_error(FaultContext::Execution, LedgerErrorKind::InvalidLifecycle)
-            })?
-            .run;
-        if state.terminal_outcome.is_some() {
-            return Err(
-                self.domain_error(FaultContext::Execution, LedgerErrorKind::InvalidLifecycle)
-            );
-        }
-        let effect = state.identities.allocate_effect().map_err(|_| {
-            self.domain_error(FaultContext::Execution, LedgerErrorKind::BoundViolation)
-        })?;
-        let response = EffectIntentResult { effect };
-        self.commit(
-            FaultContext::Execution,
-            &state,
-            MutationIdentity::new(key, "effect_intent", fingerprint),
-            vec![RecordPayload::EffectIntent {
-                run,
-                effect,
-                request_digest,
-            }],
-            &response,
-        )
-        .await
-    }
-
-    pub async fn reconcile_effect(
-        &self,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        effect: EffectId,
-        receipt_digest: CanonicalDigest,
-    ) -> Result<CommitResult<EffectIntentResult>, LedgerError> {
-        let state = self.validated_state(FaultContext::Settlement).await?;
-        if let Some(receipt) = self.existing_receipt(
-            FaultContext::Settlement,
-            &state,
-            &key,
-            "effect_receipt",
-            fingerprint,
-        )? {
-            return Ok(receipt);
-        }
-        let run = state
-            .admission
-            .as_ref()
-            .ok_or_else(|| {
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            })?
-            .run;
-        if state.terminal_outcome.is_some()
-            || state
-                .effects
-                .get(&effect)
-                .is_none_or(|intent| intent.receipt_digest.is_some())
-        {
-            return Err(
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            );
-        }
-        let response = EffectIntentResult { effect };
-        self.commit(
-            FaultContext::Settlement,
-            &state,
-            MutationIdentity::new(key, "effect_receipt", fingerprint),
-            vec![RecordPayload::EffectReceipt {
-                run,
-                effect,
-                receipt_digest,
-            }],
-            &response,
-        )
-        .await
-    }
-
-    pub async fn terminalize(
-        &self,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        outcome_digest: CanonicalDigest,
-    ) -> Result<CommitResult<CanonicalDigest>, LedgerError> {
-        let state = self.validated_state(FaultContext::Settlement).await?;
-        if let Some(receipt) = self.existing_receipt(
-            FaultContext::Settlement,
-            &state,
-            &key,
-            "terminal",
-            fingerprint,
-        )? {
-            return Ok(receipt);
-        }
-        let run = state
-            .admission
-            .as_ref()
-            .ok_or_else(|| {
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            })?
-            .run;
-        if state.terminal_outcome.is_some()
-            || state
-                .effects
-                .values()
-                .any(|effect| effect.receipt_digest.is_none())
-        {
-            return Err(
-                self.domain_error(FaultContext::Settlement, LedgerErrorKind::InvalidLifecycle)
-            );
-        }
-        self.commit(
-            FaultContext::Settlement,
-            &state,
-            MutationIdentity::new(key, "terminal", fingerprint),
-            vec![RecordPayload::Terminal {
-                run,
-                outcome_digest,
-            }],
-            &outcome_digest,
-        )
-        .await
-    }
-
-    pub async fn record_cleanup_receipt(
-        &self,
-        key: IdempotencyId,
-        fingerprint: [u8; 32],
-        cleanup_digest: CanonicalDigest,
-    ) -> Result<CommitResult<CanonicalDigest>, LedgerError> {
-        let state = self.validated_state(FaultContext::Cleanup).await?;
-        if let Some(receipt) = self.existing_receipt(
-            FaultContext::Cleanup,
-            &state,
-            &key,
-            "cleanup_receipt",
-            fingerprint,
-        )? {
-            return Ok(receipt);
-        }
-        if state.terminal_outcome.is_none() {
-            return Err(self.domain_error(FaultContext::Cleanup, LedgerErrorKind::TerminalRequired));
-        }
-        self.commit(
-            FaultContext::Cleanup,
-            &state,
-            MutationIdentity::new(key, "cleanup_receipt", fingerprint),
-            vec![RecordPayload::CleanupReceipt { cleanup_digest }],
-            &cleanup_digest,
+            CommitRequest::new(
+                FaultContext::Settlement,
+                &state,
+                MutationIdentity::new(key, "settle", fingerprint),
+                &response,
+            )
+            .with_payloads(payloads),
         )
         .await
     }

@@ -1,8 +1,9 @@
-mod support;
+#[path = "support/mod.rs"]
+pub mod support;
 
 use std::sync::Arc;
 
-use support::ledger::{key, owner, resource, temp_root};
+use support::ledger::{admission_request, key, owner, resource, temp_root};
 use tokio::sync::Barrier;
 use zeroshot_engine::cluster_ledger::mutations::{AdmissionAllocation, AdmissionRequest};
 use zeroshot_engine::cluster_ledger::record::CanonicalDigest;
@@ -15,19 +16,12 @@ use zeroshot_engine::cluster_ledger::{ClusterLedger, GenerationId, LedgerErrorKi
 use zeroshot_engine::fault::FaultCode;
 
 fn admission() -> AdmissionRequest {
-    let graph = br#"{"graph":"canonical"}"#.to_vec();
-    let input = br#"{"input":"verified"}"#.to_vec();
-    AdmissionRequest {
-        graph_digest: CanonicalDigest::of(&graph),
-        input_digest: CanonicalDigest::of(&input),
-        policy_digest: CanonicalDigest::of(b"policy"),
-        catalog_digest: CanonicalDigest::of(b"catalog"),
-        profile_digest: CanonicalDigest::of(b"profile"),
-        absolute_deadline_ms: 10_000,
-        verified_input: input,
-        canonical_graph: graph,
-        canonical_compiled_ir: br#"{"compiled":"canonical"}"#.to_vec(),
-    }
+    admission_request(
+        br#"{"graph":"canonical"}"#.to_vec(),
+        br#"{"input":"verified"}"#.to_vec(),
+        br#"{"compiled":"canonical"}"#.to_vec(),
+        10_000,
+    )
 }
 
 #[tokio::test]
@@ -150,11 +144,9 @@ async fn invalid_fence_ttl_fails_before_sqlite_resource_creation() {
         Arc::new(SqliteLedgerStore::with_clock(&root, ManualLedgerClock::new(100)).unwrap());
     for (label, ttl) in [("zero-ttl", 0), ("overflow-ttl", u64::MAX)] {
         let resource = resource(label);
-        assert!(
-            ClusterLedger::create(store.clone(), resource.clone(), owner("owner"), ttl)
-                .await
-                .is_err()
-        );
+        let creation =
+            ClusterLedger::create(store.clone(), resource.clone(), owner("owner"), ttl).await;
+        assert!(creation.is_err());
         assert!(!store.path_for(&resource).exists());
         assert!(matches!(
             store.open(&resource).await,
@@ -284,7 +276,18 @@ async fn reopen_replays_and_unknown_record_version_fails_through_fault_factory()
         before,
         reopened.state().await.unwrap().public_bytes().unwrap()
     );
-    let connection = rusqlite::Connection::open(concrete.path_for(&resource)).unwrap();
+    assert_corruption_fails_closed(&concrete, &resource, reopened, &clock).await;
+    drop(concrete);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+async fn assert_corruption_fails_closed(
+    concrete: &Arc<SqliteLedgerStore>,
+    resource: &zeroshot_engine::cluster_ledger::store::ResourceId,
+    reopened: ClusterLedger,
+    clock: &ManualLedgerClock,
+) {
+    let connection = rusqlite::Connection::open(concrete.path_for(resource)).unwrap();
     let original_response: Vec<u8> = connection
         .query_row("SELECT response FROM receipts LIMIT 1", [], |row| {
             row.get(0)
@@ -325,7 +328,7 @@ async fn reopen_replays_and_unknown_record_version_fails_through_fault_factory()
     ));
     assert_eq!(receipt_error.fault().code(), FaultCode::IntegrityFailure);
 
-    let connection = rusqlite::Connection::open(concrete.path_for(&resource)).unwrap();
+    let connection = rusqlite::Connection::open(concrete.path_for(resource)).unwrap();
     connection
         .execute("UPDATE receipts SET response = ?1", [&original_response])
         .unwrap();
@@ -333,15 +336,13 @@ async fn reopen_replays_and_unknown_record_version_fails_through_fault_factory()
         .execute("UPDATE records SET version = 99 WHERE sequence = 1", [])
         .unwrap();
     drop(connection);
-    let error = match ClusterLedger::open(concrete.clone(), resource, owner("owner-d"), 5).await {
-        Ok(_) => panic!("corrupt ledger must not open"),
-        Err(error) => error,
-    };
+    let error =
+        match ClusterLedger::open(concrete.clone(), resource.clone(), owner("owner-d"), 5).await {
+            Ok(_) => panic!("corrupt ledger must not open"),
+            Err(error) => error,
+        };
     assert!(matches!(error.kind(), LedgerErrorKind::Replay(_)));
     assert_eq!(error.fault().code(), FaultCode::IntegrityFailure);
-
-    drop(concrete);
-    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
