@@ -45,10 +45,15 @@ const child = spawn(command, finalArgs, {
   cwd: commandSpec.cwd || cwd,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
+  detached: process.platform !== 'win32',
   windowsHide: true,
 });
 
-updateTask(taskId, { pid: child.pid });
+updateTask(taskId, {
+  pid: child.pid,
+  processGroupId: process.platform === 'win32' ? null : child.pid,
+  terminationStrategy: process.platform === 'win32' ? 'process-tree' : 'process-group',
+});
 
 const silentJsonMode =
   config.outputFormat === 'json' &&
@@ -285,6 +290,8 @@ child.on('close', async (code, signal) => {
   try {
     await updateTask(taskId, {
       status,
+      pid: null,
+      processGroupId: null,
       exitCode: resolvedCode,
       error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
     });
@@ -298,7 +305,12 @@ child.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
   cleanupCommandSpecSync();
   try {
-    await updateTask(taskId, { status: 'failed', error: err.message });
+    await updateTask(taskId, {
+      status: 'failed',
+      pid: null,
+      processGroupId: null,
+      error: err.message,
+    });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);
   }
