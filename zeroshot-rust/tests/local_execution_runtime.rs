@@ -101,6 +101,40 @@ async fn may_have_started_becomes_completed_on_inspect() {
 }
 
 #[tokio::test]
+async fn post_launch_panic_before_return_is_inspectable() {
+    let launched = Arc::new(AtomicBool::new(false));
+    let runtime = runtime_for(vec![Scenario::PanicAfterLaunchBeforeReturn {
+        launched: Arc::clone(&launched),
+    }])
+    .await;
+    let command = command(CommandSpec {
+        execution: 19,
+        fence: 1,
+        recovery: "recovery-19",
+        target: agent_target(true),
+        scope: SessionScope::Execution,
+    });
+
+    let observation = runtime.dispatch(command.clone()).await;
+    assert!(launched.load(Ordering::SeqCst));
+    assert!(matches!(
+        observation,
+        DispatchObservation::Indeterminate { fault: Some(_), .. }
+    ));
+    assert!(matches!(
+        runtime.inspect(command.control()).await,
+        ExecutionObservation::Indeterminate { fault: Some(_), .. }
+    ));
+    assert!(matches!(
+        runtime.dispatch(command.clone()).await,
+        DispatchObservation::Indeterminate { fault: Some(_), .. }
+    ));
+    assert_eq!(runtime.tracked_counts().await, (0, 0, 1));
+    assert!(runtime.release_terminal(&command.control()).await);
+    assert_eq!(runtime.tracked_counts().await, (0, 0, 0));
+}
+
+#[tokio::test]
 async fn terminal_executions_release_live_tracking_and_allow_explicit_terminal_release() {
     let mut scenarios = Vec::new();
     for index in 0..70 {

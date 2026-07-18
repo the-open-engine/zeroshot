@@ -148,7 +148,7 @@ async fn await_group_exit(_handle: &ProcessTreeHandle, _deadline: Instant) -> Cl
 #[cfg(unix)]
 async fn await_process_group_exit(process_group_id: i32, deadline: Instant) -> CleanupOutcome {
     loop {
-        match process_group_exists(process_group_id) {
+        match process_group_has_live_members(process_group_id) {
             Ok(false) => {
                 return CleanupOutcome {
                     cleanup: ProcessCleanupEvidence::Reaped,
@@ -171,6 +171,21 @@ async fn await_process_group_exit(process_group_id: i32, deadline: Instant) -> C
         }
         sleep(Duration::from_millis(10)).await;
     }
+}
+
+#[cfg(unix)]
+fn process_group_has_live_members(process_group_id: i32) -> Result<bool, io::Error> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "state=", "-g", &process_group_id.to_string()])
+        .output()?;
+    if !output.status.success() {
+        return process_group_exists(process_group_id);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|state| !state.is_empty())
+        .any(|state| !state.starts_with('Z')))
 }
 
 async fn termination_without_status(

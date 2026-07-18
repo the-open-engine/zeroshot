@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{Mutex, oneshot, watch};
 
-use crate::fault::{EvidenceClass, FaultModule};
+use crate::fault::{EngineFault, EvidenceClass, FaultModule};
 
 use super::LocalExecutionRuntime;
 use super::state::{LiveExecution, LiveState, fault_is_session_lost};
@@ -16,7 +16,26 @@ use crate::execution::types::{
 pub(super) struct DispatchContext {
     pub live: Arc<LiveExecution>,
     pub cancel_rx: watch::Receiver<bool>,
-    pub ready_tx: oneshot::Sender<DispatchObservation>,
+    pub ready: ReadySignal,
+}
+
+#[derive(Clone)]
+pub(super) struct ReadySignal {
+    tx: Arc<Mutex<Option<oneshot::Sender<DispatchObservation>>>>,
+}
+
+impl ReadySignal {
+    pub fn new(tx: oneshot::Sender<DispatchObservation>) -> Self {
+        Self {
+            tx: Arc::new(Mutex::new(Some(tx))),
+        }
+    }
+
+    pub async fn send(&self, observation: DispatchObservation) {
+        if let Some(tx) = self.tx.lock().await.take() {
+            let _ = tx.send(observation);
+        }
+    }
 }
 
 pub(super) async fn run_dispatch(
@@ -35,22 +54,42 @@ pub(super) async fn run_dispatch(
             },
         )
         .await;
-        let _ = context
-            .ready_tx
+        context
+            .ready
             .send(DispatchObservation::DefinitelyNotStarted {
                 execution: command.execution(),
                 dispatch_fence: command.dispatch_fence(),
                 fault: Some(fault),
-            });
+            })
+            .await;
         return;
     }
 
-    match runtime.resolver.resolve(&command).await {
-        ExecutionSiteResolution::Resolved(resolved) => {
-            let outcome = start_resolved_site(*resolved, context.cancel_rx.clone()).await;
-            handle_driver_outcome(runtime, control, context, outcome).await;
+    match resolve_site(runtime, command.clone()).await {
+        Ok(ExecutionSiteResolution::Resolved(resolved)) => {
+            match start_resolved_site(runtime, *resolved, context.cancel_rx.clone()).await {
+                Ok(outcome) => handle_driver_outcome(runtime, control, context, outcome).await,
+                Err(fault) => {
+                    retain_terminal_state(
+                        runtime,
+                        &control,
+                        LiveState::Indeterminate {
+                            fault: Some(fault.clone()),
+                        },
+                    )
+                    .await;
+                    context
+                        .ready
+                        .send(DispatchObservation::Indeterminate {
+                            execution: command.execution(),
+                            dispatch_fence: command.dispatch_fence(),
+                            fault: Some(fault),
+                        })
+                        .await;
+                }
+            }
         }
-        ExecutionSiteResolution::DefinitelyNotStarted { fault } => {
+        Ok(ExecutionSiteResolution::DefinitelyNotStarted { fault }) => {
             let observation = resolve_not_started(&command, &fault);
             retain_terminal_state(
                 runtime,
@@ -58,9 +97,9 @@ pub(super) async fn run_dispatch(
                 live_state_for_observation(&observation, fault),
             )
             .await;
-            let _ = context.ready_tx.send(observation);
+            context.ready.send(observation).await;
         }
-        ExecutionSiteResolution::Indeterminate { fault } => {
+        Ok(ExecutionSiteResolution::Indeterminate { fault }) => {
             retain_terminal_state(
                 runtime,
                 &control,
@@ -69,31 +108,67 @@ pub(super) async fn run_dispatch(
                 },
             )
             .await;
-            let _ = context.ready_tx.send(DispatchObservation::Indeterminate {
-                execution: command.execution(),
-                dispatch_fence: command.dispatch_fence(),
-                fault: Some(fault),
-            });
+            context
+                .ready
+                .send(DispatchObservation::Indeterminate {
+                    execution: command.execution(),
+                    dispatch_fence: command.dispatch_fence(),
+                    fault: Some(fault),
+                })
+                .await;
+        }
+        Err(fault) => {
+            retain_terminal_state(
+                runtime,
+                &control,
+                LiveState::Indeterminate {
+                    fault: Some(fault.clone()),
+                },
+            )
+            .await;
+            context
+                .ready
+                .send(DispatchObservation::Indeterminate {
+                    execution: command.execution(),
+                    dispatch_fence: command.dispatch_fence(),
+                    fault: Some(fault),
+                })
+                .await;
         }
     }
 }
 
+async fn resolve_site(
+    runtime: &LocalExecutionRuntime,
+    command: ExecutionCommand,
+) -> Result<ExecutionSiteResolution, EngineFault> {
+    let resolver = Arc::clone(&runtime.resolver);
+    tokio::spawn(async move { resolver.resolve(&command).await })
+        .await
+        .map_err(|_| panic_fault(runtime))
+}
+
 async fn start_resolved_site(
+    runtime: &LocalExecutionRuntime,
     resolved: ResolvedExecutionSite,
     cancel_rx: watch::Receiver<bool>,
-) -> DriverStartOutcome {
-    match resolved {
-        ResolvedExecutionSite::Agent { driver, request } => {
-            driver
-                .start(request, DriverCancellation::new(cancel_rx))
-                .await
+) -> Result<DriverStartOutcome, EngineFault> {
+    tokio::spawn(async move {
+        match resolved {
+            ResolvedExecutionSite::Agent { driver, request } => {
+                driver
+                    .start(request, DriverCancellation::new(cancel_rx))
+                    .await
+            }
+            ResolvedExecutionSite::Builtin { driver, request } => {
+                driver
+                    .start(request, DriverCancellation::new(cancel_rx))
+                    .await
+            }
         }
-        ResolvedExecutionSite::Builtin { driver, request } => {
-            driver
-                .start(request, DriverCancellation::new(cancel_rx))
-                .await
-        }
-    }
+    })
+    .await
+    .map_err(|_| panic_fault(runtime))
 }
 
 async fn handle_driver_outcome(
@@ -116,39 +191,38 @@ async fn handle_driver_outcome(
                 },
             )
             .await;
-            let _ = context.ready_tx.send(DispatchObservation::MayHaveStarted {
-                execution,
-                dispatch_fence,
-                fault: fault.clone(),
-            });
-            retain_terminal_state(
-                runtime,
-                &control,
-                LiveState::Completed(completion.await.result),
-            )
-            .await;
+            context
+                .ready
+                .send(DispatchObservation::MayHaveStarted {
+                    execution,
+                    dispatch_fence,
+                    fault: fault.clone(),
+                })
+                .await;
+            retain_completion(runtime, &control, completion).await;
         }
         DriverStartOutcome::Running { completion } => {
             set_live_state(&context.live, LiveState::Running).await;
-            let _ = context.ready_tx.send(DispatchObservation::Running {
-                execution,
-                dispatch_fence,
-            });
-            retain_terminal_state(
-                runtime,
-                &control,
-                LiveState::Completed(completion.await.result),
-            )
-            .await;
+            context
+                .ready
+                .send(DispatchObservation::Running {
+                    execution,
+                    dispatch_fence,
+                })
+                .await;
+            retain_completion(runtime, &control, completion).await;
         }
         DriverStartOutcome::Completed { completion } => {
             let result = completion.result;
             retain_terminal_state(runtime, &control, LiveState::Completed(result.clone())).await;
-            let _ = context.ready_tx.send(DispatchObservation::Completed {
-                execution,
-                dispatch_fence,
-                result,
-            });
+            context
+                .ready
+                .send(DispatchObservation::Completed {
+                    execution,
+                    dispatch_fence,
+                    result,
+                })
+                .await;
         }
         DriverStartOutcome::Indeterminate { fault } => {
             retain_terminal_state(
@@ -159,11 +233,36 @@ async fn handle_driver_outcome(
                 },
             )
             .await;
-            let _ = context.ready_tx.send(DispatchObservation::Indeterminate {
-                execution,
-                dispatch_fence,
-                fault,
-            });
+            context
+                .ready
+                .send(DispatchObservation::Indeterminate {
+                    execution,
+                    dispatch_fence,
+                    fault,
+                })
+                .await;
+        }
+    }
+}
+
+async fn retain_completion(
+    runtime: &LocalExecutionRuntime,
+    control: &ExecutionControl,
+    completion: crate::execution::driver::DriverCompletionFuture,
+) {
+    match tokio::spawn(completion).await {
+        Ok(completion) => {
+            retain_terminal_state(runtime, control, LiveState::Completed(completion.result)).await;
+        }
+        Err(_) => {
+            retain_terminal_state(
+                runtime,
+                control,
+                LiveState::Indeterminate {
+                    fault: Some(panic_fault(runtime)),
+                },
+            )
+            .await;
         }
     }
 }
@@ -255,5 +354,9 @@ async fn finish_not_started(
         _ => unreachable!(),
     };
     retain_terminal_state(runtime, control, next).await;
-    let _ = context.ready_tx.send(observation);
+    context.ready.send(observation).await;
+}
+
+fn panic_fault(runtime: &LocalExecutionRuntime) -> EngineFault {
+    runtime.fault(FaultModule::Engine, EvidenceClass::InvariantViolation)
 }

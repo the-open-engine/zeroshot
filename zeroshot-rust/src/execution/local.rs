@@ -17,7 +17,7 @@ use super::types::{
     CancelObservation, DispatchObservation, ExecutionCommand, ExecutionControl,
     ExecutionObservation, RecoveryRef,
 };
-use dispatch::{DispatchContext, run_dispatch};
+use dispatch::{DispatchContext, ReadySignal, run_dispatch};
 use state::{ExecutionKey, LiveExecution, LiveState, RuntimeState};
 
 #[derive(Clone)]
@@ -93,6 +93,30 @@ impl LocalExecutionRuntime {
             state.terminal.len(),
         )
     }
+
+    async fn retain_dispatch_task_failure(
+        &self,
+        control: &ExecutionControl,
+    ) -> DispatchObservation {
+        let fault = self.fault(FaultModule::Engine, EvidenceClass::InvariantViolation);
+        let next = LiveState::Indeterminate {
+            fault: Some(fault.clone()),
+        };
+        let should_retain = {
+            let state = self.state.lock().await;
+            !state
+                .terminal
+                .contains_key(&(control.execution(), control.dispatch_fence()))
+        };
+        if should_retain {
+            self.retain_terminal(control, next).await;
+        }
+        DispatchObservation::Indeterminate {
+            execution: control.execution(),
+            dispatch_fence: control.dispatch_fence(),
+            fault: Some(fault),
+        }
+    }
 }
 
 #[async_trait]
@@ -123,27 +147,36 @@ impl ExecutionRuntime for LocalExecutionRuntime {
         }
 
         let (ready_tx, ready_rx) = oneshot::channel();
+        let ready = ReadySignal::new(ready_tx);
         let runtime = self.clone();
+        let supervised_control = control.clone();
         tokio::spawn(async move {
-            run_dispatch(
-                &runtime,
-                command,
-                DispatchContext {
-                    live,
-                    cancel_rx,
-                    ready_tx,
-                },
-            )
+            let ready_for_dispatch = ready.clone();
+            let runtime_for_dispatch = runtime.clone();
+            let join = tokio::spawn(async move {
+                run_dispatch(
+                    &runtime_for_dispatch,
+                    command,
+                    DispatchContext {
+                        live,
+                        cancel_rx,
+                        ready: ready_for_dispatch,
+                    },
+                )
+                .await;
+            })
             .await;
+            if join.is_err() {
+                let observation = runtime
+                    .retain_dispatch_task_failure(&supervised_control)
+                    .await;
+                ready.send(observation).await;
+            }
         });
 
         match ready_rx.await {
             Ok(observation) => observation,
-            Err(_) => DispatchObservation::Indeterminate {
-                execution: control.execution(),
-                dispatch_fence: control.dispatch_fence(),
-                fault: Some(self.fault(FaultModule::Engine, EvidenceClass::InvariantViolation)),
-            },
+            Err(_) => self.retain_dispatch_task_failure(&control).await,
         }
     }
 

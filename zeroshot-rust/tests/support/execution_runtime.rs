@@ -54,6 +54,9 @@ pub enum Scenario {
         fault: Option<EngineFault>,
         result: ExecutionResult,
     },
+    PanicAfterLaunchBeforeReturn {
+        launched: Arc<AtomicBool>,
+    },
     Running {
         completion: Arc<Notify>,
         result: ExecutionResult,
@@ -166,6 +169,10 @@ impl WorkerDriver for FakeWorkerDriver {
                 fault,
                 completion: Box::pin(async move { DriverCompletion::success(result) }),
             },
+            Scenario::PanicAfterLaunchBeforeReturn { launched } => {
+                launched.store(true, Ordering::SeqCst);
+                panic!("simulated post-launch panic before returning start evidence");
+            }
             Scenario::Running { completion, result } => DriverStartOutcome::Running {
                 completion: Box::pin(async move {
                     completion.notified().await;
