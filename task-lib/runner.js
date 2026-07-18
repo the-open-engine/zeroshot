@@ -196,3 +196,94 @@ export function killTask(pid) {
     return false;
   }
 }
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForProcessExit(pid, timeoutMs, pollMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) return true;
+    await sleep(pollMs);
+  }
+  return !isProcessRunning(pid);
+}
+
+/**
+ * Terminate a provider process without relying on Linux-only process metadata.
+ * SIGTERM gets a bounded grace period, then SIGKILL is used as the final
+ * authority so callers never leave a task persisted as running indefinitely.
+ */
+export async function terminateProcess(pid, options = {}) {
+  const graceMs = options.graceMs ?? 5000;
+  const hardKillWaitMs = options.hardKillWaitMs ?? 1000;
+  const pollMs = options.pollMs ?? 50;
+
+  if (!isProcessRunning(pid)) {
+    return {
+      terminated: true,
+      alreadyDead: true,
+      escalated: false,
+      signal: null,
+    };
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if (!isProcessRunning(pid)) {
+      return {
+        terminated: true,
+        alreadyDead: true,
+        escalated: false,
+        signal: null,
+      };
+    }
+    return {
+      terminated: false,
+      alreadyDead: false,
+      escalated: false,
+      signal: 'SIGTERM',
+      error: error.message,
+    };
+  }
+
+  if (await waitForProcessExit(pid, graceMs, pollMs)) {
+    return {
+      terminated: true,
+      alreadyDead: false,
+      escalated: false,
+      signal: 'SIGTERM',
+    };
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if (!isProcessRunning(pid)) {
+      return {
+        terminated: true,
+        alreadyDead: false,
+        escalated: true,
+        signal: 'SIGKILL',
+      };
+    }
+    return {
+      terminated: false,
+      alreadyDead: false,
+      escalated: true,
+      signal: 'SIGKILL',
+      error: error.message,
+    };
+  }
+
+  const terminated = await waitForProcessExit(pid, hardKillWaitMs, pollMs);
+  return {
+    terminated,
+    alreadyDead: false,
+    escalated: true,
+    signal: 'SIGKILL',
+    error: terminated ? null : `Process ${pid} survived SIGKILL`,
+  };
+}

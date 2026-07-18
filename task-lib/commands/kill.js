@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import { getTask, updateTask } from '../store.js';
-import { killTask as killProcess, isProcessRunning } from '../runner.js';
+import { isProcessRunning, terminateProcess } from '../runner.js';
 
-export function killTaskCommand(taskId) {
+export async function killTaskCommand(taskId, options = {}) {
   const task = getTask(taskId);
 
   if (!task) {
@@ -17,16 +17,31 @@ export function killTaskCommand(taskId) {
 
   if (!isProcessRunning(task.pid)) {
     console.log(chalk.yellow('Process already dead, updating status...'));
-    updateTask(taskId, { status: 'stale', error: 'Process died unexpectedly' });
+    updateTask(taskId, {
+      status: 'stale',
+      pid: null,
+      error: 'Process died unexpectedly',
+    });
     return;
   }
 
-  const killed = killProcess(task.pid);
+  const result = await terminateProcess(task.pid, options);
 
-  if (killed) {
-    console.log(chalk.green(`✓ Sent SIGTERM to task ${taskId} (PID: ${task.pid})`));
-    updateTask(taskId, { status: 'killed', error: 'Killed by user' });
+  if (result.terminated) {
+    const suffix = result.escalated ? ' after SIGKILL escalation' : ' with SIGTERM';
+    console.log(chalk.green(`✓ Killed task ${taskId} (PID: ${task.pid})${suffix}`));
+    updateTask(taskId, {
+      status: 'killed',
+      pid: null,
+      exitCode: result.escalated ? 137 : 143,
+      error: result.escalated ? 'Killed by user after SIGKILL escalation' : 'Killed by user',
+    });
   } else {
     console.log(chalk.red(`Failed to kill task ${taskId}`));
+    updateTask(taskId, {
+      status: 'failed',
+      pid: null,
+      error: result.error || 'Process termination failed',
+    });
   }
 }

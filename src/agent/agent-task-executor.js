@@ -673,11 +673,16 @@ async function spawnClaudeTask(agent, context) {
   const MAX_PID_POLLS = 30; // 3 seconds max
   const PID_POLL_DELAY = 100;
   let realPid = null;
+  let terminalBeforePidObservation = false;
 
   for (let i = 0; i < MAX_PID_POLLS; i++) {
     const taskInfo = getTask(taskId);
     if (taskInfo?.pid) {
       realPid = taskInfo.pid;
+      break;
+    }
+    if (taskInfo && ['completed', 'failed', 'killed', 'stale'].includes(taskInfo.status)) {
+      terminalBeforePidObservation = true;
       break;
     }
     await new Promise((r) => setTimeout(r, PID_POLL_DELAY));
@@ -687,6 +692,8 @@ async function spawnClaudeTask(agent, context) {
     agent.processPid = realPid;
     agent._publishLifecycle('PROCESS_SPAWNED', { pid: realPid });
     agent._log(`📋 Agent ${agent.id}: Process PID: ${realPid}`);
+  } else if (terminalBeforePidObservation) {
+    agent._log(`📋 Agent ${agent.id}: Task finished before PID observation`);
   } else {
     agent._log(`⚠️ Agent ${agent.id}: PID not available (task may use non-standard watcher)`);
   }
@@ -928,7 +935,8 @@ function spawnTaskProcess({ agent, ctPath, args, cwd, spawnEnv }) {
 
           // Start liveness monitoring
           if (agent.enableLivenessCheck) {
-            agent.lastOutputTime = Date.now(); // Initialize to spawn time
+            agent.taskStartedAt = Date.now();
+            agent.lastOutputTime = agent.taskStartedAt;
             agent._startLivenessCheck();
           }
 
@@ -1131,6 +1139,7 @@ function parseStatusFlags(cleanStdout) {
     isCompleted: /Status:\s+completed/i.test(cleanStdout),
     isFailed: /Status:\s+failed/i.test(cleanStdout),
     isStale: /Status:\s+stale/i.test(cleanStdout),
+    isKilled: /Status:\s+killed/i.test(cleanStdout),
   };
 }
 
@@ -1329,9 +1338,9 @@ function handleStatusCompletion({
   resolve,
 }) {
   const cleanStdout = stripAnsiCodes(stdout);
-  const { isCompleted, isFailed, isStale } = parseStatusFlags(cleanStdout);
+  const { isCompleted, isFailed, isStale, isKilled } = parseStatusFlags(cleanStdout);
 
-  if (!isCompleted && !isFailed && !isStale) {
+  if (!isCompleted && !isFailed && !isStale && !isKilled) {
     return false;
   }
 
@@ -1370,9 +1379,9 @@ function handleStatusCompletion({
   return true;
 }
 
-function buildKillHandler({ agent, state, providerName, resolve }) {
+function buildKillHandler({ agent, taskId, state, providerName, resolve }) {
   return {
-    kill: (reason = 'Task killed') => {
+    kill: (reason = 'Task killed', details = {}) => {
       if (state.resolved) return;
       state.resolved = true;
       finalizeLogFollow(agent, state);
@@ -1381,6 +1390,8 @@ function buildKillHandler({ agent, state, providerName, resolve }) {
         success: false,
         output: state.output,
         error: reason,
+        code: details.code || null,
+        taskId,
         tokenUsage: extractTokenUsage(state.output, providerName),
       });
     },
@@ -1438,7 +1449,7 @@ function createLogFollower({ agent, taskId, fsModule, ctPath, providerName }) {
       );
     }, 1000);
 
-    agent.currentTask = buildKillHandler({ agent, state, providerName, resolve });
+    agent.currentTask = buildKillHandler({ agent, taskId, state, providerName, resolve });
   });
 }
 
@@ -1584,7 +1595,8 @@ async function spawnClaudeTaskIsolated(agent, context) {
 
           // Start liveness monitoring
           if (agent.enableLivenessCheck) {
-            agent.lastOutputTime = Date.now(); // Initialize to spawn time
+            agent.taskStartedAt = Date.now();
+            agent.lastOutputTime = agent.taskStartedAt;
             agent._startLivenessCheck();
           }
 
@@ -2042,34 +2054,47 @@ async function parseResultOutput(agent, output) {
  * Kill current task
  * @param {Object} agent - Agent instance
  */
-function killTask(agent) {
-  if (agent.currentTask) {
-    // currentTask may be either a ChildProcess or our custom { kill } object
-    if (typeof agent.currentTask.kill === 'function') {
-      agent.currentTask.kill('SIGTERM');
+function normalizeTermination(termination) {
+  if (termination && typeof termination === 'object') {
+    return {
+      reason: termination.reason || 'Task killed',
+      code: termination.code || null,
+    };
+  }
+  return { reason: termination || 'Task killed', code: null };
+}
+
+async function killTask(agent, termination = 'Task killed') {
+  agent._stopLivenessCheck?.();
+
+  const { reason, code } = normalizeTermination(termination);
+  const currentTask = agent.currentTask;
+  const taskId = agent.currentTaskId;
+
+  // Kill the underlying task before resolving the local follower. This keeps
+  // retries from racing a provider process that is still shutting down.
+  if (taskId) {
+    const ctPath = getClaudeTasksPath();
+    try {
+      // `kill` is a top-level smart command. `task kill` has never existed.
+      await runCommandWithTimeout(ctPath, ['kill', taskId], { timeout: 10000 });
+      agent._log?.(`Killed task ${taskId}`);
+    } catch (error) {
+      // Resolve the local follower even if the task is already terminal or the
+      // management CLI is unavailable; shutdown state must still reconcile.
+      agent._log?.(`Note: Could not kill task ${taskId}: ${error.message}`);
     }
-    agent.currentTask = null;
   }
 
-  // Also kill the underlying zeroshot task if we have a task ID
-  // This ensures the task process is stopped, not just our polling intervals
-  if (agent.currentTaskId) {
-    const ctPath = getClaudeTasksPath();
-    runCommandWithTimeout(
-      ctPath,
-      ['task', 'kill', agent.currentTaskId],
-      { timeout: 10000 },
-      (error) => {
-        if (error) {
-          // Task may have already completed or been killed, ignore errors
-          agent._log(`Note: Could not kill task ${agent.currentTaskId}: ${error.message}`);
-        } else {
-          agent._log(`Killed task ${agent.currentTaskId}`);
-        }
-      }
-    );
-    agent.currentTaskId = null;
+  if (currentTask && typeof currentTask.kill === 'function') {
+    currentTask.kill(reason, { code });
   }
+
+  agent.currentTask = null;
+  agent.currentTaskId = null;
+  agent.processPid = null;
+  agent.lastOutputTime = null;
+  agent.taskStartedAt = null;
 }
 
 module.exports = {

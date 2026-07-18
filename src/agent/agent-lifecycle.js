@@ -7,7 +7,7 @@
  * - Message handling and routing
  * - Trigger action execution (execute_task, stop_cluster)
  * - Task execution with retry logic
- * - Liveness monitoring with multi-indicator stuck detection
+ * - Bounded task runtime and provider-output inactivity monitoring
  *
  * State machine: idle → evaluating → building_context → executing → idle
  */
@@ -17,11 +17,7 @@ const { executeHook } = require('./agent-hook-executor');
 const IsolationManager = require('../isolation-manager');
 const crypto = require('crypto');
 const { bufferMessage, scheduleDrain, drainBufferedMessages } = require('../message-buffer');
-const {
-  analyzeProcessHealth,
-  isPlatformSupported,
-  STUCK_THRESHOLD,
-} = require('./agent-stuck-detector');
+const { isPlatformSupported } = require('./agent-stuck-detector');
 const { normalizeProviderName } = require('../../lib/provider-names');
 const { loadSettings } = require('../../lib/settings');
 const { findPlatformMismatchReason } = require('./validation-platform');
@@ -36,6 +32,7 @@ class HookExecutionError extends Error {
     this.hookFailure = true;
     this.hookRetries = options?.hookRetries;
     this.originalHookError = options?.originalHookError;
+    this.taskId = options?.taskId || null;
   }
 }
 
@@ -217,21 +214,28 @@ async function stop(agent) {
 
   // Kill current task if any
   if (agent.currentTask) {
-    agent._killTask();
+    await agent._killTask('Task stopped by cluster shutdown');
   }
 
   // Wait for in-flight execution to complete (up to 5 seconds)
   // This prevents write-after-close race conditions
   if (agent._currentExecution) {
+    let executionTimeout = null;
     try {
       await Promise.race([
         agent._currentExecution,
-        new Promise((resolve) => setTimeout(resolve, 5000)),
+        new Promise((resolve) => {
+          executionTimeout = setTimeout(resolve, 5000);
+        }),
       ]);
     } catch {
       // Ignore errors from cancelled execution
+    } finally {
+      if (executionTimeout) {
+        clearTimeout(executionTimeout);
+      }
+      agent._currentExecution = null;
     }
-    agent._currentExecution = null;
   }
 
   agent._log(`Agent ${agent.id} stopped`);
@@ -427,7 +431,7 @@ function publishTaskStarted(agent, triggeringMessage) {
 
 function attachResultMetadata(agent, result) {
   // Add task ID to result for debugging and hooks
-  result.taskId = agent.currentTaskId;
+  result.taskId = result.taskId || agent.currentTaskId;
   result.agentId = agent.id;
   result.iteration = agent.iteration;
 }
@@ -465,6 +469,15 @@ function publishTokenUsage(agent, result) {
       },
     },
   });
+}
+
+function clearTransientTaskState(agent) {
+  stopLivenessCheck(agent);
+  agent.currentTask = null;
+  agent.currentTaskId = null;
+  agent.processPid = null;
+  agent.lastOutputTime = null;
+  agent.taskStartedAt = null;
 }
 
 async function executeOnCompleteHookWithRetry(agent, triggeringMessage, result) {
@@ -510,7 +523,11 @@ ${'='.repeat(80)}`);
           `Hook execution failed after ${hookMaxRetries} attempts. ` +
             `Task completed successfully but hook could not publish result. ` +
             `Original error: ${hookError.message}`,
-          { hookRetries: hookMaxRetries, originalHookError: hookError.message }
+          {
+            hookRetries: hookMaxRetries,
+            originalHookError: hookError.message,
+            taskId: result?.taskId || null,
+          }
         );
       }
     }
@@ -554,7 +571,10 @@ async function runTaskAttempt(agent, triggeringMessage) {
 
   // Check if task execution failed
   if (!result.success) {
-    throw new Error(result.error || 'Task execution failed');
+    const error = new Error(result.error || 'Task execution failed');
+    error.code = result.code || result.errorType || null;
+    error.taskId = result.taskId || null;
+    throw error;
   }
 
   const fallbackReason = await maybeRetryValidatorInDocker(agent, result);
@@ -573,6 +593,7 @@ async function runTaskAttempt(agent, triggeringMessage) {
 
   publishTaskCompleted(agent, result);
   publishTokenUsage(agent, result);
+  clearTransientTaskState(agent);
   await executeOnCompleteHookWithRetry(agent, triggeringMessage, result);
 }
 
@@ -673,7 +694,7 @@ ${'='.repeat(80)}`);
   // Save failure info to cluster for resume capability
   agent.cluster.failureInfo = {
     agentId: agent.id,
-    taskId: agent.currentTaskId,
+    taskId: error?.taskId || agent.currentTaskId,
     iteration: agent.iteration,
     error: error.message,
     attempts: maxRetries,
@@ -690,12 +711,13 @@ ${'='.repeat(80)}`);
         error: error.message,
         stack: error.stack,
         hookFailure: error?.hookFailure === true,
+        restartExhausted: error?.restartExhausted === true,
         hookRetries: error?.hookRetries ?? undefined,
         originalHookError: error?.originalHookError ?? undefined,
         agent: agent.id,
         role: agent.role,
         iteration: agent.iteration,
-        taskId: agent.currentTaskId,
+        taskId: error?.taskId || agent.currentTaskId,
         attempts: maxRetries,
         hookFailureContext: error.message.includes('Hook uses result')
           ? {
@@ -805,6 +827,97 @@ function maybeExtendMaxRetries({
   return { maxRetries, sigtermRetryGranted, noMessagesRetryGranted };
 }
 
+const RECOVERABLE_STUCK_TASK_CODES = new Set(['PROVIDER_INACTIVITY_TIMEOUT', 'AGENT_TASK_TIMEOUT']);
+
+function readRestartHistory(agent) {
+  const lifecycle = agent.messageBus.query({
+    cluster_id: agent.cluster.id,
+    topic: 'AGENT_LIFECYCLE',
+    sender: agent.id,
+  });
+  let lastCompletedIndex = -1;
+  let totalRestarts = 0;
+
+  lifecycle.forEach((message, index) => {
+    const event = message.content?.data?.event;
+    if (event === 'TASK_COMPLETED') {
+      lastCompletedIndex = index;
+    } else if (event === 'AGENT_RESTART_ATTEMPT') {
+      totalRestarts += 1;
+    }
+  });
+
+  const restartsSinceCompletion = lifecycle
+    .slice(lastCompletedIndex + 1)
+    .filter((message) => message.content?.data?.event === 'AGENT_RESTART_ATTEMPT').length;
+
+  return { restartsSinceCompletion, totalRestarts };
+}
+
+function resolveRestartBudget(agent, settings) {
+  const history = readRestartHistory(agent);
+  const maxRestartAttempts = settings.maxRestartAttempts ?? 3;
+  const maxTotalRestarts = settings.maxTotalRestarts ?? 10;
+  const allowed =
+    history.restartsSinceCompletion < maxRestartAttempts &&
+    history.totalRestarts < maxTotalRestarts;
+
+  return {
+    ...history,
+    maxRestartAttempts,
+    maxTotalRestarts,
+    allowed,
+  };
+}
+
+async function handleRecoverableStuckTaskFailure({
+  agent,
+  triggeringMessage,
+  error,
+  attempt,
+  maxRetries,
+  baseDelay,
+  settings,
+}) {
+  if (!RECOVERABLE_STUCK_TASK_CODES.has(error.code)) {
+    return { handled: false, maxRetries };
+  }
+
+  logTaskAttemptFailure(agent, attempt, maxRetries, error);
+  const budget = resolveRestartBudget(agent, settings);
+  if (!budget.allowed) {
+    agent._publishLifecycle('AGENT_RESTART_EXHAUSTED', {
+      taskId: error.taskId,
+      reason: error.message,
+      code: error.code,
+      attempts: attempt,
+      restartsSinceCompletion: budget.restartsSinceCompletion,
+      totalRestarts: budget.totalRestarts,
+      maxRestartAttempts: budget.maxRestartAttempts,
+      maxTotalRestarts: budget.maxTotalRestarts,
+    });
+    error.restartExhausted = true;
+    await handleFinalFailure(agent, triggeringMessage, error, attempt);
+    return { handled: true, shouldStop: true, maxRetries };
+  }
+
+  const nextRestartAttempt = budget.restartsSinceCompletion + 1;
+  const nextTotalRestart = budget.totalRestarts + 1;
+  agent._publishLifecycle('AGENT_RESTART_ATTEMPT', {
+    taskId: error.taskId,
+    reason: error.message,
+    code: error.code,
+    attempt: nextRestartAttempt,
+    totalRestartAttempt: nextTotalRestart,
+    maxRestartAttempts: budget.maxRestartAttempts,
+    maxTotalRestarts: budget.maxTotalRestarts,
+  });
+
+  const extendedMaxRetries = Math.max(maxRetries, attempt + 1);
+  await scheduleRetry(agent, error, attempt, extendedMaxRetries, baseDelay);
+  return { handled: true, shouldStop: false, maxRetries: extendedMaxRetries };
+}
+
 /**
  * Execute claude-zeroshots with built context
  * Default: uses settings.maxRetries (default 3) for exponential backoff retries.
@@ -849,6 +962,30 @@ async function executeTask(agent, triggeringMessage) {
         await handleFinalFailure(agent, triggeringMessage, error, 1);
         return;
       }
+      agent._publishLifecycle('TASK_FAILED', {
+        iteration: agent.iteration,
+        taskId: error.taskId || agent.currentTaskId,
+        error: error.message,
+        code: error.code || null,
+        attempt,
+      });
+      clearTransientTaskState(agent);
+      const stuckTaskResult = await handleRecoverableStuckTaskFailure({
+        agent,
+        triggeringMessage,
+        error,
+        attempt,
+        maxRetries,
+        baseDelay,
+        settings,
+      });
+      if (stuckTaskResult.handled) {
+        maxRetries = stuckTaskResult.maxRetries;
+        if (stuckTaskResult.shouldStop) {
+          return;
+        }
+        continue;
+      }
       const updated = maybeExtendMaxRetries({
         error,
         attempt,
@@ -878,89 +1015,78 @@ function startLivenessCheck(agent) {
     clearInterval(agent.livenessCheckInterval);
   }
 
-  // Check if platform supports /proc filesystem (Linux only)
-  if (!isPlatformSupported()) {
-    agent._log(
-      `[${agent.id}] Liveness check disabled: /proc filesystem not available (non-Linux platform)`
-    );
-    return;
-  }
+  const settings = loadSettings();
+  const warningsBeforeKill = Math.max(1, settings.staleWarningsBeforeKill ?? 2);
+  const staleDuration = Math.max(1, agent.staleDuration);
+  const configuredTimeout = agent.timeout > 0 ? agent.timeout : null;
+  const shortestLimit = configuredTimeout
+    ? Math.min(staleDuration, configuredTimeout)
+    : staleDuration;
+  const checkIntervalMs = Math.min(60 * 1000, Math.max(10, Math.floor(shortestLimit / 4)));
 
-  // Check every 60 seconds (gives time for multi-indicator analysis)
-  const CHECK_INTERVAL_MS = 60 * 1000;
-  const ANALYSIS_SAMPLE_MS = 5000; // Sample CPU/context switches over 5 seconds
+  agent.consecutiveStaleWarnings = 0;
+  agent.livenessTerminationStarted = false;
 
-  agent.livenessCheckInterval = setInterval(async () => {
-    // Skip if no task running or no PID tracked
-    if (!agent.currentTask || !agent.processPid) {
+  agent.livenessCheckInterval = setInterval(() => {
+    if (!agent.currentTask || agent.livenessTerminationStarted) {
       return;
     }
 
-    // Skip if output is recent (process is clearly active)
-    if (agent.lastOutputTime) {
-      const timeSinceLastOutput = Date.now() - agent.lastOutputTime;
-      if (timeSinceLastOutput < agent.staleDuration) {
-        return; // Output is recent, definitely not stuck
-      }
+    const now = Date.now();
+    const taskStartedAt = agent.taskStartedAt || agent.lastOutputTime || now;
+    const lastOutputTime = agent.lastOutputTime || taskStartedAt;
+    const taskRuntime = now - taskStartedAt;
+    const timeSinceLastOutput = now - lastOutputTime;
+
+    if (configuredTimeout && taskRuntime >= configuredTimeout) {
+      agent.livenessTerminationStarted = true;
+      const reason = `Task timed out after ${configuredTimeout}ms`;
+      agent._publishLifecycle('AGENT_TASK_TIMEOUT', {
+        taskId: agent.currentTaskId,
+        taskRuntime,
+        timeout: configuredTimeout,
+      });
+      Promise.resolve(agent._killTask({ reason, code: 'AGENT_TASK_TIMEOUT' })).catch((error) => {
+        agent._log(`[${agent.id}] Failed to terminate timed-out task: ${error.message}`);
+      });
+      return;
     }
 
-    // Output is stale - run multi-indicator analysis to confirm
-    agent._log(
-      `[${agent.id}] Output stale for ${Math.round((Date.now() - (agent.lastOutputTime || 0)) / 1000)}s, running multi-indicator analysis...`
+    if (timeSinceLastOutput < staleDuration) {
+      agent.consecutiveStaleWarnings = 0;
+      return;
+    }
+
+    agent.consecutiveStaleWarnings += 1;
+    agent._publishLifecycle('AGENT_STALE_WARNING', {
+      taskId: agent.currentTaskId,
+      timeSinceLastOutput,
+      staleDuration,
+      lastOutputTime,
+      consecutiveWarnings: agent.consecutiveStaleWarnings,
+      warningsBeforeKill,
+      processDiagnosticsAvailable: isPlatformSupported(),
+      analysis: `Provider produced no output for ${timeSinceLastOutput}ms`,
+    });
+
+    if (agent.consecutiveStaleWarnings < warningsBeforeKill) {
+      return;
+    }
+
+    agent.livenessTerminationStarted = true;
+    const reason = `Provider produced no output for ${timeSinceLastOutput}ms`;
+    agent._publishLifecycle('AGENT_INACTIVITY_TIMEOUT', {
+      taskId: agent.currentTaskId,
+      timeSinceLastOutput,
+      staleDuration,
+      consecutiveWarnings: agent.consecutiveStaleWarnings,
+    });
+    Promise.resolve(agent._killTask({ reason, code: 'PROVIDER_INACTIVITY_TIMEOUT' })).catch(
+      (error) => {
+        agent._log(`[${agent.id}] Failed to terminate inactive task: ${error.message}`);
+      }
     );
-
-    try {
-      const analysis = await analyzeProcessHealth(agent.processPid, ANALYSIS_SAMPLE_MS);
-
-      // Process died during analysis
-      if (analysis.isLikelyStuck === null) {
-        agent._log(`[${agent.id}] Process analysis inconclusive: ${analysis.reason}`);
-        return;
-      }
-
-      // Log analysis details for debugging
-      agent._log(
-        `[${agent.id}] Analysis: score=${analysis.stuckScore}/${STUCK_THRESHOLD}, ` +
-          `state=${analysis.state}, wchan=${analysis.wchan}, ` +
-          `CPU=${analysis.cpuPercent}%, ctxSwitches=${analysis.ctxSwitchesDelta}`
-      );
-
-      if (analysis.isLikelyStuck) {
-        agent._log(`⚠️  Agent ${agent.id}: CONFIRMED STUCK (confidence: ${analysis.confidence})`);
-        agent._log(`    ${analysis.analysis}`);
-
-        // CHANGED: Stale detection is informational only - never kills tasks
-        // Publish stale detection event with full analysis (for logging/monitoring)
-        agent._publishLifecycle('AGENT_STALE_WARNING', {
-          timeSinceLastOutput: Date.now() - (agent.lastOutputTime || 0),
-          staleDuration: agent.staleDuration,
-          lastOutputTime: agent.lastOutputTime,
-          // Multi-indicator analysis results
-          stuckScore: analysis.stuckScore,
-          confidence: analysis.confidence,
-          processState: analysis.state,
-          wchan: analysis.wchan,
-          cpuPercent: analysis.cpuPercent,
-          ctxSwitchesDelta: analysis.ctxSwitchesDelta,
-          indicators: analysis.indicators,
-          analysis: analysis.analysis,
-        });
-
-        // Keep monitoring - do NOT stop the agent
-        // User can manually intervene with 'zeroshot resume' if needed
-        // stopLivenessCheck(agent); // REMOVED - keep monitoring
-      } else {
-        agent._log(
-          `[${agent.id}] Process appears WORKING despite stale output (score: ${analysis.stuckScore})`
-        );
-        agent._log(`    ${analysis.analysis}`);
-        // Don't flag as stuck - process is legitimately working
-      }
-    } catch (err) {
-      agent._log(`[${agent.id}] Error during stuck analysis: ${err.message}`);
-      // Don't flag as stuck on analysis error
-    }
-  }, CHECK_INTERVAL_MS);
+  }, checkIntervalMs);
 }
 
 /**
@@ -972,6 +1098,8 @@ function stopLivenessCheck(agent) {
     clearInterval(agent.livenessCheckInterval);
     agent.livenessCheckInterval = null;
   }
+  agent.consecutiveStaleWarnings = 0;
+  agent.livenessTerminationStarted = false;
 }
 
 module.exports = {
