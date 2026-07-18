@@ -2649,8 +2649,14 @@ class Orchestrator {
   }
 
   _resolveFailureInfo(cluster, clusterId) {
-    if (cluster.failureInfo) {
-      return cluster.failureInfo.agentId ? cluster.failureInfo : null;
+    const persistedFailure = cluster.failureInfo?.agentId ? cluster.failureInfo : null;
+    if (persistedFailure) {
+      if (!this._hasDurableProgressAfterFailure(cluster, clusterId, persistedFailure)) {
+        return persistedFailure;
+      }
+      this._log(
+        `[Orchestrator] Ignoring recovered registry failure from ${persistedFailure.agentId}; durable task progress followed it`
+      );
     }
 
     const errors = cluster.messageBus.query({
@@ -2660,36 +2666,6 @@ class Orchestrator {
     });
 
     for (const error of errors) {
-      const errorIteration = error.content?.data?.iteration;
-      const durableProgress = cluster.messageBus
-        .query({
-          cluster_id: clusterId,
-          topic: 'AGENT_LIFECYCLE',
-          sender: error.sender,
-          since: error.timestamp,
-        })
-        .some((message) => {
-          const event = message.content?.data?.event;
-          if (!['TASK_STARTED', 'TASK_COMPLETED'].includes(event)) {
-            return false;
-          }
-
-          const iteration = message.content?.data?.iteration;
-          return (
-            message.timestamp > error.timestamp ||
-            (Number.isInteger(errorIteration) &&
-              Number.isInteger(iteration) &&
-              iteration > errorIteration)
-          );
-        });
-
-      if (durableProgress) {
-        this._log(
-          `[Orchestrator] Ignoring recovered ledger failure from ${error.sender}; durable task progress followed it`
-        );
-        continue;
-      }
-
       const failureInfo = {
         agentId: error.sender,
         taskId: error.content?.data?.taskId || null,
@@ -2697,11 +2673,44 @@ class Orchestrator {
         error: error.content?.data?.error || error.content?.text,
         timestamp: error.timestamp,
       };
+      if (this._hasDurableProgressAfterFailure(cluster, clusterId, failureInfo)) {
+        this._log(
+          `[Orchestrator] Ignoring recovered ledger failure from ${error.sender}; durable task progress followed it`
+        );
+        continue;
+      }
+
       this._log(`[Orchestrator] Found failure from ledger: ${failureInfo.agentId}`);
       return failureInfo;
     }
 
     return null;
+  }
+
+  _hasDurableProgressAfterFailure(cluster, clusterId, failureInfo) {
+    const failureIteration = failureInfo.iteration;
+    const failureTimestamp = failureInfo.timestamp;
+    return cluster.messageBus
+      .query({
+        cluster_id: clusterId,
+        topic: 'AGENT_LIFECYCLE',
+        sender: failureInfo.agentId,
+        since: failureTimestamp,
+      })
+      .some((message) => {
+        const event = message.content?.data?.event;
+        if (!['TASK_STARTED', 'TASK_COMPLETED'].includes(event)) {
+          return false;
+        }
+
+        const iteration = message.content?.data?.iteration;
+        return (
+          (Number.isFinite(failureTimestamp) && message.timestamp > failureTimestamp) ||
+          (Number.isInteger(failureIteration) &&
+            Number.isInteger(iteration) &&
+            iteration > failureIteration)
+        );
+      });
   }
 
   _requireFailedAgent(clusterId, cluster, failureInfo) {

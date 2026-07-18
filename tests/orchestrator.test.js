@@ -343,6 +343,144 @@ function publishRecoveredWorkerFailureHistory(cluster, clusterId) {
   });
 }
 
+function publishCompletedTaskHistory(cluster, clusterId, agentId, { iteration, taskId }) {
+  cluster.messageBus.publish({
+    cluster_id: clusterId,
+    topic: 'AGENT_LIFECYCLE',
+    sender: agentId,
+    content: {
+      text: `${agentId}: TASK_COMPLETED`,
+      data: {
+        event: 'TASK_COMPLETED',
+        agent: agentId,
+        role: 'validator',
+        state: 'idle',
+        iteration,
+        taskId,
+      },
+    },
+  });
+}
+
+function publishValidationResult(cluster, clusterId, agentId, approved, text) {
+  cluster.messageBus.publish({
+    cluster_id: clusterId,
+    topic: 'VALIDATION_RESULT',
+    sender: agentId,
+    content: { text, data: { approved } },
+  });
+}
+
+function setPersistedAgentTaskState(cluster, agentId, { state, iteration, taskId, processPid }) {
+  const agent = cluster.agents.find((candidate) => candidate.id === agentId);
+  agent.state = state;
+  agent.iteration = iteration;
+  agent.currentTaskId = taskId;
+  agent.processPid = processPid;
+}
+
+function prepareRecoveredRequirementsFailure(cluster, clusterId) {
+  cluster.failureInfo = {
+    agentId: 'validator-requirements',
+    taskId: 'recovered-requirements-task',
+    iteration: 7,
+    error: 'temporary provider lookup failure',
+    timestamp: Date.now() - 1000,
+  };
+  cluster.messageBus.publish({
+    cluster_id: clusterId,
+    topic: 'IMPLEMENTATION_READY',
+    sender: 'worker',
+    content: { text: 'Implementation ready for validation' },
+  });
+  publishInterruptedTaskHistory(cluster, clusterId, 'validator-requirements', {
+    iteration: 8,
+    taskId: 'completed-requirements-task',
+    triggeredBy: 'IMPLEMENTATION_READY',
+  });
+  publishCompletedTaskHistory(cluster, clusterId, 'validator-requirements', {
+    iteration: 8,
+    taskId: 'completed-requirements-task',
+  });
+  publishValidationResult(
+    cluster,
+    clusterId,
+    'validator-requirements',
+    true,
+    'Requirements approved'
+  );
+  setPersistedAgentTaskState(cluster, 'validator-requirements', {
+    state: 'idle',
+    iteration: 8,
+    taskId: 'completed-requirements-task',
+    processPid: null,
+  });
+}
+
+function prepareInterruptedCodeValidator(cluster, clusterId) {
+  publishInterruptedTaskHistory(cluster, clusterId, 'validator-code', {
+    iteration: 5,
+    taskId: 'interrupted-code-task',
+    triggeredBy: 'IMPLEMENTATION_READY',
+  });
+  setPersistedAgentTaskState(cluster, 'validator-code', {
+    state: 'executing_task',
+    iteration: 5,
+    taskId: 'interrupted-code-task',
+    processPid: 4242,
+  });
+}
+
+function publishAgentError(cluster, clusterId, agentId, { error, iteration, taskId }) {
+  cluster.messageBus.publish({
+    cluster_id: clusterId,
+    topic: 'AGENT_ERROR',
+    sender: agentId,
+    content: {
+      text: error,
+      data: { agent: agentId, error, iteration, taskId },
+    },
+  });
+}
+
+async function reloadLifecycleOrchestrator(orchestrator, storageDir, taskRunner) {
+  await orchestrator._saveClusters();
+  orchestrator.close();
+  return Orchestrator.create({
+    taskRunner,
+    storageDir,
+    quiet: true,
+  });
+}
+
+function validationResultCounts(cluster, clusterId) {
+  return {
+    total: cluster.messageBus.count({
+      cluster_id: clusterId,
+      topic: 'VALIDATION_RESULT',
+    }),
+    requirements: cluster.messageBus.query({
+      cluster_id: clusterId,
+      topic: 'VALIDATION_RESULT',
+      sender: 'validator-requirements',
+    }).length,
+  };
+}
+
+function assertValidationResultsAdvancedOnce(cluster, clusterId, before) {
+  const after = validationResultCounts(cluster, clusterId);
+  assert.strictEqual(
+    after.total,
+    before.total + 1,
+    'only the interrupted validator may append a new validation result'
+  );
+  assert.strictEqual(
+    after.requirements,
+    before.requirements,
+    'the completed validator result must remain a singleton'
+  );
+}
+
 function deleteLedgerTopics(cluster, clusterId, topics) {
   const placeholders = topics.map(() => '?').join(', ');
   cluster.ledger.db
@@ -1015,6 +1153,48 @@ function defineLifecycleResumeTests() {
       );
     });
 
+    it('ignores a recovered persisted failure and resumes the other interrupted validator exactly once', async function () {
+      const worktreeDir = fs.mkdtempSync(path.join(lifecycleStorageDir, 'resume-worktree-'));
+      const config = createPartialValidationResumeConfig(worktreeDir);
+      const result = await lifecycleOrchestrator.start(
+        config,
+        { text: 'Repair validation findings' },
+        { clusterId: 'persisted-failure-partial-validation-resume' }
+      );
+      const clusterId = result.id;
+
+      await lifecycleOrchestrator.stop(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      prepareRecoveredRequirementsFailure(cluster, clusterId);
+      prepareInterruptedCodeValidator(cluster, clusterId);
+
+      const resumedRunner = new MockTaskRunner();
+      resumedRunner
+        .when('validator-requirements')
+        .returns({ approved: true, summary: 'Requirements approved again' });
+      resumedRunner.when('validator-code').returns({ approved: false, summary: 'Code rejected' });
+      resumedRunner.when('worker').returns('Repaired validation findings');
+      lifecycleOrchestrator = await reloadLifecycleOrchestrator(
+        lifecycleOrchestrator,
+        lifecycleStorageDir,
+        resumedRunner
+      );
+
+      const restoredCluster = lifecycleOrchestrator.getCluster(clusterId);
+      const validationCountsBeforeResume = validationResultCounts(restoredCluster, clusterId);
+
+      const resumed = await lifecycleOrchestrator.resume(clusterId);
+      assert.strictEqual(resumed.resumeType, 'clean');
+      assert.deepStrictEqual(resumed.resumedAgents, ['validator-code']);
+      await waitForAgentCalls(resumedRunner, {
+        'validator-code': 1,
+        worker: 1,
+      });
+
+      resumedRunner.assertCalled('validator-requirements', 0);
+      assertValidationResultsAdvancedOnce(restoredCluster, clusterId, validationCountsBeforeResume);
+    });
+
     it('resumes a missing validator in a partial validation cycle without replaying completed results', async function () {
       const worktreeDir = fs.mkdtempSync(path.join(lifecycleStorageDir, 'resume-worktree-'));
       const config = createPartialValidationResumeConfig(worktreeDir);
@@ -1535,17 +1715,32 @@ function defineLifecycleResumeTests() {
       const cluster = lifecycleOrchestrator.getCluster(result.id);
       cluster.failureInfo = {
         agentId: 'worker',
+        taskId: 'persisted-worker-failure',
         iteration: 1,
         error: 'boom',
+        timestamp: Date.now(),
       };
 
-      lifecycleMockRunner.when('worker').delays(500, { done: true, resumed: true });
+      const resumedRunner = new MockTaskRunner();
+      resumedRunner.when('worker').delays(500, { done: true, resumed: true });
+      lifecycleOrchestrator = await reloadLifecycleOrchestrator(
+        lifecycleOrchestrator,
+        lifecycleStorageDir,
+        resumedRunner
+      );
 
       const resumed = await lifecycleOrchestrator.resume(result.id);
       const status = lifecycleOrchestrator.getStatus(result.id);
+      const restoredCluster = lifecycleOrchestrator.getCluster(result.id);
 
       assert.strictEqual(resumed.resumeType, 'failure');
-      assert.strictEqual(cluster.pid, process.pid, 'Resumed cluster should record current PID');
+      assert.strictEqual(resumed.resumedAgent, 'worker');
+      assert.strictEqual(resumed.previousError, 'boom');
+      assert.strictEqual(
+        restoredCluster.pid,
+        process.pid,
+        'Resumed cluster should record current PID'
+      );
       assert.strictEqual(status.state, 'running', 'Resumed cluster should not self-report zombie');
     });
 
@@ -1590,6 +1785,49 @@ function defineLifecycleResumeTests() {
       assert.strictEqual(resumed.resumeType, 'failure');
       assert.strictEqual(resumed.resumedAgent, 'worker');
       assert.strictEqual(resumed.previousError, 'current failure');
+    });
+
+    it('selects an unresolved ledger failure after reloading recovered registry and ledger failures', async function () {
+      const worktreeDir = fs.mkdtempSync(path.join(lifecycleStorageDir, 'resume-ordering-'));
+      const result = await lifecycleOrchestrator.start(
+        createPartialValidationResumeConfig(worktreeDir),
+        { text: 'Task' },
+        { clusterId: 'persisted-composed-failure-ordering' }
+      );
+      await lifecycleOrchestrator.stop(result.id);
+
+      const cluster = lifecycleOrchestrator.getCluster(result.id);
+      prepareRecoveredRequirementsFailure(cluster, result.id);
+      publishAgentError(cluster, result.id, 'validator-code', {
+        error: 'unresolved code validator failure',
+        iteration: 5,
+        taskId: 'unresolved-code-task',
+      });
+      publishRecoveredWorkerFailureHistory(cluster, result.id);
+
+      const resumedRunner = new MockTaskRunner();
+      resumedRunner.when('validator-code').delays(500, {
+        approved: false,
+        summary: 'Code rejected',
+      });
+      lifecycleOrchestrator = await reloadLifecycleOrchestrator(
+        lifecycleOrchestrator,
+        lifecycleStorageDir,
+        resumedRunner
+      );
+
+      const restored = lifecycleOrchestrator.getCluster(result.id);
+      const failureInfo = lifecycleOrchestrator._resolveFailureInfo(restored, result.id);
+      assert.strictEqual(failureInfo.agentId, 'validator-code');
+      assert.strictEqual(failureInfo.taskId, 'unresolved-code-task');
+
+      const resumed = await lifecycleOrchestrator.resume(result.id);
+      await waitForAgentCalls(resumedRunner, { 'validator-code': 1 });
+      assert.strictEqual(resumed.resumeType, 'failure');
+      assert.strictEqual(resumed.resumedAgent, 'validator-code');
+      assert.strictEqual(resumed.previousError, 'unresolved code validator failure');
+      resumedRunner.assertCalled('validator-requirements', 0);
+      resumedRunner.assertCalled('worker', 0);
     });
 
     it('should skip every recovered error and select the newest unresolved failure from complete history', async function () {
