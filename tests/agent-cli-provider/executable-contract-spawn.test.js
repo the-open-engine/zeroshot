@@ -1,8 +1,44 @@
 const assert = require('node:assert/strict');
+const { once } = require('node:events');
 const fs = require('node:fs');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+
+async function createSigtermReadyServer() {
+  const server = net.createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+
+  const ready = new Promise((resolve, reject) => {
+    server.once('connection', (socket) => {
+      socket.setEncoding('utf8');
+      let message = '';
+      socket.on('data', (chunk) => {
+        message += chunk;
+      });
+      socket.once('end', () => {
+        if (message === 'ready\n') {
+          resolve();
+        } else {
+          reject(new Error(`Unexpected child readiness message: ${JSON.stringify(message)}`));
+        }
+      });
+    });
+  });
+
+  return {
+    port: address.port,
+    ready,
+    async close() {
+      server.close();
+      await once(server, 'close');
+    },
+  };
+}
 
 test('spawnProcessRunner strips inherited process-control env before spawn', async () => {
   const { spawnProcessRunner } = require('../../lib/agent-cli-provider');
@@ -71,27 +107,47 @@ test('spawnProcessRunner strips command spec process-control env before spawn', 
   }
 });
 
-test('spawnProcessRunner escalates timed-out providers and reports timeout evidence', async () => {
+test('spawnProcessRunner escalates timed-out providers and reports timeout evidence', async (t) => {
   const { spawnProcessRunner } = require('../../lib/agent-cli-provider');
+  const readiness = await createSigtermReadyServer();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const startedAt = Date.now();
 
-  const result = await spawnProcessRunner()(
-    {
-      binary: process.execPath,
-      args: ['-e', 'process.on("SIGTERM",()=>{}); setTimeout(()=>process.exit(0),800);'],
-      env: {},
-      cleanupMetadata: [],
-      warnings: [],
-      redactions: [],
-    },
-    { timeoutMs: 50 }
-  );
+  try {
+    const resultPromise = spawnProcessRunner()(
+      {
+        binary: process.execPath,
+        args: [
+          '-e',
+          [
+            'const net = require("node:net");',
+            'process.on("SIGTERM", () => {});',
+            `const socket = net.createConnection(${readiness.port}, "127.0.0.1", () => socket.end("ready\\n"));`,
+            'setInterval(() => {}, 1000);',
+          ].join(' '),
+        ],
+        env: {},
+        cleanupMetadata: [],
+        warnings: [],
+        redactions: [],
+      },
+      { timeoutMs: 50 }
+    );
 
-  assert.equal(result.timedOut, true);
-  assert.equal(result.exitCode, null);
-  assert.equal(result.signal, 'SIGKILL');
-  assert.equal(result.timeoutMs, 50);
-  assert.ok(Date.now() - startedAt < 500);
+    await readiness.ready;
+    t.mock.timers.tick(50);
+    t.mock.timers.tick(100);
+    const result = await resultPromise;
+
+    assert.equal(result.timedOut, true);
+    assert.equal(result.exitCode, null);
+    assert.equal(result.signal, 'SIGKILL');
+    assert.equal(result.timeoutMs, 50);
+    assert.ok(Date.now() - startedAt < 500);
+  } finally {
+    t.mock.timers.reset();
+    await readiness.close();
+  }
 });
 
 test('spawnProcessRunner closes provider stdin for noninteractive invocations', async () => {
