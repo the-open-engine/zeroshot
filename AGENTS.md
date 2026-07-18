@@ -442,6 +442,8 @@ Long scripts show no output until done.
 Strict structured-output Codex tasks use the attachable PTY watcher. Claude strict
 structured-output tasks keep the non-PTY watcher because PTY notifications can be
 interpreted as streaming commands; use `zeroshot logs` for those tasks.
+Attach sockets use the shared short runtime namespace from `src/attach/socket-paths.js`;
+never reconstruct their path from `HOME` in a watcher or client.
 
 ### Kubernetes / Network Storage (SQLite Ledger)
 

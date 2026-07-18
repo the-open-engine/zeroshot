@@ -9,6 +9,7 @@ const { pathToFileURL } = require('url');
 const runnerUrl = pathToFileURL(path.resolve(__dirname, '../../task-lib/runner.js')).href;
 const storeUrl = pathToFileURL(path.resolve(__dirname, '../../task-lib/store.js')).href;
 const socketDiscoveryPath = path.resolve(__dirname, '../../src/attach/socket-discovery.js');
+const socketPaths = require('../../src/attach/socket-paths');
 
 function createFakeCodex(fakeBinDir) {
   const fakeCodex = path.join(fakeBinDir, 'codex');
@@ -108,14 +109,14 @@ process.stdout.write(JSON.stringify({ socketPath: attached.socketPath, log }) + 
   return harnessPath;
 }
 
-function runHarness(harnessPath, fakeBinDir, shortHome) {
+function runHarness(harnessPath, fakeBinDir, testHome, zeroshotHome = testHome) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [harnessPath], {
       env: {
         ...process.env,
-        HOME: shortHome,
-        USERPROFILE: shortHome,
-        ZEROSHOT_HOME: shortHome,
+        HOME: testHome,
+        USERPROFILE: testHome,
+        ZEROSHOT_HOME: zeroshotHome,
         PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -149,18 +150,26 @@ function runHarness(harnessPath, fakeBinDir, shortHome) {
   });
 }
 
-async function runAttachableRegression() {
+async function runAttachableRegression(options = {}) {
   const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-fake-codex-'));
-  const shortHome = `/tmp/zeroshot-attach-${process.pid}-${Date.now()}`;
-  fs.mkdirSync(shortHome, { recursive: true });
+  const homeSuffix = options.longHome
+    ? `${'deliberately-long-home-segment-'.repeat(5)}${process.pid}-${Date.now()}`
+    : `zeroshot-attach-${process.pid}-${Date.now()}`;
+  const testHome = path.join('/tmp', homeSuffix);
+  const zeroshotHome =
+    options.zeroshotHome || path.join('/tmp', `zeroshot-runtime-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(testHome, { recursive: true });
+  fs.mkdirSync(zeroshotHome, { recursive: true });
   createFakeCodex(fakeBinDir);
-  const harnessPath = createHarness(shortHome);
+  const harnessPath = createHarness(testHome);
 
   try {
-    return await runHarness(harnessPath, fakeBinDir, shortHome);
+    return await runHarness(harnessPath, fakeBinDir, testHome, zeroshotHome);
   } finally {
     fs.rmSync(fakeBinDir, { recursive: true, force: true });
-    fs.rmSync(shortHome, { recursive: true, force: true });
+    fs.rmSync(testHome, { recursive: true, force: true });
+    fs.rmSync(zeroshotHome, { recursive: true, force: true });
+    fs.rmSync(socketPaths.getSocketDir(zeroshotHome), { recursive: true, force: true });
   }
 }
 
@@ -191,6 +200,25 @@ describe('task watcher attachment selection', function () {
 
     expect(result.socketPath).to.match(/\.sock$/);
     expect(result.log).to.include('"type":"thread.started"');
+    expect(result.log).to.include('{\\"ok\\":true}');
+  });
+
+  it('creates a live attach socket when HOME exceeds the Unix socket path limit', async function () {
+    this.timeout(15000);
+    const result = await runAttachableRegression({ longHome: true });
+
+    expect(result.socketPath).to.match(/\.sock$/);
+    expect(result.socketPath.length).to.be.lessThan(100);
+    expect(result.log).to.include('"type":"thread.started"');
+    expect(result.log).to.include('{\\"ok\\":true}');
+  });
+
+  it('uses ZEROSHOT_HOME consistently for watcher and discovery socket paths', async function () {
+    this.timeout(15000);
+    const zeroshotHome = path.join('/tmp', `zeroshot-explicit-home-${process.pid}-${Date.now()}`);
+    const result = await runAttachableRegression({ longHome: true, zeroshotHome });
+
+    expect(path.dirname(result.socketPath)).to.equal(socketPaths.getSocketDir(zeroshotHome));
     expect(result.log).to.include('{\\"ok\\":true}');
   });
 
