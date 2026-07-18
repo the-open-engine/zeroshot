@@ -85,8 +85,36 @@ Set levels per provider in settings:
 
 Notes:
 
-- `reasoningEffort` applies to Codex and Opencode only.
+- `reasoningEffort` accepts `low`, `medium`, `high`, `xhigh`, or `max`.
+- Claude passes reasoning effort to Claude Code as `--effort`.
+- Codex passes reasoning effort as the `model_reasoning_effort` config override.
+- Opencode passes reasoning effort as `--variant`.
 - `model` is still supported as a provider-specific escape hatch.
+
+### Current explicit model IDs
+
+Zeroshot keeps provider-agnostic `modelLevel` defaults and also recognizes these
+provider-specific IDs for explicit overrides:
+
+- Codex: `gpt-5.6` (alias for Sol), `gpt-5.6-sol`, `gpt-5.6-terra`, and
+  `gpt-5.6-luna`.
+- Claude aliases: `haiku`, `sonnet`, `opus`, and `fable`.
+- Claude current IDs: `claude-fable-5`, `claude-opus-4-8`,
+  `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`,
+  `claude-opus-4-5-20251101`, `claude-sonnet-5`, `claude-sonnet-4-6`,
+  `claude-sonnet-4-5`, `claude-sonnet-4-5-20250929`,
+  `claude-haiku-4-5`, and `claude-haiku-4-5-20251001`.
+- Claude limited-access IDs: `claude-mythos-5` and `claude-mythos-preview`.
+  Recognition does not grant account access.
+
+The legacy Claude `maxModel` ceiling treats `fable` as a top-tier alias alongside
+`opus`. Explicit canonical Claude IDs remain provider-specific overrides and are
+not ranked by the legacy alias ceiling.
+
+Sources: [OpenAI models](https://developers.openai.com/api/docs/models),
+[Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+[Anthropic model lifecycle](https://platform.claude.com/docs/en/about-claude/model-deprecations),
+and [Anthropic model ID rules](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions).
 
 ## Docker Isolation and Credentials
 

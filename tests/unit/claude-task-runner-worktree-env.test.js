@@ -53,4 +53,27 @@ describe('ClaudeTaskRunner worktree env forwarding', function () {
       assert.ok(pathEntries.includes(entry));
     }
   });
+
+  it('forwards max reasoning effort into the detached task invocation', function () {
+    const runner = new ClaudeTaskRunner({ quiet: true });
+    const args = runner._buildRunArgs({
+      context: 'test context',
+      providerName: 'claude',
+      runOutputFormat: 'stream-json',
+      resolvedModelSpec: {
+        model: 'claude-opus-4-8',
+        reasoningEffort: 'max',
+      },
+      jsonSchema: null,
+    });
+
+    assert.deepStrictEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2), [
+      '--model',
+      'claude-opus-4-8',
+    ]);
+    assert.deepStrictEqual(
+      args.slice(args.indexOf('--reasoning-effort'), args.indexOf('--reasoning-effort') + 2),
+      ['--reasoning-effort', 'max']
+    );
+  });
 });

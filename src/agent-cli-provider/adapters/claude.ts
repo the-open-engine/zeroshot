@@ -4,7 +4,6 @@ import {
   type ClaudeCliFeatures,
   type CommandSpec,
   type ErrorClassification,
-  InvalidProviderModelError,
   type LevelModelSpec,
   type LevelOverrides,
   type ModelCatalogEntry,
@@ -28,8 +27,23 @@ import { parseClaudeEvent } from './claude-parser';
 
 const MODEL_CATALOG: Readonly<Record<string, ModelCatalogEntry>> = {
   haiku: { rank: 1 },
+  'claude-haiku-4-5': { rank: 1 },
+  'claude-haiku-4-5-20251001': { rank: 1 },
   sonnet: { rank: 2 },
+  'claude-sonnet-4-5': { rank: 2 },
+  'claude-sonnet-4-5-20250929': { rank: 2 },
+  'claude-sonnet-4-6': { rank: 2 },
+  'claude-sonnet-5': { rank: 2 },
   opus: { rank: 3 },
+  'claude-opus-4-5': { rank: 3 },
+  'claude-opus-4-5-20251101': { rank: 3 },
+  'claude-opus-4-6': { rank: 3 },
+  'claude-opus-4-7': { rank: 3 },
+  'claude-opus-4-8': { rank: 3 },
+  fable: { rank: 3 },
+  'claude-fable-5': { rank: 3 },
+  'claude-mythos-5': { rank: 3 },
+  'claude-mythos-preview': { rank: 3 },
 };
 
 const LEVEL_MAPPING: Readonly<Record<ModelLevel, LevelModelSpec>> = {
@@ -50,6 +64,7 @@ function detectCliFeatures(helpText?: string | null): ClaudeCliFeatures {
     supportsIncludePartials: unknown ? true : /--include-partial-messages/.test(help),
     supportsVerbose: unknown ? true : /--verbose/.test(help),
     supportsModel: unknown ? true : /--model/.test(help),
+    supportsEffort: unknown ? true : /--effort/.test(help),
     unknown,
   };
 }
@@ -85,6 +100,9 @@ function addModelArgs(args: string[], options: BuildProviderCommandOptions): voi
   const features = optionFeatures(options);
   if (options.modelSpec?.model && features.supportsModel !== false) {
     args.push('--model', options.modelSpec.model);
+  }
+  if (options.modelSpec?.reasoningEffort && features.supportsEffort !== false) {
+    args.push('--effort', options.modelSpec.reasoningEffort);
   }
 }
 
@@ -139,6 +157,15 @@ function collectWarnings(options: BuildProviderCommandOptions): WarningMetadata[
       )
     );
   }
+  if (options.modelSpec?.reasoningEffort && features.supportsEffort === false) {
+    warnings.push(
+      warning(
+        'claude',
+        'claude-reasoning',
+        'Claude CLI does not support --effort; skipping reasoningEffort.'
+      )
+    );
+  }
   return warnings;
 }
 
@@ -176,16 +203,7 @@ function resolveModelSpec(level: ModelLevel, overrides?: LevelOverrides): Resolv
 }
 
 function validateModelId(modelId: string | null | undefined): string | null | undefined {
-  try {
-    return validateModelIdFromCatalog('claude', MODEL_CATALOG, modelId);
-  } catch (error) {
-    if (modelId && (modelId === 'opus-4.6' || modelId === 'claude-opus-4-6')) {
-      throw new InvalidProviderModelError(
-        `Invalid model "${modelId}" for provider "claude". Use canonical model ids: haiku, sonnet, opus.`
-      );
-    }
-    throw error;
-  }
+  return validateModelIdFromCatalog('claude', MODEL_CATALOG, modelId);
 }
 
 function classifyError(error: unknown): ErrorClassification {

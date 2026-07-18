@@ -21,6 +21,9 @@ const { getProvider } = require('./providers');
 const { CAPABILITIES } = require('./providers/capabilities');
 const { GUIDANCE_TOPICS } = require('./guidance-topics');
 
+const REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
+const REASONING_EFFORT_LABEL = REASONING_EFFORTS.join('|');
+
 const HOOK_ACTION_TOPIC_CONTRACTS = Object.freeze({
   verify_pull_request: Object.freeze([
     { topic: 'CLUSTER_COMPLETE', keys: null },
@@ -2054,14 +2057,13 @@ function validateProviderSettings(provider, providerSettings) {
       providerModule.validateModelId(override.model);
     }
     if (override?.reasoningEffort && !providerSupportsCapability(provider, 'reasoningEffort')) {
-      throw new Error(`reasoningEffort overrides are only supported for Codex and Opencode`);
-    }
-    if (
-      override?.reasoningEffort &&
-      !['low', 'medium', 'high', 'xhigh'].includes(override.reasoningEffort)
-    ) {
       throw new Error(
-        `Invalid reasoningEffort "${override.reasoningEffort}" (low|medium|high|xhigh)`
+        `reasoningEffort overrides are only supported for Claude, Codex, and Opencode`
+      );
+    }
+    if (override?.reasoningEffort && !REASONING_EFFORTS.includes(override.reasoningEffort)) {
+      throw new Error(
+        `Invalid reasoningEffort "${override.reasoningEffort}" (${REASONING_EFFORT_LABEL})`
       );
     }
   }
@@ -2172,12 +2174,9 @@ function validateModelRulesSupport(agent, provider, providerModule, levels, warn
 function validateReasoningEffortSupport(agent, provider, warnings) {
   if (agent.reasoningEffort && !providerSupportsCapability(provider, 'reasoningEffort')) {
     warnings.push(`Agent "${agent.id}" sets reasoningEffort but ${provider} does not support it`);
-  } else if (
-    agent.reasoningEffort &&
-    !['low', 'medium', 'high', 'xhigh'].includes(agent.reasoningEffort)
-  ) {
+  } else if (agent.reasoningEffort && !REASONING_EFFORTS.includes(agent.reasoningEffort)) {
     warnings.push(
-      `Agent "${agent.id}" has invalid reasoningEffort "${agent.reasoningEffort}" (low|medium|high|xhigh)`
+      `Agent "${agent.id}" has invalid reasoningEffort "${agent.reasoningEffort}" (${REASONING_EFFORT_LABEL})`
     );
   }
 }

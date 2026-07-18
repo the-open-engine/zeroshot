@@ -429,6 +429,7 @@ test('feature probing is deterministic from injected help text', () => {
     supportsIncludePartials: true,
     supportsVerbose: true,
     supportsModel: true,
+    supportsEffort: true,
     unknown: true,
   });
 
