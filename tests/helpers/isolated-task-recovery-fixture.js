@@ -169,6 +169,42 @@ async function runWatchdogRecovery(overrides, managerOptions = {}) {
   return { agent, events, manager, result };
 }
 
+async function runPermanentWatchdogFailure(managerOptions) {
+  const manager = createIsolationManager(managerOptions);
+  const { agent, events } = createIsolatedAgent(manager, {
+    lastOutputTime: Date.now() - 100,
+    taskStartedAt: Date.now() - 100,
+  });
+  const execution = followClaudeTaskLogsIsolated(agent, agent.currentTaskId);
+
+  await waitFor(() => agent.currentTask);
+  startLivenessCheck(agent);
+  const outcome = await Promise.race([
+    execution.then(
+      (result) => ({ result }),
+      (error) => ({ error })
+    ),
+    sleep(300).then(() => ({ timedOut: true })),
+  ]);
+  const observed = {
+    agent,
+    events,
+    manager,
+    outcome,
+    killCalls: manager.killCalls,
+    stillMonitored: Boolean(agent.livenessCheckInterval),
+  };
+
+  if (outcome.timedOut) {
+    stopLivenessCheck(agent);
+    manager.allowTermination();
+    await agent.currentTask?.terminate('test cleanup');
+    await execution;
+  }
+
+  return observed;
+}
+
 async function runLifecycleRecovery(managerOptions = {}) {
   const manager = createIsolationManager(managerOptions);
   const { agent, events } = createIsolatedAgent(manager, {
@@ -231,6 +267,7 @@ module.exports = {
   createIsolatedAgent,
   createIsolationManager,
   runLifecycleRecovery,
+  runPermanentWatchdogFailure,
   runWatchdogRecovery,
   sleep,
   useZeroBackoffSettings,

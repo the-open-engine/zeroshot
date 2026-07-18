@@ -1,51 +1,11 @@
 const assert = require('assert');
 
-const { startLivenessCheck, stopLivenessCheck } = require('../src/agent/agent-lifecycle');
-const { followClaudeTaskLogsIsolated } = require('../src/agent/agent-task-executor');
 const {
-  createIsolatedAgent,
-  createIsolationManager,
   runLifecycleRecovery,
+  runPermanentWatchdogFailure,
   sleep,
   useZeroBackoffSettings,
-  waitFor,
 } = require('./helpers/isolated-task-recovery-fixture');
-
-async function runPermanentWatchdogFailure(managerOptions) {
-  const manager = createIsolationManager(managerOptions);
-  const { agent, events } = createIsolatedAgent(manager, {
-    lastOutputTime: Date.now() - 100,
-    taskStartedAt: Date.now() - 100,
-  });
-  const execution = followClaudeTaskLogsIsolated(agent, agent.currentTaskId);
-
-  await waitFor(() => agent.currentTask);
-  startLivenessCheck(agent);
-  const outcome = await Promise.race([
-    execution.then(
-      (result) => ({ result }),
-      (error) => ({ error })
-    ),
-    sleep(300).then(() => ({ timedOut: true })),
-  ]);
-  const observed = {
-    agent,
-    events,
-    manager,
-    outcome,
-    killCalls: manager.killCalls,
-    stillMonitored: Boolean(agent.livenessCheckInterval),
-  };
-
-  if (outcome.timedOut) {
-    stopLivenessCheck(agent);
-    manager.allowTermination();
-    await agent.currentTask?.terminate('test cleanup');
-    await execution;
-  }
-
-  return observed;
-}
 
 describe('Bounded isolated task recovery', function () {
   this.timeout(7000);
