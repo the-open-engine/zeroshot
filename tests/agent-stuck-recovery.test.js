@@ -226,10 +226,15 @@ describe('Agent stuck-task recovery', function () {
     });
     try {
       assert.strictEqual(fixture.runner.getCalls('worker').length, 3);
-      const registry = JSON.parse(
-        fs.readFileSync(path.join(fixture.storageDir, 'clusters.json'), 'utf8')
-      );
-      const saved = registry[fixture.started.id];
+      assert.strictEqual(fixture.orchestrator.getStatus(fixture.started.id).state, 'stopped');
+      let saved;
+      await waitFor(() => {
+        const registry = JSON.parse(
+          fs.readFileSync(path.join(fixture.storageDir, 'clusters.json'), 'utf8')
+        );
+        saved = registry[fixture.started.id];
+        return saved?.state === 'stopped';
+      });
       assert.strictEqual(saved.state, 'stopped');
       assert.deepStrictEqual(
         [saved.agentStates[0].currentTask, saved.agentStates[0].currentTaskId],
