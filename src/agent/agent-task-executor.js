@@ -1652,6 +1652,7 @@ function createIsolatedLogState() {
     resolved: false,
     terminationPromise: null,
     lifecycleHandle: null,
+    logFilePath: null,
     fullOutput: '',
     tailProcess: null,
     statusCheckInterval: null,
@@ -1706,24 +1707,124 @@ function rejectIsolatedFollower({ agent, state, cleanup, reject, error }) {
   reject(error);
 }
 
-function isTerminalIsolatedStatus(output) {
-  return /Status:\s+(?:completed|failed|killed|stale)/i.test(output);
+function parseIsolatedStatus(output) {
+  return output.match(/Status:\s+(completed|failed|killed|stale|cancelled)/i)?.[1].toLowerCase();
 }
 
 async function terminateIsolatedTask(manager, clusterId, taskId) {
   const before = await manager.execInContainer(clusterId, ['zeroshot', 'status', taskId]);
-  if (before.code === 0 && isTerminalIsolatedStatus(before.stdout)) {
-    return { alreadyTerminal: true };
+  const beforeStatus = before.code === 0 ? parseIsolatedStatus(before.stdout) : null;
+  if (beforeStatus) {
+    return { alreadyTerminal: true, forced: false, status: beforeStatus };
   }
 
   const result = await manager.execInContainer(clusterId, ['zeroshot', 'kill', taskId]);
   const status = await manager.execInContainer(clusterId, ['zeroshot', 'status', taskId]);
-  if (result.code !== 0 || status.code !== 0 || !isTerminalIsolatedStatus(status.stdout)) {
+  const afterStatus = status.code === 0 ? parseIsolatedStatus(status.stdout) : null;
+  if (!afterStatus) {
     throw new Error(
       `Failed to terminate isolated task ${taskId}: ${result.stderr || result.stdout || `exit ${result.code}`}`
     );
   }
-  return { alreadyTerminal: false };
+
+  return {
+    alreadyTerminal: false,
+    forced: afterStatus === 'killed',
+    status: afterStatus,
+  };
+}
+
+async function resolveIsolatedLogFilePath(manager, clusterId, taskId, state) {
+  if (state.logFilePath) return state.logFilePath;
+
+  const result = await manager.execInContainer(clusterId, [
+    'sh',
+    '-c',
+    `zeroshot get-log-path ${taskId}`,
+  ]);
+  if (result.code !== 0 || !result.stdout.trim()) {
+    throw new Error(
+      `Failed to get log path for ${taskId} inside container: ${result.stderr || result.stdout}`
+    );
+  }
+  state.logFilePath = result.stdout.trim();
+  return state.logFilePath;
+}
+
+function settleIsolatedTerminalStatus({
+  agent,
+  manager,
+  clusterId,
+  taskId,
+  providerName,
+  status,
+  isNotFound = false,
+  state,
+  cleanup,
+  resolve,
+  reject,
+  onLine,
+}) {
+  if (state.resolved) return Promise.resolve();
+  if (state.terminalSettlementPromise) return state.terminalSettlementPromise;
+
+  state.taskExited = true;
+  const settlement = (async () => {
+    const logFilePath = await resolveIsolatedLogFilePath(manager, clusterId, taskId, state);
+    await new Promise((settle) => setTimeout(settle, 200));
+    const finalReadResult = await manager.execInContainer(clusterId, [
+      'sh',
+      '-c',
+      `cat "${logFilePath}" 2>/dev/null || echo ""`,
+    ]);
+
+    if (finalReadResult.code === 0 && finalReadResult.stdout) {
+      state.fullOutput = finalReadResult.stdout;
+      for (const line of state.fullOutput.split('\n')) {
+        if (line.trim()) onLine(line);
+      }
+    }
+
+    const success = status === 'completed';
+    const errorContext = !success
+      ? extractErrorContext({
+          output: state.fullOutput,
+          statusOutput: status ? `Status: ${status}` : '',
+          taskId,
+          isNotFound,
+          debug: {
+            agentId: agent.id,
+            providerName,
+            pid: agent.processPid,
+            cwd: agent.config.cwd || process.cwd(),
+            worktreePath: agent.worktree?.path || null,
+            isolation: true,
+            clusterId,
+            logFilePath,
+          },
+        })
+      : null;
+    const parsedResult = await agent._parseResultOutput(state.fullOutput);
+
+    settleIsolatedFollower({
+      agent,
+      state,
+      cleanup,
+      resolve,
+      result: {
+        success,
+        output: state.fullOutput,
+        taskId,
+        result: parsedResult,
+        error: errorContext,
+        tokenUsage: extractTokenUsage(state.fullOutput, providerName),
+      },
+    });
+  })().catch((error) => {
+    rejectIsolatedFollower({ agent, state, cleanup, reject, error });
+  });
+  state.terminalSettlementPromise = settlement;
+  return settlement;
 }
 
 function buildIsolatedLifecycleHandle({
@@ -1736,6 +1837,7 @@ function buildIsolatedLifecycleHandle({
   cleanup,
   resolve,
   reject,
+  onLine,
 }) {
   const terminate = (reason = 'Task killed', details = {}) => {
     if (state.resolved || state.taskExited) return;
@@ -1743,7 +1845,22 @@ function buildIsolatedLifecycleHandle({
 
     const terminationPromise = (async () => {
       const termination = await terminateIsolatedTask(manager, clusterId, taskId);
-      if (termination.alreadyTerminal) return;
+      if (!termination.forced) {
+        await settleIsolatedTerminalStatus({
+          agent,
+          manager,
+          clusterId,
+          taskId,
+          providerName,
+          status: termination.status,
+          state,
+          cleanup,
+          resolve,
+          reject,
+          onLine,
+        });
+        return termination;
+      }
 
       settleIsolatedFollower({
         agent,
@@ -1759,6 +1876,7 @@ function buildIsolatedLifecycleHandle({
           tokenUsage: extractTokenUsage(state.fullOutput, providerName),
         },
       });
+      return termination;
     })();
     state.terminationPromise = terminationPromise;
     terminationPromise.catch(() => {
@@ -1870,72 +1988,28 @@ async function checkIsolatedStatus({
   ]);
 
   const statusOutput = statusResult.stdout;
-  const isSuccess = /Status:\s+completed/i.test(statusOutput);
-  const isError = /Status:\s+(?:failed|killed|stale)/i.test(statusOutput);
+  const status = parseIsolatedStatus(statusOutput);
   const isNotFound = statusOutput.includes('not_found');
 
-  if (!isSuccess && !isError && !isNotFound) {
+  if (!status && !isNotFound) {
     return;
   }
 
-  state.taskExited = true;
-  clearIsolatedLifecycleHandle(agent, state);
-  await new Promise((r) => setTimeout(r, 200));
-
-  try {
-    const finalReadResult = await manager.execInContainer(clusterId, [
-      'sh',
-      '-c',
-      `cat "${logFilePath}" 2>/dev/null || echo ""`,
-    ]);
-
-    if (finalReadResult.code === 0 && finalReadResult.stdout) {
-      state.fullOutput = finalReadResult.stdout;
-      const remainingLines = state.fullOutput.split('\n');
-      for (const line of remainingLines) {
-        if (line.trim()) {
-          onLine(line);
-        }
-      }
-    }
-
-    const success = isSuccess && !isError;
-    const errorContext = !success
-      ? extractErrorContext({
-          output: state.fullOutput,
-          taskId,
-          isNotFound,
-          debug: {
-            agentId: agent.id,
-            providerName,
-            pid: agent.processPid,
-            cwd: agent.config.cwd || process.cwd(),
-            worktreePath: agent.worktree?.path || null,
-            isolation: true,
-            clusterId,
-            logFilePath,
-          },
-        })
-      : null;
-    const parsedResult = await agent._parseResultOutput(state.fullOutput);
-
-    settleIsolatedFollower({
-      agent,
-      state,
-      cleanup,
-      resolve,
-      result: {
-        success,
-        output: state.fullOutput,
-        taskId,
-        result: parsedResult,
-        error: errorContext,
-        tokenUsage: extractTokenUsage(state.fullOutput, providerName),
-      },
-    });
-  } catch (error) {
-    rejectIsolatedFollower({ agent, state, cleanup, reject, error });
-  }
+  state.logFilePath = logFilePath;
+  await settleIsolatedTerminalStatus({
+    agent,
+    manager,
+    clusterId,
+    taskId,
+    providerName,
+    status,
+    isNotFound,
+    state,
+    cleanup,
+    resolve,
+    reject,
+    onLine,
+  });
 }
 
 function startIsolatedStatusChecks({
@@ -1994,6 +2068,7 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
       cleanup,
       resolve,
       reject,
+      onLine,
     });
     agent.currentTask = state.lifecycleHandle;
 
@@ -2021,6 +2096,10 @@ function followClaudeTaskLogsIsolated(agent, taskId) {
             reject,
             error: new Error(`Empty log path returned for ${taskId}`),
           });
+        }
+        state.logFilePath = logFilePath;
+        if (state.resolved || state.taskExited) {
+          return;
         }
 
         agent._log(`[${agent.id}] Following isolated task logs (streaming): ${logFilePath}`);
@@ -2248,21 +2327,31 @@ async function killTask(agent, termination = 'Task killed') {
 }
 
 async function killIsolatedTask(agent, currentTask, taskId, reason, code) {
+  let termination;
   if (currentTask && typeof currentTask.terminate === 'function') {
-    await currentTask.terminate(reason, { code });
+    termination = await currentTask.terminate(reason, { code });
   } else {
-    await terminateIsolatedTask(agent.isolation.manager, agent.isolation.clusterId, taskId);
+    termination = await terminateIsolatedTask(
+      agent.isolation.manager,
+      agent.isolation.clusterId,
+      taskId
+    );
     if (currentTask && typeof currentTask.kill === 'function') {
       currentTask.kill(reason, { code });
     }
   }
 
   agent._stopLivenessCheck?.();
+  if (termination?.forced === false) {
+    return termination;
+  }
+
   agent.currentTask = null;
   agent.currentTaskId = null;
   agent.processPid = null;
   agent.lastOutputTime = null;
   agent.taskStartedAt = null;
+  return termination;
 }
 
 module.exports = {

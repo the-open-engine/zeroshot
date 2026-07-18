@@ -5,10 +5,15 @@ const { followClaudeTaskLogsIsolated } = require('../src/agent/agent-task-execut
 const {
   createIsolatedAgent,
   createIsolationManager,
+  runLifecycleRecovery,
   runWatchdogRecovery,
   useZeroBackoffSettings,
   waitFor,
 } = require('./helpers/isolated-task-recovery-fixture');
+
+function countLifecycleEvents(events, expectedEvent) {
+  return events.filter(({ event }) => event === expectedEvent).length;
+}
 
 describe('Isolated task recovery', function () {
   this.timeout(7000);
@@ -148,4 +153,62 @@ describe('Isolated task lifecycle handles', function () {
     );
     assert.strictEqual(agent.currentTask, null);
   });
+});
+
+describe('Isolated task termination reconciliation', function () {
+  this.timeout(7000);
+  useZeroBackoffSettings();
+
+  it('preserves a natural completion that wins the in-container kill race', async function () {
+    const recovered = await runWatchdogRecovery(
+      {
+        lastOutputTime: Date.now() - 100,
+        taskStartedAt: Date.now() - 100,
+      },
+      { terminalStatusOnKill: 'completed' }
+    );
+
+    assert.deepStrictEqual(
+      {
+        killCalls: recovered.manager.killCalls,
+        success: recovered.result.success,
+        code: recovered.result.code,
+        timeoutEvents: countLifecycleEvents(recovered.events, 'AGENT_INACTIVITY_TIMEOUT'),
+      },
+      { killCalls: 1, success: true, code: undefined, timeoutEvents: 0 }
+    );
+  });
+
+  it('does not start a replacement provider after natural completion wins the kill race', async function () {
+    const recovered = await runLifecycleRecovery({ terminalStatusOnKill: 'completed' });
+
+    assert.deepStrictEqual(
+      {
+        spawnCalls: recovered.spawnCalls,
+        killCalls: recovered.manager.killCalls,
+        timeoutEvents: countLifecycleEvents(recovered.events, 'AGENT_INACTIVITY_TIMEOUT'),
+        completions: countLifecycleEvents(recovered.events, 'TASK_COMPLETED'),
+        restarts: countLifecycleEvents(recovered.events, 'AGENT_RESTART_ATTEMPT'),
+      },
+      { spawnCalls: 1, killCalls: 1, timeoutEvents: 0, completions: 1, restarts: 0 }
+    );
+  });
+
+  for (const terminalStatus of ['failed', 'cancelled']) {
+    it(`preserves natural ${terminalStatus} semantics when it wins the kill race`, async function () {
+      const recovered = await runWatchdogRecovery(
+        {
+          lastOutputTime: Date.now() - 100,
+          taskStartedAt: Date.now() - 100,
+        },
+        { terminalStatusOnKill: terminalStatus }
+      );
+
+      assert.strictEqual(recovered.manager.killCalls, 1);
+      assert.strictEqual(recovered.result.success, false);
+      assert.strictEqual(recovered.result.code, undefined);
+      assert.doesNotMatch(recovered.result.error, /produced no output for \d+ms/);
+      assert.strictEqual(countLifecycleEvents(recovered.events, 'AGENT_INACTIVITY_TIMEOUT'), 0);
+    });
+  }
 });

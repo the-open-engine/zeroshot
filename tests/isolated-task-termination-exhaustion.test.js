@@ -1,14 +1,11 @@
 const assert = require('assert');
 
-const {
-  executeTask,
-  startLivenessCheck,
-  stopLivenessCheck,
-} = require('../src/agent/agent-lifecycle');
+const { startLivenessCheck, stopLivenessCheck } = require('../src/agent/agent-lifecycle');
 const { followClaudeTaskLogsIsolated } = require('../src/agent/agent-task-executor');
 const {
   createIsolatedAgent,
   createIsolationManager,
+  runLifecycleRecovery,
   sleep,
   useZeroBackoffSettings,
   waitFor,
@@ -48,39 +45,6 @@ async function runPermanentWatchdogFailure(managerOptions) {
   }
 
   return observed;
-}
-
-async function runPermanentLifecycleFailure(managerOptions) {
-  const manager = createIsolationManager(managerOptions);
-  const { agent, events } = createIsolatedAgent(manager, {
-    config: { cwd: '/tmp/work', hooks: {}, maxRetries: 3 },
-    currentTaskId: null,
-    iteration: 0,
-    maxIterations: 10,
-    running: true,
-    state: 'idle',
-    testMode: true,
-    quiet: true,
-    _buildContext: () => 'task context',
-    _selectModel: () => 'test-model',
-    _resolveModelSpec: () => null,
-  });
-  const published = [];
-  let spawnCalls = 0;
-  agent._publish = (message) => published.push(message);
-  agent._spawnClaudeTask = async function () {
-    spawnCalls += 1;
-    this.currentTaskId = `isolated-task-${spawnCalls}`;
-    this.lastOutputTime = Date.now() - 100;
-    this.taskStartedAt = Date.now() - 100;
-    const execution = followClaudeTaskLogsIsolated(this, this.currentTaskId);
-    await waitFor(() => this.currentTask);
-    startLivenessCheck(this);
-    return execution;
-  };
-
-  await executeTask(agent, { topic: 'ISSUE_OPENED', sender: 'system' });
-  return { agent, events, manager, published, spawnCalls };
 }
 
 describe('Bounded isolated task recovery', function () {
@@ -126,7 +90,7 @@ describe('Bounded isolated task recovery', function () {
     });
 
     it(`does not retry the provider after permanent ${label}`, async function () {
-      const recovered = await runPermanentLifecycleFailure(managerOptions);
+      const recovered = await runLifecycleRecovery(managerOptions);
       const agentErrors = recovered.published.filter(({ topic }) => topic === 'AGENT_ERROR');
       const clusterFailures = recovered.published.filter(({ topic }) => topic === 'CLUSTER_FAILED');
 

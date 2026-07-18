@@ -1075,12 +1075,11 @@ function startLivenessCheck(agent) {
 
     if (configuredTimeout && taskRuntime >= configuredTimeout) {
       const reason = `Task timed out after ${configuredTimeout}ms`;
-      agent._publishLifecycle('AGENT_TASK_TIMEOUT', {
+      beginLivenessTermination(agent, settings, reason, 'AGENT_TASK_TIMEOUT', {
         taskId: agent.currentTaskId,
         taskRuntime,
         timeout: configuredTimeout,
       });
-      beginLivenessTermination(agent, settings, reason, 'AGENT_TASK_TIMEOUT');
       return;
     }
 
@@ -1106,27 +1105,37 @@ function startLivenessCheck(agent) {
     }
 
     const reason = `Provider produced no output for ${timeSinceLastOutput}ms`;
-    agent._publishLifecycle('AGENT_INACTIVITY_TIMEOUT', {
+    beginLivenessTermination(agent, settings, reason, 'PROVIDER_INACTIVITY_TIMEOUT', {
       taskId: agent.currentTaskId,
       timeSinceLastOutput,
       staleDuration,
       consecutiveWarnings: agent.consecutiveStaleWarnings,
     });
-    beginLivenessTermination(agent, settings, reason, 'PROVIDER_INACTIVITY_TIMEOUT');
   }, checkIntervalMs);
 }
 
 const MAX_LIVENESS_TERMINATION_ATTEMPTS = 3;
 
-function beginLivenessTermination(agent, settings, reason, code) {
+function beginLivenessTermination(agent, settings, reason, code, eventData) {
   agent.livenessTerminationContext = {
     taskId: agent.currentTaskId,
     reason,
     code,
+    eventData,
+    eventPublished: false,
   };
   agent.livenessTerminationAttempts = 0;
   agent.livenessTerminationRetryAt = 0;
   attemptLivenessTermination(agent, settings);
+}
+
+function publishLivenessTerminationEvent(agent, context) {
+  if (context.eventPublished) return;
+  context.eventPublished = true;
+  agent._publishLifecycle(
+    context.code === 'AGENT_TASK_TIMEOUT' ? 'AGENT_TASK_TIMEOUT' : 'AGENT_INACTIVITY_TIMEOUT',
+    context.eventData
+  );
 }
 
 function terminationRetryDelay(settings, attempt) {
@@ -1145,6 +1154,10 @@ function attemptLivenessTermination(agent, settings) {
 
   Promise.resolve()
     .then(() => agent._killTask({ reason: context.reason, code: context.code }))
+    .then((termination) => {
+      if (termination?.forced === false) return;
+      publishLivenessTerminationEvent(agent, context);
+    })
     .catch((error) => {
       if (agent.livenessTerminationContext !== context) return;
       if (attempt >= MAX_LIVENESS_TERMINATION_ATTEMPTS) {
@@ -1179,6 +1192,7 @@ function exhaustLivenessTermination(agent, context, terminationError) {
   }
 
   const attempts = agent.livenessTerminationAttempts;
+  publishLivenessTerminationEvent(agent, context);
   const error = new Error(
     `Failed to terminate isolated task ${context.taskId} after ${attempts} attempts; ` +
       `the provider task may still be running. Manual recovery is required before resume. ` +

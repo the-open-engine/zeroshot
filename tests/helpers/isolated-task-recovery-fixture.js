@@ -3,7 +3,11 @@ const os = require('os');
 const path = require('path');
 const { PassThrough } = require('stream');
 
-const { startLivenessCheck, stopLivenessCheck } = require('../../src/agent/agent-lifecycle');
+const {
+  executeTask,
+  startLivenessCheck,
+  stopLivenessCheck,
+} = require('../../src/agent/agent-lifecycle');
 const { followClaudeTaskLogsIsolated, killTask } = require('../../src/agent/agent-task-executor');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,6 +35,7 @@ function createIsolationManager({
   status = 'running',
   killCommandFailures = 0,
   unverifiableKillAttempts = 0,
+  terminalStatusOnKill = null,
 } = {}) {
   const commands = [];
   let taskStatus = status;
@@ -73,6 +78,14 @@ function createIsolationManager({
             remainingUnverifiableKillAttempts -= 1;
             pendingStatusFailures += 1;
             return { code: 0, stdout: 'kill requested\n', stderr: '' };
+          }
+          if (terminalStatusOnKill) {
+            taskStatus = terminalStatusOnKill;
+            return {
+              code: 0,
+              stdout: `Task is not running (status: ${terminalStatusOnKill})\n`,
+              stderr: '',
+            };
           }
           taskStatus = 'killed';
           return { code: 0, stdout: 'killed\n', stderr: '' };
@@ -156,6 +169,40 @@ async function runWatchdogRecovery(overrides, managerOptions = {}) {
   return { agent, events, manager, result };
 }
 
+async function runLifecycleRecovery(managerOptions = {}) {
+  const manager = createIsolationManager(managerOptions);
+  const { agent, events } = createIsolatedAgent(manager, {
+    config: { cwd: '/tmp/work', hooks: {}, maxRetries: 3 },
+    currentTaskId: null,
+    iteration: 0,
+    maxIterations: 10,
+    running: true,
+    state: 'idle',
+    testMode: true,
+    quiet: true,
+    messageBus: { publish() {}, query: () => [] },
+    _buildContext: () => 'task context',
+    _selectModel: () => 'test-model',
+    _resolveModelSpec: () => null,
+  });
+  const published = [];
+  let spawnCalls = 0;
+  agent._publish = (message) => published.push(message);
+  agent._spawnClaudeTask = async function () {
+    spawnCalls += 1;
+    this.currentTaskId = `isolated-task-${spawnCalls}`;
+    this.lastOutputTime = Date.now() - 100;
+    this.taskStartedAt = Date.now() - 100;
+    const execution = followClaudeTaskLogsIsolated(this, this.currentTaskId);
+    await waitFor(() => this.currentTask);
+    startLivenessCheck(this);
+    return execution;
+  };
+
+  await executeTask(agent, { topic: 'ISSUE_OPENED', sender: 'system' });
+  return { agent, events, manager, published, spawnCalls };
+}
+
 function useZeroBackoffSettings() {
   let originalSettingsFile;
   let settingsDir;
@@ -183,6 +230,7 @@ function useZeroBackoffSettings() {
 module.exports = {
   createIsolatedAgent,
   createIsolationManager,
+  runLifecycleRecovery,
   runWatchdogRecovery,
   sleep,
   useZeroBackoffSettings,
