@@ -80,9 +80,42 @@ function appendLedgerMessage(ledger, clusterId, topic, sender, data = {}) {
   });
 }
 
+function seedRecoveredWorkerFailure(ledger, clusterId) {
+  appendLedgerMessage(ledger, clusterId, 'AGENT_ERROR', 'worker', {
+    agent: 'worker',
+    error: 'task_not_found',
+    iteration: 1,
+    taskId: 'stale-worker-task',
+  });
+  appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'worker', {
+    event: 'TASK_STARTED',
+    agent: 'worker',
+    role: 'implementation',
+    state: 'executing_task',
+    iteration: 2,
+    triggeredBy: 'PLAN_READY',
+  });
+  appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'worker', {
+    event: 'TASK_ID_ASSIGNED',
+    agent: 'worker',
+    role: 'implementation',
+    state: 'executing_task',
+    taskId: 'recovered-worker-task',
+  });
+  appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'worker', {
+    event: 'TASK_COMPLETED',
+    agent: 'worker',
+    role: 'implementation',
+    state: 'idle',
+    iteration: 2,
+    taskId: 'recovered-worker-task',
+  });
+}
+
 function seedPartialValidationState(env, clusterId) {
   const ledger = new Ledger(clusterDbPath(env, clusterId));
   try {
+    seedRecoveredWorkerFailure(ledger, clusterId);
     appendLedgerMessage(ledger, clusterId, 'IMPLEMENTATION_READY', 'worker');
     appendLedgerMessage(ledger, clusterId, 'AGENT_LIFECYCLE', 'validator-requirements', {
       event: 'TASK_STARTED',
@@ -199,6 +232,12 @@ describe('e2e: resume --detach daemon handoff', function () {
       assert.strictEqual(readCluster(env, clusterId)?.state, 'stopped');
 
       seedPartialValidationState(env, clusterId);
+      const workerStartsBeforeResume = countLifecycleEvents(
+        env,
+        clusterId,
+        'worker',
+        'TASK_STARTED'
+      );
       const completionCountBeforeResume = readLedgerMessages(
         env,
         clusterId,
@@ -258,7 +297,11 @@ describe('e2e: resume --detach daemon handoff', function () {
         countLifecycleEvents(env, clusterId, 'validator-requirements', 'TASK_STARTED'),
         2
       );
-      assert.strictEqual(countLifecycleEvents(env, clusterId, 'worker', 'TASK_STARTED'), 1);
+      assert.strictEqual(
+        countLifecycleEvents(env, clusterId, 'worker', 'TASK_STARTED'),
+        workerStartsBeforeResume + 1,
+        'recovered historical failure must not start the worker before the missing validator reports'
+      );
       assert.strictEqual(
         readLedgerMessages(env, clusterId, 'CLUSTER_COMPLETE').length,
         completionCountBeforeResume + 1,
