@@ -319,6 +319,8 @@ server.on('exit', async ({ exitCode, signal }) => {
   try {
     await updateTask(taskId, {
       status,
+      pid: null,
+      processGroupId: null,
       exitCode: resolvedCode,
       error: fatalError || (resolvedCode !== 0 && signal ? `Killed by ${signal}` : null),
       socketPath: null,
@@ -336,7 +338,12 @@ server.on('error', async (err) => {
   log(`\nError: ${err.message}\n`);
   await cleanupCommandSpec();
   try {
-    await updateTask(taskId, { status: 'failed', error: err.message });
+    await updateTask(taskId, {
+      status: 'failed',
+      pid: null,
+      processGroupId: null,
+      error: err.message,
+    });
   } catch (updateError) {
     log(`[${Date.now()}][ERROR] Failed to update task status: ${updateError.message}\n`);
   }
@@ -358,6 +365,8 @@ try {
     pid: server.pid,
     socketPath,
     attachable: true,
+    processGroupId: process.platform === 'win32' ? null : server.pid,
+    terminationStrategy: process.platform === 'win32' ? 'process-tree' : 'process-group',
   });
 
   log(`[${Date.now()}][SYSTEM] Started with PTY (attachable)\n`);

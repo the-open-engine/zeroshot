@@ -1028,7 +1028,9 @@ function startLivenessCheck(agent) {
   agent.livenessTerminationStarted = false;
 
   agent.livenessCheckInterval = setInterval(() => {
-    if (!agent.currentTask || agent.livenessTerminationStarted) {
+    const hasRecoverableTask =
+      Boolean(agent.currentTask) || Boolean(agent.isolation?.enabled && agent.currentTaskId);
+    if (!hasRecoverableTask || agent.livenessTerminationStarted) {
       return;
     }
 
