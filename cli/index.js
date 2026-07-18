@@ -438,14 +438,13 @@ function applyModelOverrideToConfig(config, modelOverride, providerOverride, set
 
   if (providerName === 'claude') {
     const { validateModelAgainstMax, VALID_MODELS } = require('../lib/settings');
-    if (!VALID_MODELS.includes(modelOverride)) {
-      return;
-    }
-    try {
-      validateModelAgainstMax(modelOverride, settings.maxModel);
-    } catch (err) {
-      console.error(chalk.red(`Error: ${err.message}`));
-      process.exit(1);
+    if (VALID_MODELS.includes(modelOverride)) {
+      try {
+        validateModelAgainstMax(modelOverride, settings.maxModel);
+      } catch (err) {
+        console.error(chalk.red(`Error: ${err.message}`));
+        process.exit(1);
+      }
     }
   }
 
@@ -2745,7 +2744,7 @@ taskCmd
   .option('--provider <provider>', `Provider to use (${PROVIDER_CHOICES})`)
   .option('--model <model>', 'Model id override for the provider')
   .option('--model-level <level>', 'Model level override (level1, level2, level3)')
-  .option('--reasoning-effort <effort>', 'Reasoning effort (low, medium, high, xhigh)')
+  .option('--reasoning-effort <effort>', 'Reasoning effort (low, medium, high, xhigh, max)')
   .option('-r, --resume <sessionId>', 'Resume a specific Claude session (claude only)')
   .option('-c, --continue', 'Continue the most recent Claude session (claude only)')
   .option(
@@ -3249,10 +3248,12 @@ program
   .description('Resume a failed task or cluster')
   .option('-d, --detach', 'Resume in background (daemon mode)')
   .action(async (id, prompt, options) => {
+    let orchestrator = null;
+    let keepOrchestratorOpen = false;
     try {
       // Try cluster first, then task (both use same ID format: "adjective-noun-number")
       const OrchestratorModule = require('../src/orchestrator');
-      const orchestrator = await OrchestratorModule.create();
+      orchestrator = await OrchestratorModule.create();
 
       // Check if cluster exists
       const cluster = orchestrator.getCluster(id);
@@ -3357,6 +3358,7 @@ program
         // === DAEMON MODE: stay alive in the background, let signals stop the cluster ===
         if (isResumeDaemon) {
           setupDaemonCleanup(orchestrator, id);
+          keepOrchestratorOpen = true;
           console.log('');
           console.log(chalk.dim(`Follow logs with: zeroshot logs ${id} -f`));
           return;
@@ -3475,7 +3477,11 @@ program
       }
     } catch (error) {
       console.error(chalk.red('Error resuming:'), error.message);
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (orchestrator && !keepOrchestratorOpen) {
+        orchestrator.close();
+      }
     }
   });
 
@@ -5854,4 +5860,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { renderRecentMessagesToTerminal, resolveRunMode };
+module.exports = { applyModelOverrideToConfig, renderRecentMessagesToTerminal, resolveRunMode };

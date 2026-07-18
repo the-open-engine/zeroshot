@@ -81,8 +81,15 @@ class AgentWrapper {
     // LIVENESS DETECTION - Track output freshness to detect stuck agents
     /** @type {number | null} */
     this.lastOutputTime = null; // Timestamp of last output received
+    /** @type {number | null} */
+    this.taskStartedAt = null; // Timestamp used for absolute task timeout
     /** @type {NodeJS.Timeout | null} */
     this.livenessCheckInterval = null; // Interval for health checks
+    this.consecutiveStaleWarnings = 0;
+    this.livenessTerminationStarted = false;
+    this.livenessTerminationContext = null;
+    this.livenessTerminationAttempts = 0;
+    this.livenessTerminationRetryAt = 0;
     this.staleDuration = normalizedConfig.staleDuration;
     this.enableLivenessCheck = normalizedConfig.enableLivenessCheck;
 
@@ -499,8 +506,8 @@ class AgentWrapper {
    * Kill current task
    * @private
    */
-  _killTask() {
-    return killTask(this);
+  _killTask(reason) {
+    return killTask(this, reason);
   }
 
   /**

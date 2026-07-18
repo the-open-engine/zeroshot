@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { getTask } from '../store.js';
-import { isProcessRunning } from '../runner.js';
+import { isOwnedProcessTreeRunning } from '../runner.js';
 
 export function showStatus(taskId) {
   const task = getTask(taskId);
@@ -12,8 +12,18 @@ export function showStatus(taskId) {
 
   // Verify running status
   let status = task.status;
-  if (status === 'running' && !isProcessRunning(task.pid)) {
-    status = 'stale (process died)';
+  if (status === 'running') {
+    try {
+      const running = isOwnedProcessTreeRunning(task.pid, {
+        processGroupId: task.processGroupId,
+        terminationStrategy: task.terminationStrategy || 'process',
+      });
+      if (!running) {
+        status = 'stale (process died)';
+      }
+    } catch (error) {
+      status = `stale (invalid process ownership: ${error.message})`;
+    }
   }
 
   const statusColor =

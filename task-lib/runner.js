@@ -7,6 +7,12 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const { prepareSingleAgentProviderCommand } = require('./provider-helper-runtime.js');
+export {
+  isOwnedProcessTreeRunning,
+  isProcessRunning,
+  killTask,
+  terminateProcess,
+} from './process-termination.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -136,6 +142,8 @@ function buildTaskRecord({ id, prompt, cwd, options, logFile, providerName, mode
     // Attach support
     socketPath: null,
     attachable: false,
+    processGroupId: null,
+    terminationStrategy: null,
   };
 }
 
@@ -175,24 +183,4 @@ function spawnWatcher({ watcherScript, id, cwd, logFile, finalArgs, watcherConfi
 
   watcher.unref();
   watcher.disconnect(); // Close IPC channel so parent can exit
-}
-
-export function isProcessRunning(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function killTask(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 'SIGTERM');
-    return true;
-  } catch {
-    return false;
-  }
 }

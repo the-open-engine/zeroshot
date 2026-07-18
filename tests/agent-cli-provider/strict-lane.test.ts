@@ -18,6 +18,7 @@ import {
   type OutputEvent,
   type ProcessRunner,
   type ProviderId,
+  type ReasoningEffort,
 } from '../../src/agent-cli-provider/index';
 
 const expectedMetadata: Readonly<AgentCliProviderHelperMetadata> = agentCliProviderHelperMetadata;
@@ -127,12 +128,14 @@ test('discriminated output events narrow without unsafe assertions', (): void =>
 
 test('model levels and error classifications are explicit unions', (): void => {
   const level: ModelLevel = 'level3';
+  const effort: ReasoningEffort = 'max';
   const spec = resolveModelSpec('codex', level);
   const classification: ErrorClassification = classifyProviderError('codex', {
     message: 'server_error',
   });
 
   assert.equal(spec.reasoningEffort, 'xhigh');
+  assert.equal(effort, 'max');
   assert.equal(classification.retryable, true);
 });
 

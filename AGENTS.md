@@ -259,6 +259,10 @@ Agent A -> publish() -> SQLite Ledger -> LogicEngine -> trigger match -> Agent B
 
 Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledger so restart limits survive orchestrator restarts.
 
+Provider task ownership: task watchers persist an owned termination boundary with each active task.
+POSIX providers run in a dedicated process group; Windows providers use the exact root PID with
+`taskkill /T`. Recovery must terminate that recorded boundary before retrying work.
+
 ### Guidance Messaging
 
 - Topics: `USER_GUIDANCE_CLUSTER`, `USER_GUIDANCE_AGENT` (see `src/guidance-topics.js`).
@@ -290,7 +294,7 @@ Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledge
 - Set `provider` per agent or `defaultProvider`/`forceProvider` at cluster level.
 - Provider names use CLI identifiers: `claude`, `codex`, `gemini`, `opencode`, `pi`, `copilot` (legacy `anthropic`/`openai`/`google` map to these).
 - `model` remains a provider-specific escape hatch.
-- Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh`).
+- Claude/Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh|max`).
 
 ### Logic Script API
 
@@ -439,6 +443,19 @@ hook, so the orchestrator never received the completion signal.
 Fix: added `onComplete` publish of `CLUSTER_COMPLETE` in
 `src/agents/git-pusher-agent.json`.
 Test: `tests/integration/orchestrator-flow.test.js`.
+
+### Foreground Resume Exit Delay (2026-07-17)
+
+Bug: foreground `zeroshot resume` could print cluster completion but remain alive until a
+five-second task-shutdown timer expired.
+
+Root cause: agent shutdown raced in-flight execution against a bounded timeout without clearing the
+losing timer, and the resume CLI omitted the foreground orchestrator cleanup used by `run`.
+
+Fix: clear the bounded-wait timer, close non-daemon resume orchestrators in `finally`, and make
+orchestrator close release snapshotter, message-bus, and ledger resources.
+Tests: `tests/unit/agent-lifecycle-stop.test.js` and
+`tests/e2e/resume-detach-daemon.test.js`.
 
 ## Enforcement Philosophy
 
@@ -592,12 +609,13 @@ Do NOT assume single root cause.
 
 ## Mechanical Enforcement
 
-| Antipattern               | Enforcement      |
-| ------------------------- | ---------------- |
-| Dangerous fallbacks       | ESLint ERROR     |
-| Manual git tags           | Pre-push hook    |
-| Git in validator prompts  | Config validator |
-| Multiple impl files (-v2) | Pre-commit hook  |
-| Spawn without permission  | Runtime check    |
-| Git stash usage           | Pre-commit hook  |
-| Rust formatting drift     | Pre-commit hook  |
+| Antipattern                | Enforcement        |
+| -------------------------- | ------------------ |
+| Dangerous fallbacks        | ESLint ERROR       |
+| Manual git tags            | Pre-push hook      |
+| Git in validator prompts   | Config validator   |
+| Multiple impl files (-v2)  | Pre-commit hook    |
+| Spawn without permission   | Runtime check      |
+| Git stash usage            | Pre-commit hook    |
+| lint-staged backup stashes | Pre-commit wrapper |
+| Rust formatting drift      | Pre-commit hook    |

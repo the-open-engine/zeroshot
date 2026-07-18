@@ -91,6 +91,7 @@ export type {
   ProviderId,
   ProviderRegistryEntry,
   RedactionMetadata,
+  ReasoningEffort,
   ResolvedGatewayBuildOptions,
   ResolvedModelSpec,
   ResultEvent,

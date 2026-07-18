@@ -1535,6 +1535,7 @@ class Orchestrator {
       const agentRole = message.content?.data?.role;
       const attempts = message.content?.data?.attempts || 1;
       const hookFailure = message.content?.data?.hookFailure === true;
+      const restartExhausted = message.content?.data?.restartExhausted === true;
 
       await this._saveClusters();
 
@@ -1542,7 +1543,7 @@ class Orchestrator {
         agentRole === 'implementation' ||
         agentRole === 'coordinator' ||
         message.sender === 'consensus-coordinator';
-      const shouldStop = shouldStopForRole && (hookFailure || attempts >= 3);
+      const shouldStop = shouldStopForRole && (hookFailure || restartExhausted || attempts >= 3);
 
       if (shouldStop) {
         this._log(`\n${'='.repeat(80)}`);
@@ -1551,6 +1552,7 @@ class Orchestrator {
         this._log(
           `${message.sender} (${agentRole || 'unknown role'}) failed` +
             (hookFailure ? ` (hookFailure=true)` : ``) +
+            (restartExhausted ? ` (restartExhausted=true)` : ``) +
             ` after ${attempts} attempts`
         );
         this._log(`Error: ${message.content?.data?.error || 'unknown'}`);
@@ -1573,7 +1575,7 @@ class Orchestrator {
     });
   }
 
-  _registerAgentLifecycleHandlers(messageBus, clusterId) {
+  _registerAgentLifecycleHandlers(messageBus, _clusterId) {
     messageBus.on('topic:AGENT_LIFECYCLE', async (message) => {
       const event = message.content?.data?.event;
       if (
@@ -1596,13 +1598,14 @@ class Orchestrator {
       const timeSinceLastOutput = message.content?.data?.timeSinceLastOutput;
       const analysis = message.content?.data?.analysis || 'No analysis available';
 
+      const consecutiveWarnings = message.content?.data?.consecutiveWarnings;
+      const warningsBeforeKill = message.content?.data?.warningsBeforeKill;
       this._log(
-        `⚠️  Orchestrator: Agent ${agentId} appears stale (${Math.round(timeSinceLastOutput / 1000)}s no output) but will NOT be killed`
+        `⚠️  Orchestrator: Agent ${agentId} has produced no output for ${Math.round(timeSinceLastOutput / 1000)}s ` +
+          `(warning ${consecutiveWarnings}/${warningsBeforeKill})`
       );
       this._log(`    Analysis: ${analysis}`);
-      this._log(
-        `    Manual intervention may be needed - use 'zeroshot resume ${clusterId}' if stuck`
-      );
+      this._log(`    Zeroshot will terminate and restart the task if inactivity persists`);
     });
   }
 
@@ -2361,6 +2364,15 @@ class Orchestrator {
       return;
     }
     this.closed = true;
+
+    for (const cluster of this.clusters.values()) {
+      if (typeof cluster.snapshotter?.stop === 'function') {
+        cluster.snapshotter.stop();
+      }
+      if (typeof cluster.messageBus?.close === 'function') {
+        cluster.messageBus.close();
+      }
+    }
   }
 
   /**

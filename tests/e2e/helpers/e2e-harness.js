@@ -24,7 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const CLI_ENTRY = path.join(REPO_ROOT, 'cli', 'index.js');
@@ -145,6 +145,48 @@ function runZeroshot(env, args, envOverrides = {}) {
   };
 }
 
+function runZeroshotUntilNaturalExit(env, args, envOverrides, completionMarker) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', [CLI_ENTRY, ...args], {
+      cwd: env.repoDir,
+      env: buildEnv(env, envOverrides),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let completionAt = null;
+    let exitTimer = null;
+    const hardTimer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`CLI did not exit within ${envOverrides.timeout}ms\n${stdout}\n${stderr}`));
+    }, envOverrides.timeout);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      if (completionAt === null && stdout.includes(completionMarker)) {
+        completionAt = Date.now();
+        exitTimer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`CLI stayed alive after ${completionMarker}\n${stdout}\n${stderr}`));
+        }, 2000);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (status) => {
+      clearTimeout(hardTimer);
+      clearTimeout(exitTimer);
+      resolve({
+        status,
+        stdout,
+        stderr,
+        completionToExitMs: completionAt === null ? null : Date.now() - completionAt,
+      });
+    });
+  });
+}
+
 function clustersFilePath(env) {
   return path.join(env.homeDir, '.zeroshot', 'clusters.json');
 }
@@ -232,6 +274,7 @@ module.exports = {
   setupE2ERepo,
   cleanupE2ERepo,
   runZeroshot,
+  runZeroshotUntilNaturalExit,
   buildEnv,
   clustersFilePath,
   readClusters,

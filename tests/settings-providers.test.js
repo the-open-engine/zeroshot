@@ -3,7 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { loadSettings, validateSetting } = require('../lib/settings');
-const { validateProviderSettings, validateProviderLevel } = require('../src/config-validator');
+const {
+  validateProviderFeatures,
+  validateProviderSettings,
+  validateProviderLevel,
+} = require('../src/config-validator');
 const { getProvider } = require('../src/providers');
 
 describe('Provider settings', function () {
@@ -64,6 +68,28 @@ describe('Provider settings', function () {
       });
     });
 
+    assert.doesNotThrow(() => {
+      validateProviderSettings('codex', {
+        minLevel: 'level1',
+        maxLevel: 'level3',
+        defaultLevel: 'level3',
+        levelOverrides: {
+          level3: { model: 'gpt-5.6-sol', reasoningEffort: 'max' },
+        },
+      });
+    });
+
+    assert.doesNotThrow(() => {
+      validateProviderSettings('claude', {
+        minLevel: 'level1',
+        maxLevel: 'level3',
+        defaultLevel: 'level3',
+        levelOverrides: {
+          level3: { model: 'claude-opus-4-8', reasoningEffort: 'max' },
+        },
+      });
+    });
+
     assert.throws(() => {
       validateProviderSettings('gemini', {
         minLevel: 'level1',
@@ -108,6 +134,52 @@ describe('Provider settings', function () {
     }, /toolPolicy\.roots must be an array of strings/);
   });
 
+  it('accepts max reasoning effort in agent config for Claude and Codex', function () {
+    const settings = loadSettings();
+    const result = validateProviderFeatures(
+      {
+        agents: [
+          {
+            id: 'claude-worker',
+            role: 'implementation',
+            provider: 'claude',
+            model: 'claude-opus-4-8',
+            reasoningEffort: 'max',
+          },
+          {
+            id: 'codex-worker',
+            role: 'implementation',
+            provider: 'codex',
+            model: 'gpt-5.6-sol',
+            reasoningEffort: 'max',
+          },
+        ],
+      },
+      settings
+    );
+
+    assert.deepStrictEqual(result.errors, []);
+    assert.deepStrictEqual(result.warnings, []);
+  });
+
+  it('lists max in invalid reasoning-effort diagnostics', function () {
+    const result = validateProviderFeatures(
+      {
+        agents: [
+          {
+            id: 'worker',
+            role: 'implementation',
+            provider: 'codex',
+            reasoningEffort: 'extreme',
+          },
+        ],
+      },
+      loadSettings()
+    );
+
+    assert.ok(result.warnings.some((warning) => warning.includes('low|medium|high|xhigh|max')));
+  });
+
   it('applies legacy maxModel to claude levels', function () {
     process.env.ZEROSHOT_SETTINGS_FILE = settingsFile;
     fs.writeFileSync(settingsFile, JSON.stringify({ maxModel: 'haiku' }, null, 2), 'utf8');
@@ -129,11 +201,9 @@ describe('Provider settings', function () {
     assert.strictEqual(modelSpec.model, 'opus');
   });
 
-  it('rejects legacy claude model aliases as invalid input', function () {
+  it('accepts recent canonical Claude model ids', function () {
     const claude = getProvider('claude');
-    assert.throws(() => {
-      claude.validateModelId('opus-4.6');
-    }, /Use canonical model ids: haiku, sonnet, opus/);
+    assert.strictEqual(claude.validateModelId('claude-opus-4-6'), 'claude-opus-4-6');
   });
 
   it('marks invalid model errors as permanent', function () {
@@ -155,6 +225,6 @@ describe('Provider settings', function () {
         modelSpec: { model: 'opus-4.6' },
         cliFeatures: { supportsModel: true },
       });
-    }, /Use canonical model ids: haiku, sonnet, opus/);
+    }, /Invalid model "opus-4.6"/);
   });
 });
