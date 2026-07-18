@@ -122,7 +122,10 @@ async function setupCommand(args) {
         const modelChoice = await question(rl, `Model for ${level} (${catalog.join(', ')}): `);
         if (modelChoice) levelOverrides[level] = { model: modelChoice };
         if (!providerSupportsCapability(provider, 'reasoningEffort')) continue;
-        const reasoning = await question(rl, `Reasoning for ${level} (low|medium|high|xhigh): `);
+        const reasoning = await question(
+          rl,
+          `Reasoning for ${level} (low|medium|high|xhigh|max): `
+        );
         if (reasoning) {
           levelOverrides[level] = {
             ...(levelOverrides[level] || {}),

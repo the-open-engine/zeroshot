@@ -13,7 +13,7 @@ import type {
 
 const OUTPUT_FORMATS: readonly OutputFormat[] = ['text', 'json', 'stream-json'];
 const MODEL_LEVELS: readonly ModelLevel[] = ['level1', 'level2', 'level3'];
-const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const CLI_FEATURE_FIELDS = [
   'supportsOutputFormat',
   'supportsStreamJson',
@@ -22,6 +22,7 @@ const CLI_FEATURE_FIELDS = [
   'supportsIncludePartials',
   'supportsVerbose',
   'supportsModel',
+  'supportsEffort',
   'supportsJson',
   'supportsOutputSchema',
   'supportsDir',

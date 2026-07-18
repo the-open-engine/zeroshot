@@ -276,7 +276,7 @@ function registerSettingsValidationTests() {
       const error = settingsModule.validateSetting('maxModel', 'gpt4');
       assert.ok(error !== null);
       assert.ok(error.includes('Invalid model'));
-      assert.ok(error.includes('opus, sonnet, haiku'));
+      assert.ok(error.includes('opus, fable, sonnet, haiku'));
     });
 
     it('should accept valid maxModel values', function () {
@@ -392,8 +392,19 @@ function registerModelHierarchyConstantTests() {
       const { MODEL_HIERARCHY } = settingsModule;
 
       assert.strictEqual(MODEL_HIERARCHY.opus, 3);
+      assert.strictEqual(MODEL_HIERARCHY.fable, 3);
       assert.strictEqual(MODEL_HIERARCHY.sonnet, 2);
       assert.strictEqual(MODEL_HIERARCHY.haiku, 1);
+    });
+
+    it('should treat fable as a top-tier legacy alias', function () {
+      const { validateModelAgainstMax } = settingsModule;
+
+      assert.strictEqual(validateModelAgainstMax('fable', 'opus'), 'fable');
+      assert.throws(
+        () => validateModelAgainstMax('fable', 'sonnet'),
+        /Agent requests "fable" but maxModel is "sonnet"/
+      );
     });
 
     it('should have all valid models in hierarchy', function () {
