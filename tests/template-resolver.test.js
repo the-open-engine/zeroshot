@@ -109,6 +109,23 @@ describe('TemplateResolver', function () {
   });
 
   describe('resolve', function () {
+    it('should keep strictSchema enabled for the debug-workflow tester', function () {
+      const resolved = resolver.resolve('debug-workflow', {
+        task_type: 'DEBUG',
+        complexity: 'SIMPLE',
+        max_tokens: 100000,
+        max_iterations: DEFAULT_MAX_ITERATIONS,
+        investigator_level: 'level2',
+        fixer_level: 'level2',
+        tester_level: 'level2',
+      });
+
+      const tester = resolved.agents.find((agent) => agent.id === 'tester');
+      assert.ok(tester, 'tester agent should exist');
+      assert.strictEqual(tester.outputFormat, 'json');
+      assert.strictEqual(tester.strictSchema, true);
+    });
+
     it('should resolve single-worker template', function () {
       const resolved = resolver.resolve('single-worker', {
         task_type: 'TASK',
