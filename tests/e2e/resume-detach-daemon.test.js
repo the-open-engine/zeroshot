@@ -183,7 +183,13 @@ function seedPartialValidationState(env, clusterId) {
   overwriteClusterRecord(env, clusterId, {
     state: 'stopped',
     pid: null,
-    failureInfo: null,
+    failureInfo: {
+      agentId: 'worker',
+      taskId: 'stale-worker-task',
+      iteration: 1,
+      error: 'task_not_found',
+      timestamp: 0,
+    },
     agentStates,
   });
 }

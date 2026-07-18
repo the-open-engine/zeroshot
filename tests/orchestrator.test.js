@@ -1015,6 +1015,136 @@ function defineLifecycleResumeTests() {
       );
     });
 
+    it('ignores a recovered persisted failure and resumes the other interrupted validator exactly once', async function () {
+      const worktreeDir = fs.mkdtempSync(path.join(lifecycleStorageDir, 'resume-worktree-'));
+      const config = createPartialValidationResumeConfig(worktreeDir);
+      const result = await lifecycleOrchestrator.start(
+        config,
+        { text: 'Repair validation findings' },
+        { clusterId: 'persisted-failure-partial-validation-resume' }
+      );
+      const clusterId = result.id;
+
+      await lifecycleOrchestrator.stop(clusterId);
+      const cluster = lifecycleOrchestrator.getCluster(clusterId);
+      cluster.failureInfo = {
+        agentId: 'validator-requirements',
+        taskId: 'recovered-requirements-task',
+        iteration: 7,
+        error: 'temporary provider lookup failure',
+        timestamp: Date.now() - 1000,
+      };
+      cluster.messageBus.publish({
+        cluster_id: clusterId,
+        topic: 'IMPLEMENTATION_READY',
+        sender: 'worker',
+        content: { text: 'Implementation ready for validation' },
+      });
+      publishInterruptedTaskHistory(cluster, clusterId, 'validator-requirements', {
+        iteration: 8,
+        taskId: 'completed-requirements-task',
+        triggeredBy: 'IMPLEMENTATION_READY',
+      });
+      cluster.messageBus.publish({
+        cluster_id: clusterId,
+        topic: 'AGENT_LIFECYCLE',
+        sender: 'validator-requirements',
+        content: {
+          text: 'validator-requirements: TASK_COMPLETED',
+          data: {
+            event: 'TASK_COMPLETED',
+            agent: 'validator-requirements',
+            role: 'validator',
+            state: 'idle',
+            iteration: 8,
+            taskId: 'completed-requirements-task',
+          },
+        },
+      });
+      cluster.messageBus.publish({
+        cluster_id: clusterId,
+        topic: 'VALIDATION_RESULT',
+        sender: 'validator-requirements',
+        content: {
+          text: 'Requirements approved',
+          data: { approved: true },
+        },
+      });
+      publishInterruptedTaskHistory(cluster, clusterId, 'validator-code', {
+        iteration: 5,
+        taskId: 'interrupted-code-task',
+        triggeredBy: 'IMPLEMENTATION_READY',
+      });
+
+      const completedValidator = cluster.agents.find(
+        (agent) => agent.id === 'validator-requirements'
+      );
+      completedValidator.state = 'idle';
+      completedValidator.iteration = 8;
+      completedValidator.currentTaskId = 'completed-requirements-task';
+      completedValidator.processPid = null;
+
+      const interruptedValidator = cluster.agents.find((agent) => agent.id === 'validator-code');
+      interruptedValidator.state = 'executing_task';
+      interruptedValidator.iteration = 5;
+      interruptedValidator.currentTaskId = 'interrupted-code-task';
+      interruptedValidator.processPid = 4242;
+
+      await lifecycleOrchestrator._saveClusters();
+      lifecycleOrchestrator.close();
+
+      const resumedRunner = new MockTaskRunner();
+      resumedRunner
+        .when('validator-requirements')
+        .returns({ approved: true, summary: 'Requirements approved again' });
+      resumedRunner.when('validator-code').returns({ approved: false, summary: 'Code rejected' });
+      resumedRunner.when('worker').returns('Repaired validation findings');
+
+      lifecycleOrchestrator = await Orchestrator.create({
+        taskRunner: resumedRunner,
+        storageDir: lifecycleStorageDir,
+        quiet: true,
+      });
+
+      const restoredCluster = lifecycleOrchestrator.getCluster(clusterId);
+      const validationCountBeforeResume = restoredCluster.messageBus.count({
+        cluster_id: clusterId,
+        topic: 'VALIDATION_RESULT',
+      });
+      const requirementsResultsBeforeResume = restoredCluster.messageBus.query({
+        cluster_id: clusterId,
+        topic: 'VALIDATION_RESULT',
+        sender: 'validator-requirements',
+      }).length;
+
+      const resumed = await lifecycleOrchestrator.resume(clusterId);
+      assert.strictEqual(resumed.resumeType, 'clean');
+      assert.deepStrictEqual(resumed.resumedAgents, ['validator-code']);
+      await waitForAgentCalls(resumedRunner, {
+        'validator-code': 1,
+        worker: 1,
+      });
+
+      resumedRunner.assertCalled('validator-requirements', 0);
+      assert.strictEqual(
+        restoredCluster.messageBus.count({
+          cluster_id: clusterId,
+          topic: 'VALIDATION_RESULT',
+        }),
+        validationCountBeforeResume + 1,
+        'only the interrupted validator may append a new validation result'
+      );
+      assert.strictEqual(
+        restoredCluster.messageBus.query({
+          cluster_id: clusterId,
+          topic: 'VALIDATION_RESULT',
+          sender: 'validator-requirements',
+        }).length,
+        requirementsResultsBeforeResume,
+        'the completed validator result must remain a singleton'
+      );
+    });
+
     it('resumes a missing validator in a partial validation cycle without replaying completed results', async function () {
       const worktreeDir = fs.mkdtempSync(path.join(lifecycleStorageDir, 'resume-worktree-'));
       const config = createPartialValidationResumeConfig(worktreeDir);
@@ -1545,6 +1675,8 @@ function defineLifecycleResumeTests() {
       const status = lifecycleOrchestrator.getStatus(result.id);
 
       assert.strictEqual(resumed.resumeType, 'failure');
+      assert.strictEqual(resumed.resumedAgent, 'worker');
+      assert.strictEqual(resumed.previousError, 'boom');
       assert.strictEqual(cluster.pid, process.pid, 'Resumed cluster should record current PID');
       assert.strictEqual(status.state, 'running', 'Resumed cluster should not self-report zombie');
     });
