@@ -11,7 +11,7 @@ mod recovery;
 #[path = "support/mod.rs"]
 mod support;
 
-use support::{byte_stream as stream, test_intent as intent};
+use support::artifacts::{byte_stream as stream, test_intent as intent};
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 

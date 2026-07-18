@@ -69,6 +69,10 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Issue provider contracts    | `zeroshot-rust/src/issue_provider.rs`, `issue_provider/`                |
 | Source provider contracts   | `zeroshot-rust/src/source_code_provider.rs`, `source_code_provider/`    |
 | Provider value bounds       | `zeroshot-rust/src/provider_value.rs`, `provider_value/`                |
+| Execution runtime seam      | `zeroshot-rust/src/execution.rs`, `execution/types.rs`                  |
+| Local runtime + drivers     | `zeroshot-rust/src/execution/{local,driver}.rs`                         |
+| Local process runner        | `zeroshot-rust/src/execution/process.rs`                                |
+| Fair scheduler              | `zeroshot-rust/src/scheduler.rs`                                        |
 | Native safe faults          | `zeroshot-rust/src/fault.rs`                                            |
 | Native fault taxonomy       | `zeroshot-rust/src/fault/taxonomy.rs`                                   |
 | Native diagnostic redaction | `zeroshot-rust/src/fault/redaction.rs`                                  |
@@ -107,6 +111,13 @@ filesystem store, and must preserve ref-first release plus synchronized blob-the
 Issue and source registries and identifiers remain independent; neither is a worker/model provider.
 Keep protocol, transport, daemon, compatibility, adapter, credential resolution, ledger, and
 workspace behavior outside it.
+`ExecutionRuntime`, `LocalExecutionRuntime`, `LocalProcessRunner`, and the daemon-scoped fair
+scheduler are engine-private seams. They own local dispatch placement, fencing, deadlines,
+workspace conflict arbitration, cancellation, and local-process containment only. They do not own
+ledger mutation, durable attempt state, protocol methods, provider catalog/configuration,
+credential resolution, workspace lifecycle, real CLI/ACP/Gateway drivers, built-in registration,
+or `NativeBackend` composition. Runtime command/control values remain serializable, secret-free,
+and input-free after control reconstruction.
 Native engine faults must be constructed only by `FaultFactory` from closed `ModuleEvidence`.
 Decoded faults must match the canonical semantics derived from their required primary source frame.
 Raw diagnostic values are replaced wholesale with typed markers and remain ephemeral; never put

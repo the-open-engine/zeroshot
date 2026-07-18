@@ -12,7 +12,7 @@ use zeroshot_engine::fault::{EvidenceClass, FaultContext, FaultModule};
 #[path = "support/mod.rs"]
 mod support;
 
-use support::{byte_stream as stream, test_intent as intent};
+use support::artifacts::{byte_stream as stream, test_intent as intent};
 
 #[tokio::test]
 async fn store_is_object_safe_and_accepts_the_exact_limit() {
