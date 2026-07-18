@@ -15,7 +15,7 @@ export type ProviderId = (typeof providerIds)[number];
 export type ProviderAlias = (typeof providerAliases)[number];
 export type KnownProviderName = ProviderId | ProviderAlias;
 export type ModelLevel = 'level1' | 'level2' | 'level3';
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type OutputFormat = 'text' | 'json' | 'stream-json';
 export type {
   ProviderCapabilities,
@@ -95,6 +95,7 @@ export interface ClaudeCliFeatures extends BaseCliFeatures {
   readonly supportsIncludePartials: boolean;
   readonly supportsVerbose: boolean;
   readonly supportsModel: boolean;
+  readonly supportsEffort: boolean;
 }
 
 export interface CodexCliFeatures extends BaseCliFeatures {
@@ -186,6 +187,7 @@ export interface CliFeatureOverrides {
   readonly supportsIncludePartials?: boolean;
   readonly supportsVerbose?: boolean;
   readonly supportsModel?: boolean;
+  readonly supportsEffort?: boolean;
   readonly supportsJson?: boolean;
   readonly supportsOutputSchema?: boolean;
   readonly supportsDir?: boolean;

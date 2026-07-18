@@ -61,7 +61,7 @@ type MutableModelSpec = {
 };
 
 const MODEL_LEVELS: readonly ModelLevel[] = ['level1', 'level2', 'level3'];
-const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const settingsModule: unknown = require('../../lib/settings');
 const providerDetectionModule: unknown = require('../../lib/provider-detection');
 const claudeAuthModule: unknown = require('../../lib/settings/claude-auth');
@@ -420,7 +420,13 @@ function optionalModelLevel(value: unknown, field: string): ModelLevel | undefin
 
 function optionalReasoningEffort(value: unknown, field: string): ReasoningEffort | undefined {
   if (value === undefined) return undefined;
-  if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') {
+  if (
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  ) {
     return value;
   }
   throw new Error(`${field} must be one of: ${REASONING_EFFORTS.join(', ')}.`);

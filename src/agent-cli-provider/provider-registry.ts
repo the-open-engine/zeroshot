@@ -160,7 +160,7 @@ export const providerRegistry = [
     capabilities: {
       ...STANDARD_CAPABILITIES,
       jsonSchema: true,
-      reasoningEffort: false,
+      reasoningEffort: true,
     },
     docs: {
       label: 'Claude',

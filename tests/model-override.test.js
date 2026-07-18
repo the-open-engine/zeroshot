@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { applyModelOverrideToConfig } = require('../cli/index');
 const Orchestrator = require('../src/orchestrator');
 const MockTaskRunner = require('./helpers/mock-task-runner');
 
@@ -35,6 +36,27 @@ describe('Model Override (--model flag)', () => {
       console.error('Cleanup failed:', e.message);
     }
     delete process.env.ZEROSHOT_SETTINGS_FILE;
+  });
+
+  it('applies a canonical Claude model through the CLI config override path', function () {
+    const config = {
+      agents: [
+        {
+          id: 'worker',
+          modelRules: [{ iterations: 'all', model: 'sonnet' }],
+          role: 'implementation',
+          triggers: [],
+        },
+      ],
+    };
+
+    applyModelOverrideToConfig(config, 'claude-fable-5', 'claude', {
+      defaultProvider: 'claude',
+      maxModel: 'opus',
+    });
+
+    assert.strictEqual(config.agents[0].model, 'claude-fable-5');
+    assert.strictEqual(config.agents[0].modelRules, undefined);
   });
 
   it('should override all agent models when modelOverride is provided', async function () {

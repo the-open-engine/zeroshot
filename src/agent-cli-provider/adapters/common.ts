@@ -100,8 +100,9 @@ export function validateModelIdFromCatalog(
 ): string | null | undefined {
   if (!modelId) return modelId;
   if (catalog[modelId] !== undefined) return modelId;
+  const validModels = Object.keys(catalog).join(', ');
   throw new InvalidProviderModelError(
-    `Invalid model "${modelId}" for provider "${provider}". Use a model listed in provider settings/catalog.`
+    `Invalid model "${modelId}" for provider "${provider}". Valid models: ${validModels}.`
   );
 }
 

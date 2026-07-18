@@ -314,7 +314,7 @@ Restart persistence: orchestrator publishes `AGENT_RESTART_ATTEMPT` to the ledge
 - Set `provider` per agent or `defaultProvider`/`forceProvider` at cluster level.
 - Provider names use CLI identifiers: `claude`, `codex`, `gemini`, `opencode`, `pi`, `copilot` (legacy `anthropic`/`openai`/`google` map to these).
 - `model` remains a provider-specific escape hatch.
-- Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh`).
+- Claude/Codex/Opencode only: `reasoningEffort` (`low|medium|high|xhigh|max`).
 
 ### Logic Script API
 
