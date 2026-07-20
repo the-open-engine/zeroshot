@@ -157,6 +157,20 @@ found; 6 fixed in the same pass, 1 is a design item.**
 | C7     | Idempotent republish                                              | ✅                                                                                                                                              | ✅ verified (0 new chunks)                                                                                                                                                                                                   |
 | —      | Mode preservation, mixed-tree round-trip, unicode/space filenames | —                                                                                                                                               | ✅ verified                                                                                                                                                                                                                  |
 
+### D1 — fixed-256K vs CDC on real edit types (10 MB file, 40 chunks)
+
+| Edit                                 | New chunks  | Verdict                 |
+| ------------------------------------ | ----------- | ----------------------- |
+| Append 1 KB at end                   | **1 / 40**  | fixed-block fine        |
+| Modify 1 byte in place (same length) | **1 / 40**  | fixed-block fine        |
+| Prepend 1 KB (shifts all boundaries) | **41 / 40** | ⚠️ fixed-block defeated |
+
+Only **byte insertion/deletion that shifts boundaries** defeats fixed chunking; append and
+same-length edits are fine. The big dedup win is on **dependency trees** (files replaced
+wholesale on version bump, never edited in place) and source lives in the git plane — so the
+shift weakness rarely bites the workspace workload. **This confirms the spec's decision to
+defer content-defined chunking (CDC) to a metric-gated v2** rather than build it now.
+
 **Still open as a design item (not a quick fix):**
 
 - **G3 manifest index scaling** — the manifest inlines the full chunk index (307 B/file →
