@@ -370,7 +370,8 @@ fn probe4_gc_missing_live_manifest_fails_closed() {
 
     let blocks_before = fs::read_dir(store.join("blocks")).unwrap().count();
     let bogus = "0".repeat(64); // a live digest that is not on disk
-    let r = gc::collect(&store, &[bogus], Duration::ZERO).expect("must not wedge on a dangling ref");
+    let r =
+        gc::collect(&store, &[bogus], Duration::ZERO).expect("must not wedge on a dangling ref");
     let blocks_after = fs::read_dir(store.join("blocks")).unwrap().count();
     println!(
         "[P4] gc(live=[missing manifest], grace=0): missing={} blocks {}->{} deleted={}",

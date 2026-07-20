@@ -38,7 +38,13 @@ impl FileLineageStore {
         Ok(Self { path, map })
     }
     fn flush(&self) -> Result<()> {
-        std::fs::write(&self.path, serde_json::to_vec(&self.map)?)?;
+        // atomic write-then-rename (same discipline as cas.rs): the HEAD map is the mutable commit
+        // pointer, so a crash mid-write must not leave torn/partial JSON that wedges recovery.
+        let tmp = self
+            .path
+            .with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::write(&tmp, serde_json::to_vec(&self.map)?)?;
+        std::fs::rename(&tmp, &self.path)?;
         Ok(())
     }
 }

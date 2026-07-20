@@ -3,7 +3,7 @@
 //!   materialize --store <dir> --manifest <digest> --out <dir>
 //!   bench       --tree <dir> --store <dir>            # publish then cold-materialize, timed
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use capsule_workspace_core::cas::{ChunkIndex, LocalBlobStore};
 use capsule_workspace_core::daemon;
 use capsule_workspace_core::manifest::Manifest;
@@ -48,12 +48,17 @@ enum Cmd {
     },
 }
 
-fn load_known(state: &Option<PathBuf>) -> ChunkIndex {
+fn load_known(state: &Option<PathBuf>) -> Result<ChunkIndex> {
     match state {
         Some(p) if p.exists() => {
-            serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap_or_default()
+            let bytes =
+                std::fs::read(p).with_context(|| format!("reading dedup state {}", p.display()))?;
+            // FAIL FAST > silent: a corrupt/partial state file must NOT be treated as empty (that
+            // silently re-uploads everything and masks the corruption). Surface it.
+            serde_json::from_slice(&bytes)
+                .with_context(|| format!("parsing dedup state {} (corrupt?)", p.display()))
         }
-        _ => ChunkIndex::new(),
+        _ => Ok(ChunkIndex::new()),
     }
 }
 
@@ -81,7 +86,7 @@ fn main() -> Result<()> {
             workers,
         } => {
             let s = LocalBlobStore::new(&store)?;
-            let known = load_known(&state);
+            let known = load_known(&state)?;
             let stats = if workers == 0 {
                 daemon::publish(&tree, &s, &known, parent)?
             } else {

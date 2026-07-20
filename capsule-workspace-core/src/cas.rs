@@ -66,10 +66,28 @@ impl LocalBlobStore {
     }
 }
 
+/// Refresh a content-addressed object's mtime to "now". Grace-period GC uses mtime as the liveness
+/// clock: "a block an in-flight publish references is young, so protect it." A dedup hit reuses a
+/// block already on disk WITHOUT rewriting it, so without this its mtime stays old — and a
+/// crash -> identical-republish would reuse old-mtime blocks that a correctly-sized grace no longer
+/// protects, letting GC delete a block the about-to-commit manifest needs (R1 recovery-path
+/// corruption; reproduced by the reviewer). Touch-on-reference restores the invariant. (Prod
+/// replaces mtime with a monotonic Postgres commit timestamp refreshed on EVERY reference.)
+fn touch_mtime(p: &Path) -> Result<()> {
+    std::fs::File::options()
+        .write(true)
+        .open(p)?
+        .set_modified(std::time::SystemTime::now())?;
+    Ok(())
+}
+
 impl BlobStore for LocalBlobStore {
     fn put_block(&self, id: &BlockId, bytes: &[u8]) -> Result<()> {
         let p = self.block_path(id);
-        if p.exists() {
+        // Dedup hit: refresh mtime so grace-period GC still treats this reused block as young. If
+        // the refresh fails (e.g. a concurrent GC just collected it), fall through and rewrite from
+        // the bytes we hold — either way the block ends present AND young.
+        if p.exists() && touch_mtime(&p).is_ok() {
             return Ok(());
         }
         // write-then-rename for atomicity. Temp name is per-writer UNIQUE (pid + counter) so
@@ -96,7 +114,11 @@ impl BlobStore for LocalBlobStore {
         // writers committing the SAME content-addressed digest concurrently (two lineages with
         // an identical tree) must not collide on the temp file.
         let p = self.manifest_path(digest);
-        if p.exists() {
+        // Same reuse-clock fix as put_block: a crash -> identical-republish re-commits an existing
+        // manifest; without refreshing its mtime, GC's manifest sweep could collect it in the
+        // window before it becomes the live HEAD, leaving HEAD dangling. Fall through to rewrite if
+        // the refresh fails.
+        if p.exists() && touch_mtime(&p).is_ok() {
             return Ok(());
         }
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -617,7 +617,11 @@ pub fn materialize(
                 );
             }
             std::fs::write(&p, &buf)?;
-            // mask setuid/setgid/sticky — never honor those from a workspace snapshot
+            // INTENTIONAL EXCEPTION to byte-exact mode preservation: mask setuid/setgid/sticky
+            // (`& 0o777` keeps rwx incl. the exec bit, drops the high 3 bits). Restoring a setuid
+            // binary from an agent-authored workspace snapshot onto a shared node is a privilege
+            // vector we never want; a dropped setuid bit is a safe divergence, honoring it is not.
+            // This is a deliberate carve-out from the "reproduce exact modes or fail loudly" rule.
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
             Ok(())
         })?;

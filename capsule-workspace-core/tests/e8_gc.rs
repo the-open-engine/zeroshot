@@ -266,3 +266,65 @@ fn concurrent_gc_sweepers_tolerate_races() {
     let left = fs::read_dir(store.join("blocks")).unwrap().count();
     assert_eq!(left, 0, "store swept clean under concurrency");
 }
+
+// (7) R1 crash-recovery (reviewer-found F1): a crashed publish leaves durable-but-ORPHAN blocks;
+// the retry republishes the IDENTICAL tree (deterministic -> same block ids) and reuses them via
+// content-addressed skip-on-exists. Those reused blocks must be refreshed to YOUNG again, or a
+// correctly-sized grace no longer protects them and GC deletes a block the retry's about-to-commit
+// manifest needs -> silent work loss. This test FAILS without the put_block touch-on-reuse fix.
+#[test]
+fn crash_retry_reused_blocks_survive_correctly_sized_gc() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    let store = d.path().join("s");
+    let s = LocalBlobStore::new(&store).unwrap();
+    let mut body = Vec::new();
+    for i in 0..8u64 {
+        body.extend(prng(7000 + i));
+    }
+    write(&tree.join("f.bin"), &body);
+
+    // attempt 1 crashes AFTER writing blocks, BEFORE its manifest becomes the live HEAD:
+    let a1 = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
+    fs::remove_file(store.join("manifests").join(&a1.manifest)).unwrap(); // never committed
+    // pod reschedule/backoff exceeds grace -> the orphan blocks age out (mtime = 2h ago):
+    let old = std::time::SystemTime::now() - Duration::from_secs(7200);
+    for e in fs::read_dir(store.join("blocks")).unwrap() {
+        let p = e.unwrap().path();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    // attempt 2 resumes on some node and republishes the IDENTICAL tree (deterministic -> same ids;
+    // the blocks are REUSED via skip-on-exists, not rewritten -> the fix must refresh their mtime):
+    let a2 = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
+    assert_eq!(
+        a1.manifest, a2.manifest,
+        "identical tree -> identical manifest"
+    );
+
+    // GC fires in the retry's reuse->commit window with a CORRECTLY-SIZED grace; the retry's
+    // manifest is NOT yet live (about to commit):
+    let g = gc::collect(&store, &[], Duration::from_secs(3600)).unwrap();
+    println!(
+        "[E8-7] deleted={} protected_young={}",
+        g.blocks_deleted, g.blocks_young_orphans_protected
+    );
+    assert_eq!(
+        g.blocks_deleted, 0,
+        "reused blocks refreshed to young -> a correct grace protects them (no R1 corruption)"
+    );
+
+    // the retry commits: its manifest still materializes byte-identically (no dangling blocks):
+    let out = d.path().join("o");
+    materialize(&s, &a2.manifest, &out).unwrap();
+    assert_eq!(
+        fs::read(out.join("f.bin")).unwrap(),
+        body,
+        "no work lost across crash -> retry"
+    );
+}

@@ -93,9 +93,10 @@ hardening), all pass:
 | **Grace protects in-flight publish** (blocks written, manifest not yet committed) | grace=1h → **0 deleted** (young orphan protected), publish then commits + materializes; grace=0 → **1 deleted** (would corrupt)  |
 | Live manifest's blocks never collected (even grace=0)                             | referenced blocks kept, materializes intact                                                                                      |
 
-**Finding — safety is TWO invariants, not one (corrected after V1 audit).** My first framing
-("grace is the _entire_ safety mechanism") was overstated. The audit proved it with a test
-(`audit_e8_grace_does_not_protect_dedup_reused_old_block`):
+**Finding — safety is THREE invariants, not one (corrected after V1 audit + final review).** My
+first framing ("grace is the _entire_ safety mechanism") was overstated. The audit proved #1/#2 with
+a test (`audit_e8_grace_does_not_protect_dedup_reused_old_block`); the final review found #3 (the
+crash-retry reuse-clock, F1) and reproduced it:
 
 1. **Grace ≫ max publish duration `+ max clock skew`** — protects blocks a publish _freshly
    writes_ before committing its manifest (fresh mtime). grace=0 corrupts (proven: the committed
@@ -109,6 +110,19 @@ hardening), all pass:
    **reused via dedup** is _not_ rewritten, keeps its **old** mtime, and grace does **nothing**
    for it. If its source manifest is not in the mark set, GC collects a still-referenced old
    block → corruption, even at grace=1h.
+3. **A referenced object must be refreshed to "young" on every reference, not only on first
+   write (the reuse clock; F1).** The failure the final review reproduced: a publish crashes
+   _after_ writing blocks but _before_ committing its manifest → durable orphan blocks. Pod
+   reschedule/backoff exceeds grace (this latency is unbounded and is **not** what grace is sized
+   for) → those blocks age out. The run resumes on any node (R4) and republishes the **identical**
+   tree; because publish is deterministic it reuses the on-disk blocks via content-addressed
+   skip-on-exists **without rewriting them** → their mtime stays old. A correctly-sized grace (1h)
+   now fails to protect them, GC collects them in the reuse→commit window, and the retry's manifest
+   then references deleted blocks → **silent work loss** (violates R1). This is distinct from #2:
+   the block is referenced by **no committed manifest and no lineage row**, so no mark-set can
+   protect it, and grace can't (it's old). Fix: `put_block`/`put_manifest` **refresh mtime on the
+   skip-on-exists path** ("referenced ⇒ young"). Regression:
+   `crash_retry_reused_blocks_survive_correctly_sized_gc` (fails without the fix: `deleted=1`).
 
 **Decision (senior default):** grace-period mark-sweep, **not** ref-counting (fragile under
 concurrent publishers). Both invariants: **grace ≫ max _publish_ duration** (seconds–minutes,
@@ -134,6 +148,21 @@ can reference. In the real build this must be **mechanically enforced**, not doc
 collector should derive the mark set from the same lineage rows that seed `known` (single source of
 truth), so it is impossible to dedup-reuse a block whose source manifest is outside the mark set.
 Until then, treat "grace protects only _freshly written_ blocks" as the load-bearing caveat.
+
+**Final independent review — one HIGH fix + three cleanups.** A fresh senior reviewer ran the suite
+(49→50 tests) and independently re-verified the load-bearing invariants (block-before-manifest
+ordering, digest-excludes-layout, materialize integrity + non-empty-dest rejection, path-escape
+defense, streaming memory bound, all five round-2 fixes). It found one genuine HIGH bug and three
+low cleanups:
+
+| Sev | Finding | Fix |
+| --- | ------- | --- |
+| **HIGH** | **F1 reuse clock** — crash→identical-republish reuses old-mtime blocks a correct grace no longer protects → R1 corruption (reproduced). | `put_block`/`put_manifest` refresh mtime on skip-on-exists (invariant #3 above); regression test that fails without it. Prod: the Postgres commit ts must likewise be refreshed on **every** reference. |
+| LOW | **F2** — CLI `load_known` silently treated a corrupt dedup-state file as empty (+ `.unwrap()` panic on read error). | Fail-fast with context (`parsing dedup state … (corrupt?)`). |
+| LOW | **F3** — setuid/setgid/sticky dropped **silently**, diverging from "exact modes or fail loudly". | Kept the drop (it's a deliberate privilege-safety carve-out) but documented it as an explicit, intentional exception in `materialize`. |
+| LOW | **F4** — `FileLineageStore::flush` wrote the HEAD map with a bare `fs::write` (torn-write on crash). | Atomic temp+rename, matching `cas.rs`. Prototype-only (prod HEAD is Postgres), but it's the commit pointer. |
+
+Reviewer's verdict after F1: **SHIP-AS-REFERENCE** (F2–F4 are non-blocking cleanups, all applied).
 
 ### E9 — Chunking: fixed-256K vs FastCDC on real git history ✅
 
