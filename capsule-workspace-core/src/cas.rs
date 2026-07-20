@@ -82,7 +82,11 @@ impl BlobStore for LocalBlobStore {
         Ok(std::fs::read(self.block_path(id))?)
     }
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()> {
-        std::fs::write(self.manifest_path(digest), bytes)?;
+        // atomic write-then-rename (a crash mid-write never leaves a torn manifest at the key)
+        let p = self.manifest_path(digest);
+        let tmp = p.with_extension("tmp");
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, &p)?;
         Ok(())
     }
     fn get_manifest(&self, digest: &str) -> Result<Vec<u8>> {

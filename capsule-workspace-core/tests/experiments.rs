@@ -8,7 +8,7 @@ use capsule_workspace_core::cas::*;
 use capsule_workspace_core::daemon::{materialize, publish};
 use capsule_workspace_core::ifaces::{Fence, LineageId};
 use capsule_workspace_core::lineage::{FileLineageStore, LineageStore};
-use capsule_workspace_core::manifest::Manifest;
+use capsule_workspace_core::manifest::{FileEntry, Manifest};
 use std::fs;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
@@ -137,9 +137,10 @@ fn tampered_manifest_path_traversal_refused() {
     let s = LocalBlobStore::new(&store).unwrap();
     let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
     m.files[0].path = "../../ESCAPED".to_string();
-    let mb = m.to_bytes();
-    let bad = Manifest::digest(&mb);
-    s.put_manifest(&bad, &mb).unwrap();
+    // store under the CORRECT logical digest of the tampered manifest, so it passes the
+    // read-integrity check and we specifically exercise safe_rel_path (path validation)
+    let bad = m.logical_digest();
+    s.put_manifest(&bad, &m.to_bytes()).unwrap();
     let out = d.path().join("o");
     assert!(
         materialize(&s, &bad, &out).is_err(),
@@ -148,7 +149,165 @@ fn tampered_manifest_path_traversal_refused() {
     assert!(!d.path().join("ESCAPED").exists() && !d.path().join("../ESCAPED").exists());
 }
 
-// ---------- C5: chunk-integrity — a corrupted block is detected ----------
+// ---------- G5 (STRONG): chunk integrity catches a VALID-but-WRONG block ----------
+// (audit found the corrupt-block test only trips the zstd decoder; this exercises sha256==id)
+#[test]
+fn chunk_integrity_catches_content_swap() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    write(&tree.join("secret.txt"), &vec![1u8; 300_000]);
+    write(&tree.join("public.txt"), &vec![2u8; 300_000]);
+    let store = d.path().join("s");
+    let dig = pub_(&tree, &store);
+    let s = LocalBlobStore::new(&store).unwrap();
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    // repoint secret's chunk at public's (genuine, valid-zstd) block location -> content swap
+    let secret_cid = m
+        .files
+        .iter()
+        .find(|f| f.path == "secret.txt")
+        .unwrap()
+        .chunks[0]
+        .clone();
+    let public_cid = m
+        .files
+        .iter()
+        .find(|f| f.path == "public.txt")
+        .unwrap()
+        .chunks[0]
+        .clone();
+    let public_loc = m.chunks[&public_cid].clone();
+    m.chunks.insert(secret_cid, public_loc);
+    // logical content unchanged -> same digest key; the tampered PHYSICAL index is what we test
+    let ld = m.logical_digest();
+    s.put_manifest(&ld, &m.to_bytes()).unwrap();
+    assert!(
+        materialize(&s, &ld, &d.path().join("o")).is_err(),
+        "content swap must be caught"
+    );
+}
+
+// ---------- audit gap: manifest not matching its digest is refused (read integrity) ----------
+#[test]
+fn manifest_tamper_wrong_digest_refused() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    write(&tree.join("f.txt"), b"content");
+    fs::set_permissions(tree.join("f.txt"), fs::Permissions::from_mode(0o644)).unwrap();
+    let store = d.path().join("s");
+    let dig = pub_(&tree, &store);
+    let s = LocalBlobStore::new(&store).unwrap();
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    m.files[0].mode = 0o104755; // tamper: try to set setuid
+    // overwrite the manifest AT ITS ORIGINAL KEY with tampered bytes (corruption/tamper)
+    s.put_manifest(&dig, &m.to_bytes()).unwrap();
+    assert!(
+        materialize(&s, &dig, &d.path().join("o")).is_err(),
+        "digest mismatch must be refused"
+    );
+}
+
+// ---------- audit gap #4: logical identity ignores physical block layout (zstd-independent) ----
+#[test]
+fn logical_digest_ignores_block_layout() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    write(&tree.join("f.bin"), &vec![9u8; 300_000]);
+    let store = d.path().join("s");
+    let dig = pub_(&tree, &store);
+    let s = LocalBlobStore::new(&store).unwrap();
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    let before = m.logical_digest();
+    let k = m.chunks.keys().next().unwrap().clone();
+    m.chunks.get_mut(&k).unwrap().block = "different-block-id".into();
+    m.chunks.get_mut(&k).unwrap().offset = 4242;
+    assert_eq!(
+        m.logical_digest(),
+        before,
+        "identity must not depend on block layout / zstd output"
+    );
+}
+
+// ---------- audit gap #3: a malicious symlink cannot become a write-through escape ----------
+#[test]
+fn symlink_no_write_through() {
+    let d = tmp();
+    let escape = std::env::temp_dir().join(format!("ZS_ESCAPE_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&escape);
+    // seed a real chunk into the store
+    let store = d.path().join("s");
+    let s = LocalBlobStore::new(&store).unwrap();
+    let seed = d.path().join("seed");
+    write(&seed.join("x"), b"pwned");
+    let sd = publish(&seed, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let sm = Manifest::from_bytes(&s.get_manifest(&sd).unwrap()).unwrap();
+    let cid = sm.files[0].chunks[0].clone();
+    // hand-craft: symlink "s" -> escape dir, and a file "s/x" that would write THROUGH it
+    let mut m = sm.clone();
+    m.files = vec![
+        FileEntry {
+            path: "s".into(),
+            mode: 0o120777,
+            size: 0,
+            chunks: vec![],
+            symlink: Some(escape.to_string_lossy().into()),
+        },
+        FileEntry {
+            path: "s/x".into(),
+            mode: 0o100644,
+            size: 5,
+            chunks: vec![cid],
+            symlink: None,
+        },
+    ];
+    let ld = m.logical_digest();
+    s.put_manifest(&ld, &m.to_bytes()).unwrap();
+    let _ = materialize(&s, &ld, &d.path().join("o")); // may error; must NOT escape
+    assert!(
+        !escape.join("x").exists(),
+        "must not write through a symlink to escape the workspace"
+    );
+    let _ = fs::remove_dir_all(&escape);
+}
+
+// ---------- D1 as a runnable test (audit: it was prose-only) ----------
+#[test]
+fn d1_fixed_block_shift_sensitivity() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    let mut base = Vec::new();
+    for i in 0..40u8 {
+        base.extend(std::iter::repeat(i).take(CHUNK));
+    } // 40 distinct chunks
+    write(&tree.join("f.bin"), &base);
+    let store = d.path().join("s");
+    let s = LocalBlobStore::new(&store).unwrap();
+    let known = {
+        let d0 = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
+        Manifest::from_bytes(&s.get_manifest(&d0.manifest).unwrap())
+            .unwrap()
+            .chunks
+    };
+    // append at end -> only the new tail chunk
+    let mut appended = base.clone();
+    appended.extend(std::iter::repeat(200u8).take(1024));
+    write(&tree.join("f.bin"), &appended);
+    let na = publish(&tree, &s, &known, None).unwrap().new_chunks;
+    // prepend -> shifts every boundary -> all chunks new
+    let mut prepended = vec![201u8; 1024];
+    prepended.extend(&base);
+    write(&tree.join("f.bin"), &prepended);
+    let nb = publish(&tree, &s, &known, None).unwrap().new_chunks;
+    assert_eq!(na, 1, "append changes only the tail chunk");
+    assert!(
+        nb >= 40,
+        "byte-insertion shift invalidates ~all chunks (got {nb})"
+    );
+}
+
+// ---------- C5: a corrupted (invalid-zstd) block is detected on read ----------
 #[test]
 fn corrupt_block_detected() {
     let d = tmp();

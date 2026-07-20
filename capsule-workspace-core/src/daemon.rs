@@ -206,7 +206,8 @@ pub fn publish(
         chunks: index,
     };
     let mbytes = manifest.to_bytes();
-    let digest = Manifest::digest(&mbytes);
+    // Identity = LOGICAL digest (content only, zstd-independent) so it is stable across nodes.
+    let digest = manifest.logical_digest();
     store.put_manifest(&digest, &mbytes)?;
 
     let wall = t0.elapsed().as_secs_f64();
@@ -253,6 +254,12 @@ pub fn materialize(
 ) -> Result<MaterializeStats> {
     let t0 = Instant::now();
     let manifest = Manifest::from_bytes(&store.get_manifest(manifest_digest)?)?;
+    // INTEGRITY: the parsed manifest must hash (logically) to the requested digest. Detects a
+    // corrupt/torn/tampered manifest. Safe because the digest comes from the trusted lineage
+    // HEAD (fenced), never from tenant input.
+    if manifest.logical_digest() != manifest_digest {
+        anyhow::bail!("manifest digest mismatch (corruption/tamper)");
+    }
 
     // unique blocks needed (panic-safe against an adversarial/corrupt manifest)
     let mut needed: Vec<BlockId> = Vec::new();
@@ -312,31 +319,42 @@ pub fn materialize(
         .collect::<Result<HashMap<_, _>>>()?;
     let decompress_secs = t_d.elapsed().as_secs_f64();
 
-    // write files + symlinks (parallel across entries), with path-traversal validation
+    // Write in two phases so a malicious symlink cannot become an ANCESTOR of a file write
+    // (write-through-symlink escape): (1) all regular files into real dirs, then (2) symlinks.
+    // Assumes `out` starts empty (the daemon materializes into a fresh dir per pod).
     let t_w = Instant::now();
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
-    manifest.files.par_iter().try_for_each(|f| -> Result<()> {
+    manifest
+        .files
+        .par_iter()
+        .filter(|f| f.symlink.is_none())
+        .try_for_each(|f| -> Result<()> {
+            safe_rel_path(&f.path)?;
+            let p = out.join(&f.path);
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            let mut buf = Vec::with_capacity(f.size as usize);
+            for cid in &f.chunks {
+                buf.extend_from_slice(
+                    chunk_bytes
+                        .get(cid)
+                        .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
+                );
+            }
+            std::fs::write(&p, &buf)?;
+            // mask setuid/setgid/sticky — never honor those from a workspace snapshot
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+            Ok(())
+        })?;
+    for f in manifest.files.iter().filter(|f| f.symlink.is_some()) {
         safe_rel_path(&f.path)?;
         let p = out.join(&f.path);
         if let Some(d) = p.parent() {
             std::fs::create_dir_all(d)?;
         }
-        if let Some(target) = &f.symlink {
-            std::os::unix::fs::symlink(target, &p)?;
-            return Ok(());
-        }
-        let mut buf = Vec::with_capacity(f.size as usize);
-        for cid in &f.chunks {
-            buf.extend_from_slice(
-                chunk_bytes
-                    .get(cid)
-                    .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
-            );
-        }
-        std::fs::write(&p, &buf)?;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode))?;
-        Ok(())
-    })?;
+        std::os::unix::fs::symlink(f.symlink.as_ref().unwrap(), &p)?;
+    }
     let write_secs = t_w.elapsed().as_secs_f64();
 
     Ok(MaterializeStats {

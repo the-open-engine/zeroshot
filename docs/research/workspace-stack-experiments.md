@@ -186,6 +186,26 @@ defer content-defined chunking (CDC) to a metric-gated v2** rather than build it
 - **C6 streaming publish** — stream chunks into blocks instead of buffering the whole
   delta; bound publish RAM well below tree size.
 
+## Independent audit (V1) + hardening
+
+A skeptical independent audit (issue #744) re-ran everything and returned
+**PASS-WITH-CONCERNS**: findings honest, git history clean, headline results reproduced
+exactly — but it caught **1 weak test and 5 real in-scope gaps the suite had missed**. All
+addressed (tests now 15/15):
+
+| Audit finding                                                                                       | Fix                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `corrupt_block_detected` only tripped the zstd decoder, not the sha256==id check that G5 advertised | Added **`chunk_integrity_catches_content_swap`** — repoints a chunk at a _valid_ wrong block; caught by content hash. G5 wording corrected. |
+| D1 was prose-only despite a `test(...)` commit                                                      | Added **`d1_fixed_block_shift_sensitivity`** (append→1, prepend→≥40).                                                                       |
+| **Manifest not integrity-checked on read**                                                          | materialize now verifies `logical_digest == requested` (`manifest_tamper_wrong_digest_refused`).                                            |
+| **Tampered manifest → content/mode swap incl. setuid**                                              | logical-digest identity + per-chunk integrity + **mode masking** (`& 0o777`, drop setuid/setgid/sticky).                                    |
+| **Symlink targets = write-through escape**                                                          | materialize now writes **files first, symlinks last** (`symlink_no_write_through`).                                                         |
+| **Manifest digest entangled with zstd output** (breaks cross-node identity)                         | identity is now a **logical digest** over files+chunk-plaintext-ids, excluding block layout (`logical_digest_ignores_block_layout`).        |
+| `put_manifest` non-atomic                                                                           | write-then-rename (matches `put_block`).                                                                                                    |
+
+**Suite is now 15 tests, all passing.** The audit's value is exactly this: it found real
+security-relevant gaps (untrusted-manifest handling) sitting inside the stated threat model.
+
 ## Bottom line
 
 Every load-bearing assumption in the spec that could be tested on one node **held**:

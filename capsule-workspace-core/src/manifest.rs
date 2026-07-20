@@ -34,4 +34,41 @@ impl Manifest {
     pub fn digest(bytes: &[u8]) -> String {
         crate::cas::hex_sha256(bytes)
     }
+
+    /// LOGICAL identity — hash over the file tree + chunk-plaintext ids only, EXCLUDING the
+    /// physical chunk→block index. Two nodes with different zstd versions/levels therefore
+    /// compute the same identity for a byte-identical tree (fixes the cross-node lineage /
+    /// manifest-dedup fragility). The physical index is still carried for materialization but
+    /// is authenticated per-chunk by content hashing on read, not by this digest.
+    pub fn logical_digest(&self) -> String {
+        #[derive(Serialize)]
+        struct LF<'a> {
+            path: &'a str,
+            mode: u32,
+            size: u64,
+            symlink: &'a Option<String>,
+            chunks: &'a Vec<ChunkId>,
+        }
+        #[derive(Serialize)]
+        struct L<'a> {
+            parent: &'a Option<String>,
+            files: Vec<LF<'a>>,
+        }
+        let mut files: Vec<&FileEntry> = self.files.iter().collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        let l = L {
+            parent: &self.parent,
+            files: files
+                .iter()
+                .map(|f| LF {
+                    path: &f.path,
+                    mode: f.mode,
+                    size: f.size,
+                    symlink: &f.symlink,
+                    chunks: &f.chunks,
+                })
+                .collect(),
+        };
+        crate::cas::hex_sha256(&serde_json::to_vec(&l).expect("logical serialize"))
+    }
 }
