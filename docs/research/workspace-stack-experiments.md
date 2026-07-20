@@ -171,13 +171,20 @@ wholesale on version bump, never edited in place) and source lives in the git pl
 shift weakness rarely bites the workspace workload. **This confirms the spec's decision to
 defer content-defined chunking (CDC) to a metric-gated v2** rather than build it now.
 
-**Still open as a design item (not a quick fix):**
+### Scale / memory / crash (EC2 c6id.2xlarge, 8 vCPU, 15 GB RAM, hardened Rust core)
 
-- **G3 manifest index scaling** — the manifest inlines the full chunk index (307 B/file →
-  307 MB @ 1M files), which breaks the "fetch a small manifest first" premise at scale. Fix
-  is structural (shard the index into CAS objects à la Modal/Xet), tracked separately.
-- **Memory footprint** — publish holds all new chunk bytes in RAM; a large first publish
-  would OOM. Needs streaming. (Measured next / on EC2.)
+| ID     | Scenario                                          | Result                                                                                                                                                                                    |
+| ------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **C6** | Publish memory footprint (3 GB all-distinct tree) | ⚠️ **peak RSS 9.07 GB = 2.95× tree size** — prototype buffers per-file chunks + new-chunk map + block buffers. 5 GB workspace ⇒ ~15 GB RAM. **Real daemon must stream (bounded memory).** |
+| **G3** | Real manifest size (300k files)                   | ⚠️ **89 MB** (→ ~296 MB @ 1M files); materialize incl. parse = 3.23s. Confirms the inlined index must be **sharded**.                                                                     |
+| **C1** | Crash mid-publish (kill -9 during 2 GB publish)   | ✅ **atomicity holds**: 0 manifests (written last), 0 leaked `.tmp` (write-then-rename), store usable after crash — fresh publish + materialize round-trips identically.                  |
+
+**Still open as design items (structural, for the real v1 daemon — not quick fixes):**
+
+- **G3 manifest index sharding** — split the chunk index into CAS objects (Modal/Xet
+  pattern) so a cold node fetches only the shards for the files it touches.
+- **C6 streaming publish** — stream chunks into blocks instead of buffering the whole
+  delta; bound publish RAM well below tree size.
 
 ## Bottom line
 
