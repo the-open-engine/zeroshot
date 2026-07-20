@@ -9,14 +9,14 @@ Legend: ✅ done · 🔄 running · ⬜ planned · ⚠️ finding.
 
 | ID  | Decision                                                             | Experiment                                                                                        | Status |
 | --- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------ |
-| E6  | Publish concurrency: bounded-memory streaming vs parallel throughput | bounded-parallel pipeline: throughput vs peak-RSS curve                                           | 🔄     |
-| E7  | Manifest index: monolithic vs sharded                                | sharded index; cold-start time-to-first-file at 100k/500k/1M                                      | ⬜     |
-| E8  | Garbage collection strategy                                          | grace-period mark-sweep; growth tracks live set; no live chunk collected under concurrent publish | ⬜     |
-| E9  | Chunking: fixed-256K vs CDC                                          | FastCDC vs fixed dedup across a real repo's git history                                           | ⬜     |
-| E10 | Warm cache: node affinity vs statistical                             | shared-LRU simulation under aggressive reap; warm-hit rate                                        | ⬜     |
-| E11 | Hardlinks: flatten vs inode-track                                    | real pnpm/cargo density + blowup; implement + verify preservation                                 | ⬜     |
-| E12 | Path encoding: UTF-8 String vs bytes                                 | byte-path variant; non-UTF8 round-trip on Linux                                                   | ⬜     |
-| E13 | Cross-tenant dedup scope: per-org vs global                          | measure dedup forgone by per-org scoping on real multi-project corpus                             | ⬜     |
+| E6  | Publish concurrency: bounded-memory streaming vs parallel throughput | bounded-parallel pipeline: throughput vs peak-RSS curve                                           | ✅     |
+| E7  | Manifest index: monolithic vs sharded                                | sharded index; cold-start time-to-first-file at 100k/500k/1M                                      | ✅     |
+| E8  | Garbage collection strategy                                          | grace-period mark-sweep; growth tracks live set; no live chunk collected under concurrent publish | ✅     |
+| E9  | Chunking: fixed-256K vs CDC                                          | FastCDC vs fixed dedup across a real repo's git history                                           | ✅     |
+| E10 | Warm cache: node affinity vs statistical                             | shared-LRU simulation under aggressive reap; warm-hit rate                                        | ✅     |
+| E11 | Hardlinks: flatten vs inode-track                                    | real pnpm/cargo density + blowup; implement + verify preservation                                 | ✅     |
+| E12 | Path encoding: UTF-8 String vs bytes                                 | byte-path variant; non-UTF8 round-trip on Linux                                                   | ✅     |
+| E13 | Cross-tenant dedup scope: per-org vs global                          | measure dedup forgone by per-org scoping on real multi-project corpus                             | ✅     |
 
 ## Results
 
@@ -159,4 +159,45 @@ nlink=3** after materialize (was 3 distinct inodes / N copies). 30 tests green.
 
 **Decision (senior default): preserve hardlinks (inode-track).** pnpm's entire store model is
 hardlinks; without this a linked tree materializes to N full copies and can blow the R2 5 GB
-budget. The fix is cheap and localized. _(Real pnpm density + at-scale verify in the EC2 batch.)_
+budget. The fix is cheap and localized.
+
+**EC2 nuance (measured):** a fresh **pnpm** `node_modules` (5212 files) had **0% in-tree
+hardlinks** — pnpm hardlinks its content-addressed _global store_ to `node_modules`, so the
+sibling link points **outside** the snapshotted `/workspace` tree (and on XFS it may reflink
+rather than hardlink). So **in-tree** hardlink density is lower than assumed — the common
+package-manager case links to a store outside the snapshot (where we correctly treat the file
+as a canonical regular). Preservation still matters for **in-tree** links (cargo `target/`,
+some build caches), and the at-scale materialize preserved links + size with no blowup. Net:
+**keep the fix (correct, cheap), but it's lower-priority than the pnpm framing suggested.**
+
+### E12 — Path encoding: measure the non-UTF8 data-loss (Linux) ✅ (measured; impl deferred)
+
+On real Linux, a 3-file tree with two distinct non-UTF8 names (`file\xff`, `file\xfe`)
+round-tripped to **2 files — 1 silently lost** to lossy-`String` collision (both decode to
+`file\u{FFFD}`). Confirms the P8 gap is real on the daemon's actual platform.
+
+**Decision (senior default): carry paths as bytes/`OsString` — but low priority.** It's a
+correctness fix (silent data loss), yet real code/dependency workspaces essentially never
+contain non-UTF8 filenames, so it's a "fix when touching that code," not a launch gate. Did
+**not** do the full byte-path refactor (large, entangles the manifest/digest/materialize) for
+a near-never input; documented the exact loss instead.
+
+### E13 — Cross-tenant dedup scope: per-org vs global ✅
+
+Three real Python projects with overlapping deps (A=numpy/pandas/scipy, B=numpy/scipy/
+matplotlib, C=flask/requests/jinja2):
+
+| Scope                                                | Unique stored                         |
+| ---------------------------------------------------- | ------------------------------------- |
+| per-project / **per-org** (no cross-project sharing) | 602.2 MB (A 283.6 + B 300.2 + C 18.4) |
+| **global** (cross-org dedup)                         | 400.8 MB                              |
+
+**Finding: per-org scoping forgoes ~33% dedup** on this overlapping-dep corpus (numpy/scipy
+shared A↔B). That's the concrete storage cost of the security choice.
+
+**Decision (senior default): per-org scoping.** Global content-addressed dedup is a
+cross-tenant **existence oracle** (you can probe whether another tenant stores given bytes),
+which is unacceptable for untrusted multi-tenant. 33% extra storage is cheap ($0.023/GB-mo)
+next to that; and the **stated priority — one project over weeks (temporal, intra-org dedup) —
+is unaffected**, since it's within one org. The 33% is a between-orgs number that the priority
+workload never pays.
