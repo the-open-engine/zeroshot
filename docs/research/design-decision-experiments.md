@@ -120,3 +120,30 @@ _and_ (b) have large insertion-edited files — and the workspace's big bytes ar
 dependency plane (large files replaced wholesale, not insertion-edited) while source lives in
 the git plane. The CDC-vs-fixed and chunk-size decisions are coupled: at 256K the question is
 moot.
+
+### E10 — Warm cache: statistical shared vs node-affinity ✅
+
+Simulated 8 nodes (2 GB LRU cache each), 20 projects with shared common-dep chunks, zipf
+popularity (the "one project for weeks" reality), 3000 runs:
+
+| Placement                                                  | Warm-hit rate |
+| ---------------------------------------------------------- | ------------- |
+| random (shared cache, no affinity)                         | 58.1%         |
+| round-robin                                                | 57.5%         |
+| **soft affinity** (prefer node that last ran this lineage) | **99.4%**     |
+| pinned (hard affinity)                                     | 99.4%         |
+
+**Finding:** **soft affinity matches hard pinning (99.4%) while staying a scheduling
+_preference_ that preserves R4** (any node/AZ). A pure statistical shared cache (random
+placement) gets only **58%** — the shared common-dep pool accumulates in every node's cache,
+but each project's _private_ working set (half the bytes) misses unless the run lands on a
+warm node, which only affinity ensures.
+
+**Decision (senior default): soft affinity** — the operator hints the scheduler to prefer the
+node that most recently materialized this lineage, as a soft preference (never a hard
+constraint, or R4 breaks). This **recovers the warm benefit the earlier "traded away for R5
+economy" note gave up** — but with a caveat that ties it to the reap timer: affinity only
+helps if the target node is still alive between a project's runs. An **active** project (frequent
+runs) keeps its node from idle-reaping → warm; a **sparse** project (touched once a day) gets
+its node reaped → cold fallback (58%). So the real knob is **soft affinity + a reap timer
+tuned so active projects stay warm** — not a binary "affinity vs economy" trade.
