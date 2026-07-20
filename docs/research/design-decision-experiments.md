@@ -96,3 +96,27 @@ publishes / the 6h execution deadline). Mark set = the lineage HEAD **plus all r
 within the 7-day window** (§13) — miss one and you collect its blocks. GC reclaims to exactly
 the live set. This is the subsystem to test hardest in the real build (restic/kopia shipped GC
 bugs here for years); the grace-period invariant above is the thing to never violate.
+
+### E9 — Chunking: fixed-256K vs FastCDC on real git history ✅
+
+Added `fastcdc` + a `cdcbench` bin; measured cumulative dedup across **80 real versions of
+flask's source** (146 MB raw material) with fixed vs content-defined chunking:
+
+| Chunk size     | FIXED unique | CDC unique | CDC saves vs fixed |
+| -------------- | ------------ | ---------- | ------------------ |
+| 256 KiB (spec) | 10.9 MB      | 10.9 MB    | **0.0%**           |
+| 64 KiB (Xet)   | 10.7 MB      | 9.3 MB     | **13.0%**          |
+
+**Finding — the CDC benefit is entirely chunk-size-dependent.** At the spec's **256K, CDC
+gives literally 0%** on real source: files are ≤1 chunk, so there are no internal boundaries
+for an insertion to shift, and both methods dedup identically (cross-version dedup comes from
+_unchanged files_, which both handle). CDC's 13% only appears at **64K**, where source files
+span multiple chunks and insertions shift fixed boundaries (the D1 mechanism) — but 64K also
+means ~4× more chunks → more index/manifest metadata (the G3/E7 cost).
+
+**Decision (senior default): fixed-256K, no CDC** — confirmed on real data, not just D1's
+synthetic case. CDC earns its complexity only if you (a) drop to ≤64K chunks for finer dedup
+_and_ (b) have large insertion-edited files — and the workspace's big bytes are the
+dependency plane (large files replaced wholesale, not insertion-edited) while source lives in
+the git plane. The CDC-vs-fixed and chunk-size decisions are coupled: at 256K the question is
+moot.
