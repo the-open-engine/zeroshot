@@ -7,6 +7,9 @@
  *   join table lesson_application)
  * - §4.1 v_lesson_library view + §4.2 Thompson-sampling selection
  * - §5.1 validation-grounded counter rule + §5.2 Wilson status rules
+ * - §5.3 lesson_decision log: per-decision candidate snapshot (alpha/beta at
+ *   decision time) + Monte-Carlo selection propensities (v0.2). This is the
+ *   logged-bandit data the ratio-lift estimator joins against outcomes.
  * - §6 replay (fold deltas back into state)
  * - §7 curator (merge / prune, watermark-driven)
  *
@@ -103,9 +106,30 @@ CREATE TABLE IF NOT EXISTS preference_pair (
   CHECK (chosen_trace_id <> rejected_trace_id)
 );
 
+-- §5.3 decision log (v0.2). One row per intervention decision: every
+-- candidate's posterior parameters (alpha = helpful+1, beta = harmful+1) and
+-- selection propensity at decision time, the selected arms with their
+-- Thompson draws, and the null-arm indicator (1 = no candidate existed, the
+-- decision was "inject no lesson"). Immutable once written.
+CREATE TABLE IF NOT EXISTS lesson_decision (
+  decision_id        TEXT PRIMARY KEY,
+  run_id             TEXT NOT NULL,
+  trigger_message_id TEXT,
+  cycle_index        INTEGER,
+  failure_class      TEXT NOT NULL,
+  task_cue           TEXT,
+  candidates         TEXT NOT NULL,   -- JSON [{lesson_id, alpha, beta, propensity}]
+  selected           TEXT NOT NULL,   -- JSON [{lesson_id, theta}]
+  null_arm           REAL NOT NULL DEFAULT 0,
+  context            TEXT NOT NULL DEFAULT '{}',
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_delta_lesson ON lesson_delta(lesson_id, delta_id);
 CREATE INDEX IF NOT EXISTS idx_app_run      ON lesson_application(run_id, counted);
 CREATE INDEX IF NOT EXISTS idx_lesson_class ON lesson(failure_class, status);
+CREATE INDEX IF NOT EXISTS idx_decision_run   ON lesson_decision(run_id);
+CREATE INDEX IF NOT EXISTS idx_decision_class ON lesson_decision(failure_class);
 
 -- §4.1 the library view. Candidates stay retrievable for exploration.
 CREATE VIEW IF NOT EXISTS v_lesson_library AS
@@ -222,6 +246,23 @@ class LessonStore {
     this.db.pragma('synchronous = NORMAL');
     this.db.pragma('wal_autocheckpoint = 1000');
     this.db.exec(DDL);
+    this._migrate();
+  }
+
+  // Idempotent migrations. v2 (§5.3): lesson_application gains decision_id,
+  // the join key into the lesson_decision log. The DDL intentionally keeps
+  // the v1 lesson_application shape so fresh and pre-v0.2 databases converge
+  // through this ONE path; pre-existing application rows keep NULL (they
+  // predate the decision log). schema_version is upserted every open.
+  _migrate() {
+    const applicationColumns = this.db
+      .prepare('PRAGMA table_info(lesson_application)')
+      .all()
+      .map((column) => column.name);
+    if (!applicationColumns.includes('decision_id')) {
+      this.db.exec('ALTER TABLE lesson_application ADD COLUMN decision_id TEXT');
+    }
+    this._setMeta('schema_version', '2');
   }
 
   close() {
@@ -363,20 +404,92 @@ class LessonStore {
   }
 
   /**
+   * §4.2 selection with §5.3 decision-record data. Same Thompson policy as
+   * selectLessons, but additionally returns the FULL candidate set annotated
+   * with the posterior parameters (alpha = helpful+1, beta = harmful+1) and
+   * the selection propensity of each candidate: P(lesson lands in the top
+   * `limit`) under the policy, Monte-Carlo estimated with `propensityReplicates`
+   * replicates of the same injectable rng (the propensities feed the
+   * ratio-lift estimator's inverse-propensity weighting). When every
+   * candidate fits in the limit, inclusion is certain and propensity is
+   * exactly 1 (MC loop skipped). null_arm is 1 only when no candidate exists
+   * (in practice createLesson runs first, so at least one always does).
+   */
+  selectWithDecision({ failure_class, limit = 2, rng = Math.random, propensityReplicates = 1000 }) {
+    const rows = this.db
+      .prepare('SELECT * FROM v_lesson_library WHERE failure_class = ?')
+      .all(failure_class);
+
+    if (rows.length === 0) {
+      return { selected: [], candidates: [], null_arm: 1 };
+    }
+
+    const drawThetas = () =>
+      rows.map((row) => {
+        const g1 = sampleGamma(row.helpful_count + 1, rng);
+        const g2 = sampleGamma(row.harmful_count + 1, rng);
+        return g1 / (g1 + g2);
+      });
+
+    // Indices of the top-`limit` thetas, in descending-theta order.
+    const topIndices = (thetas) =>
+      thetas
+        .map((theta, index) => ({ theta, index }))
+        .sort((a, b) => b.theta - a.theta)
+        .slice(0, Math.max(0, limit))
+        .map((entry) => entry.index);
+
+    const inclusionCertain = rows.length <= limit;
+    const replicates = Math.max(0, propensityReplicates);
+    const tallies = new Array(rows.length).fill(0);
+    if (!inclusionCertain) {
+      for (let replicate = 0; replicate < replicates; replicate++) {
+        for (const index of topIndices(drawThetas())) {
+          tallies[index]++;
+        }
+      }
+    }
+
+    const candidates = rows.map((row, index) => ({
+      lesson_id: row.lesson_id,
+      alpha: row.helpful_count + 1,
+      beta: row.harmful_count + 1,
+      propensity: inclusionCertain ? 1 : replicates > 0 ? tallies[index] / replicates : 0,
+    }));
+
+    // The real selection draw (independent of the MC replicates).
+    const thetas = drawThetas();
+    const selected = topIndices(thetas).map((index) => ({
+      ...rows[index],
+      sampled_score: thetas[index],
+    }));
+
+    return { selected, candidates, null_arm: 0 };
+  }
+
+  /**
    * §2/§4.2 step 4: one application row per injected lesson (outcome pending).
    * INSERT OR IGNORE on UNIQUE(lesson_id, run_id, trigger_message_id); uses is
    * bumped only when a row was actually inserted. Returns the application row
    * (new or existing). NOTE: NULL trigger_message_id never dedupes (SQLite
    * treats NULLs as distinct); callers should always pass the trigger id.
+   * decision_id (v0.2) joins the application to its lesson_decision row.
    */
-  recordApplication({ lesson_id, run_id, trigger_message_id, task_cue, sampled_score }) {
+  recordApplication({
+    lesson_id,
+    run_id,
+    trigger_message_id,
+    task_cue,
+    sampled_score,
+    decision_id,
+  }) {
     const applicationId = randomId('app');
     const record = this.db.transaction(() => {
       const info = this.db
         .prepare(
           `INSERT OR IGNORE INTO lesson_application
-             (application_id, lesson_id, run_id, trigger_message_id, task_cue, sampled_score, outcome, counted)
-           VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)`
+             (application_id, lesson_id, run_id, trigger_message_id, task_cue, sampled_score, decision_id, outcome, counted)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0)`
         )
         .run(
           applicationId,
@@ -384,7 +497,8 @@ class LessonStore {
           run_id,
           trigger_message_id ?? null,
           task_cue ?? null,
-          sampled_score ?? null
+          sampled_score ?? null,
+          decision_id ?? null
         );
 
       if (info.changes > 0) {
@@ -403,6 +517,61 @@ class LessonStore {
     });
 
     return record();
+  }
+
+  /**
+   * §5.3 decision log: one immutable row per intervention decision, capturing
+   * every candidate's (alpha, beta, propensity) at decision time plus the
+   * selected arms and their Thompson draws. Joined against outcomes via
+   * lesson_application.decision_id, this is the logged-bandit dataset the
+   * ratio-lift estimator (§5.3) evaluates — including the null arm (cycles
+   * where no lesson was injected). decision_id is dec_<16 hex>.
+   */
+  recordDecision({
+    run_id,
+    trigger_message_id = null,
+    cycle_index = null,
+    failure_class,
+    task_cue = null,
+    candidates,
+    selected,
+    null_arm = 0,
+    context = {},
+  }) {
+    if (!run_id || !failure_class) {
+      throw new Error('LessonStore.recordDecision: run_id and failure_class are required');
+    }
+    if (!Array.isArray(candidates) || !Array.isArray(selected)) {
+      throw new Error('LessonStore.recordDecision: candidates and selected must be arrays');
+    }
+    const decisionId = randomId('dec');
+    this.db
+      .prepare(
+        `INSERT INTO lesson_decision
+           (decision_id, run_id, trigger_message_id, cycle_index, failure_class, task_cue,
+            candidates, selected, null_arm, context, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        decisionId,
+        run_id,
+        trigger_message_id ?? null,
+        cycle_index ?? null,
+        failure_class,
+        task_cue ?? null,
+        JSON.stringify(candidates),
+        JSON.stringify(selected),
+        null_arm ? 1 : 0,
+        JSON.stringify(context ?? {}),
+        nowIso()
+      );
+    return this.getDecision(decisionId);
+  }
+
+  getDecision(decisionId) {
+    return (
+      this.db.prepare('SELECT * FROM lesson_decision WHERE decision_id = ?').get(decisionId) || null
+    );
   }
 
   /**

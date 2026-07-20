@@ -372,4 +372,93 @@ describe('LYO observer lesson learning', function () {
     ledger.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('logs one decision row per rejection and applications carry decision_id', function () {
+    const ledger = new Ledger(':memory:');
+    const messageBus = new MessageBus(ledger);
+    const store = new LessonStore(':memory:');
+    const clusterId = 'lyo-decision-1';
+    const cluster = createCluster(clusterId);
+
+    const detach = attachLyoObserver({ messageBus, cluster, lessonStore: store });
+    const validation = publishValidation(messageBus, clusterId, {
+      approved: false,
+      text: 'Tests failed: npm test',
+      errors: ['missing regression coverage'],
+    });
+
+    const decisions = store.db.prepare('SELECT * FROM lesson_decision').all();
+    assert.strictEqual(decisions.length, 1);
+    const decision = decisions[0];
+    assert.strictEqual(decision.run_id, clusterId);
+    assert.strictEqual(decision.trigger_message_id, validation.id);
+    assert.strictEqual(decision.cycle_index, 1);
+    assert.strictEqual(decision.failure_class, 'output_generation');
+    assert.strictEqual(decision.null_arm, 0);
+
+    const candidates = JSON.parse(decision.candidates);
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0].alpha, 1);
+    assert.strictEqual(candidates[0].beta, 1);
+    assert.strictEqual(candidates[0].propensity, 1);
+    const selected = JSON.parse(decision.selected);
+    assert.strictEqual(selected.length, 1);
+    assert.strictEqual(selected[0].lesson_id, candidates[0].lesson_id);
+    assert.ok(selected[0].theta >= 0 && selected[0].theta <= 1);
+
+    const application = store.db.prepare('SELECT * FROM lesson_application').get();
+    assert.strictEqual(application.decision_id, decision.decision_id);
+
+    const guidance = messageBus.queryGuidanceMailbox({
+      cluster_id: clusterId,
+      target_agent_id: 'worker',
+    });
+    assert.strictEqual(guidance[0].content.data.lessons[0].decision_id, decision.decision_id);
+    assert.strictEqual(guidance[0].content.data.lessons[0].propensity, 1);
+
+    detach();
+    store.close();
+    ledger.close();
+  });
+
+  it('increments cycle_index across cycles while counter rules still apply', function () {
+    const ledger = new Ledger(':memory:');
+    const messageBus = new MessageBus(ledger);
+    const store = new LessonStore(':memory:');
+    const clusterId = 'lyo-decision-2';
+    const cluster = createCluster(clusterId);
+
+    const detach = attachLyoObserver({ messageBus, cluster, lessonStore: store });
+
+    publishValidation(messageBus, clusterId, {
+      approved: false,
+      text: 'Tests failed: npm test',
+      errors: ['missing regression coverage'],
+    });
+    // Resolves cycle 1 (failed), opens cycle 2.
+    publishValidation(messageBus, clusterId, {
+      approved: false,
+      text: 'Tests failed: npm test',
+      errors: ['missing regression coverage'],
+    });
+
+    const decisions = store.db.prepare('SELECT * FROM lesson_decision ORDER BY rowid').all();
+    assert.strictEqual(decisions.length, 2);
+    assert.strictEqual(decisions[0].cycle_index, 1);
+    assert.strictEqual(decisions[1].cycle_index, 2);
+
+    // Counter rule untouched: the first application resolved failed/counted,
+    // the second cycle's application is pending — and both join to decisions.
+    const applications = store.db.prepare('SELECT * FROM lesson_application ORDER BY rowid').all();
+    assert.strictEqual(applications.length, 2);
+    assert.strictEqual(applications[0].outcome, 'failed');
+    assert.strictEqual(applications[0].counted, 1);
+    assert.strictEqual(applications[0].decision_id, decisions[0].decision_id);
+    assert.strictEqual(applications[1].outcome, 'pending');
+    assert.strictEqual(applications[1].decision_id, decisions[1].decision_id);
+
+    detach();
+    store.close();
+    ledger.close();
+  });
 });

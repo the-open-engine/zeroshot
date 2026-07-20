@@ -1,4 +1,9 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const Database = require('better-sqlite3');
 
 const LessonStore = require('../../src/lyo/lesson-store');
 const { classifyValidationFailure } = require('../../src/lyo/failure-classifier');
@@ -511,6 +516,267 @@ describe('LYO lesson store', function () {
     assert.strictEqual(replayed.updated_at, row.updated_at);
 
     store.close();
+  });
+});
+
+describe('LYO decision log (v0.2)', function () {
+  it('returns every candidate with posterior params and propensities summing to the limit', function () {
+    const store = new LessonStore(':memory:');
+    const a = makeLesson(store, { trigger_cue: 'cue a' });
+    const b = makeLesson(store, { trigger_cue: 'cue b' });
+    makeLesson(store, { trigger_cue: 'cue c' });
+    applyOutcomes(store, a.lesson_id, ['passed', 'passed', 'failed']);
+
+    const { selected, candidates, null_arm } = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 2,
+      rng: mulberry32(42),
+    });
+
+    assert.strictEqual(null_arm, 0);
+    assert.strictEqual(candidates.length, 3);
+    const byId = new Map(candidates.map((entry) => [entry.lesson_id, entry]));
+    assert.strictEqual(byId.get(a.lesson_id).alpha, 3); // helpful 2 + 1
+    assert.strictEqual(byId.get(a.lesson_id).beta, 2); // harmful 1 + 1
+    assert.strictEqual(byId.get(b.lesson_id).alpha, 1);
+    assert.strictEqual(byId.get(b.lesson_id).beta, 1);
+    for (const candidate of candidates) {
+      assert.ok(candidate.propensity >= 0 && candidate.propensity <= 1);
+    }
+    // Each MC replicate selects exactly `limit` lessons, so propensities sum
+    // to the limit in expectation (MC noise tolerated).
+    const propensitySum = candidates.reduce((sum, entry) => sum + entry.propensity, 0);
+    assert.ok(
+      Math.abs(propensitySum - 2) < 0.15,
+      `propensities should sum to the limit (2), got ${propensitySum}`
+    );
+
+    assert.strictEqual(selected.length, 2);
+    for (const lesson of selected) {
+      assert.ok(lesson.sampled_score >= 0 && lesson.sampled_score <= 1);
+    }
+
+    store.close();
+  });
+
+  it('estimates propensities close to the analytic inclusion probability', function () {
+    const store = new LessonStore(':memory:');
+    const veteran = makeLesson(store, { trigger_cue: 'veteran cue' });
+    const newcomer = makeLesson(store, { trigger_cue: 'newcomer cue' });
+    applyOutcomes(store, veteran.lesson_id, Array(9).fill('passed'));
+
+    const { candidates } = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 1,
+      rng: mulberry32(7),
+      propensityReplicates: 2000,
+    });
+
+    // Analytic: veteran is Beta(10,1), newcomer Beta(1,1) (uniform).
+    // P(newcomer wins) = E[1 - theta_veteran] = 1 - 10/11 = 1/11 ≈ 0.091.
+    const byId = new Map(candidates.map((entry) => [entry.lesson_id, entry]));
+    const newcomerPropensity = byId.get(newcomer.lesson_id).propensity;
+    assert.ok(
+      Math.abs(newcomerPropensity - 1 / 11) < 0.05,
+      `newcomer propensity ${newcomerPropensity} should be near 1/11 ≈ 0.091`
+    );
+    const veteranPropensity = byId.get(veteran.lesson_id).propensity;
+    assert.ok(
+      Math.abs(veteranPropensity - 10 / 11) < 0.05,
+      `veteran propensity ${veteranPropensity} should be near 10/11 ≈ 0.909`
+    );
+
+    store.close();
+  });
+
+  it('assigns propensity exactly 1 when every candidate fits in the limit', function () {
+    const store = new LessonStore(':memory:');
+    makeLesson(store, { trigger_cue: 'cue one' });
+    makeLesson(store, { trigger_cue: 'cue two' });
+
+    const { selected, candidates, null_arm } = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 2,
+      rng: mulberry32(11),
+    });
+
+    assert.strictEqual(null_arm, 0);
+    assert.strictEqual(candidates.length, 2);
+    assert.ok(candidates.every((entry) => entry.propensity === 1));
+    assert.strictEqual(selected.length, 2);
+
+    store.close();
+  });
+
+  it('returns the null arm when no candidate exists for the class', function () {
+    const store = new LessonStore(':memory:');
+    const { selected, candidates, null_arm } = store.selectWithDecision({
+      failure_class: 'no_such_class',
+      limit: 2,
+    });
+    assert.deepStrictEqual(selected, []);
+    assert.deepStrictEqual(candidates, []);
+    assert.strictEqual(null_arm, 1);
+    store.close();
+  });
+
+  it('persists decision rows and joins applications via decision_id', function () {
+    const store = new LessonStore(':memory:');
+    const lesson = makeLesson(store, { trigger_cue: 'cue join' });
+    const { selected, candidates, null_arm } = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 2,
+      rng: mulberry32(3),
+    });
+
+    const decision = store.recordDecision({
+      run_id: 'run-decision',
+      trigger_message_id: 'msg-1',
+      cycle_index: 1,
+      failure_class: 'output_generation',
+      task_cue: 'cue join',
+      candidates,
+      selected: selected.map((entry) => ({
+        lesson_id: entry.lesson_id,
+        theta: entry.sampled_score,
+      })),
+      null_arm,
+    });
+
+    assert.ok(decision.decision_id.startsWith('dec_'));
+    assert.strictEqual(decision.run_id, 'run-decision');
+    assert.strictEqual(decision.cycle_index, 1);
+    assert.strictEqual(decision.null_arm, 0);
+    const storedCandidates = JSON.parse(decision.candidates);
+    assert.strictEqual(storedCandidates.length, 1);
+    assert.strictEqual(storedCandidates[0].lesson_id, lesson.lesson_id);
+    assert.strictEqual(storedCandidates[0].propensity, 1);
+    const storedSelected = JSON.parse(decision.selected);
+    assert.strictEqual(storedSelected.length, 1);
+    assert.strictEqual(storedSelected[0].lesson_id, lesson.lesson_id);
+
+    const application = store.recordApplication({
+      lesson_id: lesson.lesson_id,
+      run_id: 'run-decision',
+      trigger_message_id: 'msg-1',
+      task_cue: 'cue join',
+      sampled_score: selected[0].sampled_score,
+      decision_id: decision.decision_id,
+    });
+    assert.strictEqual(application.decision_id, decision.decision_id);
+
+    assert.strictEqual(store.getDecision(decision.decision_id).decision_id, decision.decision_id);
+    assert.strictEqual(store.getDecision('dec_missing'), null);
+
+    assert.throws(
+      () => store.recordDecision({ failure_class: 'x', candidates: [], selected: [] }),
+      /run_id and failure_class/
+    );
+    assert.throws(
+      () =>
+        store.recordDecision({ run_id: 'r', failure_class: 'x', candidates: 'nope', selected: [] }),
+      /candidates and selected/
+    );
+
+    store.close();
+  });
+
+  it('migrates a pre-v0.2 store: adds decision_id and preserves existing receipts', function () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyo-migrate-'));
+    const dbPath = path.join(tempDir, 'old-lessons.db');
+    try {
+      // Hand-build the v1 schema (lesson_application WITHOUT decision_id, no
+      // lesson_decision table) with one lesson and one counted receipt.
+      const raw = new Database(dbPath);
+      raw.exec(`
+        CREATE TABLE lesson_delta (
+          delta_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lesson_id TEXT NOT NULL,
+          run_id TEXT,
+          ts TEXT NOT NULL DEFAULT (datetime('now')),
+          actor TEXT NOT NULL,
+          delta_type TEXT NOT NULL,
+          payload TEXT NOT NULL
+        );
+        CREATE TABLE lesson (
+          lesson_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'candidate',
+          failure_class TEXT NOT NULL,
+          trigger_cue TEXT NOT NULL,
+          explanation TEXT NOT NULL,
+          intervention TEXT NOT NULL,
+          helpful_count INTEGER NOT NULL DEFAULT 0,
+          harmful_count INTEGER NOT NULL DEFAULT 0,
+          uses INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          provenance TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE lesson_application (
+          application_id TEXT PRIMARY KEY,
+          lesson_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          trigger_message_id TEXT,
+          task_cue TEXT,
+          sampled_score REAL,
+          outcome TEXT NOT NULL DEFAULT 'pending',
+          counted INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(lesson_id, run_id, trigger_message_id)
+        );
+        CREATE TABLE lyo_meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO lesson (lesson_id, status, failure_class, trigger_cue, explanation, intervention,
+                            helpful_count, harmful_count, uses, created_at, updated_at, provenance)
+          VALUES ('les_legacy', 'candidate', 'output_generation', 'legacy cue', 'why', 'do this',
+                  2, 0, 1, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', '["run-legacy"]');
+        INSERT INTO lesson_application (application_id, lesson_id, run_id, trigger_message_id,
+                                        task_cue, sampled_score, outcome, counted)
+          VALUES ('app_legacy', 'les_legacy', 'run-legacy', 'msg-legacy', 'legacy cue', 0.5, 'passed', 1);
+      `);
+      raw.close();
+
+      const store = new LessonStore(dbPath);
+
+      const applicationColumns = store.db
+        .prepare('PRAGMA table_info(lesson_application)')
+        .all()
+        .map((column) => column.name);
+      assert.ok(applicationColumns.includes('decision_id'), 'migration adds decision_id');
+      assert.deepStrictEqual(store.db.prepare('SELECT * FROM lesson_decision').all(), []);
+      assert.strictEqual(store._getMeta('schema_version'), '2');
+
+      // Pre-existing data untouched: receipt still counted, decision_id NULL.
+      const receipt = store.db
+        .prepare('SELECT * FROM lesson_application WHERE application_id = ?')
+        .get('app_legacy');
+      assert.strictEqual(receipt.outcome, 'passed');
+      assert.strictEqual(receipt.counted, 1);
+      assert.strictEqual(receipt.decision_id, null);
+      const legacy = store.getLesson('les_legacy');
+      assert.strictEqual(legacy.helpful_count, 2);
+      assert.strictEqual(legacy.status, 'candidate');
+
+      // The migrated store is fully operational: selection + decision logging.
+      const { candidates, null_arm } = store.selectWithDecision({
+        failure_class: 'output_generation',
+        limit: 2,
+        rng: mulberry32(5),
+      });
+      assert.strictEqual(null_arm, 0);
+      assert.strictEqual(candidates.length, 1);
+      assert.strictEqual(candidates[0].alpha, 3); // helpful 2 + 1
+      assert.strictEqual(candidates[0].propensity, 1);
+      const decision = store.recordDecision({
+        run_id: 'run-new',
+        failure_class: 'output_generation',
+        candidates,
+        selected: [],
+      });
+      assert.ok(decision.decision_id.startsWith('dec_'));
+
+      store.close();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

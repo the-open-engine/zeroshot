@@ -115,9 +115,10 @@ function openLessonStore({ cluster, lessonStore, storageDir }) {
 }
 
 // Reflector role (design doc §2): classify the failure, create-or-merge the
-// lesson, Thompson-select lessons for this failure class, and record one
+// lesson, Thompson-select lessons for this failure class, log the decision
+// (full candidate snapshot + selection propensities, §5.3), and record one
 // application row per selected lesson (grounded attribution).
-function learnFromRejection({ store, cluster, message }) {
+function learnFromRejection({ store, cluster, message, messageBus }) {
   const { failure_class, cue } = classifyValidationFailure(message);
   store.createLesson({
     failure_class,
@@ -129,7 +130,33 @@ function learnFromRejection({ store, cluster, message }) {
   });
   // The just-created candidate competes via its Beta(1,1) draw — intended
   // exploration, not a shortcut (design doc §4.2).
-  const selected = store.selectLessons({ failure_class, limit: 2 });
+  const { selected, candidates, null_arm } = store.selectWithDecision({
+    failure_class,
+    limit: 2,
+  });
+  // Cycle index = interventions already published in this run + 1 (this
+  // decision's intervention is published right after learnFromRejection
+  // returns). Defensive: a bus without count() still gets a decision row,
+  // with cycle_index NULL.
+  let cycleIndex = null;
+  try {
+    cycleIndex = messageBus.count({ cluster_id: cluster.id, topic: LYO_INTERVENTION_TOPIC }) + 1;
+  } catch {
+    cycleIndex = null;
+  }
+  const decision = store.recordDecision({
+    run_id: cluster.id,
+    trigger_message_id: message.id,
+    cycle_index: cycleIndex,
+    failure_class,
+    task_cue: cue,
+    candidates,
+    selected: selected.map((lesson) => ({
+      lesson_id: lesson.lesson_id,
+      theta: lesson.sampled_score,
+    })),
+    null_arm,
+  });
   return selected.map((lesson) => {
     const application = store.recordApplication({
       lesson_id: lesson.lesson_id,
@@ -137,8 +164,15 @@ function learnFromRejection({ store, cluster, message }) {
       trigger_message_id: message.id,
       task_cue: cue,
       sampled_score: lesson.sampled_score,
+      decision_id: decision.decision_id,
     });
-    return { lesson, application };
+    const candidate = candidates.find((entry) => entry.lesson_id === lesson.lesson_id);
+    return {
+      lesson,
+      application,
+      decision_id: decision.decision_id,
+      propensity: candidate ? candidate.propensity : null,
+    };
   });
 }
 
@@ -157,11 +191,13 @@ function summarizeLessons(lessonApplications) {
   if (!lessonApplications) {
     return null;
   }
-  return lessonApplications.map(({ lesson, application }) => ({
+  return lessonApplications.map(({ lesson, application, decision_id, propensity }) => ({
     lesson_id: lesson.lesson_id,
     application_id: application.application_id,
     failure_class: lesson.failure_class,
     sampled_score: lesson.sampled_score,
+    decision_id: decision_id ?? null,
+    propensity: propensity ?? null,
   }));
 }
 
@@ -220,7 +256,7 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir }) {
     let lessonApplications = null;
     if (store) {
       try {
-        lessonApplications = learnFromRejection({ store, cluster, message });
+        lessonApplications = learnFromRejection({ store, cluster, message, messageBus });
       } catch (error) {
         console.warn('[lyo] lesson pipeline failed, continuing without lessons:', error.message);
         lessonApplications = null;
