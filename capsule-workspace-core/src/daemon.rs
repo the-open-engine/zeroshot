@@ -1,6 +1,9 @@
-//! Node-daemon core: publish (freeze->chunk->dedup->pack->upload->manifest) and
-//! materialize (manifest->fetch blocks->decompress->write tree). Rayon-parallel on the
-//! CPU-bound stages so this measures the REAL throughput the Python prototype could not.
+//! Node-daemon core: publish (stream->chunk->dedup->pack->upload->manifest) and
+//! materialize (manifest->fetch blocks->decompress->write tree).
+//! `publish` is SINGLE-THREADED STREAMING (chunk-at-a-time) so peak memory is bounded and
+//! independent of file/tree apparent size — deliberately trading the earlier rayon-parallel
+//! throughput for bounded RAM (the real daemon reclaims throughput with a bounded-parallel
+//! producer/queue/packer pipeline). `materialize` remains rayon-parallel.
 
 use crate::cas::*;
 use crate::manifest::{FileEntry, Manifest};
@@ -109,10 +112,10 @@ pub fn publish(
     let mut upload_secs = 0f64;
     let mut buf = vec![0u8; CHUNK];
 
-    let mut flush = |cur: &mut BlockBuilder,
-                     new_index: &mut ChunkIndex,
-                     n_blocks: &mut usize,
-                     upload_secs: &mut f64|
+    let flush = |cur: &mut BlockBuilder,
+                 new_index: &mut ChunkIndex,
+                 n_blocks: &mut usize,
+                 upload_secs: &mut f64|
      -> Result<()> {
         if cur.buf.is_empty() {
             return Ok(());

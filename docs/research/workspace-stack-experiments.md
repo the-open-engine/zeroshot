@@ -126,18 +126,24 @@ round-trip-verified, and measured on a `c6id.2xlarge` (8 vCPU) against the real 
 dependency corpus. This closes the "real CAS throughput" open item — the Python prototype's
 slow wall-times were purely single-threaded-Python artifacts.
 
-| Stage                                   | Rust core (8 vCPU, rayon)                 | Python prototype (4 vCPU) |
-| --------------------------------------- | ----------------------------------------- | ------------------------- |
-| Publish 374 MB dep tree (cold, all new) | **0.90s** wall                            | ~5.8s                     |
-| — hash throughput                       | **1.11 GB/s**                             | ~88 MB/s (1 core)         |
-| — zstd compress throughput              | **0.98 GB/s**                             | —                         |
-| Incremental publish (+3 pkgs)           | **0.48s** wall, 25.9 MB uploaded          | ~26 MB                    |
-| Cold materialize 14,063 files           | **0.28s** wall (3 blocks, write 3.3 GB/s) | ~16s (Python write)       |
-| Round-trip identity                     | ✅ verified                               | ✅                        |
-| zstd ratio / dedup %                    | 2.87× / 65.8% incremental                 | 2.89× / 65.8% (matches)   |
+> **⚠️ SUPERSEDED (publish rows) by the V2 hardening.** These publish numbers are the
+> **pre-V2, rayon-parallel** publish. The V2 fix for the sparse-file OOM DoS made publish
+> **single-threaded streaming** (bounded memory), which trades throughput: publish is now
+> **~276 MB/s single-threaded** (measured, 1 GiB distinct: 3.9s), not 1.11 GB/s. The
+> memory win is deliberate and large; the real daemon reclaims throughput with a
+> bounded-parallel producer/queue/packer pipeline. `materialize` is unchanged (still
+> rayon-parallel: 14k files in 0.28s). Compression/dedup ratios below are unaffected.
 
-`cargo build --release` on the instance: **20s**. Compiles clean, no warnings of note.
-Ratios (compression, dedup) match the Python run exactly; only the throughput is now real.
+| Stage                            | Rust core (8 vCPU)                        | Python prototype (4 vCPU) |
+| -------------------------------- | ----------------------------------------- | ------------------------- |
+| Publish 374 MB (PRE-V2 parallel) | 0.90s wall (superseded — see note)        | ~5.8s                     |
+| Publish (POST-V2 streaming)      | **~276 MB/s single-thread, bounded RAM**  | —                         |
+| Cold materialize 14,063 files    | **0.28s** wall (3 blocks, write 3.3 GB/s) | ~16s (Python write)       |
+| Round-trip identity              | ✅ verified                               | ✅                        |
+| zstd ratio / dedup %             | 2.87× / 65.8% incremental                 | 2.89× / 65.8% (matches)   |
+
+`cargo build --release`: clean, **no warnings** (V3-verified). Ratios match the Python run;
+the durable takeaway is that the Python wall-times were single-threaded-Python artifacts.
 
 ## Correctness & adversarial suite (Rust integration tests, `capsule-workspace-core/tests/experiments.rs`)
 
@@ -213,17 +219,17 @@ single-publish EC2 benchmarks were structurally blind to** — its sharp meta-po
 publishes can't see cross-generation growth or concurrency. Triaged; the security/correctness
 ones fixed (tests flipped to assert the fix), fidelity gaps documented.
 
-| #   | Finding                                                                                                                                                                 | Severity                               | Disposition                                                                                                                              |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | **Sparse/large-file OOM DoS** — `std::fs::read` whole-file × parallel; sparse files bypass XFS quota (bounds _allocated_, not _apparent_). 96 KiB disk → **6.5 GB RAM** | **HIGH** (tenant-reachable, node-wide) | ✅ **FIXED** — streaming publish (chunk-at-a-time). **Re-measured: 7 MB RSS** for the same 3 GiB-apparent sparse tree (**~900×** lower). |
-| P3  | **Cumulative manifest index** — every manifest embedded all of `known`, growing with lineage churn (the R2 cold-start object)                                           | MED-HIGH                               | ✅ **FIXED** — index carries only referenced chunks (bounded to live tree).                                                              |
-| P6  | `put_block` fixed temp name → concurrent identical writes spuriously fail (~7/8)                                                                                        | MED-HIGH                               | ✅ **FIXED** — per-writer unique temp; 0 spurious errors.                                                                                |
-| P5  | Write-through a **pre-existing symlink** in a non-empty `out` escapes the workspace                                                                                     | MEDIUM                                 | ✅ **FIXED** — materialize refuses a non-empty `out`.                                                                                    |
-| P7  | materialize trusts manifest `size` for allocation (u64::MAX → crash)                                                                                                    | LOW-MED                                | ✅ **FIXED** — size validated against actual chunk bytes; clean error.                                                                   |
-| P2  | **Hardlinks** flattened to N copies (pnpm/npm/cargo) — inflates materialized size vs R2 budget                                                                          | MEDIUM                                 | 📋 documented design gap (needs inode tracking + hardlink entry type)                                                                    |
-| P8  | Non-UTF8 paths lossy (`to_string_lossy`) → collision/data-loss on Linux                                                                                                 | MED (fidelity)                         | 📋 documented (needs byte/OsString paths through the manifest)                                                                           |
-| P1b | Empty directories dropped                                                                                                                                               | LOW-MED                                | 📋 documented (needs explicit dir entries)                                                                                               |
-| P4  | **No GC** → orphan blocks + superseded manifests accumulate (**10× on-disk after 10 gens**)                                                                             | MED-HIGH (design)                      | 📋 spec §13 defers GC to phase 3; rate now quantified                                                                                    |
+| #   | Finding                                                                                                                                                                 | Severity                               | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **Sparse/large-file OOM DoS** — `std::fs::read` whole-file × parallel; sparse files bypass XFS quota (bounds _allocated_, not _apparent_). 96 KiB disk → **6.5 GB RAM** | **HIGH** (tenant-reachable, node-wide) | ✅ **FIXED** — streaming publish (chunk-at-a-time). Peak RSS is now bounded **independent of apparent/per-file size**: 3 GiB-apparent sparse → **7 MB** (V3-reproduced 6.98 MB); distinct data flat at **~132 MB** from 64 MiB→1 GiB. (Not literally "one block": ~2× block-target + O(chunk-count) index metadata — same O(tree) metadata as G3, not the DoS.) Trade-off: publish is now single-threaded (see Rust-core note). |
+| P3  | **Cumulative manifest index** — every manifest embedded all of `known`, growing with lineage churn (the R2 cold-start object)                                           | MED-HIGH                               | ✅ **FIXED** — index carries only referenced chunks (bounded to live tree).                                                                                                                                                                                                                                                                                                                                                     |
+| P6  | `put_block` fixed temp name → concurrent identical writes spuriously fail (~7/8)                                                                                        | MED-HIGH                               | ✅ **FIXED** — per-writer unique temp; 0 spurious errors.                                                                                                                                                                                                                                                                                                                                                                       |
+| P5  | Write-through a **pre-existing symlink** in a non-empty `out` escapes the workspace                                                                                     | MEDIUM                                 | ✅ **FIXED** — materialize refuses a non-empty `out`.                                                                                                                                                                                                                                                                                                                                                                           |
+| P7  | materialize trusts manifest `size` for allocation (u64::MAX → crash)                                                                                                    | LOW-MED                                | ✅ **FIXED** — size validated against actual chunk bytes; clean error.                                                                                                                                                                                                                                                                                                                                                          |
+| P2  | **Hardlinks** flattened to N copies (pnpm/npm/cargo) — inflates materialized size vs R2 budget                                                                          | MEDIUM                                 | 📋 documented design gap (needs inode tracking + hardlink entry type)                                                                                                                                                                                                                                                                                                                                                           |
+| P8  | Non-UTF8 paths lossy (`to_string_lossy`) → collision/data-loss on Linux                                                                                                 | MED (fidelity)                         | 📋 documented (needs byte/OsString paths through the manifest)                                                                                                                                                                                                                                                                                                                                                                  |
+| P1b | Empty directories dropped                                                                                                                                               | LOW-MED                                | 📋 documented (needs explicit dir entries)                                                                                                                                                                                                                                                                                                                                                                                      |
+| P4  | **No GC** → orphan blocks + superseded manifests accumulate (**10× on-disk after 10 gens**)                                                                             | MED-HIGH (design)                      | 📋 spec §13 defers GC to phase 3; rate now quantified                                                                                                                                                                                                                                                                                                                                                                           |
 
 Confirmed **FINE** (checked, correct): empty files, exact chunk-boundary files (256K/512K/±1),
 symlink loops (preserved not followed), missing-block → clean error.
@@ -232,6 +238,28 @@ symlink loops (preserved not followed), missing-block → clean error.
 was methodological — it showed the EC2 numbers needed cross-generation and concurrency probes,
 and the two it flagged for a deployment gate (sparse-OOM, cumulative index) are both now fixed
 and re-measured.
+
+## Final review (V3) + corrections
+
+An independent final reviewer verified the 5 V2 fixes by **code-reading + its own probes +
+independent RSS measurement** (not trusting the author's tests). Verdict:
+**PASS-WITH-CONCERNS** — all 5 fixes **genuinely correct, no correctness regression**;
+concerns were **disclosure/precision in this log**, now corrected:
+
+- Independently reproduced the **7 MB sparse RSS** (measured 6.98 MB) and extended it: distinct
+  data is flat **~132 MB across 64 MiB→1 GiB** (16× size range) — memory bounded independent of
+  apparent/per-file size, as claimed.
+- Independently verified the **referenced-only index materializes across generations** (3-gen
+  inheritance round-trips) — a path the author's test hadn't covered; now added as
+  `referenced_index_inheritance_materializes`.
+- Confirmed put_block race-freedom, non-empty-`out` rejection, and size-validation are correct
+  and don't over-reject legitimate inputs; confirmed the documented gaps are honestly labeled.
+- **Corrected here:** the Rust-core publish throughput table (was stale — pre-V2 parallel;
+  publish is now single-threaded streaming ~276 MB/s), the memory-bound wording (~2 blocks +
+  O(chunk-count) metadata, not "one block"), and the "no warnings" claim (1 warning, now fixed).
+
+**Final state: 26 tests passing, clean build (no warnings), three review layers (audit →
+adversarial → final) all reconciled.**
 
 ## Bottom line
 

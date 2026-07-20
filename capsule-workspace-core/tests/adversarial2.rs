@@ -534,6 +534,59 @@ fn streaming_large_and_sparse_roundtrip() {
 }
 
 // ============================================================================
+// PROBE 3-FIX — referenced-only index must still materialize INHERITED chunks across
+// generations (an unchanged file's chunks come from a PRIOR generation's blocks via
+// `known`). Confirms the fix didn't break multi-generation cold materialize.
+// ============================================================================
+#[test]
+fn referenced_index_inheritance_materializes() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    let store = d.path().join("s");
+    let s = LocalBlobStore::new(&store).unwrap();
+    let body = |seeds: std::ops::Range<u64>| -> Vec<u8> {
+        let mut v = Vec::new();
+        for i in seeds {
+            v.extend(prng_chunk(i));
+        }
+        v
+    };
+    // gen 0
+    write(&tree.join("keep.bin"), &body(50_000..50_003)); // 3 chunks, will be UNCHANGED
+    write(&tree.join("churn.bin"), &body(60_000..60_003));
+    let g0 = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
+    let known0 = load_index(&s, &g0.manifest);
+    // gen 1: keep.bin unchanged (chunks inherited from gen-0 blocks), churn.bin replaced
+    write(&tree.join("churn.bin"), &body(70_000..70_003));
+    let g1 = publish(&tree, &s, &known0, None).unwrap();
+    let m1 = Manifest::from_bytes(&s.get_manifest(&g1.manifest).unwrap()).unwrap();
+    let keep = m1.files.iter().find(|f| f.path == "keep.bin").unwrap();
+    let inherited = keep.chunks.iter().all(|c| known0.contains_key(c));
+    let out = d.path().join("o");
+    materialize(&s, &g1.manifest, &out).unwrap();
+    println!(
+        "[P3-fix] keep.bin chunks inherited from gen0={} index_len={} (referenced-only)",
+        inherited,
+        m1.chunks.len()
+    );
+    assert!(
+        inherited,
+        "unchanged file inherits its chunks from the prior generation"
+    );
+    assert_eq!(
+        fs::read(out.join("keep.bin")).unwrap(),
+        fs::read(tree.join("keep.bin")).unwrap(),
+        "inherited chunks materialize byte-identically from the OLD block"
+    );
+    // 6 referenced (3 inherited + 3 new), NOT cumulative 9
+    assert_eq!(
+        m1.chunks.len(),
+        6,
+        "index = referenced only, not cumulative"
+    );
+}
+
+// ============================================================================
 // PROBE 9 — FINE bundle: confirm the genuinely-safe edges so the report can say so.
 //   (a) empty file round-trips; (b) files at exact chunk boundaries (256K, 512K) round-trip;
 //   (c) symlink loops are preserved, not followed (no hang); (d) a manifest referencing a
