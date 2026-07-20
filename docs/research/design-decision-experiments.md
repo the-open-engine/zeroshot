@@ -46,3 +46,29 @@ chase more parallelism by default.** At ~350 MB/s publish is already ≈ the S3-
 (tiny delta). Full parallel-hashing (dedup-in-packer, at the cost of wasted compression on
 dups + more in-flight RAM) is a **metric-gated** follow-up, only if cold first-publish CPU
 proves to matter. **Senior default: bounded-parallel pipeline, workers ≈ cores, cap ≈ 8.**
+
+### E7 — Manifest index: monolithic vs sharded ✅
+
+Two things measured: (1) monolithic download budget at scale, (2) incremental shard-**reuse**
+by sharding scheme × edit locality (50/5000 files changed).
+
+- **Monolithic is cheap at realistic scale:** real manifest **89 MB @ 300k files** → **0.25s**
+  download @350MB/s (1M files ~0.85s). **A cold FULL materialize needs the whole index
+  regardless**, so sharding buys ~nothing for cold-full — only for warm/incremental.
+- **Incremental shard reuse** (what a warm node with gen N cached must re-fetch for gen N+1):
+
+  | Edit                                   | prefix/content-hash (256) | locality / contiguous-file (64) |
+  | -------------------------------------- | ------------------------- | ------------------------------- |
+  | **Clustered** (realistic: one dir/dep) | 66%                       | **97%**                         |
+  | Random                                 | 68%                       | 46%                             |
+
+**Finding:** the naive sharding choice (prefix/content-hash) is a trap — it's edit-agnostic
+(~66%) and _underperforms on the realistic clustered edit_, where **locality sharding reaches
+97% reuse**. But locality sharding is _worse_ than prefix on random edits.
+
+**Decision:** **monolithic index for v1** — at realistic file counts (≤300k) it's a
+sub-second download and cold-full needs it all anyway. Add **locality-based sharding
+(contiguous file ranges, following tree order) ONLY if** (a) file counts routinely exceed
+~500k–1M, or (b) warm incremental-materialize latency becomes the bottleneck. Do **not** reach
+for content-hash/prefix sharding — it doesn't help the case that matters. G3 is real only at
+extreme scale.
