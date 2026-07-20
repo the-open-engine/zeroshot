@@ -1,0 +1,35 @@
+# Standalone workspace (own [workspace] table => not pulled into the zeroshot root workspace).
+# Minimal core of the capsule workspace data plane. See README.md for the drop-in mapping
+# onto zeroshot-cloud. S3 is behind the `s3` feature so the core compiles/measures without
+# the heavy AWS SDK; the CPU-bound chunk/hash/compress rate (the open question) needs no S3.
+[workspace]
+
+[package]
+name = "capsule-workspace-core"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal, interface-compatible core of the capsule workspace storage data plane"
+license = "MIT"
+
+[dependencies]
+sha2 = "0.10"
+zstd = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1"
+walkdir = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+# optional real S3 backend (drop-in for the node daemon); not needed for CPU-rate measurement
+aws-config = { version = "1", optional = true }
+aws-sdk-s3 = { version = "1", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+[features]
+default = []
+s3 = ["dep:aws-config", "dep:aws-sdk-s3", "dep:tokio"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
