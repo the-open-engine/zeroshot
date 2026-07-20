@@ -2355,6 +2355,7 @@ program
     'Override all agents to use a provider (claude, codex, gemini, opencode)'
   )
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
+  .option('--lyo', 'Enable LYO learning observer for this run')
   .option(
     '--sim <mode>',
     'Token-free simulation gate for templates (off|fast|deep). Default: fast',

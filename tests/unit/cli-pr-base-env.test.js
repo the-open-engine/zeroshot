@@ -56,6 +56,7 @@ describe('CLI PR config env fallback', function () {
       prBase: 'dev',
       mergeQueue: true,
       closeIssue: 'always',
+      lyo: true,
     });
 
     const result = buildStartOptions({ clusterId: 'test', options: {}, settings: {} });
@@ -63,6 +64,7 @@ describe('CLI PR config env fallback', function () {
     assert.strictEqual(result.prBase, 'dev');
     assert.strictEqual(result.mergeQueue, true);
     assert.strictEqual(result.closeIssue, 'always');
+    assert.strictEqual(result.lyo, true);
   });
 
   it('prefers explicit options over ZEROSHOT_RUN_OPTIONS', function () {
