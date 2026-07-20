@@ -48,6 +48,7 @@ const { loadSettings } = require('../lib/settings');
 const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
+const { attachLyoObserver } = require('./lyo/observer');
 const { resolveClusterRequiredQualityGates } = require('./quality-gates');
 const {
   commandProofsToQualityGates,
@@ -1021,6 +1022,7 @@ class Orchestrator {
       isolationImage: options.isolationImage,
       worktree: options.worktree || false,
       autoPr,
+      lyo: options.lyo || false,
       modelOverride: options.modelOverride, // Model override for all agents
       clusterId: options.clusterId, // Explicit ID from CLI/daemon parent
       settings: options.settings, // User settings for issue provider detection
@@ -1197,6 +1199,9 @@ class Orchestrator {
       cluster.prOptions = buildPrOptions(options, requiredQualityGates);
       applyCommandProofsToAgents(config, commandProofs);
       applyRequiredQualityGatesToValidators(config, requiredQualityGates);
+      if (options.lyo) {
+        config.lyo = { ...(config.lyo || {}), enabled: true };
+      }
 
       // Detect git platform for --pr mode (independent of issue provider)
       if (options.autoPr) {
@@ -1252,6 +1257,7 @@ class Orchestrator {
       this._registerClusterSubscriptions({
         messageBus,
         clusterId,
+        cluster,
         isolationManager,
         containerId,
       });
@@ -1673,7 +1679,7 @@ class Orchestrator {
     });
   }
 
-  _registerClusterSubscriptions({ messageBus, clusterId, isolationManager, containerId }) {
+  _registerClusterSubscriptions({ messageBus, clusterId, cluster, isolationManager, containerId }) {
     this._registerClusterCompletionHandlers(messageBus, clusterId);
     this._registerAgentErrorHandler(messageBus, clusterId);
     this._registerPushBlockedHandler(messageBus, clusterId);
@@ -1687,6 +1693,10 @@ class Orchestrator {
       containerId,
       watchdog
     );
+
+    if (cluster && !cluster.lyoObserver) {
+      cluster.lyoObserver = attachLyoObserver({ messageBus, cluster, storageDir: this.storageDir });
+    }
   }
 
   async _initializeIsolation(options, config, clusterId) {
