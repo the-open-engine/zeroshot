@@ -35,17 +35,25 @@ same logical digest at w=1/2/4/8, round-trips — proves the logical digest is p
 | pipeline w=4    | 314 MB/s     | 166 MB   |
 | pipeline w=8    | **354 MB/s** | 209 MB   |
 
-**Finding (not what I'd have guessed): the pipeline reclaims only ~1.37×, not ~N×** — once
-compression is offloaded, the **serial producer (read + sha256 for the dedup decision) is the
-bottleneck**, and the curve flattens (2→4→8 is sublinear). Memory stays bounded (~140–210 MB
-for a 1 GB tree; channel-bounded, so the same for 10 GB modulo the O(chunk-count) index).
+> **CORRECTED after V1 audit — the original "1.37× ceiling, producer-bound" was a
+> mismeasurement (I stopped the sweep at w=8).** Full sweep to workers=cores (18-core Mac):
 
-**Decision:** ship the bounded-parallel pipeline (modest speedup + bounded RAM), but **don't
-chase more parallelism by default.** At ~350 MB/s publish is already ≈ the S3-upload rate
-(measured 350 MB/s cold / 1.09 GB/s parallel), and the common case is _incremental_ publish
-(tiny delta). Full parallel-hashing (dedup-in-packer, at the cost of wasted compression on
-dups + more in-flight RAM) is a **metric-gated** follow-up, only if cold first-publish CPU
-proves to matter. **Senior default: bounded-parallel pipeline, workers ≈ cores, cap ≈ 8.**
+| workers | 0    | 4    | 8    | **16**   | 24            |
+| ------- | ---- | ---- | ---- | -------- | ------------- |
+| MB/s    | 259  | 316  | 365  | **471**  | 470 (plateau) |
+| ×w0     | 1.00 | 1.22 | 1.39 | **1.80** | 1.79          |
+
+**Finding (corrected): the pipeline reaches ~1.80× at workers≈cores** and plateaus there
+(core saturation). The bottleneck is **parallel compression/packing across cores, NOT the
+producer** — I measured the pure producer rate (read+sha256+dedup, no compress: a 100%-dedup
+re-publish) at **575 MB/s**, _faster_ than the 471 MB/s pipeline ceiling, so the producer has
+headroom. Memory stays bounded (~140–270 MB for a 1 GB tree across w=0→16; channel-bounded, so
+the same for 10 GB modulo the O(chunk-count) index).
+
+**Decision:** ship the bounded-parallel pipeline — **workers ≈ cores** (not "cap 8", which
+needlessly forgoes ~30%). The earlier "producer-bound / parallel-hashing is a metric-gated
+follow-up" framing was wrong: the existing design already reaches 1.8× at workers=cores with
+no further work. Memory stays bounded either way. This is the free win — take it.
 
 ### E7 — Manifest index: monolithic vs sharded ✅
 
@@ -84,17 +92,25 @@ manifests, sweep orphans **only if older than `grace`**. Three tests, all pass:
 | **Grace protects in-flight publish** (blocks written, manifest not yet committed) | grace=1h → **0 deleted** (young orphan protected), publish then commits + materializes; grace=0 → **1 deleted** (would corrupt)  |
 | Live manifest's blocks never collected (even grace=0)                             | referenced blocks kept, materializes intact                                                                                      |
 
-**Finding:** the **grace period is the entire safety mechanism** — proven by the contrast
-(grace=1h safe, grace=0 corrupts the in-flight publish). A publish writes blocks _before_
-committing the manifest that references them, so those blocks are momentarily orphan-but-young;
-grace must exceed the longest possible publish, or a concurrent GC deletes a block the
-about-to-commit manifest needs.
+**Finding — safety is TWO invariants, not one (corrected after V1 audit).** My first framing
+("grace is the _entire_ safety mechanism") was overstated. The audit proved it with a test
+(`audit_e8_grace_does_not_protect_dedup_reused_old_block`):
+
+1. **Grace ≫ max publish duration** — protects blocks a publish _freshly writes_ before
+   committing its manifest (fresh mtime). grace=0 corrupts (proven: the committed manifest
+   then fails to materialize); grace=1h is safe.
+2. **The GC mark set must cover every manifest the dedup set can reference** — a chunk
+   **reused via dedup** is _not_ rewritten, keeps its **old** mtime, and grace does **nothing**
+   for it. If its source manifest is not in the mark set, GC collects a still-referenced old
+   block → corruption, even at grace=1h.
 
 **Decision (senior default):** grace-period mark-sweep, **not** ref-counting (fragile under
-concurrent publishers). **grace ≫ max publish duration** (e.g. 1h against seconds-scale
-publishes / the 6h execution deadline). Mark set = the lineage HEAD **plus all retained history
-within the 7-day window** (§13) — miss one and you collect its blocks. GC reclaims to exactly
-the live set. This is the subsystem to test hardest in the real build (restic/kopia shipped GC
+concurrent publishers). Both invariants: **grace ≫ max _publish_ duration** (seconds–minutes,
+NOT the 6h agent deadline — that phrasing was loose); AND the mark set = every manifest whose
+chunks the in-flight dedup set (`known`) could reference — the lineage HEAD **plus all retained
+history within the 7-day window** (§13). Miss one and you collect its dedup-reused blocks. GC
+reclaims to exactly the live set. This is the subsystem to test hardest in the real build
+(restic/kopia shipped GC
 bugs here for years); the grace-period invariant above is the thing to never violate.
 
 ### E9 — Chunking: fixed-256K vs FastCDC on real git history ✅

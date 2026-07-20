@@ -178,9 +178,10 @@ fn chunk_integrity_catches_content_swap() {
         .clone();
     let public_loc = m.chunks[&public_cid].clone();
     m.chunks.insert(secret_cid, public_loc);
-    // logical content unchanged -> same digest key; the tampered PHYSICAL index is what we test
+    // logical content unchanged -> same digest key; the tampered PHYSICAL index is what we test.
+    // Write directly to disk (bypass put_manifest's content-addressed idempotent skip).
     let ld = m.logical_digest();
-    s.put_manifest(&ld, &m.to_bytes()).unwrap();
+    std::fs::write(store.join("manifests").join(&ld), m.to_bytes()).unwrap();
     assert!(
         materialize(&s, &ld, &d.path().join("o")).is_err(),
         "content swap must be caught"
@@ -199,8 +200,9 @@ fn manifest_tamper_wrong_digest_refused() {
     let s = LocalBlobStore::new(&store).unwrap();
     let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
     m.files[0].mode = 0o104755; // tamper: try to set setuid
-    // overwrite the manifest AT ITS ORIGINAL KEY with tampered bytes (corruption/tamper)
-    s.put_manifest(&dig, &m.to_bytes()).unwrap();
+    // simulate ON-DISK tamper at the original key (bypasses put_manifest's content-addressed
+    // idempotent skip, as real corruption/tampering would)
+    std::fs::write(store.join("manifests").join(&dig), m.to_bytes()).unwrap();
     assert!(
         materialize(&s, &dig, &d.path().join("o")).is_err(),
         "digest mismatch must be refused"

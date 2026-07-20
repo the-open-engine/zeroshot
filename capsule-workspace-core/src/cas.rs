@@ -92,11 +92,23 @@ impl BlobStore for LocalBlobStore {
         Ok(std::fs::read(self.block_path(id))?)
     }
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()> {
-        // atomic write-then-rename (a crash mid-write never leaves a torn manifest at the key)
+        // atomic write-then-rename with a per-writer UNIQUE temp (same fix as put_block): two
+        // writers committing the SAME content-addressed digest concurrently (two lineages with
+        // an identical tree) must not collide on the temp file.
         let p = self.manifest_path(digest);
-        let tmp = p.with_extension("tmp");
+        if p.exists() {
+            return Ok(());
+        }
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = p.with_extension(format!("{}.{}.tmp", std::process::id(), n));
         std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, &p)?;
+        if std::fs::rename(&tmp, &p).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            if !p.exists() {
+                anyhow::bail!("put_manifest: rename failed and manifest absent");
+            }
+        }
         Ok(())
     }
     fn get_manifest(&self, digest: &str) -> Result<Vec<u8>> {
