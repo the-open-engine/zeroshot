@@ -28,6 +28,9 @@ enum Cmd {
         state: Option<PathBuf>,
         #[arg(long)]
         parent: Option<String>,
+        /// 0 = single-threaded streaming; >0 = bounded-parallel pipeline with N compressors (E6)
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
     },
     Materialize {
         #[arg(long)]
@@ -75,10 +78,15 @@ fn main() -> Result<()> {
             store,
             state,
             parent,
+            workers,
         } => {
             let s = LocalBlobStore::new(&store)?;
             let known = load_known(&state);
-            let stats = daemon::publish(&tree, &s, &known, parent)?;
+            let stats = if workers == 0 {
+                daemon::publish(&tree, &s, &known, parent)?
+            } else {
+                daemon::publish_pipelined(&tree, &s, &known, parent, workers, 8)?
+            };
             println!("{}", serde_json::to_string_pretty(&stats)?);
             save_known_from_manifest(&s, &stats.manifest, &state)?;
         }

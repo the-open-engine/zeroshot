@@ -247,6 +247,186 @@ pub fn publish(
     })
 }
 
+/// BOUNDED-PARALLEL publish (E6): a producer streams+dedups files and round-robins NEW chunks
+/// through `workers` compressor threads into a single sequential packer, over bounded channels.
+/// Peak memory ≈ (workers+2)·cap·chunk + one block — bounded regardless of tree size — while
+/// reclaiming the parallelism the single-threaded streaming publish gave up. Identity is the
+/// logical digest (packing order irrelevant), so parallel packing is safe.
+pub fn publish_pipelined(
+    root: &Path,
+    store: &dyn BlobStore,
+    known: &ChunkIndex,
+    parent: Option<String>,
+    workers: usize,
+    cap: usize,
+) -> Result<PublishStats> {
+    use std::io::Read;
+    use std::sync::mpsc::sync_channel;
+    let workers = workers.max(1);
+    let t0 = Instant::now();
+    let (mut files, symlink_entries, skipped_special) = walk_entries(root)?;
+    files.sort();
+    let n_symlinks = symlink_entries.len();
+
+    let mut file_entries: Vec<FileEntry> = Vec::with_capacity(files.len());
+    let mut total_chunks = 0usize;
+    let mut raw_bytes = 0u64;
+    let mut new_chunks = 0usize;
+    let mut new_raw_bytes = 0u64;
+
+    let (new_index, n_blocks, comp_new) = std::thread::scope(|scope| -> Result<_> {
+        let (comp_tx, comp_rx) = sync_channel::<(ChunkId, Vec<u8>, u32)>(cap.max(1) * workers);
+        let mut raw_txs = Vec::with_capacity(workers);
+        let mut chandles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let (rtx, rrx) = sync_channel::<(ChunkId, Vec<u8>)>(cap.max(1));
+            raw_txs.push(rtx);
+            let ctx = comp_tx.clone();
+            chandles.push(scope.spawn(move || {
+                while let Ok((id, raw)) = rrx.recv() {
+                    let comp = zstd::stream::encode_all(raw.as_slice(), ZSTD_LEVEL).expect("zstd");
+                    let _ = ctx.send((id, comp, raw.len() as u32));
+                }
+            }));
+        }
+        drop(comp_tx);
+        let packer = scope.spawn(move || -> Result<(ChunkIndex, usize, u64)> {
+            let mut new_index = ChunkIndex::new();
+            let mut cur = BlockBuilder::new();
+            let mut n_blocks = 0usize;
+            let mut comp_new = 0u64;
+            let flush =
+                |cur: &mut BlockBuilder, ni: &mut ChunkIndex, nb: &mut usize| -> Result<()> {
+                    if cur.buf.is_empty() {
+                        return Ok(());
+                    }
+                    let (bid, bytes, members) =
+                        std::mem::replace(cur, BlockBuilder::new()).finalize();
+                    for (id, off, clen, rlen) in members {
+                        ni.insert(
+                            id,
+                            ChunkLoc {
+                                block: bid.clone(),
+                                offset: off,
+                                clen,
+                                rlen,
+                            },
+                        );
+                    }
+                    store.put_block(&bid, &bytes)?;
+                    *nb += 1;
+                    Ok(())
+                };
+            while let Ok((id, comp, rlen)) = comp_rx.recv() {
+                comp_new += comp.len() as u64;
+                let off = cur.buf.len() as u64;
+                let clen = comp.len() as u32;
+                cur.buf.extend_from_slice(&comp);
+                cur.members.push((id, off, clen, rlen));
+                if cur.buf.len() >= BLOCK_TARGET {
+                    flush(&mut cur, &mut new_index, &mut n_blocks)?;
+                }
+            }
+            flush(&mut cur, &mut new_index, &mut n_blocks)?;
+            Ok((new_index, n_blocks, comp_new))
+        });
+
+        // producer (this thread): stream + dedup + round-robin NEW chunks
+        let mut seen: std::collections::HashSet<ChunkId> = std::collections::HashSet::new();
+        let mut buf = vec![0u8; CHUNK];
+        let mut rr = 0usize;
+        for p in &files {
+            let meta = std::fs::metadata(p)?;
+            let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+            let mut fh = std::fs::File::open(p)?;
+            let mut ids: Vec<ChunkId> = Vec::new();
+            loop {
+                let mut filled = 0;
+                while filled < CHUNK {
+                    match fh.read(&mut buf[filled..])? {
+                        0 => break,
+                        n => filled += n,
+                    }
+                }
+                if filled == 0 {
+                    break;
+                }
+                let chunk = &buf[..filled];
+                total_chunks += 1;
+                raw_bytes += filled as u64;
+                let id = hex_sha256(chunk);
+                ids.push(id.clone());
+                if !known.contains_key(&id) && !seen.contains(&id) {
+                    seen.insert(id.clone());
+                    new_chunks += 1;
+                    new_raw_bytes += filled as u64;
+                    raw_txs[rr % workers].send((id, chunk.to_vec())).unwrap();
+                    rr += 1;
+                }
+                if filled < CHUNK {
+                    break;
+                }
+            }
+            file_entries.push(FileEntry {
+                path: rel,
+                mode: meta.permissions().mode(),
+                size: meta.len(),
+                chunks: ids,
+                symlink: None,
+            });
+        }
+        drop(raw_txs); // close raw channels -> compressors finish -> packer finishes
+        for h in chandles {
+            h.join().ok();
+        }
+        packer.join().unwrap()
+    })?;
+
+    file_entries.extend(symlink_entries);
+    file_entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut index: ChunkIndex = ChunkIndex::new();
+    for f in &file_entries {
+        for cid in &f.chunks {
+            if index.contains_key(cid) {
+                continue;
+            }
+            let loc = new_index
+                .get(cid)
+                .or_else(|| known.get(cid))
+                .ok_or_else(|| anyhow::anyhow!("referenced chunk {} missing", cid))?;
+            index.insert(cid.clone(), loc.clone());
+        }
+    }
+    let manifest = Manifest {
+        parent,
+        files: file_entries,
+        chunks: index,
+    };
+    let digest = manifest.logical_digest();
+    store.put_manifest(&digest, &manifest.to_bytes())?;
+    let wall = t0.elapsed().as_secs_f64();
+    Ok(PublishStats {
+        manifest: digest,
+        files: manifest.files.len(),
+        total_chunks,
+        new_chunks,
+        dedup_pct: 100.0 * (total_chunks - new_chunks) as f64 / total_chunks.max(1) as f64,
+        raw_mb: raw_bytes as f64 / 1e6,
+        new_raw_mb: new_raw_bytes as f64 / 1e6,
+        upload_mb: comp_new as f64 / 1e6,
+        zstd_ratio_on_new: new_raw_bytes as f64 / comp_new.max(1) as f64,
+        blocks: n_blocks,
+        symlinks: n_symlinks,
+        skipped_special,
+        read_hash_secs: wall,
+        compress_secs: wall,
+        pack_upload_secs: 0.0,
+        wall_secs: wall,
+        hash_throughput_mbps: raw_bytes as f64 / 1e6 / wall.max(1e-9),
+        compress_throughput_mbps: new_raw_bytes as f64 / 1e6 / wall.max(1e-9),
+    })
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct MaterializeStats {
     pub files: usize,
