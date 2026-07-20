@@ -86,96 +86,38 @@ pub fn publish(
     known: &ChunkIndex,
     parent: Option<String>,
 ) -> Result<PublishStats> {
+    use std::io::Read;
     let t0 = Instant::now();
-    let (files, symlink_entries, skipped_special) = walk_entries(root)?;
-
-    // Stage A (parallel): read + split + hash every regular file. Bytes held until dedup.
-    let t_a = Instant::now();
-    let per_file: Vec<(FileEntry, Vec<(ChunkId, Vec<u8>)>)> = files
-        .par_iter()
-        .map(|p| -> Result<_> {
-            let meta = std::fs::metadata(p)?;
-            let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
-            let raw = std::fs::read(p)?;
-            let mut ids = Vec::new();
-            let mut chunks = Vec::new();
-            for c in raw.chunks(CHUNK) {
-                let id = hex_sha256(c);
-                ids.push(id.clone());
-                chunks.push((id, c.to_vec()));
-            }
-            let entry = FileEntry {
-                path: rel,
-                mode: meta.permissions().mode(),
-                size: meta.len(),
-                chunks: ids,
-                symlink: None,
-            };
-            Ok((entry, chunks))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let read_hash_secs = t_a.elapsed().as_secs_f64();
+    let (mut files, symlink_entries, skipped_special) = walk_entries(root)?;
+    files.sort();
     let n_symlinks = symlink_entries.len();
 
-    // Dedup (sequential, cheap): first occurrence of each new chunk keeps its raw bytes.
+    // STREAMING publish: read each file CHUNK-at-a-time and pack NEW chunks straight into the
+    // current ~64 MiB block, flushing as it fills. Peak memory is bounded by ~one block + the
+    // seen-id set + the index — NOT by tree/file size. This closes the whole-file-read OOM
+    // (sparse or large files could otherwise drive RAM to multiples of apparent size).
     let mut raw_bytes: u64 = 0;
     let mut total_chunks = 0usize;
-    let mut new_raw: HashMap<ChunkId, Vec<u8>> = HashMap::new();
-    let mut file_entries = Vec::with_capacity(per_file.len());
-    for (entry, chunks) in per_file {
-        for (id, bytes) in chunks {
-            total_chunks += 1;
-            raw_bytes += bytes.len() as u64;
-            if !known.contains_key(&id) && !new_raw.contains_key(&id) {
-                new_raw.insert(id, bytes);
-            }
-        }
-        file_entries.push(entry);
-    }
-    let mut new_unique: Vec<(ChunkId, Vec<u8>)> = new_raw.into_iter().collect();
-    new_unique.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic block packing (stable digest)
-    let new_raw_bytes: u64 = new_unique.iter().map(|(_, b)| b.len() as u64).sum();
-
-    // Stage B (parallel): compress ONLY new chunks — the expensive CPU stage.
-    let t_b = Instant::now();
-    let compressed: Vec<(ChunkId, Vec<u8>, u32)> = new_unique
-        .par_iter()
-        .map(|(id, raw)| {
-            let comp = zstd::stream::encode_all(raw.as_slice(), ZSTD_LEVEL).expect("zstd");
-            (id.clone(), comp, raw.len() as u32)
-        })
-        .collect();
-    let compress_secs = t_b.elapsed().as_secs_f64();
-    let comp_new: u64 = compressed.iter().map(|(_, c, _)| c.len() as u64).sum();
-
-    // Pack into ~64 MiB blocks, then upload blocks in parallel.
-    let t_c = Instant::now();
+    let mut new_chunks = 0usize;
+    let mut new_raw_bytes: u64 = 0;
+    let mut comp_new: u64 = 0;
+    let mut file_entries: Vec<FileEntry> = Vec::with_capacity(files.len());
     let mut new_index: ChunkIndex = ChunkIndex::new();
-    let mut blocks: Vec<(BlockId, Vec<u8>)> = Vec::new();
+    let mut seen: std::collections::HashSet<ChunkId> = std::collections::HashSet::new();
     let mut cur = BlockBuilder::new();
-    for (id, comp, rlen) in compressed {
-        let off = cur.buf.len() as u64;
-        let clen = comp.len() as u32;
-        cur.buf.extend_from_slice(&comp);
-        cur.members.push((id, off, clen, rlen));
-        if cur.buf.len() >= BLOCK_TARGET {
-            let (bid, buf, members) = std::mem::replace(&mut cur, BlockBuilder::new()).finalize();
-            for (id, off, clen, rlen) in members {
-                new_index.insert(
-                    id,
-                    ChunkLoc {
-                        block: bid.clone(),
-                        offset: off,
-                        clen,
-                        rlen,
-                    },
-                );
-            }
-            blocks.push((bid, buf));
+    let mut n_blocks = 0usize;
+    let mut upload_secs = 0f64;
+    let mut buf = vec![0u8; CHUNK];
+
+    let mut flush = |cur: &mut BlockBuilder,
+                     new_index: &mut ChunkIndex,
+                     n_blocks: &mut usize,
+                     upload_secs: &mut f64|
+     -> Result<()> {
+        if cur.buf.is_empty() {
+            return Ok(());
         }
-    }
-    if !cur.buf.is_empty() {
-        let (bid, buf, members) = cur.finalize();
+        let (bid, bytes, members) = std::mem::replace(cur, BlockBuilder::new()).finalize();
         for (id, off, clen, rlen) in members {
             new_index.insert(
                 id,
@@ -187,19 +129,87 @@ pub fn publish(
                 },
             );
         }
-        blocks.push((bid, buf));
-    }
-    let n_blocks = blocks.len();
-    blocks
-        .par_iter()
-        .try_for_each(|(bid, buf)| store.put_block(bid, buf))?;
-    let pack_upload_secs = t_c.elapsed().as_secs_f64();
+        let tu = Instant::now();
+        store.put_block(&bid, &bytes)?;
+        *upload_secs += tu.elapsed().as_secs_f64();
+        *n_blocks += 1;
+        Ok(())
+    };
 
-    // Manifest = full resolved index (known ∪ new), so a cold node needs only this + blocks.
-    let mut index = known.clone();
-    index.extend(new_index);
-    file_entries.extend(symlink_entries); // preserve symlinks alongside regular files
-    file_entries.sort_by(|a, b| a.path.cmp(&b.path)); // deterministic file order (stable digest)
+    let t_stream = Instant::now();
+    for p in &files {
+        let meta = std::fs::metadata(p)?;
+        let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+        let mut fh = std::fs::File::open(p)?;
+        let mut ids: Vec<ChunkId> = Vec::new();
+        loop {
+            // fill up to CHUNK bytes, tolerating short reads
+            let mut filled = 0;
+            while filled < CHUNK {
+                match fh.read(&mut buf[filled..])? {
+                    0 => break,
+                    n => filled += n,
+                }
+            }
+            if filled == 0 {
+                break;
+            }
+            let chunk = &buf[..filled];
+            total_chunks += 1;
+            raw_bytes += filled as u64;
+            let id = hex_sha256(chunk);
+            ids.push(id.clone());
+            if known.contains_key(&id) || seen.contains(&id) {
+                continue; // dedup: already durable or already packed this publish
+            }
+            seen.insert(id.clone());
+            let comp = zstd::stream::encode_all(chunk, ZSTD_LEVEL).expect("zstd");
+            let off = cur.buf.len() as u64;
+            cur.buf.extend_from_slice(&comp);
+            cur.members
+                .push((id, off, comp.len() as u32, filled as u32));
+            new_chunks += 1;
+            new_raw_bytes += filled as u64;
+            comp_new += comp.len() as u64;
+            if cur.buf.len() >= BLOCK_TARGET {
+                flush(&mut cur, &mut new_index, &mut n_blocks, &mut upload_secs)?;
+            }
+            if filled < CHUNK {
+                break; // short final chunk
+            }
+        }
+        file_entries.push(FileEntry {
+            path: rel,
+            mode: meta.permissions().mode(),
+            size: meta.len(),
+            chunks: ids,
+            symlink: None,
+        });
+    }
+    flush(&mut cur, &mut new_index, &mut n_blocks, &mut upload_secs)?;
+    let stream_secs = t_stream.elapsed().as_secs_f64();
+    let read_hash_secs = stream_secs;
+    let compress_secs = stream_secs;
+    let pack_upload_secs = upload_secs;
+
+    // Manifest index = ONLY chunks referenced by THIS manifest's files (not the whole cumulative
+    // `known`). Prevents the manifest — the first object a cold node downloads (R2) — from
+    // growing with lineage churn independent of live-tree size.
+    file_entries.extend(symlink_entries);
+    file_entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut index: ChunkIndex = ChunkIndex::new();
+    for f in &file_entries {
+        for cid in &f.chunks {
+            if index.contains_key(cid) {
+                continue;
+            }
+            let loc = new_index
+                .get(cid)
+                .or_else(|| known.get(cid))
+                .ok_or_else(|| anyhow::anyhow!("referenced chunk {} missing from index", cid))?;
+            index.insert(cid.clone(), loc.clone());
+        }
+    }
     let manifest = Manifest {
         parent,
         files: file_entries,
@@ -211,7 +221,7 @@ pub fn publish(
     store.put_manifest(&digest, &mbytes)?;
 
     let wall = t0.elapsed().as_secs_f64();
-    let nc = new_unique.len();
+    let nc = new_chunks;
     Ok(PublishStats {
         manifest: digest,
         files: manifest.files.len(),
@@ -259,6 +269,20 @@ pub fn materialize(
     // HEAD (fenced), never from tenant input.
     if manifest.logical_digest() != manifest_digest {
         anyhow::bail!("manifest digest mismatch (corruption/tamper)");
+    }
+
+    // `out` must be a FRESH empty dir. Materializing into a dir that already holds a symlink
+    // (a leftover/reused scratch dir) would let a regular-file write escape THROUGH it (P5).
+    // Also guarantees the bind-mount target exists even for an empty manifest (P9e).
+    if out.exists() {
+        let nonempty = std::fs::read_dir(out)
+            .map(|mut it| it.next().is_some())
+            .unwrap_or(true);
+        if nonempty {
+            anyhow::bail!("materialize target is not empty: {}", out.display());
+        }
+    } else {
+        std::fs::create_dir_all(out)?;
     }
 
     // unique blocks needed (panic-safe against an adversarial/corrupt manifest)
@@ -334,7 +358,21 @@ pub fn materialize(
             if let Some(d) = p.parent() {
                 std::fs::create_dir_all(d)?;
             }
-            let mut buf = Vec::with_capacity(f.size as usize);
+            // Never trust the manifest `size` for allocation (P7). Size from the ACTUAL
+            // authenticated chunk bytes, and require the declared size to match it.
+            let actual: usize = f
+                .chunks
+                .iter()
+                .map(|cid| chunk_bytes.get(cid).map(|b| b.len()).unwrap_or(0))
+                .sum();
+            if f.size as usize != actual {
+                anyhow::bail!(
+                    "file size field does not match chunk content ({} vs {})",
+                    f.size,
+                    actual
+                );
+            }
+            let mut buf = Vec::with_capacity(actual);
             for cid in &f.chunks {
                 buf.extend_from_slice(
                     chunk_bytes

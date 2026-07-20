@@ -206,6 +206,33 @@ addressed (tests now 15/15):
 **Suite is now 15 tests, all passing.** The audit's value is exactly this: it found real
 security-relevant gaps (untrusted-manifest handling) sitting inside the stated threat model.
 
+## Adversarial round (V2) + fixes
+
+A senior-dev adversarial pass (`tests/adversarial2.rs`) found **9 issues the audit and the
+single-publish EC2 benchmarks were structurally blind to** — its sharp meta-point: single
+publishes can't see cross-generation growth or concurrency. Triaged; the security/correctness
+ones fixed (tests flipped to assert the fix), fidelity gaps documented.
+
+| #   | Finding                                                                                                                                                                 | Severity                               | Disposition                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **Sparse/large-file OOM DoS** — `std::fs::read` whole-file × parallel; sparse files bypass XFS quota (bounds _allocated_, not _apparent_). 96 KiB disk → **6.5 GB RAM** | **HIGH** (tenant-reachable, node-wide) | ✅ **FIXED** — streaming publish (chunk-at-a-time). **Re-measured: 7 MB RSS** for the same 3 GiB-apparent sparse tree (**~900×** lower). |
+| P3  | **Cumulative manifest index** — every manifest embedded all of `known`, growing with lineage churn (the R2 cold-start object)                                           | MED-HIGH                               | ✅ **FIXED** — index carries only referenced chunks (bounded to live tree).                                                              |
+| P6  | `put_block` fixed temp name → concurrent identical writes spuriously fail (~7/8)                                                                                        | MED-HIGH                               | ✅ **FIXED** — per-writer unique temp; 0 spurious errors.                                                                                |
+| P5  | Write-through a **pre-existing symlink** in a non-empty `out` escapes the workspace                                                                                     | MEDIUM                                 | ✅ **FIXED** — materialize refuses a non-empty `out`.                                                                                    |
+| P7  | materialize trusts manifest `size` for allocation (u64::MAX → crash)                                                                                                    | LOW-MED                                | ✅ **FIXED** — size validated against actual chunk bytes; clean error.                                                                   |
+| P2  | **Hardlinks** flattened to N copies (pnpm/npm/cargo) — inflates materialized size vs R2 budget                                                                          | MEDIUM                                 | 📋 documented design gap (needs inode tracking + hardlink entry type)                                                                    |
+| P8  | Non-UTF8 paths lossy (`to_string_lossy`) → collision/data-loss on Linux                                                                                                 | MED (fidelity)                         | 📋 documented (needs byte/OsString paths through the manifest)                                                                           |
+| P1b | Empty directories dropped                                                                                                                                               | LOW-MED                                | 📋 documented (needs explicit dir entries)                                                                                               |
+| P4  | **No GC** → orphan blocks + superseded manifests accumulate (**10× on-disk after 10 gens**)                                                                             | MED-HIGH (design)                      | 📋 spec §13 defers GC to phase 3; rate now quantified                                                                                    |
+
+Confirmed **FINE** (checked, correct): empty files, exact chunk-boundary files (256K/512K/±1),
+symlink loops (preserved not followed), missing-block → clean error.
+
+**Suite: 25 tests (15 + 10), all passing.** The adversarial round's highest-value contribution
+was methodological — it showed the EC2 numbers needed cross-generation and concurrency probes,
+and the two it flagged for a deployment gate (sparse-OOM, cumulative index) are both now fixed
+and re-measured.
+
 ## Bottom line
 
 Every load-bearing assumption in the spec that could be tested on one node **held**:

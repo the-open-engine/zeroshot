@@ -72,10 +72,20 @@ impl BlobStore for LocalBlobStore {
         if p.exists() {
             return Ok(());
         }
-        // write-then-rename for atomicity (torn write => wrong-named temp, never a bad block)
-        let tmp = p.with_extension("tmp");
+        // write-then-rename for atomicity. Temp name is per-writer UNIQUE (pid + counter) so
+        // two concurrent writers persisting the SAME block id do not collide on the temp file
+        // (rename is idempotent: last writer wins, both see the final block).
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = p.with_extension(format!("{}.{}.tmp", std::process::id(), n));
         std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, &p)?;
+        // rename onto the final path; if a racer already placed it, drop our temp.
+        if std::fs::rename(&tmp, &p).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            if !p.exists() {
+                anyhow::bail!("put_block: rename failed and block absent");
+            }
+        }
         Ok(())
     }
     fn get_block(&self, id: &BlockId) -> Result<Vec<u8>> {
