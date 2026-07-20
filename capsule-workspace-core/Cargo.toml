@@ -30,6 +30,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = tr
 default = []
 s3 = ["dep:aws-config", "dep:aws-sdk-s3", "dep:tokio"]
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

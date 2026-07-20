@@ -9,6 +9,10 @@ pub struct FileEntry {
     pub mode: u32,
     pub size: u64,
     pub chunks: Vec<ChunkId>,
+    /// `Some(target)` = symlink (chunks empty); `None` = regular file. Preserves the common
+    /// `node_modules/.bin` and venv symlinks that a file-only walk silently drops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symlink: Option<String>,
 }
 
 /// One publish. `parent` links the lineage; `chunks` is the full resolved index needed to

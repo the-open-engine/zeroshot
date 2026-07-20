@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const CHUNK: usize = 256 * 1024;
@@ -124,8 +124,40 @@ pub fn decompress(comp: &[u8]) -> Vec<u8> {
     zstd::stream::decode_all(comp).expect("zstd-d")
 }
 
+/// Bounded decompress — caps output allocation at `max` bytes so a crafted block cannot
+/// blow up materialize memory (decompression-bomb defense). Legit chunks are ≤ `CHUNK`.
+pub fn decompress_bounded(comp: &[u8], max: usize) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let dec = zstd::stream::read::Decoder::new(comp)?;
+    let mut out = Vec::new();
+    dec.take(max as u64 + 1).read_to_end(&mut out)?;
+    if out.len() > max {
+        anyhow::bail!("decompressed chunk exceeds bound {} (possible bomb)", max);
+    }
+    Ok(out)
+}
+
+/// Reject a manifest-supplied path that would escape the workspace root (path traversal).
+/// Realistic tenant/manifest defense: no absolute paths, no `..`, no NUL, no empty.
+pub fn safe_rel_path(rel: &str) -> Result<()> {
+    if rel.is_empty() {
+        anyhow::bail!("empty path");
+    }
+    if rel.starts_with('/') || rel.contains('\0') {
+        anyhow::bail!("unsafe path (absolute or NUL): {:?}", rel);
+    }
+    for comp in rel.split('/') {
+        if comp == ".." {
+            anyhow::bail!("path escapes workspace via '..': {:?}", rel);
+        }
+    }
+    Ok(())
+}
+
 /// A resolved chunk index (chunk_id -> location) — the dedup set consulted on publish.
-pub type ChunkIndex = HashMap<ChunkId, ChunkLoc>;
+/// BTreeMap (not HashMap) so manifest serialization is deterministic: identical input must
+/// produce an identical manifest digest (content addressing requires it).
+pub type ChunkIndex = BTreeMap<ChunkId, ChunkLoc>;
 
 pub fn read_file_chunks(path: &Path) -> Result<Vec<Vec<u8>>> {
     let data = std::fs::read(path)?;

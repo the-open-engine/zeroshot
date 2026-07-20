@@ -139,6 +139,32 @@ slow wall-times were purely single-threaded-Python artifacts.
 `cargo build --release` on the instance: **20s**. Compiles clean, no warnings of note.
 Ratios (compression, dedup) match the Python run exactly; only the throughput is now real.
 
+## Correctness & adversarial suite (Rust integration tests, `capsule-workspace-core/tests/experiments.rs`)
+
+Realistic scenarios only (untrusted tenant tree, corrupt/tampered store, weird-but-legal
+filenames) — not contrived. Each is an auditable assertion; run `cargo test`. **7 real gaps
+found; 6 fixed in the same pass, 1 is a design item.**
+
+| ID     | Scenario                                                          | Before                                                                                                                                          | Now                                                                                                                                                                                                                          |
+| ------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1     | Symlink fidelity                                                  | ⚠️ silently dropped                                                                                                                             | ✅ preserved (`symlinks_preserved`)                                                                                                                                                                                          |
+| G2     | Path traversal via tampered manifest                              | ⚠️ `out.join(..)` escaped                                                                                                                       | ✅ refused (`safe_rel_path` + `tampered_manifest_path_traversal_refused`)                                                                                                                                                    |
+| **G4** | **Manifest digest determinism**                                   | ⚠️ **non-deterministic** — HashMap chunk index serialized in random order + HashMap-order block packing → identical tree gave different digests | ✅ fixed (BTreeMap index, sorted packing, sorted files; `idempotent_and_deterministic`). **This was a genuine correctness bug for a content-addressed system** — unstable digests break manifest dedup and lineage identity. |
+| G5     | Chunk integrity on read                                           | ⚠️ none (trusted blocks blindly)                                                                                                                | ✅ verify sha256==id + rlen (`corrupt_block_detected`)                                                                                                                                                                       |
+| G6     | Decompression bomb                                                | ⚠️ unbounded decompress                                                                                                                         | ✅ bounded to CHUNK (`decompression_bomb_bounded`)                                                                                                                                                                           |
+| G7     | Special files (fifo/socket/device)                                | ⚠️ silently dropped                                                                                                                             | ✅ counted + skipped (`special_files_counted_not_silently_dropped`)                                                                                                                                                          |
+| C2     | Concurrent-writer fence                                           | ✅ already correct                                                                                                                              | ✅ verified (`concurrent_fence_rejects_stale`)                                                                                                                                                                               |
+| C7     | Idempotent republish                                              | ✅                                                                                                                                              | ✅ verified (0 new chunks)                                                                                                                                                                                                   |
+| —      | Mode preservation, mixed-tree round-trip, unicode/space filenames | —                                                                                                                                               | ✅ verified                                                                                                                                                                                                                  |
+
+**Still open as a design item (not a quick fix):**
+
+- **G3 manifest index scaling** — the manifest inlines the full chunk index (307 B/file →
+  307 MB @ 1M files), which breaks the "fetch a small manifest first" premise at scale. Fix
+  is structural (shard the index into CAS objects à la Modal/Xet), tracked separately.
+- **Memory footprint** — publish holds all new chunk bytes in RAM; a large first publish
+  would OOM. Needs streaming. (Measured next / on EC2.)
+
 ## Bottom line
 
 Every load-bearing assumption in the spec that could be tested on one node **held**:

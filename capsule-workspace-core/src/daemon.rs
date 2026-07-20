@@ -23,6 +23,8 @@ pub struct PublishStats {
     pub upload_mb: f64,
     pub zstd_ratio_on_new: f64,
     pub blocks: usize,
+    pub symlinks: usize,
+    pub skipped_special: usize,
     pub read_hash_secs: f64,
     pub compress_secs: f64,
     pub pack_upload_secs: f64,
@@ -31,13 +33,49 @@ pub struct PublishStats {
     pub compress_throughput_mbps: f64,
 }
 
-fn list_files(root: &Path) -> Vec<PathBuf> {
-    walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file() && !e.path_is_symlink())
-        .map(|e| e.into_path())
-        .collect()
+/// Walk an opaque tree, classifying entries. Regular files carry content; symlinks are
+/// preserved by target (no content); anything else (fifo/socket/device) is counted and
+/// skipped rather than silently misrepresented as an empty file.
+fn walk_entries(root: &Path) -> Result<(Vec<PathBuf>, Vec<FileEntry>, usize)> {
+    use std::os::unix::fs::MetadataExt;
+    let mut regulars = Vec::new();
+    let mut symlinks = Vec::new();
+    let mut skipped = 0usize;
+    for e in walkdir::WalkDir::new(root).into_iter() {
+        let e = e?;
+        let rel = e
+            .path()
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        if rel.is_empty() {
+            continue; // root itself
+        }
+        let ft = e.file_type();
+        if ft.is_dir() {
+            continue; // dirs are implied by file paths (empty dirs are a known minor gap)
+        } else if ft.is_symlink() {
+            let target = std::fs::read_link(e.path())?.to_string_lossy().to_string();
+            let mode = e
+                .path()
+                .symlink_metadata()
+                .map(|m| m.mode())
+                .unwrap_or(0o120777);
+            symlinks.push(FileEntry {
+                path: rel,
+                mode,
+                size: 0,
+                chunks: vec![],
+                symlink: Some(target),
+            });
+        } else if ft.is_file() {
+            regulars.push(e.into_path());
+        } else {
+            skipped += 1; // fifo / socket / block / char device — not workspace content
+        }
+    }
+    Ok((regulars, symlinks, skipped))
 }
 
 /// Publish a tree. `known` is the chunk index already durable (the dedup set the real
@@ -49,9 +87,9 @@ pub fn publish(
     parent: Option<String>,
 ) -> Result<PublishStats> {
     let t0 = Instant::now();
-    let files = list_files(root);
+    let (files, symlink_entries, skipped_special) = walk_entries(root)?;
 
-    // Stage A (parallel): read + split + hash every file. Bytes held only until dedup.
+    // Stage A (parallel): read + split + hash every regular file. Bytes held until dedup.
     let t_a = Instant::now();
     let per_file: Vec<(FileEntry, Vec<(ChunkId, Vec<u8>)>)> = files
         .par_iter()
@@ -71,11 +109,13 @@ pub fn publish(
                 mode: meta.permissions().mode(),
                 size: meta.len(),
                 chunks: ids,
+                symlink: None,
             };
             Ok((entry, chunks))
         })
         .collect::<Result<Vec<_>>>()?;
     let read_hash_secs = t_a.elapsed().as_secs_f64();
+    let n_symlinks = symlink_entries.len();
 
     // Dedup (sequential, cheap): first occurrence of each new chunk keeps its raw bytes.
     let mut raw_bytes: u64 = 0;
@@ -92,7 +132,8 @@ pub fn publish(
         }
         file_entries.push(entry);
     }
-    let new_unique: Vec<(ChunkId, Vec<u8>)> = new_raw.into_iter().collect();
+    let mut new_unique: Vec<(ChunkId, Vec<u8>)> = new_raw.into_iter().collect();
+    new_unique.sort_by(|a, b| a.0.cmp(&b.0)); // deterministic block packing (stable digest)
     let new_raw_bytes: u64 = new_unique.iter().map(|(_, b)| b.len() as u64).sum();
 
     // Stage B (parallel): compress ONLY new chunks — the expensive CPU stage.
@@ -109,7 +150,7 @@ pub fn publish(
 
     // Pack into ~64 MiB blocks, then upload blocks in parallel.
     let t_c = Instant::now();
-    let mut new_index: ChunkIndex = HashMap::new();
+    let mut new_index: ChunkIndex = ChunkIndex::new();
     let mut blocks: Vec<(BlockId, Vec<u8>)> = Vec::new();
     let mut cur = BlockBuilder::new();
     for (id, comp, rlen) in compressed {
@@ -157,6 +198,8 @@ pub fn publish(
     // Manifest = full resolved index (known ∪ new), so a cold node needs only this + blocks.
     let mut index = known.clone();
     index.extend(new_index);
+    file_entries.extend(symlink_entries); // preserve symlinks alongside regular files
+    file_entries.sort_by(|a, b| a.path.cmp(&b.path)); // deterministic file order (stable digest)
     let manifest = Manifest {
         parent,
         files: file_entries,
@@ -179,6 +222,8 @@ pub fn publish(
         upload_mb: comp_new as f64 / 1e6,
         zstd_ratio_on_new: new_raw_bytes as f64 / comp_new.max(1) as f64,
         blocks: n_blocks,
+        symlinks: n_symlinks,
+        skipped_special,
         read_hash_secs,
         compress_secs,
         pack_upload_secs,
@@ -209,13 +254,17 @@ pub fn materialize(
     let t0 = Instant::now();
     let manifest = Manifest::from_bytes(&store.get_manifest(manifest_digest)?)?;
 
-    // unique blocks needed
-    let mut needed: Vec<BlockId> = manifest
-        .files
-        .iter()
-        .flat_map(|f| f.chunks.iter())
-        .map(|cid| manifest.chunks[cid].block.clone())
-        .collect();
+    // unique blocks needed (panic-safe against an adversarial/corrupt manifest)
+    let mut needed: Vec<BlockId> = Vec::new();
+    for f in &manifest.files {
+        for cid in &f.chunks {
+            let loc = manifest
+                .chunks
+                .get(cid)
+                .ok_or_else(|| anyhow::anyhow!("manifest missing chunk index for {}", cid))?;
+            needed.push(loc.block.clone());
+        }
+    }
     needed.sort();
     needed.dedup();
 
@@ -235,28 +284,54 @@ pub fn materialize(
     uniq.sort();
     uniq.dedup();
     let t_d = Instant::now();
+    // Decompress + VERIFY each chunk: bounded (bomb defense) and content-hash == chunk id
+    // and declared rlen (detects corruption / tampering; content addressing must be checked).
     let chunk_bytes: HashMap<ChunkId, Vec<u8>> = uniq
         .par_iter()
-        .map(|cid| {
-            let loc = &manifest.chunks[cid];
-            let blk = &block_bytes[&loc.block];
-            let comp = &blk[loc.offset as usize..loc.offset as usize + loc.clen as usize];
-            (cid.clone(), decompress(comp))
+        .map(|cid| -> Result<(ChunkId, Vec<u8>)> {
+            let loc = manifest
+                .chunks
+                .get(cid)
+                .ok_or_else(|| anyhow::anyhow!("missing chunk index"))?;
+            let blk = block_bytes
+                .get(&loc.block)
+                .ok_or_else(|| anyhow::anyhow!("missing block"))?;
+            let end = loc.offset as usize + loc.clen as usize;
+            if end > blk.len() {
+                anyhow::bail!("chunk span out of block bounds");
+            }
+            let raw = decompress_bounded(&blk[loc.offset as usize..end], CHUNK)?;
+            if raw.len() != loc.rlen as usize {
+                anyhow::bail!("chunk rlen mismatch (corruption)");
+            }
+            if hex_sha256(&raw) != *cid {
+                anyhow::bail!("chunk hash != id (corruption/tamper)");
+            }
+            Ok((cid.clone(), raw))
         })
-        .collect();
+        .collect::<Result<HashMap<_, _>>>()?;
     let decompress_secs = t_d.elapsed().as_secs_f64();
 
-    // write files (parallel across files)
+    // write files + symlinks (parallel across entries), with path-traversal validation
     let t_w = Instant::now();
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     manifest.files.par_iter().try_for_each(|f| -> Result<()> {
+        safe_rel_path(&f.path)?;
         let p = out.join(&f.path);
         if let Some(d) = p.parent() {
             std::fs::create_dir_all(d)?;
         }
+        if let Some(target) = &f.symlink {
+            std::os::unix::fs::symlink(target, &p)?;
+            return Ok(());
+        }
         let mut buf = Vec::with_capacity(f.size as usize);
         for cid in &f.chunks {
-            buf.extend_from_slice(&chunk_bytes[cid]);
+            buf.extend_from_slice(
+                chunk_bytes
+                    .get(cid)
+                    .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
+            );
         }
         std::fs::write(&p, &buf)?;
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode))?;
