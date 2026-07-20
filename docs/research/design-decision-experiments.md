@@ -72,3 +72,27 @@ sub-second download and cold-full needs it all anyway. Add **locality-based shar
 ~500k–1M, or (b) warm incremental-materialize latency becomes the bottleneck. Do **not** reach
 for content-hash/prefix sharding — it doesn't help the case that matters. G3 is real only at
 extreme scale.
+
+### E8 — Garbage collection: grace-period mark-sweep ✅ (highest-risk subsystem)
+
+Implemented `gc::collect(store, live_manifests, grace)` — mark referenced blocks from all live
+manifests, sweep orphans **only if older than `grace`**. Three tests, all pass:
+
+| Test                                                                              | Result                                                                                                                           |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Reclaims orphans (10 gens full churn, live=[HEAD], grace=0)                       | store **41.9 MB → 4.19 MB = exactly the live set** (9 orphan blocks + 9 superseded manifests collected); HEAD still materializes |
+| **Grace protects in-flight publish** (blocks written, manifest not yet committed) | grace=1h → **0 deleted** (young orphan protected), publish then commits + materializes; grace=0 → **1 deleted** (would corrupt)  |
+| Live manifest's blocks never collected (even grace=0)                             | referenced blocks kept, materializes intact                                                                                      |
+
+**Finding:** the **grace period is the entire safety mechanism** — proven by the contrast
+(grace=1h safe, grace=0 corrupts the in-flight publish). A publish writes blocks _before_
+committing the manifest that references them, so those blocks are momentarily orphan-but-young;
+grace must exceed the longest possible publish, or a concurrent GC deletes a block the
+about-to-commit manifest needs.
+
+**Decision (senior default):** grace-period mark-sweep, **not** ref-counting (fragile under
+concurrent publishers). **grace ≫ max publish duration** (e.g. 1h against seconds-scale
+publishes / the 6h execution deadline). Mark set = the lineage HEAD **plus all retained history
+within the 7-day window** (§13) — miss one and you collect its blocks. GC reclaims to exactly
+the live set. This is the subsystem to test hardest in the real build (restic/kopia shipped GC
+bugs here for years); the grace-period invariant above is the thing to never violate.
