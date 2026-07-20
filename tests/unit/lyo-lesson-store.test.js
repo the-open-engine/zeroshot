@@ -644,6 +644,7 @@ describe('LYO decision log (v0.2)', function () {
     });
 
     assert.ok(decision.decision_id.startsWith('dec_'));
+    assert.strictEqual(decision.policy, 'thompson-beta@1');
     assert.strictEqual(decision.run_id, 'run-decision');
     assert.strictEqual(decision.cycle_index, 1);
     assert.strictEqual(decision.null_arm, 0);
@@ -676,6 +677,85 @@ describe('LYO decision log (v0.2)', function () {
       () =>
         store.recordDecision({ run_id: 'r', failure_class: 'x', candidates: 'nope', selected: [] }),
       /candidates and selected/
+    );
+
+    store.close();
+  });
+
+  it('accepts a pluggable selection policy and records its id', function () {
+    const store = new LessonStore(':memory:');
+    const veteran = makeLesson(store, { trigger_cue: 'policy veteran cue' });
+    const underdog = makeLesson(store, { trigger_cue: 'policy underdog cue' });
+    applyOutcomes(store, veteran.lesson_id, Array(9).fill('passed'));
+
+    // A deterministic policy that ALWAYS picks the weakest posterior mean —
+    // the opposite of what Thompson-Beta would usually do. Ignores rng.
+    const contrarian = {
+      name: 'contrarian',
+      version: 7,
+      sampleSelection(candidates, limit) {
+        return candidates
+          .map((candidate, index) => ({
+            index,
+            score: null,
+            mean: candidate.alpha / (candidate.alpha + candidate.beta),
+          }))
+          .sort((a, b) => a.mean - b.mean)
+          .slice(0, Math.max(0, limit));
+      },
+    };
+
+    const { selected, candidates, null_arm, policy } = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 1,
+      policy: contrarian,
+    });
+
+    assert.strictEqual(policy, 'contrarian@7');
+    assert.strictEqual(null_arm, 0);
+    assert.strictEqual(selected.length, 1);
+    assert.strictEqual(selected[0].lesson_id, underdog.lesson_id); // the weak one
+    assert.strictEqual(selected[0].sampled_score, null);
+    // Deterministic policy: MC replays the identical draw => propensity 0/1.
+    const byId = new Map(candidates.map((entry) => [entry.lesson_id, entry]));
+    assert.strictEqual(byId.get(underdog.lesson_id).propensity, 1);
+    assert.strictEqual(byId.get(veteran.lesson_id).propensity, 0);
+
+    const decision = store.recordDecision({
+      run_id: 'run-policy',
+      failure_class: 'output_generation',
+      candidates,
+      selected: selected.map((entry) => ({
+        lesson_id: entry.lesson_id,
+        score: entry.sampled_score,
+      })),
+      policy,
+    });
+    assert.strictEqual(decision.policy, 'contrarian@7');
+
+    store.close();
+  });
+
+  it('resolves registry policy ids and rejects unknown ones', function () {
+    const store = new LessonStore(':memory:');
+    makeLesson(store, { trigger_cue: 'registry cue' });
+
+    const viaString = store.selectWithDecision({
+      failure_class: 'output_generation',
+      limit: 1,
+      policy: 'thompson-beta@1',
+      rng: mulberry32(9),
+    });
+    assert.strictEqual(viaString.policy, 'thompson-beta@1');
+    assert.strictEqual(viaString.selected.length, 1);
+
+    assert.throws(
+      () =>
+        store.selectWithDecision({
+          failure_class: 'output_generation',
+          policy: 'no-such-policy@9',
+        }),
+      /unknown selection policy/
     );
 
     store.close();
@@ -741,8 +821,13 @@ describe('LYO decision log (v0.2)', function () {
         .all()
         .map((column) => column.name);
       assert.ok(applicationColumns.includes('decision_id'), 'migration adds decision_id');
+      const decisionColumns = store.db
+        .prepare('PRAGMA table_info(lesson_decision)')
+        .all()
+        .map((column) => column.name);
+      assert.ok(decisionColumns.includes('policy'), 'migration adds policy');
       assert.deepStrictEqual(store.db.prepare('SELECT * FROM lesson_decision').all(), []);
-      assert.strictEqual(store._getMeta('schema_version'), '2');
+      assert.strictEqual(store._getMeta('schema_version'), '3');
 
       // Pre-existing data untouched: receipt still counted, decision_id NULL.
       const receipt = store.db
@@ -772,6 +857,7 @@ describe('LYO decision log (v0.2)', function () {
         selected: [],
       });
       assert.ok(decision.decision_id.startsWith('dec_'));
+      assert.strictEqual(decision.policy, 'thompson-beta@1');
 
       store.close();
     } finally {

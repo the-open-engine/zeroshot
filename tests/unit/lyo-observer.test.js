@@ -395,6 +395,7 @@ describe('LYO observer lesson learning', function () {
     assert.strictEqual(decision.cycle_index, 1);
     assert.strictEqual(decision.failure_class, 'output_generation');
     assert.strictEqual(decision.null_arm, 0);
+    assert.strictEqual(decision.policy, 'thompson-beta@1');
 
     const candidates = JSON.parse(decision.candidates);
     assert.strictEqual(candidates.length, 1);
@@ -404,7 +405,7 @@ describe('LYO observer lesson learning', function () {
     const selected = JSON.parse(decision.selected);
     assert.strictEqual(selected.length, 1);
     assert.strictEqual(selected[0].lesson_id, candidates[0].lesson_id);
-    assert.ok(selected[0].theta >= 0 && selected[0].theta <= 1);
+    assert.ok(selected[0].score >= 0 && selected[0].score <= 1);
 
     const application = store.db.prepare('SELECT * FROM lesson_application').get();
     assert.strictEqual(application.decision_id, decision.decision_id);
@@ -456,6 +457,44 @@ describe('LYO observer lesson learning', function () {
     assert.strictEqual(applications[0].decision_id, decisions[0].decision_id);
     assert.strictEqual(applications[1].outcome, 'pending');
     assert.strictEqual(applications[1].decision_id, decisions[1].decision_id);
+
+    detach();
+    store.close();
+    ledger.close();
+  });
+
+  it('uses an injected selection policy and records its id in the decision', function () {
+    const ledger = new Ledger(':memory:');
+    const messageBus = new MessageBus(ledger);
+    const store = new LessonStore(':memory:');
+    const clusterId = 'lyo-policy-1';
+    const cluster = createCluster(clusterId);
+
+    // Deterministic no-op policy: picks the first `limit` candidates as-is.
+    const echoPolicy = {
+      name: 'echo',
+      version: 2,
+      sampleSelection(candidates, limit) {
+        return candidates
+          .map((candidate, index) => ({ index, score: null }))
+          .slice(0, Math.max(0, limit));
+      },
+    };
+
+    const detach = attachLyoObserver({
+      messageBus,
+      cluster,
+      lessonStore: store,
+      selectionPolicy: echoPolicy,
+    });
+    publishValidation(messageBus, clusterId, {
+      approved: false,
+      text: 'Tests failed: npm test',
+      errors: ['missing regression coverage'],
+    });
+
+    const decision = store.db.prepare('SELECT * FROM lesson_decision').get();
+    assert.strictEqual(decision.policy, 'echo@2');
 
     detach();
     store.close();

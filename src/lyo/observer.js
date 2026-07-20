@@ -118,7 +118,7 @@ function openLessonStore({ cluster, lessonStore, storageDir }) {
 // lesson, Thompson-select lessons for this failure class, log the decision
 // (full candidate snapshot + selection propensities, §5.3), and record one
 // application row per selected lesson (grounded attribution).
-function learnFromRejection({ store, cluster, message, messageBus }) {
+function learnFromRejection({ store, cluster, message, messageBus, selectionPolicy = null }) {
   const { failure_class, cue } = classifyValidationFailure(message);
   store.createLesson({
     failure_class,
@@ -130,9 +130,10 @@ function learnFromRejection({ store, cluster, message, messageBus }) {
   });
   // The just-created candidate competes via its Beta(1,1) draw — intended
   // exploration, not a shortcut (design doc §4.2).
-  const { selected, candidates, null_arm } = store.selectWithDecision({
+  const { selected, candidates, null_arm, policy } = store.selectWithDecision({
     failure_class,
     limit: 2,
+    policy: selectionPolicy,
   });
   // Cycle index = interventions already published in this run + 1 (this
   // decision's intervention is published right after learnFromRejection
@@ -153,9 +154,10 @@ function learnFromRejection({ store, cluster, message, messageBus }) {
     candidates,
     selected: selected.map((lesson) => ({
       lesson_id: lesson.lesson_id,
-      theta: lesson.sampled_score,
+      score: lesson.sampled_score,
     })),
     null_arm,
+    policy,
   });
   return selected.map((lesson) => {
     const application = store.recordApplication({
@@ -201,7 +203,7 @@ function summarizeLessons(lessonApplications) {
   }));
 }
 
-function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir }) {
+function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selectionPolicy }) {
   if (!messageBus) {
     throw new Error('attachLyoObserver: messageBus is required');
   }
@@ -215,6 +217,11 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir }) {
   }
 
   const { store, owned } = openLessonStore({ cluster, lessonStore, storageDir });
+  // Selection policy resolution order (§4.2): explicit attach option ->
+  // cluster.config.lyo.policy (registry id string, e.g. 'thompson-beta@1')
+  // -> default. An unknown id throws inside the store per decision and
+  // degrades to the existing no-lessons warning path.
+  const resolvedSelectionPolicy = selectionPolicy ?? cluster.config.lyo.policy ?? null;
   let pendingIntervention = null;
 
   const unsubscribe = messageBus.subscribe((message) => {
@@ -256,7 +263,13 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir }) {
     let lessonApplications = null;
     if (store) {
       try {
-        lessonApplications = learnFromRejection({ store, cluster, message, messageBus });
+        lessonApplications = learnFromRejection({
+          store,
+          cluster,
+          message,
+          messageBus,
+          selectionPolicy: resolvedSelectionPolicy,
+        });
       } catch (error) {
         console.warn('[lyo] lesson pipeline failed, continuing without lessons:', error.message);
         lessonApplications = null;
