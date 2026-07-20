@@ -84,7 +84,8 @@ extreme scale.
 ### E8 — Garbage collection: grace-period mark-sweep ✅ (highest-risk subsystem)
 
 Implemented `gc::collect(store, live_manifests, grace)` — mark referenced blocks from all live
-manifests, sweep orphans **only if older than `grace`**. Three tests, all pass:
+manifests, sweep orphans **only if older than `grace`**. Six tests (3 core + 3 adversarial-round-2
+hardening), all pass:
 
 | Test                                                                              | Result                                                                                                                           |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -96,9 +97,14 @@ manifests, sweep orphans **only if older than `grace`**. Three tests, all pass:
 ("grace is the _entire_ safety mechanism") was overstated. The audit proved it with a test
 (`audit_e8_grace_does_not_protect_dedup_reused_old_block`):
 
-1. **Grace ≫ max publish duration** — protects blocks a publish _freshly writes_ before
-   committing its manifest (fresh mtime). grace=0 corrupts (proven: the committed manifest
-   then fails to materialize); grace=1h is safe.
+1. **Grace ≫ max publish duration `+ max clock skew`** — protects blocks a publish _freshly
+   writes_ before committing its manifest (fresh mtime). grace=0 corrupts (proven: the committed
+   manifest then fails to materialize); grace=1h is safe. The `+ max clock skew` term matters
+   because orphan age is derived from **filesystem mtime**, set by the writer host; if GC runs on
+   a host whose clock is ahead of the writer's, a block can _appear_ older than it is. The real
+   collector must compute age against a **monotonic per-object commit timestamp in Postgres**
+   (lineage table), never trust file mtime across hosts — mtime is only sound in this single-host
+   prototype.
 2. **The GC mark set must cover every manifest the dedup set can reference** — a chunk
    **reused via dedup** is _not_ rewritten, keeps its **old** mtime, and grace does **nothing**
    for it. If its source manifest is not in the mark set, GC collects a still-referenced old
@@ -112,6 +118,22 @@ history within the 7-day window** (§13). Miss one and you collect its dedup-reu
 reclaims to exactly the live set. This is the subsystem to test hardest in the real build
 (restic/kopia shipped GC
 bugs here for years); the grace-period invariant above is the thing to never violate.
+
+**Adversarial round 2 — three operability fixes + one enforcement note** (probes in
+`tests/adversarial3.rs`, regression tests in `tests/e8_gc.rs`):
+
+| Finding (round-2 probe)                                                                                                                                                           | Fix                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GC not concurrency-safe** — two racing sweepers hit `ENOENT` on `metadata()`/`remove_file` mid-sweep and errored (partial sweep every round).                                  | MARK/SWEEP now tolerate "already gone" (idempotent `rm` closure + `metadata` NotFound → skip). Regression: 2 real threads sweep a shared store → **0 spurious errors**, store ends empty. (Real deploy still single-flights GC via lease — concurrent sweeps just waste work, they don't corrupt.) |
+| **One dangling live manifest wedged all GC** — a missing `live` digest was a hard error → store grows unbounded, no partial progress, no signal.                                 | Missing live manifest is **skipped + counted** (`missing_live_manifests`) so one dangling ref can't stop reclamation; the count is surfaced for alerting (a live HEAD that vanished is a real anomaly).                     |
+| **Leftover `.tmp` blocks leaked forever** — a crash between `put_block`'s write and rename left a temp file the sweep skipped unconditionally → unbounded leak across crashes.    | `.tmp` files are reclaimed once **`age >= grace`** (`tmp_deleted`); a _young_ `.tmp` is still protected (it may belong to an in-flight write mid-rename).                                                                  |
+
+**Enforcement note (known ⊆ mark-set).** Invariant #2 above is currently a _documented_ contract:
+the caller must pass a `live` set that covers every manifest the in-flight dedup index (`known`)
+can reference. In the real build this must be **mechanically enforced**, not documented — the
+collector should derive the mark set from the same lineage rows that seed `known` (single source of
+truth), so it is impossible to dedup-reuse a block whose source manifest is outside the mark set.
+Until then, treat "grace protects only _freshly written_ blocks" as the load-bearing caveat.
 
 ### E9 — Chunking: fixed-256K vs FastCDC on real git history ✅
 
@@ -186,7 +208,7 @@ as a canonical regular). Preservation still matters for **in-tree** links (cargo
 some build caches), and the at-scale materialize preserved links + size with no blowup. Net:
 **keep the fix (correct, cheap), but it's lower-priority than the pnpm framing suggested.**
 
-### E12 — Path encoding: measure the non-UTF8 data-loss (Linux) ✅ (measured; impl deferred)
+### E12 — Path encoding: measure the non-UTF8 data-loss (Linux) ✅ (measured; fail-fast shipped, full byte-path deferred)
 
 On real Linux, a 3-file tree with two distinct non-UTF8 names (`file\xff`, `file\xfe`)
 round-tripped to **2 files — 1 silently lost** to lossy-`String` collision (both decode to
@@ -196,7 +218,14 @@ round-tripped to **2 files — 1 silently lost** to lossy-`String` collision (bo
 correctness fix (silent data loss), yet real code/dependency workspaces essentially never
 contain non-UTF8 filenames, so it's a "fix when touching that code," not a launch gate. Did
 **not** do the full byte-path refactor (large, entangles the manifest/digest/materialize) for
-a near-never input; documented the exact loss instead.
+a near-never input.
+
+**Interim fix shipped (adversarial round 2): fail-fast, not silent loss.** `walk_entries` now
+rejects a non-UTF8 path or symlink target with a clean error (`non-UTF8 path not supported
+(fail-fast)`) instead of lossily decoding it. This honors the repo's "FAIL FAST > silent failure"
+rule: the near-never input now **stops the publish loudly** rather than dropping a file, and it's a
+one-line change to swap in real byte-paths later. Both publish paths gate through `walk_entries`, so
+the guarantee is uniform.
 
 ### E13 — Cross-tenant dedup scope: per-org vs global ✅
 

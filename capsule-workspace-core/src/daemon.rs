@@ -50,20 +50,25 @@ fn walk_entries(root: &Path) -> Result<(Vec<PathBuf>, Vec<FileEntry>, usize)> {
     let mut skipped = 0usize;
     for e in walkdir::WalkDir::new(root).into_iter() {
         let e = e?;
-        let rel = e
-            .path()
-            .strip_prefix(root)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        if rel.is_empty() {
+        let rp = e.path().strip_prefix(root).unwrap();
+        if rp.as_os_str().is_empty() {
             continue; // root itself
         }
+        // FAIL FAST > silent (E12): a non-UTF8 name would be lossily decoded and could collide
+        // with another name → silent data loss. Error instead. (byte-paths is the real fix.)
+        let rel = rp
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("non-UTF8 path not supported (fail-fast): {:?}", rp))?
+            .to_string();
         let ft = e.file_type();
         if ft.is_dir() {
             continue; // dirs are implied by file paths (empty dirs are a known minor gap)
         } else if ft.is_symlink() {
-            let target = std::fs::read_link(e.path())?.to_string_lossy().to_string();
+            let tgt = std::fs::read_link(e.path())?;
+            let target = tgt
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("non-UTF8 symlink target (fail-fast): {:?}", tgt))?
+                .to_string();
             let mode = e
                 .path()
                 .symlink_metadata()
@@ -403,7 +408,10 @@ pub fn publish_pipelined(
                     seen.insert(id.clone());
                     new_chunks += 1;
                     new_raw_bytes += filled as u64;
-                    raw_txs[rr % workers].send((id, chunk.to_vec())).unwrap();
+                    // clean error (not panic) if a compressor died; thread::scope still joins all.
+                    raw_txs[rr % workers]
+                        .send((id, chunk.to_vec()))
+                        .map_err(|_| anyhow::anyhow!("compressor worker terminated mid-publish"))?;
                     rr += 1;
                 }
                 if filled < CHUNK {
