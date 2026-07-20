@@ -253,6 +253,7 @@ fn symlink_no_write_through() {
             size: 0,
             chunks: vec![],
             symlink: Some(escape.to_string_lossy().into()),
+            hardlink: None,
         },
         FileEntry {
             path: "s/x".into(),
@@ -260,6 +261,7 @@ fn symlink_no_write_through() {
             size: 5,
             chunks: vec![cid],
             symlink: None,
+            hardlink: None,
         },
     ];
     let ld = m.logical_digest();

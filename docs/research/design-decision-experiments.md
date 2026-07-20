@@ -147,3 +147,16 @@ helps if the target node is still alive between a project's runs. An **active** 
 runs) keeps its node from idle-reaping → warm; a **sparse** project (touched once a day) gets
 its node reaped → cold fallback (58%). So the real knob is **soft affinity + a reap timer
 tuned so active projects stay warm** — not a binary "affinity vs economy" trade.
+
+### E11 — Hardlinks: implement inode-tracking preservation ✅ (impl + local test; EC2 density below)
+
+**Implemented** hardlink preservation: `walk_entries` tracks `(dev,ino)`, sorts by path so the
+lexicographically-first path is the canonical (chunked) file, and emits later same-inode paths
+as **hardlink entries** (no chunks). Materialize gained a 3rd phase: regular files → hardlinks
+(`hard_link` to the canonical) → symlinks. Added `FileEntry.hardlink: Option<String>` (in the
+logical digest). Test `hardlinks_preserved` flips the old "broken" probe: 3 paths → **1 inode,
+nlink=3** after materialize (was 3 distinct inodes / N copies). 30 tests green.
+
+**Decision (senior default): preserve hardlinks (inode-track).** pnpm's entire store model is
+hardlinks; without this a linked tree materializes to N full copies and can blow the R2 5 GB
+budget. The fix is cheap and localized. _(Real pnpm density + at-scale verify in the EC2 batch.)_

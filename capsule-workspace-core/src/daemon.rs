@@ -39,10 +39,14 @@ pub struct PublishStats {
 /// Walk an opaque tree, classifying entries. Regular files carry content; symlinks are
 /// preserved by target (no content); anything else (fifo/socket/device) is counted and
 /// skipped rather than silently misrepresented as an empty file.
+/// Returns (regular files to chunk [canonical, sorted], extra entries [symlinks + hardlinks],
+/// skipped-special count). Hardlinks (same dev+ino as an already-seen regular) become hardlink
+/// entries pointing at the lexicographically-first path for that inode — so a pnpm/npm/cargo
+/// linked tree materializes with the links intact instead of N full copies.
 fn walk_entries(root: &Path) -> Result<(Vec<PathBuf>, Vec<FileEntry>, usize)> {
     use std::os::unix::fs::MetadataExt;
-    let mut regulars = Vec::new();
-    let mut symlinks = Vec::new();
+    let mut regs: Vec<(PathBuf, String, u32, u64, u64, u64, u64)> = Vec::new(); // path,rel,mode,size,dev,ino,nlink
+    let mut extra: Vec<FileEntry> = Vec::new(); // symlinks (hardlinks appended after resolution)
     let mut skipped = 0usize;
     for e in walkdir::WalkDir::new(root).into_iter() {
         let e = e?;
@@ -65,20 +69,52 @@ fn walk_entries(root: &Path) -> Result<(Vec<PathBuf>, Vec<FileEntry>, usize)> {
                 .symlink_metadata()
                 .map(|m| m.mode())
                 .unwrap_or(0o120777);
-            symlinks.push(FileEntry {
+            extra.push(FileEntry {
                 path: rel,
                 mode,
                 size: 0,
                 chunks: vec![],
                 symlink: Some(target),
+                hardlink: None,
             });
         } else if ft.is_file() {
-            regulars.push(e.into_path());
+            let m = e.metadata()?;
+            regs.push((
+                e.path().to_path_buf(),
+                rel,
+                m.mode(),
+                m.len(),
+                m.dev(),
+                m.ino(),
+                m.nlink(),
+            ));
         } else {
             skipped += 1; // fifo / socket / block / char device — not workspace content
         }
     }
-    Ok((regulars, symlinks, skipped))
+    // resolve hardlinks deterministically: sort by path; first path per inode is canonical.
+    regs.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut canonical: std::collections::HashMap<(u64, u64), String> =
+        std::collections::HashMap::new();
+    let mut to_chunk = Vec::new();
+    for (path, rel, mode, size, dev, ino, nlink) in regs {
+        if nlink > 1 {
+            if let Some(canon) = canonical.get(&(dev, ino)) {
+                extra.push(FileEntry {
+                    path: rel,
+                    mode,
+                    size,
+                    chunks: vec![],
+                    symlink: None,
+                    hardlink: Some(canon.clone()),
+                });
+                continue;
+            }
+            canonical.insert((dev, ino), rel.clone());
+        }
+        to_chunk.push(path);
+    }
+    Ok((to_chunk, extra, skipped))
 }
 
 /// Publish a tree. `known` is the chunk index already durable (the dedup set the real
@@ -93,7 +129,10 @@ pub fn publish(
     let t0 = Instant::now();
     let (mut files, symlink_entries, skipped_special) = walk_entries(root)?;
     files.sort();
-    let n_symlinks = symlink_entries.len();
+    let n_symlinks = symlink_entries
+        .iter()
+        .filter(|f| f.symlink.is_some())
+        .count();
 
     // STREAMING publish: read each file CHUNK-at-a-time and pack NEW chunks straight into the
     // current ~64 MiB block, flushing as it fills. Peak memory is bounded by ~one block + the
@@ -187,6 +226,7 @@ pub fn publish(
             size: meta.len(),
             chunks: ids,
             symlink: None,
+            hardlink: None,
         });
     }
     flush(&mut cur, &mut new_index, &mut n_blocks, &mut upload_secs)?;
@@ -266,7 +306,10 @@ pub fn publish_pipelined(
     let t0 = Instant::now();
     let (mut files, symlink_entries, skipped_special) = walk_entries(root)?;
     files.sort();
-    let n_symlinks = symlink_entries.len();
+    let n_symlinks = symlink_entries
+        .iter()
+        .filter(|f| f.symlink.is_some())
+        .count();
 
     let mut file_entries: Vec<FileEntry> = Vec::with_capacity(files.len());
     let mut total_chunks = 0usize;
@@ -373,6 +416,7 @@ pub fn publish_pipelined(
                 size: meta.len(),
                 chunks: ids,
                 symlink: None,
+                hardlink: None,
             });
         }
         drop(raw_txs); // close raw channels -> compressors finish -> packer finishes
@@ -526,15 +570,16 @@ pub fn materialize(
         .collect::<Result<HashMap<_, _>>>()?;
     let decompress_secs = t_d.elapsed().as_secs_f64();
 
-    // Write in two phases so a malicious symlink cannot become an ANCESTOR of a file write
-    // (write-through-symlink escape): (1) all regular files into real dirs, then (2) symlinks.
+    // Write in phases so a malicious symlink cannot become an ANCESTOR of a file write
+    // (write-through-symlink escape): (1) regular files into real dirs, (2) hardlinks (their
+    // canonical target is a regular file, written in phase 1), (3) symlinks last.
     // Assumes `out` starts empty (the daemon materializes into a fresh dir per pod).
     let t_w = Instant::now();
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     manifest
         .files
         .par_iter()
-        .filter(|f| f.symlink.is_none())
+        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
         .try_for_each(|f| -> Result<()> {
             safe_rel_path(&f.path)?;
             let p = out.join(&f.path);
@@ -568,6 +613,18 @@ pub fn materialize(
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
             Ok(())
         })?;
+    // phase 2: hardlinks (canonical target already written as a regular file)
+    for f in manifest.files.iter().filter(|f| f.hardlink.is_some()) {
+        safe_rel_path(&f.path)?;
+        let target = f.hardlink.as_ref().unwrap();
+        safe_rel_path(target)?;
+        let p = out.join(&f.path);
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        std::fs::hard_link(out.join(target), &p)?;
+    }
+    // phase 3: symlinks
     for f in manifest.files.iter().filter(|f| f.symlink.is_some()) {
         safe_rel_path(&f.path)?;
         let p = out.join(&f.path);

@@ -81,7 +81,7 @@ fn empty_directories_silently_dropped() {
 // can push a "fits in 5GB" workspace past the R2 budget after materialize.
 // ============================================================================
 #[test]
-fn hardlinks_broken_relationship_lost() {
+fn hardlinks_preserved() {
     let d = tmp();
     let tree = d.path().join("t");
     write(&tree.join("pkg/real.js"), &vec![9u8; 200_000]);
@@ -114,13 +114,18 @@ fn hardlinks_broken_relationship_lost() {
         distinct_inodes.len(),
         m1.len() + m2.len() + m3.len()
     );
-    // DESIGN-GAP: relationship lost -> 3 independent inodes, nlink collapses to 1, and the
-    // on-disk tree is 3x the original's linked footprint.
-    assert_eq!(m1.nlink(), 1, "hardlink relationship lost");
+    // FIXED (E11): the hardlink relationship is preserved -> ONE inode, nlink==3, no N-copy
+    // blowup on the materialized NVMe tree (pnpm/npm/cargo case).
     assert_eq!(
         distinct_inodes.len(),
-        3,
-        "each path is now an independent copy"
+        1,
+        "all three paths share one inode after materialize"
+    );
+    assert_eq!(m1.nlink(), 3, "hardlink count preserved");
+    // content still correct
+    assert_eq!(
+        fs::read(out.join("pkg/real.js")).unwrap(),
+        fs::read(out.join("node_modules/a.js")).unwrap()
     );
 }
 
@@ -284,6 +289,7 @@ fn prepopulated_symlink_write_through_escape() {
         size: 13,
         chunks: vec![cid],
         symlink: None,
+        hardlink: None,
     }];
     let ld = m.logical_digest();
     s.put_manifest(&ld, &m.to_bytes()).unwrap();
@@ -410,6 +416,7 @@ fn materialize_trusts_size_field_for_allocation() {
         size: u64::MAX, // <-- 5-byte content, but claims u64::MAX
         chunks: vec![cid],
         symlink: None,
+        hardlink: None,
     }];
     // recompute digest so the integrity check PASSES — this is a *self-consistent* manifest.
     let ld = m.logical_digest();
@@ -464,6 +471,7 @@ fn non_utf8_paths_collide_and_lose_files() {
             size: 6,
             chunks: vec![cid.clone()],
             symlink: None,
+            hardlink: None,
         },
         FileEntry {
             path: collided.clone(),
@@ -471,6 +479,7 @@ fn non_utf8_paths_collide_and_lose_files() {
             size: 6,
             chunks: vec![cid],
             symlink: None,
+            hardlink: None,
         },
     ];
     let ld = m.logical_digest();

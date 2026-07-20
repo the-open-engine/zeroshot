@@ -13,6 +13,11 @@ pub struct FileEntry {
     /// `node_modules/.bin` and venv symlinks that a file-only walk silently drops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symlink: Option<String>,
+    /// `Some(canonical_path)` = a hardlink to another entry in this tree (same inode). Chunks
+    /// empty. Preserves the pnpm/npm/cargo hardlink model so a linked tree doesn't materialize
+    /// to N full copies (E11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardlink: Option<String>,
 }
 
 /// One publish. `parent` links the lineage; `chunks` is the full resolved index needed to
@@ -47,6 +52,7 @@ impl Manifest {
             mode: u32,
             size: u64,
             symlink: &'a Option<String>,
+            hardlink: &'a Option<String>,
             chunks: &'a Vec<ChunkId>,
         }
         #[derive(Serialize)]
@@ -65,6 +71,7 @@ impl Manifest {
                     mode: f.mode,
                     size: f.size,
                     symlink: &f.symlink,
+                    hardlink: &f.hardlink,
                     chunks: &f.chunks,
                 })
                 .collect(),
