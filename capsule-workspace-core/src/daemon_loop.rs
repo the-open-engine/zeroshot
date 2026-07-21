@@ -63,7 +63,7 @@ pub fn spawn_health_server(listener: TcpListener, ready: Arc<AtomicBool>) -> Joi
 #[cfg(feature = "pg")]
 mod cycle {
     use crate::cas::{BlobStore, BlockId, ChunkIndex};
-    use crate::daemon::{materialize, publish};
+    use crate::daemon::{materialize, publish_pipelined};
     use crate::ifaces::{Fence, LineageId};
     use crate::lineage::{Head, LineageError, LineageStore};
     use crate::manifest::Manifest;
@@ -139,7 +139,15 @@ mod cycle {
             None => (ChunkIndex::new(), None, Fence(0)),
         };
 
-        let stats = publish(tree, store, &known, parent)?; // upload new blocks + put manifest
+        // O3: the daemon uses the bounded-PARALLEL publish pipeline (measured ~2× faster than the
+        // single-threaded streaming publish on a 2 GB tree: 20.4s→10.4s at 16 workers, plateauing
+        // there). `workers` = available parallelism capped at 16 (a 2–4 vCPU pod uses 2–4; a big node
+        // gains nothing past 16 for this workload). Produces the SAME logical manifest as streaming.
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(1, 16);
+        let stats = publish_pipelined(tree, store, &known, parent, workers, 8)?;
 
         // Change-detection: with content-only manifest identity, an unchanged tree yields the SAME
         // digest as the live HEAD → nothing to commit. Skip touch + advance so an idle daemon does no

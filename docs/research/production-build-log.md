@@ -605,6 +605,48 @@ bucket + IAM + SGs removed).
   retried into 1a/1c (still cross-AZ). Real spot-of-the-moment AWS capacity, not a design issue.
 - Est. cost: 2× c7gd.2xlarge (~$0.36/hr each) + RDS, < 1 hr → ~$1. Nothing left running.
 
+### 2026-07-21 — Optimization pass (threads 1+2+4, still standalone; user: "optimize as much as possible before integrating")
+Code done locally (O1/O2/O4), measured on real EC2 (O5), all torn down.
+- **O1 — kill manifest churn (F1).** `logical_digest` now EXCLUDES `parent` → content-only manifest
+  identity: a byte-identical tree always yields the same digest, so an idle re-publish is idempotent
+  (`put_manifest` dedups, no orphan leak) and identical trees dedup. Daemon `publish_cycle` gained
+  `CycleOutcome::NoChange` — when the content digest equals the live HEAD, skip touch+advance entirely
+  (no fence bump, no churn; blocks stay MARK-protected via the unchanged HEAD). An idle daemon now does
+  ZERO writes. Tests: `manifest_identity_content_only_ignores_parent`, `nochange_cycle_when_tree_unchanged`.
+- **O2 — warm-cache tier (`CachedBlobStore`).** Node-local NVMe cache in front of the durable S3 backing;
+  reads prefer the cache (local, no network), miss reads-through + populates; writes go to the durable
+  authority FIRST then best-effort to cache (cache NEVER authoritative; content-addressing makes staleness
+  harmless; deletes hit both tiers). Daemon `--cache-dir` wires it in. Tests prove a warm materialize does
+  0 backing GETs.
+- **O3 — daemon uses the bounded-parallel publish pipeline** (measure-first: see O5). `publish_cycle`
+  switched `publish` → `publish_pipelined(workers = available_parallelism.clamp(1,16))` — same logical
+  manifest, ~2× less publish CPU.
+- **O4 — the store-wide GC actor (F2).** `gc` subcommand + `PgLineageStore::all_head_digests()` (marks
+  against EVERY lineage's HEAD — store-wide, the F2 requirement). Test `gc_store_wide_live_set_protects_
+  all_lineages` DEMONSTRATES the per-lineage footgun (deletes another lineage's blocks → materialize fails).
+
+**O5 — real-EC2 measurements** (c6gd.8xlarge, 32 vCPU + NVMe, us-east-1a; RDS PG17/TLS; S3; via SSM; torn
+down):
+| Metric | Result |
+|---|---|
+| **Warm vs cold resume (2 GB, R2 — the O2 payoff)** | **cold 3.74s → warm 1.48s (2.5× faster); warm restore byte-identical.** 1.48s is UNDER the <5s R2 target; the cache eliminates the S3 fetch. |
+| Publish 2 GB → S3 | 43.8s (upload-dominated: ~23s network + ~20s CPU) |
+| **Publish pipeline scaling (2 GB local, incompressible)** | workers 0→**20.4s**, 4→15.7s, 8→13.5s, 16→**10.4s**, 32→10.4s. **~2× at 16 workers**, plateaus there → drove O3. |
+| 5 GB scale (local) | publish 25.2s (16w), **materialize 3.22s** — linear, fast resume path |
+
+**Findings:** (1) the warm cache hits the aggressive <5s resume target (1.48s/2 GB warm) and even cold in-
+region is under it on a fast node (3.74s). (2) Publish CPU halves with the pipeline (now wired). (3) S3
+publish is UPLOAD-bound (~23s of 43.8s for 2 GB incompressible) — the next publish lever is PARALLEL block
+UPLOADS (the packer currently uploads serially); overlapping compress+upload would cut the S3 publish
+further. Real workspaces are also more compressible than the random test data, so both the pipeline speedup
+and the upload volume improve in practice. (4) 5 GB scales linearly and stays memory-bounded (streaming).
+
+**Still open (optimization follow-ups):** parallel S3 uploads in the packer (the biggest remaining publish
+lever); file-level reflink on warm resume (skip decompress+write for unchanged files → near-instant
+incremental resume — needs a reflink-capable FS + prior-tree tracking); mtime-based skip so an idle daemon
+avoids even re-hashing; the orphan-object reconciler (needs a `BlobStore.list`). LVM-thin same-node COW
+fork not yet measured.
+
 **Remaining prod-hardening (from the per-phase watch-lists, still open):** manifest GC + the GC actor
 (F1/F2), orphan-object reconciler, per-publisher lease (claim→delete straddle), single-flight advisory
 lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle
