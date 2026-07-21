@@ -1,6 +1,7 @@
 //! Minimal, interface-compatible core of the capsule workspace storage data plane.
 //! See README.md for the drop-in mapping onto zeroshot-cloud.
 
+pub mod cache;
 pub mod cas;
 pub mod daemon;
 pub mod daemon_loop;

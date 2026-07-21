@@ -68,6 +68,10 @@ enum Cmd {
         /// Optional `ip:port` for the raw-TCP `/health` readiness endpoint (503 until ready, 200 after).
         #[arg(long)]
         health_addr: Option<String>,
+        /// Optional node-local cache dir (NVMe): wraps the durable store so warm reads are served
+        /// locally instead of over the network — fast warm resume.
+        #[arg(long)]
+        cache_dir: Option<String>,
         /// Run exactly ONE publish cycle and exit (for tests / one-shot snapshots).
         #[arg(long)]
         once: bool,
@@ -150,6 +154,7 @@ fn main() -> Result<()> {
             lineage,
             publish_interval,
             health_addr,
+            cache_dir,
             once,
         } => {
             #[cfg(feature = "pg")]
@@ -161,6 +166,7 @@ fn main() -> Result<()> {
                     lineage,
                     publish_interval,
                     health_addr,
+                    cache_dir,
                     once,
                 )?;
             }
@@ -174,6 +180,7 @@ fn main() -> Result<()> {
                     &lineage,
                     publish_interval,
                     &health_addr,
+                    &cache_dir,
                     once,
                 );
                 anyhow::bail!(
@@ -206,9 +213,11 @@ mod daemon_cmd {
 
     /// Dispatch `--store <uri>` to a concrete `BlobStore`: `file://<path>` → LocalBlobStore,
     /// `s3://<bucket>` → S3BlobStore (feature `s3`; endpoint/region/creds via the env contract).
-    fn build_store(uri: &str) -> Result<Box<dyn BlobStore>> {
-        if let Some(path) = uri.strip_prefix("file://") {
-            Ok(Box::new(LocalBlobStore::new(path)?))
+    /// When `cache_dir` is set, wrap the durable store in a node-local `CachedBlobStore` (NVMe cache)
+    /// so a warm node serves blocks locally instead of over the network — fast warm resume.
+    fn build_store(uri: &str, cache_dir: Option<&str>) -> Result<Box<dyn BlobStore>> {
+        let backing: Box<dyn BlobStore> = if let Some(path) = uri.strip_prefix("file://") {
+            Box::new(LocalBlobStore::new(path)?)
         } else if let Some(bucket) = uri.strip_prefix("s3://") {
             #[cfg(feature = "s3")]
             {
@@ -216,9 +225,9 @@ mod daemon_cmd {
                 let endpoint = std::env::var("S3_ENDPOINT_URL")
                     .ok()
                     .filter(|s| !s.is_empty());
-                Ok(Box::new(capsule_workspace_core::s3::S3BlobStore::new(
+                Box::new(capsule_workspace_core::s3::S3BlobStore::new(
                     bucket, endpoint,
-                )?))
+                )?)
             }
             #[cfg(not(feature = "s3"))]
             {
@@ -229,6 +238,12 @@ mod daemon_cmd {
             }
         } else {
             anyhow::bail!("unrecognized --store {uri:?}: expected file://<path> or s3://<bucket>")
+        };
+        match cache_dir {
+            Some(dir) => Ok(Box::new(
+                capsule_workspace_core::cache::CachedBlobStore::new(dir, backing)?,
+            )),
+            None => Ok(backing),
         }
     }
 
@@ -272,6 +287,7 @@ mod daemon_cmd {
         Ok(outcome)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         tree: PathBuf,
         store_uri: String,
@@ -279,13 +295,14 @@ mod daemon_cmd {
         lineage: String,
         publish_interval: u64,
         health_addr: Option<String>,
+        cache_dir: Option<String>,
         once: bool,
     ) -> Result<()> {
         // 1. Postgres = lineage + GC clock (REQUIRED). A bad URL fails fast here.
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
         ls.init_schema().context("apply bootstrap schema")?;
         let clock = ls.ref_clock();
-        let store = build_store(&store_uri).context("build --store")?;
+        let store = build_store(&store_uri, cache_dir.as_deref()).context("build --store")?;
         let lineage = LineageId(lineage);
 
         // Readiness (materialize-on-start done) + shutdown (SIGTERM/SIGINT) latches — std only (MF2).
