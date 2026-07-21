@@ -76,6 +76,21 @@ enum Cmd {
         #[arg(long)]
         once: bool,
     },
+    /// Store-wide GC sweep (feature `pg`): reclaim aged, unreferenced blocks. Marks against EVERY
+    /// lineage's HEAD (store-wide — a per-lineage sweep would delete other lineages' live blocks).
+    /// This is a SINGLETON actor, run separately from the per-lineage daemons.
+    Gc {
+        /// Blob store URI: `file://<path>` or `s3://<bucket>` (the durable authority — no cache).
+        #[arg(long)]
+        store: String,
+        /// Postgres URL (the lineage HEADs + the block_ref clock).
+        #[arg(long)]
+        db: String,
+        /// Grace period: a block is collectable only if unreferenced AND older than this. MUST exceed
+        /// max(publish duration, sweep duration) + clock skew.
+        #[arg(long, default_value_t = 3600)]
+        grace_secs: u64,
+    },
 }
 
 fn load_known(state: &Option<PathBuf>) -> Result<ChunkIndex> {
@@ -186,6 +201,23 @@ fn main() -> Result<()> {
                 anyhow::bail!(
                     "the `daemon` subcommand requires the `pg` feature (and `s3` for an s3:// \
                      store). Rebuild with: cargo build --release --features pg,s3"
+                );
+            }
+        }
+        Cmd::Gc {
+            store,
+            db,
+            grace_secs,
+        } => {
+            #[cfg(feature = "pg")]
+            {
+                daemon_cmd::run_gc(store, db, grace_secs)?;
+            }
+            #[cfg(not(feature = "pg"))]
+            {
+                let _ = (&store, &db, grace_secs);
+                anyhow::bail!(
+                    "the `gc` subcommand requires the `pg` feature. Rebuild with --features pg,s3"
                 );
             }
         }
@@ -373,6 +405,37 @@ mod daemon_cmd {
         eprintln!("[daemon] shutdown signal — final publish (drain)");
         run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)?;
         eprintln!("[daemon] drained; exiting 0");
+        Ok(())
+    }
+
+    /// Store-wide GC sweep: mark against EVERY lineage's HEAD (F2), then reclaim aged orphans. Uses
+    /// the raw durable store (no cache — GC deletes from the authority). Prints `GcPgStats` as JSON.
+    pub fn run_gc(store_uri: String, db: String, grace_secs: u64) -> Result<()> {
+        use capsule_workspace_core::gc_pg;
+        let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
+        ls.init_schema().context("apply bootstrap schema")?;
+        let clock = ls.ref_clock();
+        let store = build_store(&store_uri, None).context("build --store")?;
+        // F2: the STORE-WIDE live set — every lineage's HEAD.
+        let live = ls.all_head_digests().context("read all live HEADs")?;
+        let st = gc_pg::collect(
+            store.as_ref(),
+            &clock,
+            &live,
+            Duration::from_secs(grace_secs),
+        )?;
+        eprintln!(
+            "[gc] live_heads={} grace={}s → scanned={} deleted={} kept_marked={} raced_young={} orphaned={} missing_live={}",
+            live.len(),
+            grace_secs,
+            st.scanned,
+            st.deleted,
+            st.kept_marked,
+            st.raced_young,
+            st.orphaned,
+            st.missing_live_manifests
+        );
+        println!("{}", serde_json::to_string(&st)?);
         Ok(())
     }
 }

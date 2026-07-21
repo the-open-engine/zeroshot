@@ -376,3 +376,25 @@ fn atomic_claim_server_side_recheck() {
         "protected block's row survived the claim"
     );
 }
+
+// all_head_digests returns EVERY lineage's current HEAD (the store-wide live set for the GC actor, F2)
+#[test]
+fn all_head_digests_returns_every_lineage() {
+    let Some(ls) = lineage() else {
+        return;
+    };
+    let n = nonce();
+    let a = LineageId(format!("{n}-allA"));
+    let b = LineageId(format!("{n}-allB"));
+    ls.advance(&a, format!("{n}-digA"), Fence(0)).unwrap();
+    ls.advance(&b, format!("{n}-digB"), Fence(0)).unwrap();
+    let heads = ls.all_head_digests().unwrap();
+    assert!(
+        heads.contains(&format!("{n}-digA")),
+        "lineage A HEAD present"
+    );
+    assert!(
+        heads.contains(&format!("{n}-digB")),
+        "lineage B HEAD present"
+    );
+}

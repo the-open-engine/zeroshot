@@ -241,3 +241,43 @@ fn gc_pg_concurrent_publish_and_gc_no_live_loss() {
         "final live HEAD survived concurrent GC"
     );
 }
+
+// (F2) The `live` set MUST be store-wide. Two lineages with distinct blocks share one global store;
+// a store-wide sweep protects both, but a per-lineage sweep DELETES the other lineage's live blocks.
+// This is the footgun the loud warning on gc_pg::collect guards against.
+#[test]
+fn gc_store_wide_live_set_protects_all_lineages() {
+    let d = tmp();
+    let store_dir = d.path().join("s");
+    let s = LocalBlobStore::new(&store_dir).unwrap();
+    let clock = MemRefClock::new();
+
+    let ta = d.path().join("ta");
+    write(&ta.join("a.bin"), &prng(10));
+    let ma = publish(&ta, &s, &ChunkIndex::new(), None).unwrap().manifest;
+    clock.touch(&ref_set(&s, &ma)).unwrap();
+
+    let tb = d.path().join("tb");
+    write(&tb.join("b.bin"), &prng(20));
+    let mb = publish(&tb, &s, &ChunkIndex::new(), None).unwrap().manifest;
+    clock.touch(&ref_set(&s, &mb)).unwrap();
+
+    // STORE-WIDE [A, B] at grace 0 → both marked, nothing deleted.
+    let both = vec![ma.clone(), mb.clone()];
+    let st = gc_pg::collect(&s, &clock, &both, Duration::ZERO).unwrap();
+    assert_eq!(st.deleted, 0, "store-wide live set protects every lineage");
+    assert!(st.kept_marked >= 2);
+
+    // FOOTGUN: sweeping with only lineage A's HEAD collects lineage B's (unmarked) live blocks.
+    let st2 = gc_pg::collect(&s, &clock, std::slice::from_ref(&ma), Duration::ZERO).unwrap();
+    assert!(
+        st2.deleted >= 1,
+        "a per-lineage sweep collected ANOTHER lineage's blocks (the F2 footgun)"
+    );
+    assert!(
+        materialize(&s, &mb, &d.path().join("ob")).is_err(),
+        "lineage B lost its blocks to the per-lineage sweep"
+    );
+    // lineage A (the one that was in the live set) is intact.
+    materialize(&s, &ma, &d.path().join("oa")).unwrap();
+}

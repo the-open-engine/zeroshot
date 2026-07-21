@@ -97,6 +97,19 @@ impl PgRuntime {
         })
     }
 
+    /// EVERY lineage's current HEAD digest — the STORE-WIDE live set the GC actor must mark against
+    /// (F2). `block_ref` and the block store are global + content-addressed, so a block referenced by
+    /// ANY lineage's HEAD must be protected; a per-lineage `live` set would delete other lineages'
+    /// live blocks. GC is a store-wide singleton, and this is where its `live` comes from.
+    fn all_head_digests(&self) -> Result<Vec<String>> {
+        self.on(async {
+            let rows = sqlx::query_scalar::<_, String>("SELECT manifest_digest FROM lineage_head")
+                .fetch_all(&self.pool)
+                .await?;
+            Ok(rows)
+        })
+    }
+
     /// Precise HEAD read (`Result`, unlike the infallible trait `get`) — used internally by
     /// `advance`'s idempotent-retry so a transient DB error there is a real error, not "no HEAD".
     fn get_head(&self, id: &LineageId) -> Result<Option<Head>> {
@@ -273,6 +286,12 @@ impl PgLineageStore {
     /// `sqlx::raw_sql(include_str!(...))` mechanism zeroshot-cloud uses, not `sqlx::migrate!`.
     pub fn init_schema(&self) -> Result<()> {
         self.inner.init_schema()
+    }
+
+    /// EVERY lineage's current HEAD digest — the STORE-WIDE live set for the GC actor (F2). Passing
+    /// anything narrower to `gc_pg::collect` risks deleting other lineages' live blocks.
+    pub fn all_head_digests(&self) -> Result<Vec<String>> {
+        self.inner.all_head_digests()
     }
 
     /// A `PgRefClock` sharing THIS store's pool + runtime (same DB backend).
