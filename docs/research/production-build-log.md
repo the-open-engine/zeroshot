@@ -476,3 +476,40 @@ full suite.
   `byte_length` is metrics-only (GC never reads it), so this is an accounting inaccuracy, not a
   correctness bug — flagged for the reviewer.
 - Next: Phase 4 senior-review gate → push → Phase 5 (real AWS e2e — needs the user's `aws sso login`).
+
+**Phase 4 senior-review: APPROVED-WITH-NITS** (no must-fix). The reviewer verified STRUCTURALLY that
+neither crasher exists: **MF2** — no nested-runtime path (sync `fn main`; signals/health/pipeline on std
+threads; adapters' `block_on` only ever from non-tokio threads; concurrent `block_on` from `par_iter`
+rayon threads is the supported multi-thread-runtime case); **MF3/MF4** — no live-block loss (touch-after-
+upload is the *correct* realization: block ids aren't known until packed, and an untouched fresh block
+has no `block_ref` row → invisible to GC; continuous cover no-row→young→marked; MF3 `known` is a
+fail-safe single-source-of-truth from the one `head()` read). Should-fixes applied:
+- **S1**: health server now sets `set_read_timeout`/`set_write_timeout` (2s) — a half-open/slow client
+  could otherwise wedge the single-threaded accept loop → block all probes → kubelet kills the pod.
+- **S2**: the daemon now **backs off exponentially on a genuine fence streak** (capped 600s; reset on a
+  successful advance). A fenced daemon does the expensive publish (upload delta + manifest) before the
+  cheap CAS, so re-contending every interval leaked S3 cost + orphan manifests and could oscillate HEAD;
+  backoff throttles it. (Prod fences-by-kill via the orchestrator; standalone has no such guard.)
+- **S3**: MF4 `touch` now sends the block's REAL `byte_length` (sum of its member chunks' compressed
+  lengths), not one arbitrary chunk's `clen` (~256× under-report). Metrics-only (GC never reads it) but
+  fixed while fresh.
+- **S4 (test gap)**: added `s3_concurrent_block_on` (blobstore_conformance) — N threads share one
+  `S3BlobStore` doing concurrent `get_block` → concurrent `block_on` on the adapter's runtime, the exact
+  `materialize` `par_iter` path and the whole reason the runtime must be multi-thread. **Validated on
+  real MinIO** (no nested-runtime panic, correct bytes). Nits: reworded the "pre-touch" comment
+  (it's after upload); documented the SIGTERM-at-cycle-boundary + first-publish-at-interval behavior.
+- Verified fine: idempotent-retry-vs-StaleFence, SIGTERM drain (double-publish is harmless/idempotent),
+  cross-test GC isolation (disjoint digests + per-test stores), ifaces labels. 55 default green;
+  s3 conformance 3/3 on MinIO; daemon 5/5 on real PG; clippy/fmt clean.
+
+**PHASE-5 WATCH added by this review:** (1) TLS — no sqlx tls feature; real RDS `force_ssl` fails to
+connect (add `tls-rustls` + RDS CA). (2) materialize-into-non-empty-tree — a pod reusing an NVMe dir with
+stale files → `materialize` hard-bails on start (fail-safe but brittle; decide: guaranteed-fresh volume
+or reconcile). (3) transient-error crash loop — a non-fence cycle error kills the daemon (fail-fast); real
+S3 503/throttle is common (SDK retries most; confirm or add bounded retry). (4) drain vs 30s/61s budgets —
+an in-flight publish isn't interrupted by SIGTERM; cold-materialize wall-time vs 61s still unmeasured
+(Phase-5 measurement). (5) manifest growth — deferred manifest GC + fenced churn leak orphan manifests.
+
+### Phases 1–4 COMPLETE. Standalone build done; only the real-AWS e2e (Phase 5) remains — it needs the
+user's `aws sso login` (internal account 993939946442). Test totals: 55 default + 3 S3 (MinIO) + 12 PG
+(7 lineage + 5 daemon) + the gc_pg/e8 already in default. All green.

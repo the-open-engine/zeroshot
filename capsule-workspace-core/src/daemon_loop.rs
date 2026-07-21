@@ -31,8 +31,13 @@ pub fn health_response(ready: bool) -> &'static str {
 }
 
 fn serve_health(mut stream: TcpStream, ready: bool) {
-    // Best-effort drain of the request line/headers so the client's write doesn't RST before we
+    // Bound the read/write so a half-open or slow client can't wedge the single-threaded accept loop
+    // (which would block ALL subsequent probes → readiness/liveness stuck → the kubelet kills the pod)
+    // (reviewer S1). Best-effort drain of the request so the client's write doesn't RST before we
     // reply; we don't parse it (any path is a probe). Bounded read — never block on a huge body.
+    let to = Some(std::time::Duration::from_secs(2));
+    let _ = stream.set_read_timeout(to);
+    let _ = stream.set_write_timeout(to);
     let mut scratch = [0u8; 1024];
     let _ = stream.read(&mut scratch);
     let _ = stream.write_all(health_response(ready).as_bytes());
@@ -105,10 +110,12 @@ mod cycle {
     ///    then comes from a manifest GC MARKS (the parent HEAD is within retention), so a reused block
     ///    can never be collected out from under us. `parent`/`expected` come from the SAME HEAD.
     /// 3. `publish()` — uploads new blocks + puts the new manifest (idempotent, content-addressed).
-    /// 4. MF4 touch: refresh the reuse-clock for EVERY block the new manifest references, BEFORE
-    ///    advancing HEAD. Pre-touch is safe because a freshly-uploaded-but-untouched block has NO
-    ///    `block_ref` row and is invisible to GC's candidate scan; once touched it is young; once the
-    ///    HEAD advances it is protected by the MARK. (Blocks are touched with their compressed length.)
+    /// 4. MF4 touch: refresh the reuse-clock for EVERY block the new manifest references, AFTER upload
+    ///    but BEFORE advancing HEAD. (Block ids aren't known until packed, so pre-upload touch is
+    ///    impossible for a streaming publish; post-upload is the correct realization of the invariant.)
+    ///    Safe because a freshly-uploaded-but-untouched block has NO `block_ref` row and is invisible
+    ///    to GC's candidate scan; once touched it is young; once the HEAD advances it is MARK-protected.
+    ///    Continuous cover: no-row (invisible) → young-row (grace) → marked (reachable).
     /// 5. `advance()` fence CAS. Its built-in idempotent-retry turns a lost-ack of OUR OWN write into
     ///    `Ok`, so a StaleFence reaching us here is a DIFFERENT writer → surface `Fenced` (non-fatal).
     pub fn publish_cycle(
@@ -130,13 +137,15 @@ mod cycle {
 
         let stats = publish(tree, store, &known, parent)?; // upload new blocks + put manifest
 
-        // MF4: touch every block the new manifest references (young) BEFORE advancing HEAD.
+        // MF4: touch every block the new manifest references (young) BEFORE advancing HEAD. `touch`
+        // dedups by block, so accumulate the block's REAL size = sum of its member chunks' compressed
+        // lengths (not one arbitrary chunk's `clen`, which would under-report byte_length ~256×).
         let m = Manifest::from_bytes(&store.get_manifest(&stats.manifest)?)?;
-        let touch: Vec<(BlockId, u64)> = m
-            .chunks
-            .values()
-            .map(|loc| (loc.block.clone(), loc.clen as u64))
-            .collect();
+        let mut sizes: std::collections::BTreeMap<BlockId, u64> = std::collections::BTreeMap::new();
+        for loc in m.chunks.values() {
+            *sizes.entry(loc.block.clone()).or_insert(0) += loc.clen as u64;
+        }
+        let touch: Vec<(BlockId, u64)> = sizes.into_iter().collect();
         clock.touch(&touch)?;
 
         match ls.advance(lineage, stats.manifest.clone(), expected) {

@@ -109,3 +109,52 @@ fn s3_blobstore_conformance() {
     let run = format!("{:x}", std::process::id());
     conformance(&store, &run);
 }
+
+/// MF2 concurrency proof: many threads share ONE `S3BlobStore` and call `get_block` concurrently —
+/// each does `block_on` on the adapter's single multi-thread runtime. This is the exact path
+/// `materialize`'s `par_iter` fan-out takes (concurrent `block_on` from rayon threads), and the whole
+/// reason the adapter runtime must be MULTI-thread (a current-thread rt would panic/serialize). Proves
+/// no nested-runtime panic and correct results under concurrency. Same S3 gating as the conformance test.
+#[cfg(feature = "s3")]
+#[test]
+fn s3_concurrent_block_on() {
+    use capsule_workspace_core::s3::S3BlobStore;
+    use std::sync::{Arc, Barrier};
+    let endpoint = std::env::var("S3_ENDPOINT_URL")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let it = std::env::var("S3_IT").ok().as_deref() == Some("1");
+    if std::env::var("S3_BUCKET").is_err() || (endpoint.is_none() && !it) {
+        eprintln!(
+            "SKIPPED s3_concurrent_block_on: set S3_ENDPOINT_URL+S3_BUCKET or S3_IT=1. Degraded coverage."
+        );
+        return;
+    }
+    let store = Arc::new(S3BlobStore::from_env().expect("build S3BlobStore"));
+    let run = format!("{:x}c", std::process::id());
+    // seed 8 distinct blocks
+    let n = 8usize;
+    let blocks: Vec<(String, Vec<u8>)> = (0..n)
+        .map(|i| (format!("{run}{i:063x}"), vec![i as u8; 200_000 + i * 1000]))
+        .collect();
+    for (k, v) in &blocks {
+        store.put_block(k, v).unwrap();
+    }
+    // N threads all fire get_block at once (barrier) → concurrent block_on on the shared runtime.
+    let barrier = Arc::new(Barrier::new(n));
+    let mut handles = Vec::new();
+    for (k, v) in blocks.clone() {
+        let (store, barrier) = (Arc::clone(&store), Arc::clone(&barrier));
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            let got = store.get_block(&k).expect("concurrent get_block");
+            assert_eq!(got, v, "concurrent get_block returned wrong bytes");
+        }));
+    }
+    for h in handles {
+        h.join().expect("no panic under concurrent block_on");
+    }
+    for (k, _) in &blocks {
+        store.delete_block(k).unwrap();
+    }
+}

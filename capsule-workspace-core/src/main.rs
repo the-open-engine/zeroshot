@@ -244,16 +244,18 @@ mod daemon_cmd {
         }
     }
 
-    /// One publish cycle + a human log line. A genuine (non-fence) error propagates and crashes the
-    /// daemon (fail-fast); a lost fence race is logged PROMINENTLY and deferred to the next cycle.
+    /// One publish cycle + a human log line; returns the outcome so the loop can back off on a
+    /// genuine fence. A non-fence error propagates and crashes the daemon (fail-fast); a lost fence
+    /// race is logged PROMINENTLY and deferred.
     fn run_and_log_cycle(
         tree: &Path,
         store: &dyn BlobStore,
         ls: &PgLineageStore,
         clock: &PgRefClock,
         lineage: &LineageId,
-    ) -> Result<()> {
-        match daemon_loop::publish_cycle(tree, store, ls, clock, lineage)? {
+    ) -> Result<CycleOutcome> {
+        let outcome = daemon_loop::publish_cycle(tree, store, ls, clock, lineage)?;
+        match &outcome {
             CycleOutcome::Advanced(h) => eprintln!(
                 "[daemon] published: lineage={} fence={} manifest={}",
                 lineage.0, h.fence.0, h.manifest_digest
@@ -264,7 +266,7 @@ mod daemon_cmd {
                 lineage.0, expected.0, current.0
             ),
         }
-        Ok(())
+        Ok(outcome)
     }
 
     pub fn run(
@@ -316,18 +318,35 @@ mod daemon_cmd {
 
         // 3. One cycle (--once) or the interval loop.
         if once {
-            return run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage);
+            run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)?;
+            return Ok(());
         }
         eprintln!(
             "[daemon] publish loop every {publish_interval}s (SIGTERM/SIGINT → one final publish, \
              exit 0)"
         );
+        // Back off on a genuine fence streak (reviewer S2): a fenced daemon does the expensive publish
+        // (upload delta + manifest) BEFORE the cheap CAS, so re-contending every interval leaks S3
+        // cost + orphan manifests and can oscillate HEAD with the other writer. Exponential backoff
+        // (capped) throttles that; a successful advance resets it. (In prod the orchestrator
+        // fences-by-kill; the standalone daemon has no such guard, hence the backoff.)
+        let mut fenced_streak: u32 = 0;
         loop {
-            interruptible_sleep(publish_interval, &shutdown);
+            let sleep_secs = if fenced_streak == 0 {
+                publish_interval
+            } else {
+                publish_interval
+                    .saturating_mul(1u64 << fenced_streak.min(5))
+                    .min(600)
+            };
+            interruptible_sleep(sleep_secs, &shutdown);
             if shutdown.load(Ordering::SeqCst) {
                 break;
             }
-            run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)?;
+            match run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)? {
+                CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
+                CycleOutcome::Advanced(_) => fenced_streak = 0,
+            }
         }
 
         // 4. Drain: one final publish, then exit 0 (well within the ~30s budget).
