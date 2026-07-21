@@ -29,6 +29,10 @@ pub trait RefClock {
 /// atomicity (`claim_collectable` re-checks age and removes under one lock, exactly as the server-side
 /// `DELETE ... WHERE last_referenced_at < clock_timestamp() - grace` does). Lets `gc_pg` and its
 /// concurrency tests run fast without a Postgres container, while `PgRefClock` covers the real thing.
+///
+/// Fidelity note: this fake treats age `>= grace` as collectable; `PgRefClock` uses `<` (i.e. age
+/// strictly `> grace`). They differ only at age EXACTLY == grace — immaterial at real grace sizes and
+/// unobservable with wall-clock timing, but don't write a boundary test that leans on it.
 #[derive(Default)]
 pub struct MemRefClock {
     inner: Mutex<HashMap<BlockId, Instant>>,

@@ -41,10 +41,17 @@ fn positive_u64(v: i64) -> Result<u64> {
     u64::try_from(v).map_err(|_| anyhow!("negative BIGINT {v} where a u64 was expected"))
 }
 
-/// Render a `Duration` grace as a Postgres interval literal bound to `$n::interval`. Whole seconds
-/// is the GC granularity (grace is on the order of minutes); sub-second precision is irrelevant.
+/// Render a `Duration` grace as a Postgres interval literal bound to `$n::interval`. Whole-second
+/// granularity (grace is minute-scale in prod). A NON-zero sub-second grace rounds UP to 1s — the
+/// SAFE/more-protective direction — so a misconfigured 500 ms never floors to 0 (= collect everything
+/// older by any amount). `grace=0` stays 0 (a deliberate test value). (reviewer nit)
 fn grace_secs(grace: Duration) -> String {
-    format!("{} seconds", grace.as_secs())
+    let secs = if grace.is_zero() {
+        0
+    } else {
+        grace.as_secs().max(1)
+    };
+    format!("{secs} seconds")
 }
 
 /// Shared backend: the pool + the one owned runtime + the `block_on` tripwire. Both `PgLineageStore`

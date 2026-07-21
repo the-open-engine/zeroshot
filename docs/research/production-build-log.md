@@ -410,3 +410,37 @@ carrying into the deployment docs.
   lock (correctness is in the per-block atomic claim; the lock only avoids two sweepers wasting work —
   a deployment concern, not a correctness one). Both noted in `gc_pg.rs`.
 - Next: Phase 3 senior-review gate → push → Phase 4 (daemon).
+
+**Phase 3 senior-review: APPROVED-WITH-NITS** (no must-fix). The reviewer independently REPRODUCED the
+grace=0 live-loss (5/5) and grace=50ms safety (5/5), and verified each attack is stopped by the exact
+named invariant: in-flight block → grace clock + server-side re-check; dedup-reused block → MARK;
+HEAD-commits-mid-sweep → grace clock; two concurrent sweepers → the per-block atomic claim (genuinely
+safe, just wasteful — single-flight lock correctly deferred). Should-fixes applied:
+- **S1 (honesty, R1-critical file)**: the `gc_pg.rs` header under-stated the claim→delete straddle as
+  "only a cost leak." Corrected: it's a genuine NARROW live-byte-loss residual — if the GC thread STALLS
+  between the won claim and `delete_block`, and a publisher resurrects that same (previously-orphan)
+  block (`touch`+`put_block`) in the window, GC's delete removes the re-uploaded object. Closed fully
+  only by a per-publisher lease (plan-deferred). Does NOT apply to dedup-reuse (marked → never a
+  candidate). Documented both residuals precisely.
+- **S2**: `mark_live_blocks` NotFound-skip now matches `StoreError::NotFound` specifically (was: any
+  `StoreError`). A future non-NotFound variant treated as "skip" would drop a needed block from the mark
+  set → wrongful collection. Now propagates.
+- **S3**: `mark_live_blocks` returns the missing-manifest count; `GcPgStats.missing_live_manifests`
+  surfaces it (a live HEAD whose manifest can't be read is an anomaly the caller must alert on).
+- Nits: `grace_secs` rounds a non-zero sub-second grace UP to 1s (safe direction; grace=0 stays 0);
+  documented the fake's `>=` vs PG's `>` boundary. 55 default green, clippy/fmt clean.
+
+**PHASE-4 CONSTRAINT (must enforce mechanically, not by docs — reviewer W4):** every Phase-3 test used
+`known = empty` + `live = current HEAD only`. The entire dedup-reuse safety (MF3, invariant #2) rests on
+the Phase-4 daemon **seeding dedup `known` from the parent live-HEAD chunk index** AND the GC caller
+passing all retained-history HEADs in `live`. Wire this as a single source of truth in Phase 4 and TEST
+it (a dedup-reused block from the live HEAD survives a concurrent GC).
+
+**PHASE-5 WATCH (real S3+PG, unshowable on the fake/local tests):** (1) grace must be ≥ publish + sweep +
+**max clock step/skew** (NTP forward-step / RDS-failover lagging clock) — the `Instant` fake can't model
+wall-clock anomalies; (2) **sweep duration on real S3** — `mark_live_blocks` is N manifest GETs (a
+manifest is ~89 MB @ 300k files, not "tiny"), and the whole sweep must stay < grace; MEASURE it; (3) the
+claim→delete straddle is exercised by NO local test (needs a precisely-injected stall) — watch the e2e;
+(4) manifest growth — deferring manifest GC is correctness-fine but orphaned manifests accumulate real S3
+cost over long runs; track it.
+- Next: push Phase 3 → Phase 4 (daemon), enforcing the MF3 known⊆mark seeding.

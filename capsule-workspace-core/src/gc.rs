@@ -14,18 +14,35 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 /// MARK step (shared by the Postgres-driven `gc_pg` sweep): the set of blocks referenced by ANY live
-/// manifest — invariant #2, the blocks GC must NEVER collect regardless of age. A live manifest that
-/// is momentarily absent on the store is SKIPPED (not fatal): it references no blocks we can see, and
-/// wedging the whole sweep on one dangling ref would let the store grow unbounded (matches the
-/// file-backed collector's `missing_live_manifests` tolerance). The caller should surface a persistent
-/// miss as an anomaly. Reads manifests through the `BlobStore` trait, so it works over S3 or local fs.
-pub fn mark_live_blocks(store: &dyn BlobStore, live: &[String]) -> Result<HashSet<BlockId>> {
+/// manifest — invariant #2, the blocks GC must NEVER collect regardless of age — plus the count of
+/// live manifests that were ABSENT on the store. Reads manifests through the `BlobStore` trait, so it
+/// works over S3 or local fs.
+///
+/// A live manifest that is momentarily absent is SKIPPED (not fatal): it references no blocks we can
+/// see, and wedging the whole sweep on one dangling ref would let the store grow unbounded (matches
+/// the file-backed collector's `missing_live_manifests` tolerance). But a live HEAD whose manifest we
+/// CANNOT read means we could not protect that HEAD's blocks this sweep — a genuine anomaly — so the
+/// count is returned for the caller to surface/alert. Only a `StoreError::NotFound` counts as absent;
+/// any OTHER error (corruption, throttling, auth) PROPAGATES — treating those as "skip" could drop a
+/// still-needed block from the mark set and wrongly collect it (reviewer S2).
+pub fn mark_live_blocks(
+    store: &dyn BlobStore,
+    live: &[String],
+) -> Result<(HashSet<BlockId>, usize)> {
     let mut marked = HashSet::new();
+    let mut missing = 0usize;
     for dig in live {
         let bytes = match store.get_manifest(dig) {
             Ok(b) => b,
-            // a genuinely-absent live manifest references nothing collectable → skip, don't wedge
-            Err(e) if e.downcast_ref::<StoreError>().is_some() => continue,
+            Err(e)
+                if matches!(
+                    e.downcast_ref::<StoreError>(),
+                    Some(StoreError::NotFound(_))
+                ) =>
+            {
+                missing += 1;
+                continue;
+            }
             Err(e) => return Err(e),
         };
         let m = Manifest::from_bytes(&bytes)?;
@@ -37,7 +54,7 @@ pub fn mark_live_blocks(store: &dyn BlobStore, live: &[String]) -> Result<HashSe
             }
         }
     }
-    Ok(marked)
+    Ok((marked, missing))
 }
 
 #[derive(Debug, Default, serde::Serialize)]

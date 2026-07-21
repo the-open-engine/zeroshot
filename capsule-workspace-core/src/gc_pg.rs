@@ -16,15 +16,26 @@
 //!    (which moved the row young) makes the claim return 0 rows → the object is never deleted. This
 //!    closes the select-vs-delete TOCTOU that an S3-first ordering left open.
 //!
-//! Ordering is row-claim-FIRST, object-delete-second. Residual (documented, acceptable for a
-//! measurement build): a crash between the won claim and `delete_block` leaves an **orphan object**
-//! (row gone, bytes remain) — a cost leak, never live-byte loss; a periodic orphan-object reconciler
-//! (list the store, drop objects with no `block_ref` row) reclaims it. Operational invariant the
-//! deployment must hold: **grace > max(publish duration, GC sweep duration)** — so a block touched at
-//! the start of a publish stays young through commit, at which point the MARK takes over. Real
-//! deployments also single-flight the sweep (a PG advisory lock) to avoid two sweepers wasting work;
-//! correctness does not depend on it (each per-block claim is individually atomic — two sweepers just
-//! means one wins each block).
+//! Ordering is row-claim-FIRST, object-delete-second. Two residuals (documented, accepted for this
+//! measurement build; both need a per-publisher lease to close fully, which the plan defers):
+//!   1. **Orphan object (cost leak, NOT loss):** a crash between the won claim and `delete_block`
+//!      leaves the bytes with no `block_ref` row → a periodic reconciler (list the store, drop objects
+//!      with no row) reclaims it.
+//!   2. **Claim→delete straddle (a NARROW live-byte loss):** if the GC thread STALLS between the won
+//!      claim and `delete_block`, and in that window a publisher re-references the *same, previously-
+//!      orphan* block — `touch` (row re-inserted young) then `put_block` (object re-uploaded) — then
+//!      GC's `delete_block` deletes the just-re-uploaded object, and the publisher's subsequent
+//!      manifest references a now-missing block. This is real work loss, closed fully only by a
+//!      per-publisher lease (out of scope here). It does NOT apply to dedup-REUSE (a reused block is
+//!      in a live HEAD → MARKED → never a candidate), only to a block that was a genuine orphan at
+//!      claim time and is concurrently resurrected. Keep the GC-host stall window small (per-block
+//!      claim→delete, no batching) to shrink it.
+//!
+//! Operational invariant the deployment must hold: **grace > max(publish duration, GC sweep duration
+//! + max clock skew)** — so a block touched at the start of a publish stays young through commit, at
+//! which point the MARK takes over. Real deployments also single-flight the sweep (a PG advisory lock)
+//! to avoid two sweepers wasting work; correctness does not depend on it (each per-block claim is
+//! individually atomic — two sweepers just means one wins each block).
 
 use crate::cas::BlobStore;
 use crate::gc::mark_live_blocks;
@@ -45,6 +56,10 @@ pub struct GcPgStats {
     pub raced_young: usize,
     /// claims won but `delete_block` failed → orphan object (row gone, bytes remain) for the reconciler
     pub orphaned: usize,
+    /// live HEADs whose manifest was ABSENT on the store — their blocks could not be marked this
+    /// sweep. Non-fatal (skipped), but the caller MUST surface/alert: a live HEAD we can't read is an
+    /// anomaly (replication lag, partial restore, or — the dangerous case — a lost committed manifest).
+    pub missing_live_manifests: usize,
 }
 
 /// Sweep collectable blocks. `live` = the manifest digests of every currently-live HEAD (within
@@ -56,9 +71,12 @@ pub fn collect(
     live: &[String],
     grace: Duration,
 ) -> Result<GcPgStats> {
-    let marked = mark_live_blocks(store, live)?; // invariant #2
+    let (marked, missing) = mark_live_blocks(store, live)?; // invariant #2
     let candidates = clock.candidates_older_than(grace)?; // grace pre-filter (superset)
-    let mut st = GcPgStats::default();
+    let mut st = GcPgStats {
+        missing_live_manifests: missing,
+        ..Default::default()
+    };
     for b in candidates {
         st.scanned += 1;
         if marked.contains(&b) {
