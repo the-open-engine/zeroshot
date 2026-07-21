@@ -7,3 +7,5 @@ pub mod gc;
 pub mod ifaces;
 pub mod lineage;
 pub mod manifest;
+#[cfg(feature = "s3")]
+pub mod s3;

@@ -36,6 +36,22 @@ fn hex(b: &[u8]) -> String {
     s
 }
 
+/// Typed store error so callers distinguish a genuinely-absent object from a transient failure —
+/// GC and crash-retry/republish logic depend on `NotFound` ≠ generic error. Uniform across every
+/// `BlobStore` backend (local fs and S3). Carries only the key, never any secret material.
+#[derive(Debug)]
+pub enum StoreError {
+    NotFound(String),
+}
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoreError::NotFound(k) => write!(f, "object not found: {k}"),
+        }
+    }
+}
+impl std::error::Error for StoreError {}
+
 /// Byte-storage port behind `ArtifactRef` receipts. `LocalBlobStore` is the default; an
 /// `S3BlobStore` (feature `s3`) is the drop-in for the node daemon. Immutable, content-keyed.
 pub trait BlobStore: Send + Sync {
@@ -44,6 +60,11 @@ pub trait BlobStore: Send + Sync {
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()>;
     fn get_manifest(&self, digest: &str) -> Result<Vec<u8>>;
     fn has_block(&self, id: &BlockId) -> bool;
+    /// Idempotent delete: returns `true` if THIS call removed the object, `false` if it was
+    /// already absent. Never errors on "already gone" (a concurrent GC / re-drive must be safe).
+    /// GC deletes the object here AFTER winning the atomic `block_ref` claim (see plan MF1).
+    fn delete_block(&self, id: &BlockId) -> Result<bool>;
+    fn delete_manifest(&self, digest: &str) -> Result<bool>;
 }
 
 /// Filesystem CAS (also serves as the node-local block cache tier).
@@ -107,7 +128,7 @@ impl BlobStore for LocalBlobStore {
         Ok(())
     }
     fn get_block(&self, id: &BlockId) -> Result<Vec<u8>> {
-        Ok(std::fs::read(self.block_path(id))?)
+        read_or_notfound(&self.block_path(id), id)
     }
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()> {
         // atomic write-then-rename with a per-writer UNIQUE temp (same fix as put_block): two
@@ -134,10 +155,37 @@ impl BlobStore for LocalBlobStore {
         Ok(())
     }
     fn get_manifest(&self, digest: &str) -> Result<Vec<u8>> {
-        Ok(std::fs::read(self.manifest_path(digest))?)
+        read_or_notfound(&self.manifest_path(digest), digest)
     }
     fn has_block(&self, id: &BlockId) -> bool {
         self.block_path(id).exists()
+    }
+    fn delete_block(&self, id: &BlockId) -> Result<bool> {
+        rm_idempotent(&self.block_path(id))
+    }
+    fn delete_manifest(&self, digest: &str) -> Result<bool> {
+        rm_idempotent(&self.manifest_path(digest))
+    }
+}
+
+/// Read a content-addressed object, mapping a missing file to the typed [`StoreError::NotFound`]
+/// (so callers get the same NotFound signal as the S3 backend) while other IO errors propagate.
+fn read_or_notfound(p: &Path, key: &str) -> Result<Vec<u8>> {
+    match std::fs::read(p) {
+        Ok(b) => Ok(b),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(StoreError::NotFound(key.to_string()).into())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Idempotent file removal: `true` if removed, `false` if already gone, error otherwise.
+fn rm_idempotent(p: &Path) -> Result<bool> {
+    match std::fs::remove_file(p) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
     }
 }
 

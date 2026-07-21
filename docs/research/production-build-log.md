@@ -259,3 +259,30 @@ the ifaces honesty fix as its own tiny commit (zero functional value standalone 
 Verdict interpretation: reviewer said "fix these four → APPROVED-WITH-CHANGES." Revising plan in place
 (Revision 1) and proceeding to Phase 1 on that basis; the fixes are precisely specified, no second full
 plan-review round needed.
+
+### 2026-07-21 — Phase 1: S3BlobStore (implemented + validated on real MinIO)
+- **Trait change**: added idempotent `delete_block`/`delete_manifest` (returns `bool` "did-remove";
+  NotFound⇒false) to `BlobStore`; `LocalBlobStore` impl via `rm_idempotent`. Updated the 2 `FlakyStore`
+  doubles (delegate to inner). **50→51 default tests green** (added `local_blobstore_conformance`).
+- **Uniform NotFound**: moved `StoreError::NotFound` into `cas.rs` (was going to live in `s3.rs`); BOTH
+  `LocalBlobStore` (`read_or_notfound`) and `S3BlobStore` now return the same typed NotFound, so GC /
+  materialize get one signal regardless of backend. Nicer than the plan's S3-only NotFound.
+- **`src/s3.rs` `S3BlobStore`** (feature `s3`): bounded **multi-thread** tokio runtime (4 workers) +
+  `block_on` inside sync methods + `Handle::try_current().is_err()` debug-assert tripwire (MF2). Keys
+  `blocks/<id>`/`manifests/<digest>`. `put_*` = **unconditional idempotent PutObject** (OQ4, no
+  HeadObject-skip). `get_*` map `GetObjectError::NoSuchKey` → `StoreError::NotFound`. `has_block` =
+  HeadObject. `delete_*` = Head-then-Delete for a faithful did-remove bool (off the hot path; GC deletes
+  only after winning the PG claim). Errors redacted to the modeled service code (no creds/body leak),
+  mirroring zeroshot-cloud `kms.rs`. Env contract: `S3_BUCKET` + optional `S3_ENDPOINT_URL` (⇒
+  `force_path_style` for MinIO); region/creds via default chain.
+- **Dep pins**: `aws-sdk-s3 v1.138.1` + `aws-config v1.9.0` (matches zeroshot-cloud's `=1.9.0`), both
+  `default-features=false` + `["behavior-version-latest","default-https-client","rt-tokio"]`. Compiled
+  clean first try. Default (no-feature) build stays lean.
+- **Validation**: `tests/blobstore_conformance.rs` runs the SAME contract on `LocalBlobStore` (always) and
+  `S3BlobStore`. Ran it against **real MinIO** (Docker `minio/minio`, bucket via `minio/mc`): **both
+  pass** — 300 KB block + manifest round-trip, typed NotFound (absent + after-delete), idempotent delete
+  (true then false), unconditional-overwrite-identical. Skip path (no S3 env) prints a visible degraded-
+  coverage notice and passes (repo rule). clippy clean on `--features s3 --all-targets`; rustfmt clean.
+- **Not yet**: real-AWS S3 (`S3_IT=1`, Phase 5); multipart (deferred); versioned-bucket
+  `DeleteObjectVersion` (test buckets are versioning-off; noted as prod follow-up).
+- Next: Phase 1 senior-review gate → push → Phase 2 (PgLineageStore + block_ref).

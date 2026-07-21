@@ -537,6 +537,12 @@ impl BlobStore for FlakyStore {
     fn has_block(&self, id: &BlockId) -> bool {
         self.inner.has_block(id)
     }
+    fn delete_block(&self, id: &BlockId) -> Result<bool> {
+        self.inner.delete_block(id)
+    }
+    fn delete_manifest(&self, d: &str) -> Result<bool> {
+        self.inner.delete_manifest(d)
+    }
 }
 
 // ============================================================================
