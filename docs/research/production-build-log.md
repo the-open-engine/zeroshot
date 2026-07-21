@@ -540,12 +540,43 @@ real-AWS validation, then **tore everything down**.
   removed. No resources left running. No credentials committed (tests read `DATABASE_URL`/AWS creds from
   env only). Est. cost < $0.10 (RDS ~1 hr + a few S3 ops).
 
-**PHASE 5 COMPLETE. The production build is DONE** — S3BlobStore + PgLineageStore + block_ref reuse-clock
-+ gc_pg + the daemon, all validated against the real services they target (S3 + RDS Postgres over TLS),
-behind the prototype's existing sync traits, standalone (not integrated into zeroshot-cloud). Every
-load-bearing invariant (R1/R2, MF1–MF4) is proven by tests on real infra + reproduced by independent
-reviewers. Remaining prod-hardening items (not blockers for this standalone measurement build) are
-tracked in the per-phase watch lists above: manifest GC, orphan-object reconciler, per-publisher lease
-for the narrow claim→delete straddle, single-flight advisory lock, materialize-into-nonempty-tree on pod
-restart, bounded retry on transient S3 errors, IAM auth / verify-full CA, in-region cold-materialize at
+**PHASE 5 COMPLETE.** The five backend COMPONENTS — S3BlobStore + PgLineageStore + block_ref reuse-clock
++ gc_pg + the daemon — are built and **validated against the real services they target** (S3 + RDS
+Postgres over TLS), behind the prototype's sync traits, standalone (not integrated into zeroshot-cloud).
+Every load-bearing PER-COMPONENT invariant (R1/R2, MF1–MF4) is proven by tests on real infra + reproduced
+by independent reviewers, and the seams compose for a single publish/materialize/GC path.
+
+### 2026-07-21 — Final holistic (cross-phase) review: SHIP-WITH-FOLLOWUPS
+An independent final reviewer traced the WHOLE wired system (the view no per-phase reviewer had) and
+verified the seams compose (uniform fence-0↔1, uniform `StoreError::NotFound` plumbing P1→P3/P4, MF1
+atomic-claim consistency, MF2 no-nested-runtime, MF4 touch-after-upload). **Honest correction to the
+record: the *components* are done + real-AWS-proven; the daemon as a DEPLOYABLE WHOLE is not** — the
+system-level reclamation actor was designed, built, and tested, then intentionally left unwired (the user
+deferred platform integration). The critical cross-phase follow-ups (blockers before the daemon runs in a
+pod — an INTEGRATION-phase job, out of scope here, but surfaced loudly):
+- **F1 (manifest churn):** `parent` is part of `logical_digest` identity AND changes every cycle, so the
+  daemon mints a UNIQUE manifest every interval even on a byte-identical tree → ~2,880 orphaned
+  manifests/day idle, and manifest GC isn't implemented. `parent` is currently write-only (nothing reads
+  it). Fix at integration: content-only change-detection to skip no-op cycles and/or drop `parent` from
+  `logical_digest` (free manifest dedup), + implement manifest GC.
+- **F2 (data-loss footgun — now documented in code):** `gc_pg::collect`'s `live` MUST be STORE-WIDE (all
+  lineages' HEADs), not per-lineage, or it deletes other lineages' live blocks. A loud ⚠️ warning added
+  to the `collect` doc. GC is a store-wide singleton actor, not a daemon responsibility.
+- **F3:** MF3's `known ⊆ mark-set` is mechanical on the producer (daemon seeds `known` from parent HEAD)
+  but has no wired consumer (GC unwired) — the closing half is test-scaffolding-only until GC is wired.
+- **F4:** two hardcoded 4-worker runtimes (S3 + PG) on a 2-vCPU pod = oversubscription; size to
+  `available_parallelism` or share one infra runtime.
+- **F5 (fs vs pg GC):** `gc::collect` keeps its own inline mark (doesn't call `mark_live_blocks`) — two
+  mark loops kept identical by hand (documented deviation; OQ1 "unmixable" is honored — `gc::collect`
+  takes `&Path`, physically can't accept an S3 store).
+- **F6:** materialize masks setuid/setgid/sticky (in `logical_digest`), so a tree with special-mode files
+  isn't a publish fixed-point across restart (dominated by F1 today).
+Plan deviations noted as CORRECT: `--fence` flag dropped (fence authority = `lineage_head` CAS, better);
+ifaces "drop-in" labels now honest. §2 non-goals all still honored (no scope creep); all deferrals
+documented.
+
+**Remaining prod-hardening (from the per-phase watch-lists, still open):** manifest GC + the GC actor
+(F1/F2), orphan-object reconciler, per-publisher lease (claim→delete straddle), single-flight advisory
+lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle
+error currently crash-loops the daemon), RDS IAM auth / `verify-full` CA, in-region cold-materialize at
 1–5 GB scale.

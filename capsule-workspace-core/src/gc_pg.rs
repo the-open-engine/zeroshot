@@ -62,9 +62,18 @@ pub struct GcPgStats {
     pub missing_live_manifests: usize,
 }
 
-/// Sweep collectable blocks. `live` = the manifest digests of every currently-live HEAD (within
-/// retention). Never collects a marked (live-referenced) block or one a concurrent publish just
-/// touched; deletes only genuine, aged, unreferenced orphans.
+/// Sweep collectable blocks. Never collects a marked (live-referenced) block or one a concurrent
+/// publish just touched; deletes only genuine, aged, unreferenced orphans.
+///
+/// ⚠️ **DATA-LOSS FOOTGUN — `live` MUST be STORE-WIDE, not per-lineage.** `block_ref` and the block
+/// store are GLOBAL and content-addressed: the SAME block id can be referenced by the HEADs of
+/// DIFFERENT lineages. So `live` must be **every currently-live HEAD of EVERY lineage sharing this
+/// store** (within retention) — e.g. `SELECT manifest_digest FROM lineage_head` with NO `WHERE`. If a
+/// caller passes only its own lineage's HEAD (the tempting per-daemon call), this will MARK one
+/// lineage and then claim+delete every OTHER lineage's aged-but-live blocks → cross-lineage live-byte
+/// loss. GC is therefore a **store-wide singleton actor**, NOT a per-lineage/per-daemon responsibility.
+/// (This is why no per-lineage caller in this crate invokes `collect` — wiring it is a deliberate
+/// integration step; see the build log's Phase-5 final-review follow-ups.)
 pub fn collect(
     store: &dyn BlobStore,
     clock: &dyn RefClock,
