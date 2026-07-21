@@ -198,3 +198,64 @@ type mirrors an existing zeroshot-cloud shape (verified 2026-07-20)." Reality fr
 ### 2026-07-21 — Plan drafting
 - All 3 research reports synthesized above. Writing `planning/plans/0001-production-backends.md`, then an
   independent senior-reviewer agent iterates it to approval (team-programming step 3) before any code.
+
+### 2026-07-21 — Plan review round 1: REVISE-AND-RESUBMIT (high-value finding)
+Independent senior-reviewer verdict on plan 0001. Endorsed the architecture (sync/`block_on` bet,
+scoping discipline, two-tier testing, materialize integrity carrying to S3 for free) but found **one
+genuine R1-corrupting flaw** + 3 more must-fixes. Resolutions folded into plan Revision 1:
+
+- **MF1 (critical) — GC delete ordering races a concurrent publisher → drops live bytes.** My plan's
+  "DeleteObject(S3) first, then block_ref row" is backwards: under a concurrent publish+GC, GC computes
+  candidates (old, unmarked) at select time, then a racing republish touches the block young, but GC's
+  delete doesn't re-check freshness → deletes a block the about-to-commit manifest needs. The prototype
+  only ever tested publish and GC *serialized*, so this was unproven, not just untested (the fs GC has
+  the same latent TOCTOU). **Fix:** GC claims each block via an atomic **`DELETE FROM block_ref WHERE
+  block_digest=$1 AND last_referenced_at < clock_timestamp() - $grace RETURNING`** (age re-checked
+  SERVER-SIDE at delete, never `SystemTime::now()` on the GC host → no cross-host skew), and only on a
+  won claim does it `DeleteObject`. Operational invariant added: **grace > max(publish duration, GC
+  sweep duration)**; single-flight GC via a PG advisory lock; per-block claim-then-delete (no
+  batch-claim-then-loop); documented residuals (crash between row-delete and object-delete = re-driveable
+  orphan object = cost leak, not live-byte loss; + a narrow straddle fully closed only by a per-publisher
+  lease — out of scope) + a periodic orphan-object reconciler as follow-up. **New required test: publish
+  running CONCURRENTLY with a GC sweep asserts no live block dropped** (the serialized F1 test stays green
+  while this race is latent — that's the trap).
+- **MF2 — pin the daemon threading model** so the sync/`block_on` bet can't panic. If the daemon is
+  `#[tokio::main]`, every adapter `block_on` panics ("runtime within runtime"). Require: sync `fn main()`,
+  infra (signals + `/health`) on an ISOLATED runtime, pipeline on plain std/rayon (no ambient runtime).
+  `materialize` fetches via `par_iter` → concurrent `block_on` from N rayon threads → the adapter runtime
+  MUST be **multi-thread** (a current-thread rt would contend/panic). Add a debug-assert
+  `Handle::try_current().is_err()` tripwire in the adapter methods.
+- **MF3 — enforce `known ⊆ mark-set` from a single source of truth** (hidden Phase 4↔3 coupling). The
+  daemon's dedup `known` must be seeded from the SAME live-HEAD manifest(s) GC marks, else a dedup-reused
+  block from an unmarked manifest gets collected at correct grace (invariant #2). Mechanical: `known` =
+  the parent live-HEAD's chunk index; parent HEAD is within retention ⇒ GC marks it.
+- **MF4 — pin publish commit ordering + the touch set.** Load-bearing: **touch `block_ref` for every
+  referenced block (young) → upload new blocks → put_manifest → advance**. Touch fires even when the
+  PutObject is skipped/idempotent, and BEFORE upload (earlier touch = smaller race window). Touch set =
+  every block the manifest references (simplest safe superset).
+
+**Rulings on the 4 open questions:** OQ1 → extract MARK only; keep two `collect` fns; local collector
+takes the **concrete `&LocalBlobStore`** (so mtime-vs-S3 can't be mixed — won't compile); PG sweep behind
+a `RefClock` trait with the PG impl **+ an in-memory fake** (unit-testable without testcontainers). OQ2 →
+build the minimal raw-TCP `/health` + readiness latch NOW (cheapest test of the daemon threading model,
+MF2). OQ3 → **RDS `db.t4g.micro`** (faithful to what zeroshot-cloud runs; provision ONCE for both the
+gated `PG_IT=1` tests and Phase 5; `--skip-final-snapshot` teardown). OQ4 → **drop the HeadObject
+dedup-skip; unconditional idempotent PutObject** (content-addressed ⇒ overwrite is byte-identical; the
+common path is new blocks so Head just adds latency); keep `has_block` as a separate method; F1 protection
+comes from the `block_ref` touch, NOT the upload — decoupled per MF4. This makes unconditional re-upload
+also the thing that RESTORES a block GC deleted mid-race.
+
+**Should-fixes captured into the plan:** `advance()` dispatch (INSERT-on-conflict for first write vs
+guarded UPDATE) + treat `StaleFence`-where-HEAD-already-equals-`(my digest, expected+1)` as success
+(lost-ack on the final SIGTERM publish is durable, not an R1 alarm); trait-change blast radius (2
+`FlakyStore` doubles in `audit_independent.rs`/`adversarial3.rs` + `let mut ls`→`let ls` in
+`experiments.rs` — must update so "50 green" holds); bound adapter runtime worker threads (2–4 vCPU pod);
+**record materialize fetch concurrency** in Phase 5 (par_iter caps at num_cpus; may miss R2 budget for
+multi-GB trees — batch `join_all` fix if so); no `.tmp`/partial-write concept on S3 (PutObject atomic);
+**verify `sqlx 0.9` resolves** standalone (research read `=0.9.0` from zeroshot-cloud; reviewer flags
+crates.io latest-known 0.8.x — reconcile at Phase 2 start; 0.8.x semantics identical for our use); land
+the ifaces honesty fix as its own tiny commit (zero functional value standalone — don't let it gate).
+
+Verdict interpretation: reviewer said "fix these four → APPROVED-WITH-CHANGES." Revising plan in place
+(Revision 1) and proceeding to Phase 1 on that basis; the fixes are precisely specified, no second full
+plan-review round needed.
