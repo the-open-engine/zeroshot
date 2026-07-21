@@ -47,6 +47,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time"], optional
 sqlx = { version = "0.9", default-features = false, features = [
     "postgres",
     "runtime-tokio",
+    # TLS backend so a real RDS (`sslmode=require`, or `rds.force_ssl=1`) can connect. `ring` avoids
+    # the aws-lc-rs cmake/nasm build deps. Local tests use `sslmode=disable` (no TLS negotiated).
+    "tls-rustls-ring",
 ], optional = true }
 
 # daemon signal handling (SIGTERM/SIGINT → an Arc<AtomicBool> shutdown latch). Sync + tiny: a pure

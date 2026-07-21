@@ -513,3 +513,39 @@ an in-flight publish isn't interrupted by SIGTERM; cold-materialize wall-time vs
 ### Phases 1–4 COMPLETE. Standalone build done; only the real-AWS e2e (Phase 5) remains — it needs the
 user's `aws sso login` (internal account 993939946442). Test totals: 55 default + 3 S3 (MinIO) + 12 PG
 (7 lineage + 5 daemon) + the gc_pg/e8 already in default. All green.
+
+### 2026-07-21 — Phase 5: real-AWS end-to-end (internal account 993939946442) — PASSED, torn down
+User chose RDS `db.t4g.micro`. Provisioned a throwaway S3 bucket + RDS Postgres 17.10 (public, SG scoped
+to my IP:5432) in us-east-1, added the **sqlx `tls-rustls-ring`** feature (RDS requires TLS), ran the
+real-AWS validation, then **tore everything down**.
+- **Real S3** (`S3_IT=1`, no `S3_ENDPOINT_URL`): `blobstore_conformance` (round-trip, typed NotFound,
+  idempotent delete) + `s3_concurrent_block_on` — **pass**. The NotFound test passing on real S3 confirms
+  the 403-vs-404 concern is a non-issue with these creds (missing key → 404 NoSuchKey).
+- **Real RDS over TLS** (`sslmode=require`): `pg_lineage` (7) + `daemon` (5) — **all pass, 12/12**.
+  **`sslmode=disable` FAILS** → this RDS enforces `rds.force_ssl`, which CONFIRMS the reviewer's Phase-2
+  watch item: without the sqlx TLS feature we could not connect; with `tls-rustls-ring` we can. Load-bearing
+  validation, not just a nice-to-have.
+- **Full-stack e2e** (`tests/e2e_aws.rs`, real S3 blobs + RDS lineage/clock together, over TLS) —
+  **both pass**:
+  - `e2e_publish_materialize_gc_over_s3_and_rds`: publish→**cold-materialize from real S3 in 1.06s**
+    (1 block; laptop→S3 = upper bound, well under the 61s activation budget → **R2 satisfied**)→ a fully-
+    superseded gen → **GC deleted 3 real S3 orphan objects** (real `DeleteObject`) via the RDS clock+mark,
+    kept the marked live block, gen2 re-materialized byte-identically.
+  - `e2e_fence_cas_over_rds`: two concurrent first-writers over real RDS → exactly one wins, one typed
+    StaleFence.
+  - (A first run surfaced a *test-scenario* bug — a partial-overwrite gen2 dedup-reused gen1's block so it
+    stayed correctly live, no orphan; fixed to fully-distinct gen2. The CODE was right; the test proved
+    block-level dedup keeps a shared block live under GC, which is itself reassuring.)
+- **Teardown**: RDS deleted (`--skip-final-snapshot`), S3 bucket emptied + deleted, security group
+  removed. No resources left running. No credentials committed (tests read `DATABASE_URL`/AWS creds from
+  env only). Est. cost < $0.10 (RDS ~1 hr + a few S3 ops).
+
+**PHASE 5 COMPLETE. The production build is DONE** — S3BlobStore + PgLineageStore + block_ref reuse-clock
++ gc_pg + the daemon, all validated against the real services they target (S3 + RDS Postgres over TLS),
+behind the prototype's existing sync traits, standalone (not integrated into zeroshot-cloud). Every
+load-bearing invariant (R1/R2, MF1–MF4) is proven by tests on real infra + reproduced by independent
+reviewers. Remaining prod-hardening items (not blockers for this standalone measurement build) are
+tracked in the per-phase watch lists above: manifest GC, orphan-object reconciler, per-publisher lease
+for the narrow claim→delete straddle, single-flight advisory lock, materialize-into-nonempty-tree on pod
+restart, bounded retry on transient S3 errors, IAM auth / verify-full CA, in-region cold-materialize at
+1–5 GB scale.
