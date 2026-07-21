@@ -260,6 +260,9 @@ mod daemon_cmd {
                 "[daemon] published: lineage={} fence={} manifest={}",
                 lineage.0, h.fence.0, h.manifest_digest
             ),
+            CycleOutcome::NoChange => {
+                eprintln!("[daemon] no change (tree unchanged) — skipped commit")
+            }
             CycleOutcome::Fenced { expected, current } => eprintln!(
                 "[daemon] WARNING: lineage {} fenced — another writer owns it; deferring \
                  (expected fence {}, current {})",
@@ -345,7 +348,7 @@ mod daemon_cmd {
             }
             match run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)? {
                 CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
-                CycleOutcome::Advanced(_) => fenced_streak = 0,
+                CycleOutcome::Advanced(_) | CycleOutcome::NoChange => fenced_streak = 0,
             }
         }
 

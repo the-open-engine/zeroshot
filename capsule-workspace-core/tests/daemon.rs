@@ -422,3 +422,43 @@ fn http_probe(addr: SocketAddr) -> String {
     stream.read_to_string(&mut buf).unwrap();
     buf
 }
+
+// ---------- F1: an UNCHANGED tree is a NoChange cycle (no fence bump, no manifest churn) ----------
+#[test]
+fn nochange_cycle_when_tree_unchanged() {
+    let Some((ls, _url)) = connect() else {
+        return;
+    };
+    let clock = ls.ref_clock();
+    let lin = LineageId(format!("nochg-{:x}", std::process::id()));
+    let d = tempfile::tempdir().unwrap();
+    let s = LocalBlobStore::new(d.path().join("store")).unwrap();
+    let tree = d.path().join("w");
+    write(&tree.join("f.bin"), &body(9100, 3));
+
+    // cycle 1 → fence 1
+    match publish_cycle(&tree, &s, &ls, &clock, &lin).unwrap() {
+        CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(1)),
+        o => panic!("cycle 1 must Advance, got {o:?}"),
+    }
+    let head1 = ls.head(&lin).unwrap().unwrap();
+
+    // cycle 2 with NO tree change → NoChange, HEAD untouched (content-only digest == HEAD).
+    match publish_cycle(&tree, &s, &ls, &clock, &lin).unwrap() {
+        CycleOutcome::NoChange => {}
+        o => panic!("unchanged tree must be NoChange, got {o:?}"),
+    }
+    let head2 = ls.head(&lin).unwrap().unwrap();
+    assert_eq!(head2.fence, Fence(1), "no fence bump on an unchanged tree");
+    assert_eq!(
+        head2.manifest_digest, head1.manifest_digest,
+        "HEAD digest unchanged"
+    );
+
+    // a real change still Advances (sanity: NoChange isn't swallowing real commits).
+    write(&tree.join("f.bin"), &body(9200, 3));
+    match publish_cycle(&tree, &s, &ls, &clock, &lin).unwrap() {
+        CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(2)),
+        o => panic!("changed tree must Advance, got {o:?}"),
+    }
+}

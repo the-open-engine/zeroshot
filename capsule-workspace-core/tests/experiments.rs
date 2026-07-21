@@ -405,6 +405,42 @@ fn special_files_counted_not_silently_dropped() {
     }
 }
 
+// F1 (optimization): manifest identity is CONTENT-ONLY — `parent` is excluded from `logical_digest`,
+// so a byte-identical tree always yields the same manifest digest regardless of lineage predecessor.
+// This is what makes an idle daemon idempotent (no manifest churn / orphan leak) and dedups identical
+// trees to a single manifest object.
+#[test]
+fn manifest_identity_content_only_ignores_parent() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    let store = d.path().join("s");
+    let s = LocalBlobStore::new(&store).unwrap();
+    write(&tree.join("f.bin"), &vec![7u8; 3 * CHUNK]);
+    // SAME content, DIFFERENT parent → SAME manifest digest.
+    let a = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
+    let b = publish(
+        &tree,
+        &s,
+        &ChunkIndex::new(),
+        Some("a-different-parent".into()),
+    )
+    .unwrap();
+    assert_eq!(
+        a.manifest, b.manifest,
+        "identical tree => identical manifest digest regardless of parent"
+    );
+    // the two publishes shared a single manifest object (put_manifest deduped on the shared key).
+    assert_eq!(
+        fs::read_dir(store.join("manifests")).unwrap().count(),
+        1,
+        "no manifest churn: one object for identical content"
+    );
+    // it still materializes.
+    let out = d.path().join("o");
+    materialize(&s, &a.manifest, &out).unwrap();
+    assert_eq!(fs::read(out.join("f.bin")).unwrap(), vec![7u8; 3 * CHUNK]);
+}
+
 // minimal libc mkfifo shim (avoid pulling the libc crate for one call)
 extern "C" {
     #[link_name = "mkfifo"]

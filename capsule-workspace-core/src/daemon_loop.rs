@@ -80,6 +80,10 @@ mod cycle {
     pub enum CycleOutcome {
         /// HEAD advanced to (or, idempotently, already held) this fence.
         Advanced(Head),
+        /// The tree is byte-identical to the live HEAD (content-only digest unchanged) → nothing to
+        /// commit. We skip touch + advance entirely: the blocks are already MARK-protected via the
+        /// unchanged HEAD, so an idle daemon does ZERO writes (no fence bump, no manifest churn — F1).
+        NoChange,
         /// The lineage is fenced by a DIFFERENT writer — defer, don't crash.
         Fenced { expected: Fence, current: Fence },
     }
@@ -136,6 +140,17 @@ mod cycle {
         };
 
         let stats = publish(tree, store, &known, parent)?; // upload new blocks + put manifest
+
+        // Change-detection: with content-only manifest identity, an unchanged tree yields the SAME
+        // digest as the live HEAD → nothing to commit. Skip touch + advance so an idle daemon does no
+        // writes at all (no fence bump, no block_ref churn). Its blocks stay protected by the MARK on
+        // the unchanged HEAD. (`publish` still walked/hashed the tree — an mtime-skip to avoid even
+        // that is a later throughput optimization.)
+        if let Some(h) = &head {
+            if stats.manifest == h.manifest_digest {
+                return Ok(CycleOutcome::NoChange);
+            }
+        }
 
         // MF4: touch every block the new manifest references (young) BEFORE advancing HEAD. `touch`
         // dedups by block, so accumulate the block's REAL size = sum of its member chunks' compressed

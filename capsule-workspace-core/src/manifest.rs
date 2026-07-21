@@ -20,8 +20,13 @@ pub struct FileEntry {
     pub hardlink: Option<String>,
 }
 
-/// One publish. `parent` links the lineage; `chunks` is the full resolved index needed to
-/// materialize this tree (self-contained so a cold node needs only this manifest + blocks).
+/// One publish. `chunks` is the full resolved index needed to materialize this tree (self-contained
+/// so a cold node needs only this manifest + blocks). `parent` is INFORMATIONAL ONLY — it is NOT part
+/// of the manifest's logical identity (see `logical_digest`), so a byte-identical tree always yields
+/// the same manifest digest regardless of its lineage predecessor. That is what makes an idle daemon
+/// idempotent (no churn) and lets identical trees across lineages share one manifest object. Because
+/// of that content-dedup, a stored manifest's `parent` reflects whichever writer created the object
+/// first; nothing in publish/materialize/GC reads it (the lineage chain lives in `lineage_head`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub parent: Option<String>,
@@ -40,11 +45,13 @@ impl Manifest {
         crate::cas::hex_sha256(bytes)
     }
 
-    /// LOGICAL identity — hash over the file tree + chunk-plaintext ids only, EXCLUDING the
-    /// physical chunk→block index. Two nodes with different zstd versions/levels therefore
-    /// compute the same identity for a byte-identical tree (fixes the cross-node lineage /
-    /// manifest-dedup fragility). The physical index is still carried for materialization but
-    /// is authenticated per-chunk by content hashing on read, not by this digest.
+    /// LOGICAL identity — hash over the file tree + chunk-plaintext ids ONLY, EXCLUDING both the
+    /// physical chunk→block index AND `parent`. Excluding the index makes the identity independent of
+    /// zstd version/level and block packing (cross-node stability). Excluding `parent` makes it purely
+    /// content-addressed: a byte-identical tree ALWAYS produces the same digest, so re-publishing an
+    /// unchanged workspace is idempotent (no manifest churn / orphan leak — the F1 fix) and identical
+    /// trees dedup. The physical index is still carried for materialization but is authenticated
+    /// per-chunk by content hashing on read, not by this digest.
     pub fn logical_digest(&self) -> String {
         #[derive(Serialize)]
         struct LF<'a> {
@@ -57,13 +64,11 @@ impl Manifest {
         }
         #[derive(Serialize)]
         struct L<'a> {
-            parent: &'a Option<String>,
             files: Vec<LF<'a>>,
         }
         let mut files: Vec<&FileEntry> = self.files.iter().collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let l = L {
-            parent: &self.parent,
             files: files
                 .iter()
                 .map(|f| LF {
