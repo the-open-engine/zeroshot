@@ -575,6 +575,36 @@ Plan deviations noted as CORRECT: `--fence` flag dropped (fence authority = `lin
 ifaces "drop-in" labels now honest. §2 non-goals all still honored (no scope creep); all deferrals
 documented.
 
+### 2026-07-21 — Cross-node + in-region experiments (64-vCPU quota approved) — PASSED, torn down
+Quota increased to 64 vCPU on the internal account → ran the two quota-gated experiments on REAL
+multi-node EC2, using the COMPLETED production daemon binary (Linux arm64, built locally in Docker,
+distributed via S3). Provisioned: S3 bucket + RDS `db.t4g.micro` PG17 + 2× **c7gd.2xlarge** Graviton
+nodes (8 vCPU, instance-store NVMe) in **different AZs** (node A us-east-1a, node B us-east-1c), IAM
+instance profile (SSM + S3), driven via SSM. Then **torn down** (both instances terminated, RDS deleted,
+bucket + IAM + SGs removed).
+
+- **2-node cross-node transfer (R1 + R4) — the core thesis, PROVEN.** Node A (us-east-1a) generated a
+  **2.0 GB / 840-file** workspace on its NVMe and published it to S3+RDS (**publish 37.8s**: walk + chunk
+  + sha256 + zstd + upload 2 GB incompressible + fence advance → HEAD fence 1). Node B (us-east-1c —
+  **different AZ, a FRESH instance that never saw node A's disk**) ran the daemon: materialize-on-start
+  reconstructed the ENTIRE workspace from the content store (S3 blocks + RDS lineage HEAD) onto its own
+  empty NVMe. **Tree checksum identical on both nodes** (`f256ae0f…`) → byte-for-byte transfer with **no
+  shared filesystem**. This is R1 (survive node loss → resume elsewhere) + R4 (node/AZ flexibility)
+  end-to-end on real infra, using the exact S3BlobStore + PgLineageStore + daemon that were built.
+- **In-region cold-materialize at scale (R2) — the open number, CLOSED.** Node B's cold-materialize of
+  the 2 GB / 840-file tree from S3 to fresh NVMe, timed via the daemon's OWN health-readiness signal
+  (503→200 when materialize-on-start completes — validating that endpoint on real infra): **6.60s**.
+  Well under the 61s activation budget; ~6× faster than the publish direction (materialize = parallel
+  block GETs + decompress + write; publish = hash + compress + upload). For a typical 1–2 GB workspace
+  resume is ~3–7s cold (faster warm / with reflink). The Phase-5 laptop→S3 number (1.06s @ 5 MB) was an
+  upper bound; this is the representative in-region figure at realistic scale.
+- **Full daemon lifecycle on real infra**: materialize-on-start → health-ready (503→200) → publish loop
+  → SIGTERM → final publish (drain) → exit 0, all exercised across both nodes. The single-writer handoff
+  (node A fence 1 → node B resumes + advances) worked over real RDS/TLS.
+- **Note (capacity):** c7gd.2xlarge hit `InsufficientInstanceCapacity` in us-east-1b/1d on first try —
+  retried into 1a/1c (still cross-AZ). Real spot-of-the-moment AWS capacity, not a design issue.
+- Est. cost: 2× c7gd.2xlarge (~$0.36/hr each) + RDS, < 1 hr → ~$1. Nothing left running.
+
 **Remaining prod-hardening (from the per-phase watch-lists, still open):** manifest GC + the GC actor
 (F1/F2), orphan-object reconciler, per-publisher lease (claim→delete straddle), single-flight advisory
 lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle
