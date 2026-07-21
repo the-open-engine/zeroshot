@@ -36,13 +36,25 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
     "rt-tokio",
 ], optional = true }
 # explicit driver features (rt/net/time) so `enable_all()` doesn't silently depend on the AWS SDK's
-# transitive tokio feature set (reviewer N1).
+# transitive tokio feature set (reviewer N1). Shared by the `s3` and `pg` adapters (each holds a
+# bounded multi-thread runtime + block_on inside the sync trait methods).
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time"], optional = true }
+
+# optional real Postgres LineageStore + block_ref liveness clock (drop-in for the node daemon).
+# Native PgPool, 100% runtime `sqlx::query` (no compile-time macros / no build-time DATABASE_URL),
+# schema via `sqlx::raw_sql(include_str!(...))` — mirrors zeroshot-cloud (pins sqlx =0.9.0). No TLS
+# backend: the local/test path is sslmode=disable; add `tls-rustls` when a real RDS needs TLS.
+sqlx = { version = "0.9", default-features = false, features = [
+    "postgres",
+    "runtime-tokio",
+], optional = true }
 
 [features]
 default = []
 # real S3 BlobStore (holds a bounded multi-thread tokio runtime, block_on inside sync trait methods)
 s3 = ["dep:aws-config", "dep:aws-sdk-s3", "dep:tokio"]
+# real Postgres LineageStore + PgRefClock (bounded multi-thread runtime, block_on inside sync methods)
+pg = ["dep:sqlx", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3"

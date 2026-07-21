@@ -312,3 +312,62 @@ raw-fs NotFound matches untouched; F1 `touch_mtime` intact), OQ4 unconditional P
 4. **Throttling/503, large-object (64 MiB) PUT/GET wall-time + single-PUT retry replaying 64 MiB, versioned-
    bucket reclamation** — none exercised at 300 KB on MinIO. Confirm the Phase-5 bucket is versioning-OFF.
 - Next: push Phase 1 → Phase 2 (PgLineageStore + block_ref, testcontainers Postgres).
+
+### 2026-07-21 — Phase 2: PgLineageStore + block_ref (implemented via worker agent, reviewed, fixed)
+Implemented by a worker subagent (team-programming worker role) to a precise spec; I read every line,
+reproduced the tests on real Postgres, then ran a senior-review gate. Deviation from the plan: used a
+**manually-run `postgres:17.10-alpine` container gated on `DATABASE_URL`** (same pattern as the S3 MinIO
+test) instead of the `testcontainers` crate — simpler, avoids a heavy dev-dep, consistent with Phase 1.
+- **`LineageStore` trait**: `advance(&mut self)`→`advance(&self)` (pooled store shared); `FileLineageStore`
+  wraps its map in a `Mutex` (behavior identical); added typed `LineageError::StaleFence{expected,current}`
+  (matchable). Fixed the one caller (`let mut ls`→`let ls`). Default suite stays **51 green**.
+- **`src/refclock.rs`**: feature-independent `RefClock` trait (`touch`/`candidates_older_than`/
+  `claim_collectable`) so a Phase-3 in-memory fake needs no `pg`.
+- **`src/pg.rs`**: `PgLineageStore` + `PgRefClock` over a shared `Arc<PgRuntime>` (one bounded 4-worker
+  multi-thread runtime + pool built ON it + the `on()` tripwire, mirroring `S3BlobStore`). Fence CAS
+  dispatched on `expected` (INSERT-on-conflict for 0, guarded UPDATE for ≥1) + MF4 idempotent-retry
+  (absorb a would-be StaleFence iff HEAD already == `(digest, expected+1)`). Guarded `signed`/
+  `positive_u64` (no raw `as`), `checked_add` overflow. `PgRefClock.touch` = unnest upsert
+  `DO UPDATE SET last_referenced_at=clock_timestamp()`; `claim_collectable` = the MF1 atomic
+  `DELETE ... WHERE last_referenced_at < clock_timestamp()-grace` (age re-checked SERVER-SIDE).
+- **`migrations/0001_bootstrap.sql`**: plan §4 DDL, idempotent.
+- **sqlx 0.9.0** pinned (`cargo add` resolved crates.io-latest = 0.9.0 — matches zeroshot-cloud's `=0.9.0`;
+  the plan's 0.8.x hedge was stale). `["postgres","runtime-tokio"]`, no TLS backend (local = sslmode=disable).
+  Default dep tree has **0 sqlx** (lean preserved).
+- **Tests (`tests/pg_lineage.rs`, gated on `DATABASE_URL`)**: 7 on real PG — fence happy path; concurrent
+  UPDATE-path race (one wins/one StaleFence, different digests so no false idempotence); concurrent
+  INSERT-path first-writers (S2); idempotent-retry both paths + a genuine-StaleFence sanity; reuse-clock
+  touch-bumps; MF1 server-side re-check (a touch-between defeats a 1h-grace claim); M1 duplicate-digest
+  touch. Reproduced all green myself.
+
+**Phase 2 senior-review: CHANGES-REQUIRED → fixed.** The reviewer PROVED the fence CAS and the atomic
+claim correct under every interleaving (incl. ABA and same/different-digest first-writer races), and found:
+- **M1 (must-fix, real bug the 5 original tests missed)**: `touch` fed Postgres an `ON CONFLICT DO UPDATE`
+  with duplicate keys → `ERROR: cannot affect row a second time`. In prod a manifest references each block
+  hundreds of times (one per packed chunk), so **every real publish's touch would fail**. Fixed: `touch`
+  dedups by digest (BTreeMap) before binding (also shrinks payload ~256×). Regression test added.
+- **S1 (fixed)**: dropped the `block_ref_seen_ordered CHECK (last>=first)` — it coupled publish liveness to
+  wall-clock monotonicity (an RDS failover to a standby a few ms behind would fail touches) and guarded a
+  column nothing reads.
+- **N2 (fixed)**: dropped the dead `RETURNING` in `claim_collectable` (rows_affected drives the win).
+- **N3 (fixed)**: added `PgLineageStore::head() -> Result<Option<Head>>` (fallible) — the Phase-4 daemon's
+  materialize-on-start MUST use it (not the infallible trait `get`, which degrades a transient DB error to
+  None and could start a pod with an empty workspace on a blip).
+- Verified fine: runtime/pool binding (pool built on the held runtime; no deadlock with max_conns=8 + 4
+  workers since no conn is held across a second acquire); eager `connect` fail-fast; type mapping.
+
+**PHASE-5 WATCH (real RDS, can't surface on local PG):** (1) **TLS is the likely tripwire** — the crate has
+NO sqlx tls feature; real RDS with `rds.force_ssl=1` / `sslmode=require` will fail to connect. Phase 5 must
+add `tls-rustls` + the RDS CA + `sslmode=require`. (2) IAM auth not implemented (password via DATABASE_URL
+only — fine for the master user). (3) Connection budget: prefer `ref_clock()` (shared pool) over two
+independent pools at pod scale; mind `db.t4g.micro` max_connections. (4) `clock_timestamp()` monotonicity
+across failover (relates to S1).
+
+**PHASE-3 DESIGN FLAG (settle BEFORE coding Phase 3):** there is **no manifest liveness clock** and
+`lineage_head`'s UPDATE **overwrites** `manifest_digest` (no superseded-digest history). So Phase 3's
+"manifest GC (superseded HEADs)" has neither a superseded-manifest list nor a cross-host grace clock for
+manifests — needs a design decision (a `manifest_ref` clock, or accept that only blocks are GC'd for now).
+Also: the claim→`delete_block` straddle means Phase 3's sweep MUST keep dedup-reusable (live-HEAD-marked)
+blocks OUT of the candidate set (invariant #2), since a block re-referenced after a won claim but before
+DeleteObject is a live-byte loss the claim primitive alone can't prevent.
+- Next: push Phase 2 → Phase 3 (PG-driven GC).

@@ -347,7 +347,7 @@ fn decompression_bomb_bounded() {
 #[test]
 fn concurrent_fence_rejects_stale() {
     let d = tmp();
-    let mut ls = FileLineageStore::open(d.path().join("lin.json")).unwrap();
+    let ls = FileLineageStore::open(d.path().join("lin.json")).unwrap();
     let id = LineageId("proj-1".into());
     let h1 = ls.advance(&id, "digestA".into(), Fence(0)).unwrap();
     assert_eq!(h1.fence, Fence(1));
