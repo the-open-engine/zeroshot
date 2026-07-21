@@ -32,14 +32,24 @@ fn manifest_key(digest: &str) -> String {
     format!("manifests/{digest}")
 }
 
-/// Map any SDK error to a redacted `anyhow` error carrying the modeled service code (never the
-/// request body or credentials). Mirrors zeroshot-cloud's `kms.rs` convention.
+/// Map any SDK error to a redacted `anyhow` error carrying the SDK error *category* + the modeled
+/// service code (never the request body or credentials). Category distinguishes a service response
+/// from a timeout/dispatch/TLS failure so a real-AWS incident is diagnosable — `[unknown]` alone is
+/// not (reviewer S2). Mirrors zeroshot-cloud's `kms.rs` redaction discipline.
 fn redacted<E, R>(ctx: &str, e: &SdkError<E, R>) -> anyhow::Error
 where
     SdkError<E, R>: ProvideErrorMetadata,
 {
     let code = e.code().unwrap_or("unknown");
-    anyhow!("{ctx}: s3 error [{code}]")
+    let kind = match e {
+        SdkError::ServiceError(_) => "service",
+        SdkError::TimeoutError(_) => "timeout",
+        SdkError::DispatchFailure(_) => "dispatch",
+        SdkError::ResponseError(_) => "response",
+        SdkError::ConstructionFailure(_) => "construction",
+        _ => "other",
+    };
+    anyhow!("{ctx}: s3 {kind} error [{code}]")
 }
 
 impl S3BlobStore {
@@ -117,6 +127,10 @@ impl S3BlobStore {
             {
                 Ok(o) => o,
                 Err(e) => {
+                    // A missing key is `NoSuchKey` ONLY if the principal has `s3:ListBucket` on the
+                    // bucket; without it real S3 returns 403 AccessDenied for a missing key and this
+                    // classifies as transient, silently breaking the NotFound-dependent GC/republish
+                    // logic. Phase-5 bucket policy MUST grant s3:ListBucket (build log watch item).
                     if let SdkError::ServiceError(se) = &e {
                         if se.err().is_no_such_key() {
                             return Err(StoreError::NotFound(key).into());
@@ -134,32 +148,43 @@ impl S3BlobStore {
         })
     }
 
-    fn exists(&self, key: String) -> bool {
-        self.on(async {
-            self.client
-                .head_object()
-                .bucket(&self.bucket)
-                .key(key)
-                .send()
-                .await
-                .is_ok()
-        })
+    /// HEAD → `Ok(true)` exists, `Ok(false)` a modeled 404, `Err` a TRANSIENT failure. Async (avoids a
+    /// nested `block_on`); callers drive it via `self.on(...)`.
+    async fn head_exists(&self, key: &str) -> Result<bool> {
+        match self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                if let SdkError::ServiceError(se) = &e {
+                    if se.err().is_not_found() {
+                        return Ok(false);
+                    }
+                }
+                Err(redacted("head_object", &e))
+            }
+        }
     }
 
-    /// Idempotent delete with a faithful "did-remove" bool (HeadObject then DeleteObject). GC calls
-    /// this only after winning the atomic `block_ref` claim, so the extra Head is off the hot path.
-    /// NOTE: correct on a NON-versioned bucket (our test buckets); a versioned bucket needs
-    /// DeleteObjectVersion to truly reclaim — tracked as a prod follow-up in the build log.
+    /// `has_block` can't propagate (bool trait method): a transient HEAD failure ⇒ `false`, the SAFE
+    /// direction (worst case a redundant byte-identical re-upload; never a false "exists").
+    fn exists(&self, key: &str) -> bool {
+        self.on(self.head_exists(key)).unwrap_or(false)
+    }
+
+    /// Idempotent delete with a faithful "did-remove" bool. Only a modeled 404 counts as absent; a
+    /// TRANSIENT HEAD error PROPAGATES (reviewer S1) so GC re-drives instead of silently skipping the
+    /// DeleteObject and leaking the object. GC calls this only after winning the atomic `block_ref`
+    /// claim, so the extra HEAD is off the hot path. NOTE: correct on a NON-versioned bucket (our test
+    /// buckets); a versioned bucket needs DeleteObjectVersion to truly reclaim (prod follow-up).
     fn del(&self, key: String, ctx: &str) -> Result<bool> {
         self.on(async {
-            let existed = self
-                .client
-                .head_object()
-                .bucket(&self.bucket)
-                .key(&key)
-                .send()
-                .await
-                .is_ok();
+            let existed = self.head_exists(&key).await?;
             if existed {
                 self.client
                     .delete_object()
@@ -188,7 +213,7 @@ impl BlobStore for S3BlobStore {
         self.get(manifest_key(digest), "get_manifest")
     }
     fn has_block(&self, id: &BlockId) -> bool {
-        self.exists(block_key(id))
+        self.exists(&block_key(id))
     }
     fn delete_block(&self, id: &BlockId) -> Result<bool> {
         self.del(block_key(id), "delete_block")

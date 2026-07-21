@@ -17,7 +17,7 @@ fn conformance(store: &dyn BlobStore, k: &str) {
     let manifest_id =
         format!("{k}2222222222222222222222222222222222222222222222222222222222222222");
     let absent = format!("{k}deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
-    let block = vec![0xABu8; 300_000]; // > one part, exercises a real body
+    let block = vec![0xABu8; 300_000]; // a real multi-hundred-KB body (single PUT; 64 MiB blocks / multipart / large-object timeouts are Phase 5)
     let manifest = br#"{"schema":1,"files":[]}"#.to_vec();
 
     // absent before write

@@ -35,7 +35,9 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
     "default-https-client",
     "rt-tokio",
 ], optional = true }
-tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+# explicit driver features (rt/net/time) so `enable_all()` doesn't silently depend on the AWS SDK's
+# transitive tokio feature set (reviewer N1).
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"], optional = true }
 
 [features]
 default = []

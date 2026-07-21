@@ -285,4 +285,30 @@ plan-review round needed.
   coverage notice and passes (repo rule). clippy clean on `--features s3 --all-targets`; rustfmt clean.
 - **Not yet**: real-AWS S3 (`S3_IT=1`, Phase 5); multipart (deferred); versioned-bucket
   `DeleteObjectVersion` (test buckets are versioning-off; noted as prod follow-up).
-- Next: Phase 1 senior-review gate → push → Phase 2 (PgLineageStore + block_ref).
+
+**Phase 1 senior-review: APPROVED-WITH-NITS** (no must-fix). Verified correct: MF2 runtime containment
+(owned multi-thread runtime + per-call `block_on` is panic-free from rayon threads, no deadlock,
+multi-thread genuinely required for concurrent `par_iter` gets), the `on()` tripwire, GetObject
+`NoSuchKey`→NotFound, the HEAD-vs-GET 404 asymmetry, the `StoreError` refactor (50 green holds; `gc.rs`
+raw-fs NotFound matches untouched; F1 `touch_mtime` intact), OQ4 unconditional PUT. Should-fixes applied:
+- **S1** (silent orphan): `del()` HEAD now distinguishes a modeled 404 (`is_not_found()` ⇒ absent) from a
+  TRANSIENT error (propagates), so GC re-drives instead of skipping DeleteObject and leaking bytes.
+  `has_block` keeps transient⇒false (safe direction). Re-validated on MinIO.
+- **S2** (observability): `redacted()` now includes the SDK error CATEGORY (service/timeout/dispatch/
+  response/construction) + code, so a real-AWS incident isn't an undiagnosable `[unknown]`.
+- **N1**: `tokio` `s3` feature now declares `net`,`time` explicitly (not relying on the SDK's transitive
+  features for `enable_all()`).
+- **N2**: fixed the misleading "one part" test comment.
+
+**PHASE-5 WATCH ITEMS (real-AWS behaviors MinIO cannot exercise) — set up before/at Phase 5:**
+1. **s3:ListBucket is load-bearing** — without it real S3 returns **403 (not 404 NoSuchKey)** for a missing
+   key, which our code would classify as transient, breaking the NotFound-dependent GC/republish logic.
+   The Phase-5 bucket policy/role MUST grant `s3:ListBucket`. (Code comment added at `s3.rs` get().)
+2. **Region**: `from_env` sets no region → must export `AWS_REGION` for real AWS (MinIO+path-style masks
+   this; wrong region → 301 PermanentRedirect).
+3. **SSE-KMS**: if the bucket enforces `aws:kms`, PUT needs no header but the role needs
+   `kms:GenerateDataKey`/`Decrypt`; GET needs `kms:Decrypt`. Provision KMS grants with the bucket (or use a
+   plain SSE-S3 test bucket).
+4. **Throttling/503, large-object (64 MiB) PUT/GET wall-time + single-PUT retry replaying 64 MiB, versioned-
+   bucket reclamation** — none exercised at 300 KB on MinIO. Confirm the Phase-5 bucket is versioning-OFF.
+- Next: push Phase 1 → Phase 2 (PgLineageStore + block_ref, testcontainers Postgres).
