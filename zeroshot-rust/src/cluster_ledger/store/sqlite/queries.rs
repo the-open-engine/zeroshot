@@ -198,34 +198,31 @@ fn family_from_i64(value: i64) -> Result<RecordFamily, StoreError> {
 }
 
 pub(super) const fn kind_to_i64(kind: RecordKind) -> i64 {
-    match kind {
-        RecordKind::Admission => 1,
-        RecordKind::Dispatch => 2,
-        RecordKind::Settlement => 3,
-        RecordKind::SafeFault => 4,
-        RecordKind::EffectIntent => 5,
-        RecordKind::EffectReceipt => 6,
-        RecordKind::Terminal => 7,
-        RecordKind::CleanupReceipt => 8,
-        RecordKind::VerifiedInput => 9,
-        RecordKind::VerifiedOutput => 10,
-        RecordKind::MutationReceipt => 11,
-    }
+    kind as i64
 }
 
 fn kind_from_i64(value: i64) -> Result<RecordKind, StoreError> {
-    match value {
-        1 => Ok(RecordKind::Admission),
-        2 => Ok(RecordKind::Dispatch),
-        3 => Ok(RecordKind::Settlement),
-        4 => Ok(RecordKind::SafeFault),
-        5 => Ok(RecordKind::EffectIntent),
-        6 => Ok(RecordKind::EffectReceipt),
-        7 => Ok(RecordKind::Terminal),
-        8 => Ok(RecordKind::CleanupReceipt),
-        9 => Ok(RecordKind::VerifiedInput),
-        10 => Ok(RecordKind::VerifiedOutput),
-        11 => Ok(RecordKind::MutationReceipt),
-        _ => Err(StoreError::Corrupt("record kind")),
-    }
+    const KINDS: [RecordKind; 11] = [
+        RecordKind::Admission,
+        RecordKind::Dispatch,
+        RecordKind::Settlement,
+        RecordKind::SafeFault,
+        RecordKind::EffectIntent,
+        RecordKind::EffectReceipt,
+        RecordKind::Terminal,
+        RecordKind::CleanupReceipt,
+        RecordKind::VerifiedInput,
+        RecordKind::VerifiedOutput,
+        RecordKind::MutationReceipt,
+    ];
+    let index = usize::try_from(
+        value
+            .checked_sub(1)
+            .ok_or(StoreError::Corrupt("record kind"))?,
+    )
+    .map_err(|_| StoreError::Corrupt("record kind"))?;
+    KINDS
+        .get(index)
+        .copied()
+        .ok_or(StoreError::Corrupt("record kind"))
 }

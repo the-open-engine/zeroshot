@@ -1,10 +1,14 @@
-use std::error::Error;
-use std::fmt;
+use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use super::store::{MutationReceipt, Position, ResourceId};
+
+mod error;
+mod payload;
+
+pub use error::RecordError;
 
 pub const RECORD_VERSION_V1: u16 = 1;
 pub const MAX_RECORD_PAYLOAD_BYTES: usize = 1024 * 1024;
@@ -13,50 +17,68 @@ pub const MAX_APPEND_BATCH_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_RANGE_RECORDS: usize = 4_096;
 const HASH_DOMAIN: &[u8] = b"openengine.cluster-ledger.record/v1\0";
 
-macro_rules! durable_id {
-    ($name:ident) => {
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-        #[serde(transparent)]
-        pub struct $name(u64);
-
-        impl $name {
-            pub fn new(value: u64) -> Result<Self, RecordError> {
-                if value == 0 || value > i64::MAX as u64 {
-                    return Err(RecordError::IdentityOutOfRange);
-                }
-                Ok(Self(value))
-            }
-
-            #[must_use]
-            pub const fn get(self) -> u64 {
-                self.0
-            }
-
-            pub fn checked_next(self) -> Result<Self, RecordError> {
-                Self::new(
-                    self.0
-                        .checked_add(1)
-                        .ok_or(RecordError::IdentityOutOfRange)?,
-                )
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                Self::new(u64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
-            }
-        }
-    };
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct DurableId<K> {
+    value: u64,
+    #[serde(skip)]
+    kind: PhantomData<K>,
 }
 
-durable_id!(GenerationId);
-durable_id!(RunSequence);
-durable_id!(NodeInstanceId);
-durable_id!(ExecutionId);
-durable_id!(EffectId);
+impl<K> DurableId<K> {
+    pub fn new(value: u64) -> Result<Self, RecordError> {
+        if value == 0 || value > i64::MAX as u64 {
+            return Err(RecordError::IdentityOutOfRange);
+        }
+        Ok(Self {
+            value,
+            kind: PhantomData,
+        })
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.value
+    }
+
+    pub fn checked_next(self) -> Result<Self, RecordError> {
+        Self::new(
+            self.value
+                .checked_add(1)
+                .ok_or(RecordError::IdentityOutOfRange)?,
+        )
+    }
+}
+
+impl<'de, K> Deserialize<'de> for DurableId<K> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(u64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum GenerationIdentity {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RunIdentity {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum NodeInstanceIdentity {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ExecutionIdentity {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EffectIdentity {}
+
+pub type GenerationId = DurableId<GenerationIdentity>;
+pub type RunSequence = DurableId<RunIdentity>;
+pub type NodeInstanceId = DurableId<NodeInstanceIdentity>;
+pub type ExecutionId = DurableId<ExecutionIdentity>;
+pub type EffectId = DurableId<EffectIdentity>;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct IdentityCounters {
@@ -164,36 +186,25 @@ impl RecordFamily {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[repr(u8)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordKind {
-    Admission,
-    Dispatch,
-    Settlement,
-    SafeFault,
-    EffectIntent,
-    EffectReceipt,
-    Terminal,
-    CleanupReceipt,
-    VerifiedInput,
-    VerifiedOutput,
-    MutationReceipt,
+    Admission = 1,
+    Dispatch = 2,
+    Settlement = 3,
+    SafeFault = 4,
+    EffectIntent = 5,
+    EffectReceipt = 6,
+    Terminal = 7,
+    CleanupReceipt = 8,
+    VerifiedInput = 9,
+    VerifiedOutput = 10,
+    MutationReceipt = 11,
 }
 
 impl RecordKind {
     const fn tag(self) -> u8 {
-        match self {
-            Self::Admission => 1,
-            Self::Dispatch => 2,
-            Self::Settlement => 3,
-            Self::SafeFault => 4,
-            Self::EffectIntent => 5,
-            Self::EffectReceipt => 6,
-            Self::Terminal => 7,
-            Self::CleanupReceipt => 8,
-            Self::VerifiedInput => 9,
-            Self::VerifiedOutput => 10,
-            Self::MutationReceipt => 11,
-        }
+        self as u8
     }
 
     #[must_use]
@@ -274,76 +285,6 @@ pub enum RecordPayload {
     },
 }
 
-impl RecordPayload {
-    #[must_use]
-    pub const fn kind(&self) -> RecordKind {
-        match self {
-            Self::Admission { .. } => RecordKind::Admission,
-            Self::Dispatch { .. } => RecordKind::Dispatch,
-            Self::Settlement { .. } => RecordKind::Settlement,
-            Self::SafeFault { .. } => RecordKind::SafeFault,
-            Self::EffectIntent { .. } => RecordKind::EffectIntent,
-            Self::EffectReceipt { .. } => RecordKind::EffectReceipt,
-            Self::Terminal { .. } => RecordKind::Terminal,
-            Self::CleanupReceipt { .. } => RecordKind::CleanupReceipt,
-            Self::VerifiedInput { .. } => RecordKind::VerifiedInput,
-            Self::VerifiedOutput { .. } => RecordKind::VerifiedOutput,
-            Self::MutationReceipt { .. } => RecordKind::MutationReceipt,
-        }
-    }
-
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecordError> {
-        let encoded = serde_json::to_vec(self).map_err(|_| RecordError::Encoding)?;
-        if encoded.len() > MAX_RECORD_PAYLOAD_BYTES {
-            return Err(RecordError::PayloadTooLarge);
-        }
-        Ok(encoded)
-    }
-
-    pub fn decode(kind: RecordKind, version: u16, bytes: &[u8]) -> Result<Self, RecordError> {
-        if version != RECORD_VERSION_V1 {
-            return Err(RecordError::UnknownVersion);
-        }
-        if bytes.len() > MAX_RECORD_PAYLOAD_BYTES {
-            return Err(RecordError::PayloadTooLarge);
-        }
-        let value: Self = serde_json::from_slice(bytes).map_err(|_| RecordError::Encoding)?;
-        if value.kind() != kind {
-            return Err(RecordError::KindMismatch);
-        }
-        if value.canonical_bytes()? != bytes {
-            return Err(RecordError::NonCanonicalPayload);
-        }
-        match &value {
-            Self::VerifiedInput {
-                digest,
-                canonical_bytes,
-                ..
-            }
-            | Self::VerifiedOutput {
-                digest,
-                canonical_bytes,
-                ..
-            } if *digest != CanonicalDigest::of(canonical_bytes) => {
-                return Err(RecordError::DigestMismatch);
-            }
-            _ => {}
-        }
-        if let Self::Admission {
-            graph_digest,
-            canonical_graph,
-            ..
-        } = &value
-        {
-            if !canonical_graph.is_empty() && *graph_digest != CanonicalDigest::of(canonical_graph)
-            {
-                return Err(RecordError::DigestMismatch);
-            }
-        }
-        Ok(value)
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoredRecord {
     pub resource: ResourceId,
@@ -369,15 +310,15 @@ impl StoredRecord {
         let kind = payload.kind();
         let family = kind.family();
         let payload = payload.canonical_bytes()?;
-        let record_hash = calculate_record_hash(
-            &resource,
+        let record_hash = calculate_record_hash(RecordHashInput {
+            resource: &resource,
             sequence,
             family,
             kind,
-            RECORD_VERSION_V1,
-            &payload,
+            version: RECORD_VERSION_V1,
+            payload: &payload,
             previous_hash,
-        );
+        });
         Ok(Self {
             resource,
             sequence,
@@ -411,15 +352,15 @@ impl StoredRecord {
         if self.previous_hash != expected_previous_hash {
             return Err(RecordError::PreviousHashMismatch);
         }
-        let calculated = calculate_record_hash(
-            &self.resource,
-            self.sequence,
-            self.family,
-            self.kind,
-            self.version,
-            &self.payload,
-            self.previous_hash,
-        );
+        let calculated = calculate_record_hash(RecordHashInput {
+            resource: &self.resource,
+            sequence: self.sequence,
+            family: self.family,
+            kind: self.kind,
+            version: self.version,
+            payload: &self.payload,
+            previous_hash: self.previous_hash,
+        });
         if self.record_hash != calculated {
             return Err(RecordError::RecordHashMismatch);
         }
@@ -436,64 +377,27 @@ impl StoredRecord {
     }
 }
 
-fn calculate_record_hash(
-    resource: &ResourceId,
+struct RecordHashInput<'a> {
+    resource: &'a ResourceId,
     sequence: Position,
     family: RecordFamily,
     kind: RecordKind,
     version: u16,
-    payload: &[u8],
+    payload: &'a [u8],
     previous_hash: [u8; 32],
-) -> [u8; 32] {
-    let payload_digest = Sha256::digest(payload);
+}
+
+fn calculate_record_hash(input: RecordHashInput<'_>) -> [u8; 32] {
+    let payload_digest = Sha256::digest(input.payload);
     let mut hasher = Sha256::new();
     hasher.update(HASH_DOMAIN);
-    hasher.update((resource.as_str().len() as u64).to_be_bytes());
-    hasher.update(resource.as_str().as_bytes());
-    hasher.update(sequence.get().to_be_bytes());
-    hasher.update([family.tag()]);
-    hasher.update([kind.tag()]);
-    hasher.update(version.to_be_bytes());
+    hasher.update((input.resource.as_str().len() as u64).to_be_bytes());
+    hasher.update(input.resource.as_str().as_bytes());
+    hasher.update(input.sequence.get().to_be_bytes());
+    hasher.update([input.family.tag()]);
+    hasher.update([input.kind.tag()]);
+    hasher.update(input.version.to_be_bytes());
     hasher.update(payload_digest);
-    hasher.update(previous_hash);
+    hasher.update(input.previous_hash);
     hasher.finalize().into()
 }
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecordError {
-    IdentityOutOfRange,
-    SequenceOutOfRange,
-    PayloadTooLarge,
-    Encoding,
-    UnknownVersion,
-    KindMismatch,
-    FamilyMismatch,
-    NonCanonicalPayload,
-    DigestMismatch,
-    ResourceMismatch,
-    SequenceGap,
-    PreviousHashMismatch,
-    RecordHashMismatch,
-}
-
-impl fmt::Display for RecordError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::IdentityOutOfRange => "durable identity is outside the supported range",
-            Self::SequenceOutOfRange => "record sequence is outside the supported range",
-            Self::PayloadTooLarge => "record payload exceeds 1 MiB",
-            Self::Encoding => "record payload encoding is invalid",
-            Self::UnknownVersion => "record version is unknown",
-            Self::KindMismatch => "record kind does not match its payload",
-            Self::FamilyMismatch => "record family does not match its kind",
-            Self::NonCanonicalPayload => "record payload is not canonically encoded",
-            Self::DigestMismatch => "verified I/O digest does not match canonical bytes",
-            Self::ResourceMismatch => "record resource does not match its ledger",
-            Self::SequenceGap => "record sequence is not contiguous",
-            Self::PreviousHashMismatch => "record previous hash does not match the prefix",
-            Self::RecordHashMismatch => "record hash is invalid",
-        })
-    }
-}
-
-impl Error for RecordError {}

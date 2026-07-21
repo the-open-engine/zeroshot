@@ -8,10 +8,10 @@ use zeroshot_engine::execution::{
     MAX_EXECUTION_CANDIDATE_BYTES, MAX_EXECUTION_INLINE_BYTES,
 };
 
-#[path = "support/mod.rs"]
-mod support;
+#[path = "support/execution_contract.rs"]
+mod execution_contract;
 
-use support::execution_contract::{CommandSpec, agent_target, builtin_target, command_with_input};
+use execution_contract::{CommandSpec, agent_target, builtin_target, command_with_input};
 
 fn command(input: ExecutionInput) -> ExecutionCommand {
     command_with_input(

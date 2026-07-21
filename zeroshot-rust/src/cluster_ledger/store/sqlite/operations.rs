@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest as _, Sha256};
 use rusqlite::{params, Transaction};
 
-use super::super::{AppendBatch, AppendOutcome, MutationReceipt, Position, ResourceId, StoreError};
+use super::super::{
+    validate_append_identity, AppendBatch, AppendOutcome, MutationReceipt, Position, ResourceId,
+    StoreError,
+};
 use super::queries::{family_to_i64, kind_to_i64, query_receipt, to_sql_i64};
 use super::SqliteLedgerStore;
 use crate::cluster_ledger::record::StoredRecord;
@@ -48,24 +51,7 @@ pub(super) fn validate_append_transaction(
     batch: &AppendBatch,
 ) -> Result<Position, StoreError> {
     let actual = SqliteLedgerStore::position(transaction)?;
-    if actual != expected {
-        return Err(StoreError::PositionConflict { expected, actual });
-    }
-    let committed_position = expected.checked_add(batch.records.len())?;
-    for (offset, record) in batch.records.iter().enumerate() {
-        let expected_sequence = expected.checked_add(offset + 1)?;
-        if record.resource != *resource || record.sequence != expected_sequence {
-            return Err(StoreError::Corrupt("append record identity"));
-        }
-    }
-    if batch
-        .receipt
-        .as_ref()
-        .is_some_and(|receipt| receipt.committed_position != committed_position)
-    {
-        return Err(StoreError::Corrupt("receipt position"));
-    }
-    Ok(committed_position)
+    validate_append_identity(resource, expected, actual, batch)
 }
 
 pub(super) fn insert_records(

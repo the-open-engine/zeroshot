@@ -1,60 +1,90 @@
-use std::error::Error;
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::record::{
     StoredRecord, MAX_APPEND_BATCH_BYTES, MAX_APPEND_RECORDS, MAX_RECORD_PAYLOAD_BYTES,
 };
 
+mod contract;
 pub mod fake;
 pub mod sqlite;
+
+pub use contract::LedgerStore;
 
 pub const MAX_IDENTIFIER_BYTES: usize = 256;
 pub const MAX_DISCOVERY_PAGE: usize = 1_024;
 
-macro_rules! bounded_identifier {
-    ($name:ident, $label:literal) => {
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self, StoreError> {
-                let value = value.into();
-                validate_identifier(&value, $label)?;
-                Ok(Self(value))
-            }
-
-            #[must_use]
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                let value = String::deserialize(deserializer)?;
-                Self::new(value).map_err(serde::de::Error::custom)
-            }
-        }
-    };
+pub trait IdentifierKind {
+    const LABEL: &'static str;
 }
 
-bounded_identifier!(ResourceId, "resource");
-bounded_identifier!(OwnerId, "owner");
-bounded_identifier!(IdempotencyId, "idempotency");
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct BoundedIdentifier<K> {
+    value: String,
+    #[serde(skip)]
+    kind: PhantomData<K>,
+}
+
+impl<K: IdentifierKind> BoundedIdentifier<K> {
+    pub fn new(value: impl Into<String>) -> Result<Self, StoreError> {
+        let value = value.into();
+        validate_identifier(&value, K::LABEL)?;
+        Ok(Self {
+            value,
+            kind: PhantomData,
+        })
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+}
+
+impl<K> fmt::Display for BoundedIdentifier<K> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.value)
+    }
+}
+
+impl<'de, K: IdentifierKind> Deserialize<'de> for BoundedIdentifier<K> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResourceIdentifier {}
+
+impl IdentifierKind for ResourceIdentifier {
+    const LABEL: &'static str = "resource";
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OwnerIdentifier {}
+
+impl IdentifierKind for OwnerIdentifier {
+    const LABEL: &'static str = "owner";
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum IdempotencyIdentifier {}
+
+impl IdentifierKind for IdempotencyIdentifier {
+    const LABEL: &'static str = "idempotency";
+}
+
+pub type ResourceId = BoundedIdentifier<ResourceIdentifier>;
+pub type OwnerId = BoundedIdentifier<OwnerIdentifier>;
+pub type IdempotencyId = BoundedIdentifier<IdempotencyIdentifier>;
 
 fn validate_identifier(value: &str, label: &'static str) -> Result<(), StoreError> {
     if value.is_empty() || value.len() > MAX_IDENTIFIER_BYTES || value.chars().any(char::is_control)
@@ -99,7 +129,8 @@ impl<'de> Deserialize<'de> for Position {
     where
         D: serde::Deserializer<'de>,
     {
-        Self::new(u64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+        u64::deserialize(deserializer)
+            .and_then(|value| Self::new(value).map_err(serde::de::Error::custom))
     }
 }
 
@@ -179,6 +210,62 @@ impl AppendBatch {
     }
 }
 
+pub(crate) fn validate_append_identity(
+    resource: &ResourceId,
+    expected: Position,
+    actual: Position,
+    batch: &AppendBatch,
+) -> Result<Position, StoreError> {
+    if actual != expected {
+        return Err(StoreError::PositionConflict { expected, actual });
+    }
+    let committed_position = expected.checked_add(batch.records.len())?;
+    for (offset, record) in batch.records.iter().enumerate() {
+        let expected_sequence = expected.checked_add(offset + 1)?;
+        if record.resource != *resource || record.sequence != expected_sequence {
+            return Err(StoreError::Corrupt("append record identity"));
+        }
+    }
+    if batch
+        .receipt
+        .as_ref()
+        .is_some_and(|receipt| receipt.committed_position != committed_position)
+    {
+        return Err(StoreError::Corrupt("receipt position"));
+    }
+    Ok(committed_position)
+}
+
+pub(crate) fn fence_expiry(now_ms: u64, ttl_ms: u64) -> Result<u64, StoreError> {
+    if ttl_ms == 0 {
+        return Err(StoreError::FenceExpired);
+    }
+    let expires_at_ms = now_ms
+        .checked_add(ttl_ms)
+        .ok_or(StoreError::PositionOverflow)?;
+    if expires_at_ms > i64::MAX as u64 {
+        return Err(StoreError::PositionOverflow);
+    }
+    Ok(expires_at_ms)
+}
+
+pub(crate) fn wait_is_complete(
+    position: Position,
+    after: Position,
+    now_ms: u64,
+    deadline_ms: u64,
+) -> bool {
+    position > after || now_ms >= deadline_ms
+}
+
+pub(crate) struct WaitProbe<'a> {
+    pub resource: &'a ResourceId,
+    pub position: Position,
+    pub after: Position,
+    pub now_ms: u64,
+    pub deadline_ms: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceInfo {
     pub resource: ResourceId,
@@ -203,6 +290,12 @@ pub enum AppendOutcome {
     Committed(MutationReceipt),
     Replayed(MutationReceipt),
     CommittedWithoutReceipt(Position),
+}
+
+impl AppendOutcome {
+    const fn is_new_commit(&self) -> bool {
+        matches!(self, Self::Committed(_) | Self::CommittedWithoutReceipt(_))
+    }
 }
 
 #[derive(Clone)]
@@ -234,70 +327,88 @@ impl Default for AppendGuard {
     }
 }
 
+pub(crate) struct AppendRequest<'a> {
+    pub(crate) resource: &'a ResourceId,
+    pub(crate) fence: &'a Fence,
+    pub(crate) expected: Position,
+    pub(crate) batch: AppendBatch,
+    pub(crate) guard: AppendGuard,
+}
+
+impl<'a> AppendRequest<'a> {
+    #[must_use]
+    pub(crate) fn new(
+        resource: &'a ResourceId,
+        fence: &'a Fence,
+        expected: Position,
+        batch: AppendBatch,
+    ) -> Self {
+        Self {
+            resource,
+            fence,
+            expected,
+            batch,
+            guard: AppendGuard::allow(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn guarded(mut self, guard: AppendGuard) -> Self {
+        self.guard = guard;
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FailPoint {
     BeforeCommit,
     AfterCommitBeforeResponse,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum StoreError {
+    #[error("invalid {0} identifier")]
     InvalidIdentifier(&'static str),
+    #[error("requested limit exceeds the fixed bound")]
     InvalidLimit,
+    #[error("ledger resource already exists")]
     ResourceExists,
+    #[error("ledger resource does not exist")]
     ResourceNotFound,
+    #[error("ledger resource fence is held")]
     FenceHeld,
+    #[error("ledger resource fence is stale")]
     StaleFence,
+    #[error("ledger resource fence expired")]
     FenceExpired,
+    #[error(
+        "ledger position conflict: expected {}, actual {}",
+        .expected.get(),
+        .actual.get()
+    )]
     PositionConflict {
         expected: Position,
         actual: Position,
     },
+    #[error("ledger position exceeds SQLite range")]
     PositionOverflow,
+    #[error("append batch record bound exceeded")]
     BatchRecordBound,
+    #[error("append batch byte bound exceeded")]
     BatchByteBound,
+    #[error("mutation receipt exceeds fixed bound")]
     ReceiptTooLarge,
+    #[error("idempotency key reused with a different mutation")]
     IdempotencyConflict,
+    #[error("append was cancelled before its first durable write")]
     AppendCancelled,
+    #[error("ledger data is corrupt: {0}")]
     Corrupt(&'static str),
+    #[error("ledger failpoint: {0:?}")]
     FailureInjected(FailPoint),
+    #[error("ledger storage operation failed")]
     Storage,
 }
-
-impl fmt::Display for StoreError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidIdentifier(label) => write!(formatter, "invalid {label} identifier"),
-            Self::InvalidLimit => formatter.write_str("requested limit exceeds the fixed bound"),
-            Self::ResourceExists => formatter.write_str("ledger resource already exists"),
-            Self::ResourceNotFound => formatter.write_str("ledger resource does not exist"),
-            Self::FenceHeld => formatter.write_str("ledger resource fence is held"),
-            Self::StaleFence => formatter.write_str("ledger resource fence is stale"),
-            Self::FenceExpired => formatter.write_str("ledger resource fence expired"),
-            Self::PositionConflict { expected, actual } => write!(
-                formatter,
-                "ledger position conflict: expected {}, actual {}",
-                expected.get(),
-                actual.get()
-            ),
-            Self::PositionOverflow => formatter.write_str("ledger position exceeds SQLite range"),
-            Self::BatchRecordBound => formatter.write_str("append batch record bound exceeded"),
-            Self::BatchByteBound => formatter.write_str("append batch byte bound exceeded"),
-            Self::ReceiptTooLarge => formatter.write_str("mutation receipt exceeds fixed bound"),
-            Self::IdempotencyConflict => {
-                formatter.write_str("idempotency key reused with a different mutation")
-            }
-            Self::AppendCancelled => {
-                formatter.write_str("append was cancelled before its first durable write")
-            }
-            Self::Corrupt(reason) => write!(formatter, "ledger data is corrupt: {reason}"),
-            Self::FailureInjected(point) => write!(formatter, "ledger failpoint: {point:?}"),
-            Self::Storage => formatter.write_str("ledger storage operation failed"),
-        }
-    }
-}
-
-impl Error for StoreError {}
 
 pub trait LedgerClock: Send + Sync {
     fn now_ms(&self) -> u64;
@@ -317,70 +428,13 @@ impl LedgerClock for SystemLedgerClock {
     }
 }
 
-#[async_trait]
-pub trait LedgerStore: Send + Sync + 'static {
-    async fn discover(
-        &self,
-        after: Option<&ResourceId>,
-        limit: usize,
-    ) -> Result<DiscoveryPage, StoreError>;
-    async fn create(&self, resource: &ResourceId) -> Result<ResourceInfo, StoreError>;
-    async fn create_fenced(
-        &self,
-        resource: &ResourceId,
-        owner: &OwnerId,
-        ttl_ms: u64,
-    ) -> Result<(ResourceInfo, Fence), StoreError>;
-    async fn open(&self, resource: &ResourceId) -> Result<ResourceInfo, StoreError>;
-    async fn acquire_fence(
-        &self,
-        resource: &ResourceId,
-        owner: &OwnerId,
-        ttl_ms: u64,
-    ) -> Result<Fence, StoreError>;
-    async fn renew_fence(&self, fence: &Fence, ttl_ms: u64) -> Result<Fence, StoreError>;
-    async fn check_fence(&self, fence: &Fence) -> Result<(), StoreError>;
-    async fn read_prefix(
-        &self,
-        resource: &ResourceId,
-        through: Option<Position>,
-    ) -> Result<PrefixSnapshot, StoreError>;
-    async fn read_range(
-        &self,
-        resource: &ResourceId,
-        after: Position,
-        limit: usize,
-    ) -> Result<Vec<StoredRecord>, StoreError>;
-    async fn compare_and_append(
-        &self,
-        resource: &ResourceId,
-        fence: &Fence,
-        expected: Position,
-        batch: AppendBatch,
-    ) -> Result<AppendOutcome, StoreError>;
-    async fn compare_and_append_guarded(
-        &self,
-        resource: &ResourceId,
-        fence: &Fence,
-        expected: Position,
-        batch: AppendBatch,
-        guard: AppendGuard,
-    ) -> Result<AppendOutcome, StoreError>;
-    async fn lookup_receipt(
-        &self,
-        resource: &ResourceId,
-        key: &IdempotencyId,
-    ) -> Result<Option<MutationReceipt>, StoreError>;
-    async fn wait_for_advance(
-        &self,
-        resource: &ResourceId,
-        after: Position,
-        deadline_ms: u64,
-    ) -> Result<Position, StoreError>;
-    async fn remove(
-        &self,
-        resource: &ResourceId,
-        fence: &Fence,
-        expected: Position,
-    ) -> Result<(), StoreError>;
+pub(crate) async fn completed_wait_position(
+    store: &dyn LedgerStore,
+    probe: WaitProbe<'_>,
+) -> Result<Option<Position>, StoreError> {
+    if wait_is_complete(probe.position, probe.after, probe.now_ms, probe.deadline_ms) {
+        return Ok(Some(probe.position));
+    }
+    let reread = store.open(probe.resource).await?.position;
+    Ok((reread > probe.after).then_some(reread))
 }

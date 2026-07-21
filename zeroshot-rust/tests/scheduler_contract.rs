@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-#[path = "support/mod.rs"]
-mod support;
+#[path = "support/scheduler.rs"]
+mod scheduler_support;
 
 use tokio::time::Duration;
 use zeroshot_engine::execution::WorkspaceAccessMode;
 use zeroshot_engine::scheduler::{FairScheduler, SchedulerConfig, SchedulerError};
 
-use support::scheduler::{BlockingRuntime, CommandSpec, RunningRuntime, command};
+use scheduler_support::{BlockingRuntime, CommandSpec, RunningRuntime, command};
 
 #[tokio::test]
 async fn provider_lane_then_cluster_round_robin_is_exact() {

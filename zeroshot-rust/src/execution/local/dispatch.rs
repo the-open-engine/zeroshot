@@ -45,49 +45,13 @@ pub(super) async fn run_dispatch(
 ) {
     let control = command.control();
     if node_instance_scope_is_unsupported(&command) {
-        let fault = runtime.fault(FaultModule::Worker, EvidenceClass::InvariantViolation);
-        retain_terminal_state(
-            runtime,
-            &control,
-            LiveState::DefinitelyNotStarted {
-                fault: Some(fault.clone()),
-            },
-        )
-        .await;
-        context
-            .ready
-            .send(DispatchObservation::DefinitelyNotStarted {
-                execution: command.execution(),
-                dispatch_fence: command.dispatch_fence(),
-                fault: Some(fault),
-            })
-            .await;
+        reject_unsupported_scope(runtime, &command, &control, context).await;
         return;
     }
 
     match resolve_site(runtime, command.clone()).await {
         Ok(ExecutionSiteResolution::Resolved(resolved)) => {
-            match start_resolved_site(runtime, *resolved, context.cancel_rx.clone()).await {
-                Ok(outcome) => handle_driver_outcome(runtime, control, context, outcome).await,
-                Err(fault) => {
-                    retain_terminal_state(
-                        runtime,
-                        &control,
-                        LiveState::Indeterminate {
-                            fault: Some(fault.clone()),
-                        },
-                    )
-                    .await;
-                    context
-                        .ready
-                        .send(DispatchObservation::Indeterminate {
-                            execution: command.execution(),
-                            dispatch_fence: command.dispatch_fence(),
-                            fault: Some(fault),
-                        })
-                        .await;
-                }
-            }
+            start_and_handle_resolved(runtime, control, context, *resolved).await;
         }
         Ok(ExecutionSiteResolution::DefinitelyNotStarted { fault }) => {
             let observation = resolve_not_started(&command, &fault);
@@ -131,6 +95,60 @@ pub(super) async fn run_dispatch(
                 .send(DispatchObservation::Indeterminate {
                     execution: command.execution(),
                     dispatch_fence: command.dispatch_fence(),
+                    fault: Some(fault),
+                })
+                .await;
+        }
+    }
+}
+
+async fn reject_unsupported_scope(
+    runtime: &LocalExecutionRuntime,
+    command: &ExecutionCommand,
+    control: &ExecutionControl,
+    context: DispatchContext,
+) {
+    let fault = runtime.fault(FaultModule::Worker, EvidenceClass::InvariantViolation);
+    retain_terminal_state(
+        runtime,
+        control,
+        LiveState::DefinitelyNotStarted {
+            fault: Some(fault.clone()),
+        },
+    )
+    .await;
+    context
+        .ready
+        .send(DispatchObservation::DefinitelyNotStarted {
+            execution: command.execution(),
+            dispatch_fence: command.dispatch_fence(),
+            fault: Some(fault),
+        })
+        .await;
+}
+
+async fn start_and_handle_resolved(
+    runtime: &LocalExecutionRuntime,
+    control: ExecutionControl,
+    context: DispatchContext,
+    resolved: ResolvedExecutionSite,
+) {
+    match start_resolved_site(runtime, resolved, context.cancel_rx.clone()).await {
+        Ok(outcome) => handle_driver_outcome(runtime, control, context, outcome).await,
+        Err(fault) => {
+            retain_terminal_state(
+                runtime,
+                &control,
+                LiveState::Indeterminate {
+                    fault: Some(fault.clone()),
+                },
+            )
+            .await;
+            context
+                .ready
+                .send(DispatchObservation::Indeterminate {
+                    execution: control.execution(),
+                    dispatch_fence: control.dispatch_fence(),
                     fault: Some(fault),
                 })
                 .await;
