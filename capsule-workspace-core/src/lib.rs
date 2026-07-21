@@ -3,6 +3,7 @@
 
 pub mod cas;
 pub mod daemon;
+pub mod daemon_loop;
 pub mod gc;
 pub mod gc_pg;
 pub mod ifaces;

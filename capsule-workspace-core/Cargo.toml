@@ -49,6 +49,13 @@ sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio",
 ], optional = true }
 
+# daemon signal handling (SIGTERM/SIGINT → an Arc<AtomicBool> shutdown latch). Sync + tiny: a pure
+# syscall-registration crate, NO async runtime — the daemon's threading model (MF2) keeps signals,
+# health, and the publish pipeline off any ambient tokio runtime. Non-optional (always available) but
+# only USED by the `pg`-gated `daemon` subcommand, so the default build links it without invoking it.
+# default-features=false drops the unused `channel`/`iterator` extras (only `flag::register` is used).
+signal-hook = { version = "0.4", default-features = false }
+
 [features]
 default = []
 # real S3 BlobStore (holds a bounded multi-thread tokio runtime, block_on inside sync trait methods)

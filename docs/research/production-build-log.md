@@ -444,3 +444,35 @@ claim→delete straddle is exercised by NO local test (needs a precisely-injecte
 (4) manifest growth — deferring manifest GC is correctness-fine but orphaned manifests accumulate real S3
 cost over long runs; track it.
 - Next: push Phase 3 → Phase 4 (daemon), enforcing the MF3 known⊆mark seeding.
+
+### 2026-07-21 — Phase 4: the daemon (implemented via worker agent, verified)
+The production loop: blobs in `--store` (`file://` LocalBlobStore | `s3://` S3BlobStore), lineage + GC
+clock in `--db` (Postgres, required). I read the load-bearing core (`daemon_loop.rs`) and reproduced the
+full suite.
+- **`src/daemon_loop.rs`** (library, so `tests/` can drive it): `publish_cycle` + `materialize_on_start`
+  (feature `pg`) + a std-only `/health` server. **`publish_cycle` is the MF3+MF4 core**: (1) `ls.head()`
+  FALLIBLE read (a DB blip is Err, not "fresh lineage"); (2) **MF3** — seed dedup `known` from the parent
+  live-HEAD's chunk index (so a reused block is always in a MARKED manifest); (3) `publish()` (upload +
+  put_manifest); (4) **MF4** — `clock.touch()` every referenced block young BEFORE `advance` (touch-after-
+  upload is safe: an untouched fresh block has no `block_ref` row → invisible to GC); (5) `advance` fence
+  CAS → `Fenced` (non-fatal, a different writer) surfaced as a value, non-fence error is fatal.
+- **`src/main.rs`**: `Daemon` subcommand (variant always present; handler `#[cfg(feature="pg")]`, else a
+  clear "rebuild with --features pg,s3"). **MF2 threading**: plain sync `fn main`; signals (`signal-hook`,
+  new dep), the health `TcpListener` thread, and the pipeline all on std threads — NO ambient tokio
+  runtime, so the S3/PG adapters' internal `block_on`s never nest-panic. Lifecycle: connect PG + init
+  schema → build store → materialize-on-start → ready → interruptible interval loop → SIGTERM: one final
+  publish → exit 0. `--once` for tests/one-shot.
+- **`src/ifaces.rs`** honesty fix: relabeled LITERAL MIRRORS (`Fence`, `RecoveryStatusCompletedParts`) vs
+  NEUTRAL GENERALIZATIONS (`ClaimRole`, `ProviderNeutralClaim(s)`, `ArtifactRef`) vs OUR-OWN; restored the
+  3 dropped `RecoveryStatusCompletedParts` fields (`run_id`, `reservation_id`, `fence`).
+- **Tests (`tests/daemon.rs`, 5, gated on `DATABASE_URL`)**: lifecycle (fence 1→2, a fresh daemon
+  materializes-on-start byte-for-byte); **MF3 dedup-reuse survives GC** (a reused block, seeded from HEAD,
+  survives a grace=0 sweep); stale-fence surfaces non-fatal; health readiness 503→200 + response format.
+  Plus the worker's real-binary smoke tests (`--once` ×2, `/health` over TCP 200, SIGTERM→final publish→
+  exit 0, default-build rebuild message). Reproduced: **55 default green; full pg suite 67 green**;
+  clippy (`pg,s3`) + fmt clean. `signal-hook 0.4.4` (default-features off), `sqlx 0.9.0`.
+- **Noted for review**: MF4 `touch` uses `loc.clen` (a chunk's compressed length) as the block's
+  `byte_length` — after per-block dedup that's SOME member chunk's clen, not the block's total size.
+  `byte_length` is metrics-only (GC never reads it), so this is an accounting inaccuracy, not a
+  correctness bug — flagged for the reviewer.
+- Next: Phase 4 senior-review gate → push → Phase 5 (real AWS e2e — needs the user's `aws sso login`).
