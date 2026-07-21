@@ -6,12 +6,39 @@
 //! needs → silent corruption. This is the file-backed prototype of the real (Postgres-lineage-
 //! driven) collector; the invariant is identical.
 
-use crate::cas::BlockId;
+use crate::cas::{BlobStore, BlockId, StoreError};
 use crate::manifest::Manifest;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
+
+/// MARK step (shared by the Postgres-driven `gc_pg` sweep): the set of blocks referenced by ANY live
+/// manifest — invariant #2, the blocks GC must NEVER collect regardless of age. A live manifest that
+/// is momentarily absent on the store is SKIPPED (not fatal): it references no blocks we can see, and
+/// wedging the whole sweep on one dangling ref would let the store grow unbounded (matches the
+/// file-backed collector's `missing_live_manifests` tolerance). The caller should surface a persistent
+/// miss as an anomaly. Reads manifests through the `BlobStore` trait, so it works over S3 or local fs.
+pub fn mark_live_blocks(store: &dyn BlobStore, live: &[String]) -> Result<HashSet<BlockId>> {
+    let mut marked = HashSet::new();
+    for dig in live {
+        let bytes = match store.get_manifest(dig) {
+            Ok(b) => b,
+            // a genuinely-absent live manifest references nothing collectable → skip, don't wedge
+            Err(e) if e.downcast_ref::<StoreError>().is_some() => continue,
+            Err(e) => return Err(e),
+        };
+        let m = Manifest::from_bytes(&bytes)?;
+        for f in &m.files {
+            for cid in &f.chunks {
+                if let Some(loc) = m.chunks.get(cid) {
+                    marked.insert(loc.block.clone());
+                }
+            }
+        }
+    }
+    Ok(marked)
+}
 
 #[derive(Debug, Default, serde::Serialize)]
 pub struct GcStats {

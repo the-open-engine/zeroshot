@@ -371,3 +371,42 @@ Also: the claim→`delete_block` straddle means Phase 3's sweep MUST keep dedup-
 blocks OUT of the candidate set (invariant #2), since a block re-referenced after a won claim but before
 DeleteObject is a live-byte loss the claim primitive alone can't prevent.
 - Next: push Phase 2 → Phase 3 (PG-driven GC).
+
+### 2026-07-21 — Phase 3: Postgres-driven GC (implemented inline — the crux)
+Implemented myself (load-bearing MF1 correctness). Generic over the `BlobStore` + `RefClock` traits so
+it runs with the in-memory fake (fast) AND real S3+PG (Phase 5).
+- **`gc::mark_live_blocks(&dyn BlobStore, &[String]) -> HashSet<BlockId>`** (shared MARK, invariant #2):
+  reads live manifests via the trait; a genuinely-absent live manifest is skipped (via the uniform
+  `StoreError::NotFound` downcast), not fatal. The file-backed `gc::collect` keeps its own path-based
+  mark (OQ1: no forced refactor of the 7 passing fs-GC tests).
+- **`refclock::MemRefClock`**: in-memory `RefClock` fake (Mutex<HashMap<block, Instant>>) that models the
+  server-side atomicity — `claim_collectable` re-checks age + removes under one lock, exactly as the PG
+  `DELETE ... WHERE last_referenced_at < clock_timestamp()-grace` does. Lets GC + its concurrency tests
+  run without Docker.
+- **`gc_pg::collect(store, clock, live, grace)`**: MARK (skip live-referenced) → `candidates_older_than`
+  (grace pre-filter) → for each unmarked candidate, **atomic `claim_collectable` (age re-checked
+  server-side) → only on a won claim `delete_block`** (row-claim-FIRST, object-delete-second, MF1). A
+  `delete_block` failure after a won claim → counted as `orphaned` (row gone, object remains → cost
+  leak, reconciler reclaims), does NOT abort the sweep. `GcPgStats{scanned,deleted,kept_marked,
+  raced_young,orphaned}`.
+- **Tests (`tests/gc_pg.rs`, 4, default-feature, no Docker)**: reclaims aged orphans + keeps live-HEAD
+  blocks + HEAD materializes; a marked block is never collected even at grace=0 (invariant #2); the
+  MemRefClock atomic re-check (a re-touch defeats a 1h-grace claim, mirroring the PgRefClock test);
+  **concurrent publisher + GC over 20 gens with a per-sweep liveness assert + final materialize** — no
+  live-byte loss, orphans reclaimed. **55 default tests green** (51+4); stable across 3 runs.
+
+**Insight the failing concurrent test surfaced (and how it was resolved).** My first cut swept at
+**grace=0**, and it FAILED — correctly. At grace=0 there is NO youth window: a block a publisher just
+wrote+touched but that a *stale* GC read hasn't marked yet (GC still on the previous HEAD) is
+immediately "old" and unmarked → GC collects it → the about-to-be-live HEAD loses a block. That is not
+a GC defect — it's the **operational invariant `grace > max(publish, sweep) duration` being violated**.
+Fixed the test to use a realistic grace (50 ms) with inter-gen spacing (20 ms): a freshly-touched block
+stays young (clock-protected) until the next sweep marks it, while superseded gens age past grace and
+ARE reclaimed. This is a concrete demonstration of WHY grace=0 is an invalid production config — worth
+carrying into the deployment docs.
+
+- **Deferred (documented)**: manifest GC (manifests are tiny; needs a manifest liveness clock /
+  superseded-digest history the schema doesn't keep — see Phase-2 design flag). Single-flight advisory
+  lock (correctness is in the per-block atomic claim; the lock only avoids two sweepers wasting work —
+  a deployment concern, not a correctness one). Both noted in `gc_pg.rs`.
+- Next: Phase 3 senior-review gate → push → Phase 4 (daemon).

@@ -4,6 +4,7 @@
 pub mod cas;
 pub mod daemon;
 pub mod gc;
+pub mod gc_pg;
 pub mod ifaces;
 pub mod lineage;
 pub mod manifest;
