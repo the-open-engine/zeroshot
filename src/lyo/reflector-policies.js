@@ -97,12 +97,17 @@ function isValidReflection(reflection) {
 // the OpenRouter client is only constructed when actually configured).
 const REFLECTOR_REGISTRY = new Map([
   [reflectorId(TEMPLATE_REFLECTOR), TEMPLATE_REFLECTOR],
-  ['elaborator@1', () => require('./elaborator-reflector').createElaboratorReflector()],
+  [
+    'elaborator@1',
+    (ctx) => require('./elaborator-reflector').createElaboratorReflector({ model: ctx?.model }),
+  ],
 ]);
 
 // Accepts a reflector object (sync `reflect` and/or async `reflectAsync`),
-// a registry id string, or null (default).
-function resolveReflector(ref) {
+// a registry id string, or null (default). `ctx` is forwarded to registry
+// factories — e.g. { model } selects the elaborator's model (per-cluster
+// cluster.config.lyo.reflectorModel for model-inversion A/B).
+function resolveReflector(ref, ctx) {
   if (!ref) {
     return DEFAULT_REFLECTOR;
   }
@@ -113,7 +118,7 @@ function resolveReflector(ref) {
   if (!entry) {
     throw new Error(`unknown reflector: ${ref}`);
   }
-  return typeof entry === 'function' ? entry() : entry;
+  return typeof entry === 'function' ? entry(ctx) : entry;
 }
 
 module.exports = {

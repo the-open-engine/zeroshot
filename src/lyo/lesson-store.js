@@ -143,6 +143,25 @@ SELECT lesson_id, failure_class, trigger_cue, explanation, intervention,
   CAST(helpful_count + 1 AS REAL) / (helpful_count + harmful_count + 2) AS posterior_mean
 FROM lesson
 WHERE status IN ('active', 'candidate');
+
+-- Model-inversion pair stats (migration v4 columns). Which executor ×
+-- reflector(-model) combination authors lessons that survive grounding?
+-- pair_posterior_mean is the Beta-Bernoulli posterior over the pair's pooled
+-- grounded outcomes — pairs are comparable exactly like lessons.
+CREATE VIEW IF NOT EXISTS v_lyo_pair_stats AS
+SELECT
+  COALESCE(executor_model, '(unknown)') AS executor_model,
+  COALESCE(reflector_policy, '(unknown)') AS reflector_policy,
+  COALESCE(reflector_model, '(none)') AS reflector_model,
+  COUNT(*) AS lessons,
+  SUM(helpful_count) AS helpful,
+  SUM(harmful_count) AS harmful,
+  SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS promoted,
+  SUM(CASE WHEN status = 'quarantined' THEN 1 ELSE 0 END) AS quarantined,
+  CAST(SUM(helpful_count) + 1 AS REAL) / (SUM(helpful_count) + SUM(harmful_count) + 2)
+    AS pair_posterior_mean
+FROM lesson
+GROUP BY executor_model, reflector_policy, reflector_model;
 `;
 
 function randomId(prefix) {
@@ -244,7 +263,22 @@ class LessonStore {
         `ALTER TABLE lesson_decision ADD COLUMN policy TEXT NOT NULL DEFAULT '${DEFAULT_POLICY_ID}'`
       );
     }
-    this._setMeta('schema_version', '3');
+    // v4 (model inversion): pair provenance columns on lesson. NULL on
+    // pre-v4 rows — pair stats aggregate those under '(unknown)'.
+    const lessonColumns = this.db
+      .prepare('PRAGMA table_info(lesson)')
+      .all()
+      .map((column) => column.name);
+    if (!lessonColumns.includes('reflector_policy')) {
+      this.db.exec('ALTER TABLE lesson ADD COLUMN reflector_policy TEXT');
+    }
+    if (!lessonColumns.includes('reflector_model')) {
+      this.db.exec('ALTER TABLE lesson ADD COLUMN reflector_model TEXT');
+    }
+    if (!lessonColumns.includes('executor_model')) {
+      this.db.exec('ALTER TABLE lesson ADD COLUMN executor_model TEXT');
+    }
+    this._setMeta('schema_version', '4');
   }
 
   close() {
@@ -261,6 +295,13 @@ class LessonStore {
     return this.db
       .prepare('SELECT * FROM lesson_delta WHERE lesson_id = ? ORDER BY delta_id')
       .all(lessonId);
+  }
+
+  // Model-inversion A/B: grounded performance per executor × reflector pair.
+  getPairStats() {
+    return this.db
+      .prepare('SELECT * FROM v_lyo_pair_stats ORDER BY pair_posterior_mean DESC, lessons DESC')
+      .all();
   }
 
   _getMeta(key) {
@@ -299,6 +340,8 @@ class LessonStore {
     run_id,
     actor,
     reflector,
+    reflector_model,
+    executor_model,
   }) {
     if (!failure_class) {
       throw new Error('LessonStore.createLesson: failure_class is required');
@@ -331,6 +374,8 @@ class LessonStore {
             explanation,
             intervention,
             reflector: reflector ?? null, // authoring reflector id, e.g. 'template@1' (A/B provenance)
+            reflector_model: reflector_model ?? null,
+            executor_model: executor_model ?? null,
           },
         });
         const provenance = unionProvenance(JSON.parse(existing.provenance), run_id);
@@ -356,14 +401,17 @@ class LessonStore {
           updated_at: now,
           provenance,
           reflector: reflector ?? null, // authoring reflector id, e.g. 'template@1' (A/B provenance)
+          reflector_model: reflector_model ?? null,
+          executor_model: executor_model ?? null,
         },
       });
       this.db
         .prepare(
           `INSERT INTO lesson (
              lesson_id, status, failure_class, trigger_cue, explanation, intervention,
-             helpful_count, harmful_count, uses, created_at, updated_at, provenance
-           ) VALUES (?, 'candidate', ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)`
+             helpful_count, harmful_count, uses, created_at, updated_at, provenance,
+             reflector_policy, reflector_model, executor_model
+           ) VALUES (?, 'candidate', ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           lessonId,
@@ -373,7 +421,10 @@ class LessonStore {
           intervention ?? '',
           now,
           now,
-          JSON.stringify(provenance)
+          JSON.stringify(provenance),
+          reflector ?? null,
+          reflector_model ?? null,
+          executor_model ?? null
         );
       return this.getLesson(lessonId);
     });

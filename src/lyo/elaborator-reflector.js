@@ -126,6 +126,9 @@ function createElaboratorReflector({ chat, model, timeoutMs = DEFAULT_TIMEOUT_MS
   return {
     name: 'elaborator',
     version: 1,
+    // Exposed for pair provenance (model-inversion A/B): the observer records
+    // this id on every lesson the reflector authors.
+    model: resolvedModel,
     // No sync reflect: the observer detects reflectAsync and ships template
     // guidance synchronously instead (zero added latency on the hot path).
     async reflectAsync({ message, failure_class, cue }) {

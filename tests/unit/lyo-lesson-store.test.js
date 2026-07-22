@@ -827,7 +827,14 @@ describe('LYO decision log (v0.2)', function () {
         .map((column) => column.name);
       assert.ok(decisionColumns.includes('policy'), 'migration adds policy');
       assert.deepStrictEqual(store.db.prepare('SELECT * FROM lesson_decision').all(), []);
-      assert.strictEqual(store._getMeta('schema_version'), '3');
+      const lessonColumns = store.db
+        .prepare('PRAGMA table_info(lesson)')
+        .all()
+        .map((column) => column.name);
+      assert.ok(lessonColumns.includes('reflector_policy'), 'migration adds reflector_policy');
+      assert.ok(lessonColumns.includes('reflector_model'), 'migration adds reflector_model');
+      assert.ok(lessonColumns.includes('executor_model'), 'migration adds executor_model');
+      assert.strictEqual(store._getMeta('schema_version'), '4');
 
       // Pre-existing data untouched: receipt still counted, decision_id NULL.
       const receipt = store.db
@@ -839,6 +846,10 @@ describe('LYO decision log (v0.2)', function () {
       const legacy = store.getLesson('les_legacy');
       assert.strictEqual(legacy.helpful_count, 2);
       assert.strictEqual(legacy.status, 'candidate');
+      // Pre-v4 rows carry no pair provenance.
+      assert.strictEqual(legacy.reflector_policy, null);
+      assert.strictEqual(legacy.reflector_model, null);
+      assert.strictEqual(legacy.executor_model, null);
 
       // The migrated store is fully operational: selection + decision logging.
       const { candidates, null_arm } = store.selectWithDecision({
@@ -863,6 +874,99 @@ describe('LYO decision log (v0.2)', function () {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('LYO pair provenance (v4)', function () {
+  it('persists the model trio on create and defaults to null when omitted', function () {
+    const store = new LessonStore(':memory:');
+    const withTrio = store.createLesson({
+      failure_class: 'output_generation',
+      trigger_cue: 'trio cue',
+      explanation: 'why',
+      intervention: 'do this',
+      run_id: 'run-1',
+      reflector: 'elaborator@1',
+      reflector_model: 'openai/gpt-4o-mini',
+      executor_model: 'claude:level2',
+    });
+    assert.strictEqual(withTrio.reflector_policy, 'elaborator@1');
+    assert.strictEqual(withTrio.reflector_model, 'openai/gpt-4o-mini');
+    assert.strictEqual(withTrio.executor_model, 'claude:level2');
+    const payload = JSON.parse(store.getDeltas(withTrio.lesson_id)[0].payload);
+    assert.strictEqual(payload.reflector, 'elaborator@1');
+    assert.strictEqual(payload.reflector_model, 'openai/gpt-4o-mini');
+    assert.strictEqual(payload.executor_model, 'claude:level2');
+
+    const bare = store.createLesson({
+      failure_class: 'output_generation',
+      trigger_cue: 'bare cue',
+      explanation: 'why',
+      intervention: 'do this',
+      run_id: 'run-1',
+    });
+    assert.strictEqual(bare.reflector_policy, null);
+    assert.strictEqual(bare.reflector_model, null);
+    assert.strictEqual(bare.executor_model, null);
+    store.close();
+  });
+
+  it('aggregates grounded outcomes per executor x reflector pair', function () {
+    const store = new LessonStore(':memory:');
+    const seed = (cue, trio, helpful, harmful) => {
+      const lesson = store.createLesson({
+        failure_class: 'output_generation',
+        trigger_cue: cue,
+        explanation: 'why',
+        intervention: 'do this',
+        run_id: 'run-1',
+        ...trio,
+      });
+      store.db
+        .prepare('UPDATE lesson SET helpful_count = ?, harmful_count = ? WHERE lesson_id = ?')
+        .run(helpful, harmful, lesson.lesson_id);
+    };
+    seed(
+      'cue a1',
+      {
+        reflector: 'elaborator@1',
+        reflector_model: 'openai/gpt-4o-mini',
+        executor_model: 'claude:level2',
+      },
+      6,
+      1
+    );
+    seed(
+      'cue a2',
+      {
+        reflector: 'elaborator@1',
+        reflector_model: 'openai/gpt-4o-mini',
+        executor_model: 'claude:level2',
+      },
+      3,
+      1
+    );
+    seed('cue b1', { reflector: 'template@1', executor_model: 'claude:level2' }, 2, 4);
+    seed('cue c1', {}, 1, 0); // unknown pair
+
+    const stats = store.getPairStats();
+    assert.strictEqual(stats.length, 3);
+    // Best pair first: elaborator pair (9 helpful / 2 harmful) beats template (2/4).
+    const top = stats[0];
+    assert.strictEqual(top.reflector_policy, 'elaborator@1');
+    assert.strictEqual(top.reflector_model, 'openai/gpt-4o-mini');
+    assert.strictEqual(top.executor_model, 'claude:level2');
+    assert.strictEqual(top.lessons, 2);
+    assert.strictEqual(top.helpful, 9);
+    assert.strictEqual(top.harmful, 2);
+    assert.ok(Math.abs(top.pair_posterior_mean - 10 / 13) < 1e-9);
+    const templatePair = stats.find((row) => row.reflector_policy === 'template@1');
+    assert.strictEqual(templatePair.reflector_model, '(none)');
+    assert.strictEqual(templatePair.helpful, 2);
+    assert.strictEqual(templatePair.harmful, 4);
+    const unknown = stats.find((row) => row.reflector_policy === '(unknown)');
+    assert.strictEqual(unknown.executor_model, '(unknown)');
+    store.close();
   });
 });
 

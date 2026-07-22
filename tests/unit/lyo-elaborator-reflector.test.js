@@ -187,6 +187,125 @@ describe('elaborator reflector — registry', function () {
     assert.strictEqual(reflector.version, 1);
     assert.strictEqual(typeof reflector.reflectAsync, 'function');
   });
+
+  it('exposes the resolved model id for pair provenance', function () {
+    const viaFactory = createElaboratorReflector({
+      chat: () => Promise.resolve('{}'),
+      model: 'x/y',
+    });
+    assert.strictEqual(viaFactory.model, 'x/y');
+    // Registry ctx (cluster.config.lyo.reflectorModel) reaches the factory.
+    const viaRegistry = resolveReflector('elaborator@1', { model: 'anthropic/claude-haiku' });
+    assert.strictEqual(viaRegistry.model, 'anthropic/claude-haiku');
+  });
+});
+
+describe('observer — pair provenance (model inversion)', function () {
+  it('records reflector model and executor model on the stored lesson', async function () {
+    const ledger = new Ledger(':memory:');
+    const messageBus = new MessageBus(ledger);
+    const store = new LessonStore(':memory:');
+    const clusterId = 'lyo-pair-1';
+    const cluster = {
+      id: clusterId,
+      config: { lyo: { enabled: true }, forceProvider: 'claude' },
+      agents: [
+        {
+          id: 'implementer',
+          config: { role: 'implementation', modelConfig: { modelLevel: 'level2' } },
+        },
+        { id: 'validator', config: { role: 'validation' } },
+      ],
+    };
+    const reflector = {
+      name: 'elaborator',
+      version: 1,
+      model: 'openai/gpt-4o-mini',
+      reflectAsync: () =>
+        Promise.resolve({ explanation: 'distilled why', intervention: 'distilled rule' }),
+    };
+    let enrichment = null;
+    const detach = attachLyoObserver({
+      messageBus,
+      cluster,
+      lessonStore: store,
+      reflector,
+      onEnrichment: (p) => {
+        enrichment = p;
+      },
+    });
+
+    messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'VALIDATION_RESULT',
+      sender: 'validator',
+      content: {
+        text: 'Tests failed: npm test',
+        data: { approved: false, errors: ['missing regression coverage'] },
+      },
+    });
+    await enrichment;
+
+    const rows = store.db.prepare('SELECT * FROM lesson').all();
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].reflector_policy, 'elaborator@1');
+    assert.strictEqual(rows[0].reflector_model, 'openai/gpt-4o-mini');
+    assert.strictEqual(rows[0].executor_model, 'claude:level2');
+
+    detach();
+    store.close();
+    ledger.close();
+  });
+
+  it('records null executor model when the cluster carries no model config', async function () {
+    const ledger = new Ledger(':memory:');
+    const messageBus = new MessageBus(ledger);
+    const store = new LessonStore(':memory:');
+    const clusterId = 'lyo-pair-2';
+    const cluster = {
+      id: clusterId,
+      config: { lyo: { enabled: true } },
+      agents: [
+        { id: 'implementer', config: { role: 'implementation' } },
+        { id: 'validator', config: { role: 'validation' } },
+      ],
+    };
+    let enrichment = null;
+    const detach = attachLyoObserver({
+      messageBus,
+      cluster,
+      lessonStore: store,
+      reflector: {
+        name: 'elaborator',
+        version: 1,
+        model: 'openai/gpt-4o-mini',
+        reflectAsync: () => Promise.resolve({ explanation: 'e', intervention: 'i' }),
+      },
+      onEnrichment: (p) => {
+        enrichment = p;
+      },
+    });
+
+    messageBus.publish({
+      cluster_id: clusterId,
+      topic: 'VALIDATION_RESULT',
+      sender: 'validator',
+      content: {
+        text: 'Tests failed: npm test',
+        data: { approved: false, errors: ['missing regression coverage'] },
+      },
+    });
+    await enrichment;
+
+    const rows = store.db.prepare('SELECT * FROM lesson').all();
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].executor_model, null);
+    assert.strictEqual(rows[0].reflector_model, 'openai/gpt-4o-mini');
+
+    detach();
+    store.close();
+    ledger.close();
+  });
 });
 
 describe('observer — async reflector enrichment', function () {

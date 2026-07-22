@@ -94,19 +94,41 @@ function openLessonStore({ cluster, lessonStore, storageDir }) {
   }
 }
 
+// Best-effort executor model identity for pair provenance (model-inversion
+// A/B): the implementation agent's configured model (or level), prefixed with
+// the cluster provider when known — e.g. 'claude:level2'. NULL when
+// unresolvable; provenance never blocks learning.
+function resolveExecutorModel(cluster) {
+  try {
+    const implementer = (cluster.agents || []).find(
+      (agent) => agent?.config?.role === 'implementation'
+    );
+    const modelConfig = implementer?.config?.modelConfig || {};
+    const model = modelConfig.model || modelConfig.modelLevel || implementer?.config?.model || null;
+    if (!model) {
+      return null;
+    }
+    const provider = cluster.config?.forceProvider || cluster.config?.defaultProvider || null;
+    return provider ? `${provider}:${model}` : String(model);
+  } catch {
+    return null;
+  }
+}
+
 // Run the configured reflector policy over a rejection. ANY failure — unknown
 // registry id, reflector throw, malformed return — degrades to template@1
 // (pure, never throws), so the guidance path always has an intervention text.
-function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
+function reflectOnRejection({ message, failure_class, cue, reflectorRef, reflectorCtx }) {
   const fallback = () => ({
     reflection: {
       ...TEMPLATE_REFLECTOR.reflect({ message }),
       reflector_id: reflectorId(TEMPLATE_REFLECTOR),
+      reflector_model: null,
     },
     reflector: TEMPLATE_REFLECTOR,
   });
   try {
-    const reflector = resolveReflector(reflectorRef);
+    const reflector = resolveReflector(reflectorRef, reflectorCtx);
     if (typeof reflector.reflectAsync === 'function') {
       // Async reflector (e.g. elaborator@1): guidance ships template text
       // synchronously (zero added latency); the caller fires reflectAsync to
@@ -121,7 +143,11 @@ function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
       return fallback();
     }
     return {
-      reflection: { ...reflection, reflector_id: reflectorId(reflector) },
+      reflection: {
+        ...reflection,
+        reflector_id: reflectorId(reflector),
+        reflector_model: reflector.model ?? null,
+      },
       reflector,
     };
   } catch (error) {
@@ -136,7 +162,15 @@ function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
 // Returns a promise that NEVER rejects (containment: Appendix B.4) so callers
 // may safely leave it floating; the onEnrichment attach option exposes it for
 // tests.
-function enrichStoreAsync({ store, cluster, reflector, message, failure_class, cue }) {
+function enrichStoreAsync({
+  store,
+  cluster,
+  reflector,
+  message,
+  failure_class,
+  cue,
+  executor_model,
+}) {
   return Promise.resolve()
     .then(() => reflector.reflectAsync({ message, failure_class, cue }))
     .then((reflection) => {
@@ -148,7 +182,12 @@ function enrichStoreAsync({ store, cluster, reflector, message, failure_class, c
         cluster,
         failure_class,
         cue,
-        reflection: { ...reflection, reflector_id: reflectorId(reflector) },
+        reflection: {
+          ...reflection,
+          reflector_id: reflectorId(reflector),
+          reflector_model: reflector.model ?? null,
+        },
+        executor_model,
       });
     })
     .catch((error) => {
@@ -162,7 +201,9 @@ function enrichStoreAsync({ store, cluster, reflector, message, failure_class, c
           reflection: {
             ...TEMPLATE_REFLECTOR.reflect({ message }),
             reflector_id: reflectorId(TEMPLATE_REFLECTOR),
+            reflector_model: null,
           },
+          executor_model,
         });
       } catch (persistError) {
         console.warn('[lyo] failed to store fallback reflection:', persistError.message);
@@ -170,8 +211,10 @@ function enrichStoreAsync({ store, cluster, reflector, message, failure_class, c
     });
 }
 
-// Persist one reflection as a create-or-merge lesson (design doc §2).
-function persistReflection({ store, cluster, failure_class, cue, reflection }) {
+// Persist one reflection as a create-or-merge lesson (design doc §2). The
+// model trio (authoring policy, reflector model, executor model) is pair
+// provenance for the model-inversion A/B (v_lyo_pair_stats).
+function persistReflection({ store, cluster, failure_class, cue, reflection, executor_model }) {
   store.createLesson({
     failure_class,
     trigger_cue: cue,
@@ -180,6 +223,8 @@ function persistReflection({ store, cluster, failure_class, cue, reflection }) {
     run_id: cluster.id,
     actor: 'reflector',
     reflector: reflection.reflector_id,
+    reflector_model: reflection.reflector_model ?? null,
+    executor_model: executor_model ?? null,
   });
 }
 
@@ -200,9 +245,10 @@ function learnFromRejection({
   cue,
   reflection,
   persistCreate = true,
+  executor_model = null,
 }) {
   if (persistCreate) {
-    persistReflection({ store, cluster, failure_class, cue, reflection });
+    persistReflection({ store, cluster, failure_class, cue, reflection, executor_model });
   }
   // The just-created candidate competes via its Beta(1,1) draw — intended
   // exploration, not a shortcut (design doc §4.2).
@@ -311,6 +357,11 @@ function attachLyoObserver({
   // -> default. Unknown ids and reflector failures fall back to template@1
   // inside reflectOnRejection; learning never blocks a run.
   const resolvedReflector = reflector ?? cluster.config.lyo.reflector ?? null;
+  // Model-inversion A/B: per-cluster reflector model override (forwarded to
+  // registry factories — e.g. elaborator@1's OpenRouter model) + best-effort
+  // executor identity recorded on every lesson for pair stats.
+  const reflectorCtx = { model: cluster.config.lyo.reflectorModel ?? null };
+  const executorModel = resolveExecutorModel(cluster);
   let pendingIntervention = null;
 
   const unsubscribe = messageBus.subscribe((message) => {
@@ -362,6 +413,7 @@ function attachLyoObserver({
       failure_class,
       cue,
       reflectorRef: resolvedReflector,
+      reflectorCtx,
     });
 
     let lessonApplications = null;
@@ -377,6 +429,7 @@ function attachLyoObserver({
           cue,
           reflection,
           persistCreate: !asyncPending,
+          executor_model: executorModel,
         });
       } catch (error) {
         console.warn('[lyo] lesson pipeline failed, continuing without lessons:', error.message);
@@ -393,6 +446,7 @@ function attachLyoObserver({
           message,
           failure_class,
           cue,
+          executor_model: executorModel,
         });
         if (typeof onEnrichment === 'function') {
           onEnrichment(enrichment);
