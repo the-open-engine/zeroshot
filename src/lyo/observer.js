@@ -4,11 +4,16 @@ const path = require('path');
 const { USER_GUIDANCE_AGENT } = require('../guidance-topics');
 const LessonStore = require('./lesson-store');
 const { classifyValidationFailure } = require('./failure-classifier');
+const {
+  TEMPLATE_REFLECTOR,
+  reflectorId,
+  isValidReflection,
+  resolveReflector,
+} = require('./reflector-policies');
 
 const LYO_INTERVENTION_TOPIC = 'LYO_INTERVENTION';
 const LYO_FEEDBACK_TOPIC = 'LYO_FEEDBACK';
 const LYO_SENDER = 'lyo';
-const EXPLANATION_MAX_LENGTH = 500;
 
 function isLyoEnabled(cluster) {
   return cluster?.config?.lyo?.enabled === true;
@@ -30,26 +35,6 @@ function getValidationOutcome(message) {
   return 'unknown';
 }
 
-function formatValidationFeedback(message) {
-  const parts = [];
-  const text = message.content?.text;
-  const errors = message.content?.data?.errors;
-
-  if (text) {
-    parts.push(text);
-  }
-
-  if (Array.isArray(errors) && errors.length > 0) {
-    parts.push(`Errors:\n${errors.map((error) => `- ${error}`).join('\n')}`);
-  }
-
-  return parts.join('\n\n') || 'Validator rejected the last result without details.';
-}
-
-function buildGuidanceText(message) {
-  return `Address the validator feedback before retrying.\n\nLatest validation:\n${formatValidationFeedback(message)}`;
-}
-
 function publishInterventionFeedback({ messageBus, cluster, pendingIntervention, message }) {
   messageBus.publish({
     cluster_id: cluster.id,
@@ -68,11 +53,6 @@ function publishInterventionFeedback({ messageBus, cluster, pendingIntervention,
       source: 'lyo_observer',
     },
   });
-}
-
-function truncate(text, maxLength) {
-  const value = String(text || '');
-  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
 /**
@@ -114,19 +94,60 @@ function openLessonStore({ cluster, lessonStore, storageDir }) {
   }
 }
 
-// Reflector role (design doc §2): classify the failure, create-or-merge the
-// lesson, Thompson-select lessons for this failure class, log the decision
-// (full candidate snapshot + selection propensities, §5.3), and record one
-// application row per selected lesson (grounded attribution).
-function learnFromRejection({ store, cluster, message, messageBus, selectionPolicy = null }) {
-  const { failure_class, cue } = classifyValidationFailure(message);
+// Run the configured reflector policy over a rejection. ANY failure — unknown
+// registry id, reflector throw, malformed return — degrades to template@1
+// (pure, never throws), so the guidance path always has an intervention text.
+function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
+  const fallback = () => ({
+    reflection: {
+      ...TEMPLATE_REFLECTOR.reflect({ message }),
+      reflector_id: reflectorId(TEMPLATE_REFLECTOR),
+    },
+    reflector: TEMPLATE_REFLECTOR,
+  });
+  try {
+    const reflector = resolveReflector(reflectorRef);
+    const reflection = reflector.reflect({ message, failure_class, cue });
+    if (!isValidReflection(reflection)) {
+      console.warn(
+        `[lyo] reflector ${reflectorId(reflector)} returned a malformed reflection, using template fallback`
+      );
+      return fallback();
+    }
+    return {
+      reflection: { ...reflection, reflector_id: reflectorId(reflector) },
+      reflector,
+    };
+  } catch (error) {
+    console.warn('[lyo] reflector failed, using template fallback:', error.message);
+    return fallback();
+  }
+}
+
+// Reflector role (design doc §2): the REFLECTION (abduction — explanation +
+// intervention) is produced upstream by a pluggable reflector policy and
+// passed in; this function persists it (create-or-merge), Thompson-selects
+// lessons for this failure class, logs the decision (full candidate snapshot
+// + selection propensities, §5.3), and records one application row per
+// selected lesson (grounded attribution).
+function learnFromRejection({
+  store,
+  cluster,
+  message,
+  messageBus,
+  selectionPolicy = null,
+  failure_class,
+  cue,
+  reflection,
+}) {
   store.createLesson({
     failure_class,
     trigger_cue: cue,
-    explanation: truncate(formatValidationFeedback(message), EXPLANATION_MAX_LENGTH),
-    intervention: buildGuidanceText(message),
+    explanation: reflection.explanation,
+    intervention: reflection.intervention,
     run_id: cluster.id,
     actor: 'reflector',
+    reflector: reflection.reflector_id,
   });
   // The just-created candidate competes via its Beta(1,1) draw — intended
   // exploration, not a shortcut (design doc §4.2).
@@ -203,7 +224,14 @@ function summarizeLessons(lessonApplications) {
   }));
 }
 
-function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selectionPolicy }) {
+function attachLyoObserver({
+  messageBus,
+  cluster,
+  lessonStore,
+  storageDir,
+  selectionPolicy,
+  reflector,
+}) {
   if (!messageBus) {
     throw new Error('attachLyoObserver: messageBus is required');
   }
@@ -222,6 +250,11 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selec
   // -> default. An unknown id throws inside the store per decision and
   // degrades to the existing no-lessons warning path.
   const resolvedSelectionPolicy = selectionPolicy ?? cluster.config.lyo.policy ?? null;
+  // Reflector policy resolution order (§2): explicit attach option ->
+  // cluster.config.lyo.reflector (registry id string, e.g. 'template@1')
+  // -> default. Unknown ids and reflector failures fall back to template@1
+  // inside reflectOnRejection; learning never blocks a run.
+  const resolvedReflector = reflector ?? cluster.config.lyo.reflector ?? null;
   let pendingIntervention = null;
 
   const unsubscribe = messageBus.subscribe((message) => {
@@ -260,6 +293,17 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selec
       return;
     }
 
+    // Grounding first (deterministic classifier), then abduction (pluggable
+    // reflector). Both run even in degraded mode (no store): the reflector's
+    // intervention is also the base guidance text delivered to the agent.
+    const { failure_class, cue } = classifyValidationFailure(message);
+    const { reflection } = reflectOnRejection({
+      message,
+      failure_class,
+      cue,
+      reflectorRef: resolvedReflector,
+    });
+
     let lessonApplications = null;
     if (store) {
       try {
@@ -269,6 +313,9 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selec
           message,
           messageBus,
           selectionPolicy: resolvedSelectionPolicy,
+          failure_class,
+          cue,
+          reflection,
         });
       } catch (error) {
         console.warn('[lyo] lesson pipeline failed, continuing without lessons:', error.message);
@@ -306,7 +353,7 @@ function attachLyoObserver({ messageBus, cluster, lessonStore, storageDir, selec
       sender: LYO_SENDER,
       target_agent_id: targetAgentId,
       content: {
-        text: `${buildGuidanceText(message)}${buildLessonSection(lessonApplications)}`,
+        text: `${reflection.intervention}${buildLessonSection(lessonApplications)}`,
         data: {
           trigger_message_id: message.id,
           intervention_id: intervention?.id || null,

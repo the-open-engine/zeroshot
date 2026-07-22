@@ -291,7 +291,15 @@ class LessonStore {
    * an EDIT delta (append run_id to provenance, bump updated_at) and return the
    * existing lesson; otherwise emit a CREATE delta and insert a new candidate.
    */
-  createLesson({ failure_class, trigger_cue, explanation, intervention, run_id, actor }) {
+  createLesson({
+    failure_class,
+    trigger_cue,
+    explanation,
+    intervention,
+    run_id,
+    actor,
+    reflector,
+  }) {
     if (!failure_class) {
       throw new Error('LessonStore.createLesson: failure_class is required');
     }
@@ -317,7 +325,13 @@ class LessonStore {
           run_id,
           actor: lessonActor,
           delta_type: 'EDIT',
-          payload: { run_id: run_id ?? null, updated_at: now, explanation, intervention },
+          payload: {
+            run_id: run_id ?? null,
+            updated_at: now,
+            explanation,
+            intervention,
+            reflector: reflector ?? null, // authoring reflector id, e.g. 'template@1' (A/B provenance)
+          },
         });
         const provenance = unionProvenance(JSON.parse(existing.provenance), run_id);
         this.db
@@ -341,6 +355,7 @@ class LessonStore {
           created_at: now,
           updated_at: now,
           provenance,
+          reflector: reflector ?? null, // authoring reflector id, e.g. 'template@1' (A/B provenance)
         },
       });
       this.db
