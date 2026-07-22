@@ -521,10 +521,13 @@ pub fn publish_pipelined(
     })
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize)]
 pub struct MaterializeStats {
     pub files: usize,
     pub blocks_fetched: usize,
+    /// files served from a reference tree via reflink/copy (incremental resume) instead of
+    /// fetch+decompress+write — 0 for a full materialize.
+    pub reference_reused: usize,
     pub fetch_secs: f64,
     pub decompress_secs: f64,
     pub write_secs: f64,
@@ -532,39 +535,18 @@ pub struct MaterializeStats {
     pub write_throughput_mbps: f64,
 }
 
-/// Materialize a manifest into `out`. Fetches each needed block once (parallel), decompresses
-/// unique chunks (parallel), writes files (parallel). Mirrors the daemon's read path.
-pub fn materialize(
+/// Fetch (parallel) the blocks that `regulars` need, decompress+VERIFY their chunks (content hash ==
+/// id, bounded, rlen), and write the files (parallel, phase-1 regular-file write with size validation
+/// + setuid/setgid/sticky masking). Shared by `materialize` (all regulars) and `materialize_incremental`
+/// (only the changed regulars). Returns (blocks_fetched, fetch_secs, decompress_secs, write_secs).
+fn write_regular_files(
     store: &dyn BlobStore,
-    manifest_digest: &str,
+    manifest: &Manifest,
     out: &Path,
-) -> Result<MaterializeStats> {
-    let t0 = Instant::now();
-    let manifest = Manifest::from_bytes(&store.get_manifest(manifest_digest)?)?;
-    // INTEGRITY: the parsed manifest must hash (logically) to the requested digest. Detects a
-    // corrupt/torn/tampered manifest. Safe because the digest comes from the trusted lineage
-    // HEAD (fenced), never from tenant input.
-    if manifest.logical_digest() != manifest_digest {
-        anyhow::bail!("manifest digest mismatch (corruption/tamper)");
-    }
-
-    // `out` must be a FRESH empty dir. Materializing into a dir that already holds a symlink
-    // (a leftover/reused scratch dir) would let a regular-file write escape THROUGH it (P5).
-    // Also guarantees the bind-mount target exists even for an empty manifest (P9e).
-    if out.exists() {
-        let nonempty = std::fs::read_dir(out)
-            .map(|mut it| it.next().is_some())
-            .unwrap_or(true);
-        if nonempty {
-            anyhow::bail!("materialize target is not empty: {}", out.display());
-        }
-    } else {
-        std::fs::create_dir_all(out)?;
-    }
-
-    // unique blocks needed (panic-safe against an adversarial/corrupt manifest)
+    regulars: &[&FileEntry],
+) -> Result<(usize, f64, f64, f64)> {
     let mut needed: Vec<BlockId> = Vec::new();
-    for f in &manifest.files {
+    for f in regulars {
         for cid in &f.chunks {
             let loc = manifest
                 .chunks
@@ -583,17 +565,13 @@ pub fn materialize(
         .collect::<Result<HashMap<_, _>>>()?;
     let fetch_secs = t_f.elapsed().as_secs_f64();
 
-    // decompress each unique chunk once (parallel)
-    let mut uniq: Vec<ChunkId> = manifest
-        .files
+    let mut uniq: Vec<ChunkId> = regulars
         .iter()
         .flat_map(|f| f.chunks.iter().cloned())
         .collect();
     uniq.sort();
     uniq.dedup();
     let t_d = Instant::now();
-    // Decompress + VERIFY each chunk: bounded (bomb defense) and content-hash == chunk id
-    // and declared rlen (detects corruption / tampering; content addressing must be checked).
     let chunk_bytes: HashMap<ChunkId, Vec<u8>> = uniq
         .par_iter()
         .map(|cid| -> Result<(ChunkId, Vec<u8>)> {
@@ -620,54 +598,48 @@ pub fn materialize(
         .collect::<Result<HashMap<_, _>>>()?;
     let decompress_secs = t_d.elapsed().as_secs_f64();
 
-    // Write in phases so a malicious symlink cannot become an ANCESTOR of a file write
-    // (write-through-symlink escape): (1) regular files into real dirs, (2) hardlinks (their
-    // canonical target is a regular file, written in phase 1), (3) symlinks last.
-    // Assumes `out` starts empty (the daemon materializes into a fresh dir per pod).
     let t_w = Instant::now();
-    let total: u64 = manifest.files.iter().map(|f| f.size).sum();
-    manifest
-        .files
-        .par_iter()
-        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
-        .try_for_each(|f| -> Result<()> {
-            safe_rel_path(&f.path)?;
-            let p = out.join(&f.path);
-            if let Some(d) = p.parent() {
-                std::fs::create_dir_all(d)?;
-            }
-            // Never trust the manifest `size` for allocation (P7). Size from the ACTUAL
-            // authenticated chunk bytes, and require the declared size to match it.
-            let actual: usize = f
-                .chunks
-                .iter()
-                .map(|cid| chunk_bytes.get(cid).map(|b| b.len()).unwrap_or(0))
-                .sum();
-            if f.size as usize != actual {
-                anyhow::bail!(
-                    "file size field does not match chunk content ({} vs {})",
-                    f.size,
-                    actual
-                );
-            }
-            let mut buf = Vec::with_capacity(actual);
-            for cid in &f.chunks {
-                buf.extend_from_slice(
-                    chunk_bytes
-                        .get(cid)
-                        .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
-                );
-            }
-            std::fs::write(&p, &buf)?;
-            // INTENTIONAL EXCEPTION to byte-exact mode preservation: mask setuid/setgid/sticky
-            // (`& 0o777` keeps rwx incl. the exec bit, drops the high 3 bits). Restoring a setuid
-            // binary from an agent-authored workspace snapshot onto a shared node is a privilege
-            // vector we never want; a dropped setuid bit is a safe divergence, honoring it is not.
-            // This is a deliberate carve-out from the "reproduce exact modes or fail loudly" rule.
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
-            Ok(())
-        })?;
-    // phase 2: hardlinks (canonical target already written as a regular file)
+    regulars.par_iter().try_for_each(|f| -> Result<()> {
+        safe_rel_path(&f.path)?;
+        let p = out.join(&f.path);
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        let actual: usize = f
+            .chunks
+            .iter()
+            .map(|cid| chunk_bytes.get(cid).map(|b| b.len()).unwrap_or(0))
+            .sum();
+        if f.size as usize != actual {
+            anyhow::bail!(
+                "file size field does not match chunk content ({} vs {})",
+                f.size,
+                actual
+            );
+        }
+        let mut buf = Vec::with_capacity(actual);
+        for cid in &f.chunks {
+            buf.extend_from_slice(
+                chunk_bytes
+                    .get(cid)
+                    .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
+            );
+        }
+        std::fs::write(&p, &buf)?;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+        Ok(())
+    })?;
+    Ok((
+        needed.len(),
+        fetch_secs,
+        decompress_secs,
+        t_w.elapsed().as_secs_f64(),
+    ))
+}
+
+/// Recreate the hardlinks (phase 2) then symlinks (phase 3) of `manifest` into `out`. Symlinks LAST so
+/// a malicious symlink can never become an ancestor of a regular-file write (write-through-escape).
+fn write_links(manifest: &Manifest, out: &Path) -> Result<()> {
     for f in manifest.files.iter().filter(|f| f.hardlink.is_some()) {
         safe_rel_path(&f.path)?;
         let target = f.hardlink.as_ref().unwrap();
@@ -678,7 +650,6 @@ pub fn materialize(
         }
         std::fs::hard_link(out.join(target), &p)?;
     }
-    // phase 3: symlinks
     for f in manifest.files.iter().filter(|f| f.symlink.is_some()) {
         safe_rel_path(&f.path)?;
         let p = out.join(&f.path);
@@ -687,11 +658,134 @@ pub fn materialize(
         }
         std::os::unix::fs::symlink(f.symlink.as_ref().unwrap(), &p)?;
     }
-    let write_secs = t_w.elapsed().as_secs_f64();
+    Ok(())
+}
 
+/// Verify a manifest's integrity + that `out` is a fresh empty dir (or create it). Shared preamble.
+fn load_verified_manifest(store: &dyn BlobStore, digest: &str, out: &Path) -> Result<Manifest> {
+    let manifest = Manifest::from_bytes(&store.get_manifest(digest)?)?;
+    if manifest.logical_digest() != digest {
+        anyhow::bail!("manifest digest mismatch (corruption/tamper)");
+    }
+    if out.exists() {
+        let nonempty = std::fs::read_dir(out)
+            .map(|mut it| it.next().is_some())
+            .unwrap_or(true);
+        if nonempty {
+            anyhow::bail!("materialize target is not empty: {}", out.display());
+        }
+    } else {
+        std::fs::create_dir_all(out)?;
+    }
+    Ok(manifest)
+}
+
+/// Materialize a manifest into `out` (a FRESH empty dir). Fetches each needed block once (parallel),
+/// decompresses+verifies chunks (parallel), writes regulars (parallel), then hardlinks, then symlinks
+/// LAST (write-through-symlink-escape safety). The daemon's COLD read path.
+pub fn materialize(
+    store: &dyn BlobStore,
+    manifest_digest: &str,
+    out: &Path,
+) -> Result<MaterializeStats> {
+    let t0 = Instant::now();
+    let manifest = load_verified_manifest(store, manifest_digest, out)?;
+    let regulars: Vec<&FileEntry> = manifest
+        .files
+        .iter()
+        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
+        .collect();
+    let (blocks, fetch_secs, decompress_secs, write_secs) =
+        write_regular_files(store, &manifest, out, &regulars)?;
+    write_links(&manifest, out)?;
+    let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     Ok(MaterializeStats {
         files: manifest.files.len(),
-        blocks_fetched: needed.len(),
+        blocks_fetched: blocks,
+        reference_reused: 0,
+        fetch_secs,
+        decompress_secs,
+        write_secs,
+        wall_secs: t0.elapsed().as_secs_f64(),
+        write_throughput_mbps: total as f64 / 1e6 / write_secs.max(1e-9),
+    })
+}
+
+/// INCREMENTAL materialize (warm resume): like `materialize`, but for every regular file whose content
+/// is UNCHANGED from a reference materialization (same path, byte-identical chunk list), **reflink** it
+/// from `ref_dir` (O(1) CoW clone on XFS/APFS; transparent copy fallback elsewhere) instead of
+/// fetch+decompress+write. Only the CHANGED/new regular files hit the block store — so a warm node
+/// resuming to the next generation pays ~the delta, not the whole tree.
+///
+/// SAFETY CONTRACT: `ref_dir` must be an UNMODIFIED prior `materialize`/`materialize_incremental` output
+/// of `ref_manifest_digest` (it was content-verified when written). The caller owns keeping it clean —
+/// if the agent may have mutated it, do a full `materialize` instead. `out` must be a fresh empty dir
+/// (distinct from `ref_dir`).
+pub fn materialize_incremental(
+    store: &dyn BlobStore,
+    manifest_digest: &str,
+    out: &Path,
+    ref_manifest_digest: &str,
+    ref_dir: &Path,
+) -> Result<MaterializeStats> {
+    let t0 = Instant::now();
+    let manifest = load_verified_manifest(store, manifest_digest, out)?;
+    // The reference manifest is verified too (so its chunk lists are trustworthy for comparison).
+    let ref_manifest = Manifest::from_bytes(&store.get_manifest(ref_manifest_digest)?)?;
+    if ref_manifest.logical_digest() != ref_manifest_digest {
+        anyhow::bail!("reference manifest digest mismatch");
+    }
+    let ref_by_path: HashMap<&str, &FileEntry> = ref_manifest
+        .files
+        .iter()
+        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
+        .map(|f| (f.path.as_str(), f))
+        .collect();
+
+    // Partition new regular files: REFLINK the unchanged ones now; collect the rest to materialize.
+    let mut to_write: Vec<&FileEntry> = Vec::new();
+    let mut reflinked = 0usize;
+    for f in manifest
+        .files
+        .iter()
+        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
+    {
+        let unchanged = ref_by_path
+            .get(f.path.as_str())
+            .is_some_and(|rf| rf.chunks == f.chunks);
+        if unchanged {
+            safe_rel_path(&f.path)?;
+            let src = ref_dir.join(&f.path);
+            // Only reflink a REAL regular file in the reference (defensive: never follow a symlink).
+            let src_ok = src
+                .symlink_metadata()
+                .map(|m| m.file_type().is_file())
+                .unwrap_or(false);
+            if src_ok {
+                let dst = out.join(&f.path);
+                if let Some(d) = dst.parent() {
+                    std::fs::create_dir_all(d)?;
+                }
+                // reflink (CoW) if supported, else a full copy — either way, no network + no decompress.
+                reflink_copy::reflink_or_copy(&src, &dst)?;
+                std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+                reflinked += 1;
+                continue;
+            }
+        }
+        to_write.push(f); // changed / new / reference-missing → materialize from the store
+    }
+
+    let (blocks, fetch_secs, decompress_secs, write_secs) =
+        write_regular_files(store, &manifest, out, &to_write)?;
+    // hardlinks + symlinks are always recreated (reflink N/A); still LAST for symlink-escape safety.
+    write_links(&manifest, out)?;
+
+    let total: u64 = manifest.files.iter().map(|f| f.size).sum();
+    Ok(MaterializeStats {
+        files: manifest.files.len(),
+        blocks_fetched: blocks,
+        reference_reused: reflinked,
         fetch_secs,
         decompress_secs,
         write_secs,

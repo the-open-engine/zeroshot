@@ -20,6 +20,9 @@ serde_json = "1"
 rayon = "1"
 walkdir = "2"
 anyhow = "1"
+# file-level reflink (CoW clone) for warm INCREMENTAL resume: FICLONE on XFS, clonefile on APFS,
+# transparent full-copy fallback on filesystems without reflink. O(1) reuse of unchanged files.
+reflink-copy = "0.1"
 clap = { version = "4", features = ["derive"] }
 
 # optional real S3 backend (drop-in for the node daemon); not needed for CPU-rate measurement.
