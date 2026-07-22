@@ -39,6 +39,13 @@ enum Cmd {
         manifest: String,
         #[arg(long)]
         out: PathBuf,
+        /// Incremental (reflink) resume: a CLEAN prior-materialization dir to reflink unchanged files
+        /// from. Requires `--ref-manifest`. `out` must be empty and distinct from `--reference`.
+        #[arg(long)]
+        reference: Option<PathBuf>,
+        /// The manifest digest that `--reference` was materialized from.
+        #[arg(long)]
+        ref_manifest: Option<String>,
     },
     Bench {
         #[arg(long)]
@@ -144,9 +151,17 @@ fn main() -> Result<()> {
             store,
             manifest,
             out,
+            reference,
+            ref_manifest,
         } => {
             let s = LocalBlobStore::new(&store)?;
-            let stats = daemon::materialize(&s, &manifest, &out)?;
+            let stats = match (reference, ref_manifest) {
+                (Some(rdir), Some(rman)) => {
+                    daemon::materialize_incremental(&s, &manifest, &out, &rman, &rdir)?
+                }
+                (None, None) => daemon::materialize(&s, &manifest, &out)?,
+                _ => anyhow::bail!("--reference and --ref-manifest must be given together"),
+            };
             println!("{}", serde_json::to_string_pretty(&stats)?);
         }
         Cmd::Bench { tree, store } => {
