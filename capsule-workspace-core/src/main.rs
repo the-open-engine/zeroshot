@@ -82,6 +82,10 @@ enum Cmd {
         /// Run exactly ONE publish cycle and exit (for tests / one-shot snapshots).
         #[arg(long)]
         once: bool,
+        /// Publish-pipeline width (compressor + uploader threads). 0 = auto (available parallelism,
+        /// capped at 16). Raise it on a big node to overlap more S3 PUTs (publish is upload-bound).
+        #[arg(long, default_value_t = 0)]
+        publish_workers: usize,
     },
     /// Store-wide GC sweep (feature `pg`): reclaim aged, unreferenced blocks. Marks against EVERY
     /// lineage's HEAD (store-wide — a per-lineage sweep would delete other lineages' live blocks).
@@ -186,6 +190,7 @@ fn main() -> Result<()> {
             health_addr,
             cache_dir,
             once,
+            publish_workers,
         } => {
             #[cfg(feature = "pg")]
             {
@@ -198,6 +203,7 @@ fn main() -> Result<()> {
                     health_addr,
                     cache_dir,
                     once,
+                    publish_workers,
                 )?;
             }
             #[cfg(not(feature = "pg"))]
@@ -212,6 +218,7 @@ fn main() -> Result<()> {
                     &health_addr,
                     &cache_dir,
                     once,
+                    publish_workers,
                 );
                 anyhow::bail!(
                     "the `daemon` subcommand requires the `pg` feature (and `s3` for an s3:// \
@@ -315,8 +322,9 @@ mod daemon_cmd {
         ls: &PgLineageStore,
         clock: &PgRefClock,
         lineage: &LineageId,
+        publish_workers: usize,
     ) -> Result<CycleOutcome> {
-        let outcome = daemon_loop::publish_cycle(tree, store, ls, clock, lineage)?;
+        let outcome = daemon_loop::publish_cycle(tree, store, ls, clock, lineage, publish_workers)?;
         match &outcome {
             CycleOutcome::Advanced(h) => eprintln!(
                 "[daemon] published: lineage={} fence={} manifest={}",
@@ -344,6 +352,7 @@ mod daemon_cmd {
         health_addr: Option<String>,
         cache_dir: Option<String>,
         once: bool,
+        publish_workers: usize,
     ) -> Result<()> {
         // 1. Postgres = lineage + GC clock (REQUIRED). A bad URL fails fast here.
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
@@ -385,7 +394,14 @@ mod daemon_cmd {
 
         // 3. One cycle (--once) or the interval loop.
         if once {
-            run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)?;
+            run_and_log_cycle(
+                &tree,
+                store.as_ref(),
+                &ls,
+                &clock,
+                &lineage,
+                publish_workers,
+            )?;
             return Ok(());
         }
         eprintln!(
@@ -410,7 +426,14 @@ mod daemon_cmd {
             if shutdown.load(Ordering::SeqCst) {
                 break;
             }
-            match run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)? {
+            match run_and_log_cycle(
+                &tree,
+                store.as_ref(),
+                &ls,
+                &clock,
+                &lineage,
+                publish_workers,
+            )? {
                 CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
                 CycleOutcome::Advanced(_) | CycleOutcome::NoChange => fenced_streak = 0,
             }
@@ -418,7 +441,14 @@ mod daemon_cmd {
 
         // 4. Drain: one final publish, then exit 0 (well within the ~30s budget).
         eprintln!("[daemon] shutdown signal — final publish (drain)");
-        run_and_log_cycle(&tree, store.as_ref(), &ls, &clock, &lineage)?;
+        run_and_log_cycle(
+            &tree,
+            store.as_ref(),
+            &ls,
+            &clock,
+            &lineage,
+            publish_workers,
+        )?;
         eprintln!("[daemon] drained; exiting 0");
         Ok(())
     }

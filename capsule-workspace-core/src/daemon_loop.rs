@@ -128,6 +128,7 @@ mod cycle {
         ls: &PgLineageStore,
         clock: &dyn RefClock,
         lineage: &LineageId,
+        req_workers: usize,
     ) -> Result<CycleOutcome> {
         let head = ls.head(lineage)?; // fallible authoritative read
         let (known, parent, expected): (ChunkIndex, Option<String>, Fence) = match &head {
@@ -141,12 +142,18 @@ mod cycle {
 
         // O3: the daemon uses the bounded-PARALLEL publish pipeline (measured ~2× faster than the
         // single-threaded streaming publish on a 2 GB tree: 20.4s→10.4s at 16 workers, plateauing
-        // there). `workers` = available parallelism capped at 16 (a 2–4 vCPU pod uses 2–4; a big node
-        // gains nothing past 16 for this workload). Produces the SAME logical manifest as streaming.
-        let workers = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .clamp(1, 16);
+        // there). `req_workers == 0` → auto = available parallelism capped at 16 (a 2–4 vCPU pod uses
+        // 2–4; a big node gains nothing past 16 for CPU, though real-S3 publish is upload-bound so more
+        // uploader threads still overlap PUTs). A non-zero value is an explicit operator override
+        // (`--publish-workers`), clamped to a sane ceiling. Produces the SAME logical manifest either way.
+        let workers = if req_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .clamp(1, 16)
+        } else {
+            req_workers.clamp(1, 64)
+        };
         let stats = publish_pipelined(tree, store, &known, parent, workers, 8)?;
 
         // Change-detection: with content-only manifest identity, an unchanged tree yields the SAME
