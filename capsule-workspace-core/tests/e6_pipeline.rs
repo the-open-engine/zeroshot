@@ -74,3 +74,72 @@ fn pipelined_equivalent_to_streaming() {
         );
     }
 }
+
+// O6: uploads run CONCURRENTLY in the pipeline (the S3-publish speedup). A latency-injecting store
+// records the MAX concurrent put_block calls — with a multi-block tree + N uploaders it must exceed 1.
+struct SlowStore {
+    inner: LocalBlobStore,
+    cur: std::sync::atomic::AtomicUsize,
+    max: std::sync::atomic::AtomicUsize,
+}
+impl BlobStore for SlowStore {
+    fn put_block(&self, id: &BlockId, b: &[u8]) -> anyhow::Result<()> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let c = self.cur.fetch_add(1, SeqCst) + 1;
+        self.max.fetch_max(c, SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(80)); // overlap window (simulates S3 latency)
+        let r = self.inner.put_block(id, b);
+        self.cur.fetch_sub(1, SeqCst);
+        r
+    }
+    fn get_block(&self, id: &BlockId) -> anyhow::Result<Vec<u8>> {
+        self.inner.get_block(id)
+    }
+    fn put_manifest(&self, d: &str, b: &[u8]) -> anyhow::Result<()> {
+        self.inner.put_manifest(d, b)
+    }
+    fn get_manifest(&self, d: &str) -> anyhow::Result<Vec<u8>> {
+        self.inner.get_manifest(d)
+    }
+    fn has_block(&self, id: &BlockId) -> bool {
+        self.inner.has_block(id)
+    }
+    fn delete_block(&self, id: &BlockId) -> anyhow::Result<bool> {
+        self.inner.delete_block(id)
+    }
+    fn delete_manifest(&self, d: &str) -> anyhow::Result<bool> {
+        self.inner.delete_manifest(d)
+    }
+}
+
+#[test]
+fn parallel_uploads_overlap() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    // ~140 MiB of DISTINCT incompressible data → several 64 MiB blocks (multi-block is required to
+    // observe upload concurrency).
+    let mut body = Vec::new();
+    for i in 0..560u64 {
+        body.extend(prng(i));
+    }
+    write(&tree.join("f.bin"), &body);
+    let store = SlowStore {
+        inner: LocalBlobStore::new(d.path().join("s")).unwrap(),
+        cur: 0.into(),
+        max: 0.into(),
+    };
+    let st = publish_pipelined(&tree, &store, &ChunkIndex::new(), None, 4, 8).unwrap();
+    assert!(
+        st.blocks >= 2,
+        "need multiple blocks to observe upload concurrency (got {})",
+        st.blocks
+    );
+    let max = store.max.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        max >= 2,
+        "uploads must overlap across workers (max concurrent = {max})"
+    );
+    // still correct: round-trips byte-identically.
+    materialize(&store, &st.manifest, &d.path().join("o")).unwrap();
+    assert_eq!(fs::read(d.path().join("o").join("f.bin")).unwrap(), body);
+}

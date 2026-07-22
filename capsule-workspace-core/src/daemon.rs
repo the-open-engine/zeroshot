@@ -338,33 +338,62 @@ pub fn publish_pipelined(
             }));
         }
         drop(comp_tx);
+
+        // UPLOAD stage: N uploader threads pull finalized blocks and `put_block` them CONCURRENTLY
+        // (S3 publish is upload-bound — the packer was previously the serial upload bottleneck). Each
+        // has its own channel (mpsc rx isn't shareable); the packer round-robins blocks across them.
+        // `put_block` is thread-safe (S3 adapter shares a multi-thread runtime; LocalBlobStore uses a
+        // per-writer unique temp + atomic rename), so concurrent uploads are safe.
+        let mut up_txs = Vec::with_capacity(workers);
+        let mut uhandles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let (utx, urx) = sync_channel::<(BlockId, Vec<u8>)>(cap.max(1));
+            up_txs.push(utx);
+            uhandles.push(scope.spawn(move || -> Result<()> {
+                while let Ok((bid, bytes)) = urx.recv() {
+                    store.put_block(&bid, &bytes)?;
+                }
+                Ok(())
+            }));
+        }
+
         let packer = scope.spawn(move || -> Result<(ChunkIndex, usize, u64)> {
             let mut new_index = ChunkIndex::new();
             let mut cur = BlockBuilder::new();
             let mut n_blocks = 0usize;
             let mut comp_new = 0u64;
-            let flush =
-                |cur: &mut BlockBuilder, ni: &mut ChunkIndex, nb: &mut usize| -> Result<()> {
-                    if cur.buf.is_empty() {
-                        return Ok(());
-                    }
-                    let (bid, bytes, members) =
-                        std::mem::replace(cur, BlockBuilder::new()).finalize();
-                    for (id, off, clen, rlen) in members {
-                        ni.insert(
-                            id,
-                            ChunkLoc {
-                                block: bid.clone(),
-                                offset: off,
-                                clen,
-                                rlen,
-                            },
-                        );
-                    }
-                    store.put_block(&bid, &bytes)?;
-                    *nb += 1;
-                    Ok(())
-                };
+            let mut brr = 0usize; // block round-robin cursor across uploaders
+            // Finalize a full block, record its chunks in the index (what the manifest needs — does
+            // NOT depend on the upload landing), then hand (id, bytes) to an uploader.
+            fn flush_block(
+                cur: &mut BlockBuilder,
+                ni: &mut ChunkIndex,
+                nb: &mut usize,
+                brr: &mut usize,
+                up_txs: &[std::sync::mpsc::SyncSender<(BlockId, Vec<u8>)>],
+            ) -> Result<()> {
+                if cur.buf.is_empty() {
+                    return Ok(());
+                }
+                let (bid, bytes, members) = std::mem::replace(cur, BlockBuilder::new()).finalize();
+                for (id, off, clen, rlen) in members {
+                    ni.insert(
+                        id,
+                        ChunkLoc {
+                            block: bid.clone(),
+                            offset: off,
+                            clen,
+                            rlen,
+                        },
+                    );
+                }
+                up_txs[*brr % up_txs.len()]
+                    .send((bid, bytes))
+                    .map_err(|_| anyhow::anyhow!("uploader terminated mid-publish"))?;
+                *brr += 1;
+                *nb += 1;
+                Ok(())
+            }
             while let Ok((id, comp, rlen)) = comp_rx.recv() {
                 comp_new += comp.len() as u64;
                 let off = cur.buf.len() as u64;
@@ -372,10 +401,11 @@ pub fn publish_pipelined(
                 cur.buf.extend_from_slice(&comp);
                 cur.members.push((id, off, clen, rlen));
                 if cur.buf.len() >= BLOCK_TARGET {
-                    flush(&mut cur, &mut new_index, &mut n_blocks)?;
+                    flush_block(&mut cur, &mut new_index, &mut n_blocks, &mut brr, &up_txs)?;
                 }
             }
-            flush(&mut cur, &mut new_index, &mut n_blocks)?;
+            flush_block(&mut cur, &mut new_index, &mut n_blocks, &mut brr, &up_txs)?;
+            drop(up_txs); // close upload channels → uploaders drain + finish
             Ok((new_index, n_blocks, comp_new))
         });
 
@@ -431,7 +461,12 @@ pub fn publish_pipelined(
         for h in chandles {
             h.join().ok();
         }
-        packer.join().unwrap()
+        // packer built the index + handed every block to the uploaders; then the uploaders drain.
+        let packed = packer.join().unwrap()?;
+        for h in uhandles {
+            h.join().unwrap()?; // propagate any upload error — all blocks are durable once these return
+        }
+        Ok(packed)
     })?;
 
     file_entries.extend(symlink_entries);
