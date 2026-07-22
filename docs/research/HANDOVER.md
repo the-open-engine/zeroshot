@@ -118,21 +118,26 @@ From `capsule-workspace-core/`:
 **DONE since the last handover:** O6 **parallel S3 block uploads** (packer round-robins finalized blocks
 to `workers` uploader threads; reviewed — fixed a GiB-scale channel-buffering regression + a debug-only
 test) and O7 **reflink incremental resume** (`materialize_incremental` reflinks unchanged files from a
-reference; reviewed as security-critical — no security property dropped). Both pushed.
+reference; reviewed as security-critical — no security property dropped). Both pushed. Then **measured on
+real EC2** (c6gd.4xlarge, XFS reflink=1, local PG; rig torn down): O6 — 1→2 uploaders collapses exposed
+upload latency ~7.2s→~0.8s (uploads hidden behind compute; S3 wall tracks CPU-bound local wall within
+~1s at every W≥2), end-to-end 2.24× across the width sweep; O7 — reflink writes only the ~5% delta
+(101 MiB of 2049) and fetches 2 blocks vs 34 (17× less store I/O), byte-identical output. Two CLI knobs
+added for this: `daemon --publish-workers N` and `materialize --reference <dir> --ref-manifest <digest>`.
+Full numbers in the build log (2026-07-22 entry).
 
 **Optimization follow-ups (biggest headroom first):**
-1. **Wire `materialize_incremental` into the daemon** — O7 built the mechanism but there's NO production
-   caller yet (`daemon_loop::materialize_on_start` still does a full `materialize`). This is where the
-   reflink R2 win actually lands. REQUIRES a **pristine retained reference** (a prior materialize output
-   kept immutable, NEVER the agent's mutated live workspace) + "full materialize on any doubt" as the
-   default. This is workspace-lifecycle work (keep the old gen as a read-only reference, materialize the
-   new gen with reflink, swap). Measure warm incremental resume on real XFS.
+1. **Wire `materialize_incremental` into the daemon** — O7 built the mechanism + a CLI caller, but there's
+   still NO *daemon* caller (`daemon_loop::materialize_on_start` does a full `materialize`). This is where
+   the reflink R2 win actually lands in production, and the EC2 batch quantified how big it is (17× less
+   store fetch on the delta). REQUIRES a **pristine retained reference** (a prior materialize output kept
+   immutable, NEVER the agent's mutated live workspace) + "full materialize on any doubt" as the default.
+   Workspace-lifecycle work (keep the old gen as a read-only reference, materialize the new gen with
+   reflink, swap).
 2. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes).
 3. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with
    no `block_ref` row older than grace — closes the documented GC crash/straddle orphan residual.
 4. **LVM-thin same-node COW fork** — not yet measured (writer→reader fork; from the original research).
-5. **Re-measure O6/O7 on real EC2** (S3 upload speedup at scale; O(1)-reflink incremental resume on XFS) —
-   the next EC2 batch (needs the user's `aws sso login`, teardown after).
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).

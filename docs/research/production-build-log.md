@@ -709,3 +709,62 @@ measured on real XFS in the next EC2 batch.
 lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle
 error currently crash-loops the daemon), RDS IAM auth / `verify-full` CA, in-region cold-materialize at
 1–5 GB scale.
+
+### 2026-07-22 — O6+O7 measured on real EC2 (parallel S3 uploads; reflink on XFS)
+Throwaway rig (internal acct 993939946442, us-east-1, torn down): one **c6gd.4xlarge** (16 vCPU,
+up-to-10 Gbps), instance-store NVMe formatted **XFS reflink=1**, **local Postgres on the NVMe** (the
+lineage store — RDS+TLS was already proven in O5, so this batch didn't re-pay for it), binary rebuilt
+in Docker with `--features pg,s3`. Workload: a 2.1 GB / 256-file **incompressible** tree (so
+`upload_mb == 2148` — zstd can't shrink random data, giving a clean upload-volume control). Two new CLI
+surfaces made the measurement reachable: `daemon --publish-workers N` (sweep pipeline width) and
+`materialize --reference <dir> --ref-manifest <digest>` (invoke `materialize_incremental`).
+
+**O6 — parallel S3 uploads take PUTs off the critical path.** Same instance, same tree, sweeping the
+pipeline width. LOCAL store = CPU+local-write baseline (isolates compute); S3 = end-to-end; the
+width-dependent gap between them is the exposed upload latency:
+
+| workers | LOCAL wall (CPU+write) | S3 wall (e2e, run1/run2) | exposed upload ≈ S3−local |
+|--:|--:|--:|--:|
+| 1  | 17.0s | 24.2 / 24.4s | **~7.2s** |
+| 2  | 16.5s | 17.3 / 17.3s | ~0.8s |
+| 4  | 15.3s | 16.2 / 16.1s | ~0.9s |
+| 8  | 13.0s | 14.2 / 13.8s | ~0.9s |
+| 16 | 9.8s  | 10.9 / 10.7s | ~1.0s |
+
+- **O6's specific win:** going 1→2 uploaders collapses exposed upload latency **~7.2s → ~0.8s** — a
+  single S3 PUT stream (~0.7 Gbps here) can't keep up with the packer, so at W=1 the pipeline stalls on
+  uploads; ≥2 streams overlap uploads with compute and the upload essentially disappears (S3 wall tracks
+  the CPU-bound local wall within ~1s at every W≥2). Aggregate upload throughput goes from ~0.7 Gbps
+  (serial) to ≥1.75 Gbps (overlapped).
+- End-to-end publish **24.2s → 10.8s = 2.24×** across the width sweep (the compute half of that is O3's
+  parallel pipeline: local 17.0→9.8s; the upload half is O6). Cross-batch, O5's pre-O6 baseline was
+  ~43.8s for 2 GB on a serial-upload daemon — not a same-instance control, but directionally consistent.
+
+**O7 — reflink incremental resume (XFS reflink=1).** gen2 = 13/256 files rewritten (~5% churn); LOCAL
+store to isolate the CoW effect from network (which makes this a *lower bound* on the real win — see
+below). Full `materialize` vs `materialize --reference`:
+
+| metric | FULL materialize | INCREMENTAL (reflink) |
+|---|--:|--:|
+| wall time | 1.297s | **0.506s (2.6×)** |
+| blocks fetched from store | 34 | **2 (17× less)** |
+| files reflinked | 0 | 243 / 256 |
+| disk actually written (df delta) | ~2049 MiB | **101 MiB (20× less)** |
+| apparent size | 2049 MiB | 2049 MiB |
+| output vs FULL | — | **IDENTICAL** |
+
+- True CoW confirmed: only **101 MiB** hit the disk (the changed delta) though the tree is 2049 MiB
+  apparent — the 243 unchanged files share extents with the reference. Byte-identical output.
+- **The local-store numbers UNDERSTATE the production win.** `blocks_fetched 34 → 2` is the real lever:
+  on a network-backed store a cold full resume re-downloads+decompresses all 34 blocks (~2 GB), while the
+  incremental fetches 2 (~128 MiB) — a ~17× store-I/O reduction that, over S3, dominates wall-time far
+  more than the 2.6× seen against a warm local NVMe. The reflink win grows with workspace size,
+  unchanged-fraction, and store latency.
+- Still gated on the same integration obligation as before: needs a **pristine retained reference** (never
+  the agent's mutated live workspace) + "full materialize on any doubt". `materialize_incremental` now has
+  a CLI caller but still no *daemon* caller — that wiring is the next integration-PR step.
+
+Net: both optimizations validated on real hardware. Parallel uploads make S3 publish compute-bound rather
+than network-bound (uploads hidden behind hashing/compression); reflink makes warm resume pay ~the delta
+in both disk and store-fetch. Rig fully torn down (instance, bucket, IAM role/profile, SG — verified
+empty). 65 default tests green; clippy/fmt clean.
