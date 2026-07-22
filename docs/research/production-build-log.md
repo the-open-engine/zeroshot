@@ -647,6 +647,33 @@ incremental resume — needs a reflink-capable FS + prior-tree tracking); mtime-
 avoids even re-hashing; the orphan-object reconciler (needs a `BlobStore.list`). LVM-thin same-node COW
 fork not yet measured.
 
+### 2026-07-21 — O6: parallel S3 block uploads (implemented, reviewed, fixed)
+The biggest remaining publish lever (O5: S3 publish of 2 GB was ~43.8s, ~23s serial upload). The packer
+previously called `put_block` serially as it finalized each 64 MiB block. Now `publish_pipelined` has an
+UPLOAD stage: `workers` uploader threads (round-robin channels) `put_block` blocks CONCURRENTLY; the
+packer finalizes a block, records its chunk locations in the index (independent of the upload landing),
+then hands `(block_id, bytes)` to an uploader. Ordering preserved (index built → uploaders drain, all
+blocks durable → `put_manifest`). Same logical manifest (pipeline-equivalence tests green).
+
+**Senior-review: CHANGES-REQUIRED → fixed.** The reviewer confirmed the load-bearing properties (no
+deadlock — traced every thread-death; no silent upload failure — `put_manifest` runs only after every
+uploader joins `Ok`, empirically 0 manifests written on an injected upload failure; same output as
+streaming) and found two real must-fixes:
+- **Memory regression (real):** the upload channels reused the 256 KiB-chunk bound `cap`(=8) for
+  **64 MiB BLOCK** items → up to `workers·cap` blocks buffered ≈ **2.4 GiB @4 workers / 9 GiB @16**. Fixed:
+  upload channel bound = **1** (block-tier peak now ~`2·workers·64 MiB` = queued+in-flight, scales with
+  workers which the daemon clamps to `available_parallelism`; ~256–512 MiB on a 2–4 vCPU pod). Comment
+  corrected.
+- **Test red in debug:** `parallel_uploads_overlap` (a latency-injecting store asserting max-concurrent
+  `put_block` ≥ 2) passed in `--release` but FAILED 6/6 in debug — debug's sha256-bound block production
+  is slower than the 80 ms simulated latency, so blocks never coexist. Fixed: `#[cfg_attr(debug_assertions,
+  ignore)]` (release-only, with a reason) — `cargo test` shows it ignored, `cargo test --release` runs it.
+- Reviewer's 3rd item (the standalone crate isn't wired into the JS-root CI, so its tests have no CI
+  protection) is real but an INTEGRATION concern (the crate has its own `[workspace]` on purpose) —
+  deferred/noted, consistent with "don't integrate yet". All testing remains manual/local + real-AWS.
+59 default green + 1 ignored (the release-only overlap test); clippy/fmt clean. Real-S3 speedup to be
+re-measured in the next EC2 batch.
+
 **Remaining prod-hardening (from the per-phase watch-lists, still open):** manifest GC + the GC actor
 (F1/F2), orphan-object reconciler, per-publisher lease (claim→delete straddle), single-flight advisory
 lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle

@@ -292,11 +292,16 @@ pub fn publish(
     })
 }
 
-/// BOUNDED-PARALLEL publish (E6): a producer streams+dedups files and round-robins NEW chunks
-/// through `workers` compressor threads into a single sequential packer, over bounded channels.
-/// Peak memory ≈ (workers+2)·cap·chunk + one block — bounded regardless of tree size — while
-/// reclaiming the parallelism the single-threaded streaming publish gave up. Identity is the
-/// logical digest (packing order irrelevant), so parallel packing is safe.
+/// BOUNDED-PARALLEL publish (E6 + O6): a producer streams+dedups files and round-robins NEW chunks
+/// through `workers` compressor threads into a single packer; the packer finalizes 64 MiB blocks and
+/// round-robins them to `workers` UPLOADER threads that `put_block` concurrently (S3 publish is
+/// upload-bound). Identity is the logical digest (packing/upload order irrelevant), so this is safe.
+///
+/// Peak memory (bounded regardless of tree size): the chunk-stage channels hold `~(workers+2)·cap`
+/// 256 KiB chunks; the upload stage holds at most **~2·workers 64 MiB BLOCKS** in flight (each
+/// uploader: 1 queued + 1 uploading — the upload channel bound is deliberately 1, NOT `cap`, because
+/// its items are whole blocks). So block-tier peak ≈ `2·workers·64 MiB` — scales with `workers` (the
+/// daemon clamps it to `available_parallelism`, so a 2–4 vCPU pod holds ~256–512 MiB, not GiBs).
 pub fn publish_pipelined(
     root: &Path,
     store: &dyn BlobStore,
@@ -347,7 +352,9 @@ pub fn publish_pipelined(
         let mut up_txs = Vec::with_capacity(workers);
         let mut uhandles = Vec::with_capacity(workers);
         for _ in 0..workers {
-            let (utx, urx) = sync_channel::<(BlockId, Vec<u8>)>(cap.max(1));
+            // Bound = 1 (NOT `cap`): items are whole 64 MiB blocks, so a per-uploader queue of 1 caps
+            // block-tier peak to ~2·workers blocks (queued + in-flight) instead of `cap`·workers.
+            let (utx, urx) = sync_channel::<(BlockId, Vec<u8>)>(1);
             up_txs.push(utx);
             uhandles.push(scope.spawn(move || -> Result<()> {
                 while let Ok((bid, bytes)) = urx.recv() {

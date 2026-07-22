@@ -112,6 +112,13 @@ impl BlobStore for SlowStore {
     }
 }
 
+// RELEASE-only: in a debug build the sha256-bound block production is slower than the simulated
+// 80 ms upload latency, so blocks never coexist and `max` stays 1 (a false red). Under `--release`
+// block production is fast, so uploads genuinely overlap. Run: `cargo test --release`.
+#[cfg_attr(
+    debug_assertions,
+    ignore = "needs --release (debug block-production is slower than the simulated upload latency)"
+)]
 #[test]
 fn parallel_uploads_overlap() {
     let d = tmp();
