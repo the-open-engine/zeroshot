@@ -115,16 +115,24 @@ From `capsule-workspace-core/`:
   `c7gd` capacity is flaky per-AZ — fall back across AZs/types. Throwaway RDS password; tear everything down.
 
 ## 6. Open work — pick up here (prioritized)
+**DONE since the last handover:** O6 **parallel S3 block uploads** (packer round-robins finalized blocks
+to `workers` uploader threads; reviewed — fixed a GiB-scale channel-buffering regression + a debug-only
+test) and O7 **reflink incremental resume** (`materialize_incremental` reflinks unchanged files from a
+reference; reviewed as security-critical — no security property dropped). Both pushed.
+
 **Optimization follow-ups (biggest headroom first):**
-1. **Parallel S3 block uploads** in the packer — the biggest remaining PUBLISH win. O5 showed S3 publish
-   of 2 GB = ~43.8s with ~23s being serial upload. Overlap compress+upload / upload blocks concurrently.
-2. **File-level reflink on warm resume** — the biggest remaining R2 win. On a warm node, reflink (FICLONE
-   on XFS) unchanged files from a prior materialization instead of decompress+write → near-instant
-   *incremental* resume. Needs a reflink-capable FS + prior-tree tracking.
-3. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes).
-4. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with
+1. **Wire `materialize_incremental` into the daemon** — O7 built the mechanism but there's NO production
+   caller yet (`daemon_loop::materialize_on_start` still does a full `materialize`). This is where the
+   reflink R2 win actually lands. REQUIRES a **pristine retained reference** (a prior materialize output
+   kept immutable, NEVER the agent's mutated live workspace) + "full materialize on any doubt" as the
+   default. This is workspace-lifecycle work (keep the old gen as a read-only reference, materialize the
+   new gen with reflink, swap). Measure warm incremental resume on real XFS.
+2. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes).
+3. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with
    no `block_ref` row older than grace — closes the documented GC crash/straddle orphan residual.
-5. **LVM-thin same-node COW fork** — not yet measured (writer→reader fork; from the original research).
+4. **LVM-thin same-node COW fork** — not yet measured (writer→reader fork; from the original research).
+5. **Re-measure O6/O7 on real EC2** (S3 upload speedup at scale; O(1)-reflink incremental resume on XFS) —
+   the next EC2 batch (needs the user's `aws sso login`, teardown after).
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).
