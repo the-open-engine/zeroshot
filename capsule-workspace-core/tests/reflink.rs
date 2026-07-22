@@ -114,3 +114,107 @@ fn incremental_falls_back_when_reference_file_absent() {
     assert_eq!(fs::read(out.join("a.bin")).unwrap(), prng(7)); // materialized from the store
     assert_eq!(fs::read(out.join("b.bin")).unwrap(), prng(8)); // reflinked
 }
+
+// content SAME, mode CHANGED → reflinked (0 blocks fetched) with the NEW mode applied.
+#[test]
+fn incremental_applies_new_mode_on_content_match() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tmp();
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let tree = d.path().join("t");
+    write(&tree.join("run.sh"), &prng(5));
+    fs::set_permissions(tree.join("run.sh"), fs::Permissions::from_mode(0o644)).unwrap();
+    let g1 = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let refdir = d.path().join("ref");
+    materialize(&s, &g1, &refdir).unwrap();
+
+    fs::set_permissions(tree.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let g2 = publish(&tree, &s, &load_index(&s, &g1), Some(g1.clone()))
+        .unwrap()
+        .manifest;
+    let out = d.path().join("out");
+    let st = materialize_incremental(&s, &g2, &out, &g1, &refdir).unwrap();
+    assert_eq!(st.reference_reused, 1, "content unchanged → reflinked");
+    assert_eq!(st.blocks_fetched, 0, "reflink only — nothing fetched");
+    assert_eq!(
+        fs::metadata(out.join("run.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755,
+        "the NEW mode is applied after reflink"
+    );
+}
+
+// a tampered new manifest with a traversal path must be refused by the incremental entry point too.
+#[test]
+fn incremental_refuses_path_traversal() {
+    use capsule_workspace_core::manifest::Manifest;
+    let d = tmp();
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let tree = d.path().join("t");
+    write(&tree.join("f.txt"), b"x");
+    let g1 = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let refdir = d.path().join("ref");
+    materialize(&s, &g1, &refdir).unwrap();
+
+    let mut m = Manifest::from_bytes(&s.get_manifest(&g1).unwrap()).unwrap();
+    m.files[0].path = "../../ESCAPED".to_string();
+    let bad = m.logical_digest();
+    fs::write(
+        d.path().join("s").join("manifests").join(&bad),
+        m.to_bytes(),
+    )
+    .unwrap();
+    let out = d.path().join("out");
+    assert!(
+        materialize_incremental(&s, &bad, &out, &g1, &refdir).is_err(),
+        "traversal must be refused"
+    );
+    assert!(!d.path().join("ESCAPED").exists() && !d.path().join("../ESCAPED").exists());
+}
+
+// hardlinks + symlinks are recreated (never reflinked) and are correct under the incremental path,
+// even when their canonical target was REFLINKED (write_links runs after reflink + delta write).
+#[test]
+fn incremental_recreates_links_over_reflinked_target() {
+    use std::os::unix::fs::{symlink, MetadataExt};
+    let d = tmp();
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let tree = d.path().join("t");
+    write(&tree.join("canon.bin"), &prng(11));
+    fs::hard_link(tree.join("canon.bin"), tree.join("hl.bin")).unwrap();
+    symlink("canon.bin", tree.join("ln")).unwrap();
+    write(&tree.join("x.bin"), &prng(12));
+    let g1 = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let refdir = d.path().join("ref");
+    materialize(&s, &g1, &refdir).unwrap();
+
+    // gen2: change x.bin; canon/hl/ln unchanged.
+    write(&tree.join("x.bin"), &prng(99));
+    let g2 = publish(&tree, &s, &load_index(&s, &g1), Some(g1.clone()))
+        .unwrap()
+        .manifest;
+    let out = d.path().join("out");
+    let st = materialize_incremental(&s, &g2, &out, &g1, &refdir).unwrap();
+    assert!(st.reference_reused >= 1, "canon.bin reflinked");
+    // the hardlink shares the reflinked canonical target's inode
+    assert_eq!(
+        fs::metadata(out.join("canon.bin")).unwrap().ino(),
+        fs::metadata(out.join("hl.bin")).unwrap().ino(),
+        "hardlink shares the reflinked target's inode"
+    );
+    assert_eq!(
+        fs::read_link(out.join("ln")).unwrap().to_str().unwrap(),
+        "canon.bin"
+    );
+    assert_eq!(fs::read(out.join("x.bin")).unwrap(), prng(99));
+    assert_eq!(fs::read(out.join("canon.bin")).unwrap(), prng(11));
+}

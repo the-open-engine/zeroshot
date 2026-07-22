@@ -674,6 +674,36 @@ streaming) and found two real must-fixes:
 59 default green + 1 ignored (the release-only overlap test); clippy/fmt clean. Real-S3 speedup to be
 re-measured in the next EC2 batch.
 
+### 2026-07-21 — O7: reflink incremental warm resume (implemented, reviewed, tested)
+The biggest remaining R2 lever. `materialize`'s fetch/decompress/write + link phases were refactored
+into shared helpers (`write_regular_files`, `write_links`, `load_verified_manifest`) — behavior-
+preserving (all 16 existing materialize/tamper/symlink/hardlink/mode security tests still green). New
+`materialize_incremental(store, digest, out, ref_manifest, ref_dir)`: for each regular file whose chunk
+list is byte-identical to the reference manifest's same-path file, **reflink** it from `ref_dir`
+(reflink-copy: FICLONE on XFS, clonefile on APFS, transparent copy fallback) + apply the new mode; only
+CHANGED/new regulars hit the block store. So a warm node resuming to the next generation pays ~the
+delta. `MaterializeStats.reference_reused`. Defensive: only reflinks a real regular file in the reference
+(lstat, never follows a symlink); absent/non-regular → falls back to the store. `reflink-copy 0.1.30`.
+
+**Senior-review (security-critical fn): APPROVED-WITH-NITS**, no must-fix. The reviewer ran 5 throwaway
+adversarial probes and verified: the refactor drops NO security property (manifest integrity, empty-dir
+check, size-from-actual-chunks, chunk verification, setuid masking, and the regulars→hardlinks→symlinks-
+LAST phase ordering all survive; composition preserves ordering); reflink path-safety (`safe_rel_path`
+before every `ref_dir.join`/`out.join`, so a `..`/absolute path in a tampered new manifest can't read
+outside `ref_dir` or write outside `out`); symlink-follow refusal at the reference leaf (lstat); and the
+KEY soundness link — the reference manifest is ALSO integrity-verified before its chunk lists are trusted
+for the unchanged-comparison (stops a tampered stored ref-manifest from falsely marking a changed file
+"unchanged"). Applied the top nit (coverage): added `tests/reflink.rs` cases for content-same/mode-changed
+(reflink applies the new mode, 0 blocks fetched), traversal-refused-via-incremental, and hardlink+symlink
+recreation over a reflinked target — locking in the properties the reviewer verified by hand.
+
+Deferred (noted): (a) `materialize_incremental` has NO production caller yet — the daemon's
+materialize-on-start still uses full `materialize`; wiring it needs a **pristine retained reference**
+(never the agent's mutated live workspace) with "full materialize on any doubt" as the default posture —
+an integration-PR obligation. (b) Stat drift: `write_secs`/`write_throughput_mbps` now cover the delta
+write only (cosmetic, non-security). 65 default green; clippy/fmt clean. O(1)-reflink wall-clock win to be
+measured on real XFS in the next EC2 batch.
+
 **Remaining prod-hardening (from the per-phase watch-lists, still open):** manifest GC + the GC actor
 (F1/F2), orphan-object reconciler, per-publisher lease (claim→delete straddle), single-flight advisory
 lock, materialize-into-nonempty-tree on pod restart, bounded retry on transient S3 5xx (a non-fence cycle
