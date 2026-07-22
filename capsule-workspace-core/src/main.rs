@@ -86,6 +86,15 @@ enum Cmd {
         /// capped at 16). Raise it on a big node to overlap more S3 PUTs (publish is upload-bound).
         #[arg(long, default_value_t = 0)]
         publish_workers: usize,
+        /// Optional pristine-reference root for WARM RESUME (O7). When set, materialize-on-start keeps an
+        /// immutable reference materialization here (scoped per lineage) and reflinks unchanged files into
+        /// `--tree`, fetching only the delta. MUST be on the same filesystem as `--tree` — cross-fs falls
+        /// back to a full copy, which is SLOWER than omitting the flag. MUST be EPHEMERAL node-local storage
+        /// (same class as `--cache-dir`): the reflink clone does not re-hash, so it trusts the reference,
+        /// which is safe only because a node power-event wipes ephemeral storage → cold resume. Single-writer
+        /// per lineage. Omit = full cold materialize (unchanged default).
+        #[arg(long)]
+        ref_dir: Option<PathBuf>,
     },
     /// Store-wide GC sweep (feature `pg`): reclaim aged, unreferenced blocks. Marks against EVERY
     /// lineage's HEAD (store-wide — a per-lineage sweep would delete other lineages' live blocks).
@@ -191,6 +200,7 @@ fn main() -> Result<()> {
             cache_dir,
             once,
             publish_workers,
+            ref_dir,
         } => {
             #[cfg(feature = "pg")]
             {
@@ -204,6 +214,7 @@ fn main() -> Result<()> {
                     cache_dir,
                     once,
                     publish_workers,
+                    ref_dir,
                 )?;
             }
             #[cfg(not(feature = "pg"))]
@@ -219,6 +230,7 @@ fn main() -> Result<()> {
                     &cache_dir,
                     once,
                     publish_workers,
+                    &ref_dir,
                 );
                 anyhow::bail!(
                     "the `daemon` subcommand requires the `pg` feature (and `s3` for an s3:// \
@@ -353,7 +365,19 @@ mod daemon_cmd {
         cache_dir: Option<String>,
         once: bool,
         publish_workers: usize,
+        ref_dir: Option<PathBuf>,
     ) -> Result<()> {
+        // 0. `--ref-dir` must not be nested with `--tree`: the reference lives inside `tree` (or vice
+        //    versa) would corrupt the empty-workspace check + the ref GC. Reject up front (lexical guard).
+        if let Some(rd) = ref_dir.as_deref() {
+            if rd.starts_with(&tree) || tree.starts_with(rd) {
+                anyhow::bail!(
+                    "--ref-dir ({}) and --tree ({}) must not be nested",
+                    rd.display(),
+                    tree.display()
+                );
+            }
+        }
         // 1. Postgres = lineage + GC clock (REQUIRED). A bad URL fails fast here.
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
         ls.init_schema().context("apply bootstrap schema")?;
@@ -377,9 +401,16 @@ mod daemon_cmd {
             eprintln!("[daemon] health/readiness on {addr} (503 until ready)");
         }
 
-        // 2. Materialize-latest-on-start (fallible head read), THEN arm readiness.
-        let restored = daemon_loop::materialize_on_start(store.as_ref(), &ls, &lineage, &tree)
-            .context("materialize-on-start")?;
+        // 2. Materialize-latest-on-start (fallible head read), THEN arm readiness. With `--ref-dir` this
+        //    is a reflink warm resume (fetch only the delta); without it, a full cold materialize.
+        let restored = daemon_loop::materialize_on_start(
+            store.as_ref(),
+            &ls,
+            &lineage,
+            &tree,
+            ref_dir.as_deref(),
+        )
+        .context("materialize-on-start")?;
         ready.store(true, Ordering::SeqCst);
         eprintln!(
             "[daemon] ready — materialize-on-start: {} (lineage={}, tree={})",

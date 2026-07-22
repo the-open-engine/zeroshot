@@ -63,7 +63,7 @@ pub fn spawn_health_server(listener: TcpListener, ready: Arc<AtomicBool>) -> Joi
 #[cfg(feature = "pg")]
 mod cycle {
     use crate::cas::{BlobStore, BlockId, ChunkIndex};
-    use crate::daemon::{materialize, publish_pipelined};
+    use crate::daemon::{materialize, publish_pipelined, resume_via_reference};
     use crate::ifaces::{Fence, LineageId};
     use crate::lineage::{Head, LineageError, LineageStore};
     use crate::manifest::Manifest;
@@ -97,10 +97,28 @@ mod cycle {
         ls: &PgLineageStore,
         lineage: &LineageId,
         tree: &Path,
+        ref_dir: Option<&Path>,
     ) -> Result<bool> {
         match ls.head(lineage)? {
             Some(h) => {
-                materialize(store, &h.manifest_digest, tree)?;
+                match ref_dir {
+                    // Warm resume: reflink unchanged files from a daemon-owned pristine reference, fetch
+                    // only the delta (O7). `ref_dir` should be on the same filesystem as `tree`. Scoped by
+                    // lineage so multiple lineages can share one `--ref-dir` without clobbering each other.
+                    Some(rroot) => {
+                        let scoped = rroot.join(crate::daemon::lineage_ref_subdir(&lineage.0));
+                        let st = resume_via_reference(store, &h.manifest_digest, tree, &scoped)?;
+                        eprintln!(
+                            "[daemon] warm resume ({:?}): ref_blocks_fetched={} ref_reflinked={} \
+                             workspace_files={}",
+                            st.kind, st.ref_blocks_fetched, st.ref_reflinked, st.workspace_files
+                        );
+                    }
+                    // Default (no --ref-dir): full cold materialize straight into the workspace.
+                    None => {
+                        materialize(store, &h.manifest_digest, tree)?;
+                    }
+                }
                 Ok(true)
             }
             None => Ok(false),

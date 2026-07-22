@@ -793,3 +793,217 @@ pub fn materialize_incremental(
         write_throughput_mbps: total as f64 / 1e6 / write_secs.max(1e-9),
     })
 }
+
+/// How a reference-accelerated warm resume (`resume_via_reference`) built its pristine reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeKind {
+    /// No usable prior reference — the pristine ref was built by a FULL materialize (cold node).
+    ColdFull,
+    /// Built INCREMENTALLY from a prior reference (reflink unchanged, fetch only the delta).
+    WarmIncremental,
+    /// A pristine ref for this exact digest already existed (restart at the same HEAD) — reused, 0 fetch.
+    RefReused,
+}
+
+/// Stats from `resume_via_reference`, for the daemon log + tests.
+#[derive(Debug, Clone, Copy)]
+pub struct ResumeStats {
+    pub kind: ResumeKind,
+    /// Blocks fetched from the store to (re)build the pristine reference (0 when the ref was reused).
+    pub ref_blocks_fetched: usize,
+    /// Regular files reflinked (CoW, or copy-fallback) from the prior reference while building the new one.
+    pub ref_reflinked: usize,
+    /// Total files in the cloned live workspace (all regulars reflinked from the pristine ref).
+    pub workspace_files: usize,
+}
+
+/// True iff `s` is a 64-char lowercase-hex sha256 digest — the ONLY shape we will `join` onto `ref_root`
+/// or `remove_dir_all`. Guards path-injection via a corrupt `current` file or a stray dir name.
+fn is_hex_digest(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Read the committed current-reference digest from `ref_root/current` (None if absent/corrupt/non-hex).
+fn read_current_ref(ref_root: &Path) -> Option<String> {
+    let d = std::fs::read_to_string(ref_root.join("current")).ok()?;
+    let d = d.trim().to_string();
+    is_hex_digest(&d).then_some(d)
+}
+
+/// Commit `ref_root/current = digest` atomically (write staging file, then rename).
+fn write_current_ref(ref_root: &Path, digest: &str) -> Result<()> {
+    let tmp = ref_root.join(".current.tmp");
+    std::fs::write(&tmp, digest)?;
+    std::fs::rename(&tmp, ref_root.join("current"))?;
+    Ok(())
+}
+
+/// Sweep crash-residue staging entries (`.tmp-*` dirs, `.current.tmp`) under `ref_root`. Best-effort.
+fn sweep_ref_staging(ref_root: &Path) {
+    if let Ok(rd) = std::fs::read_dir(ref_root) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(".tmp-") {
+                let _ = std::fs::remove_dir_all(e.path());
+            } else if n == ".current.tmp" {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// Filesystem-safe, injection-proof subdirectory name for a lineage's reference tree, so multiple
+/// lineages can safely share one `--ref-dir` without clobbering each other's refs or GC. `LineageId` is a
+/// free-form String (it may contain `/` or `..`), so we HASH it rather than trust it as a path component.
+pub fn lineage_ref_subdir(lineage: &str) -> String {
+    // 16 hex of sha256 — ample against collision, and clearly not a 64-hex manifest digest.
+    format!("lineage-{}", &hex_sha256(lineage.as_bytes())[..16])
+}
+
+/// A committed reference is trusted ONLY when its completeness sentinel `<digest>.ok` is a real FILE AND
+/// `<digest>/` is a real DIRECTORY (both lstat'd — never a symlink). The sentinel is written as the LAST
+/// step of a build, so a crash-partial or externally-planted `<digest>/` (no sentinel) is never reflinked
+/// un-rehashed: this converts "a visible dir is complete" from an assumption into an enforced invariant.
+fn ref_committed(ref_root: &Path, digest: &str) -> bool {
+    let sentinel_ok = ref_root
+        .join(format!("{digest}.ok"))
+        .symlink_metadata()
+        .map(|m| m.is_file())
+        .unwrap_or(false);
+    sentinel_ok
+        && ref_root
+            .join(digest)
+            .symlink_metadata()
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+}
+
+/// Best-effort lstat-based removal of a path whatever it is (dir tree / file / symlink) — never follows a
+/// symlink into another tree. Clears an incomplete/foreign `<digest>/` before a rebuild.
+fn remove_any(p: &Path) {
+    match std::fs::symlink_metadata(p) {
+        Ok(m) if m.is_dir() => {
+            let _ = std::fs::remove_dir_all(p);
+        }
+        Ok(_) => {
+            let _ = std::fs::remove_file(p);
+        }
+        Err(_) => {}
+    }
+}
+
+/// Remove every committed reference (dir + its `.ok` sentinel) under `ref_root` except `keep`
+/// (best-effort, lstat-based). Safe: the new ref already inherited the shared extents via reflink, so CoW
+/// keeps them alive — this reclaims only the delta.
+fn gc_other_refs(ref_root: &Path, keep: &str) {
+    if let Ok(rd) = std::fs::read_dir(ref_root) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if let Some(dig) = n.strip_suffix(".ok") {
+                if is_hex_digest(dig) && dig != keep {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            } else if is_hex_digest(&n)
+                && n != keep
+                && e.path()
+                    .symlink_metadata()
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false)
+            {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+}
+
+/// Reflink-accelerated WARM RESUME for the daemon's materialize-on-start.
+///
+/// Maintains a daemon-owned **pristine reference** under `ref_root` (never touched by the agent) and hands
+/// the agent a reflink-CLONE of it as the live `tree`. Layout under `ref_root`: `<digest>/` = an immutable
+/// full materialization of that manifest; `<digest>.ok` = its completeness sentinel; `current` = the
+/// committed current digest; `.tmp-*` = in-progress builds (atomically renamed on success, swept on start).
+/// The next generation's reference is built INCREMENTALLY from the current one (reflink unchanged files,
+/// fetch only the delta), so a warm node pays ~the delta; the clone into `tree` is all-reflink (0 fetched).
+///
+/// SAFETY: the reference is written by `materialize` (content-verified) and the agent only ever mutates
+/// `tree` (a CoW clone) — so the reference's bytes always match its manifest and stay trustworthy for the
+/// NEXT generation's chunk-list diff. A reference is trusted only once its sentinel is written LAST, so an
+/// incomplete/foreign `<digest>/` is rebuilt, never reflinked blindly. `ref_root` must be single-writer
+/// (per (lineage, node) — see `lineage_ref_subdir`); `tree` must be provided EMPTY/absent each start (same
+/// contract as `materialize` — the daemon never clears the agent's workspace itself).
+///
+/// `ref_root` MUST be EPHEMERAL node-local storage (the same class as the NVMe block cache): the reflink
+/// clone does NO content re-hash, so it trusts the sentinel. That is safe because a node power-event wipes
+/// ephemeral storage → the reference is gone → cold resume from the durable store. It is NOT safe on
+/// storage that can survive a power-loss with metadata (rename+sentinel) durable but file DATA un-flushed —
+/// there is no fsync barrier yet (deferred). For the reflink win, `ref_root` must also be on the SAME
+/// filesystem as `tree`; cross-fs falls back to a full copy (correct, but SLOWER than no reference at all).
+pub fn resume_via_reference(
+    store: &dyn BlobStore,
+    target: &str,
+    tree: &Path,
+    ref_root: &Path,
+) -> Result<ResumeStats> {
+    // The target is the DB HEAD digest; validate it before it becomes a path component or the `current`
+    // file (defense in depth — a non-hex value would also fail the manifest verification below).
+    if !is_hex_digest(target) {
+        anyhow::bail!("resume target is not a 64-hex digest: {target:?}");
+    }
+    std::fs::create_dir_all(ref_root)?;
+    sweep_ref_staging(ref_root);
+
+    let target_ref = ref_root.join(target);
+    let (kind, ref_blocks_fetched, ref_reflinked) = if ref_committed(ref_root, target) {
+        // Restart at a HEAD whose pristine ref is already COMMITTED (sentinel present) — reuse, no fetch.
+        (ResumeKind::RefReused, 0, 0)
+    } else {
+        // A `<target>/` without a sentinel is incomplete/foreign — clear it (and any stale sentinel) first.
+        remove_any(&target_ref);
+        let _ = std::fs::remove_file(ref_root.join(format!("{target}.ok")));
+        // Only a COMMITTED prior can seed the incremental build.
+        let prior = read_current_ref(ref_root)
+            .filter(|p| p.as_str() != target && ref_committed(ref_root, p))
+            .map(|p| {
+                let d = ref_root.join(&p);
+                (p, d)
+            });
+        let tmp = ref_root.join(format!(".tmp-{target}"));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let (kind, st) = match prior {
+            Some((pdig, pdir)) => {
+                match materialize_incremental(store, target, &tmp, &pdig, &pdir) {
+                    Ok(st) => (ResumeKind::WarmIncremental, st),
+                    Err(e) => {
+                        // Prior ref unusable (e.g. its manifest was GC'd) → wipe partial tmp, full rebuild.
+                        eprintln!(
+                            "[daemon] incremental reference build failed ({e}); full materialize"
+                        );
+                        let _ = std::fs::remove_dir_all(&tmp);
+                        (ResumeKind::ColdFull, materialize(store, target, &tmp)?)
+                    }
+                }
+            }
+            None => (ResumeKind::ColdFull, materialize(store, target, &tmp)?),
+        };
+        std::fs::rename(&tmp, &target_ref)?; // atomic commit of the reference BODY
+        // Completeness sentinel LAST — only now will `ref_committed` trust `<target>/` on a later start.
+        std::fs::write(ref_root.join(format!("{target}.ok")), b"")?;
+        (kind, st.blocks_fetched, st.reference_reused)
+    };
+
+    write_current_ref(ref_root, target)?;
+
+    // Clone the pristine reference into the agent's live workspace: ref_manifest == target ⇒ every regular
+    // reflinks from the ref (0 blocks fetched), links recreated from the manifest. `tree` must be empty.
+    let clone = materialize_incremental(store, target, tree, target, &target_ref)?;
+
+    gc_other_refs(ref_root, target);
+    Ok(ResumeStats {
+        kind,
+        ref_blocks_fetched,
+        ref_reflinked,
+        workspace_files: clone.files,
+    })
+}

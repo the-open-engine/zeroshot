@@ -136,7 +136,7 @@ fn lifecycle_publish_then_materialize_on_start() {
 
     // materialize-on-start with no HEAD is a clean no-op (fresh lineage).
     assert!(
-        !materialize_on_start(&s, &ls, &lin, &tree_a).unwrap(),
+        !materialize_on_start(&s, &ls, &lin, &tree_a, None).unwrap(),
         "no HEAD yet → nothing materialized"
     );
     assert!(ls.head(&lin).unwrap().is_none());
@@ -168,7 +168,7 @@ fn lifecycle_publish_then_materialize_on_start() {
     let ls2 = PgLineageStore::connect(&url).unwrap();
     let tree_b = d.path().join("wb"); // does not exist → materialize creates it
     assert!(
-        materialize_on_start(&s2, &ls2, &lin, &tree_b).unwrap(),
+        materialize_on_start(&s2, &ls2, &lin, &tree_b, None).unwrap(),
         "HEAD present → materialized on start"
     );
 
