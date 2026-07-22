@@ -49,6 +49,7 @@ const { normalizeProviderName } = require('../lib/provider-names');
 const { getProvider } = require('./providers');
 const StateSnapshotter = require('./state-snapshotter');
 const { attachLyoObserver } = require('./lyo/observer');
+const { attachPlanChecker } = require('./plan-checks');
 const { resolveClusterRequiredQualityGates } = require('./quality-gates');
 const {
   commandProofsToQualityGates,
@@ -1696,6 +1697,10 @@ class Orchestrator {
 
     if (cluster && !cluster.lyoObserver) {
       cluster.lyoObserver = attachLyoObserver({ messageBus, cluster, storageDir: this.storageDir });
+    }
+
+    if (cluster && !cluster.planChecker) {
+      cluster.planChecker = attachPlanChecker({ messageBus, cluster });
     }
   }
 

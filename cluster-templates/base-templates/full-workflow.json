@@ -103,6 +103,41 @@
               "required": ["id", "criterion", "verification", "priority"]
             },
             "minItems": 3
+          },
+          "steps": {
+            "type": "array",
+            "description": "OPTIONAL machine-checkable skeleton of the plan, mirroring the numbered prose steps in `plan`, in execution order. kind: inspect=read-only look, edit=modify existing file, create=new file, run=execute command, verify=check work (tests/build/lint). target: primary file path or command. verify: how this step's result is checked. dependsOn: ids of steps that must complete first. The prose `plan` stays the human source of truth; steps let deterministic tooling check the plan before execution.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "S1, S2, etc., matching the numbered prose steps"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["inspect", "edit", "create", "run", "verify"]
+                },
+                "target": {
+                  "type": "string",
+                  "description": "Primary file path or command for this step"
+                },
+                "verify": {
+                  "type": "string",
+                  "description": "How this step's result is checked (command, test name)"
+                },
+                "dependsOn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "kind"]
+            }
           }
         },
         "required": ["plan", "summary", "filesAffected", "acceptanceCriteria"]
@@ -145,7 +180,8 @@
                 "summary": "{{result.summary}}",
                 "filesAffected": "{{result.filesAffected}}",
                 "risks": "{{result.risks}}",
-                "acceptanceCriteria": "{{result.acceptanceCriteria}}"
+                "acceptanceCriteria": "{{result.acceptanceCriteria}}",
+                "steps": "{{result.steps}}"
               }
             }
           }
