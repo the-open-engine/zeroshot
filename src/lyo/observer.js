@@ -107,6 +107,12 @@ function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
   });
   try {
     const reflector = resolveReflector(reflectorRef);
+    if (typeof reflector.reflectAsync === 'function') {
+      // Async reflector (e.g. elaborator@1): guidance ships template text
+      // synchronously (zero added latency); the caller fires reflectAsync to
+      // enrich the store for future cycles (docs/lyo-reflector-design.md §4).
+      return { ...fallback(), reflector, asyncPending: true };
+    }
     const reflection = reflector.reflect({ message, failure_class, cue });
     if (!isValidReflection(reflection)) {
       console.warn(
@@ -124,22 +130,48 @@ function reflectOnRejection({ message, failure_class, cue, reflectorRef }) {
   }
 }
 
-// Reflector role (design doc §2): the REFLECTION (abduction — explanation +
-// intervention) is produced upstream by a pluggable reflector policy and
-// passed in; this function persists it (create-or-merge), Thompson-selects
-// lessons for this failure class, logs the decision (full candidate snapshot
-// + selection propensities, §5.3), and records one application row per
-// selected lesson (grounded attribution).
-function learnFromRejection({
-  store,
-  cluster,
-  message,
-  messageBus,
-  selectionPolicy = null,
-  failure_class,
-  cue,
-  reflection,
-}) {
+// Fire-and-forget enrichment for async reflectors: the model's distilled
+// reflection is persisted for FUTURE cycles; on any failure a template@1
+// lesson is stored instead, so evidence continuity survives a down model.
+// Returns a promise that NEVER rejects (containment: Appendix B.4) so callers
+// may safely leave it floating; the onEnrichment attach option exposes it for
+// tests.
+function enrichStoreAsync({ store, cluster, reflector, message, failure_class, cue }) {
+  return Promise.resolve()
+    .then(() => reflector.reflectAsync({ message, failure_class, cue }))
+    .then((reflection) => {
+      if (!isValidReflection(reflection)) {
+        throw new Error(`malformed reflection from ${reflectorId(reflector)}`);
+      }
+      persistReflection({
+        store,
+        cluster,
+        failure_class,
+        cue,
+        reflection: { ...reflection, reflector_id: reflectorId(reflector) },
+      });
+    })
+    .catch((error) => {
+      console.warn('[lyo] async reflector failed, storing template reflection:', error.message);
+      try {
+        persistReflection({
+          store,
+          cluster,
+          failure_class,
+          cue,
+          reflection: {
+            ...TEMPLATE_REFLECTOR.reflect({ message }),
+            reflector_id: reflectorId(TEMPLATE_REFLECTOR),
+          },
+        });
+      } catch (persistError) {
+        console.warn('[lyo] failed to store fallback reflection:', persistError.message);
+      }
+    });
+}
+
+// Persist one reflection as a create-or-merge lesson (design doc §2).
+function persistReflection({ store, cluster, failure_class, cue, reflection }) {
   store.createLesson({
     failure_class,
     trigger_cue: cue,
@@ -149,6 +181,29 @@ function learnFromRejection({
     actor: 'reflector',
     reflector: reflection.reflector_id,
   });
+}
+
+// Reflector role (design doc §2): the REFLECTION (abduction — explanation +
+// intervention) is produced upstream by a pluggable reflector policy and
+// passed in; this function optionally persists it (persistCreate — skipped
+// when an async reflector will persist its own reflection later), then
+// Thompson-selects lessons for this failure class, logs the decision (full
+// candidate snapshot + selection propensities, §5.3), and records one
+// application row per selected lesson (grounded attribution).
+function learnFromRejection({
+  store,
+  cluster,
+  message,
+  messageBus,
+  selectionPolicy = null,
+  failure_class,
+  cue,
+  reflection,
+  persistCreate = true,
+}) {
+  if (persistCreate) {
+    persistReflection({ store, cluster, failure_class, cue, reflection });
+  }
   // The just-created candidate competes via its Beta(1,1) draw — intended
   // exploration, not a shortcut (design doc §4.2).
   const { selected, candidates, null_arm, policy } = store.selectWithDecision({
@@ -231,6 +286,7 @@ function attachLyoObserver({
   storageDir,
   selectionPolicy,
   reflector,
+  onEnrichment,
 }) {
   if (!messageBus) {
     throw new Error('attachLyoObserver: messageBus is required');
@@ -297,7 +353,11 @@ function attachLyoObserver({
     // reflector). Both run even in degraded mode (no store): the reflector's
     // intervention is also the base guidance text delivered to the agent.
     const { failure_class, cue } = classifyValidationFailure(message);
-    const { reflection } = reflectOnRejection({
+    const {
+      reflection,
+      reflector: resolvedReflectorPolicy,
+      asyncPending,
+    } = reflectOnRejection({
       message,
       failure_class,
       cue,
@@ -316,10 +376,27 @@ function attachLyoObserver({
           failure_class,
           cue,
           reflection,
+          persistCreate: !asyncPending,
         });
       } catch (error) {
         console.warn('[lyo] lesson pipeline failed, continuing without lessons:', error.message);
         lessonApplications = null;
+      }
+
+      if (asyncPending) {
+        // Async reflector: enrich the store for future cycles, off the hot
+        // path. The promise never rejects; onEnrichment exposes it to tests.
+        const enrichment = enrichStoreAsync({
+          store,
+          cluster,
+          reflector: resolvedReflectorPolicy,
+          message,
+          failure_class,
+          cue,
+        });
+        if (typeof onEnrichment === 'function') {
+          onEnrichment(enrichment);
+        }
       }
     }
     const lessons = summarizeLessons(lessonApplications);

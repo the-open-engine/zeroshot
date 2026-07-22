@@ -42,6 +42,9 @@ export default [
         clearInterval: 'readonly',
         setImmediate: 'readonly',
         clearImmediate: 'readonly',
+        // Node 18+ web-standard globals
+        fetch: 'readonly',
+        AbortController: 'readonly',
       },
     },
     rules: {

@@ -92,22 +92,28 @@ function isValidReflection(reflection) {
 }
 
 // String-addressable reflectors ('name@version'); object reflectors can
-// always be injected directly without registration.
-const REFLECTOR_REGISTRY = new Map([[reflectorId(TEMPLATE_REFLECTOR), TEMPLATE_REFLECTOR]]);
+// always be injected directly without registration. Registry values are
+// either reflector objects or zero-arg factories (used by 'elaborator@1' so
+// the OpenRouter client is only constructed when actually configured).
+const REFLECTOR_REGISTRY = new Map([
+  [reflectorId(TEMPLATE_REFLECTOR), TEMPLATE_REFLECTOR],
+  ['elaborator@1', () => require('./elaborator-reflector').createElaboratorReflector()],
+]);
 
-// Accepts a reflector object, a registry id string, or null (default).
+// Accepts a reflector object (sync `reflect` and/or async `reflectAsync`),
+// a registry id string, or null (default).
 function resolveReflector(ref) {
   if (!ref) {
     return DEFAULT_REFLECTOR;
   }
-  if (typeof ref.reflect === 'function') {
+  if (typeof ref.reflect === 'function' || typeof ref.reflectAsync === 'function') {
     return ref;
   }
-  const reflector = REFLECTOR_REGISTRY.get(String(ref));
-  if (!reflector) {
+  const entry = REFLECTOR_REGISTRY.get(String(ref));
+  if (!entry) {
     throw new Error(`unknown reflector: ${ref}`);
   }
-  return reflector;
+  return typeof entry === 'function' ? entry() : entry;
 }
 
 module.exports = {
