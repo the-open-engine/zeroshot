@@ -4,6 +4,7 @@ const path = require('path');
 const { USER_GUIDANCE_AGENT } = require('../guidance-topics');
 const LessonStore = require('./lesson-store');
 const { classifyValidationFailure } = require('./failure-classifier');
+const { invertedReflectorModel } = require('./model-inversion');
 const {
   TEMPLATE_REFLECTOR,
   reflectorId,
@@ -357,11 +358,15 @@ function attachLyoObserver({
   // -> default. Unknown ids and reflector failures fall back to template@1
   // inside reflectOnRejection; learning never blocks a run.
   const resolvedReflector = reflector ?? cluster.config.lyo.reflector ?? null;
-  // Model-inversion A/B: per-cluster reflector model override (forwarded to
-  // registry factories — e.g. elaborator@1's OpenRouter model) + best-effort
-  // executor identity recorded on every lesson for pair stats.
-  const reflectorCtx = { model: cluster.config.lyo.reflectorModel ?? null };
+  // Model-inversion A/B: reflector model precedence — explicit
+  // cluster.config.lyo.reflectorModel > auto-invert (cross-family default
+  // for the detected executor family, Greptile-style) > factory/env default.
+  // Pair provenance (executor_model + the resolved reflector model) is
+  // recorded on every lesson for v_lyo_pair_stats.
   const executorModel = resolveExecutorModel(cluster);
+  const reflectorCtx = {
+    model: cluster.config.lyo.reflectorModel ?? invertedReflectorModel(executorModel),
+  };
   let pendingIntervention = null;
 
   const unsubscribe = messageBus.subscribe((message) => {
