@@ -768,3 +768,62 @@ Net: both optimizations validated on real hardware. Parallel uploads make S3 pub
 than network-bound (uploads hidden behind hashing/compression); reflink makes warm resume pay ~the delta
 in both disk and store-fetch. Rig fully torn down (instance, bucket, IAM role/profile, SG — verified
 empty). 65 default tests green; clippy/fmt clean.
+
+### 2026-07-22 — O8: reflink warm resume wired into the daemon (`resume_via_reference`)
+Where the O7 reflink win lands in production. Materialize-on-start could already do a full cold
+`materialize`; O8 adds an OPT-IN warm-resume path behind `daemon --ref-dir <R>` (**omit ⇒ today's behavior
+byte-for-byte** — zero default change). When set, the daemon keeps a **pristine, daemon-owned reference**
+under `R` (scoped per lineage) and hands the agent a reflink-CLONE of it as the live `--tree`. Layout:
+`R/<lin>/<digest>/` = an immutable full materialization; `R/<lin>/<digest>.ok` = its completeness sentinel;
+`R/<lin>/current` = the committed digest; `.tmp-*` = in-progress builds (atomic-rename + swept on start).
+
+`resume_via_reference(store, target, tree, ref_root)` (new `pub fn` in `daemon.rs` — unit-testable with a
+LocalBlobStore, no Postgres): (1) validate `target` is 64-hex; sweep crash residue; (2) if `<target>/` is
+COMMITTED (sentinel present + real dir) reuse it, else clear any incomplete/foreign `<target>/` and build
+into `.tmp-<target>` INCREMENTALLY from the current committed reference (reflink unchanged, fetch only the
+delta; on any error — e.g. prior manifest GC'd — full `materialize`), atomic-rename the body, then write the
+`.ok` sentinel LAST; (3) commit `current` (atomic write-tmp-rename); (4) CLONE the pristine ref into `tree`
+via `materialize_incremental(target, tree, target, <target>/)` — every regular reflinks (0 blocks fetched),
+links recreated; (5) GC other refs (their extents were inherited via reflink, so CoW keeps them alive —
+reclaims only the delta). Returns `ResumeStats { kind: ColdFull|WarmIncremental|RefReused,
+ref_blocks_fetched, ref_reflinked, workspace_files }`.
+
+**Why safe (the whole subtlety):** `materialize_incremental` reflinks a file whenever the target & reference
+manifests agree on its chunk-list, and does NOT re-hash the reflinked bytes. So the reference must be
+pristine — reflinking the agent's live workspace (whose bytes can diverge from any manifest via uncommitted
+edits) would transplant wrong bytes. The reference is written by `materialize` (content-verified), the agent
+only mutates `tree` (a CoW clone), and a reference is trusted only once its sentinel is written LAST — so an
+incomplete/foreign `<digest>/` is rebuilt, never blindly reflinked. Crash-safety = tmp→atomic-rename (a
+sentineled dir is always complete) + `current` committed after. `ref_root` MUST be EPHEMERAL node-local
+storage (same class as `--cache-dir`): the reflink clone does no re-hash, so it trusts the sentinel — safe
+because a node power-event wipes ephemeral storage → cold resume, but NOT safe on storage that survives
+power-loss with metadata durable + file DATA un-flushed (no fsync barrier yet — deferred, documented).
+
+**Two independent adversarial reviews (design + code): DESIGN SOUND WITH FIXES / SHIP WITH FIXES — all
+findings applied.** The design review confirmed no interleaving (crash, concurrent 2nd daemon, agent racing
+the clone, prior-ref GC, fs-boundary) lands wrong bytes in `tree`; the code review traced every crash point
+in the `rename→sentinel→current→clone→gc` sequence and found each recovers cleanly (no normal-operation or
+clean-crash corruption path). Fixes implemented: (#1) a completeness **sentinel** so the reuse branch can't
+trust an externally-planted/partial dir; (#2) **per-lineage scoping** (`lineage_ref_subdir` hashes the
+lineage id) so lineages can share a `--ref-dir` without clobbering each other's refs/GC; (#3) validate
+`target`; (#4) lstat (not `is_dir`) in GC + the sentinel check; (#5) reject `--ref-dir` nested with `--tree`
++ document cross-fs as a REGRESSION (full copy). The code review's one should-fix (power-loss durability on
+NON-ephemeral `ref_root`) is closed by documenting the ephemeral-storage requirement (it matches the system's
+"NVMe is a pure cache" premise) and deferring a full fsync barrier.
+
+Tests (`tests/resume.rs`, 12, all non-pg): cold→warm-incremental (delta-only fetch + byte-identical
+workspace + old ref & sentinel GC'd); **the agent-mutation safety test** (scribble garbage into a resumed
+workspace, then resume the next gen — the unchanged file carries pristine content, NOT the garbage);
+**incomplete dir without sentinel is rebuilt** (not trusted); **symlink + hardlink recreation through a warm
+resume**; **3-generation chain keeps only current**; ref-reuse on same-HEAD restart; crash-residue sweep +
+committed-ref reuse with stale `current`; GC ignores a hex-named symlink; fallback to full when the prior
+manifest is missing; corrupt/traversal `current` ignored; non-hex `target` rejected; injection-proof
+`lineage_ref_subdir`. 77 default tests green (was 65); clippy/fmt clean. `--ref-dir` threaded through
+`materialize_on_start` (5th arg, `None` = default) and the `daemon` subcommand.
+
+Deferred (noted): fsync barrier for a non-ephemeral `ref_root` (unnecessary for the intended ephemeral
+deployment); the clone into `tree` is non-atomic (crash mid-clone ⇒ partial tree ⇒ bail on restart,
+identical to today's full-materialize semantics — `tree` must be provided empty each start); reflink-vs-copy
+not surfaced in stats (`reflink_or_copy` returns `Option<u64>`); no per-(lineage,ref_root) advisory lock
+(single-writer is a deployment invariant — an RWO PV reattached to the next pod provides it). End-to-end
+daemon `--ref-dir` timing on real XFS is the next EC2 measurement.
