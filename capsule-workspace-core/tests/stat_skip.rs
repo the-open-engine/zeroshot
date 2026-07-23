@@ -212,6 +212,44 @@ fn skipped_files_chunks_stay_in_the_manifest_index_so_gc_still_touches_them() {
     );
 }
 
+// GUARD-PINNING TEST — deliberately does NOT use `settled()`.
+//
+// Every other test here advances the recorded scan timestamp to simulate elapsed time, which moves the
+// safety-critical field in the PERMISSIVE direction. That made the whole file blind to the guard itself: an
+// independent review reverted `may_skip` to its original (unsafe) form and all of these tests still passed.
+// This one publishes back-to-back with the REAL timestamps, so a file written microseconds before the first
+// scan must NOT be skippable — it has not been quiescent for SETTLE_NS. Weakening or removing the settle
+// margin makes this test fail, which is the entire point of it.
+#[test]
+fn freshly_written_files_are_not_skippable_without_elapsed_time() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    for i in 0..4 {
+        write(&tree.join(format!("f{i}.bin")), &blob(i, 200_000));
+    }
+    let s = LocalBlobStore::new(d.path().join("store")).unwrap();
+    let st1 = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, 4, 8, None).unwrap();
+    let m1 = Manifest::from_bytes(&s.get_manifest(&st1.manifest).unwrap()).unwrap();
+
+    // Real cache, real timestamps, immediately afterwards.
+    let prev = PrevPublish::new(&m1, &st1.manifest, &st1.stat_cache).unwrap();
+    let st2 = publish_pipelined(
+        &tree,
+        &s,
+        &m1.chunks,
+        Some(st1.manifest.clone()),
+        4,
+        8,
+        Some(prev),
+    )
+    .unwrap();
+    assert_eq!(
+        st2.skipped_files, 0,
+        "a file written just before the previous scan is inside the settle margin and MUST be re-hashed"
+    );
+    assert_eq!(st2.manifest, st1.manifest, "and the content is unchanged");
+}
+
 // An idle republish skips every regular file and still yields the identical digest.
 #[test]
 fn idle_republish_skips_everything_and_is_idempotent() {

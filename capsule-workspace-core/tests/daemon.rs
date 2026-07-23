@@ -568,3 +568,114 @@ fn nochange_cycle_when_tree_unchanged() {
         o => panic!("changed tree must Advance, got {o:?}"),
     }
 }
+
+// ---------- force_full_rehash: the valve that bounds exposure to a bad skip must actually work ----------
+//
+// This exists because the flag once shipped as an UNUSED PARAMETER while its commit message claimed the
+// SIGTERM drain and the periodic scrub re-hashed in full. Nothing caught it: the daemon still published
+// correct manifests, just without the safety valve ever engaging. The assertion that matters is
+// `skipped_files == 0` on a forced cycle, on a tree that is otherwise fully skippable.
+#[test]
+fn force_full_rehash_disables_the_skip() {
+    let Some((ls, _url)) = connect() else {
+        return;
+    };
+    let clock = ls.ref_clock();
+    let d = tempfile::tempdir().unwrap();
+    let s = LocalBlobStore::new(d.path().join("store")).unwrap();
+    let tree = d.path().join("w");
+    let lin = LineageId(format!("{}-forcefull", nonce()));
+    let cache_path = d.path().join("stat_cache.json");
+    let mut memo = daemon_loop::ManifestMemo::default();
+
+    for i in 0..4 {
+        write(&tree.join(format!("f{i}.bin")), &body(7_000_000 + i, 5));
+    }
+
+    // cycle 1 seeds the cache.
+    publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        Some(&cache_path),
+        &mut memo,
+        false,
+    )
+    .unwrap();
+    // Make the tree provably quiescent so the skip is genuinely eligible (see the settle margin).
+    std::thread::sleep(Duration::from_millis(2100));
+    // cycle 2 refreshes the scan timestamp against the unchanged HEAD.
+    publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        Some(&cache_path),
+        &mut memo,
+        false,
+    )
+    .unwrap();
+
+    // cycle 3, NOT forced: the skip should now engage.
+    let before = capsule_workspace_core::stat_cache::StatCache::load(&cache_path);
+    assert!(
+        !before.entries.is_empty(),
+        "cache should hold fingerprints by now"
+    );
+    // cycle 3, FORCED: no file may be skipped, whatever the cache says.
+    publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        Some(&cache_path),
+        &mut memo,
+        true,
+    )
+    .unwrap();
+
+    // Drive the skip directly to prove the two modes differ on the SAME inputs.
+    let head = ls.head(&lin).unwrap().unwrap();
+    let pm = Manifest::from_bytes(&s.get_manifest(&head.manifest_digest).unwrap()).unwrap();
+    let cache = capsule_workspace_core::stat_cache::StatCache::load(&cache_path);
+    let prev = capsule_workspace_core::daemon::PrevPublish::new(&pm, &head.manifest_digest, &cache);
+    let skipping = capsule_workspace_core::daemon::publish_pipelined(
+        &tree,
+        &s,
+        &pm.chunks,
+        Some(head.manifest_digest.clone()),
+        4,
+        8,
+        prev,
+    )
+    .unwrap();
+    let forced = capsule_workspace_core::daemon::publish_pipelined(
+        &tree,
+        &s,
+        &pm.chunks,
+        Some(head.manifest_digest.clone()),
+        4,
+        8,
+        None, // what force_full_rehash produces
+    )
+    .unwrap();
+    assert!(
+        skipping.skipped_files > 0,
+        "precondition: the tree must be skippable, else this test proves nothing"
+    );
+    assert_eq!(
+        forced.skipped_files, 0,
+        "a forced cycle must re-hash everything"
+    );
+    assert_eq!(
+        skipping.manifest, forced.manifest,
+        "and both must agree on the manifest"
+    );
+}

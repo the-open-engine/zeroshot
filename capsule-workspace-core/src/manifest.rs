@@ -81,6 +81,22 @@ impl Manifest {
                 })
                 .collect(),
         };
-        crate::cas::hex_sha256(&serde_json::to_vec(&l).expect("logical serialize"))
+        // Stream the canonical form straight into the hasher instead of materialising it. The digest is
+        // byte-identical (same serializer, same bytes) but a 100k-file manifest no longer allocates a
+        // ~17 MB intermediate Vec on every call — and this is called several times per resume.
+        use sha2::{Digest, Sha256};
+        struct HashWriter(Sha256);
+        impl std::io::Write for HashWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.update(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut w = HashWriter(Sha256::new());
+        serde_json::to_writer(&mut w, &l).expect("logical serialize");
+        crate::cas::hex_of(&w.0.finalize())
     }
 }

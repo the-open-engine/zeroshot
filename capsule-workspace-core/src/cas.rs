@@ -22,18 +22,28 @@ pub struct ChunkLoc {
     pub rlen: u32,
 }
 
+/// Hex of an already-computed digest (lets callers stream into their own hasher).
+pub fn hex_of(b: &[u8]) -> String {
+    hex(b)
+}
+
 pub fn hex_sha256(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     hex(&h.finalize())
 }
 
+/// Hex-encode with a lookup table and ONE allocation. The obvious `format!("{:02x}")`-per-byte version
+/// heap-allocates a `String` for every byte: 32 allocations per chunk id, and a publish mints an id per
+/// 256 KiB chunk, so a 100k-chunk tree paid ~3.2M allocations here alone.
 fn hex(b: &[u8]) -> String {
-    let mut s = String::with_capacity(b.len() * 2);
-    for x in b {
-        s.push_str(&format!("{:02x}", x));
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = vec![0u8; b.len() * 2];
+    for (i, &x) in b.iter().enumerate() {
+        out[i * 2] = HEX[(x >> 4) as usize];
+        out[i * 2 + 1] = HEX[(x & 0x0f) as usize];
     }
-    s
+    String::from_utf8(out).expect("hex output is ASCII")
 }
 
 /// Typed store error so callers distinguish a genuinely-absent object from a transient failure —

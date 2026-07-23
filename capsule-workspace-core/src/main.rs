@@ -186,8 +186,17 @@ fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&stats)?);
             save_known_from_manifest(&s, &stats.manifest, &state)?;
+            // Only the pipelined publish produces fingerprints; the streaming path returns an EMPTY cache,
+            // and saving that would silently clobber a good one and disable the skip forever after.
             if let Some(p) = stat_cache.as_deref() {
-                stats.stat_cache.save(p)?;
+                if workers == 0 {
+                    eprintln!(
+                        "[publish] --stat-cache needs --workers > 0 (the skip lives in the pipelined \
+                         publish); leaving the existing cache untouched"
+                    );
+                } else {
+                    stats.stat_cache.save(p)?;
+                }
             }
         }
         Cmd::Materialize {

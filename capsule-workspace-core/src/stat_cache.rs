@@ -128,10 +128,13 @@ impl StatCache {
     ///
     /// Requires BOTH:
     /// 1. the freshly-stat'd fingerprint is EXACTLY equal to the cached one; and
-    /// 2. **racy-window guard** — the file was already quiescent before the previous scan began
-    ///    (`mtime_ns < scan_started_ns`). Without this, a write landing in the same coarse timestamp tick
-    ///    as the previous scan would be invisible: the fingerprint would match while the bytes differ.
-    ///    Files touched during or after that scan are re-hashed exactly once, then become skippable.
+    /// 2. **racy-window guard** — BOTH `mtime_ns` and `ctime_ns` are at least `SETTLE_NS` older than the
+    ///    previous scan's start. A bare `mtime < scan_started` is NOT sufficient and has been demonstrated
+    ///    to lose data: filesystems truncate mtime DOWN to their granularity, which moves the comparison in
+    ///    the unsafe direction, so a write landing after the scan began can still carry an mtime before it.
+    ///    (Reproduced on a 1 s-granularity filesystem: same size, in-place rewrite, identical fingerprint,
+    ///    file silently reverted on the next resume — and it never self-heals, because the fingerprint
+    ///    never changes again.) The margin also covers the process-clock vs filesystem-clock domain gap.
     ///
     /// The caller MUST additionally confirm the parent manifest holds a regular-file entry for this path
     /// and take the chunk list from THERE (never from this cache) — that is what guarantees every reused

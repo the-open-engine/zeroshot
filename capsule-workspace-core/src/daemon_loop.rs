@@ -199,8 +199,14 @@ mod cycle {
         let cache = stat_cache_path
             .map(crate::stat_cache::StatCache::load)
             .unwrap_or_default();
-        let prev = match (parent_manifest.as_ref(), head.as_ref()) {
-            (Some(m), Some(h)) => crate::daemon::PrevPublish::new(m, &h.manifest_digest, &cache),
+        let prev = match (parent_manifest.as_ref(), head.as_ref(), force_full_rehash) {
+            // `force_full_rehash` (SIGTERM drain, and every Nth cycle) disables the skip for this cycle.
+            // This is the valve that bounds exposure to an unknown flaw in the skip, so it must actually be
+            // read here — it shipped once as an unused parameter while the commit message claimed it worked.
+            (_, _, true) => None,
+            (Some(m), Some(h), false) => {
+                crate::daemon::PrevPublish::new(m, &h.manifest_digest, &cache)
+            }
             _ => None,
         };
 
