@@ -72,6 +72,37 @@ fn unknown_profile_string_fails_deserialization() {
 }
 
 #[test]
+fn json_schema_matches_canonical_profile_order() {
+    let schema = serde_json::to_value(schemars::schema_for!(ServerCapabilities)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+
+    for graph_profiles in [
+        json!([]),
+        json!(["openengine.graph.full/v1"]),
+        json!(["openengine.graph.single-worker/v1"]),
+        json!([
+            "openengine.graph.full/v1",
+            "openengine.graph.single-worker/v1"
+        ]),
+    ] {
+        let value = json!({ "graphProfiles": graph_profiles });
+        assert!(validator.is_valid(&value), "schema rejected {value}");
+    }
+
+    for graph_profiles in [
+        json!([
+            "openengine.graph.single-worker/v1",
+            "openengine.graph.full/v1"
+        ]),
+        json!(["openengine.graph.full/v1", "openengine.graph.full/v1"]),
+        json!(["openengine.graph.unknown/v1"]),
+    ] {
+        let value = json!({ "graphProfiles": graph_profiles });
+        assert!(!validator.is_valid(&value), "schema accepted {value}");
+    }
+}
+
+#[test]
 fn missing_field_defaults_to_empty() {
     let value: ServerCapabilities = serde_json::from_value(json!({})).unwrap();
     assert_eq!(value, capabilities_of(vec![]));
