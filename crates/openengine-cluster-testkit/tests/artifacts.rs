@@ -116,7 +116,15 @@ async fn openrpc_exposes_only_the_implemented_protocol_methods() {
         .collect();
     assert_eq!(
         methods,
-        ["initialize", "plan", "apply", "update", "stop", "get"]
+        [
+            "initialize",
+            "plan",
+            "apply",
+            "update",
+            "stop",
+            "get",
+            "watch"
+        ]
     );
     for component in [
         "GraphSpec",

@@ -10,6 +10,7 @@ pub mod lifecycle;
 pub mod payload;
 mod payload_value;
 mod value;
+pub mod watch;
 pub mod worker;
 
 pub use worker::*;
@@ -21,6 +22,7 @@ pub use graph::*;
 pub use lifecycle::*;
 pub use payload::*;
 pub use payload_value::*;
+pub use watch::*;
 
 use std::borrow::Cow;
 
@@ -59,6 +61,14 @@ pub enum RequestId {
 pub struct JsonRpcRequest<P> {
     pub jsonrpc: String,
     pub id: RequestId,
+    pub method: String,
+    pub params: P,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsonRpcNotification<P> {
+    pub jsonrpc: String,
     pub method: String,
     pub params: P,
 }
@@ -215,7 +225,9 @@ pub enum Phase {
     Finished,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(transparent)]
 pub struct Cursor(String);
 
@@ -231,7 +243,9 @@ impl Cursor {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(transparent)]
 pub struct RunId(String);
 

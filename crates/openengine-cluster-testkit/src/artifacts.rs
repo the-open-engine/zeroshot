@@ -2,9 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    ApplyParams, ApplyResult, ArtifactRef, CompiledGraphIr, GetParams, GetResult, GraphDiagnostic,
-    GraphSpec, InitializeParams, InitializeResult, JsonRpcRequest, JsonRpcResponse, PlanParams,
-    PlanResult, StopParams, StopResult, StructuralBounds, UpdateParams, UpdateResult,
+    ApplyParams, ApplyResult, ArtifactRef, CompiledGraphIr, EventNotification, GetParams,
+    GetResult, GraphDiagnostic, GraphSpec, InitializeParams, InitializeResult, JsonRpcNotification,
+    JsonRpcRequest, JsonRpcResponse, PlanParams, PlanResult, StopParams, StopResult,
+    StructuralBounds, SubscriptionCancelParams, SubscriptionClosedNotification, UpdateParams,
+    UpdateResult, WatchParams, WatchResult,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -53,6 +55,11 @@ pub struct ImplementedProtocolSchema {
     pub update_response: JsonRpcResponse<UpdateResult>,
     pub stop_request: JsonRpcRequest<StopParams>,
     pub stop_response: JsonRpcResponse<StopResult>,
+    pub watch_request: JsonRpcRequest<WatchParams>,
+    pub watch_response: JsonRpcResponse<WatchResult>,
+    pub event_notification: JsonRpcNotification<EventNotification>,
+    pub subscription_cancel_notification: JsonRpcNotification<SubscriptionCancelParams>,
+    pub subscription_closed_notification: JsonRpcNotification<SubscriptionClosedNotification>,
 }
 
 pub async fn generate_artifacts() -> Vec<Artifact> {
@@ -111,6 +118,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     artifacts.extend(crate::graph_verifier_artifacts::graph_verifier_fixture_artifacts().await);
     artifacts.extend(crate::admission_artifacts::generate_admission_goldens().await);
     artifacts.extend(crate::lifecycle_artifacts::generate_lifecycle_goldens().await);
+    artifacts.extend(crate::watch_artifacts::generate_watch_goldens().await);
     for (name, request) in cases {
         let response = dispatcher.dispatch(request).await;
         artifacts.push(Artifact {
@@ -162,7 +170,7 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn json_artifact(relative_path: String, value: Value) -> Artifact {
+pub(crate) fn json_artifact(relative_path: String, value: Value) -> Artifact {
     let mut bytes = serde_json::to_vec_pretty(&value).expect("artifact serialization must succeed");
     bytes.push(b'\n');
     Artifact {

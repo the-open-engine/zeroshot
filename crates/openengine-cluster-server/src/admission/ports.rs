@@ -13,6 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::lifecycle::{LifecycleSnapshot, LifecycleStore, MutationReceipt};
+use crate::watch::ObservationStore;
 
 #[derive(Clone, Default)]
 pub struct CancellationSignal(Arc<AtomicBool>);
@@ -196,6 +197,10 @@ pub enum StoreError {
     UnknownLease,
     #[error("dispatch completion was rejected because the lease is cancelled or terminal")]
     CompletionRejected,
+    #[error("run does not exist")]
+    UnknownRun,
+    #[error("run history was deleted")]
+    RunGone { tombstoned_at: Option<Cursor> },
 }
 
 /// Logical durable control-journal view.
@@ -218,7 +223,7 @@ pub trait VerifiedIoLedger: Send + Sync {
 /// check cancellation immediately before writing any effect.
 #[async_trait]
 pub trait AdmissionStore:
-    ControlJournal + VerifiedIoLedger + LifecycleStore + Send + Sync + 'static
+    ControlJournal + VerifiedIoLedger + LifecycleStore + ObservationStore + Send + Sync + 'static
 {
     async fn read_snapshot(&self) -> Result<AdmissionSnapshot, StoreError>;
     async fn read_aggregate(&self) -> Result<(AdmissionSnapshot, LifecycleSnapshot), StoreError>;

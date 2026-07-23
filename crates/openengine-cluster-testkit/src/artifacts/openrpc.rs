@@ -16,6 +16,7 @@ pub(super) fn document() -> Value {
             update_method(),
             stop_method(),
             get_method(),
+            watch_method(),
         ],
         "components": {
             "schemas": {
@@ -24,6 +25,17 @@ pub(super) fn document() -> Value {
                 "GraphDiagnostic": { "$ref": "graph.schema.json#/$defs/GraphDiagnostic" },
                 "StructuralBounds": { "$ref": "graph.schema.json#/$defs/StructuralBounds" },
                 "ArtifactRef": { "$ref": "graph.schema.json#/$defs/ArtifactRef" }
+            }
+        },
+        "x-generic-subscription-framing": {
+            "description": "watch establishes a subscription via one normal JSON-RPC result; \
+                subsequent delivery uses the generic notification methods below, shared by any \
+                future subscription-based method (e.g. logs/attach). There is no watch/event, \
+                watch/cancel, or watch/closed method on the wire.",
+            "notifications": {
+                "event": { "$ref": "schema.json#/$defs/EventNotification" },
+                "subscription/cancel": { "$ref": "schema.json#/$defs/SubscriptionCancelParams" },
+                "subscription/closed": { "$ref": "schema.json#/$defs/SubscriptionClosedNotification" }
             }
         }
     })
@@ -161,6 +173,27 @@ fn get_method() -> Value {
         "result": {
             "name": "getResult",
             "schema": { "$ref": "schema.json#/$defs/GetResult" }
+        }
+    })
+}
+
+fn watch_method() -> Value {
+    json!({
+        "name": "watch",
+        "paramStructure": "by-name",
+        "params": [
+            {
+                "name": "runId", "required": false,
+                "schema": { "type": ["string", "null"] }
+            },
+            {
+                "name": "fromCursor", "required": false,
+                "schema": { "type": ["string", "null"] }
+            }
+        ],
+        "result": {
+            "name": "watchResult",
+            "schema": { "$ref": "schema.json#/$defs/WatchResult" }
         }
     })
 }

@@ -23,6 +23,8 @@ mod inspection;
 pub use fixtures::*;
 pub use inspection::StoreInspection;
 
+use crate::watch::ObservationState;
+
 #[derive(Clone, Debug)]
 pub enum ScriptedOutcome {
     Approve {
@@ -203,6 +205,7 @@ pub(crate) struct StoreState {
     pub(crate) leases: BTreeMap<LeaseId, ActiveLease>,
     pub(crate) cancelled_leases: BTreeSet<LeaseId>,
     pub(crate) next_lease: u64,
+    pub(crate) observation: ObservationState,
 }
 
 #[derive(Clone, Debug)]
@@ -337,10 +340,23 @@ impl StoreState {
         append(self, Some(cursor.clone()), AppendKind::Control);
         self.seed_ledger.push(VerifiedSeed {
             run_id: run_id.clone(),
-            input,
+            input: input.clone(),
             cursor: cursor.clone(),
         });
-        append(self, Some(cursor), AppendKind::VerifiedSeed);
+        append(self, Some(cursor.clone()), AppendKind::VerifiedSeed);
+        let status = self.control.status_with_lifecycle(&self.lifecycle);
+        self.record_public_event(
+            &run_id,
+            cursor,
+            openengine_cluster_protocol::WatchEvent::Phase {
+                status,
+                admission: Some(Box::new(openengine_cluster_protocol::AdmissionTransition {
+                    run_id: run_id.clone(),
+                    spec: proposal.graph.clone(),
+                    seed_input: input,
+                })),
+            },
+        );
         Ok(ApplyResult {
             generation: Some(generation),
             run_id: Some(run_id),
