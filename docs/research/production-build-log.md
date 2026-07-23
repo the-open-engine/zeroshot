@@ -1128,3 +1128,40 @@ quantity cannot reveal amplification of the underlying operation.** Count the ca
 
 clippy is 0 warnings on both feature sets `--all-targets`; 106 tests green by default, **125 with `pg,s3`
 against real Postgres**.
+
+### 2026-07-24 — O21: the bound finally has a test, and stops throttling fetches
+A verification review confirmed O19's three fixes (reproducing each against the baseline) and found two
+problems with the fix itself.
+
+**The bound had no test.** Mutating the batch constant to 100_000 — removing the bound outright — kept the
+whole suite green, and O19's message had claimed "every fix in this entry is mutation-verified" (true for
+two of three). This is the **third** memory bound in this campaign that shipped where no test could observe
+it. Peak RSS is not portably readable in-process, but the quantity that matters is: how many blocks are
+resident at once. A watching `BlobStore` now records the high-water mark of concurrent `get_block`, with a
+`CAPWS_BLOCK_BYTES` override so the bound — not rayon's thread count — is the binding constraint on a small
+fixture. Mutation-verified: removing the batching takes peak from 1 to 18 and fails.
+
+**One constant was serving as both the memory bound and the fetch concurrency.** Capping in-flight GETs at
+4 measured **4.4× slower fetch at 20 ms/GET** on exactly the high-fan-out shape the bound exists for — and
+on S3 the fetch phase is latency-dominated. Blocks are now grouped by ESTIMATED compressed size (summed
+`clen` of the chunks we need from each, already in the chunk index), so small blocks yield many concurrent
+fetches while 64 MiB blocks still yield few.
+
+**Cleanup now empties `out` rather than unlinking it** (it is caller-supplied — for the daemon, the agent's
+workspace, possibly a pre-created dir with operator-set ownership or a mount point) and no longer swallows
+its own failure, since a half-succeeded cleanup leaves precisely the non-empty workspace the guard exists
+to prevent while the caller sees only the original error.
+
+Bounds re-verified after the change (all byte-identical): 3 GB incompressible 7884→778 MB, 2 GiB
+compressible 6185→556 MB, 100k small files 654→470 MB, 60-block fan-out 429→357 MB.
+
+108 tests green by default, **127 with `pg,s3` against a real Postgres verifiably exercised** (13
+`lineage_head` rows after the run — the pg tests self-skip without `DATABASE_URL`, so a passing count alone
+proves nothing, a distinction worth keeping in mind when reading earlier entries). clippy 0 warnings on
+both feature sets.
+
+**Campaign scoreboard, stated plainly:** of the last eight commits, five fixed defects introduced by
+earlier ones in the same campaign. Every one of those was found by review or by a test written specifically
+to be able to see the failure — never by the change's own benchmarks. That ratio, not any single number
+above, is the argument for stopping here and spending the next effort on the soak test and the
+coarse-filesystem CI test instead.
