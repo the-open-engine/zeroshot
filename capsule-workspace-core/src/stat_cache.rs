@@ -349,6 +349,28 @@ mod tests {
     }
 
     // The fingerprint must actually reflect a real file's stat, and change when the file changes.
+    // The probe must PASS on an ordinary local filesystem (otherwise it would disable the skip
+    // everywhere), leave no debris, and fail safe on a path it cannot write to.
+    #[test]
+    fn fidelity_probe_passes_on_a_normal_filesystem_and_cleans_up() {
+        let d = tempfile::tempdir().unwrap();
+        let before: Vec<_> = std::fs::read_dir(d.path()).unwrap().flatten().collect();
+        match probe_fidelity(d.path()) {
+            Fidelity::Ok { observed_ns } => assert!(observed_ns >= 0),
+            Fidelity::Unusable => panic!("a local filesystem must support the skip's guards"),
+        }
+        let after: Vec<_> = std::fs::read_dir(d.path()).unwrap().flatten().collect();
+        assert_eq!(before.len(), after.len(), "probe left debris behind");
+    }
+
+    #[test]
+    fn fidelity_probe_fails_safe_on_an_unwritable_path() {
+        assert_eq!(
+            probe_fidelity(Path::new("/definitely/not/a/writable/dir")),
+            Fidelity::Unusable
+        );
+    }
+
     #[test]
     fn from_metadata_tracks_real_file_changes() {
         let d = tempfile::tempdir().unwrap();
@@ -361,4 +383,65 @@ mod tests {
         let k2 = StatKey::from_metadata(&std::fs::metadata(&f).unwrap());
         assert_ne!(k1, k2, "rewriting the file changes its fingerprint");
     }
+}
+
+/// Result of probing the workspace filesystem for the timestamp behaviour the skip depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fidelity {
+    /// ctime demonstrably moved in response to an in-place rewrite, within the settle margin. The skip's
+    /// guards mean what they say on this filesystem.
+    Ok { observed_ns: i64 },
+    /// ctime did not move within the margin — either it does not track writes at all (SMB/CIFS, vfat and
+    /// exFAT report a creation time; several FUSE backends likewise) or the timestamp granularity is
+    /// coarser than the margin. Either way the racy-window guard is not sound here and the skip must be
+    /// refused.
+    Unusable,
+}
+
+/// Probe `dir`'s filesystem for the ONE property the skip's safety actually rests on: that an in-place
+/// rewrite moves `ctime` within the settle margin.
+///
+/// This exists because the alternative is an unenforceable deployment assumption. The guards are sound on
+/// node-local Linux/XFS/ext4 and were DEMONSTRATED to lose data on a 1 s-granularity filesystem — and
+/// nothing stops an operator pointing `--tree` at an EFS/Azure-Files/gcsfuse PVC, which is an entirely
+/// ordinary k8s choice. A file whose mtime has been normalised by `tar -x`/`rsync -t`/Bazel is
+/// permanently past the settle margin, so on such a filesystem ctime is the ONLY remaining defence; if it
+/// is frozen too, a same-size in-place rewrite is invisible.
+///
+/// One rewrite loop, bounded by the settle margin, run once at startup. Fails toward `Unusable`.
+pub fn probe_fidelity(dir: &Path) -> Fidelity {
+    let probe = dir.join(format!(".capsule-fidelity-probe-{}", std::process::id()));
+    let cleanup = |f: &Path| {
+        let _ = std::fs::remove_file(f);
+    };
+    if std::fs::write(&probe, b"a".repeat(4096)).is_err() {
+        return Fidelity::Unusable;
+    }
+    let first = match std::fs::metadata(&probe).map(|m| StatKey::from_metadata(&m)) {
+        Ok(k) => k,
+        Err(_) => {
+            cleanup(&probe);
+            return Fidelity::Unusable;
+        }
+    };
+    let start = std::time::Instant::now();
+    // Rewrite in place, same size, until ctime moves or we exceed the margin we would otherwise be
+    // trusting. Same size on purpose: that is exactly the case the fingerprint cannot see.
+    while start.elapsed().as_nanos() < SETTLE_NS as u128 {
+        if std::fs::write(&probe, b"b".repeat(4096)).is_err() {
+            cleanup(&probe);
+            return Fidelity::Unusable;
+        }
+        if let Ok(k) = std::fs::metadata(&probe).map(|m| StatKey::from_metadata(&m)) {
+            if k.ctime_ns != first.ctime_ns {
+                cleanup(&probe);
+                return Fidelity::Ok {
+                    observed_ns: start.elapsed().as_nanos() as i64,
+                };
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    cleanup(&probe);
+    Fidelity::Unusable
 }

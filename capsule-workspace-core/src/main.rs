@@ -441,6 +441,36 @@ mod daemon_cmd {
         let store = build_store(&store_uri, cache_dir.as_deref()).context("build --store")?;
         let lineage = LineageId(lineage);
 
+        // ENFORCE > DOCUMENT: the O10 skip's racy-window guard is only sound on a filesystem where an
+        // in-place rewrite moves ctime within the settle margin. Rather than assume that (an operator can
+        // point --tree at any PVC), probe the real workspace filesystem once and REFUSE the skip if it
+        // cannot be demonstrated. Withholding the cache path is all it takes — publish_cycle then behaves
+        // exactly as it did before O10.
+        let stat_cache = match stat_cache.as_deref() {
+            None => None,
+            Some(p) => {
+                std::fs::create_dir_all(&tree).ok();
+                match capsule_workspace_core::stat_cache::probe_fidelity(&tree) {
+                    capsule_workspace_core::stat_cache::Fidelity::Ok { observed_ns } => {
+                        eprintln!(
+                            "[daemon] stat-cache skip ENABLED (workspace fs moved ctime in {:.1}ms)",
+                            observed_ns as f64 / 1e6
+                        );
+                        Some(p.to_path_buf())
+                    }
+                    capsule_workspace_core::stat_cache::Fidelity::Unusable => {
+                        eprintln!(
+                            "[daemon] WARNING: stat-cache skip DISABLED — {} is on a filesystem whose \
+                             ctime does not move on an in-place rewrite within the settle margin, so a \
+                             same-size rewrite could be invisible. Publishing with a full re-hash.",
+                            tree.display()
+                        );
+                        None
+                    }
+                }
+            }
+        };
+
         // Bound exposure to an unknown flaw in the O10 skip: every Nth cycle re-hashes the whole tree, so
         // a hypothetical missed change is stale for at most that many cycles rather than forever. The
         // SIGTERM drain publish below always re-hashes in full.

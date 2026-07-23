@@ -94,9 +94,6 @@ mod cycle {
             self.entry = Some((digest.to_string(), m.clone()));
             Ok(m)
         }
-        fn put(&mut self, digest: String, m: Manifest) {
-            self.entry = Some((digest, std::sync::Arc::new(m)));
-        }
     }
 
     /// The outcome of one publish cycle. `Fenced` is the NON-FATAL "another writer owns this lineage"
@@ -263,8 +260,19 @@ mod cycle {
         }
         let touch: Vec<(BlockId, u64)> = sizes.into_iter().collect();
         clock.touch(&touch)?;
-        // Prime the memo: if this cycle advances HEAD, the next cycle's parent IS this manifest.
-        memo.put(stats.manifest.clone(), m);
+        // DELIBERATELY NOT memoizing our own just-built manifest here.
+        //
+        // `logical_digest` covers content only — it EXCLUDES the physical chunk→block index — and
+        // `put_manifest` is don't-overwrite-if-present (cas.rs). So when another lineage has already stored
+        // a byte-identical tree under this digest, the store keeps THEIR index and discards ours. Caching
+        // our object under that digest would then make `known` (our blocks) diverge from what
+        // `mark_live_blocks` marks (their blocks): our blocks would be touched but never marked, could be
+        // collected after a long idle stretch, and a later publish deduping against them would emit a
+        // manifest referencing objects that no longer exist.
+        //
+        // Only manifests READ BACK from the store are authoritative, so only those are memoized. The idle
+        // steady state — the case O11 exists for — still hits the memo, because HEAD is unchanged and the
+        // digest was already fetched; we pay one fetch per HEAD CHANGE instead of one per cycle.
 
         match ls.advance(lineage, stats.manifest.clone(), expected) {
             Ok(h) => Ok(CycleOutcome::Advanced(h)),
