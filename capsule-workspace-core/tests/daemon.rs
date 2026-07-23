@@ -151,6 +151,7 @@ fn lifecycle_publish_then_materialize_on_start() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -171,6 +172,7 @@ fn lifecycle_publish_then_materialize_on_start() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -241,6 +243,7 @@ fn mf3_dedup_reuse_survives_gc() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -261,6 +264,7 @@ fn mf3_dedup_reuse_survives_gc() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -366,6 +370,7 @@ fn stale_fence_surfaces_as_non_fatal_fenced() {
             0,
             None,
             &mut Default::default(),
+            false,
         )
         .unwrap()
         {
@@ -395,6 +400,7 @@ fn stale_fence_surfaces_as_non_fatal_fenced() {
                     0,
                     None,
                     &mut Default::default(),
+                    false,
                 )
             }));
         }
@@ -510,6 +516,7 @@ fn nochange_cycle_when_tree_unchanged() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -528,6 +535,7 @@ fn nochange_cycle_when_tree_unchanged() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {
@@ -552,6 +560,7 @@ fn nochange_cycle_when_tree_unchanged() {
         0,
         None,
         &mut Default::default(),
+        false,
     )
     .unwrap()
     {

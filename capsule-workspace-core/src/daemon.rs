@@ -875,12 +875,20 @@ pub fn materialize_incremental(
         safe_rel_path(&f.path)?;
     }
 
-    // Reflink the unchanged files IN PARALLEL — the per-file work is lstat + create_dir_all + FICLONE +
-    // chmod, which is syscall/IO-bound, so a sequential loop leaves the device idle (this pass dominated
-    // the cold `--ref-dir` start before O9). Mirrors the rayon-parallel fetch/write path below. A file
-    // whose reference leaf is missing or not a REAL regular file (defensive: never follow a symlink)
-    // yields `Some(f)` and falls back to the store; a genuine IO error propagates rather than silently
-    // degrading to a fetch.
+    // Reflink the unchanged files IN PARALLEL. MEASURED cost of this pass: ~90-115 µs per file — i.e. ~22 ms
+    // at 256 files but ~10.8 s at 95k, so it matters at real workspace file counts and is invisible at toy
+    // ones. It is metadata/syscall-bound (lstat + create_dir_all + FICLONE + chmod), so parallelism buys
+    // only ~1.25×, not linear speedup; the remaining win is in issuing fewer syscalls per file.
+    //
+    // NOT a claim that this pass explains the O8 cold-`--ref-dir` delta — that residual was assigned by
+    // elimination under a confounded comparison and remains unexplained (see the build log).
+    //
+    // A file whose reference leaf is missing or is not a real regular file falls back to the store
+    // (`Some(f)`); a genuine IO error propagates rather than silently degrading to a fetch. The lstat is a
+    // leaf-only, TOCTOU-bounded gate, NOT a guarantee: `reflink_or_copy` re-opens the source by path
+    // without `O_NOFOLLOW`, and intermediate path components are resolved normally. That is sound here
+    // because `ref_dir` is daemon-owned and single-writer; it is not a defense against a concurrently
+    // mutated reference (a caller-supplied `--reference` on the CLI is the caller's trust decision).
     let t_reflink = Instant::now();
     let fallbacks: Vec<&FileEntry> = candidates
         .par_iter()

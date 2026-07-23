@@ -176,6 +176,7 @@ mod cycle {
         req_workers: usize,
         stat_cache_path: Option<&std::path::Path>,
         memo: &mut ManifestMemo,
+        force_full_rehash: bool,
     ) -> Result<CycleOutcome> {
         let head = ls.head(lineage)?; // fallible authoritative read
         // MF3: dedup set = the parent live-HEAD's chunk index (a manifest GC marks). The parent manifest is

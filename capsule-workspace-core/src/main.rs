@@ -370,6 +370,7 @@ mod daemon_cmd {
         publish_workers: usize,
         stat_cache: Option<&Path>,
         memo: &mut daemon_loop::ManifestMemo,
+        force_full_rehash: bool,
     ) -> Result<CycleOutcome> {
         let outcome = daemon_loop::publish_cycle(
             tree,
@@ -380,6 +381,7 @@ mod daemon_cmd {
             publish_workers,
             stat_cache,
             memo,
+            force_full_rehash,
         )?;
         match &outcome {
             CycleOutcome::Advanced(h) => eprintln!(
@@ -429,6 +431,12 @@ mod daemon_cmd {
         let clock = ls.ref_clock();
         let store = build_store(&store_uri, cache_dir.as_deref()).context("build --store")?;
         let lineage = LineageId(lineage);
+
+        // Bound exposure to an unknown flaw in the O10 skip: every Nth cycle re-hashes the whole tree, so
+        // a hypothetical missed change is stale for at most that many cycles rather than forever. The
+        // SIGTERM drain publish below always re-hashes in full.
+        const FULL_REHASH_EVERY: u64 = 20;
+        let mut cycle_n: u64 = 0;
 
         // O11: one memo for the whole daemon lifetime — the parent manifest is then fetched+parsed only
         // when HEAD actually moved (and after our own publish, not at all).
@@ -483,6 +491,7 @@ mod daemon_cmd {
                 publish_workers,
                 stat_cache.as_deref(),
                 &mut memo,
+                false,
             )?;
             return Ok(());
         }
@@ -517,6 +526,10 @@ mod daemon_cmd {
                 publish_workers,
                 stat_cache.as_deref(),
                 &mut memo,
+                {
+                    cycle_n += 1;
+                    cycle_n % FULL_REHASH_EVERY == 0
+                },
             )? {
                 CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
                 CycleOutcome::Advanced(_) | CycleOutcome::NoChange => fenced_streak = 0,
@@ -534,6 +547,7 @@ mod daemon_cmd {
             publish_workers,
             stat_cache.as_deref(),
             &mut memo,
+            true, // drain = last chance at durability: never trust the skip here
         )?;
         eprintln!("[daemon] drained; exiting 0");
         Ok(())

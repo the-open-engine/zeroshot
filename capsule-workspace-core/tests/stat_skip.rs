@@ -35,6 +35,15 @@ fn blob(seed: u64, len: usize) -> Vec<u8> {
     out
 }
 
+/// Simulate elapsed time between cycles WITHOUT sleeping. The racy guard requires a file to have been
+/// quiescent for `SETTLE_NS` (2s) before the previous scan began, so back-to-back publishes in a test would
+/// never skip anything. Advancing the recorded scan timestamp is exactly equivalent to that previous
+/// publish having run 10s after the tree settled, which is what a real 30s publish interval looks like.
+fn settled(mut c: StatCache) -> StatCache {
+    c.scan_started_ns += 10_000_000_000;
+    c
+}
+
 /// One daemon-like cycle carrying the parent manifest + stat cache forward.
 struct Cycle {
     store: LocalBlobStore,
@@ -62,7 +71,7 @@ impl Cycle {
         let st = publish_pipelined(tree, &self.store, &known, pdigest, 4, 8, prev).unwrap();
         let m = Manifest::from_bytes(&self.store.get_manifest(&st.manifest).unwrap()).unwrap();
         self.parent = Some((m, st.manifest.clone()));
-        self.cache = st.stat_cache;
+        self.cache = settled(st.stat_cache);
         (st.manifest, st.skipped_files)
     }
 }
@@ -272,7 +281,7 @@ fn racy_file_is_rehashed_not_skipped() {
     let m1 = Manifest::from_bytes(&s.get_manifest(&st1.manifest).unwrap()).unwrap();
 
     // Sanity: with the real cache the file IS skippable.
-    let mut cache = st1.stat_cache;
+    let mut cache = settled(st1.stat_cache);
     let prev = PrevPublish::new(&m1, &st1.manifest, &cache).unwrap();
     let ok = publish_pipelined(
         &tree,
@@ -309,7 +318,8 @@ fn does_not_skip_when_parent_chunks_are_not_in_known() {
     let m1 = Manifest::from_bytes(&s.get_manifest(&st1.manifest).unwrap()).unwrap();
 
     // EMPTY `known` — nothing is known-durable, so nothing may be reused.
-    let prev = PrevPublish::new(&m1, &st1.manifest, &st1.stat_cache).unwrap();
+    let cache = settled(st1.stat_cache);
+    let prev = PrevPublish::new(&m1, &st1.manifest, &cache).unwrap();
     let st2 = publish_pipelined(
         &tree,
         &s,

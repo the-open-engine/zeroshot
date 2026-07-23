@@ -22,7 +22,7 @@ use std::path::Path;
 
 /// Bump when the fingerprint's meaning changes — an older cache is then ignored (⇒ full re-hash) rather
 /// than misinterpreted.
-pub const STAT_CACHE_VERSION: u32 = 1;
+pub const STAT_CACHE_VERSION: u32 = 2;
 
 /// A file's stat fingerprint. Equality alone is NOT sufficient to skip (see [`StatCache::may_skip`]).
 ///
@@ -32,7 +32,9 @@ pub const STAT_CACHE_VERSION: u32 = 1;
 /// - `ctime_ns` — catches mtime BACKDATING (`utimes` rewrites mtime but ctime becomes now, and a non-root
 ///                process cannot forge ctime), plus chmod/rename/link changes.
 /// - `ino`      — catches replace-by-rename, which can otherwise preserve size and mtime exactly.
-/// - `dev`      — catches a remount / different device under the same path.
+/// - `dev`      — catches a remount / bind-mount / overlayfs copy-up under the same path.
+/// - `nlink`    — catches hardlink churn (pnpm/cargo relinking a store entry into place).
+/// - `mode`     — redundant with ctime in principle, but free and makes the fingerprint self-evident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatKey {
     pub size: u64,
@@ -40,6 +42,8 @@ pub struct StatKey {
     pub ctime_ns: i64,
     pub ino: u64,
     pub dev: u64,
+    pub nlink: u64,
+    pub mode: u32,
 }
 
 impl StatKey {
@@ -53,6 +57,8 @@ impl StatKey {
             ctime_ns: ns(m.ctime(), m.ctime_nsec()),
             ino: m.ino(),
             dev: m.dev(),
+            nlink: m.nlink(),
+            mode: m.mode(),
         }
     }
 }
@@ -89,6 +95,17 @@ impl Default for StatCache {
     }
 }
 
+/// A file must have been quiescent for at least this long BEFORE the previous scan began to be skippable.
+///
+/// The racy-window guard compares a FILESYSTEM mtime against a PROCESS wall clock. On the intended
+/// deployment (node-local ephemeral storage) those are the same kernel clock, but they are not the same
+/// clock *domain* in general — a network filesystem's server clock, an NTP step, or a VM migration can
+/// separate them. A settle margin absorbs that skew and any coarse-granularity truncation, at the cost of
+/// re-hashing a file for one extra cycle after it stops changing. Publish intervals are tens of seconds, so
+/// this is ~free; being wrong is not. (A filesystem-domain watermark — create a sentinel, read back its
+/// mtime — is the fully general fix and is recorded as a follow-up.)
+const SETTLE_NS: i64 = 2_000_000_000; // 2s
+
 /// Unix nanoseconds now (0 if the clock is before the epoch — which then disables skipping, fail-safe).
 pub fn now_unix_ns() -> i64 {
     std::time::SystemTime::now()
@@ -121,7 +138,17 @@ impl StatCache {
     /// chunk belongs to a successfully-published manifest and is therefore durable and GC-protected.
     pub fn may_skip(&self, path: &str, fresh: &StatKey) -> bool {
         match self.entries.get(path) {
-            Some(prev) => *prev == *fresh && fresh.mtime_ns < self.scan_started_ns,
+            Some(prev) => {
+                *prev == *fresh
+                    && fresh
+                        .mtime_ns
+                        .saturating_add(SETTLE_NS)
+                        .lt(&self.scan_started_ns)
+                    && fresh
+                        .ctime_ns
+                        .saturating_add(SETTLE_NS)
+                        .lt(&self.scan_started_ns)
+            }
             None => false,
         }
     }
@@ -177,6 +204,11 @@ impl StatCache {
 mod tests {
     use super::*;
 
+    // Realistic nanosecond scales: the racy guard now requires a SETTLE_NS margin, so toy values like
+    // mtime=500 / scan=1000 are (correctly) never skippable.
+    const SCAN: i64 = 100_000_000_000; // 100s
+    const OLD: i64 = 1_000_000_000; //   1s — comfortably older than SCAN - SETTLE_NS
+
     fn key(size: u64, mtime: i64, ctime: i64, ino: u64) -> StatKey {
         StatKey {
             size,
@@ -184,14 +216,16 @@ mod tests {
             ctime_ns: ctime,
             ino,
             dev: 1,
+            nlink: 1,
+            mode: 0o644,
         }
     }
 
     // The happy path: quiescent well before the previous scan, fingerprint identical → skippable.
     #[test]
     fn skips_only_a_quiescent_identical_file() {
-        let mut c = StatCache::new(1000);
-        let k = key(10, 500, 500, 7);
+        let mut c = StatCache::new(SCAN);
+        let k = key(10, OLD, OLD, 7);
         c.insert("a".into(), k);
         assert!(c.may_skip("a", &k));
         assert!(!c.may_skip("missing", &k), "unknown path is never skipped");
@@ -200,29 +234,39 @@ mod tests {
     // Each fingerprint field must independently defeat the skip.
     #[test]
     fn every_fingerprint_field_defeats_the_skip() {
-        let mut c = StatCache::new(1000);
-        let base = key(10, 500, 500, 7);
+        let mut c = StatCache::new(SCAN);
+        let base = key(10, OLD, OLD, 7);
         c.insert("a".into(), base);
-        assert!(!c.may_skip("a", &key(11, 500, 500, 7)), "size change");
-        assert!(!c.may_skip("a", &key(10, 501, 500, 7)), "mtime change");
+        assert!(c.may_skip("a", &base), "baseline is skippable");
+        assert!(!c.may_skip("a", &key(11, OLD, OLD, 7)), "size change");
+        assert!(!c.may_skip("a", &key(10, OLD + 1, OLD, 7)), "mtime change");
         assert!(
-            !c.may_skip("a", &key(10, 500, 501, 7)),
+            !c.may_skip("a", &key(10, OLD, OLD + 1, 7)),
             "ctime change (mtime backdated after a write)"
         );
         assert!(
-            !c.may_skip("a", &key(10, 500, 500, 8)),
+            !c.may_skip("a", &key(10, OLD, OLD, 8)),
             "inode change (replace-by-rename)"
         );
-        let mut other_dev = base;
-        other_dev.dev = 2;
-        assert!(!c.may_skip("a", &other_dev), "device change");
+        for (label, mutate) in [
+            (
+                "device change",
+                (|k: &mut StatKey| k.dev = 2) as fn(&mut StatKey),
+            ),
+            ("hardlink churn (nlink)", |k: &mut StatKey| k.nlink = 2),
+            ("mode change", |k: &mut StatKey| k.mode = 0o755),
+        ] {
+            let mut m = base;
+            mutate(&mut m);
+            assert!(!c.may_skip("a", &m), "{label}");
+        }
     }
 
     // THE data-loss guard: a file written in the same timestamp tick as the previous scan has an
     // identical fingerprint but different bytes. The racy window must refuse to skip it.
     #[test]
     fn racy_window_refuses_files_touched_during_or_after_the_previous_scan() {
-        let scan = 1000;
+        let scan = SCAN;
         let mut c = StatCache::new(scan);
         // mtime exactly AT the scan start — indistinguishable from a write during the scan.
         let at_scan = key(10, scan, scan, 7);
@@ -238,8 +282,15 @@ mod tests {
             !c.may_skip("after", &after),
             "mtime > scan start must re-hash"
         );
-        // strictly before → trustworthy.
-        let before = key(10, scan - 1, scan - 1, 7);
+        // inside the settle margin (quiescent, but only just) → still refused.
+        let recent = key(10, scan - 1_000_000_000, scan - 1_000_000_000, 7);
+        c.insert("recent".into(), recent);
+        assert!(
+            !c.may_skip("recent", &recent),
+            "1s before the scan is inside the 2s settle margin → must re-hash"
+        );
+        // comfortably settled before the scan → trustworthy.
+        let before = key(10, OLD, OLD, 7);
         c.insert("before".into(), before);
         assert!(c.may_skip("before", &before));
     }
@@ -267,7 +318,7 @@ mod tests {
         std::fs::write(&p, b"{not json").unwrap();
         assert!(StatCache::load(&p).entries.is_empty(), "corrupt → empty");
 
-        let mut old = StatCache::new(1000);
+        let mut old = StatCache::new(SCAN);
         old.insert("a".into(), key(10, 1, 1, 7));
         let mut v = serde_json::to_value(&old).unwrap();
         v["version"] = serde_json::json!(STAT_CACHE_VERSION + 1);
@@ -282,11 +333,11 @@ mod tests {
     fn save_then_load_roundtrips() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("nested/sc.json");
-        let mut c = StatCache::new(4242);
+        let mut c = StatCache::new(SCAN);
         c.insert("dir/f.bin".into(), key(99, 1, 2, 3));
         c.save(&p).unwrap();
         let back = StatCache::load(&p);
-        assert_eq!(back.scan_started_ns, 4242);
+        assert_eq!(back.scan_started_ns, SCAN);
         assert_eq!(back.entries.get("dir/f.bin"), c.entries.get("dir/f.bin"));
         assert!(
             !p.with_extension("tmp").exists(),
