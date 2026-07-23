@@ -140,22 +140,33 @@ but **that delta's attribution was retracted** — the reflink pass is ~0.02s (m
 two EC2 runs weren't comparable (the with-ref run paid first-in-batch S3 TLS/DNS warmup). O9 added
 `reflink_secs` so the next batch can attribute it. Full numbers in the build log's O8 entry.
 
-**Optimization follow-ups (biggest headroom first):**
-1. **Stat-cache / mtime skip on publish — BY FAR the biggest remaining win.** Measured locally (1 GB, 256
-   files): an UNCHANGED tree republish costs **1.81s**, and a 0.4%-churn republish costs **1.81s** — i.e.
-   publish cost is proportional to TREE SIZE and completely independent of churn, because it re-reads and
-   re-sha256s every file every cycle (only the upload is deduped). This recurs every publish interval
-   forever. A stat-cache skip (reuse the parent manifest's chunk list for files whose size+mtime+ctime+ino
-   +dev are unchanged, with a git-style racy window) should take an idle cycle to ~stat-only. RISK: a missed
-   change means the agent's work is silently NOT durable — the worst failure mode in this system — so it
-   needs hard guards (racy window; skip anchored to the PARENT MANIFEST so reused chunks are provably
-   durable; cache is a node-local hint that fails safe to full re-hash).
-2. **Re-measure the `--ref-dir` first start on XFS with `reflink_secs`** to explain (or dismiss) the 2.85s.
-3. **fsync barrier for O8** IF `--ref-dir` ever needs to live on non-ephemeral storage (today it must be
-   ephemeral node-local — documented; the reflink clone does no re-hash so it trusts the sentinel).
-4. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with
-   no `block_ref` row older than grace — closes the documented GC crash/straddle orphan residual.
-5. **LVM-thin same-node COW fork** — not yet measured (writer→reader fork; from the original research).
+**Optimization campaign: CLOSED on performance, and here is why.** Three independent adversarial reviews
+converged on the same call — the remaining wins are micro-optimizations of things that stopped being the
+bottleneck. Measured at realistic scale (100k files / 520 MB): a steady-state publish cycle is ~0.58s and is
+now STAT-bound, not hash/compress/network-bound; a cold materialize is ~7s dominated by per-file syscalls.
+What landed: parallel S3 uploads (O6), reflink warm resume + the daemon reference lifecycle (O7/O8), the
+publish re-hash skip (O10, idle cycle 2.56s → 0.58s at 100k files), manifest memoization (O11), a real
+materialize memory bound (O13/O17), and a bounded block cache (O16).
+
+**What is genuinely left, ranked:**
+1. **Nothing performance-shaped is worth doing before integration.** The honest list of remaining ideas
+   (ARMv8 SHA verification, `create_dir_all` hoisting, zstd context reuse, manifest compression, tree-
+   structured manifests) is either a no-op against the measured profile or a large format change whose
+   benefit O11 already captured in steady state. Revisit only if a cold-start profile demands it.
+2. **A soak test** — N cycles of an agent-like writer against a full-rehash oracle, asserting equality every
+   cycle. This is the one test shape that finds timing-dependent skips, and it is the shape this system most
+   needs before it runs against real agent work.
+3. **A coarse-granularity-filesystem test in CI** (loopback ext3/FAT image). A reviewer found a live
+   data-loss bug this way that no in-repo test could see.
+4. **Re-measure O6/O8 on EC2 with the 100k fixture.** Those numbers were taken on 256 large files.
+
+**READ THIS BEFORE OPTIMIZING ANYTHING ELSE.** Three separate defects in this campaign were invisible to
+their own benchmarks because the fixture was 256 large incompressible files: the reflink per-file cost
+(22ms at 256 files, ~10.8s at 95k), a wall regression that only appeared at 100k files, and a memory
+"bound" that only held at compression ratio ~1. Twice, a safety mechanism shipped that provably did nothing
+while its tests passed — `force_full_rehash` as an unused parameter, and a racy-window guard whose tests
+moved the safety-critical timestamp in the permissive direction. **Benchmark on a production-shaped fixture,
+and mutation-test every guard** (revert it; the test must fail).
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).

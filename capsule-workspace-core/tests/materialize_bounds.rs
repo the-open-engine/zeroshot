@@ -112,3 +112,60 @@ fn failed_materialize_leaves_no_partial_tree() {
         "a failed materialize must leave no partial tree (found {left} entries)"
     );
 }
+
+// Wave BOUNDARIES. The file-ordered wave logic has three distinct cases and nothing else exercises them
+// together: many small files packed into one wave, a file that alone exceeds the ceiling (streamed
+// chunk-by-chunk rather than assembled), and files sitting either side of a wave boundary. Sizes here are
+// chosen relative to the real MATERIALIZE_WAVE_BYTES so the fixture actually crosses boundaries.
+#[test]
+fn wave_boundaries_round_trip_exactly() {
+    let d = tmp();
+    let tree = d.path().join("t");
+    // ~600 MiB total across three shapes → several waves at the 256 MiB ceiling.
+    for i in 0..2000u64 {
+        // many small files (some empty, some sub-chunk, some multi-chunk)
+        let n = match i % 4 {
+            0 => 0,
+            1 => 100,
+            2 => CHUNK + 7,
+            _ => 3 * CHUNK,
+        };
+        let mut v = vec![0u8; n];
+        if n >= 8 {
+            v[..8].copy_from_slice(&i.to_le_bytes());
+        }
+        w(&tree.join(format!("many/f{i}.bin")), &v);
+    }
+    // one file that alone exceeds the wave ceiling → takes the streaming path
+    let mut huge = Vec::with_capacity(300 * 1024 * 1024);
+    for c in 0..1200u64 {
+        huge.extend_from_slice(&compressible_chunk(1_000_000 + c));
+    }
+    w(&tree.join("huge.bin"), &huge);
+    // and a normal file after it, so the streamed file is not simply last
+    w(&tree.join("zz_after.bin"), &vec![7u8; 5 * CHUNK + 3]);
+
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let out = d.path().join("o");
+    materialize(&s, &dig, &out).unwrap();
+
+    // Every file byte-identical, including the streamed one and the boundary neighbours.
+    for i in 0..2000u64 {
+        let p = out.join(format!("many/f{i}.bin"));
+        let got = fs::read(&p).unwrap();
+        let want = fs::read(tree.join(format!("many/f{i}.bin"))).unwrap();
+        assert_eq!(got, want, "mismatch at many/f{i}.bin");
+    }
+    assert_eq!(
+        fs::read(out.join("huge.bin")).unwrap(),
+        huge,
+        "streamed file"
+    );
+    assert_eq!(
+        fs::read(out.join("zz_after.bin")).unwrap(),
+        vec![7u8; 5 * CHUNK + 3]
+    );
+}
