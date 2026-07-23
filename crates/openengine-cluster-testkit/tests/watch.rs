@@ -1,6 +1,7 @@
+use openengine_cluster_client::{EventOrClosed, WatchClient};
 use openengine_cluster_protocol::{
-    GetParams, NodeAddress, NodeName, PositiveInteger, RunId, WatchEvent, WatchParams,
-    WorkerOutcome, GONE, NOT_FOUND,
+    GetParams, NodeAddress, NodeName, PositiveInteger, RunId, SubscriptionCloseReason, WatchEvent,
+    WatchParams, WorkerOutcome, DEFAULT_SUBSCRIPTION_QUEUE_CAPACITY, GONE, NOT_FOUND,
 };
 use openengine_cluster_server::watch::WatchStreamItem;
 use openengine_cluster_server::{ClusterBackend, ConnectionContext};
@@ -51,6 +52,73 @@ async fn watch_parks_while_empty_and_attaches_on_the_next_committed_run() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn parked_overflow_reconnect_stays_on_the_attached_run() {
+    let graph_a = graph_fixture("worker-a", json!({"kind":"null"}));
+    let compiled_a = compiled_from_graph_fixture(&graph_a);
+    let graph_b = graph_fixture("worker-b", json!({"kind":"null"}));
+    let compiled_b = compiled_from_graph_fixture(&graph_b);
+    let (admission_client, dispatcher, _backend, _verifier, store) = setup(vec![
+        ScriptedOutcome::approve(compiled_a, vec![]),
+        ScriptedOutcome::approve(compiled_b, vec![]),
+    ]);
+    let watch_client = WatchClient::new(dispatcher);
+
+    let (parked, mut stream, _handle) = watch_client.watch(WatchParams::default()).await.unwrap();
+    assert_eq!(parked.run_id, None);
+
+    let first = admission_client
+        .apply(committed(graph_a, Value::Null, 0, "create-parked-a"))
+        .await
+        .unwrap();
+    let first_run = first.run_id.unwrap();
+    let node = NodeAddress {
+        node: NodeName::new("worker-a").unwrap(),
+        attempt: PositiveInteger::new(1).unwrap(),
+    };
+    for _ in 0..DEFAULT_SUBSCRIPTION_QUEUE_CAPACITY {
+        store
+            .emit_node_event(
+                &first_run,
+                node.clone(),
+                NodeEventBody::Begin { input: Value::Null },
+            )
+            .await;
+    }
+
+    let second = admission_client
+        .apply(committed(
+            graph_b,
+            Value::Null,
+            first.generation.unwrap().get(),
+            "create-parked-b",
+        ))
+        .await
+        .unwrap();
+    assert_ne!(second.run_id.as_ref(), Some(&first_run));
+
+    loop {
+        match stream.next().await.unwrap() {
+            EventOrClosed::Event(record) => assert_eq!(record.run_id, first_run),
+            EventOrClosed::Closed {
+                reason,
+                last_delivered_cursor,
+            } => {
+                assert_eq!(reason, SubscriptionCloseReason::SlowConsumer);
+                assert!(last_delivered_cursor.is_some());
+                break;
+            }
+        }
+    }
+
+    let (reconnected, mut stream, _handle) = watch_client.reconnect(stream).await.unwrap();
+    assert_eq!(reconnected.run_id, Some(first_run.clone()));
+    let Some(EventOrClosed::Event(record)) = stream.next().await else {
+        panic!("expected the attached run's overflowed event on reconnect");
+    };
+    assert_eq!(record.run_id, first_run);
 }
 
 #[tokio::test]
