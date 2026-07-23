@@ -84,6 +84,13 @@ enum Cmd {
         /// locally instead of over the network — fast warm resume.
         #[arg(long)]
         cache_dir: Option<String>,
+        /// Ceiling for `--cache-dir`, in GiB (0 = unbounded). Defaults to a bound rather than unbounded
+        /// on purpose: the cache shares its device with `--ref-dir` and usually the workspace, and cache
+        /// writes fail silently while workspace writes do not — so an unbounded cache turns a busy node
+        /// into a workspace-write outage. Eviction is oldest-first and always safe (a miss falls through
+        /// to the durable store).
+        #[arg(long, default_value_t = 20)]
+        cache_max_gb: u64,
         /// Run exactly ONE publish cycle and exit (for tests / one-shot snapshots).
         #[arg(long)]
         once: bool,
@@ -237,6 +244,7 @@ fn main() -> Result<()> {
             publish_interval,
             health_addr,
             cache_dir,
+            cache_max_gb,
             once,
             publish_workers,
             ref_dir,
@@ -252,6 +260,7 @@ fn main() -> Result<()> {
                     publish_interval,
                     health_addr,
                     cache_dir,
+                    cache_max_gb,
                     once,
                     publish_workers,
                     ref_dir,
@@ -269,6 +278,7 @@ fn main() -> Result<()> {
                     publish_interval,
                     &health_addr,
                     &cache_dir,
+                    cache_max_gb,
                     once,
                     publish_workers,
                     &ref_dir,
@@ -323,7 +333,11 @@ mod daemon_cmd {
     /// `s3://<bucket>` → S3BlobStore (feature `s3`; endpoint/region/creds via the env contract).
     /// When `cache_dir` is set, wrap the durable store in a node-local `CachedBlobStore` (NVMe cache)
     /// so a warm node serves blocks locally instead of over the network — fast warm resume.
-    fn build_store(uri: &str, cache_dir: Option<&str>) -> Result<Box<dyn BlobStore>> {
+    fn build_store(
+        uri: &str,
+        cache_dir: Option<&str>,
+        cache_max_bytes: Option<u64>,
+    ) -> Result<Box<dyn BlobStore>> {
         let backing: Box<dyn BlobStore> = if let Some(path) = uri.strip_prefix("file://") {
             Box::new(LocalBlobStore::new(path)?)
         } else if let Some(bucket) = uri.strip_prefix("s3://") {
@@ -349,7 +363,11 @@ mod daemon_cmd {
         };
         match cache_dir {
             Some(dir) => Ok(Box::new(
-                capsule_workspace_core::cache::CachedBlobStore::new(dir, backing)?,
+                capsule_workspace_core::cache::CachedBlobStore::with_limit(
+                    dir,
+                    backing,
+                    cache_max_bytes,
+                )?,
             )),
             None => Ok(backing),
         }
@@ -418,6 +436,7 @@ mod daemon_cmd {
         publish_interval: u64,
         health_addr: Option<String>,
         cache_dir: Option<String>,
+        cache_max_gb: u64,
         once: bool,
         publish_workers: usize,
         ref_dir: Option<PathBuf>,
@@ -438,7 +457,9 @@ mod daemon_cmd {
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
         ls.init_schema().context("apply bootstrap schema")?;
         let clock = ls.ref_clock();
-        let store = build_store(&store_uri, cache_dir.as_deref()).context("build --store")?;
+        let cache_max_bytes = (cache_max_gb > 0).then(|| cache_max_gb * 1024 * 1024 * 1024);
+        let store = build_store(&store_uri, cache_dir.as_deref(), cache_max_bytes)
+            .context("build --store")?;
         let lineage = LineageId(lineage);
 
         // ENFORCE > DOCUMENT: the O10 skip's racy-window guard is only sound on a filesystem where an
@@ -599,7 +620,7 @@ mod daemon_cmd {
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
         ls.init_schema().context("apply bootstrap schema")?;
         let clock = ls.ref_clock();
-        let store = build_store(&store_uri, None).context("build --store")?;
+        let store = build_store(&store_uri, None, None).context("build --store")?;
         // F2: the STORE-WIDE live set — every lineage's HEAD.
         let live = ls.all_head_digests().context("read all live HEADs")?;
         let st = gc_pg::collect(

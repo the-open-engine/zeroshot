@@ -15,11 +15,19 @@
 
 use crate::cas::{BlobStore, BlockId, LocalBlobStore, StoreError};
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct CachedBlobStore {
     cache: LocalBlobStore,
+    cache_root: PathBuf,
     backing: Box<dyn BlobStore>,
+    /// Byte ceiling for the cache tier. `None` = unbounded (the historical behaviour).
+    max_bytes: Option<u64>,
+    /// Bytes written since the last sweep — sweeping on every write would be O(cache) per block.
+    since_sweep: AtomicU64,
+    /// One sweeper at a time; a concurrent caller just skips (the next write re-triggers).
+    sweeping: AtomicBool,
 }
 
 fn is_not_found(e: &anyhow::Error) -> bool {
@@ -32,10 +40,73 @@ fn is_not_found(e: &anyhow::Error) -> bool {
 impl CachedBlobStore {
     /// `cache_root` is the node-local NVMe dir (fast, disposable); `backing` is the durable authority.
     pub fn new(cache_root: impl AsRef<Path>, backing: Box<dyn BlobStore>) -> Result<Self> {
+        Self::with_limit(cache_root, backing, None)
+    }
+
+    /// Same, with a byte ceiling on the cache tier.
+    ///
+    /// WHY THIS EXISTS: without a bound the cache grows until the device fills — and that device is the
+    /// same ephemeral NVMe that holds `--ref-dir` and, typically, the agent's workspace. Cache writes are
+    /// best-effort so they fail silently; the workspace writes that fail alongside them do NOT. An
+    /// unbounded cache therefore converts "this node has been busy for a while" into a workspace-write
+    /// outage, which is the same failure class as the unbounded materialize buffer.
+    pub fn with_limit(
+        cache_root: impl AsRef<Path>,
+        backing: Box<dyn BlobStore>,
+        max_bytes: Option<u64>,
+    ) -> Result<Self> {
         Ok(Self {
             cache: LocalBlobStore::new(cache_root.as_ref())?,
+            cache_root: cache_root.as_ref().to_path_buf(),
             backing,
+            max_bytes,
+            since_sweep: AtomicU64::new(0),
+            sweeping: AtomicBool::new(false),
         })
+    }
+
+    /// Evict oldest-by-mtime until the cache is back under ~90% of the ceiling. Safe at any moment: the
+    /// cache is never authoritative, so a miss simply falls through to the durable backing store.
+    /// Amortised — only runs once an eighth of the ceiling has been written since the last sweep.
+    fn maybe_sweep(&self, wrote: u64) {
+        let Some(max) = self.max_bytes else { return };
+        if self.since_sweep.fetch_add(wrote, Ordering::Relaxed) + wrote < max / 8 {
+            return;
+        }
+        if self.sweeping.swap(true, Ordering::SeqCst) {
+            return; // another thread is already sweeping
+        }
+        self.since_sweep.store(0, Ordering::Relaxed);
+        let blocks = self.cache_root.join("blocks");
+        let mut entries: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+        let mut total: u64 = 0;
+        if let Ok(rd) = std::fs::read_dir(&blocks) {
+            for e in rd.flatten() {
+                if let Ok(m) = e.metadata() {
+                    if m.is_file() {
+                        total += m.len();
+                        entries.push((
+                            m.modified().unwrap_or(std::time::UNIX_EPOCH),
+                            m.len(),
+                            e.path(),
+                        ));
+                    }
+                }
+            }
+        }
+        if total > max {
+            entries.sort_by_key(|(t, _, _)| *t); // oldest first
+            let target = max - max / 10;
+            for (_, len, path) in entries {
+                if total <= target {
+                    break;
+                }
+                if std::fs::remove_file(&path).is_ok() {
+                    total = total.saturating_sub(len);
+                }
+            }
+        }
+        self.sweeping.store(false, Ordering::SeqCst);
     }
 
     /// Read-through: cache hit → local; miss → backing, then populate the cache (best-effort).
@@ -61,13 +132,18 @@ impl BlobStore for CachedBlobStore {
     fn put_block(&self, id: &BlockId, bytes: &[u8]) -> Result<()> {
         self.backing.put_block(id, bytes)?; // durable authority FIRST
         let _ = self.cache.put_block(id, bytes); // populate cache best-effort
+        self.maybe_sweep(bytes.len() as u64);
         Ok(())
     }
     fn get_block(&self, id: &BlockId) -> Result<Vec<u8>> {
         self.get_through(
             |c| c.get_block(id),
             |b| b.get_block(id),
-            |c, bytes| c.put_block(id, bytes),
+            |c, bytes| {
+                let r = c.put_block(id, bytes);
+                self.maybe_sweep(bytes.len() as u64);
+                r
+            },
         )
     }
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()> {

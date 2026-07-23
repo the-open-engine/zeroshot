@@ -196,7 +196,11 @@ impl StatCache {
         if let Some(d) = path.parent() {
             std::fs::create_dir_all(d)?;
         }
-        let tmp = path.with_extension("tmp");
+        // Per-writer UNIQUE temp (same pattern as cas.rs): two processes sharing a --stat-cache path must
+        // not interleave into one temp file and leave a torn rename behind.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("{}.{}.tmp", std::process::id(), n));
         std::fs::write(&tmp, serde_json::to_vec(self)?)?;
         std::fs::rename(&tmp, path)?;
         Ok(())

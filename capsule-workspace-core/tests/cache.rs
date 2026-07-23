@@ -121,3 +121,42 @@ fn write_through_and_delete_hit_both_tiers() {
     assert!(!LocalBlobStore::new(&backing_dir).unwrap().has_block(&id));
     assert!(!LocalBlobStore::new(&cache_dir).unwrap().has_block(&id));
 }
+
+// The cache tier must stay under its ceiling, and eviction must never lose data — the cache is a cache,
+// so an evicted block has to fall through to the durable backing store and still read back correctly.
+// Without a bound the cache grows until the ephemeral NVMe fills, taking the workspace down with it.
+#[test]
+fn bounded_cache_evicts_and_stays_correct() {
+    let d = tempfile::tempdir().unwrap();
+    let backing = Box::new(LocalBlobStore::new(d.path().join("durable")).unwrap());
+    let cache_root = d.path().join("cache");
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let c = CachedBlobStore::with_limit(&cache_root, backing, Some(LIMIT)).unwrap();
+
+    // Write well past the ceiling.
+    let mut ids = Vec::new();
+    for i in 0..40u32 {
+        let id: BlockId = format!("{:064x}", i);
+        let bytes = vec![i as u8; 256 * 1024]; // 40 x 256 KiB = 10 MiB into a 4 MiB cache
+        c.put_block(&id, &bytes).unwrap();
+        ids.push((id, bytes));
+    }
+
+    let used: u64 = std::fs::read_dir(cache_root.join("blocks"))
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum();
+    assert!(
+        used <= LIMIT,
+        "cache must stay under its ceiling: {used} > {LIMIT}"
+    );
+    assert!(used > 0, "and must not have evicted everything");
+
+    // EVERY block still reads back byte-identical — evicted ones via the durable backing store.
+    for (id, want) in &ids {
+        assert_eq!(&c.get_block(id).unwrap(), want, "block {id} lost");
+    }
+}
