@@ -15,7 +15,7 @@
 //! pure CONTENT identity and the O1 idle-republish idempotence (a manifest must not change just because an
 //! mtime did).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -171,20 +171,39 @@ impl StatCache {
         if !path.exists() {
             return Self::default();
         }
-        match std::fs::read(path)
-            .map_err(anyhow::Error::from)
-            .and_then(|b| serde_json::from_slice::<StatCache>(&b).context("parsing stat cache"))
-        {
-            Ok(c) if c.version == STAT_CACHE_VERSION => c,
-            Ok(c) => {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[publish] stat cache unreadable ({e}) — ignoring (full re-hash)");
+                return Self::default();
+            }
+        };
+        // Read the version FIRST, on its own. A full parse cannot distinguish "older format" from
+        // "corrupt": adding a required field to StatKey makes every genuine older cache fail
+        // deserialization, so a normal upgrade would report "corrupt" to the operator after every deploy.
+        #[derive(Deserialize)]
+        struct VersionProbe {
+            version: u32,
+        }
+        match serde_json::from_slice::<VersionProbe>(&bytes) {
+            Ok(v) if v.version != STAT_CACHE_VERSION => {
                 eprintln!(
-                    "[publish] stat cache version {} != {STAT_CACHE_VERSION} — ignoring (full re-hash)",
-                    c.version
+                    "[publish] stat cache is version {}, this build writes {STAT_CACHE_VERSION} — \
+                     ignoring it and re-hashing once (expected after an upgrade)",
+                    v.version
                 );
-                Self::default()
+                return Self::default();
             }
             Err(e) => {
                 eprintln!("[publish] stat cache unusable ({e}) — ignoring (full re-hash)");
+                return Self::default();
+            }
+            Ok(_) => {}
+        }
+        match serde_json::from_slice::<StatCache>(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[publish] stat cache corrupt ({e}) — ignoring (full re-hash)");
                 Self::default()
             }
         }
@@ -325,14 +344,18 @@ mod tests {
         std::fs::write(&p, b"{not json").unwrap();
         assert!(StatCache::load(&p).entries.is_empty(), "corrupt → empty");
 
-        let mut old = StatCache::new(SCAN);
-        old.insert("a".into(), key(10, 1, 1, 7));
-        let mut v = serde_json::to_value(&old).unwrap();
-        v["version"] = serde_json::json!(STAT_CACHE_VERSION + 1);
-        std::fs::write(&p, serde_json::to_vec(&v).unwrap()).unwrap();
+        // A GENUINE v1 payload: StatKey had no nlink/mode, so a full parse of it fails. The version must
+        // still be recognised (this is the real upgrade path, and it previously reported "corrupt").
+        let v1 = serde_json::json!({
+            "version": 1,
+            "scan_started_ns": SCAN,
+            "manifest_digest": "",
+            "entries": { "a": {"size":10,"mtime_ns":1,"ctime_ns":1,"ino":7,"dev":1} }
+        });
+        std::fs::write(&p, serde_json::to_vec(&v1).unwrap()).unwrap();
         assert!(
             StatCache::load(&p).entries.is_empty(),
-            "version mismatch → empty"
+            "an older cache version → empty (full re-hash), not a hard error"
         );
     }
 

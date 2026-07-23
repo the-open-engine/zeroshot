@@ -996,3 +996,48 @@ streams into the hasher instead of allocating a ~17 MB intermediate.
 Verified end-to-end against real Postgres driving the actual interval loop: an agent edit is DETECTED while
 the skip is active, and a resume into a fresh workspace restores the tree byte-identical. 96 tests green by
 default, 113 with `pg,s3` against real Postgres.
+
+### 2026-07-23 — O17: the memory bound made real, and what the campaign got wrong
+A third adversarial review measured the previous commit's claims instead of accepting them, and the
+headline claim did not survive. Recording the corrections, because the pattern matters more than the bugs.
+
+**The "flat" memory bound was not a bound.** Waves were keyed on BLOCKS, and a wave must always admit at
+least one block. Publish flushes a block at 64 MiB of COMPRESSED bytes, so nothing caps a block's
+DECOMPRESSED footprint — a highly compressible block decompresses to gigabytes. Measured **2.03x tree size
+on compressible input, still perfectly linear.** It looked flat only because every fixture in this campaign
+was incompressible. Rewritten with FILE-ordered waves (a contiguous run of files bounded by their own
+logical size), which bounds the decompressed working set directly at any zstd ratio; a single file larger
+than the ceiling is streamed rather than assembled.
+
+| shape | OLD peak RSS | NEW peak RSS | OLD wall | NEW wall |
+|---|--:|--:|--:|--:|
+| 100k small files (520 MB) | 653 MB | **463 MB** | 6.49s | 6.98s |
+| 3 GB incompressible | 7884 MB | **705 MB** | 1.02s | 0.59s |
+| 2 GiB compressible (1 block) | 6185 MB | **559 MB** | 0.56s | 0.46s |
+
+**The commit that claimed to fix a crash loop had created one.** Pre-creating every file at final length
+meant a failed materialize left a complete-LOOKING tree: right file count, right sizes, right modes, all
+zero bytes. The implementation it replaced left `out` EMPTY and the retry was clean. Now cleared on failure,
+with a test.
+
+**Two allocation mistakes, one of them mine on the way to fixing the other.** `read_to_end` on an empty Vec
+grew geometrically and held exactly 2x every full-size chunk. Sizing to the ceiling fixes that and creates
+something worse — 4 KB files allocating 256 KiB each, a 64x overshoot (measured: 654 → 1657 MB on the 100k
+tree). The buffer is now sized by the chunk's DECLARED length, which is verified against the output anyway.
+
+**The drain was made the most expensive publish of the pod's life, inside a hard deadline.** Forcing a full
+re-hash on SIGTERM measured 5-8x a normal cycle on fast hardware and scales with tree size; on a small pod
+with a multi-GB workspace that can exceed the default 30s `terminationGracePeriodSeconds`, and a SIGKILL
+mid-drain loses the ENTIRE final publish. Reverted: the drain takes the fast path and must COMPLETE; the
+periodic full re-hash provides the same defense on a cycle that is not racing a shutdown deadline.
+
+**What the campaign got wrong, and the durable lesson.** Nearly every measurement here was taken on 256
+large incompressible files. That fixture hid: per-file syscall cost (the same reflink cost reads as 22ms at
+256 files and ~10.8s at 95k), manifest size (0.1% of the tree at 256 files, 8.8% at 100k — 31.4 MB), and
+compression-ratio-dependent memory (invisible at ratio 1.0). Re-measured at 100k files, O10's headline is
+**4.4x on a representative workspace** (idle cycle 2.56s → 0.58s), not the 180x the large-file fixture
+suggested — both are real, the second is the one to quote. Three separate defects in this campaign were
+invisible to their own benchmarks. **Measure on a fixture shaped like production, and mutation-test every
+guard** — twice here a safety mechanism was shipped that provably did nothing while its tests passed.
+
+99 tests green by default, **118 with `pg,s3` against a real Postgres**; no warnings, fmt clean.
