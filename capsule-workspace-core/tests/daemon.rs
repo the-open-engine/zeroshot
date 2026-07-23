@@ -142,7 +142,18 @@ fn lifecycle_publish_then_materialize_on_start() {
     assert!(ls.head(&lin).unwrap().is_none());
 
     // cycle 1 → fence 1
-    match publish_cycle(&tree_a, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    match publish_cycle(
+        &tree_a,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(1)),
         o => panic!("cycle 1 must Advance, got {o:?}"),
     }
@@ -151,7 +162,18 @@ fn lifecycle_publish_then_materialize_on_start() {
     // mutate the tree; cycle 2 → fence 2
     let a2 = body(base + 500, 4);
     write(&tree_a.join("a.txt"), &a2);
-    let head2 = match publish_cycle(&tree_a, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    let head2 = match publish_cycle(
+        &tree_a,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => {
             assert_eq!(h.fence, Fence(2));
             h
@@ -210,7 +232,18 @@ fn mf3_dedup_reuse_survives_gc() {
     write(&tree.join("change.bin"), &body(base + 100, 3));
 
     // cycle 1
-    let h1 = match publish_cycle(&tree, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    let h1 = match publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => h,
         o => panic!("cycle 1 must Advance, got {o:?}"),
     };
@@ -219,7 +252,18 @@ fn mf3_dedup_reuse_survives_gc() {
     // change ONLY change.bin; keep1/keep2 stay → their chunks dedup-reuse via `known` seeded from the
     // parent live-HEAD chunk index (MF3, done inside `publish_cycle`).
     write(&tree.join("change.bin"), &body(base + 900, 3));
-    let h2 = match publish_cycle(&tree, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    let h2 = match publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => {
             assert_eq!(h.fence, Fence(2));
             h
@@ -313,7 +357,18 @@ fn stale_fence_surfaces_as_non_fatal_fenced() {
             &seed_tree.join("s.bin"),
             &body(base + 900 + attempt as u64, 1),
         );
-        match publish_cycle(&seed_tree, &*s, &ls, &*clock, &lin, 0, None).unwrap() {
+        match publish_cycle(
+            &seed_tree,
+            &*s,
+            &ls,
+            &*clock,
+            &lin,
+            0,
+            None,
+            &mut Default::default(),
+        )
+        .unwrap()
+        {
             CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(1)),
             o => panic!("seed must Advance, got {o:?}"),
         }
@@ -331,7 +386,16 @@ fn stale_fence_surfaces_as_non_fatal_fenced() {
             );
             handles.push(std::thread::spawn(move || {
                 barrier.wait(); // maximize overlap: both read fence 1 before either advances
-                publish_cycle(&t, &*s, &ls, &*clock, &lin, 0, None)
+                publish_cycle(
+                    &t,
+                    &*s,
+                    &ls,
+                    &*clock,
+                    &lin,
+                    0,
+                    None,
+                    &mut Default::default(),
+                )
             }));
         }
         let outcomes: Vec<CycleOutcome> = handles
@@ -437,14 +501,36 @@ fn nochange_cycle_when_tree_unchanged() {
     write(&tree.join("f.bin"), &body(9100, 3));
 
     // cycle 1 → fence 1
-    match publish_cycle(&tree, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    match publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(1)),
         o => panic!("cycle 1 must Advance, got {o:?}"),
     }
     let head1 = ls.head(&lin).unwrap().unwrap();
 
     // cycle 2 with NO tree change → NoChange, HEAD untouched (content-only digest == HEAD).
-    match publish_cycle(&tree, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    match publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::NoChange => {}
         o => panic!("unchanged tree must be NoChange, got {o:?}"),
     }
@@ -457,7 +543,18 @@ fn nochange_cycle_when_tree_unchanged() {
 
     // a real change still Advances (sanity: NoChange isn't swallowing real commits).
     write(&tree.join("f.bin"), &body(9200, 3));
-    match publish_cycle(&tree, &s, &ls, &clock, &lin, 0, None).unwrap() {
+    match publish_cycle(
+        &tree,
+        &s,
+        &ls,
+        &clock,
+        &lin,
+        0,
+        None,
+        &mut Default::default(),
+    )
+    .unwrap()
+    {
         CycleOutcome::Advanced(h) => assert_eq!(h.fence, Fence(2)),
         o => panic!("changed tree must Advance, got {o:?}"),
     }

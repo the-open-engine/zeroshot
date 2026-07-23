@@ -369,6 +369,7 @@ mod daemon_cmd {
         lineage: &LineageId,
         publish_workers: usize,
         stat_cache: Option<&Path>,
+        memo: &mut daemon_loop::ManifestMemo,
     ) -> Result<CycleOutcome> {
         let outcome = daemon_loop::publish_cycle(
             tree,
@@ -378,6 +379,7 @@ mod daemon_cmd {
             lineage,
             publish_workers,
             stat_cache,
+            memo,
         )?;
         match &outcome {
             CycleOutcome::Advanced(h) => eprintln!(
@@ -428,6 +430,10 @@ mod daemon_cmd {
         let store = build_store(&store_uri, cache_dir.as_deref()).context("build --store")?;
         let lineage = LineageId(lineage);
 
+        // O11: one memo for the whole daemon lifetime — the parent manifest is then fetched+parsed only
+        // when HEAD actually moved (and after our own publish, not at all).
+        let mut memo = daemon_loop::ManifestMemo::default();
+
         // Readiness (materialize-on-start done) + shutdown (SIGTERM/SIGINT) latches — std only (MF2).
         let ready = Arc::new(AtomicBool::new(false));
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -476,6 +482,7 @@ mod daemon_cmd {
                 &lineage,
                 publish_workers,
                 stat_cache.as_deref(),
+                &mut memo,
             )?;
             return Ok(());
         }
@@ -509,6 +516,7 @@ mod daemon_cmd {
                 &lineage,
                 publish_workers,
                 stat_cache.as_deref(),
+                &mut memo,
             )? {
                 CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
                 CycleOutcome::Advanced(_) | CycleOutcome::NoChange => fenced_streak = 0,
@@ -525,6 +533,7 @@ mod daemon_cmd {
             &lineage,
             publish_workers,
             stat_cache.as_deref(),
+            &mut memo,
         )?;
         eprintln!("[daemon] drained; exiting 0");
         Ok(())

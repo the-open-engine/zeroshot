@@ -69,6 +69,12 @@ pub struct PublishStats {
     /// `PrevPublish::cache` next cycle. Not serialized (it is state, not a stat).
     #[serde(skip)]
     pub stat_cache: crate::stat_cache::StatCache,
+    /// The manifest this publish just built and stored (O11). Callers need its chunk index (to refresh the
+    /// GC reuse-clock) and its file entries (as the NEXT cycle's parent), and re-fetching it from the store
+    /// would be a multi-MB round-trip for something we already hold. `None` only for the streaming
+    /// `publish`, which callers do not chain.
+    #[serde(skip)]
+    pub manifest_obj: Option<Manifest>,
 }
 
 /// Walk an opaque tree, classifying entries. Regular files carry content; symlinks are
@@ -305,9 +311,10 @@ pub fn publish(
 
     let wall = t0.elapsed().as_secs_f64();
     let nc = new_chunks;
+    let n_files = manifest.files.len();
     Ok(PublishStats {
         manifest: digest,
-        files: manifest.files.len(),
+        files: n_files,
         total_chunks,
         new_chunks: nc,
         dedup_pct: 100.0 * (total_chunks - nc) as f64 / total_chunks.max(1) as f64,
@@ -326,6 +333,7 @@ pub fn publish(
         skipped_files: 0,
         skipped_mb: 0.0,
         stat_cache: crate::stat_cache::StatCache::default(),
+        manifest_obj: None,
         compress_throughput_mbps: new_raw_bytes as f64 / 1e6 / compress_secs.max(1e-9),
     })
 }
@@ -614,6 +622,7 @@ pub fn publish_pipelined(
         skipped_files,
         skipped_mb: skipped_bytes as f64 / 1e6,
         stat_cache: new_cache,
+        manifest_obj: Some(manifest),
         compress_throughput_mbps: new_raw_bytes as f64 / 1e6 / wall.max(1e-9),
     })
 }

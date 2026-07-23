@@ -72,6 +72,33 @@ mod cycle {
     use anyhow::Result;
     use std::path::Path;
 
+    /// Caches the last manifest we loaded/produced, keyed by digest (O11). Manifests are CONTENT-ADDRESSED,
+    /// so a digest match guarantees byte-identical content — this is pure memoization with no correctness
+    /// surface. It exists because a publish cycle otherwise re-fetches and re-parses the parent manifest
+    /// every interval; on a 20k-file tree that manifest is ~6 MB, i.e. a multi-MB S3 GET per cycle per
+    /// capsule for something that usually has not changed.
+    #[derive(Default)]
+    pub struct ManifestMemo {
+        entry: Option<(String, std::sync::Arc<Manifest>)>,
+    }
+
+    impl ManifestMemo {
+        /// The manifest for `digest`, from memory when we already hold it, else fetched + parsed and kept.
+        fn get(&mut self, store: &dyn BlobStore, digest: &str) -> Result<std::sync::Arc<Manifest>> {
+            if let Some((d, m)) = &self.entry {
+                if d == digest {
+                    return Ok(m.clone());
+                }
+            }
+            let m = std::sync::Arc::new(Manifest::from_bytes(&store.get_manifest(digest)?)?);
+            self.entry = Some((digest.to_string(), m.clone()));
+            Ok(m)
+        }
+        fn put(&mut self, digest: String, m: Manifest) {
+            self.entry = Some((digest, std::sync::Arc::new(m)));
+        }
+    }
+
     /// The outcome of one publish cycle. `Fenced` is the NON-FATAL "another writer owns this lineage"
     /// case (a genuine StaleFence, AFTER `advance`'s idempotent-retry already absorbed our own
     /// lost-acks): the daemon logs it and defers to the next cycle, which re-reads the new HEAD. It is
@@ -148,14 +175,14 @@ mod cycle {
         lineage: &LineageId,
         req_workers: usize,
         stat_cache_path: Option<&std::path::Path>,
+        memo: &mut ManifestMemo,
     ) -> Result<CycleOutcome> {
         let head = ls.head(lineage)?; // fallible authoritative read
         // MF3: dedup set = the parent live-HEAD's chunk index (a manifest GC marks). The parent manifest is
         // ALSO the only source of reused chunk lists for the O10 re-hash skip, so keep it whole.
-        let parent_manifest: Option<Manifest> = match &head {
-            Some(h) => Some(Manifest::from_bytes(
-                &store.get_manifest(&h.manifest_digest)?,
-            )?),
+        // O11: served from the in-memory memo when HEAD hasn't moved, instead of a multi-MB fetch+parse.
+        let parent_manifest: Option<std::sync::Arc<Manifest>> = match &head {
+            Some(h) => Some(memo.get(store, &h.manifest_digest)?),
             None => None,
         };
         let empty_index = ChunkIndex::new();
@@ -217,13 +244,20 @@ mod cycle {
         // MF4: touch every block the new manifest references (young) BEFORE advancing HEAD. `touch`
         // dedups by block, so accumulate the block's REAL size = sum of its member chunks' compressed
         // lengths (not one arbitrary chunk's `clen`, which would under-report byte_length ~256×).
-        let m = Manifest::from_bytes(&store.get_manifest(&stats.manifest)?)?;
+        // O11: publish already built and stored this manifest — use it rather than paying another
+        // multi-MB fetch+parse. (Fall back to the store if a caller supplied no object.)
+        let m = match stats.manifest_obj {
+            Some(m) => m,
+            None => Manifest::from_bytes(&store.get_manifest(&stats.manifest)?)?,
+        };
         let mut sizes: std::collections::BTreeMap<BlockId, u64> = std::collections::BTreeMap::new();
         for loc in m.chunks.values() {
             *sizes.entry(loc.block.clone()).or_insert(0) += loc.clen as u64;
         }
         let touch: Vec<(BlockId, u64)> = sizes.into_iter().collect();
         clock.touch(&touch)?;
+        // Prime the memo: if this cycle advances HEAD, the next cycle's parent IS this manifest.
+        memo.put(stats.manifest.clone(), m);
 
         match ls.advance(lineage, stats.manifest.clone(), expected) {
             Ok(h) => Ok(CycleOutcome::Advanced(h)),
@@ -239,4 +273,4 @@ mod cycle {
 }
 
 #[cfg(feature = "pg")]
-pub use cycle::{materialize_on_start, publish_cycle, CycleOutcome};
+pub use cycle::{materialize_on_start, publish_cycle, CycleOutcome, ManifestMemo};
