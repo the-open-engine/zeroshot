@@ -321,6 +321,31 @@ mod tests {
         assert!(c.may_skip("before", &before));
     }
 
+    // The ctime clause of the racy guard, pinned SEPARATELY from the mtime clause.
+    //
+    // This test exists because the clause was previously deletable with the entire suite still green.
+    // It is the clause that matters most in practice: any tool that restores mtime after writing
+    // (`rsync -t`, `tar -x`, `cp -p`, Bazel, reproducible builds) leaves mtime permanently past the settle
+    // margin, so ctime recency is then the ONLY thing standing between a same-size in-place rewrite and a
+    // silent skip. `every_fingerprint_field_defeats_the_skip` covers ctime INEQUALITY; this covers ctime
+    // RECENCY, which is a different property.
+    #[test]
+    fn recent_ctime_alone_defeats_the_skip() {
+        let mut c = StatCache::new(SCAN);
+        // mtime is ancient (as a tool that restores timestamps would leave it) but ctime is recent —
+        // i.e. the bytes were just rewritten. Fingerprints match, so only the ctime margin can refuse.
+        let k = key(10, OLD, SCAN - 1, 7);
+        c.insert("a".into(), k);
+        assert!(
+            !c.may_skip("a", &k),
+            "an old mtime with a RECENT ctime must re-hash: the content was just rewritten"
+        );
+        // and the same entry becomes skippable once the ctime is also settled
+        let settled = key(10, OLD, OLD, 7);
+        c.insert("b".into(), settled);
+        assert!(c.may_skip("b", &settled));
+    }
+
     // A default/empty cache must skip NOTHING (the safe identity), including for a zero-mtime file.
     #[test]
     fn empty_cache_skips_nothing() {
@@ -437,38 +462,86 @@ pub enum Fidelity {
 ///
 /// One rewrite loop, bounded by the settle margin, run once at startup. Fails toward `Unusable`.
 pub fn probe_fidelity(dir: &Path) -> Fidelity {
+    use std::io::Write;
+    // Sweep debris from any previous run FIRST. This probe writes into the agent's workspace before the
+    // daemon has registered signal handlers, so a SIGTERM in that window kills the process with default
+    // disposition and leaves the file behind — after which every subsequent start fails materialize's
+    // empty-tree precondition. A stranded diagnostic file must not be able to cause a permanent
+    // CrashLoopBackOff.
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name()
+                .to_string_lossy()
+                .starts_with(".capsule-fidelity-probe-")
+            {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     let probe = dir.join(format!(".capsule-fidelity-probe-{}", std::process::id()));
     let cleanup = |f: &Path| {
         let _ = std::fs::remove_file(f);
     };
-    if std::fs::write(&probe, b"a".repeat(4096)).is_err() {
+    let stat = |f: &Path| {
+        std::fs::metadata(f)
+            .map(|m| StatKey::from_metadata(&m))
+            .ok()
+    };
+
+    // Rewrite IN PLACE over an open fd — not `fs::write`, which truncates. The threat being modelled is a
+    // same-size overwrite, and a backend can plausibly stamp ctime on truncate but not on a pure overwrite.
+    let rewrite = |f: &Path, byte: u8| -> bool {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(f)
+            .and_then(|mut fh| fh.write_all(&[byte; 4096]))
+            .is_ok()
+    };
+    if std::fs::write(&probe, [0u8; 4096]).is_err() {
         return Fidelity::Unusable;
     }
-    let first = match std::fs::metadata(&probe).map(|m| StatKey::from_metadata(&m)) {
-        Ok(k) => k,
-        Err(_) => {
-            cleanup(&probe);
-            return Fidelity::Unusable;
-        }
+    let Some(first) = stat(&probe) else {
+        cleanup(&probe);
+        return Fidelity::Unusable;
     };
+
+    // MEASURE the granularity; do not merely observe that ctime moved once. Seeing a single tick inside a
+    // window of length T does NOT prove granularity <= T: if the real granularity is G > T, a tick still
+    // lands in that window with probability ~T/G, so a bare existence check FALSE-PASSES at a measurable
+    // rate on exactly the filesystems this exists to reject (measured ~20% at G = 10s, and each daemon
+    // start re-rolls). Require several consecutive transitions and keep the LARGEST gap observed.
+    const TRANSITIONS: usize = 3;
     let start = std::time::Instant::now();
-    // Rewrite in place, same size, until ctime moves or we exceed the margin we would otherwise be
-    // trusting. Same size on purpose: that is exactly the case the fingerprint cannot see.
-    while start.elapsed().as_nanos() < SETTLE_NS as u128 {
-        if std::fs::write(&probe, b"b".repeat(4096)).is_err() {
+    let mut prev = first;
+    let mut worst_gap_ns: i64 = 0;
+    let mut seen = 0usize;
+    let mut byte = 1u8;
+    while seen < TRANSITIONS && (start.elapsed().as_nanos() as i64) < SETTLE_NS {
+        let mark = std::time::Instant::now();
+        if !rewrite(&probe, byte) {
             cleanup(&probe);
             return Fidelity::Unusable;
         }
-        if let Ok(k) = std::fs::metadata(&probe).map(|m| StatKey::from_metadata(&m)) {
-            if k.ctime_ns != first.ctime_ns {
-                cleanup(&probe);
-                return Fidelity::Ok {
-                    observed_ns: start.elapsed().as_nanos() as i64,
-                };
+        byte = byte.wrapping_add(1);
+        if let Some(k) = stat(&probe) {
+            if k.ctime_ns != prev.ctime_ns {
+                worst_gap_ns = worst_gap_ns.max(mark.elapsed().as_nanos() as i64);
+                prev = k;
+                seen += 1;
+                continue;
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::thread::sleep(std::time::Duration::from_millis(2));
     }
     cleanup(&probe);
-    Fidelity::Unusable
+    // Demand real headroom: the observed granularity must be a small FRACTION of the margin we are about
+    // to trust, not merely smaller than it. On ext4/XFS/APFS each rewrite moves ctime in microseconds, so
+    // this still passes essentially instantly.
+    if seen == TRANSITIONS && worst_gap_ns.saturating_mul(8) <= SETTLE_NS {
+        Fidelity::Ok {
+            observed_ns: worst_gap_ns,
+        }
+    } else {
+        Fidelity::Unusable
+    }
 }

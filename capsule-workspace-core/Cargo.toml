@@ -12,7 +12,12 @@ description = "Minimal, interface-compatible core of the capsule workspace stora
 license = "MIT"
 
 [dependencies]
-sha2 = "0.10"
+# LOAD-BEARING FEATURE, not a tuning knob. `sha2` compiles its ARMv8 hardware SHA-256 backend ONLY under
+# `asm` (sha256.rs: `cfg(all(feature = "asm", target_arch = "aarch64"))`). Without it an aarch64 build —
+# i.e. every Graviton node this runs on — silently uses software SHA. Measured on aarch64: publish of a
+# 1 GiB tree 3.12s -> 0.61s (5.1x), hash throughput 344 -> 1765 MB/s. Digests are byte-identical either
+# way, which is exactly why a soft build is invisible; `tests/sha_backend.rs` fails if it regresses.
+sha2 = { version = "0.10", features = ["asm"] }
 zstd = "0.13"
 fastcdc = "3"
 serde = { version = "1", features = ["derive"] }

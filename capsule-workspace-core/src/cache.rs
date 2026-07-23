@@ -76,20 +76,39 @@ impl CachedBlobStore {
         if self.sweeping.swap(true, Ordering::SeqCst) {
             return; // another thread is already sweeping
         }
+        // Clear the flag even on an unwind: a latched `sweeping` would silently disable eviction for the
+        // rest of the process's life, i.e. quietly restore the unbounded behaviour this exists to prevent.
+        struct Unlatch<'a>(&'a AtomicBool);
+        impl Drop for Unlatch<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _unlatch = Unlatch(&self.sweeping);
         self.since_sweep.store(0, Ordering::Relaxed);
-        let blocks = self.cache_root.join("blocks");
+        // BOTH tiers. Sweeping only `blocks/` would miss the faster-growing one: blocks dedup across
+        // generations, manifests do not — every tree-changing publish mints a new digest and caches a
+        // whole new manifest object (~32 MB on a 100k-file tree), so a manifests dir left unbounded can
+        // outgrow the block cache the ceiling was written to bound.
         let mut entries: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
         let mut total: u64 = 0;
-        if let Ok(rd) = std::fs::read_dir(&blocks) {
-            for e in rd.flatten() {
-                if let Ok(m) = e.metadata() {
-                    if m.is_file() {
-                        total += m.len();
-                        entries.push((
-                            m.modified().unwrap_or(std::time::UNIX_EPOCH),
-                            m.len(),
-                            e.path(),
-                        ));
+        for sub in ["blocks", "manifests"] {
+            if let Ok(rd) = std::fs::read_dir(self.cache_root.join(sub)) {
+                for e in rd.flatten() {
+                    // Skip other writers' in-flight `.tmp` staging files: deleting one breaks its rename,
+                    // and counting it inflates the total.
+                    if e.file_name().to_string_lossy().ends_with(".tmp") {
+                        continue;
+                    }
+                    if let Ok(m) = e.metadata() {
+                        if m.is_file() {
+                            total += m.len();
+                            entries.push((
+                                m.modified().unwrap_or(std::time::UNIX_EPOCH),
+                                m.len(),
+                                e.path(),
+                            ));
+                        }
                     }
                 }
             }
@@ -106,7 +125,6 @@ impl CachedBlobStore {
                 }
             }
         }
-        self.sweeping.store(false, Ordering::SeqCst);
     }
 
     /// Read-through: cache hit → local; miss → backing, then populate the cache (best-effort).
@@ -149,13 +167,18 @@ impl BlobStore for CachedBlobStore {
     fn put_manifest(&self, digest: &str, bytes: &[u8]) -> Result<()> {
         self.backing.put_manifest(digest, bytes)?;
         let _ = self.cache.put_manifest(digest, bytes);
+        self.maybe_sweep(bytes.len() as u64);
         Ok(())
     }
     fn get_manifest(&self, digest: &str) -> Result<Vec<u8>> {
         self.get_through(
             |c| c.get_manifest(digest),
             |b| b.get_manifest(digest),
-            |c, bytes| c.put_manifest(digest, bytes),
+            |c, bytes| {
+                let r = c.put_manifest(digest, bytes);
+                self.maybe_sweep(bytes.len() as u64);
+                r
+            },
         )
     }
     fn has_block(&self, id: &BlockId) -> bool {

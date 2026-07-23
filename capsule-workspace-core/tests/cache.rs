@@ -142,9 +142,17 @@ fn bounded_cache_evicts_and_stays_correct() {
         ids.push((id, bytes));
     }
 
-    let used: u64 = std::fs::read_dir(cache_root.join("blocks"))
-        .unwrap()
-        .flatten()
+    // Write manifests too — they are the FASTER-growing tier (blocks dedup across generations, manifests
+    // do not: every changed publish mints a new digest and caches a whole new object). A ceiling that
+    // swept only `blocks/` would leave the bigger directory unbounded, which is what shipped first.
+    for i in 0..40u32 {
+        c.put_manifest(&format!("{:064x}", 1000 + i), &vec![i as u8; 128 * 1024])
+            .unwrap();
+    }
+
+    let used: u64 = ["blocks", "manifests"]
+        .iter()
+        .flat_map(|sub| std::fs::read_dir(cache_root.join(sub)).unwrap().flatten())
         .filter_map(|e| e.metadata().ok())
         .filter(|m| m.is_file())
         .map(|m| m.len())

@@ -457,7 +457,7 @@ mod daemon_cmd {
         let ls = PgLineageStore::connect(&db).context("connect --db Postgres")?;
         ls.init_schema().context("apply bootstrap schema")?;
         let clock = ls.ref_clock();
-        let cache_max_bytes = (cache_max_gb > 0).then(|| cache_max_gb * 1024 * 1024 * 1024);
+        let cache_max_bytes = (cache_max_gb > 0).then(|| cache_max_gb.saturating_mul(1 << 30));
         let store = build_store(&store_uri, cache_dir.as_deref(), cache_max_bytes)
             .context("build --store")?;
         let lineage = LineageId(lineage);
