@@ -131,13 +131,20 @@ reflink-cloned live workspace, so resume fetches only the delta). Two independen
 per-lineage scoping, target validation, lstat GC, nesting guard, ephemeral-`ref_root` doc). 77 default tests
 green (was 65). See the build log's O8 entry.
 
+O8 was then **measured end-to-end on real EC2** (c6gd.4xlarge, XFS reflink=1, real S3, no block cache; rig
+torn down): time-to-workspace-ready for a gen2 resume — **cold 4.01s → warm-incremental 1.42s (2.8×) →
+ref-reused 0.23s (17.4×)**, fetching only 2 blocks and reflinking 243/256 files, all workspaces
+byte-IDENTICAL to the cold one. A reflink-cloned workspace costs **0.1 MiB** of disk vs **1904 MiB** for a
+full materialize (same 2049 MiB apparent). Honest cost: the FIRST start with `--ref-dir` is ~1.7× SLOWER
+(6.86s vs 4.01s — full materialize into the reference, then clone), so it trades a one-time slower cold
+start for far faster every-subsequent-resume. Full numbers in the build log's O8 measurement entry.
+
 **Optimization follow-ups (biggest headroom first):**
-1. **Measure daemon `--ref-dir` end-to-end on real XFS** — O8 is wired + unit-tested (12 non-pg tests incl.
-   the agent-mutation safety property), but the production warm-resume timing (`daemon --ref-dir` on XFS
-   reflink=1, cold vs warm generational resume) hasn't been measured. This is the natural next EC2 batch:
-   stand up the daemon with `--ref-dir` on the NVMe, publish a few generations, kill+restart, and time the
-   incremental resume vs the O5 cold baseline.
-2. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes).
+1. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes) — now
+   the largest remaining per-cycle cost, since resume is solved.
+2. **Reconsider the `--ref-dir` first-start cost** before choosing an integration default: materializing
+   straight into the workspace and then reflinking the reference FROM it (instead of ref-then-clone) would
+   likely remove the ~1.7× first-start penalty. Needs care — the reference must still end up pristine.
 3. **fsync barrier for O8** IF `--ref-dir` ever needs to live on non-ephemeral storage (today it must be
    ephemeral node-local — documented; the reflink clone does no re-hash so it trusts the sentinel).
 4. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with

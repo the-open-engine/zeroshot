@@ -825,5 +825,47 @@ Deferred (noted): fsync barrier for a non-ephemeral `ref_root` (unnecessary for 
 deployment); the clone into `tree` is non-atomic (crash mid-clone ⇒ partial tree ⇒ bail on restart,
 identical to today's full-materialize semantics — `tree` must be provided empty each start); reflink-vs-copy
 not surfaced in stats (`reflink_or_copy` returns `Option<u64>`); no per-(lineage,ref_root) advisory lock
-(single-writer is a deployment invariant — an RWO PV reattached to the next pod provides it). End-to-end
-daemon `--ref-dir` timing on real XFS is the next EC2 measurement.
+(single-writer is a deployment invariant — an RWO PV reattached to the next pod provides it).
+
+### 2026-07-22 — O8 measured end-to-end on real EC2 (daemon `--ref-dir` over real S3 + XFS)
+Throwaway rig (internal acct, us-east-1, torn down + verified empty): **c6gd.4xlarge**, instance-store NVMe
+as **XFS reflink=1**, local Postgres, real S3 store, 2.1 GB / 256-file incompressible tree. **No
+`--cache-dir` anywhere**, so every block fetch goes to real S3 — a clean cold-vs-warm comparison. The
+lifecycle exercised was the REAL one: gen1 published, then a daemon started on an empty workspace (building
+the pristine reference), the "agent" edited 13/256 files (~5%) in its live workspace, and **the daemon's own
+SIGTERM final-publish produced gen2** — leaving the on-disk reference one generation behind, which is
+exactly the production warm-resume case. Metric = **time to workspace-ready**, measured with the daemon's
+own health endpoint (503→200 flips precisely when materialize-on-start completes) — i.e. how long until the
+agent can start working.
+
+| resume of gen2 | `--ref-dir` | time to ready | speedup |
+|---|---|--:|--:|
+| COLD full materialize (today's default) | no | 4.01s | 1.0× |
+| **WARM INCREMENTAL** (reference one gen behind) | yes | **1.42s** | **2.8×** |
+| **REF REUSED** (restart at the same HEAD) | yes | **0.23s** | **17.4×** |
+
+Daemon telemetry confirms the mechanism: warm → `WarmIncremental ref_blocks_fetched=2 ref_reflinked=243
+workspace_files=256` (only the delta's 2 blocks crossed the network; 243 of 256 files reflinked); reuse →
+`RefReused ref_blocks_fetched=0 ref_reflinked=0 workspace_files=256` (**zero S3 I/O** — a pure CoW clone of
+the pristine reference). Per-lineage scoping worked (`lineage-860bc5c69e5ac057`) and GC kept exactly one
+reference dir.
+
+**Correctness (the point of the batch): all IDENTICAL** — warm-resumed vs cold-resumed workspace, ref-reused
+vs cold, and both against the agent's authored gen2. The warm paths produce byte-identical workspaces over
+real S3 + XFS.
+
+**CoW disk cost, cleanly isolated** (space freed by deleting each 2049 MiB-apparent workspace): deleting the
+**reflink-cloned** workspace freed **0.1 MiB**; deleting the **full-materialized** one freed **1904 MiB**. A
+warm workspace is therefore essentially free on disk (~0.005% of a full copy) — the reference and the live
+workspace share extents until the agent writes.
+
+**The honest cost:** the FIRST start with `--ref-dir` (no reference yet) took **6.86s vs 4.01s cold** — ~1.7×
+SLOWER, because it does a full materialize INTO the reference and then clones that into the workspace (two
+passes). So `--ref-dir` trades a one-time slower cold start for a 2.8×/17.4× faster every-subsequent-resume.
+That is the right trade for capsules (which restart/reschedule far more often than they first-start), but it
+is a real regression for a workload that only ever starts once — worth stating plainly when choosing a
+default at integration time.
+
+Net: O8 does what it was built to do on real hardware — a resuming node fetches only the delta (2 blocks vs
+the full tree), reflinks the rest, produces a byte-identical workspace, and costs ~nothing in disk. Rig fully
+torn down (instance, bucket, IAM role/policy/profile, SG, volumes — verified empty).
