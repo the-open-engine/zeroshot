@@ -118,13 +118,55 @@ store change:
   - `intervention` — _what to do differently_, imperative, transferable beyond
     the specific error text, scoped to `failure_class`. This string is both
     stored and delivered verbatim as guidance, so it must stand alone.
-- **Execution:** synchronous inside the observer's `reflectOnRejection`
-  try/catch. Timeout or error → `template@1` fallback (already implemented).
-  Latency budget: reflector time adds to the rejection→guidance path; keep it
-  under a few seconds, small model.
+- **Execution:** ASYNC by design (`reflectAsync`, fire-and-forget). The
+  rejection→guidance path never waits on the model: guidance ships
+  synchronously with `template@1` text, and the distilled lesson is persisted
+  off-path for FUTURE cycles. Any failure (no key, timeout, malformed JSON,
+  HTTP error) degrades to a stored `template@1` lesson, so evidence continuity
+  survives a down model. See §4.1 for the latency cost of this choice.
 - **Registration:** `REFLECTOR_REGISTRY` entry or per-cluster config
   (`cluster.config.lyo.reflector = 'elaborator@1'`). Swapping is a config
   change, never a code change — that was the point of the interface.
+
+### 4.1 Async execution and the grounding-latency floor (live finding)
+
+The async design trades reflection latency for grounding latency. The chain:
+
+```
+cycle N:   rejection -> decision logged (no elaborated lesson exists yet ->
+           null_arm, zero applications) -> async reflect fires
+cycle N+1: lesson now in store -> first possible injection -> application row
+cycle N+2: next validation -> application outcome counted (grounding)
+```
+
+An elaborated lesson can be injected no earlier than one cycle after its
+triggering rejection, and grounded no earlier than the validation after that.
+Consequence: **short runs may never ground elaborated lessons.** Live evidence
+(cluster `azure-beacon-8`, 2026-07-23, 3-iteration cap, unsatisfiable task):
+two `elaborator@1` lessons created, one actually injected into worker guidance
+(`les_027d0f1176`), and zero outcomes counted — the cluster hit max iterations
+with the application still `pending`. Both pair arms sat at 0✓/0✗.
+
+Implications:
+
+- **Decision log interpretation:** first rejections of a failure class under an
+  async reflector log `null_arm` decisions with no applications. That is
+  correct attribution (the cycle was genuinely untreated — usable as control
+  data for §5.3's lift estimator), not an error.
+- **Grounding floor:** a workload that wants elaborated lessons to earn
+  counters needs ≥3 validation cycles per failure class (fail → async land →
+  inject → verdict). Single-rejection runs only ever produce ungrounded
+  candidates.
+- **Orphaned applications:** applications left `pending` when a run dies stay
+  pending forever (nothing sweeps them). They never move counters — harmless
+  to scores, but the ratio-lift estimator should treat long-pending rows as
+  missing outcomes, and a future curator pass may want to mark them
+  `unresolved` explicitly.
+- **Possible mitigations (not built):** a sync fast-path reflection for
+  first-seen classes (pay ~1s once per class, lesson injectable immediately);
+  proactive pre-arming (lesson-mempool §11) so known lessons are in context
+  before failures recur; injecting the pending-async lesson into the NEXT
+  cycle's guidance even when the same run produced no new rejection.
 
 ### Failure modes and their answers
 
