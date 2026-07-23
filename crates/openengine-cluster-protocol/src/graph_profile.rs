@@ -95,10 +95,19 @@ impl<'de> Deserialize<'de> for GraphProfileSet {
 /// `schema_with` target for the `graphProfiles` field: `GraphProfileSet` has no standalone
 /// `JsonSchema` impl because its wire shape only ever appears inline on that field.
 pub fn graph_profile_set_schema(generator: &mut SchemaGenerator) -> Schema {
+    let full = GraphProfile::Full.as_str();
+    let single_worker = GraphProfile::SingleWorker.as_str();
     json_schema!({
         "type": "array",
         "maxItems": GRAPH_PROFILES.len(),
         "uniqueItems": true,
-        "items": generator.subschema_for::<GraphProfile>()
+        "items": generator.subschema_for::<GraphProfile>(),
+        "not": {
+            "minItems": 2,
+            "prefixItems": [
+                { "const": single_worker },
+                { "const": full }
+            ]
+        }
     })
 }

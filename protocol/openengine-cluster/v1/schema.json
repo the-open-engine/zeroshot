@@ -1978,6 +1978,17 @@
             "$ref": "#/$defs/GraphProfile"
           },
           "maxItems": 2,
+          "not": {
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "const": "openengine.graph.single-worker/v1"
+              },
+              {
+                "const": "openengine.graph.full/v1"
+              }
+            ]
+          },
           "type": "array",
           "uniqueItems": true
         }
