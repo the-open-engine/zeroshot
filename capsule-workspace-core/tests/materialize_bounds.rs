@@ -366,3 +366,145 @@ fn cross_wave_block_refetch_is_measured_and_bounded() {
         distinct.len()
     );
 }
+
+// THE BOUND TEST that was missing. A reviewer mutated MATERIALIZE_BLOCK_BYTES's predecessor from 4 to
+// 100_000 — removing the bound entirely — and the whole suite stayed green. That is the third time in this
+// campaign a memory bound shipped with no test able to observe it.
+//
+// Peak RSS isn't portably readable in-process, but the quantity that MATTERS is observable from the store:
+// how many blocks are resident at once. This proxy holds each get_block long enough to overlap and records
+// the high-water mark of concurrent calls, which is exactly the batch width. Remove the batching and this
+// spikes to the number of blocks the manifest references.
+#[test]
+fn compressed_working_set_is_actually_bounded() {
+    use capsule_workspace_core::cas::{BlobStore, BlockId};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Watching {
+        inner: LocalBlobStore,
+        live: AtomicUsize,
+        peak: AtomicUsize,
+    }
+    impl BlobStore for Watching {
+        fn put_block(&self, id: &BlockId, b: &[u8]) -> anyhow::Result<()> {
+            self.inner.put_block(id, b)
+        }
+        fn get_block(&self, id: &BlockId) -> anyhow::Result<Vec<u8>> {
+            let n = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(n, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(3)); // overlap concurrent fetches
+            let r = self.inner.get_block(id);
+            self.live.fetch_sub(1, Ordering::SeqCst);
+            r
+        }
+        fn put_manifest(&self, d: &str, b: &[u8]) -> anyhow::Result<()> {
+            self.inner.put_manifest(d, b)
+        }
+        fn get_manifest(&self, d: &str) -> anyhow::Result<Vec<u8>> {
+            self.inner.get_manifest(d)
+        }
+        fn has_block(&self, id: &BlockId) -> bool {
+            self.inner.has_block(id)
+        }
+        fn delete_block(&self, id: &BlockId) -> anyhow::Result<bool> {
+            self.inner.delete_block(id)
+        }
+        fn delete_manifest(&self, d: &str) -> anyhow::Result<bool> {
+            self.inner.delete_manifest(d)
+        }
+    }
+
+    // Many LARGE blocks: one file per block, each file a full chunk, so the manifest fans out widely and
+    // every block is big enough that the byte budget — not the count cap — decides the batch.
+    let d = tmp();
+    let tree = d.path().join("t");
+    let s = Watching {
+        inner: LocalBlobStore::new(d.path().join("s")).unwrap(),
+        live: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+    };
+    // Publish each file separately so each lands in its own block.
+    let mut idx = ChunkIndex::new();
+    for i in 0..48u64 {
+        let sub = tree.join(format!("g{i}"));
+        // ~8 MiB per generation → its own block
+        let mut body = Vec::new();
+        for c in 0..32u64 {
+            body.extend_from_slice(&compressible_chunk(i * 32 + c));
+        }
+        w(&sub.join("f.bin"), &body);
+        let st = publish(&sub, &s, &idx, None).unwrap();
+        let m = Manifest::from_bytes(&s.get_manifest(&st.manifest).unwrap()).unwrap();
+        idx.extend(m.chunks);
+    }
+    // Now publish the whole tree: its files' chunks dedup against 48 distinct blocks.
+    let dig = publish(&tree, &s, &idx, None).unwrap().manifest;
+    let m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    let distinct: std::collections::BTreeSet<_> = m.chunks.values().map(|l| &l.block).collect();
+    assert!(
+        distinct.len() >= 24,
+        "fixture must fan out across many blocks, got {}",
+        distinct.len()
+    );
+
+    // A 1-byte budget makes every block its own batch, so at most one may be resident. Without the
+    // batching all 48 land in one par_iter and rayon runs ~thread-count of them at once. This is what
+    // makes the BOUND — rather than rayon's thread count — the thing under test on a small fixture.
+    std::env::set_var("CAPWS_BLOCK_BYTES", "1");
+    s.peak.store(0, Ordering::SeqCst);
+    materialize(&s, &dig, &d.path().join("o")).unwrap();
+    std::env::remove_var("CAPWS_BLOCK_BYTES");
+    let peak = s.peak.load(Ordering::SeqCst);
+    println!(
+        "[bound] distinct blocks={} peak concurrent get_block={peak}",
+        distinct.len()
+    );
+    assert!(
+        peak <= 2,
+        "with a 1-byte budget each of the {} blocks should be its own batch, but {peak} were resident at \
+         once — the compressed working set is not bounded by the budget",
+        distinct.len()
+    );
+}
+
+// The cleanup must EMPTY a caller-supplied `out`, not unlink it. For the daemon `out` is the agent's
+// workspace — possibly a pre-created directory with operator-set ownership, or a mount point — so
+// removing the directory itself would silently recreate it with our defaults, or fail EBUSY on a mount.
+#[test]
+fn cleanup_empties_out_but_preserves_the_directory_itself() {
+    use capsule_workspace_core::manifest::FileEntry;
+    let d = tmp();
+    let tree = d.path().join("t");
+    for i in 0..10 {
+        w(&tree.join(format!("f{i}.bin")), &vec![i as u8; 40_000]);
+    }
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    m.files.push(FileEntry {
+        path: "dangling.bin".into(),
+        mode: 0o100644,
+        size: 0,
+        chunks: vec![],
+        symlink: None,
+        hardlink: Some("nope/missing.bin".into()),
+    });
+    let bad = m.logical_digest();
+    s.put_manifest(&bad, &m.to_bytes()).unwrap();
+
+    // Caller pre-creates `out` (as an operator or a volume mount would).
+    let out = d.path().join("preexisting");
+    fs::create_dir_all(&out).unwrap();
+    assert!(materialize(&s, &bad, &out).is_err());
+    assert!(out.is_dir(), "the caller's directory must still exist");
+    assert_eq!(
+        fs::read_dir(&out).unwrap().count(),
+        0,
+        "but it must be empty, so a retry can proceed"
+    );
+    // and a retry against a good manifest now succeeds into that same directory
+    materialize(&s, &dig, &out).unwrap();
+    assert_eq!(fs::read_dir(&out).unwrap().count(), 10);
+}

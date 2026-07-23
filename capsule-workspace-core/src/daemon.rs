@@ -716,8 +716,45 @@ impl ClearOutOnFailure<'_> {
 }
 impl Drop for ClearOutOnFailure<'_> {
     fn drop(&mut self) {
-        if self.armed {
-            let _ = std::fs::remove_dir_all(self.out);
+        if !self.armed {
+            return;
+        }
+        // Empty `out`, do NOT unlink it. `out` is caller-supplied — for the daemon it is the agent's
+        // workspace, which may be a pre-created directory with operator-set ownership/mode, or a mount
+        // point. Removing the directory itself would silently recreate it with our defaults (or fail
+        // EBUSY on a mount). Clearing the CONTENTS restores the retryable state, which is the whole point.
+        let mut failed: Vec<std::path::PathBuf> = Vec::new();
+        match std::fs::read_dir(self.out) {
+            Ok(rd) => {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    let r = match e.file_type() {
+                        Ok(t) if t.is_dir() => std::fs::remove_dir_all(&p),
+                        _ => std::fs::remove_file(&p),
+                    };
+                    if r.is_err() {
+                        failed.push(p);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[materialize] could not clean up {} ({e})",
+                    self.out.display()
+                );
+                return;
+            }
+        }
+        // Never silent: a cleanup that half-succeeded leaves a non-empty `out`, which fails the next
+        // start's empty-dir precondition — i.e. exactly the crash loop this guard exists to prevent. The
+        // caller still gets the ORIGINAL error, so without this line that state would be invisible.
+        if !failed.is_empty() {
+            eprintln!(
+                "[materialize] WARNING: {} left in {} after a failed materialize — the next start will \
+                 refuse a non-empty workspace until it is cleared",
+                failed.len(),
+                self.out.display()
+            );
         }
     }
 }
@@ -730,7 +767,35 @@ impl Drop for ClearOutOnFailure<'_> {
 /// (once by 8x, once by 2x) and no test could see either.
 const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// How many compressed blocks a wave may hold at once.
+/// Compressed bytes a wave may hold at once. THIS is the memory bound.
+///
+/// Kept separate from fetch concurrency on purpose. A single constant serving as both meant capping
+/// in-flight GETs at 4 regardless of block size, which measured **4.4x slower** fetch at 20 ms/GET on
+/// exactly the high-fan-out shape the bound exists for — and on S3 the fetch phase is latency-dominated.
+/// Blocks are sized from the chunk index (the summed `clen` of the chunks we need from each), so small
+/// blocks now yield many concurrent fetches while large ones still yield few.
+const MATERIALIZE_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The effective budget, read once. `CAPWS_BLOCK_BYTES` exists so a TEST can make the bound the binding
+/// constraint on a small fixture: proving a 256 MiB ceiling honestly otherwise needs hundreds of MiB of
+/// incompressible blocks per run. Three memory bounds in this campaign shipped with no test able to
+/// observe them; a knob that makes the bound observable is worth more than the purity of not having one.
+fn materialize_block_budget() -> u64 {
+    // Read per call, not memoised: this runs once per wave (not per block), and a cached value cannot be
+    // set by a test that starts after another test in the same process already read it.
+    std::env::var("CAPWS_BLOCK_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(MATERIALIZE_BLOCK_BYTES)
+}
+
+/// Hard ceiling on blocks resident at once, whatever the size estimate says — a floor of safety if the
+/// index under-reports (we only see the chunks THIS manifest references, not the whole block).
+const MATERIALIZE_BLOCK_CAP: usize = 64;
+
+/// Blocks resident in the pool across waves (see `BlockPool`). Small, since its only job is to avoid
+/// re-fetching a block a neighbouring wave also needs.
 ///
 /// Bounding the DECOMPRESSED side alone is not enough. A wave fetches every distinct block its files
 /// touch, and nothing caps that count: a long-lived daemon republishes against the parent manifest, so an
@@ -740,6 +805,36 @@ const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 /// exactly the property the wave rewrite exists to remove. So blocks are fetched, drained and dropped a
 /// batch at a time; compressed peak is at most this many x `BLOCK_TARGET`.
 const MATERIALIZE_BLOCK_BATCH: usize = 4;
+
+/// Group `blocks` into batches whose ESTIMATED compressed size stays under [`MATERIALIZE_BLOCK_BYTES`].
+///
+/// The estimate is the summed `clen` of the chunks this manifest references in each block — exact when we
+/// need the whole block, an under-estimate otherwise, hence the hard [`MATERIALIZE_BLOCK_CAP`] on count.
+/// Sizing by bytes rather than a fixed count is what lets a high-fan-out manifest of SMALL blocks fetch
+/// many concurrently (the latency case) while a manifest of 64 MiB blocks still fetches few (the memory
+/// case). One block always forms at least its own batch.
+fn group_blocks_by_bytes<'a>(
+    blocks: &[&'a BlockId],
+    est: &HashMap<&BlockId, u64>,
+) -> Vec<Vec<&'a BlockId>> {
+    let mut out: Vec<Vec<&BlockId>> = Vec::new();
+    let (mut cur, mut acc): (Vec<&BlockId>, u64) = (Vec::new(), 0);
+    for b in blocks {
+        let sz = est.get(b).copied().unwrap_or(BLOCK_TARGET as u64).max(1);
+        if !cur.is_empty()
+            && (acc + sz > materialize_block_budget() || cur.len() >= MATERIALIZE_BLOCK_CAP)
+        {
+            out.push(std::mem::take(&mut cur));
+            acc = 0;
+        }
+        acc += sz;
+        cur.push(b);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
 
 /// Fetch the blocks `regulars` need, decompress+VERIFY their chunks (content hash == id, bounded, rlen),
 /// and write the files. Shared by `materialize` (all regulars) and `materialize_incremental` (only the
@@ -773,6 +868,7 @@ fn write_regular_files(
     // ---- PLAN. Validate every path and size from the MANIFEST before writing a single byte, and assert
     // the invariant the offset math depends on. Ids are BORROWED from the manifest, never cloned: each is
     // a 64-char String and cloning one per chunk costs ~100k allocations on a realistic tree.
+    let mut block_clen: HashMap<&BlockId, u64> = HashMap::new();
     for f in regulars.iter() {
         safe_rel_path(&f.path)?;
         let mut total: u64 = 0;
@@ -791,6 +887,7 @@ fn write_regular_files(
                     loc.rlen
                 );
             }
+            *block_clen.entry(&loc.block).or_insert(0) += loc.clen as u64;
             total += loc.rlen as u64;
         }
         if total != f.size {
@@ -885,7 +982,8 @@ fn write_regular_files(
                 // blocks, so fetch them a bounded group at a time rather than all at once.
                 let need_v: Vec<&BlockId> = need.iter().copied().collect();
                 let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(batch.len());
-                for grp in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
+                for grp in group_blocks_by_bytes(&need_v, &block_clen) {
+                    let grp = &grp[..];
                     let t = Instant::now();
                     pool.load(grp)?;
                     fetch_secs += t.elapsed().as_secs_f64();
@@ -928,7 +1026,8 @@ fn write_regular_files(
         // and that is what MATERIALIZE_WAVE_BYTES bounds.
         let need_v: Vec<&BlockId> = need.iter().copied().collect();
         let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(cids.len());
-        for batch in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
+        for batch in group_blocks_by_bytes(&need_v, &block_clen) {
+            let batch = &batch[..];
             let t = Instant::now();
             pool.load(batch)?;
             fetch_secs += t.elapsed().as_secs_f64();
