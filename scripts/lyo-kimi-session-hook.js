@@ -120,6 +120,19 @@ function main(payload) {
   }
 }
 
+// CLI mode for hook-less tools (codex via AGENTS.md, manual use):
+// `node lyo-kimi-session-hook.js --cwd .` prints lessons and exits —
+// no stdin JSON required.
+const cwdFlagIndex = process.argv.indexOf('--cwd');
+if (cwdFlagIndex !== -1) {
+  try {
+    main({ cwd: process.argv[cwdFlagIndex + 1] || process.cwd() });
+  } catch {
+    // fail-open: never block the session
+  }
+  process.exit(0);
+}
+
 let input = '';
 process.stdin.on('data', (chunk) => {
   input += chunk;
