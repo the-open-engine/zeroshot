@@ -38,7 +38,7 @@ fn canonical_empty_results_have_exact_wire_shape() {
         serde_json::to_value(initialize).unwrap(),
         serde_json::json!({
             "protocolVersion": "openengine.cluster/v1",
-            "capabilities": {},
+            "capabilities": { "graphProfiles": [] },
             "status": {
                 "phase": "empty",
                 "observedGeneration": null,

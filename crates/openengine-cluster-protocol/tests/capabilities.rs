@@ -1,0 +1,84 @@
+use openengine_cluster_protocol::{GraphProfile, GraphProfilesError, ServerCapabilities};
+use serde_json::json;
+
+fn capabilities_of(profiles: Vec<GraphProfile>) -> ServerCapabilities {
+    ServerCapabilities {
+        graph_profiles: openengine_cluster_protocol::GraphProfileSet::new(profiles).unwrap(),
+    }
+}
+
+#[test]
+fn empty_capabilities_round_trip() {
+    let value = capabilities_of(vec![]);
+    let json = serde_json::to_value(&value).unwrap();
+    assert_eq!(json, json!({ "graphProfiles": [] }));
+    let parsed: ServerCapabilities = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, value);
+}
+
+#[test]
+fn single_worker_capabilities_round_trip() {
+    let value = capabilities_of(vec![GraphProfile::SingleWorker]);
+    let json = serde_json::to_value(&value).unwrap();
+    assert_eq!(
+        json,
+        json!({ "graphProfiles": ["openengine.graph.single-worker/v1"] })
+    );
+    let parsed: ServerCapabilities = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, value);
+}
+
+#[test]
+fn full_v1_capabilities_round_trip() {
+    let value = capabilities_of(vec![GraphProfile::Full, GraphProfile::SingleWorker]);
+    let json = serde_json::to_value(&value).unwrap();
+    assert_eq!(
+        json,
+        json!({
+            "graphProfiles": [
+                "openengine.graph.full/v1",
+                "openengine.graph.single-worker/v1"
+            ]
+        })
+    );
+    let parsed: ServerCapabilities = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, value);
+}
+
+#[test]
+fn duplicate_profiles_are_rejected() {
+    let error = openengine_cluster_protocol::GraphProfileSet::new(vec![
+        GraphProfile::SingleWorker,
+        GraphProfile::SingleWorker,
+    ])
+    .unwrap_err();
+    assert_eq!(error, GraphProfilesError::Duplicate);
+}
+
+#[test]
+fn reversed_declaration_order_is_rejected() {
+    let error = openengine_cluster_protocol::GraphProfileSet::new(vec![
+        GraphProfile::SingleWorker,
+        GraphProfile::Full,
+    ])
+    .unwrap_err();
+    assert_eq!(error, GraphProfilesError::Unordered);
+}
+
+#[test]
+fn unknown_profile_string_fails_deserialization() {
+    let json = json!({ "graphProfiles": ["openengine.graph.unknown/v1"] });
+    assert!(serde_json::from_value::<ServerCapabilities>(json).is_err());
+}
+
+#[test]
+fn missing_field_defaults_to_empty() {
+    let value: ServerCapabilities = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(value, capabilities_of(vec![]));
+}
+
+#[test]
+fn extra_field_is_rejected() {
+    let json = json!({ "graphProfiles": [], "unknownField": true });
+    assert!(serde_json::from_value::<ServerCapabilities>(json).is_err());
+}
