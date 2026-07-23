@@ -105,7 +105,12 @@ function resolveExecutorModel(cluster) {
       (agent) => agent?.config?.role === 'implementation'
     );
     const modelConfig = implementer?.config?.modelConfig || {};
-    const model = modelConfig.model || modelConfig.modelLevel || implementer?.config?.model || null;
+    const model =
+      modelConfig.model ||
+      modelConfig.modelLevel ||
+      implementer?.config?.model ||
+      implementer?.config?.modelLevel ||
+      null;
     if (!model) {
       return null;
     }
