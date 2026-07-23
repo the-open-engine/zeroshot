@@ -859,12 +859,16 @@ real S3 + XFS.
 warm workspace is therefore essentially free on disk (~0.005% of a full copy) — the reference and the live
 workspace share extents until the agent writes.
 
-**The honest cost:** the FIRST start with `--ref-dir` (no reference yet) took **6.86s vs 4.01s cold** — ~1.7×
-SLOWER, because it does a full materialize INTO the reference and then clones that into the workspace (two
-passes). So `--ref-dir` trades a one-time slower cold start for a 2.8×/17.4× faster every-subsequent-resume.
-That is the right trade for capsules (which restart/reschedule far more often than they first-start), but it
-is a real regression for a workload that only ever starts once — worth stating plainly when choosing a
-default at integration time.
+**The apparent first-start cost — and why the attribution was wrong (corrected 2026-07-23):** the first
+start with `--ref-dir` took **6.86s vs 4.01s cold**, and this log originally attributed the ~2.85s delta to
+the second (reflink) pass. **That attribution does not survive scrutiny.** A controlled local A/B
+(`RAYON_NUM_THREADS=1` vs default, 1 GB / 256 files, APFS) measured the reflink pass at **0.022s sequential
+/ 0.015s parallel** — three orders of magnitude too small to explain 2.85s. The two EC2 runs were also not
+comparable: the with-`--ref-dir` run was the FIRST S3-reading process in the batch (paying cold DNS/TLS/
+connection setup and a cold page cache), while the plain-cold run came later. The honest statement is that
+**the first-start delta is unexplained and was measured under a confounded comparison**; O9 added a
+`reflink_secs` stat so the next batch can attribute it instead of guessing. Nothing here changes the warm/
+reuse results above, which were measured against each other under identical conditions.
 
 Net: O8 does what it was built to do on real hardware — a resuming node fetches only the delta (2 blocks vs
 the full tree), reflinks the rest, produces a byte-identical workspace, and costs ~nothing in disk. Rig fully

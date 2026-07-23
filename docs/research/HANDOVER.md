@@ -135,16 +135,22 @@ O8 was then **measured end-to-end on real EC2** (c6gd.4xlarge, XFS reflink=1, re
 torn down): time-to-workspace-ready for a gen2 resume — **cold 4.01s → warm-incremental 1.42s (2.8×) →
 ref-reused 0.23s (17.4×)**, fetching only 2 blocks and reflinking 243/256 files, all workspaces
 byte-IDENTICAL to the cold one. A reflink-cloned workspace costs **0.1 MiB** of disk vs **1904 MiB** for a
-full materialize (same 2049 MiB apparent). Honest cost: the FIRST start with `--ref-dir` is ~1.7× SLOWER
-(6.86s vs 4.01s — full materialize into the reference, then clone), so it trades a one-time slower cold
-start for far faster every-subsequent-resume. Full numbers in the build log's O8 measurement entry.
+full materialize (same 2049 MiB apparent). The first start with `--ref-dir` measured 6.86s vs 4.01s cold,
+but **that delta's attribution was retracted** — the reflink pass is ~0.02s (measured by local A/B), and the
+two EC2 runs weren't comparable (the with-ref run paid first-in-batch S3 TLS/DNS warmup). O9 added
+`reflink_secs` so the next batch can attribute it. Full numbers in the build log's O8 entry.
 
 **Optimization follow-ups (biggest headroom first):**
-1. **mtime-skip** so an idle daemon avoids even re-hashing the tree (today `NoChange` still re-hashes) — now
-   the largest remaining per-cycle cost, since resume is solved.
-2. **Reconsider the `--ref-dir` first-start cost** before choosing an integration default: materializing
-   straight into the workspace and then reflinking the reference FROM it (instead of ref-then-clone) would
-   likely remove the ~1.7× first-start penalty. Needs care — the reference must still end up pristine.
+1. **Stat-cache / mtime skip on publish — BY FAR the biggest remaining win.** Measured locally (1 GB, 256
+   files): an UNCHANGED tree republish costs **1.81s**, and a 0.4%-churn republish costs **1.81s** — i.e.
+   publish cost is proportional to TREE SIZE and completely independent of churn, because it re-reads and
+   re-sha256s every file every cycle (only the upload is deduped). This recurs every publish interval
+   forever. A stat-cache skip (reuse the parent manifest's chunk list for files whose size+mtime+ctime+ino
+   +dev are unchanged, with a git-style racy window) should take an idle cycle to ~stat-only. RISK: a missed
+   change means the agent's work is silently NOT durable — the worst failure mode in this system — so it
+   needs hard guards (racy window; skip anchored to the PARENT MANIFEST so reused chunks are provably
+   durable; cache is a node-local hint that fails safe to full re-hash).
+2. **Re-measure the `--ref-dir` first start on XFS with `reflink_secs`** to explain (or dismiss) the 2.85s.
 3. **fsync barrier for O8** IF `--ref-dir` ever needs to live on non-ephemeral storage (today it must be
    ephemeral node-local — documented; the reflink clone does no re-hash so it trusts the sentinel).
 4. **Orphan-object reconciler** (needs adding `list` to `BlobStore`): list the store, drop objects with
