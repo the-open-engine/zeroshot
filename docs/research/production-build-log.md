@@ -1041,3 +1041,39 @@ invisible to their own benchmarks. **Measure on a fixture shaped like production
 guard** — twice here a safety mechanism was shipped that provably did nothing while its tests passed.
 
 99 tests green by default, **118 with `pg,s3` against a real Postgres**; no warnings, fmt clean.
+
+### 2026-07-23 — O18: the whole campaign was benchmarked on SOFTWARE SHA-256
+`sha2` compiles its ARMv8 hardware SHA-256 backend **only** under the `asm` feature
+(`sha256.rs`: `cfg(all(feature = "asm", target_arch = "aarch64"))`). `Cargo.toml` said plain
+`sha2 = "0.10"`. So every aarch64 build — **every Graviton EC2 run in this log, and every local
+benchmark on the aarch64 dev machine** — used software SHA. Measured after enabling it, same binary,
+same fixture, digests byte-identical:
+
+| | software | hardware (`sha2/asm`) |
+|---|--:|--:|
+| publish, 1 GiB | 3.12s | **0.61s (5.1×)** |
+| sha256 throughput | 344 MB/s | **1765 MB/s** |
+
+**How to read the earlier entries in this log:** every hash-bound number here (cold publish, the
+publish-width sweeps of O3/O6, the full re-hash cost, cold materialize's verify phase) understates the
+system by up to ~5×. The upload-bound conclusions (O6: uploads hide behind compute) may not survive
+re-measurement — with hashing 5× faster, compute shrinks and the upload is likelier to be exposed. The
+O5/O6/O8 EC2 numbers should be re-taken before any of them is quoted as a production figure.
+
+It was invisible precisely because it cannot change behaviour: the digests are identical, so every
+correctness test passes just as happily on the slow path. `tests/sha_backend.rs` now asserts a throughput
+floor (mutation-verified: removing the feature drops to 531 MB/s and fails).
+
+**Three more gaps closed, each mutation-verified.** (1) The racy window's ctime clause could be deleted
+with the whole suite green — and it is the clause that matters most, because any tool that restores mtime
+after writing leaves mtime permanently past the settle margin. (2) `probe_fidelity` false-passed at a
+measurable rate: seeing ctime move ONCE in a 2s window doesn't prove granularity ≤ 2s (~20% false pass at
+G=10s, re-rolled every daemon start); it now measures granularity, rewrites in place over an open fd
+rather than via truncating `fs::write`, and sweeps debris it could otherwise strand in the workspace
+before signal handlers exist. (3) The cache ceiling swept only `blocks/`, missing `manifests/` — the
+faster-growing tier, since blocks dedup across generations and manifests do not.
+
+**Campaign closed on performance.** Three independent adversarial reviews converged: what remains is
+constant-factor work on paths that are no longer the recurring cost. The measured profile at realistic
+scale (100k files) is stat-bound on publish and per-file-syscall-bound on materialize. 102 tests green by
+default, **121 with `pg,s3` against real Postgres**.
