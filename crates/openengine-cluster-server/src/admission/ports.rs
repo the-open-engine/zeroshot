@@ -13,7 +13,6 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::lifecycle::{LifecycleSnapshot, LifecycleStore, MutationReceipt};
-use crate::watch::ObservationStore;
 
 #[derive(Clone, Default)]
 pub struct CancellationSignal(Arc<AtomicBool>);
@@ -223,7 +222,7 @@ pub trait VerifiedIoLedger: Send + Sync {
 /// check cancellation immediately before writing any effect.
 #[async_trait]
 pub trait AdmissionStore:
-    ControlJournal + VerifiedIoLedger + LifecycleStore + ObservationStore + Send + Sync + 'static
+    ControlJournal + VerifiedIoLedger + LifecycleStore + Send + Sync + 'static
 {
     async fn read_snapshot(&self) -> Result<AdmissionSnapshot, StoreError>;
     async fn read_aggregate(&self) -> Result<(AdmissionSnapshot, LifecycleSnapshot), StoreError>;

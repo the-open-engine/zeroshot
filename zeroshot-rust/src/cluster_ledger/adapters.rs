@@ -16,9 +16,6 @@ use openengine_cluster_server::lifecycle::{
     CompletionResult, DispatchPermit, LifecycleSnapshot, LifecycleStore, StopProposal,
     UpdateProposal, VerifiedCompletion,
 };
-use openengine_cluster_server::watch::{
-    ObservationStore, PublicEventRecord, ReplayPageRequest, ResolvedSubscription, SubscribeRequest,
-};
 
 use super::record::{CanonicalDigest, RecordPayload};
 use super::store::IdempotencyId;
@@ -419,32 +416,6 @@ impl AdmissionStore for ClusterLedgerAdapters {
             },
         )
         .await
-    }
-}
-
-/// The native ledger does not yet project durable watch history; that projection is owned by a
-/// later issue, which must consume the merged watch types unchanged. This adapter only satisfies
-/// the additive `AdmissionStore: ObservationStore` supertrait bound so the workspace continues to
-/// build; it declines every call rather than approximating native projection.
-#[async_trait]
-impl ObservationStore for ClusterLedgerAdapters {
-    async fn subscribe(
-        &self,
-        _request: SubscribeRequest,
-        _queue_capacity: usize,
-    ) -> Result<ResolvedSubscription, ProtocolStoreError> {
-        Err(ProtocolStoreError::Internal(
-            "native ledger observation projection is not implemented yet".into(),
-        ))
-    }
-
-    async fn replay_page(
-        &self,
-        _request: ReplayPageRequest<'_>,
-    ) -> Result<Vec<PublicEventRecord>, ProtocolStoreError> {
-        Err(ProtocolStoreError::Internal(
-            "native ledger observation projection is not implemented yet".into(),
-        ))
     }
 }
 
