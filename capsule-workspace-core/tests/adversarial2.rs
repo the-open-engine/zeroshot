@@ -485,17 +485,24 @@ fn non_utf8_paths_collide_and_lose_files() {
     let ld = m.logical_digest();
     s.put_manifest(&ld, &m.to_bytes()).unwrap();
     let out = d.path().join("o");
-    let _ = materialize(&s, &ld, &out);
+    let r = materialize(&s, &ld, &out);
     let n_files = fs::read_dir(&out).map(|it| it.count()).unwrap_or(0);
     println!(
-        "[P8] two distinct non-UTF8 source names -> lossy path {:?} -> {} file(s) materialized (data loss if <2)",
-        collided, n_files
+        "[P8] two distinct non-UTF8 source names -> lossy path {:?} -> materialize: {:?}, {} file(s)",
+        collided,
+        r.as_ref().err().map(|e| e.to_string()),
+        n_files
     );
-    // BUG: two source files collapse to one on disk (the second overwrites the first).
-    assert_eq!(
-        n_files, 1,
-        "distinct non-UTF8 names collide -> silent data loss"
+    // WAS: the two entries collapsed to one file on disk (the second silently overwrote the first) and
+    // this asserted `n_files == 1` — i.e. it PINNED the data loss. materialize now REJECTS a manifest that
+    // lists the same path twice, which is the fail-fast this repo prefers: a duplicate path can only mean
+    // a lossy-decoded collision or a tampered manifest, and either way writing one of the two and calling
+    // it success is the worst available outcome. Nothing is left behind on the failure path.
+    assert!(
+        r.is_err(),
+        "a manifest listing the same path twice must be refused, not silently deduplicated"
     );
+    assert_eq!(n_files, 0, "a refused materialize leaves nothing behind");
 }
 
 // ============================================================================

@@ -493,8 +493,12 @@ mod daemon_cmd {
         };
 
         // Bound exposure to an unknown flaw in the O10 skip: every Nth cycle re-hashes the whole tree, so
-        // a hypothetical missed change is stale for at most that many cycles rather than forever. The
-        // SIGTERM drain publish below always re-hashes in full.
+        // a hypothetical missed change is stale for at most N cycles rather than forever.
+        //
+        // The counter resetting on restart is harmless, and worth stating so a reader doesn't worry:
+        // materialize requires an EMPTY tree, so every restart re-materializes, every file gets a fresh
+        // ino/mtime/ctime, and the first cycle after any restart is already a full re-hash. The valve
+        // exists for the LONG-LIVED daemon, where it bounds staleness at N x the publish interval.
         const FULL_REHASH_EVERY: u64 = 20;
         let mut cycle_n: u64 = 0;
 
@@ -577,6 +581,8 @@ mod daemon_cmd {
             if shutdown.load(Ordering::SeqCst) {
                 break;
             }
+            cycle_n += 1;
+            let full_rehash_this_cycle = cycle_n % FULL_REHASH_EVERY == 0;
             match run_and_log_cycle(
                 &tree,
                 store.as_ref(),
@@ -586,17 +592,22 @@ mod daemon_cmd {
                 publish_workers,
                 stat_cache.as_deref(),
                 &mut memo,
-                {
-                    cycle_n += 1;
-                    cycle_n % FULL_REHASH_EVERY == 0
-                },
+                full_rehash_this_cycle,
             )? {
                 CycleOutcome::Fenced { .. } => fenced_streak = (fenced_streak + 1).min(6),
                 CycleOutcome::Advanced(_) | CycleOutcome::NoChange => fenced_streak = 0,
             }
         }
 
-        // 4. Drain: one final publish, then exit 0 (well within the ~30s budget).
+        // 4. Drain: one final publish, then exit 0.
+        //
+        // This deliberately uses the FAST path (skip enabled), not a full re-hash. A forced full re-hash
+        // here was measured at 5-8x a normal cycle on fast local hardware, and scales with tree size — on a
+        // small pod with a multi-GB workspace it can exceed the default 30s terminationGracePeriodSeconds,
+        // and a SIGKILL mid-drain loses the ENTIRE final publish. Losing everything to protect against a
+        // hypothetical bad skip is the wrong trade: the drain's job is to capture the agent's last work and
+        // COMPLETE. Defense in depth against a bad skip lives in the periodic full re-hash above, which
+        // runs on a cycle that is not racing a shutdown deadline.
         eprintln!("[daemon] shutdown signal — final publish (drain)");
         run_and_log_cycle(
             &tree,
@@ -607,7 +618,7 @@ mod daemon_cmd {
             publish_workers,
             stat_cache.as_deref(),
             &mut memo,
-            true, // drain = last chance at durability: never trust the skip here
+            false, // see above: the drain must COMPLETE, so it takes the fast path
         )?;
         eprintln!("[daemon] drained; exiting 0");
         Ok(())

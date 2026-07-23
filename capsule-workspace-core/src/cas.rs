@@ -232,15 +232,29 @@ pub fn decompress(comp: &[u8]) -> Vec<u8> {
 
 /// Bounded decompress — caps output allocation at `max` bytes so a crafted block cannot
 /// blow up materialize memory (decompression-bomb defense). Legit chunks are ≤ `CHUNK`.
-pub fn decompress_bounded(comp: &[u8], max: usize) -> Result<Vec<u8>> {
+/// `expect` is the caller's declared plaintext length (it is verified against the result afterwards) and
+/// is used ONLY to size the buffer. `max` remains the hard decompression-bomb ceiling.
+pub fn decompress_bounded_hint(comp: &[u8], max: usize, expect: usize) -> Result<Vec<u8>> {
     use std::io::Read;
     let dec = zstd::stream::read::Decoder::new(comp)?;
-    let mut out = Vec::new();
+    // Pre-size to the EXPECTED length. `read_to_end` on an empty Vec grows geometrically and never
+    // shrinks, so a full-size chunk ended up holding exactly 2x its length — which silently doubled the
+    // working set MATERIALIZE_WAVE_BYTES is meant to cap. Sizing to `max` instead would fix that and
+    // introduce a worse one: a tree of 4 KB files would allocate 256 KiB per chunk, a 64x overshoot
+    // (measured: 654 MB -> 1657 MB on a 100k-small-file tree). The declared length is the right hint, and
+    // it is verified against the actual output by the caller.
+    let mut out = Vec::with_capacity(expect.min(max) + 1);
     dec.take(max as u64 + 1).read_to_end(&mut out)?;
     if out.len() > max {
         anyhow::bail!("decompressed chunk exceeds bound {} (possible bomb)", max);
     }
     Ok(out)
+}
+
+/// Bomb-bounded decompress with no length hint (sizes to the ceiling). Prefer
+/// [`decompress_bounded_hint`] wherever the plaintext length is known.
+pub fn decompress_bounded(comp: &[u8], max: usize) -> Result<Vec<u8>> {
+    decompress_bounded_hint(comp, max, max)
 }
 
 /// Reject a manifest-supplied path that would escape the workspace root (path traversal).

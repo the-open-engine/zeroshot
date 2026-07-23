@@ -648,40 +648,48 @@ pub struct MaterializeStats {
 /// id, bounded, rlen), and write the files (parallel, phase-1 regular-file write with size validation
 /// + setuid/setgid/sticky masking). Shared by `materialize` (all regulars) and `materialize_incremental`
 /// (only the changed regulars). Returns (blocks_fetched, fetch_secs, decompress_secs, write_secs).
-/// Peak decompressed bytes held in flight by one wave of `write_regular_files`. Memory is ~2x this
-/// (compressed block + decompressed chunk) and is INDEPENDENT of tree size — that independence is the
-/// whole point; see the note on `write_regular_files`.
+/// Ceiling on the LOGICAL (decompressed) bytes a single materialize wave holds. Peak is this plus the
+/// compressed blocks that wave needs.
 const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Fetch the blocks `regulars` need, decompress+VERIFY their chunks (content hash == id, bounded, rlen),
 /// and write the files. Shared by `materialize` (all regulars) and `materialize_incremental` (only the
 /// changed regulars). Returns (blocks_fetched, fetch_secs, decompress_secs, write_secs).
 ///
-/// MEMORY (the reason for the wave structure): this used to hold EVERY needed block AND EVERY decompressed
-/// chunk in RAM at once and then build each file in a third buffer — a measured ~2.7x tree size peak RSS,
-/// unbounded. A 4 GB workspace would need ~11 GB, so materialize-on-start would OOM on a small pod, leaving
-/// a partial `tree` that fails the empty-dir check on the next start: a permanent crash loop. `publish` was
-/// deliberately made memory-bounded; this is the same treatment for the read path.
+/// MEMORY: this once held EVERY needed block AND EVERY decompressed chunk at once, then built each file in
+/// a third buffer — measured ~2.6x tree size peak RSS and unbounded, so a large workspace OOM'd during
+/// materialize-on-start. Work is therefore done in WAVES.
 ///
-/// Because publish only ever emits a short chunk as a file's LAST one (asserted below), chunk `i` occupies
-/// exactly `[i*CHUNK, i*CHUNK + rlen)`. That lets each chunk be written independently with `pwrite`, so a
-/// file never has to be assembled in memory. Blocks are grouped into waves bounded by decompressed bytes;
-/// each wave is fetched, verified, written, and dropped before the next begins.
+/// The wave unit is a contiguous run of FILES, not a set of blocks. That distinction is load-bearing:
+/// blocks are flushed by publish at 64 MiB of COMPRESSED bytes, so a highly compressible block can
+/// decompress to gigabytes, and a block-keyed wave (which must always admit at least one block) inherits
+/// that with no bound at all — measured 2.03x tree on compressible input, i.e. still linear. Bounding by
+/// the files' own logical sizes bounds the decompressed working set directly, whatever the zstd ratio.
+///
+/// File-ordering also means each file is written by exactly one wave, with a single `create` + `write` +
+/// chmod — FEWER syscalls than the pre-wave version, not more (an earlier block-keyed attempt pre-created
+/// every file and reopened it per wave, which cost +2 syscalls/file and was 1.28x slower at 100k files).
+/// And because publish packs chunks in file order, a file-ordered wave needs a near-contiguous block run.
+///
+/// A single file larger than the ceiling is streamed chunk-by-chunk instead of assembled (see below).
 fn write_regular_files(
     store: &dyn BlobStore,
     manifest: &Manifest,
     out: &Path,
     regulars: &[&FileEntry],
 ) -> Result<(usize, f64, f64, f64)> {
+    use std::collections::BTreeSet;
     use std::os::unix::fs::FileExt;
 
-    // ---- PLAN. Validate every path and size from the MANIFEST before writing a single byte (stronger
-    // than the old post-hoc check, which could only fail after the data was already in hand), and record
-    // where each chunk must land.
-    let mut per_block: HashMap<BlockId, Vec<(usize, u64, ChunkId)>> = HashMap::new();
-    let mut block_rlen: HashMap<BlockId, u64> = HashMap::new();
-    for (fi, f) in regulars.iter().enumerate() {
+    // ---- PLAN. Validate every path and size from the MANIFEST before writing a single byte, and assert
+    // the invariant the offset math depends on. Ids are BORROWED from the manifest, never cloned: each is
+    // a 64-char String and cloning one per chunk costs ~100k allocations on a realistic tree.
+    let mut seen_paths: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for f in regulars.iter() {
         safe_rel_path(&f.path)?;
+        if !seen_paths.insert(f.path.as_str()) {
+            anyhow::bail!("manifest lists {} more than once", f.path);
+        }
         let mut total: u64 = 0;
         let last = f.chunks.len().saturating_sub(1);
         for (ci, cid) in f.chunks.iter().enumerate() {
@@ -689,8 +697,8 @@ fn write_regular_files(
                 .chunks
                 .get(cid)
                 .ok_or_else(|| anyhow::anyhow!("manifest missing chunk index for {}", cid))?;
-            // The pwrite offset math below is only valid if every non-final chunk is exactly CHUNK long.
-            // Publish guarantees it; a tampered manifest must not be able to turn that into a bad offset.
+            // Chunk i occupies [i*CHUNK, i*CHUNK+rlen). Publish only ever emits a short chunk LAST; a
+            // tampered manifest must not be able to turn that into an out-of-place write.
             if ci != last && loc.rlen as usize != CHUNK {
                 anyhow::bail!(
                     "non-final chunk of {} is {} bytes, expected {CHUNK} (corrupt/tampered manifest)",
@@ -698,12 +706,6 @@ fn write_regular_files(
                     loc.rlen
                 );
             }
-            per_block.entry(loc.block.clone()).or_default().push((
-                fi,
-                (ci * CHUNK) as u64,
-                cid.clone(),
-            ));
-            *block_rlen.entry(loc.block.clone()).or_insert(0) += loc.rlen as u64;
             total += loc.rlen as u64;
         }
         if total != f.size {
@@ -715,110 +717,151 @@ fn write_regular_files(
         }
     }
 
-    // ---- CREATE every file at its final length up front, so the wave writes are pure pwrites.
-    let t_w = Instant::now();
-    regulars.par_iter().try_for_each(|f| -> Result<()> {
-        let p = out.join(&f.path);
-        if let Some(d) = p.parent() {
-            std::fs::create_dir_all(d)?;
+    // ---- WAVES over files, bounded by their logical size.
+    let mut waves: Vec<&[&FileEntry]> = Vec::new();
+    let (mut start, mut acc) = (0usize, 0u64);
+    for i in 0..regulars.len() {
+        let sz = regulars[i].size;
+        if i > start && acc + sz > MATERIALIZE_WAVE_BYTES {
+            waves.push(&regulars[start..i]);
+            start = i;
+            acc = 0;
         }
-        let fh = std::fs::File::create(&p)?;
-        fh.set_len(f.size)?;
-        // Explicit chmod rather than relying on open(2) mode: that is umask-masked, and the setuid/setgid/
-        // sticky masking here is a security property, not a convenience.
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
-        Ok(())
-    })?;
-    let mut write_secs = t_w.elapsed().as_secs_f64();
-
-    // ---- WAVES, bounded by decompressed bytes so peak memory is independent of tree size.
-    let mut blocks: Vec<BlockId> = per_block.keys().cloned().collect();
-    blocks.sort();
-    let blocks_fetched = blocks.len();
-    let mut waves: Vec<Vec<BlockId>> = Vec::new();
-    let mut cur: Vec<BlockId> = Vec::new();
-    let mut cur_bytes: u64 = 0;
-    for b in blocks {
-        let sz = block_rlen.get(&b).copied().unwrap_or(0);
-        if !cur.is_empty() && cur_bytes + sz > MATERIALIZE_WAVE_BYTES {
-            waves.push(std::mem::take(&mut cur));
-            cur_bytes = 0;
-        }
-        cur_bytes += sz;
-        cur.push(b);
+        acc += sz;
     }
-    if !cur.is_empty() {
-        waves.push(cur);
+    if start < regulars.len() {
+        waves.push(&regulars[start..]);
     }
 
-    let (mut fetch_secs, mut decompress_secs) = (0.0, 0.0);
-    for wave in &waves {
-        let t = Instant::now();
-        let block_bytes: HashMap<BlockId, Vec<u8>> = wave
-            .par_iter()
-            .map(|b| -> Result<_> { Ok((b.clone(), store.get_block(b)?)) })
-            .collect::<Result<HashMap<_, _>>>()?;
-        fetch_secs += t.elapsed().as_secs_f64();
+    let (mut fetch_secs, mut decompress_secs, mut write_secs) = (0.0, 0.0, 0.0);
+    let mut all_blocks: BTreeSet<&BlockId> = BTreeSet::new();
 
-        let mut uniq: Vec<ChunkId> = wave
-            .iter()
-            .flat_map(|b| per_block[b].iter().map(|(_, _, c)| c.clone()))
-            .collect();
-        uniq.sort();
-        uniq.dedup();
-        let t = Instant::now();
-        let chunk_bytes: HashMap<ChunkId, Vec<u8>> = uniq
-            .par_iter()
+    // Decompress+VERIFY a set of chunks from already-fetched blocks. Every guarantee the read path makes
+    // about content lives here: span bounds, decompression bomb ceiling, declared length, and hash == id.
+    let verify = |cids: &[&ChunkId],
+                  blocks: &HashMap<&BlockId, Vec<u8>>|
+     -> Result<HashMap<ChunkId, Vec<u8>>> {
+        cids.par_iter()
             .map(|cid| -> Result<(ChunkId, Vec<u8>)> {
                 let loc = manifest
                     .chunks
-                    .get(cid)
+                    .get(*cid)
                     .ok_or_else(|| anyhow::anyhow!("missing chunk index"))?;
-                let blk = block_bytes
+                let blk = blocks
                     .get(&loc.block)
                     .ok_or_else(|| anyhow::anyhow!("missing block"))?;
                 let end = loc.offset as usize + loc.clen as usize;
                 if end > blk.len() {
                     anyhow::bail!("chunk span out of block bounds");
                 }
-                let raw = decompress_bounded(&blk[loc.offset as usize..end], CHUNK)?;
+                let raw = decompress_bounded_hint(
+                    &blk[loc.offset as usize..end],
+                    CHUNK,
+                    loc.rlen as usize,
+                )?;
                 if raw.len() != loc.rlen as usize {
                     anyhow::bail!("chunk rlen mismatch (corruption)");
                 }
-                if hex_sha256(&raw) != *cid {
+                if hex_sha256(&raw) != **cid {
                     anyhow::bail!("chunk hash != id (corruption/tamper)");
                 }
-                Ok((cid.clone(), raw))
+                Ok(((*cid).clone(), raw))
             })
-            .collect::<Result<HashMap<_, _>>>()?;
-        decompress_secs += t.elapsed().as_secs_f64();
-        drop(block_bytes); // compressed copies are dead once verified — halves the wave's peak
+            .collect::<Result<HashMap<_, _>>>()
+    };
 
-        // Write this wave's chunks, grouped by file so each file is opened once per wave.
-        let mut by_file: HashMap<usize, Vec<(u64, &ChunkId)>> = HashMap::new();
-        for b in wave {
-            for (fi, off, cid) in &per_block[b] {
-                by_file.entry(*fi).or_default().push((*off, cid));
+    for wave in &waves {
+        // A file bigger than the whole ceiling can't be assembled in memory — stream it instead, one
+        // bounded batch of its chunks at a time, placed with pwrite into a pre-sized file.
+        if wave.len() == 1 && wave[0].size > MATERIALIZE_WAVE_BYTES {
+            let f = wave[0];
+            let p = out.join(&f.path);
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d)?;
             }
-        }
-        let t = Instant::now();
-        by_file
-            .par_iter()
-            .try_for_each(|(fi, writes)| -> Result<()> {
-                let p = out.join(&regulars[*fi].path);
-                let fh = std::fs::OpenOptions::new().write(true).open(&p)?;
-                for (off, cid) in writes {
-                    let data = chunk_bytes
-                        .get(*cid)
-                        .ok_or_else(|| anyhow::anyhow!("missing chunk"))?;
-                    fh.write_all_at(data, *off)?;
+            let t = Instant::now();
+            let fh = std::fs::File::create(&p)?;
+            fh.set_len(f.size)?;
+            write_secs += t.elapsed().as_secs_f64();
+            let mut i = 0usize;
+            while i < f.chunks.len() {
+                let mut batch: Vec<&ChunkId> = Vec::new();
+                let mut bytes = 0u64;
+                while i < f.chunks.len() && bytes < MATERIALIZE_WAVE_BYTES {
+                    bytes += manifest.chunks[&f.chunks[i]].rlen as u64;
+                    batch.push(&f.chunks[i]);
+                    i += 1;
                 }
-                Ok(())
-            })?;
+                let need: BTreeSet<&BlockId> =
+                    batch.iter().map(|c| &manifest.chunks[*c].block).collect();
+                all_blocks.extend(need.iter().copied());
+                let t = Instant::now();
+                let blocks: HashMap<&BlockId, Vec<u8>> = need
+                    .par_iter()
+                    .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+                    .collect::<Result<HashMap<_, _>>>()?;
+                fetch_secs += t.elapsed().as_secs_f64();
+                let t = Instant::now();
+                let chunks = verify(&batch, &blocks)?;
+                decompress_secs += t.elapsed().as_secs_f64();
+                drop(blocks);
+                let t = Instant::now();
+                let base = i - batch.len();
+                for (k, cid) in batch.iter().enumerate() {
+                    fh.write_all_at(&chunks[*cid], ((base + k) * CHUNK) as u64)?;
+                }
+                write_secs += t.elapsed().as_secs_f64();
+            }
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+            continue;
+        }
+
+        // Ordinary wave: fetch its blocks, verify its chunks, then write each file whole.
+        let need: BTreeSet<&BlockId> = wave
+            .iter()
+            .flat_map(|f| f.chunks.iter())
+            .map(|c| &manifest.chunks[c].block)
+            .collect();
+        all_blocks.extend(need.iter().copied());
+        let t = Instant::now();
+        let blocks: HashMap<&BlockId, Vec<u8>> = need
+            .par_iter()
+            .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+            .collect::<Result<HashMap<_, _>>>()?;
+        fetch_secs += t.elapsed().as_secs_f64();
+
+        let mut cids: Vec<&ChunkId> = wave.iter().flat_map(|f| f.chunks.iter()).collect();
+        cids.sort();
+        cids.dedup();
+        let t = Instant::now();
+        let chunks = verify(&cids, &blocks)?;
+        decompress_secs += t.elapsed().as_secs_f64();
+        drop(blocks); // compressed copies die once verified
+
+        let t = Instant::now();
+        wave.par_iter().try_for_each(|f| -> Result<()> {
+            let p = out.join(&f.path);
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            let mut buf: Vec<u8> = Vec::with_capacity(f.size as usize);
+            for cid in &f.chunks {
+                buf.extend_from_slice(
+                    chunks
+                        .get(cid)
+                        .ok_or_else(|| anyhow::anyhow!("missing chunk"))?,
+                );
+            }
+            std::fs::write(&p, &buf)?;
+            // Explicit chmod, not open(2) mode: that is umask-masked, and the setuid/setgid/sticky
+            // masking here is a security property.
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+            Ok(())
+        })?;
         write_secs += t.elapsed().as_secs_f64();
     }
 
-    Ok((blocks_fetched, fetch_secs, decompress_secs, write_secs))
+    Ok((all_blocks.len(), fetch_secs, decompress_secs, write_secs))
 }
 
 /// Recreate the hardlinks (phase 2) then symlinks (phase 3) of `manifest` into `out`. Symlinks LAST so
@@ -879,8 +922,19 @@ pub fn materialize(
         .iter()
         .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
         .collect();
+    // A failed materialize must leave NOTHING behind. Partial output here is worse than none: the files
+    // are created at their true paths and (for the streamed large-file path) their true length, so a
+    // half-written tree looks complete to every cheap check while containing wrong bytes — and it also
+    // trips `load_verified_manifest`'s empty-dir guard on the next start, turning a transient fetch error
+    // into a permanent crash loop. Clearing `out` restores the retryable behaviour.
     let (blocks, fetch_secs, decompress_secs, write_secs) =
-        write_regular_files(store, &manifest, out, &regulars)?;
+        match write_regular_files(store, &manifest, out, &regulars) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(out);
+                return Err(e);
+            }
+        };
     write_links(&manifest, out)?;
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     Ok(MaterializeStats {
@@ -993,8 +1047,15 @@ pub fn materialize_incremental(
     let reflinked = candidates.len() - fallbacks.len();
     to_write.extend(fallbacks); // reference leaf unusable → materialize from the store instead
 
+    // See `materialize`: partial output is worse than none, so wipe `out` on failure.
     let (blocks, fetch_secs, decompress_secs, write_secs) =
-        write_regular_files(store, &manifest, out, &to_write)?;
+        match write_regular_files(store, &manifest, out, &to_write) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(out);
+                return Err(e);
+            }
+        };
     // hardlinks + symlinks are always recreated (reflink N/A); still LAST for symlink-escape safety.
     write_links(&manifest, out)?;
 
