@@ -4,6 +4,15 @@ This contract adds operational `update` and `stop` controls to an admitted run. 
 types are authoritative. The deterministic testkit backend proves the state machine and durable
 records; it is not a native graph scheduler, worker executor, or process-freezing runtime.
 
+## Initialize capabilities
+
+`initialize` returns `capabilities.graphProfiles`, a deterministic, duplicate-free array of
+supported graph profiles in canonical ascending order (`openengine.graph.full/v1` before
+`openengine.graph.single-worker/v1`). The default is an empty array: a backend advertises a
+profile only once its own certification issue upgrades its production factory to claim that
+profile. Testkit-scripted capability vectors exist to verify wire shape and dispatcher plumbing;
+they make no production claim about any backend's actual conformance.
+
 ## Update
 
 `update({labels?, logLevel?, suspended?, ifGeneration, idempotencyKey})` requires at least one

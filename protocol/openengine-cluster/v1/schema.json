@@ -1971,6 +1971,17 @@
     },
     "ServerCapabilities": {
       "additionalProperties": false,
+      "properties": {
+        "graphProfiles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GraphProfile"
+          },
+          "maxItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
       "type": "object"
     },
     "StopMode": {

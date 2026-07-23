@@ -5,6 +5,7 @@ pub mod artifact;
 pub mod canonical;
 pub mod diagnostic;
 pub mod graph;
+mod graph_profile;
 pub mod lifecycle;
 pub mod payload;
 mod payload_value;
@@ -174,8 +175,12 @@ pub struct GetResult {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServerCapabilities {}
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ServerCapabilities {
+    #[serde(default)]
+    #[schemars(schema_with = "graph_profile::graph_profile_set_schema")]
+    pub graph_profiles: GraphProfileSet,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
