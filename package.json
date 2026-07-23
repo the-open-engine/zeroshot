@@ -107,11 +107,12 @@
     "better-sqlite3": "^12.6.2",
     "chalk": "^4.1.2",
     "commander": "^14.0.2",
+    "lyo-kernel": "file:../../individual/agent-learning-workflow/dist/lyo-kernel-0.3.0.tgz",
     "node-pty": "^1.1.0",
     "omelette": "^0.4.17",
     "pidusage": "^4.0.1",
-    "puppeteer": "^24.34.0",
-    "proper-lockfile": "^4.1.2"
+    "proper-lockfile": "^4.1.2",
+    "puppeteer": "^24.34.0"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
