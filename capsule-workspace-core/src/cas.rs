@@ -20,6 +20,16 @@ pub struct ChunkLoc {
     pub offset: u64,
     pub clen: u32,
     pub rlen: u32,
+    /// TRUE compressed length of the containing block.
+    ///
+    /// Materialize fetches whole blocks, so bounding its working set needs the block's real size. Deriving
+    /// it from the chunks a manifest happens to reference under-reports by exactly the un-referenced
+    /// fraction — measured 15.6x over the intended ceiling (4.24 GB RSS) on a manifest referencing one
+    /// chunk per 62.5 MiB block. Recording it is digest-neutral: `logical_digest` covers content only and
+    /// EXCLUDES this index, so no stored manifest changes identity. `serde(default)` = 0 on manifests
+    /// written before this field existed, which callers must read as "unknown, assume BLOCK_TARGET".
+    #[serde(default)]
+    pub blen: u32,
 }
 
 /// Hex of an already-computed digest (lets callers stream into their own hasher).

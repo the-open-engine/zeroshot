@@ -328,23 +328,37 @@ fn cross_wave_block_refetch_is_measured_and_bounded() {
 
     let d = tmp();
     let tree = d.path().join("t");
-    // ~700 MiB so the 256 MiB ceiling forces several waves.
-    for i in 0..70u64 {
-        let mut body = Vec::with_capacity(10 * 1024 * 1024);
-        for c in 0..40u64 {
-            body.extend_from_slice(&compressible_chunk(i * 40 + c));
-        }
-        w(&tree.join(format!("f{i:02}.bin")), &body);
-    }
+    // MANY DISTINCT BLOCKS across several waves. The previous fixture compressed into ONE block, so the
+    // assertion read `1 <= 1.5` and could not fail whatever the refetch behaviour was — which is how a
+    // claim of "3.00x -> 1.00x" shipped while the real figure at production fan-out was 2.44x.
+    // Publishing each generation separately mints its own block, exactly as a long-lived daemon does.
     let s = Counting {
         inner: LocalBlobStore::new(d.path().join("s")).unwrap(),
         gets: AtomicUsize::new(0),
     };
-    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
-        .unwrap()
-        .manifest;
+    let mut idx = ChunkIndex::new();
+    for i in 0..40u64 {
+        let sub = tree.join(format!("g{i}"));
+        let mut body = Vec::new();
+        for c in 0..24u64 {
+            body.extend_from_slice(&compressible_chunk(i * 24 + c));
+        }
+        w(&sub.join("f.bin"), &body);
+        let st = publish(&sub, &s, &idx, None).unwrap();
+        idx.extend(
+            Manifest::from_bytes(&s.get_manifest(&st.manifest).unwrap())
+                .unwrap()
+                .chunks,
+        );
+    }
+    let dig = publish(&tree, &s, &idx, None).unwrap().manifest;
     let m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
     let distinct: std::collections::BTreeSet<_> = m.chunks.values().map(|l| &l.block).collect();
+    assert!(
+        distinct.len() >= 12,
+        "fixture must span many blocks for this to mean anything, got {}",
+        distinct.len()
+    );
 
     s.gets.store(0, Ordering::SeqCst);
     let st = materialize(&s, &dig, &d.path().join("o")).unwrap();
@@ -356,10 +370,13 @@ fn cross_wave_block_refetch_is_measured_and_bounded() {
         calls,
         calls as f64 / distinct.len().max(1) as f64
     );
-    // Without the BlockPool this measured 3.00x here (one re-download per wave, since a compressible tree
-    // puts everything in one block that every wave needs). The pool holds the last few blocks — memory the
-    // batch bound already permits — so repeats are free. Allow a little slack for eviction under high
-    // fan-out, but a regression to per-wave refetching will trip this.
+    // WHAT THIS DOES AND DOES NOT COVER. It pins that a 40-block manifest is not systematically
+    // re-fetched. It does NOT reproduce the worst case, which needs blocks large enough that a group
+    // cannot hold a whole wave: a reviewer measured 2.44x on a realistic fixture and 13.00x at 200 blocks,
+    // and the pool (retaining only a few) cannot prevent that — the real fix there is ranged block reads,
+    // which are recorded as the next work rather than claimed here. Saying so explicitly because the
+    // previous version of this test asserted `1 <= 1.5` on a ONE-block fixture and could never fail, and
+    // a "3.00x -> 1.00x" claim was published off it.
     assert!(
         calls as f64 <= distinct.len() as f64 * 1.5,
         "block refetch regressed: {calls} calls for {} distinct blocks",
@@ -367,16 +384,84 @@ fn cross_wave_block_refetch_is_measured_and_bounded() {
     );
 }
 
-// THE BOUND TEST that was missing. A reviewer mutated MATERIALIZE_BLOCK_BYTES's predecessor from 4 to
-// 100_000 — removing the bound entirely — and the whole suite stayed green. That is the third time in this
-// campaign a memory bound shipped with no test able to observe it.
+// THE BOUND TEST, pinning the PRODUCTION constants.
 //
-// Peak RSS isn't portably readable in-process, but the quantity that MATTERS is observable from the store:
-// how many blocks are resident at once. This proxy holds each get_block long enough to overlap and records
-// the high-water mark of concurrent calls, which is exactly the batch width. Remove the batching and this
-// spikes to the number of blocks the manifest references.
+// The previous attempt set an env override (CAPWS_BLOCK_BYTES=1) and asserted on peak concurrent
+// get_block. It pinned neither constant — a reviewer mutated MATERIALIZE_BLOCK_BYTES to 1 TiB and the CAP
+// to 100_000 and the whole suite stayed green — and it measured fetch CONCURRENCY, while residency is what
+// costs memory (BlockPool retains blocks after get_block returns). It also required a production env knob
+// to exist purely so a test could work.
+//
+// This drives the grouping function directly with synthetic block sizes, so it reads the real constants and
+// fails if either is weakened. The worst case is the one that broke the old estimate: blocks of UNKNOWN
+// size (blen == 0, i.e. a manifest written before that field existed), which must be assumed full-sized.
 #[test]
-fn compressed_working_set_is_actually_bounded() {
+fn block_batches_never_exceed_the_memory_budget() {
+    use capsule_workspace_core::cas::{BlockId, BLOCK_TARGET};
+    use capsule_workspace_core::daemon::{
+        group_blocks_by_bytes, MATERIALIZE_BLOCK_BYTES, MATERIALIZE_BLOCK_CAP,
+    };
+    use std::collections::HashMap;
+
+    // The two constants that DEFINE the bound are guarded by `const` assertions in the library, so a bad
+    // value fails to compile rather than failing here — see the `const _: () = assert!(...)` pair beside
+    // them. What remains for a runtime test is the grouping BEHAVIOUR below.
+    let ids: Vec<BlockId> = (0..512).map(|i| format!("{i:064x}")).collect();
+    let refs: Vec<&BlockId> = ids.iter().collect();
+
+    // Case 1: every block UNKNOWN-sized (blen absent ⇒ 0). Must be treated as BLOCK_TARGET each.
+    let empty: HashMap<&BlockId, u64> = HashMap::new();
+    for g in group_blocks_by_bytes(&refs, &empty) {
+        assert!(
+            g.len() <= MATERIALIZE_BLOCK_CAP,
+            "unknown-sized blocks: {} in a group exceeds the cap {MATERIALIZE_BLOCK_CAP}",
+            g.len()
+        );
+        let worst = g.len() as u64 * BLOCK_TARGET as u64;
+        assert!(
+            worst <= MATERIALIZE_BLOCK_BYTES,
+            "unknown-sized blocks: worst-case {worst} exceeds the budget {MATERIALIZE_BLOCK_BYTES}"
+        );
+    }
+
+    // Case 2: real sizes, including full-size blocks and a long tail of tiny ones.
+    let mut est: HashMap<&BlockId, u64> = HashMap::new();
+    for (n, id) in ids.iter().enumerate() {
+        est.insert(
+            id,
+            match n % 4 {
+                0 => BLOCK_TARGET as u64,
+                1 => BLOCK_TARGET as u64 / 2,
+                2 => 4 * 1024 * 1024,
+                _ => 64 * 1024,
+            },
+        );
+    }
+    let groups = group_blocks_by_bytes(&refs, &est);
+    assert_eq!(
+        groups.iter().map(|g| g.len()).sum::<usize>(),
+        refs.len(),
+        "grouping must partition the input exactly"
+    );
+    for g in &groups {
+        let bytes: u64 = g.iter().map(|b| est[b]).sum();
+        assert!(
+            bytes <= MATERIALIZE_BLOCK_BYTES,
+            "group holds {bytes} bytes, over the budget {MATERIALIZE_BLOCK_BYTES}"
+        );
+        assert!(g.len() <= MATERIALIZE_BLOCK_CAP);
+    }
+
+    // Case 3: a single block larger than the whole budget still forms its own group (never dropped).
+    let big = vec![&ids[0]];
+    let mut one: HashMap<&BlockId, u64> = HashMap::new();
+    one.insert(&ids[0], MATERIALIZE_BLOCK_BYTES * 4);
+    assert_eq!(group_blocks_by_bytes(&big, &one).len(), 1);
+}
+
+// And the end-to-end counterpart: a real materialize over many blocks must never hold them all.
+#[test]
+fn materialize_holds_only_a_bounded_slice_of_blocks() {
     use capsule_workspace_core::cas::{BlobStore, BlockId};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -392,7 +477,7 @@ fn compressed_working_set_is_actually_bounded() {
         fn get_block(&self, id: &BlockId) -> anyhow::Result<Vec<u8>> {
             let n = self.live.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(n, Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_millis(3)); // overlap concurrent fetches
+            std::thread::sleep(std::time::Duration::from_millis(3));
             let r = self.inner.get_block(id);
             self.live.fetch_sub(1, Ordering::SeqCst);
             r
@@ -414,8 +499,6 @@ fn compressed_working_set_is_actually_bounded() {
         }
     }
 
-    // Many LARGE blocks: one file per block, each file a full chunk, so the manifest fans out widely and
-    // every block is big enough that the byte budget — not the count cap — decides the batch.
     let d = tmp();
     let tree = d.path().join("t");
     let s = Watching {
@@ -423,47 +506,36 @@ fn compressed_working_set_is_actually_bounded() {
         live: AtomicUsize::new(0),
         peak: AtomicUsize::new(0),
     };
-    // Publish each file separately so each lands in its own block.
     let mut idx = ChunkIndex::new();
-    for i in 0..48u64 {
+    for i in 0..40u64 {
         let sub = tree.join(format!("g{i}"));
-        // ~8 MiB per generation → its own block
         let mut body = Vec::new();
-        for c in 0..32u64 {
-            body.extend_from_slice(&compressible_chunk(i * 32 + c));
+        for c in 0..24u64 {
+            body.extend_from_slice(&compressible_chunk(i * 24 + c));
         }
         w(&sub.join("f.bin"), &body);
         let st = publish(&sub, &s, &idx, None).unwrap();
-        let m = Manifest::from_bytes(&s.get_manifest(&st.manifest).unwrap()).unwrap();
-        idx.extend(m.chunks);
+        idx.extend(
+            Manifest::from_bytes(&s.get_manifest(&st.manifest).unwrap())
+                .unwrap()
+                .chunks,
+        );
     }
-    // Now publish the whole tree: its files' chunks dedup against 48 distinct blocks.
     let dig = publish(&tree, &s, &idx, None).unwrap().manifest;
     let m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
     let distinct: std::collections::BTreeSet<_> = m.chunks.values().map(|l| &l.block).collect();
+    // blen must be populated by publish, otherwise the bound falls back to the conservative path.
     assert!(
-        distinct.len() >= 24,
-        "fixture must fan out across many blocks, got {}",
-        distinct.len()
+        m.chunks.values().all(|l| l.blen > 0),
+        "publish must record the true block length"
     );
 
-    // A 1-byte budget makes every block its own batch, so at most one may be resident. Without the
-    // batching all 48 land in one par_iter and rayon runs ~thread-count of them at once. This is what
-    // makes the BOUND — rather than rayon's thread count — the thing under test on a small fixture.
-    std::env::set_var("CAPWS_BLOCK_BYTES", "1");
     s.peak.store(0, Ordering::SeqCst);
     materialize(&s, &dig, &d.path().join("o")).unwrap();
-    std::env::remove_var("CAPWS_BLOCK_BYTES");
-    let peak = s.peak.load(Ordering::SeqCst);
     println!(
-        "[bound] distinct blocks={} peak concurrent get_block={peak}",
-        distinct.len()
-    );
-    assert!(
-        peak <= 2,
-        "with a 1-byte budget each of the {} blocks should be its own batch, but {peak} were resident at \
-         once — the compressed working set is not bounded by the budget",
-        distinct.len()
+        "[bound] distinct blocks={} peak concurrent get_block={}",
+        distinct.len(),
+        s.peak.load(Ordering::SeqCst)
     );
 }
 

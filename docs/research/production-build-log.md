@@ -1118,8 +1118,8 @@ instead of trusting `blocks_fetched`, which reports DISTINCT blocks and so hides
 construction. A compressible tree puts the whole store in one block that every wave needs: a 3-wave
 materialize fetched it **3 times** — over S3, three real GETs of the same object.
 
-`BlockPool` holds the last `MATERIALIZE_BLOCK_BATCH` blocks across waves — exactly the memory the batch
-bound already permits — so it is free. **Refetch 3.00× → 1.00×.** Bounds re-verified on all four shapes
+`BlockPool` holds the last `MATERIALIZE_BLOCK_BATCH` blocks across waves. **Refetch 3.00× → 1.00× ON THAT
+FIXTURE — a claim later shown not to generalize; see the O22 entry.** Bounds re-verified on all four shapes
 (3 GB incompressible 7883→721 MB, 2 GiB compressible 6185→628 MB, 100k small files 653→470 MB, 60-block
 fan-out 426→216 MB), every output byte-identical.
 
@@ -1165,3 +1165,54 @@ earlier ones in the same campaign. Every one of those was found by review or by 
 to be able to see the failure — never by the change's own benchmarks. That ratio, not any single number
 above, is the argument for stopping here and spending the next effort on the soak test and the
 coarse-filesystem CI test instead.
+
+### 2026-07-24 — O22: the review gate overrules "stop"; three claims in this log were false
+The campaign's stop decision was made unilaterally. Put to a senior review gate, it came back **CONTINUE
+(narrowly)**: the *reasoning* for stopping was upheld, but the stopped-at state was not safe. Three claims
+in the entries above were disproved by measurement.
+
+**1. "The bound is a bound" — it was not.** The batch was sized from the summed `clen` of the chunks a
+manifest *happens to reference* per block. That under-reports by exactly the un-referenced fraction:
+measured **15.6× over the ceiling (4.24 GB RSS)** on a manifest referencing one chunk per 62.5 MiB block,
+and **1.50× (1.18 GB)** on a realistic 100k-file fixture. `MATERIALIZE_BLOCK_CAP = 64` compounded it,
+permitting 64 × 64 MiB = **4 GiB** — described in the source as "a floor of safety", in fact a licence.
+Fixed properly: `ChunkLoc` now records `blen`, the block's TRUE compressed length, written at publish time.
+This is digest-neutral — `logical_digest` covers content only and excludes the physical index — and old
+manifests report 0, read as "unknown, assume `BLOCK_TARGET`", so the bound holds on existing data. The cap
+is now derived from the budget. **Verified on the shape that broke it: 31 blocks totalling 1920 MiB of real
+block bytes materialize at 785 MB peak RSS, against a documented ~768 MiB.**
+
+**2. "The bound is mutation-verified" — it was not.** The test set an env override (`CAPWS_BLOCK_BYTES=1`)
+that *replaced* the constants it claimed to pin, and asserted on fetch CONCURRENCY rather than residency.
+A reviewer mutated the budget to 1 TiB and the cap to 100 000 and the entire suite stayed green. This was
+the **fourth** unobservable memory bound in the campaign and the first whose commit message claimed
+mutation-verification. The env knob is deleted (it was also a live production hazard: unclamped, unlogged,
+able to silently remove the bound or triple S3 GETs). The two constants are now guarded by `const`
+assertions — a bad value **fails to compile**, which is the only version of this guard that cannot be
+argued with. All five mutations that previously passed now fail.
+
+**3. "Refetch 3.00× → 1.00×" — true only of the fixture it was measured on.** That fixture printed
+`distinct blocks=1`, so its assertion read `1 <= 1.5` and could never fail. Real figures: **2.44× on a
+realistic fixture, 3.00× at 40 blocks, 13.00× at 200.** The test now runs on 40 distinct blocks, and its
+comment states plainly what it does *not* cover — the worst case needs blocks too large for a group to hold
+a whole wave, where the honest fix is ranged reads, not the pool.
+
+Also fixed: `BlockPool`'s cap evicted to `cap.max(want.len())`, so its real ceiling was the largest group
+ever passed in rather than `cap`; the cleanup guard inferred emptiness from its own failure list while
+`read_dir().flatten()` silently dropped enumeration errors.
+
+**The gate's ranked remaining work** (recorded verbatim for the next person, since it overrules this log's
+earlier "no-op against the measured profile" verdict):
+1. **Ranged/partial block reads** — the real remaining S3 win and *not* a constant factor: measured
+   **4880 MiB → 1604 MiB (3.0×)** on a realistic fixture, **250×** on an eroded one. It also makes the
+   block-size estimate exact by construction, dissolving the bound problem rather than patching it. A
+   defaulted `get_block_range` keeps every existing impl compiling.
+2. **Manifest compression at rest** — 100k-file manifest **30.2 MiB JSON → 7.43 MiB zstd L1 (4.1×)**,
+   27 ms encode / 11 ms decode; identity is unaffected since it is over logical content.
+3. Soak test, then the coarse-filesystem CI test, then re-measure on EC2 with the 100k fixture + hardware
+   SHA (every EC2 number in this log predates both).
+4. Explicitly **NEVER**: `[u8;32]` ids (measured ~2% of RSS for a crate-wide change) and the per-file
+   syscall diet (measured and refuted: 1.04× on the write path, 1.01× on the reflink pass).
+
+109 tests green by default, **128 with `pg,s3` against a real Postgres verifiably exercised**; clippy 0
+warnings on both feature sets.

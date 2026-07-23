@@ -206,6 +206,7 @@ pub fn publish(
             return Ok(());
         }
         let (bid, bytes, members) = std::mem::take(cur).finalize();
+        let blen = bytes.len() as u32; // TRUE block size — materialize bounds its working set with this
         for (id, off, clen, rlen) in members {
             new_index.insert(
                 id,
@@ -214,6 +215,7 @@ pub fn publish(
                     offset: off,
                     clen,
                     rlen,
+                    blen,
                 },
             );
         }
@@ -447,6 +449,7 @@ pub fn publish_pipelined(
                     return Ok(());
                 }
                 let (bid, bytes, members) = std::mem::take(cur).finalize();
+                let blen = bytes.len() as u32;
                 for (id, off, clen, rlen) in members {
                     ni.insert(
                         id,
@@ -455,6 +458,7 @@ pub fn publish_pipelined(
                             offset: off,
                             clen,
                             rlen,
+                            blen,
                         },
                     );
                 }
@@ -667,6 +671,9 @@ impl<'a> BlockPool<'a> {
         }
     }
     /// Ensure `want` are resident, evicting oldest first. Fetches only what is missing.
+    ///
+    /// Retention is capped at `cap` blocks BEYOND the current group. Evicting to `cap.max(want.len())`
+    /// instead made the pool's real ceiling the largest group ever passed in, so the "cap" bounded nothing.
     fn load(&mut self, want: &[&BlockId]) -> Result<()> {
         let missing: Vec<&BlockId> = want
             .iter()
@@ -747,13 +754,19 @@ impl Drop for ClearOutOnFailure<'_> {
         }
         // Never silent: a cleanup that half-succeeded leaves a non-empty `out`, which fails the next
         // start's empty-dir precondition — i.e. exactly the crash loop this guard exists to prevent. The
-        // caller still gets the ORIGINAL error, so without this line that state would be invisible.
-        if !failed.is_empty() {
+        // caller still gets the ORIGINAL error, so without this the state would be invisible.
+        //
+        // Check emptiness DIRECTLY rather than inferring it from `failed`: `read_dir().flatten()` above
+        // drops per-entry errors, so an entry that failed to enumerate is neither deleted nor recorded.
+        let still_populated = std::fs::read_dir(self.out)
+            .map(|mut it| it.next().is_some())
+            .unwrap_or(true);
+        if !failed.is_empty() || still_populated {
             eprintln!(
-                "[materialize] WARNING: {} left in {} after a failed materialize — the next start will \
-                 refuse a non-empty workspace until it is cleared",
-                failed.len(),
-                self.out.display()
+                "[materialize] WARNING: {} could not be emptied after a failed materialize ({} known \
+                 failures) — the next start will refuse a non-empty workspace until it is cleared",
+                self.out.display(),
+                failed.len()
             );
         }
     }
@@ -774,28 +787,32 @@ const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 /// exactly the high-fan-out shape the bound exists for — and on S3 the fetch phase is latency-dominated.
 /// Blocks are sized from the chunk index (the summed `clen` of the chunks we need from each), so small
 /// blocks now yield many concurrent fetches while large ones still yield few.
-const MATERIALIZE_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
+pub const MATERIALIZE_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
 
-/// The effective budget, read once. `CAPWS_BLOCK_BYTES` exists so a TEST can make the bound the binding
-/// constraint on a small fixture: proving a 256 MiB ceiling honestly otherwise needs hundreds of MiB of
-/// incompressible blocks per run. Three memory bounds in this campaign shipped with no test able to
-/// observe them; a knob that makes the bound observable is worth more than the purity of not having one.
-fn materialize_block_budget() -> u64 {
-    // Read per call, not memoised: this runs once per wave (not per block), and a cached value cannot be
-    // set by a test that starts after another test in the same process already read it.
-    std::env::var("CAPWS_BLOCK_BYTES")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(MATERIALIZE_BLOCK_BYTES)
-}
+/// Hard ceiling on blocks resident at once. Set so that even if EVERY block is unknown-sized and assumed
+/// to be a full `BLOCK_TARGET`, the batch still fits the byte budget. It was previously 64, which permitted
+/// 64 x 64 MiB = 4 GiB — a licence, not a bound.
+pub const MATERIALIZE_BLOCK_CAP: usize = (MATERIALIZE_BLOCK_BYTES / BLOCK_TARGET as u64) as usize;
 
-/// Hard ceiling on blocks resident at once, whatever the size estimate says — a floor of safety if the
-/// index under-reports (we only see the chunks THIS manifest references, not the whole block).
-const MATERIALIZE_BLOCK_CAP: usize = 64;
+// COMPILE-TIME guards on the two values that define the memory bound. Runtime tests could not protect
+// these: asserting "each group fits the budget" is self-referential, so raising the budget kept every test
+// green — which is how two mutations of these constants survived a test written specifically to pin them.
+// As `const` assertions a bad value does not build at all, which is the only form of this guard that
+// cannot be argued with.
+const _: () = assert!(
+    MATERIALIZE_BLOCK_CAP as u64 * BLOCK_TARGET as u64 <= MATERIALIZE_BLOCK_BYTES,
+    "the block-count cap must not permit more full-size blocks than the byte budget allows; it exists \
+     for the case where block sizes are UNKNOWN, so it has to be derived from the budget"
+);
+const _: () = assert!(
+    MATERIALIZE_BLOCK_BYTES <= 512 * 1024 * 1024,
+    "materialize's working-set budget scales peak RSS directly and this runs on small pods; raising it \
+     is a deliberate operational decision, not a tweak"
+);
 
-/// Blocks resident in the pool across waves (see `BlockPool`). Small, since its only job is to avoid
-/// re-fetching a block a neighbouring wave also needs.
+/// Blocks the pool RETAINS across waves, beyond the current group. Small on purpose: its only job is to
+/// avoid re-fetching a block a neighbouring wave also needs, and every retained block is resident memory
+/// on top of the group's own.
 ///
 /// Bounding the DECOMPRESSED side alone is not enough. A wave fetches every distinct block its files
 /// touch, and nothing caps that count: a long-lived daemon republishes against the parent manifest, so an
@@ -808,21 +825,27 @@ const MATERIALIZE_BLOCK_BATCH: usize = 4;
 
 /// Group `blocks` into batches whose ESTIMATED compressed size stays under [`MATERIALIZE_BLOCK_BYTES`].
 ///
-/// The estimate is the summed `clen` of the chunks this manifest references in each block — exact when we
-/// need the whole block, an under-estimate otherwise, hence the hard [`MATERIALIZE_BLOCK_CAP`] on count.
+/// Sizes come from `ChunkLoc::blen`, the block's TRUE compressed length, recorded at publish time. A
+/// manifest written before that field existed reports 0, which is read as `BLOCK_TARGET` — conservative,
+/// so the bound still holds on old data. Deriving the size from the chunks a manifest happens to reference
+/// (the previous approach) under-reports by the un-referenced fraction: measured 15.6x over the ceiling.
 /// Sizing by bytes rather than a fixed count is what lets a high-fan-out manifest of SMALL blocks fetch
 /// many concurrently (the latency case) while a manifest of 64 MiB blocks still fetches few (the memory
 /// case). One block always forms at least its own batch.
-fn group_blocks_by_bytes<'a>(
+pub fn group_blocks_by_bytes<'a>(
     blocks: &[&'a BlockId],
     est: &HashMap<&BlockId, u64>,
 ) -> Vec<Vec<&'a BlockId>> {
     let mut out: Vec<Vec<&BlockId>> = Vec::new();
     let (mut cur, mut acc): (Vec<&BlockId>, u64) = (Vec::new(), 0);
     for b in blocks {
-        let sz = est.get(b).copied().unwrap_or(BLOCK_TARGET as u64).max(1);
+        // 0 == "written before blen existed" == unknown == assume the worst.
+        let sz = match est.get(b).copied().unwrap_or(0) {
+            0 => BLOCK_TARGET as u64,
+            n => n,
+        };
         if !cur.is_empty()
-            && (acc + sz > materialize_block_budget() || cur.len() >= MATERIALIZE_BLOCK_CAP)
+            && (acc + sz > MATERIALIZE_BLOCK_BYTES || cur.len() >= MATERIALIZE_BLOCK_CAP)
         {
             out.push(std::mem::take(&mut cur));
             acc = 0;
@@ -887,7 +910,7 @@ fn write_regular_files(
                     loc.rlen
                 );
             }
-            *block_clen.entry(&loc.block).or_insert(0) += loc.clen as u64;
+            block_clen.insert(&loc.block, loc.blen as u64);
             total += loc.rlen as u64;
         }
         if total != f.size {
