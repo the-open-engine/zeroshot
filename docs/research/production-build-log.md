@@ -931,3 +931,68 @@ the skip-enabled manifest must equal a full re-hash of the same tree. Plus GC-in
 idempotence, cross-generation cache refusal, racy-file re-hash, `known`-absent refusal, and links
 unaffected. Opt-in via `publish --stat-cache` / `daemon --stat-cache`; without it behavior is byte-for-byte
 unchanged. 91 tests green; clippy/fmt clean on default and `pg,s3`.
+
+### 2026-07-23 — O11-O15: manifest round-trips, a latent OOM, and two safety mechanisms that were not running
+Driven by two independent adversarial reviews. Both re-measured at REALISTIC workspace scale (100k files)
+instead of the 256-file fixture this campaign had been using, and that reframing is the most valuable thing
+to come out of the whole effort — the same per-file cost reads as 22ms on the old fixture and ~10.8s at
+95k files. **Every measurement below the fixture line should be re-taken at 100k files before it is trusted.**
+
+**O11 — stop re-fetching manifests every cycle.** With O10 the idle cycle collapsed to ~0.1s, which promoted
+the manifest round-trips to the dominant cost: `publish_cycle` fetched+parsed the parent manifest, then
+fetched+parsed the manifest publish had just written (for the GC touch). On a 20k-file tree that manifest is
+6.3 MB, so a steady-state cycle paid ~12 MB of store reads per interval per capsule — over S3, two multi-MB
+GETs every 30s. `publish_pipelined` now returns the manifest it built, and a `ManifestMemo` caches the last
+one by digest.
+
+**O13 — `materialize` had unbounded memory. This was a latent OUTAGE, not an optimization.** It held EVERY
+needed block AND EVERY decompressed chunk in RAM at once, then assembled each file in a third buffer.
+Measured same-machine A/B (identical output both ways):
+
+| tree | OLD peak RSS | NEW peak RSS |
+|---|--:|--:|
+| 1 GB | 2665 MB (2.60x) | 700 MB |
+| 3 GB | **7882 MB (2.57x)** | **744 MB** |
+
+Old scales linearly with tree size; new is FLAT. A 4 GB workspace needed ~11 GB, i.e. an OOM during
+materialize-on-start, leaving a partial `tree` that fails the empty-dir check on every subsequent start: a
+permanent crash loop. `publish` was deliberately made memory-bounded long ago; the read path never got the
+same treatment. Fixed by processing blocks in waves bounded by decompressed bytes, writing each chunk with
+`pwrite` at `i*CHUNK` (valid because publish only ever emits a short chunk LAST — now asserted, so a
+tampered manifest cannot turn the offset math into a stray write). Size validation moved BEFORE the first
+byte is written. Also 2.4x faster.
+
+**Two safety mechanisms that were not actually running.** Worth recording as a pattern, not as two bugs:
+- O10 as first committed silently DESTROYED a file. A reviewer built an HFS+ (1s granularity) harness and
+  demonstrated it end-to-end: same-size in-place rewrite inside one timestamp tick → identical fingerprint →
+  skipped → and because the fingerprint never changes again, the stale chunk list is re-emitted FOREVER
+  while the cycle reports `NoChange`. The comparator was right; its operands were in different clock
+  domains (filesystems truncate mtime DOWN, which moves the comparison the unsafe way).
+- The settle margin that fixed it shipped alongside `force_full_rehash` — the valve meant to bound exposure
+  to exactly this class — as an UNUSED PARAMETER, while the commit message asserted it worked and that
+  clippy was clean. It emitted an unused-variable warning; the verification had only ever grepped `^error`.
+
+Both fixed. The process lesson is the durable one: **check warnings, and mutation-test the guard.** The
+integration tests could not have caught either, because the `settled()` helper advances the safety-critical
+timestamp in the PERMISSIVE direction — a reviewer reverted `may_skip` to its unsafe form and all 7 tests
+still passed. There is now a test using REAL timestamps that asserts zero skips, verified by mutation to
+fail when the margin is removed.
+
+**O15 — enforce the filesystem assumption instead of documenting it.** The guard is sound only where an
+in-place rewrite moves ctime within the settle margin; an operator can point `--tree` at any PVC. It matters
+more than it looks, because a file whose mtime was normalised by `tar -x`/`rsync -t`/Bazel is permanently
+past the margin, leaving ctime as the ONLY defence — and ctime is frozen on SMB/CIFS, vfat, exFAT and some
+FUSE backends. `probe_fidelity()` now rewrites a probe file in place at startup and requires ctime to move;
+on failure the daemon withholds the cache path and publishes with a full re-hash, saying so loudly.
+
+**Also closed:** the `ManifestMemo` no longer caches our OWN just-built manifest — `logical_digest` excludes
+the physical chunk→block index and `put_manifest` is don't-overwrite-if-present, so a byte-identical tree
+published by another lineage means the store keeps THEIR index; caching ours would let `known` diverge from
+what GC marks. A golden-digest test now pins the canonical form (a silent change would orphan every stored
+manifest, and no other test could catch it — they all compare digests from the same build). `hex()` uses a
+lookup table instead of `format!` per byte (~3.2M allocations per 100k-chunk publish); `logical_digest`
+streams into the hasher instead of allocating a ~17 MB intermediate.
+
+Verified end-to-end against real Postgres driving the actual interval loop: an agent edit is DETECTED while
+the skip is active, and a resume into a fresh workspace restores the tree byte-identical. 96 tests green by
+default, 113 with `pg,s3` against real Postgres.
