@@ -448,7 +448,7 @@ fn materialize_trusts_size_field_for_allocation() {
 // the manifest layer: two entries that a lossy walk would produce collapse to one on write.
 // ============================================================================
 #[test]
-fn non_utf8_paths_collide_and_lose_files() {
+fn duplicate_lossy_paths_are_refused_not_silently_merged() {
     let d = tmp();
     let store = d.path().join("s");
     let s = LocalBlobStore::new(&store).unwrap();

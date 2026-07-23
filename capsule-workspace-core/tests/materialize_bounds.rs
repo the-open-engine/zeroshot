@@ -285,3 +285,84 @@ fn duplicate_paths_are_refused_on_the_incremental_path() {
     );
     assert_eq!(fs::read_dir(&out).map(|it| it.count()).unwrap_or(0), 0);
 }
+
+// Cross-wave block refetch, measured rather than assumed.
+//
+// File-ordered waves trade a bounded working set for the possibility of fetching a block once per wave
+// that references it, where the earlier block-keyed design fetched each block exactly once. That is a real
+// cost (over S3 it is a real GET), so it should be a number in the record, not a guess. `blocks_fetched`
+// reports DISTINCT blocks, so it hides the amplification — this counts actual calls.
+#[test]
+fn cross_wave_block_refetch_is_measured_and_bounded() {
+    use capsule_workspace_core::cas::{BlobStore, BlockId};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counting {
+        inner: LocalBlobStore,
+        gets: AtomicUsize,
+    }
+    impl BlobStore for Counting {
+        fn put_block(&self, id: &BlockId, b: &[u8]) -> anyhow::Result<()> {
+            self.inner.put_block(id, b)
+        }
+        fn get_block(&self, id: &BlockId) -> anyhow::Result<Vec<u8>> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get_block(id)
+        }
+        fn put_manifest(&self, d: &str, b: &[u8]) -> anyhow::Result<()> {
+            self.inner.put_manifest(d, b)
+        }
+        fn get_manifest(&self, d: &str) -> anyhow::Result<Vec<u8>> {
+            self.inner.get_manifest(d)
+        }
+        fn has_block(&self, id: &BlockId) -> bool {
+            self.inner.has_block(id)
+        }
+        fn delete_block(&self, id: &BlockId) -> anyhow::Result<bool> {
+            self.inner.delete_block(id)
+        }
+        fn delete_manifest(&self, d: &str) -> anyhow::Result<bool> {
+            self.inner.delete_manifest(d)
+        }
+    }
+
+    let d = tmp();
+    let tree = d.path().join("t");
+    // ~700 MiB so the 256 MiB ceiling forces several waves.
+    for i in 0..70u64 {
+        let mut body = Vec::with_capacity(10 * 1024 * 1024);
+        for c in 0..40u64 {
+            body.extend_from_slice(&compressible_chunk(i * 40 + c));
+        }
+        w(&tree.join(format!("f{i:02}.bin")), &body);
+    }
+    let s = Counting {
+        inner: LocalBlobStore::new(d.path().join("s")).unwrap(),
+        gets: AtomicUsize::new(0),
+    };
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    let distinct: std::collections::BTreeSet<_> = m.chunks.values().map(|l| &l.block).collect();
+
+    s.gets.store(0, Ordering::SeqCst);
+    let st = materialize(&s, &dig, &d.path().join("o")).unwrap();
+    let calls = s.gets.load(Ordering::SeqCst);
+    println!(
+        "[refetch] distinct blocks={} reported={} actual get_block calls={} amplification={:.2}x",
+        distinct.len(),
+        st.blocks_fetched,
+        calls,
+        calls as f64 / distinct.len().max(1) as f64
+    );
+    // Without the BlockPool this measured 3.00x here (one re-download per wave, since a compressible tree
+    // puts everything in one block that every wave needs). The pool holds the last few blocks — memory the
+    // batch bound already permits — so repeats are free. Allow a little slack for eviction under high
+    // fan-out, but a regression to per-wave refetching will trip this.
+    assert!(
+        calls as f64 <= distinct.len() as f64 * 1.5,
+        "block refetch regressed: {calls} calls for {} distinct blocks",
+        distinct.len()
+    );
+}

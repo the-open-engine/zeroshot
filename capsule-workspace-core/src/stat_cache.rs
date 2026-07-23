@@ -20,6 +20,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+struct VersionProbe {
+    version: u32,
+}
+
 /// Bump when the fingerprint's meaning changes — an older cache is then ignored (⇒ full re-hash) rather
 /// than misinterpreted.
 pub const STAT_CACHE_VERSION: u32 = 2;
@@ -167,6 +171,19 @@ impl StatCache {
     /// as empty silently RE-UPLOADS everything and hides the corruption, whereas treating a corrupt stat
     /// cache as empty is self-correcting and costs only CPU. A present-but-unusable file is still reported
     /// on stderr so it can't rot unnoticed.
+    /// The version recorded in a serialized cache, read WITHOUT attempting a full parse.
+    ///
+    /// Exposed so the two-stage behaviour is testable: a genuine older cache fails a full `StatCache`
+    /// parse (new required fields), so a one-stage loader cannot tell "older format" from "corrupt" and
+    /// reports corruption after every upgrade. A test asserting only "returns empty" passes either way.
+    pub fn probe_version(bytes: &[u8]) -> Option<u32> {
+        #[derive(Deserialize)]
+        struct V {
+            version: u32,
+        }
+        serde_json::from_slice::<V>(bytes).ok().map(|v| v.version)
+    }
+
     pub fn load(path: &Path) -> Self {
         if !path.exists() {
             return Self::default();
@@ -181,12 +198,8 @@ impl StatCache {
         // Read the version FIRST, on its own. A full parse cannot distinguish "older format" from
         // "corrupt": adding a required field to StatKey makes every genuine older cache fail
         // deserialization, so a normal upgrade would report "corrupt" to the operator after every deploy.
-        #[derive(Deserialize)]
-        struct VersionProbe {
-            version: u32,
-        }
-        match serde_json::from_slice::<VersionProbe>(&bytes) {
-            Ok(v) if v.version != STAT_CACHE_VERSION => {
+        match Self::probe_version(&bytes).map(|version| VersionProbe { version }) {
+            Some(v) if v.version != STAT_CACHE_VERSION => {
                 eprintln!(
                     "[publish] stat cache is version {}, this build writes {STAT_CACHE_VERSION} — \
                      ignoring it and re-hashing once (expected after an upgrade)",
@@ -194,11 +207,13 @@ impl StatCache {
                 );
                 return Self::default();
             }
-            Err(e) => {
-                eprintln!("[publish] stat cache unusable ({e}) — ignoring (full re-hash)");
+            None => {
+                eprintln!(
+                    "[publish] stat cache unusable (unreadable version) — ignoring (full re-hash)"
+                );
                 return Self::default();
             }
-            Ok(_) => {}
+            Some(_) => {}
         }
         match serde_json::from_slice::<StatCache>(&bytes) {
             Ok(c) => c,
@@ -377,7 +392,20 @@ mod tests {
             "manifest_digest": "",
             "entries": { "a": {"size":10,"mtime_ns":1,"ctime_ns":1,"ino":7,"dev":1} }
         });
-        std::fs::write(&p, serde_json::to_vec(&v1).unwrap()).unwrap();
+        let v1_bytes = serde_json::to_vec(&v1).unwrap();
+        // The distinguishing property: the version is readable even though the FULL parse fails, which is
+        // what lets an upgrade report "older version" instead of "corrupt". Asserting only that load()
+        // returns empty passes against the one-stage loader too, so it pins nothing.
+        assert!(
+            serde_json::from_slice::<StatCache>(&v1_bytes).is_err(),
+            "a v1 payload must indeed fail a full parse (else this test proves nothing)"
+        );
+        assert_eq!(
+            StatCache::probe_version(&v1_bytes),
+            Some(1),
+            "the version must be readable WITHOUT a full parse"
+        );
+        std::fs::write(&p, &v1_bytes).unwrap();
         assert!(
             StatCache::load(&p).entries.is_empty(),
             "an older cache version → empty (full re-hash), not a hard error"
@@ -498,6 +526,9 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
             .is_ok()
     };
     if std::fs::write(&probe, [0u8; 4096]).is_err() {
+        // `fs::write` creates then writes, so an ENOSPC/EIO after create leaves the file behind — inside
+        // the agent's workspace, where the next publish would pick it up into the manifest.
+        cleanup(&probe);
         return Fidelity::Unusable;
     }
     let Some(first) = stat(&probe) else {

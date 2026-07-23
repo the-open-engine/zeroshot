@@ -644,6 +644,58 @@ pub struct MaterializeStats {
     pub write_throughput_mbps: f64,
 }
 
+/// A bounded pool of decompressed-from blocks, held across waves.
+///
+/// Waves are contiguous file runs, so consecutive waves frequently need the SAME block — and a compressible
+/// tree can put the entire store in one block, which every wave then needs. Fetching per wave made that a
+/// re-download per wave (measured 3.00x amplification on a 3-wave compressible tree; over S3 those are real
+/// GETs). Keeping the last few blocks costs the same memory the batch bound already permits, so it is free.
+struct BlockPool<'a> {
+    store: &'a dyn BlobStore,
+    held: Vec<(BlockId, Vec<u8>)>,
+    cap: usize,
+    fetches: usize,
+}
+
+impl<'a> BlockPool<'a> {
+    fn new(store: &'a dyn BlobStore, cap: usize) -> Self {
+        Self {
+            store,
+            held: Vec::with_capacity(cap),
+            cap,
+            fetches: 0,
+        }
+    }
+    /// Ensure `want` are resident, evicting oldest first. Fetches only what is missing.
+    fn load(&mut self, want: &[&BlockId]) -> Result<()> {
+        let missing: Vec<&BlockId> = want
+            .iter()
+            .filter(|b| !self.held.iter().any(|(h, _)| h == **b))
+            .copied()
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        // Evict oldest entries not in `want` to make room, keeping the pool at its cap.
+        while self.held.len() + missing.len() > self.cap.max(want.len()) {
+            let Some(pos) = self.held.iter().position(|(h, _)| !want.contains(&h)) else {
+                break;
+            };
+            self.held.remove(pos);
+        }
+        let fetched: Vec<(BlockId, Vec<u8>)> = missing
+            .par_iter()
+            .map(|b| -> Result<_> { Ok(((*b).clone(), self.store.get_block(b)?)) })
+            .collect::<Result<Vec<_>>>()?;
+        self.fetches += fetched.len();
+        self.held.extend(fetched);
+        Ok(())
+    }
+    fn get(&self, b: &BlockId) -> Option<&Vec<u8>> {
+        self.held.iter().find(|(h, _)| h == b).map(|(_, v)| v)
+    }
+}
+
 /// Armed once `out` has been claimed (after `load_verified_manifest` proved it empty/absent) and disarmed
 /// only on success: if materialize returns early for ANY reason, `out` is cleared.
 ///
@@ -768,11 +820,12 @@ fn write_regular_files(
 
     let (mut fetch_secs, mut decompress_secs, mut write_secs) = (0.0, 0.0, 0.0);
     let mut all_blocks: BTreeSet<&BlockId> = BTreeSet::new();
+    let mut pool = BlockPool::new(store, MATERIALIZE_BLOCK_BATCH);
 
     // Decompress+VERIFY a set of chunks from already-fetched blocks. Every guarantee the read path makes
     // about content lives here: span bounds, decompression bomb ceiling, declared length, and hash == id.
     let verify = |cids: &[&ChunkId],
-                  blocks: &HashMap<&BlockId, Vec<u8>>|
+                  blocks: &HashMap<&BlockId, &Vec<u8>>|
      -> Result<HashMap<ChunkId, Vec<u8>>> {
         cids.par_iter()
             .map(|cid| -> Result<(ChunkId, Vec<u8>)> {
@@ -834,20 +887,20 @@ fn write_regular_files(
                 let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(batch.len());
                 for grp in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
                     let t = Instant::now();
-                    let blocks: HashMap<&BlockId, Vec<u8>> = grp
-                        .par_iter()
-                        .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
-                        .collect::<Result<HashMap<_, _>>>()?;
+                    pool.load(grp)?;
                     fetch_secs += t.elapsed().as_secs_f64();
+                    let resident: HashMap<&BlockId, &Vec<u8>> = grp
+                        .iter()
+                        .filter_map(|b| pool.get(b).map(|v| (*b, v)))
+                        .collect();
                     let mine: Vec<&ChunkId> = batch
                         .iter()
                         .copied()
-                        .filter(|c| blocks.contains_key(&manifest.chunks[*c].block))
+                        .filter(|c| resident.contains_key(&manifest.chunks[*c].block))
                         .collect();
                     let t = Instant::now();
-                    chunks.extend(verify(&mine, &blocks)?);
+                    chunks.extend(verify(&mine, &resident)?);
                     decompress_secs += t.elapsed().as_secs_f64();
-                    drop(blocks);
                 }
                 let t = Instant::now();
                 let base = i - batch.len();
@@ -877,20 +930,20 @@ fn write_regular_files(
         let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(cids.len());
         for batch in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
             let t = Instant::now();
-            let blocks: HashMap<&BlockId, Vec<u8>> = batch
-                .par_iter()
-                .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
-                .collect::<Result<HashMap<_, _>>>()?;
+            pool.load(batch)?;
             fetch_secs += t.elapsed().as_secs_f64();
+            let resident: HashMap<&BlockId, &Vec<u8>> = batch
+                .iter()
+                .filter_map(|b| pool.get(b).map(|v| (*b, v)))
+                .collect();
             let mine: Vec<&ChunkId> = cids
                 .iter()
                 .copied()
-                .filter(|c| blocks.contains_key(&manifest.chunks[*c].block))
+                .filter(|c| resident.contains_key(&manifest.chunks[*c].block))
                 .collect();
             let t = Instant::now();
-            chunks.extend(verify(&mine, &blocks)?);
+            chunks.extend(verify(&mine, &resident)?);
             decompress_secs += t.elapsed().as_secs_f64();
-            drop(blocks); // compressed copies die once verified
         }
 
         let t = Instant::now();
