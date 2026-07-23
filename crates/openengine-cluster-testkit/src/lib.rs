@@ -4,11 +4,14 @@ pub mod admission;
 mod admission_artifacts;
 pub mod artifacts;
 pub mod capability_vectors;
+pub mod fixture;
 pub mod graph_verifier_artifacts;
 pub mod lifecycle;
 mod lifecycle_artifacts;
 mod negative_graph_fixtures;
 mod schema_helpers;
+pub mod watch;
+mod watch_artifacts;
 pub mod worker_artifacts;
 pub mod worker_profiles;
 

@@ -4,6 +4,7 @@ pub mod admission;
 pub mod graph_verifier;
 pub mod lifecycle;
 pub mod stdio;
+pub mod watch;
 pub mod worker_registry;
 
 use std::sync::Arc;
@@ -15,10 +16,12 @@ use openengine_cluster_protocol::{
     RequestId, APPLICATION_ERROR, INTERNAL_ERROR, INTERNAL_ERROR_CODE, INVALID_PARAMS,
     INVALID_PHASE, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
     PROTOCOL_VERSION, SCHEMA_VIOLATION, StopParams, StopResult, UNSUPPORTED_PROTOCOL_VERSION,
-    UpdateParams, UpdateResult,
+    UpdateParams, UpdateResult, WatchParams, WatchResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+
+use crate::watch::{WatchEventStream, WatchHandle};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConnectionContext {
@@ -143,6 +146,19 @@ pub trait ClusterBackend: Send + Sync + 'static {
             None,
         ))
     }
+
+    async fn watch(
+        &self,
+        _context: &ConnectionContext,
+        _params: WatchParams,
+        _queue_capacity: usize,
+    ) -> Result<(WatchResult, WatchEventStream, WatchHandle), BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support watch",
+            None,
+        ))
+    }
 }
 
 pub struct Dispatcher<B> {
@@ -174,6 +190,14 @@ where
     #[must_use]
     pub fn from_shared(backend: Arc<B>, context: ConnectionContext) -> Self {
         Self { backend, context }
+    }
+
+    pub(crate) fn backend(&self) -> &Arc<B> {
+        &self.backend
+    }
+
+    pub(crate) fn context(&self) -> &ConnectionContext {
+        &self.context
     }
 
     pub async fn dispatch(&self, input: &str) -> String {

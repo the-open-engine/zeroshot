@@ -80,19 +80,27 @@ impl StoreState {
         }
     }
 
-    fn allocate_cursor(&mut self) -> Cursor {
+    pub(crate) fn allocate_cursor(&mut self) -> Cursor {
         self.next_cursor += 1;
         Cursor::new(format!("cursor-{}", self.next_cursor))
     }
 
+    /// Appends an operational lifecycle mutation and projects it to the durable public watch
+    /// algebra at the exact same cursor, per the closed `LifecycleEvent` -> `WatchEvent` mapping
+    /// in `crate::watch`: no event site allocates a second cursor for one logical mutation.
     fn append_lifecycle(&mut self, event: LifecycleEvent) -> Cursor {
         let cursor = self.allocate_cursor();
         self.lifecycle.records.push(LifecycleRecord {
             cursor: cursor.clone(),
-            event,
+            event: event.clone(),
         });
         self.lifecycle.latest_cursor = Some(cursor.clone());
         append(self, Some(cursor.clone()), AppendKind::Lifecycle);
+        if let Some(run_id) = self.control.run_id.clone() {
+            let status = self.control.status_with_lifecycle(&self.lifecycle);
+            let watch_event = crate::watch::watch_event_for_lifecycle(&event, status);
+            self.record_public_event(&run_id, cursor.clone(), watch_event);
+        }
         cursor
     }
 

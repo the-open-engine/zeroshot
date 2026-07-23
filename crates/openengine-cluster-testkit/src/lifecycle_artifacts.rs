@@ -6,7 +6,7 @@ use crate::admission_artifacts::{scripted_dispatcher, transcript};
 use crate::artifacts::Artifact;
 
 pub(crate) async fn generate_lifecycle_goldens() -> Vec<Artifact> {
-    let (graph, dispatcher) = scripted_dispatcher(1);
+    let (graph, dispatcher, _store) = scripted_dispatcher(1);
     let requests = vec![
         json!({
             "jsonrpc":"2.0","id":"lifecycle-apply","method":"apply",

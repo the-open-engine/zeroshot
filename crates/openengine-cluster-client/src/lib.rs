@@ -1,5 +1,8 @@
 //! Typed transport-neutral Cluster Protocol client.
 
+pub mod watch;
+pub use watch::*;
+
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_trait::async_trait;
@@ -228,4 +231,6 @@ pub enum ClientError {
     Rpc(JsonRpcError),
     #[error("invalid JSON-RPC response: {0}")]
     InvalidResponse(String),
+    #[error(transparent)]
+    Backend(#[from] openengine_cluster_server::BackendError),
 }

@@ -1,5 +1,6 @@
 //! Backend-neutral admission orchestration and durable-store ports.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod ports;
@@ -11,9 +12,10 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{
     diff_compiled_graphs, ApplyParams, ApplyResult, CompiledGraphIr, Generation, GetParams,
     GetResult, GraphSpec, IdempotencyKey, InitializeParams, InitializeResult, PlanParams,
-    PlanResult, RequestFingerprint, ServerCapabilities, StopParams, StopResult, UpdateParams,
-    UpdateResult, CANCELLED, GENERATION_CONFLICT, GRAPH_INVALID, IDEMPOTENCY_REUSE,
-    INTERNAL_ERROR_CODE, INVALID_PHASE, SCHEMA_VIOLATION,
+    PlanResult, RequestFingerprint, ServerCapabilities, StopParams, StopResult, SubscriptionId,
+    UpdateParams, UpdateResult, WatchParams, WatchResult, CANCELLED, GENERATION_CONFLICT, GONE,
+    GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, INVALID_PHASE, NOT_FOUND,
+    SCHEMA_VIOLATION,
 };
 use serde_json::{json, Value};
 
@@ -21,11 +23,13 @@ use crate::lifecycle::{
     method_fingerprint, stop_fingerprint, update_fingerprint, LifecycleSnapshot, MutationReceipt,
     StopProposal, UpdateProposal,
 };
+use crate::watch::{ObservationStore, WatchEventStream, WatchHandle};
 use crate::{BackendError, ClusterBackend, ConnectionContext};
 
 pub struct AdmissionCoordinator<V, S> {
     verifier: Arc<V>,
     store: Arc<S>,
+    next_subscription: Arc<AtomicU64>,
 }
 
 struct PreparedCommit {
@@ -40,6 +44,7 @@ impl<V, S> Clone for AdmissionCoordinator<V, S> {
         Self {
             verifier: Arc::clone(&self.verifier),
             store: Arc::clone(&self.store),
+            next_subscription: Arc::clone(&self.next_subscription),
         }
     }
 }
@@ -50,12 +55,17 @@ impl<V, S> AdmissionCoordinator<V, S> {
         Self {
             verifier: Arc::new(verifier),
             store: Arc::new(store),
+            next_subscription: Arc::new(AtomicU64::new(1)),
         }
     }
 
     #[must_use]
     pub fn from_shared(verifier: Arc<V>, store: Arc<S>) -> Self {
-        Self { verifier, store }
+        Self {
+            verifier,
+            store,
+            next_subscription: Arc::new(AtomicU64::new(1)),
+        }
     }
 
     #[must_use]
@@ -342,6 +352,29 @@ where
             .await
             .map_err(store_error_to_backend)
     }
+
+    async fn watch(
+        &self,
+        _context: &ConnectionContext,
+        params: WatchParams,
+        queue_capacity: usize,
+    ) -> Result<(WatchResult, WatchEventStream, WatchHandle), BackendError> {
+        let subscription_id = SubscriptionId::new(format!(
+            "sub-{}",
+            self.next_subscription.fetch_add(1, Ordering::Relaxed)
+        ));
+        let store: Arc<dyn ObservationStore> = Arc::clone(&self.store) as Arc<dyn ObservationStore>;
+        crate::watch::subscribe_and_stream(
+            &store,
+            crate::watch::SubscribeAndStreamRequest {
+                subscription_id,
+                params,
+                queue_capacity,
+            },
+            store_error_to_backend,
+        )
+        .await
+    }
 }
 
 fn validate_apply_mode(params: &ApplyParams) -> Result<(), BackendError> {
@@ -450,6 +483,12 @@ fn store_error_to_backend(error: StoreError) -> BackendError {
             CANCELLED,
             "Dispatch completion was rejected after cancellation or terminalization",
             None,
+        ),
+        StoreError::UnknownRun => BackendError::application(NOT_FOUND, "Run does not exist", None),
+        StoreError::RunGone { tombstoned_at } => BackendError::application(
+            GONE,
+            "Run history was deleted",
+            Some(json!({ "tombstonedAt": tombstoned_at })),
         ),
     }
 }
