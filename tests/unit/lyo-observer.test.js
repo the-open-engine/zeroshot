@@ -24,7 +24,10 @@ describe('LYO observer', function () {
       ],
     };
 
-    const detach = attachLyoObserver({ messageBus, cluster });
+    // Inject an in-memory store: without one the observer falls through to
+    // the real global ~/.zeroshot/lyo-lessons.db and pollutes it.
+    const store = new LessonStore(':memory:');
+    const detach = attachLyoObserver({ messageBus, cluster, lessonStore: store });
 
     const validation = messageBus.publish({
       cluster_id: clusterId,
@@ -57,6 +60,7 @@ describe('LYO observer', function () {
     assert.match(guidance[0].content.text, /Tests failed: npm test/);
 
     detach();
+    store.close();
     ledger.close();
   });
 
@@ -70,7 +74,8 @@ describe('LYO observer', function () {
       agents: [{ id: 'worker', config: { role: 'implementation' } }],
     };
 
-    const detach = attachLyoObserver({ messageBus, cluster });
+    const store = new LessonStore(':memory:');
+    const detach = attachLyoObserver({ messageBus, cluster, lessonStore: store });
 
     messageBus.publish({
       cluster_id: clusterId,
@@ -107,6 +112,7 @@ describe('LYO observer', function () {
     assert.strictEqual(guidance.length, 1);
 
     detach();
+    store.close();
     ledger.close();
   });
 });
