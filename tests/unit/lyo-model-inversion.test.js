@@ -21,8 +21,8 @@ describe('model inversion routing', function () {
   it('routes each known executor family to a different-family reflector', function () {
     assert.strictEqual(invertedReflectorModel('claude:level2'), 'openai/gpt-4o-mini');
     assert.strictEqual(invertedReflectorModel('anthropic:opus'), 'openai/gpt-4o-mini');
-    assert.strictEqual(invertedReflectorModel('openai:gpt-5'), 'anthropic/claude-3.5-haiku');
-    assert.strictEqual(invertedReflectorModel('codex:level2'), 'anthropic/claude-3.5-haiku');
+    assert.strictEqual(invertedReflectorModel('openai:gpt-5'), 'anthropic/claude-haiku-4.5');
+    assert.strictEqual(invertedReflectorModel('codex:level2'), 'anthropic/claude-haiku-4.5');
     assert.strictEqual(invertedReflectorModel('google:gemini-2.5-pro'), 'openai/gpt-4o-mini');
   });
 
@@ -50,7 +50,7 @@ describe('model inversion routing', function () {
     const sameFamilyControl = resolveReflector('elaborator@1', {
       model: invertedReflectorModel('openai:gpt-5'),
     });
-    assert.strictEqual(sameFamilyControl.model, 'anthropic/claude-3.5-haiku');
+    assert.strictEqual(sameFamilyControl.model, 'anthropic/claude-haiku-4.5');
     // Explicit config wins: the factory takes the ctx model as-is.
     const explicit = resolveReflector('elaborator@1', { model: 'google/gemini-2.0-flash' });
     assert.strictEqual(explicit.model, 'google/gemini-2.0-flash');

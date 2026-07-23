@@ -19,9 +19,9 @@
 const INVERSION_MAP = new Map([
   ['claude', 'openai/gpt-4o-mini'],
   ['anthropic', 'openai/gpt-4o-mini'],
-  ['openai', 'anthropic/claude-3.5-haiku'],
-  ['codex', 'anthropic/claude-3.5-haiku'],
-  ['gpt', 'anthropic/claude-3.5-haiku'],
+  ['openai', 'anthropic/claude-haiku-4.5'],
+  ['codex', 'anthropic/claude-haiku-4.5'],
+  ['gpt', 'anthropic/claude-haiku-4.5'],
   ['google', 'openai/gpt-4o-mini'],
   ['gemini', 'openai/gpt-4o-mini'],
 ]);
