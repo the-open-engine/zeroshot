@@ -1110,3 +1110,21 @@ Earlier claims of "clippy clean" in this log were made while grepping only for `
 were 21 warnings the whole time. Fixed rather than qualified.
 
 105 tests green by default, **124 with `pg,s3` against real Postgres**; fmt clean.
+
+### 2026-07-24 — O20: the refetch the wave rewrite introduced (found by counting, not by reading)
+File-ordered waves bounded memory but re-fetched a block once per wave that referenced it, where the
+block-keyed design fetched each exactly once. It surfaced only because a test COUNTS `get_block` calls
+instead of trusting `blocks_fetched`, which reports DISTINCT blocks and so hides amplification by
+construction. A compressible tree puts the whole store in one block that every wave needs: a 3-wave
+materialize fetched it **3 times** — over S3, three real GETs of the same object.
+
+`BlockPool` holds the last `MATERIALIZE_BLOCK_BATCH` blocks across waves — exactly the memory the batch
+bound already permits — so it is free. **Refetch 3.00× → 1.00×.** Bounds re-verified on all four shapes
+(3 GB incompressible 7883→721 MB, 2 GiB compressible 6185→628 MB, 100k small files 653→470 MB, 60-block
+fan-out 426→216 MB), every output byte-identical.
+
+The general lesson, and the one worth carrying into integration: **a stat that reports the deduplicated
+quantity cannot reveal amplification of the underlying operation.** Count the calls.
+
+clippy is 0 warnings on both feature sets `--all-targets`; 106 tests green by default, **125 with `pg,s3`
+against real Postgres**.
