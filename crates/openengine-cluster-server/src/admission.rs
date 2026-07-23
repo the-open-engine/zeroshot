@@ -202,7 +202,7 @@ where
 impl<V, S> ClusterBackend for AdmissionCoordinator<V, S>
 where
     V: GraphVerifier,
-    S: AdmissionStore,
+    S: AdmissionStore + ObservationStore,
 {
     async fn initialize(
         &self,

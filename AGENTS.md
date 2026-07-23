@@ -193,6 +193,9 @@ predicate is a winner; correlate `raced=satisfied|no_satisfier` with those winne
 The admission coordinator provides stateful plan/apply/get semantics through injected ports.
 Testkit scripted approval and `running` phase mean admitted state, not native verification or a
 production full-graph executor.
+`AdmissionStore` and `ObservationStore` remain separate ports. A watch-capable
+`AdmissionCoordinator` requires both; never satisfy the observation boundary with a runtime
+placeholder that rejects every subscription.
 Authoritative admission snapshots fail closed: `empty` has no durable fields, `running` has the
 complete matching control/seed tuple, and transient `admitting` preserves one of those two shapes.
 Operational suspend is a dispatch gate: existing leases may land verified I/O, but successors wait
