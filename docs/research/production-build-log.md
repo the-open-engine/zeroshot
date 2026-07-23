@@ -1077,3 +1077,36 @@ faster-growing tier, since blocks dedup across generations and manifests do not.
 constant-factor work on paths that are no longer the recurring cost. The measured profile at realistic
 scale (100k files) is stat-bound on publish and per-file-syscall-bound on materialize. 102 tests green by
 default, **121 with `pg,s3` against real Postgres**.
+
+### 2026-07-24 — O19: three defects the O17 "fix" did not fix
+A verification review reproduced each of these end-to-end against the committed code. O17's message
+claimed all three were closed. They were not, and the pattern (three consecutive commits each fixing the
+previous one's claim) is the most useful thing in this entry.
+
+1. **Data loss on the incremental path.** The duplicate-path check sat inside `write_regular_files`, which
+   only ever sees `to_write` — so a duplicate landing in the reflink candidates was never examined, and
+   `materialize_incremental` returned SUCCESS while one entry's bytes silently replaced the other's. The
+   check now lives in `load_verified_manifest` over ALL manifest entries.
+2. **The crash loop was still reachable.** The cleanup wrapped only `write_regular_files`; `write_links`
+   and the reflink pass both stranded a populated `out` and a permanently-refused retry. Worst at
+   `resume_via_reference`'s workspace clone, where `ref_manifest == manifest` makes every file a reflink
+   candidate — so `to_write` is empty, the guarded call is a **no-op**, and the unguarded reflink pass does
+   100% of the work. The daemon's warm resume, the highest-value call site in the product, was entirely
+   unprotected. Now a scope guard around the whole body.
+3. **The bound still wasn't a bound.** Bounding decompressed bytes left the COMPRESSED side uncapped: a
+   wave fetches every distinct block its files touch, and nothing caps that count. Not hypothetical — a
+   long-lived daemon republishes against the parent manifest, so unchanged files keep the `ChunkLoc` of
+   whichever generation first stored them and a contiguous file run fans out across block generations
+   (measured: 60 generations → 60 distinct blocks; the reviewer measured 959 MB peak for a **3.6 MB** tree
+   using 1 MiB blocks, and real blocks are 64× larger). Blocks are now fetched, drained and dropped a
+   bounded batch at a time. Measured on a 60-block fan-out: **426 MB → 214 MB**.
+
+Every fix in this entry is **mutation-verified**: disarm the guard and both new partial-tree tests fail;
+revert the duplicate check to regulars-only and the new incremental test fails. That is the discipline this
+campaign kept re-learning — a guard nobody can break is a guard nobody is testing.
+
+**Clippy is now genuinely clean** (0 warnings on `--all-targets` and on `--features pg,s3 --all-targets`).
+Earlier claims of "clippy clean" in this log were made while grepping only for `^error` and `unused`; there
+were 21 warnings the whole time. Fixed rather than qualified.
+
+105 tests green by default, **124 with `pg,s3` against real Postgres**; fmt clean.
