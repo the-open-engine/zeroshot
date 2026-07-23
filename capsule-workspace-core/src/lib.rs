@@ -15,3 +15,4 @@ pub mod pg;
 pub mod refclock;
 #[cfg(feature = "s3")]
 pub mod s3;
+pub mod stat_cache;
