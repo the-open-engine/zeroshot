@@ -531,6 +531,9 @@ pub struct MaterializeStats {
     pub fetch_secs: f64,
     pub decompress_secs: f64,
     pub write_secs: f64,
+    /// wall time of the (parallel) reflink pass — 0 for a full materialize. Separated from `write_secs`
+    /// so a reference-backed resume shows where its time actually goes (CoW clone vs store fetch).
+    pub reflink_secs: f64,
     pub wall_secs: f64,
     pub write_throughput_mbps: f64,
 }
@@ -706,6 +709,7 @@ pub fn materialize(
         fetch_secs,
         decompress_secs,
         write_secs,
+        reflink_secs: 0.0,
         wall_secs: t0.elapsed().as_secs_f64(),
         write_throughput_mbps: total as f64 / 1e6 / write_secs.max(1e-9),
     })
@@ -742,39 +746,63 @@ pub fn materialize_incremental(
         .map(|f| (f.path.as_str(), f))
         .collect();
 
-    // Partition new regular files: REFLINK the unchanged ones now; collect the rest to materialize.
+    // Partition new regular files by MANIFEST ONLY (pure comparison, no I/O): `candidates` are unchanged
+    // vs the reference and can be reflinked; the rest must come from the store.
     let mut to_write: Vec<&FileEntry> = Vec::new();
-    let mut reflinked = 0usize;
+    let mut candidates: Vec<&FileEntry> = Vec::new();
     for f in manifest
         .files
         .iter()
         .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
     {
-        let unchanged = ref_by_path
+        if ref_by_path
             .get(f.path.as_str())
-            .is_some_and(|rf| rf.chunks == f.chunks);
-        if unchanged {
-            safe_rel_path(&f.path)?;
+            .is_some_and(|rf| rf.chunks == f.chunks)
+        {
+            candidates.push(f);
+        } else {
+            to_write.push(f); // changed / new → materialize from the store
+        }
+    }
+    // Validate every candidate path BEFORE any join (fail fast, cheap, sequential).
+    for f in &candidates {
+        safe_rel_path(&f.path)?;
+    }
+
+    // Reflink the unchanged files IN PARALLEL — the per-file work is lstat + create_dir_all + FICLONE +
+    // chmod, which is syscall/IO-bound, so a sequential loop leaves the device idle (this pass dominated
+    // the cold `--ref-dir` start before O9). Mirrors the rayon-parallel fetch/write path below. A file
+    // whose reference leaf is missing or not a REAL regular file (defensive: never follow a symlink)
+    // yields `Some(f)` and falls back to the store; a genuine IO error propagates rather than silently
+    // degrading to a fetch.
+    let t_reflink = Instant::now();
+    let fallbacks: Vec<&FileEntry> = candidates
+        .par_iter()
+        .map(|f| -> Result<Option<&FileEntry>> {
             let src = ref_dir.join(&f.path);
-            // Only reflink a REAL regular file in the reference (defensive: never follow a symlink).
             let src_ok = src
                 .symlink_metadata()
                 .map(|m| m.file_type().is_file())
                 .unwrap_or(false);
-            if src_ok {
-                let dst = out.join(&f.path);
-                if let Some(d) = dst.parent() {
-                    std::fs::create_dir_all(d)?;
-                }
-                // reflink (CoW) if supported, else a full copy — either way, no network + no decompress.
-                reflink_copy::reflink_or_copy(&src, &dst)?;
-                std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(f.mode & 0o777))?;
-                reflinked += 1;
-                continue;
+            if !src_ok {
+                return Ok(Some(*f));
             }
-        }
-        to_write.push(f); // changed / new / reference-missing → materialize from the store
-    }
+            let dst = out.join(&f.path);
+            if let Some(d) = dst.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            // reflink (CoW) if supported, else a full copy — either way, no network + no decompress.
+            reflink_copy::reflink_or_copy(&src, &dst)?;
+            std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(f.mode & 0o777))?;
+            Ok(None)
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    let reflink_secs = t_reflink.elapsed().as_secs_f64();
+    let reflinked = candidates.len() - fallbacks.len();
+    to_write.extend(fallbacks); // reference leaf unusable → materialize from the store instead
 
     let (blocks, fetch_secs, decompress_secs, write_secs) =
         write_regular_files(store, &manifest, out, &to_write)?;
@@ -789,6 +817,7 @@ pub fn materialize_incremental(
         fetch_secs,
         decompress_secs,
         write_secs,
+        reflink_secs,
         wall_secs: t0.elapsed().as_secs_f64(),
         write_throughput_mbps: total as f64 / 1e6 / write_secs.max(1e-9),
     })
