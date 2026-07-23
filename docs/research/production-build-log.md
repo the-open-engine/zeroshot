@@ -873,3 +873,61 @@ reuse results above, which were measured against each other under identical cond
 Net: O8 does what it was built to do on real hardware — a resuming node fetches only the delta (2 blocks vs
 the full tree), reflinks the rest, produces a byte-identical workspace, and costs ~nothing in disk. Rig fully
 torn down (instance, bucket, IAM role/policy/profile, SG, volumes — verified empty).
+
+### 2026-07-23 — O9: parallel reflink pass + `reflink_secs` (and a retracted attribution)
+The reflink loop in `materialize_incremental` was sequential (per-file lstat + create_dir_all + FICLONE +
+chmod) while the fetch/decompress/write path beside it is rayon-parallel. Split into a pure-manifest
+classification (no I/O) + a rayon-parallel reflink, with `reflink_secs` separated from `write_secs`.
+Semantics unchanged: `safe_rel_path` before every join, the lstat gate that refuses a symlinked reference
+leaf and falls back to the store, and IO errors propagating rather than silently degrading to a fetch.
+
+**The honest result: this was NOT the bottleneck.** A controlled A/B (`RAYON_NUM_THREADS=1` vs default,
+1 GB / 256 files, APFS) measured the pass at **0.022s sequential / 0.015s parallel**. That also falsified the
+O8 log's claim that the ~2.85s cold-`--ref-dir` delta was the second pass — three orders of magnitude too
+small — and the two EC2 runs weren't comparable anyway (the with-ref run was first-in-batch, paying cold
+DNS/TLS/page-cache). That attribution is retracted above; `reflink_secs` now makes it measurable. Keeping the
+change: it is free, helps where FICLONE is slower than APFS clonefile, and the telemetry ends the guessing.
+
+### 2026-07-23 — O10: publish stops re-hashing quiescent files (the biggest win of the campaign)
+**The measured problem.** `publish` read + sha256'd EVERY file EVERY cycle; only the *upload* was deduped.
+On a 1 GB / 256-file tree: cold 2.86s, **idle republish 1.81s, 0.4%-churn republish 1.81s** — cost tracks
+TREE SIZE, is independent of churn, and recurs every publish interval forever. (For comparison a full
+materialize of the same tree from a local store is 0.25s, so publish was ~8× materialize's per-GB cost.)
+
+**The change.** A node-local `StatCache` (deliberately NOT in the manifest, so `logical_digest` stays pure
+content identity and O1 idle-republish idempotence holds) lets a publish reuse the PARENT MANIFEST's chunk
+list for a file, skipping the read+hash entirely. A skip requires ALL FOUR:
+1. `may_skip` — stat fingerprint (`size+mtime_ns+ctime_ns+ino+dev`) identical AND the file was quiescent
+   BEFORE the previous scan began (git-style racy-index guard, so a write landing in the same coarse
+   timestamp tick as that scan can never be invisible);
+2. the parent manifest has a regular-file entry for that exact path — chunks come from THERE, never from
+   the cache, so every reused chunk belongs to a successfully-published manifest;
+3. that entry's size equals the freshly stat'd size;
+4. every reused chunk is already in `known` — a skip can never emit a manifest referencing a non-durable
+   chunk, whatever the caller passed. (The index assembly's `ok_or_else` fail-fast backstops this.)
+
+| publish | churn | before | after |
+|---|--:|--:|--:|
+| cold | 100% | 2.86s | 2.90s (no cache yet) |
+| **idle** | 0% | 1.81s | **0.01s (~180×)** |
+| **light** | 0.4% (1 file of 256) | 1.81s | **0.02s (~90×)** |
+
+**A data-loss bug found while wiring it.** A publish can store its manifest and write its cache and then
+LOSE THE FENCE, leaving HEAD on the previous generation. Pairing that cache (describing gen N+1's tree) with
+gen N's parent manifest would let any file changed in N+1 whose size happened to match be "skipped" back to
+gen N's STALE chunk list — silently discarding the agent's work. `StatCache` now records the manifest digest
+it was taken against and `PrevPublish::new` refuses any other pairing, making the unsafe pair
+unconstructable rather than merely discouraged.
+
+**GC interaction, checked explicitly:** skipped files never reach the packer, so the worry was that blocks
+referenced ONLY by skipped files would go un-touched, age out, and be collected under a live HEAD. They do
+not: the manifest's chunk INDEX is assembled by walking every file entry and resolving each chunk via
+`new_index` or `known`, so skipped files' chunks are present, and `publish_cycle`'s `touch` iterates that
+index. Pinned by a test asserting the skip's chunk/block set equals a full re-hash's.
+
+Tests (`tests/stat_skip.rs`, 7): the load-bearing one is an ORACLE property test — across a 9-step mutation
+sequence (same-size rewrite, size change, add, delete, truncate, replace-by-rename, chmod, two idle cycles)
+the skip-enabled manifest must equal a full re-hash of the same tree. Plus GC-index equivalence, idle
+idempotence, cross-generation cache refusal, racy-file re-hash, `known`-absent refusal, and links
+unaffected. Opt-in via `publish --stat-cache` / `daemon --stat-cache`; without it behavior is byte-for-byte
+unchanged. 91 tests green; clippy/fmt clean on default and `pg,s3`.

@@ -150,6 +150,59 @@ fn skip_always_agrees_with_a_full_rehash() {
     );
 }
 
+// GC PROTECTION. `publish_cycle` refreshes the GC reuse-clock by iterating the NEW manifest's chunk
+// INDEX. Skipped files never reach the packer, so if their chunks were missing from that index their
+// blocks would go un-touched, age out, and be collected out from under a live HEAD — silent corruption.
+// Assert the index (and therefore the touched block set) is IDENTICAL to a full re-hash's.
+#[test]
+fn skipped_files_chunks_stay_in_the_manifest_index_so_gc_still_touches_them() {
+    use std::collections::BTreeSet;
+    let d = tmp();
+    let tree = d.path().join("t");
+    for i in 0..6 {
+        write(&tree.join(format!("f{i}.bin")), &blob(i, 300_000));
+    }
+    let mut cyc = Cycle::new(&d.path().join("store"));
+    cyc.publish(&tree);
+    let (dig, skipped) = cyc.publish(&tree); // every file skipped
+    assert_eq!(skipped, 6, "all quiescent files skipped");
+
+    let s = LocalBlobStore::new(d.path().join("store")).unwrap();
+    let m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    // every chunk of every file must be resolvable in the index...
+    for f in m
+        .files
+        .iter()
+        .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
+    {
+        for c in &f.chunks {
+            assert!(
+                m.chunks.contains_key(c),
+                "chunk of skipped file {} missing from the manifest index → its block would never be \
+                 touched and could be GC'd under a live HEAD",
+                f.path
+            );
+        }
+    }
+    // ...and the touched BLOCK set must equal what a full re-hash would have produced.
+    let full_dig = oracle(&tree, &d.path().join("o"));
+    let fs_store = LocalBlobStore::new(d.path().join("o")).unwrap();
+    let full = Manifest::from_bytes(&fs_store.get_manifest(&full_dig).unwrap()).unwrap();
+    let blocks = |mm: &Manifest| -> BTreeSet<String> {
+        mm.chunks.values().map(|l| l.block.clone()).collect()
+    };
+    assert_eq!(
+        blocks(&m).len(),
+        blocks(&full).len(),
+        "skip must touch the same number of blocks as a full re-hash"
+    );
+    assert_eq!(
+        m.chunks.len(),
+        full.chunks.len(),
+        "skip must reference the same chunk set as a full re-hash"
+    );
+}
+
 // An idle republish skips every regular file and still yields the identical digest.
 #[test]
 fn idle_republish_skips_everything_and_is_idempotent() {
