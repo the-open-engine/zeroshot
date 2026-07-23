@@ -206,6 +206,12 @@ pub struct BlockBuilder {
     pub members: Vec<(ChunkId, u64, u32, u32)>,
 }
 
+impl Default for BlockBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockBuilder {
     pub fn new() -> Self {
         Self {
@@ -213,6 +219,7 @@ impl BlockBuilder {
             members: Vec::new(),
         }
     }
+    #[allow(clippy::type_complexity)] // the tuple IS the block layout; a named alias would hide it
     pub fn finalize(self) -> (BlockId, Vec<u8>, Vec<(ChunkId, u64, u32, u32)>) {
         let id = hex_sha256(&self.buf);
         (id, self.buf, self.members)

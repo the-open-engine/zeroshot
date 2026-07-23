@@ -169,3 +169,119 @@ fn wave_boundaries_round_trip_exactly() {
         vec![7u8; 5 * CHUNK + 3]
     );
 }
+
+// ---- the failure paths the FIRST cleanup attempt missed -------------------------------------------
+// It guarded only `write_regular_files`. These two reproduce what that left open. The second is the one
+// that mattered: at resume_via_reference's workspace clone, ref_manifest == manifest, so every file is a
+// reflink candidate, `to_write` is empty, and the guarded call is a NO-OP while the reflink pass does all
+// the work — i.e. the daemon's warm resume was entirely unprotected.
+
+#[test]
+fn failed_write_links_leaves_no_partial_tree() {
+    use capsule_workspace_core::manifest::FileEntry;
+    let d = tmp();
+    let tree = d.path().join("t");
+    for i in 0..20 {
+        w(&tree.join(format!("f{i}.bin")), &vec![i as u8; 50_000]);
+    }
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    // a hardlink whose target does not exist in the manifest → write_links fails AFTER the regulars land
+    m.files.push(FileEntry {
+        path: "dangling.bin".into(),
+        mode: 0o100644,
+        size: 0,
+        chunks: vec![],
+        symlink: None,
+        hardlink: Some("nope/missing.bin".into()),
+    });
+    let bad = m.logical_digest();
+    s.put_manifest(&bad, &m.to_bytes()).unwrap();
+
+    let out = d.path().join("o");
+    assert!(materialize(&s, &bad, &out).is_err(), "must fail loudly");
+    let left = fs::read_dir(&out).map(|it| it.count()).unwrap_or(0);
+    assert_eq!(
+        left, 0,
+        "a write_links failure must not strand a tree ({left} entries)"
+    );
+}
+
+#[test]
+fn failed_reflink_pass_leaves_no_partial_tree() {
+    use capsule_workspace_core::daemon::materialize_incremental;
+    use std::os::unix::fs::PermissionsExt;
+    let d = tmp();
+    let tree = d.path().join("t");
+    for i in 0..30 {
+        w(&tree.join(format!("f{i}.bin")), &vec![i as u8; 50_000]);
+    }
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let reference = d.path().join("ref");
+    materialize(&s, &dig, &reference).unwrap();
+
+    // Make one reference leaf unreadable, then clone ref→out exactly as resume_via_reference does
+    // (ref_manifest == manifest ⇒ every file is a reflink candidate ⇒ write_regular_files is a no-op).
+    let victim = reference.join("f7.bin");
+    fs::set_permissions(&victim, fs::Permissions::from_mode(0o000)).unwrap();
+    let out = d.path().join("o");
+    let r = materialize_incremental(&s, &dig, &out, &dig, &reference);
+    fs::set_permissions(&victim, fs::Permissions::from_mode(0o644)).unwrap(); // so tempdir can clean up
+
+    if r.is_ok() {
+        // running as root, or a filesystem that ignores the mode — the scenario didn't trigger
+        eprintln!(
+            "[skip] reference leaf stayed readable; cannot exercise the reflink failure here"
+        );
+        return;
+    }
+    let left = fs::read_dir(&out).map(|it| it.count()).unwrap_or(0);
+    assert_eq!(
+        left, 0,
+        "a reflink-pass failure must not strand a tree ({left} entries) — this is the daemon's warm-resume path"
+    );
+}
+
+// A duplicate path must be refused on the INCREMENTAL path too. It previously reported SUCCESS while one
+// entry's bytes silently replaced the other's, because the check only saw the slice bound for the store.
+#[test]
+fn duplicate_paths_are_refused_on_the_incremental_path() {
+    use capsule_workspace_core::daemon::materialize_incremental;
+    let d = tmp();
+    let tree = d.path().join("t");
+    w(&tree.join("a.bin"), &vec![1u8; 40_000]);
+    w(&tree.join("b.bin"), &vec![2u8; 40_000]);
+    let s = LocalBlobStore::new(d.path().join("s")).unwrap();
+    let dig = publish(&tree, &s, &ChunkIndex::new(), None)
+        .unwrap()
+        .manifest;
+    let reference = d.path().join("ref");
+    materialize(&s, &dig, &reference).unwrap();
+
+    // Forge a manifest whose two entries share a path but differ in content.
+    let mut m = Manifest::from_bytes(&s.get_manifest(&dig).unwrap()).unwrap();
+    let b_chunks = m
+        .files
+        .iter()
+        .find(|f| f.path == "b.bin")
+        .unwrap()
+        .chunks
+        .clone();
+    m.files[1].path = "a.bin".into();
+    m.files[1].chunks = b_chunks;
+    let bad = m.logical_digest();
+    s.put_manifest(&bad, &m.to_bytes()).unwrap();
+
+    let out = d.path().join("o");
+    assert!(
+        materialize_incremental(&s, &bad, &out, &dig, &reference).is_err(),
+        "a duplicate path must be refused on the incremental path, not silently resolved"
+    );
+    assert_eq!(fs::read_dir(&out).map(|it| it.count()).unwrap_or(0), 0);
+}

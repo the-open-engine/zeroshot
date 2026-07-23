@@ -30,7 +30,7 @@ pub const STAT_CACHE_VERSION: u32 = 2;
 /// - `size`     — catches almost all content change for free.
 /// - `mtime_ns` — the primary change signal.
 /// - `ctime_ns` — catches mtime BACKDATING (`utimes` rewrites mtime but ctime becomes now, and a non-root
-///                process cannot forge ctime), plus chmod/rename/link changes.
+///   process cannot forge ctime), plus chmod/rename/link changes.
 /// - `ino`      — catches replace-by-rename, which can otherwise preserve size and mtime exactly.
 /// - `dev`      — catches a remount / bind-mount / overlayfs copy-up under the same path.
 /// - `nlink`    — catches hardlink churn (pnpm/cargo relinking a store entry into place).

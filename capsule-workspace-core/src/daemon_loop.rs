@@ -164,6 +164,9 @@ mod cycle {
     ///    Continuous cover: no-row (invisible) → young-row (grace) → marked (reachable).
     /// 5. `advance()` fence CAS. Its built-in idempotent-retry turns a lost-ack of OUR OWN write into
     ///    `Ok`, so a StaleFence reaching us here is a DIFFERENT writer → surface `Fenced` (non-fatal).
+    // Each argument is an independent daemon knob (store/lineage/clock/width/cache/memo/valve);
+    // bundling them into a config struct would relocate the list, not shorten it.
+    #[allow(clippy::too_many_arguments)]
     pub fn publish_cycle(
         tree: &Path,
         store: &dyn BlobStore,

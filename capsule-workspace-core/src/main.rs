@@ -388,6 +388,9 @@ mod daemon_cmd {
     /// One publish cycle + a human log line; returns the outcome so the loop can back off on a
     /// genuine fence. A non-fence error propagates and crashes the daemon (fail-fast); a lost fence
     /// race is logged PROMINENTLY and deferred.
+    // Each argument is an independent daemon knob (store/lineage/clock/width/cache/memo/valve);
+    // bundling them into a config struct would relocate the list, not shorten it.
+    #[allow(clippy::too_many_arguments)]
     fn run_and_log_cycle(
         tree: &Path,
         store: &dyn BlobStore,
@@ -582,7 +585,7 @@ mod daemon_cmd {
                 break;
             }
             cycle_n += 1;
-            let full_rehash_this_cycle = cycle_n % FULL_REHASH_EVERY == 0;
+            let full_rehash_this_cycle = cycle_n.is_multiple_of(FULL_REHASH_EVERY);
             match run_and_log_cycle(
                 &tree,
                 store.as_ref(),

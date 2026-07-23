@@ -31,11 +31,11 @@
 //!      claim time and is concurrently resurrected. Keep the GC-host stall window small (per-block
 //!      claim→delete, no batching) to shrink it.
 //!
-//! Operational invariant the deployment must hold: **grace > max(publish duration, GC sweep duration
-//! + max clock skew)** — so a block touched at the start of a publish stays young through commit, at
-//! which point the MARK takes over. Real deployments also single-flight the sweep (a PG advisory lock)
-//! to avoid two sweepers wasting work; correctness does not depend on it (each per-block claim is
-//! individually atomic — two sweepers just means one wins each block).
+//! Operational invariant the deployment must hold: **grace > max(publish duration, GC sweep
+//! duration + max clock skew)** — so a block touched at the start of a publish stays young through
+//! commit, at which point the MARK takes over. Real deployments also single-flight the sweep (a PG
+//! advisory lock) to avoid two sweepers wasting work; correctness does not depend on it (each
+//! per-block claim is individually atomic — two sweepers just means one wins each block).
 
 use crate::cas::BlobStore;
 use crate::gc::mark_live_blocks;

@@ -75,7 +75,7 @@ fn gc_reclaims_orphans_growth_tracks_live_set() {
             .map(|b| fs::metadata(store.join("blocks").join(b)).unwrap().len())
             .sum()
     };
-    let st = gc::collect(&store, &[head.clone()], Duration::ZERO).unwrap();
+    let st = gc::collect(&store, std::slice::from_ref(&head), Duration::ZERO).unwrap();
     let after = blocks_bytes(&store);
     println!(
         "[E8-1] before={before} after={after} live_head={live_head} deleted={} manifests_deleted={}",
@@ -158,7 +158,7 @@ fn live_referenced_blocks_never_collected() {
     // add an orphan block (from a superseded gen) by publishing different content then dropping it
     write(&tree.join("a.bin"), &prng(3));
     let _orphan = publish(&tree, &s, &ChunkIndex::new(), None).unwrap();
-    let gc1 = gc::collect(&store, &[st.manifest.clone()], Duration::ZERO).unwrap();
+    let gc1 = gc::collect(&store, std::slice::from_ref(&st.manifest), Duration::ZERO).unwrap();
     println!(
         "[E8-3] live=[gen0]: kept={} deleted={}",
         gc1.blocks_kept, gc1.blocks_deleted

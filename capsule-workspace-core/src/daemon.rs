@@ -205,7 +205,7 @@ pub fn publish(
         if cur.buf.is_empty() {
             return Ok(());
         }
-        let (bid, bytes, members) = std::mem::replace(cur, BlockBuilder::new()).finalize();
+        let (bid, bytes, members) = std::mem::take(cur).finalize();
         for (id, off, clen, rlen) in members {
             new_index.insert(
                 id,
@@ -446,7 +446,7 @@ pub fn publish_pipelined(
                 if cur.buf.is_empty() {
                     return Ok(());
                 }
-                let (bid, bytes, members) = std::mem::replace(cur, BlockBuilder::new()).finalize();
+                let (bid, bytes, members) = std::mem::take(cur).finalize();
                 for (id, off, clen, rlen) in members {
                     ni.insert(
                         id,
@@ -644,13 +644,50 @@ pub struct MaterializeStats {
     pub write_throughput_mbps: f64,
 }
 
-/// Fetch (parallel) the blocks that `regulars` need, decompress+VERIFY their chunks (content hash ==
-/// id, bounded, rlen), and write the files (parallel, phase-1 regular-file write with size validation
-/// + setuid/setgid/sticky masking). Shared by `materialize` (all regulars) and `materialize_incremental`
-/// (only the changed regulars). Returns (blocks_fetched, fetch_secs, decompress_secs, write_secs).
-/// Ceiling on the LOGICAL (decompressed) bytes a single materialize wave holds. Peak is this plus the
-/// compressed blocks that wave needs.
+/// Armed once `out` has been claimed (after `load_verified_manifest` proved it empty/absent) and disarmed
+/// only on success: if materialize returns early for ANY reason, `out` is cleared.
+///
+/// A scope guard rather than a wrapper around one call, because the previous attempt guarded only
+/// `write_regular_files` and left `write_links` and the reflink pass free to strand a populated `out` —
+/// and at `resume_via_reference`'s workspace clone the reflink pass does 100% of the work while the
+/// guarded call is a no-op, so the path that mattered most was entirely unprotected. A partial tree is
+/// worse than none: it looks complete to every cheap check, and it trips the empty-dir precondition on
+/// every subsequent start, turning a transient error into a permanent crash loop.
+struct ClearOutOnFailure<'a> {
+    out: &'a Path,
+    armed: bool,
+}
+impl ClearOutOnFailure<'_> {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+impl Drop for ClearOutOnFailure<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_dir_all(self.out);
+        }
+    }
+}
+
+/// Ceiling on the LOGICAL (decompressed) bytes a single materialize wave holds.
+///
+/// Real peak is roughly **2x this plus [`MATERIALIZE_BLOCK_BATCH`] x `BLOCK_TARGET`**: the wave's chunk
+/// map and the per-file assembly buffers are alive at the same time, and a batch of compressed blocks sits
+/// alongside them. Stated precisely because two earlier versions of this comment understated the bound
+/// (once by 8x, once by 2x) and no test could see either.
 const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// How many compressed blocks a wave may hold at once.
+///
+/// Bounding the DECOMPRESSED side alone is not enough. A wave fetches every distinct block its files
+/// touch, and nothing caps that count: a long-lived daemon republishes against the parent manifest, so an
+/// unchanged file keeps the `ChunkLoc` of whichever generation first stored it, and a contiguous run of
+/// files fans out across many block generations (measured: 5 distinct blocks on a fresh publish, 65 after
+/// 60 generations). With blocks up to `BLOCK_TARGET` (64 MiB) that fan-out is linear in tree size again —
+/// exactly the property the wave rewrite exists to remove. So blocks are fetched, drained and dropped a
+/// batch at a time; compressed peak is at most this many x `BLOCK_TARGET`.
+const MATERIALIZE_BLOCK_BATCH: usize = 4;
 
 /// Fetch the blocks `regulars` need, decompress+VERIFY their chunks (content hash == id, bounded, rlen),
 /// and write the files. Shared by `materialize` (all regulars) and `materialize_incremental` (only the
@@ -684,12 +721,8 @@ fn write_regular_files(
     // ---- PLAN. Validate every path and size from the MANIFEST before writing a single byte, and assert
     // the invariant the offset math depends on. Ids are BORROWED from the manifest, never cloned: each is
     // a 64-char String and cloning one per chunk costs ~100k allocations on a realistic tree.
-    let mut seen_paths: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for f in regulars.iter() {
         safe_rel_path(&f.path)?;
-        if !seen_paths.insert(f.path.as_str()) {
-            anyhow::bail!("manifest lists {} more than once", f.path);
-        }
         let mut total: u64 = 0;
         let last = f.chunks.len().saturating_sub(1);
         for (ci, cid) in f.chunks.iter().enumerate() {
@@ -795,16 +828,27 @@ fn write_regular_files(
                 let need: BTreeSet<&BlockId> =
                     batch.iter().map(|c| &manifest.chunks[*c].block).collect();
                 all_blocks.extend(need.iter().copied());
-                let t = Instant::now();
-                let blocks: HashMap<&BlockId, Vec<u8>> = need
-                    .par_iter()
-                    .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
-                    .collect::<Result<HashMap<_, _>>>()?;
-                fetch_secs += t.elapsed().as_secs_f64();
-                let t = Instant::now();
-                let chunks = verify(&batch, &blocks)?;
-                decompress_secs += t.elapsed().as_secs_f64();
-                drop(blocks);
+                // Same bound as the ordinary path: this batch's chunks can live in up to 1024 distinct
+                // blocks, so fetch them a bounded group at a time rather than all at once.
+                let need_v: Vec<&BlockId> = need.iter().copied().collect();
+                let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(batch.len());
+                for grp in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
+                    let t = Instant::now();
+                    let blocks: HashMap<&BlockId, Vec<u8>> = grp
+                        .par_iter()
+                        .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+                        .collect::<Result<HashMap<_, _>>>()?;
+                    fetch_secs += t.elapsed().as_secs_f64();
+                    let mine: Vec<&ChunkId> = batch
+                        .iter()
+                        .copied()
+                        .filter(|c| blocks.contains_key(&manifest.chunks[*c].block))
+                        .collect();
+                    let t = Instant::now();
+                    chunks.extend(verify(&mine, &blocks)?);
+                    decompress_secs += t.elapsed().as_secs_f64();
+                    drop(blocks);
+                }
                 let t = Instant::now();
                 let base = i - batch.len();
                 for (k, cid) in batch.iter().enumerate() {
@@ -823,20 +867,31 @@ fn write_regular_files(
             .map(|c| &manifest.chunks[c].block)
             .collect();
         all_blocks.extend(need.iter().copied());
-        let t = Instant::now();
-        let blocks: HashMap<&BlockId, Vec<u8>> = need
-            .par_iter()
-            .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
-            .collect::<Result<HashMap<_, _>>>()?;
-        fetch_secs += t.elapsed().as_secs_f64();
-
         let mut cids: Vec<&ChunkId> = wave.iter().flat_map(|f| f.chunks.iter()).collect();
         cids.sort();
         cids.dedup();
-        let t = Instant::now();
-        let chunks = verify(&cids, &blocks)?;
-        decompress_secs += t.elapsed().as_secs_f64();
-        drop(blocks); // compressed copies die once verified
+        // Fetch the wave's blocks a BOUNDED BATCH at a time, decompress the chunks living in each batch,
+        // then drop the compressed bytes before fetching the next. Only the decompressed map accumulates,
+        // and that is what MATERIALIZE_WAVE_BYTES bounds.
+        let need_v: Vec<&BlockId> = need.iter().copied().collect();
+        let mut chunks: HashMap<ChunkId, Vec<u8>> = HashMap::with_capacity(cids.len());
+        for batch in need_v.chunks(MATERIALIZE_BLOCK_BATCH) {
+            let t = Instant::now();
+            let blocks: HashMap<&BlockId, Vec<u8>> = batch
+                .par_iter()
+                .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+                .collect::<Result<HashMap<_, _>>>()?;
+            fetch_secs += t.elapsed().as_secs_f64();
+            let mine: Vec<&ChunkId> = cids
+                .iter()
+                .copied()
+                .filter(|c| blocks.contains_key(&manifest.chunks[*c].block))
+                .collect();
+            let t = Instant::now();
+            chunks.extend(verify(&mine, &blocks)?);
+            decompress_secs += t.elapsed().as_secs_f64();
+            drop(blocks); // compressed copies die once verified
+        }
 
         let t = Instant::now();
         wave.par_iter().try_for_each(|f| -> Result<()> {
@@ -894,6 +949,18 @@ fn load_verified_manifest(store: &dyn BlobStore, digest: &str, out: &Path) -> Re
     if manifest.logical_digest() != digest {
         anyhow::bail!("manifest digest mismatch (corruption/tamper)");
     }
+    // Duplicate paths are refused HERE, over EVERY entry — regulars, hardlinks and symlinks alike.
+    // Checking inside `write_regular_files` was not enough: it only sees the slice handed to it, so on the
+    // incremental path a duplicate that landed in the reflink candidates was never examined and the two
+    // entries silently overwrote each other while materialize reported SUCCESS. A duplicate path can only
+    // mean a lossy-decoded collision or a tampered manifest; writing one of the two and calling it success
+    // is the worst available outcome.
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for f in &manifest.files {
+        if !seen.insert(f.path.as_str()) {
+            anyhow::bail!("manifest lists {} more than once", f.path);
+        }
+    }
     if out.exists() {
         let nonempty = std::fs::read_dir(out)
             .map(|mut it| it.next().is_some())
@@ -922,20 +989,11 @@ pub fn materialize(
         .iter()
         .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
         .collect();
-    // A failed materialize must leave NOTHING behind. Partial output here is worse than none: the files
-    // are created at their true paths and (for the streamed large-file path) their true length, so a
-    // half-written tree looks complete to every cheap check while containing wrong bytes — and it also
-    // trips `load_verified_manifest`'s empty-dir guard on the next start, turning a transient fetch error
-    // into a permanent crash loop. Clearing `out` restores the retryable behaviour.
+    let mut guard = ClearOutOnFailure { out, armed: true };
     let (blocks, fetch_secs, decompress_secs, write_secs) =
-        match write_regular_files(store, &manifest, out, &regulars) {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(out);
-                return Err(e);
-            }
-        };
+        write_regular_files(store, &manifest, out, &regulars)?;
     write_links(&manifest, out)?;
+    guard.disarm(); // everything landed — keep `out`
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     Ok(MaterializeStats {
         files: manifest.files.len(),
@@ -974,6 +1032,7 @@ pub fn materialize_incremental(
     if ref_manifest.logical_digest() != ref_manifest_digest {
         anyhow::bail!("reference manifest digest mismatch");
     }
+    let mut guard = ClearOutOnFailure { out, armed: true };
     let ref_by_path: HashMap<&str, &FileEntry> = ref_manifest
         .files
         .iter()
@@ -1047,18 +1106,12 @@ pub fn materialize_incremental(
     let reflinked = candidates.len() - fallbacks.len();
     to_write.extend(fallbacks); // reference leaf unusable → materialize from the store instead
 
-    // See `materialize`: partial output is worse than none, so wipe `out` on failure.
     let (blocks, fetch_secs, decompress_secs, write_secs) =
-        match write_regular_files(store, &manifest, out, &to_write) {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(out);
-                return Err(e);
-            }
-        };
+        write_regular_files(store, &manifest, out, &to_write)?;
     // hardlinks + symlinks are always recreated (reflink N/A); still LAST for symlink-escape safety.
     write_links(&manifest, out)?;
 
+    guard.disarm(); // everything landed — keep `out`
     let total: u64 = manifest.files.iter().map(|f| f.size).sum();
     Ok(MaterializeStats {
         files: manifest.files.len(),

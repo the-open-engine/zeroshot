@@ -224,7 +224,7 @@ fn probe2_concurrent_gc_double_delete_races() {
         }
         // synthesize many OLD-name orphan block files to make the two sweeps overlap reliably
         for i in 0..400u32 {
-            let name = format!("{:064x}", 0x0DEAD_0000u64 + i as u64);
+            let name = format!("{:064x}", 0x0DEA_D000_0000u64 + i as u64);
             fs::write(store.join("blocks").join(name), b"orphan-block").unwrap();
         }
         let orphans_before = fs::read_dir(store.join("blocks")).unwrap().count();
@@ -404,7 +404,7 @@ fn probe5_gc_agrees_with_pipelined_publish() {
         write(&tree.join(format!("f{}.bin", i)), &prng(700 + i));
     }
     let g0 = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, 4, 8, None).unwrap();
-    let st0 = gc::collect(&store, &[g0.manifest.clone()], Duration::ZERO).unwrap();
+    let st0 = gc::collect(&store, std::slice::from_ref(&g0.manifest), Duration::ZERO).unwrap();
     println!(
         "[P5] after pipelined publish, GC(live=[HEAD],grace=0): kept={} deleted={}",
         st0.blocks_kept, st0.blocks_deleted
@@ -420,7 +420,7 @@ fn probe5_gc_agrees_with_pipelined_publish() {
         write(&tree.join(format!("f{}.bin", i)), &prng(800 + i));
     }
     let g1 = publish_pipelined(&tree, &s, &known0, None, 4, 8, None).unwrap();
-    let st1 = gc::collect(&store, &[g1.manifest.clone()], Duration::ZERO).unwrap();
+    let st1 = gc::collect(&store, std::slice::from_ref(&g1.manifest), Duration::ZERO).unwrap();
     println!(
         "[P5] after superseding pipelined gen, GC(live=[gen1],grace=0): kept={} deleted={}",
         st1.blocks_kept, st1.blocks_deleted
@@ -448,7 +448,7 @@ fn probe6_gc_never_collects_leftover_tmp() {
     let _s = LocalBlobStore::new(&store).unwrap();
     let tmpname = format!("{:064x}.{}.{}.tmp", 0x00C0FFEEu64, 4242, 0);
     let tmp_path = store.join("blocks").join(&tmpname);
-    fs::write(&tmp_path, &vec![0u8; 8192]).unwrap();
+    fs::write(&tmp_path, vec![0u8; 8192]).unwrap();
     backdate(&tmp_path); // old by every measure
 
     let st = gc::collect(&store, &[], Duration::ZERO).unwrap();

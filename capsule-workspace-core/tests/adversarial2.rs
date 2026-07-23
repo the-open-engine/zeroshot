@@ -436,7 +436,7 @@ fn materialize_trusts_size_field_for_allocation() {
         clean_err
     );
     // FIXED: size is validated against actual chunk bytes -> clean Err, NOT a capacity panic.
-    assert!(!caught.is_err(), "must not panic on a bogus size field");
+    assert!(caught.is_ok(), "must not panic on a bogus size field");
     assert!(clean_err, "bogus size field is now a clean error");
 }
 

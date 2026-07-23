@@ -226,7 +226,12 @@ fn audit_e8_grace_does_not_protect_dedup_reused_old_block() {
     // Keep gen0 in the live set. Its (old, backdated) block is protected ONLY by being MARKED
     // (grace can't help it — it is years old). gen1's fresh block is protected by grace=1h.
     // Both survive -> gen1 materializes: isolates the mark set as B0's protector.
-    let st2 = gc::collect(&store2, &[g0b.manifest.clone()], Duration::from_secs(3600)).unwrap();
+    let st2 = gc::collect(
+        &store2,
+        std::slice::from_ref(&g0b.manifest),
+        Duration::from_secs(3600),
+    )
+    .unwrap();
     let out2 = d2.path().join("o");
     let ok = materialize(&s2, &g1b.manifest, &out2).is_ok();
     println!(

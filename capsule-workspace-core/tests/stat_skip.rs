@@ -101,6 +101,7 @@ fn skip_always_agrees_with_a_full_rehash() {
 
     // A sequence of realistic mutations. `never_touched.bin` stays quiescent throughout, so it should be
     // skipped from cycle 2 onward while every other case still lands correctly.
+    #[allow(clippy::type_complexity)] // a table of named mutations reads better inline
     let steps: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
         ("no-op (idle cycle)", Box::new(|_: &Path| {})),
         (

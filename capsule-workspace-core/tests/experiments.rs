@@ -283,7 +283,7 @@ fn d1_fixed_block_shift_sensitivity() {
     let tree = d.path().join("t");
     let mut base = Vec::new();
     for i in 0..40u8 {
-        base.extend(std::iter::repeat(i).take(CHUNK));
+        base.extend(std::iter::repeat_n(i, CHUNK));
     } // 40 distinct chunks
     write(&tree.join("f.bin"), &base);
     let store = d.path().join("s");
@@ -296,7 +296,7 @@ fn d1_fixed_block_shift_sensitivity() {
     };
     // append at end -> only the new tail chunk
     let mut appended = base.clone();
-    appended.extend(std::iter::repeat(200u8).take(1024));
+    appended.extend(std::iter::repeat_n(200u8, 1024));
     write(&tree.join("f.bin"), &appended);
     let na = publish(&tree, &s, &known, None).unwrap().new_chunks;
     // prepend -> shifts every boundary -> all chunks new
