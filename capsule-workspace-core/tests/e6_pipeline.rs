@@ -52,7 +52,7 @@ fn pipelined_equivalent_to_streaming() {
     for w in [1usize, 2, 4, 8] {
         let sd = d.path().join(format!("sp{}", w));
         let s = LocalBlobStore::new(&sd).unwrap();
-        let b = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, 8).unwrap();
+        let b = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, 8, None).unwrap();
         assert_eq!(
             a.manifest, b.manifest,
             "pipelined(w={w}) digest must equal streaming"
@@ -135,7 +135,7 @@ fn parallel_uploads_overlap() {
         cur: 0.into(),
         max: 0.into(),
     };
-    let st = publish_pipelined(&tree, &store, &ChunkIndex::new(), None, 4, 8).unwrap();
+    let st = publish_pipelined(&tree, &store, &ChunkIndex::new(), None, 4, 8, None).unwrap();
     assert!(
         st.blocks >= 2,
         "need multiple blocks to observe upload concurrency (got {})",

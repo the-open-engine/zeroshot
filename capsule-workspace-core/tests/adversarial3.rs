@@ -77,7 +77,7 @@ fn probe1_pipeline_zero_work_and_edge_trees() {
         let ss = LocalBlobStore::new(d.path().join("empty_s")).unwrap();
         let sp = LocalBlobStore::new(d.path().join("empty_p")).unwrap();
         let a = publish(&tree, &ss, &ChunkIndex::new(), None).unwrap();
-        let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, 4, 8).unwrap();
+        let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, 4, 8, None).unwrap();
         assert_eq!(
             a.manifest, b.manifest,
             "empty-tree digest streaming!=pipelined"
@@ -96,7 +96,7 @@ fn probe1_pipeline_zero_work_and_edge_trees() {
         let ss = LocalBlobStore::new(d.path().join("sym_s")).unwrap();
         let sp = LocalBlobStore::new(d.path().join("sym_p")).unwrap();
         let a = publish(&tree, &ss, &ChunkIndex::new(), None).unwrap();
-        let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, 4, 8).unwrap();
+        let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, 4, 8, None).unwrap();
         assert_eq!(a.manifest, b.manifest, "symlink-only digest mismatch");
         assert_eq!((b.new_chunks, b.symlinks), (0, 2));
         let out = d.path().join("sym_o");
@@ -118,7 +118,7 @@ fn probe1_pipeline_zero_work_and_edge_trees() {
         let sp = LocalBlobStore::new(d.path().join("dedup_p")).unwrap();
         let base = publish(&tree, &ss, &ChunkIndex::new(), None).unwrap();
         let known = load_index(&ss, &base.manifest);
-        let b = publish_pipelined(&tree, &sp, &known, None, 8, 8).unwrap();
+        let b = publish_pipelined(&tree, &sp, &known, None, 8, 8, None).unwrap();
         assert_eq!(base.manifest, b.manifest, "100%-dedup digest mismatch");
         assert_eq!((b.total_chunks, b.new_chunks, b.blocks), (2, 0, 0));
         println!(
@@ -136,7 +136,7 @@ fn probe1_pipeline_zero_work_and_edge_trees() {
         let a = publish(&tree, &ss, &ChunkIndex::new(), None).unwrap();
         for w in [1usize, 4, 16] {
             let sp = LocalBlobStore::new(d.path().join(format!("hl_p{}", w))).unwrap();
-            let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, w, 8).unwrap();
+            let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, w, 8, None).unwrap();
             assert_eq!(
                 a.manifest, b.manifest,
                 "hardlink-tree digest mismatch w={w}"
@@ -173,7 +173,7 @@ fn probe1_pipeline_zero_work_and_edge_trees() {
         let a = publish(&tree, &ss, &ChunkIndex::new(), None).unwrap();
         for w in [1usize, 2, 8] {
             let sp = LocalBlobStore::new(d.path().join(format!("share_p{}", w))).unwrap();
-            let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, w, 8).unwrap();
+            let b = publish_pipelined(&tree, &sp, &ChunkIndex::new(), None, w, 8, None).unwrap();
             assert_eq!(a.manifest, b.manifest, "shared-chunk digest mismatch w={w}");
             assert_eq!(
                 a.new_chunks, b.new_chunks,
@@ -403,7 +403,7 @@ fn probe5_gc_agrees_with_pipelined_publish() {
     for i in 0..10u64 {
         write(&tree.join(format!("f{}.bin", i)), &prng(700 + i));
     }
-    let g0 = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, 4, 8).unwrap();
+    let g0 = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, 4, 8, None).unwrap();
     let st0 = gc::collect(&store, &[g0.manifest.clone()], Duration::ZERO).unwrap();
     println!(
         "[P5] after pipelined publish, GC(live=[HEAD],grace=0): kept={} deleted={}",
@@ -419,7 +419,7 @@ fn probe5_gc_agrees_with_pipelined_publish() {
     for i in 0..10u64 {
         write(&tree.join(format!("f{}.bin", i)), &prng(800 + i));
     }
-    let g1 = publish_pipelined(&tree, &s, &known0, None, 4, 8).unwrap();
+    let g1 = publish_pipelined(&tree, &s, &known0, None, 4, 8, None).unwrap();
     let st1 = gc::collect(&store, &[g1.manifest.clone()], Duration::ZERO).unwrap();
     println!(
         "[P5] after superseding pipelined gen, GC(live=[gen1],grace=0): kept={} deleted={}",
@@ -576,7 +576,7 @@ fn probe8_store_failure_midstream_no_hang() {
             calls: AtomicUsize::new(0),
             fail_after: 0, // fail the very first (mid-stream) block flush
         };
-        let r = publish_pipelined(&treep, &store, &ChunkIndex::new(), None, 4, 4);
+        let r = publish_pipelined(&treep, &store, &ChunkIndex::new(), None, 4, 4, None);
         let _ = tx.send(r.is_err());
     });
     match rx.recv_timeout(Duration::from_secs(60)) {

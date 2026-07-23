@@ -64,6 +64,16 @@ pub struct StatCache {
     /// Wall-clock (unix ns) captured BEFORE the walk that produced these entries. The racy-window guard
     /// compares file mtimes against this.
     pub scan_started_ns: i64,
+    /// Digest of the manifest THIS scan produced. A cache may only be applied against a parent manifest
+    /// with the SAME digest — see `PrevPublish::new`.
+    ///
+    /// Why this is load-bearing: a publish can succeed (manifest stored, cache written) and then LOSE the
+    /// fence, so HEAD never advances. Without this binding, the next cycle would pair a cache describing
+    /// generation N+1's tree with generation N's parent manifest, and any file changed in N+1 whose size
+    /// happened to match would be "skipped" back to its STALE chunk list — silent data loss. Empty by
+    /// default (and via `serde(default)` for older caches), which never matches ⇒ no skip.
+    #[serde(default)]
+    pub manifest_digest: String,
     pub entries: HashMap<String, StatKey>,
 }
 
@@ -73,6 +83,7 @@ impl Default for StatCache {
             version: STAT_CACHE_VERSION,
             // 0 ⇒ every file fails the racy-window guard ⇒ nothing is ever skipped. The safe identity.
             scan_started_ns: 0,
+            manifest_digest: String::new(),
             entries: HashMap::new(),
         }
     }
@@ -91,6 +102,7 @@ impl StatCache {
         Self {
             version: STAT_CACHE_VERSION,
             scan_started_ns,
+            manifest_digest: String::new(),
             entries: HashMap::new(),
         }
     }

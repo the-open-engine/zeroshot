@@ -14,6 +14,34 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+/// The previous publish's outputs, enabling the O10 re-hash skip: the parent MANIFEST (the only source of
+/// reused chunk lists) plus the node-local stat cache written by that publish. Construct via
+/// [`PrevPublish::new`], which refuses a mismatched pair.
+#[derive(Clone, Copy)]
+pub struct PrevPublish<'a> {
+    pub manifest: &'a Manifest,
+    pub cache: &'a crate::stat_cache::StatCache,
+}
+
+impl<'a> PrevPublish<'a> {
+    /// Pair a parent manifest with a stat cache ONLY if that cache was produced by the publish that
+    /// created this exact manifest; otherwise `None` (⇒ no skip ⇒ full re-hash).
+    ///
+    /// This binding is load-bearing, not hygiene. A publish can store its manifest and write its cache and
+    /// then LOSE the fence, leaving HEAD on the previous generation. Pairing that cache (which describes
+    /// gen N+1's tree) with gen N's manifest would let any file changed in N+1 whose size happened to match
+    /// be "skipped" back to gen N's STALE chunk list — silently discarding the agent's work. Making the
+    /// unsafe pairing unconstructable is cheaper than remembering not to write it.
+    pub fn new(
+        manifest: &'a Manifest,
+        manifest_digest: &str,
+        cache: &'a crate::stat_cache::StatCache,
+    ) -> Option<Self> {
+        (!manifest_digest.is_empty() && cache.manifest_digest == manifest_digest)
+            .then_some(Self { manifest, cache })
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct PublishStats {
     pub manifest: String,
@@ -34,6 +62,13 @@ pub struct PublishStats {
     pub wall_secs: f64,
     pub hash_throughput_mbps: f64,
     pub compress_throughput_mbps: f64,
+    /// O10: regular files whose chunk list was reused from the parent manifest without being re-read.
+    pub skipped_files: usize,
+    pub skipped_mb: f64,
+    /// Fingerprints observed during THIS publish — persist alongside the new HEAD and feed back as
+    /// `PrevPublish::cache` next cycle. Not serialized (it is state, not a stat).
+    #[serde(skip)]
+    pub stat_cache: crate::stat_cache::StatCache,
 }
 
 /// Walk an opaque tree, classifying entries. Regular files carry content; symlinks are
@@ -288,6 +323,9 @@ pub fn publish(
         pack_upload_secs,
         wall_secs: wall,
         hash_throughput_mbps: raw_bytes as f64 / 1e6 / read_hash_secs.max(1e-9),
+        skipped_files: 0,
+        skipped_mb: 0.0,
+        stat_cache: crate::stat_cache::StatCache::default(),
         compress_throughput_mbps: new_raw_bytes as f64 / 1e6 / compress_secs.max(1e-9),
     })
 }
@@ -309,11 +347,29 @@ pub fn publish_pipelined(
     parent: Option<String>,
     workers: usize,
     cap: usize,
+    prev: Option<PrevPublish<'_>>,
 ) -> Result<PublishStats> {
     use std::io::Read;
     use std::sync::mpsc::sync_channel;
     let workers = workers.max(1);
     let t0 = Instant::now();
+    // Wall-clock BEFORE the walk — the racy-window guard for the NEXT publish compares file mtimes against
+    // this, so it must pre-date every stat we are about to take.
+    let scan_started_ns = crate::stat_cache::now_unix_ns();
+    let mut new_cache = crate::stat_cache::StatCache::new(scan_started_ns);
+    let mut skipped_files = 0usize;
+    let mut skipped_bytes = 0u64;
+    // Parent manifest's regular files by path — the ONLY source of reused chunk lists.
+    let prev_by_path: HashMap<&str, &FileEntry> = prev
+        .map(|p| {
+            p.manifest
+                .files
+                .iter()
+                .filter(|f| f.symlink.is_none() && f.hardlink.is_none())
+                .map(|f| (f.path.as_str(), f))
+                .collect()
+        })
+        .unwrap_or_default();
     let (mut files, symlink_entries, skipped_special) = walk_entries(root)?;
     files.sort();
     let n_symlinks = symlink_entries
@@ -423,6 +479,42 @@ pub fn publish_pipelined(
         for p in &files {
             let meta = std::fs::metadata(p)?;
             let rel = p.strip_prefix(root).unwrap().to_string_lossy().to_string();
+
+            // O10 — REUSE-WITHOUT-REHASH. Record this file's fingerprint for the next cycle, then decide
+            // whether we can take its chunk list from the parent manifest instead of reading + sha256ing
+            // it. A wrong skip is silent non-durability, so ALL FOUR must hold:
+            //   1. `may_skip`  — fingerprint identical AND the file was quiescent before the previous scan
+            //                    began (racy-window guard; see stat_cache).
+            //   2. the PARENT MANIFEST has a regular-file entry for this exact path (chunks come from
+            //      there, never from the cache).
+            //   3. that entry's size equals what we just stat'd (cheap cross-check of the two sources).
+            //   4. every reused chunk is already in `known` — so we can never emit a manifest referencing a
+            //      chunk that isn't durable, regardless of what the caller passed as `known`.
+            let key = crate::stat_cache::StatKey::from_metadata(&meta);
+            new_cache.insert(rel.clone(), key);
+            if let Some(pv) = prev {
+                if pv.cache.may_skip(&rel, &key) {
+                    if let Some(pe) = prev_by_path.get(rel.as_str()) {
+                        if pe.size == meta.len() && pe.chunks.iter().all(|c| known.contains_key(c))
+                        {
+                            total_chunks += pe.chunks.len();
+                            raw_bytes += pe.size;
+                            skipped_files += 1;
+                            skipped_bytes += pe.size;
+                            file_entries.push(FileEntry {
+                                path: rel,
+                                mode: meta.permissions().mode(),
+                                size: meta.len(),
+                                chunks: pe.chunks.clone(),
+                                symlink: None,
+                                hardlink: None,
+                            });
+                            continue; // not opened, not read, not hashed
+                        }
+                    }
+                }
+            }
+
             let mut fh = std::fs::File::open(p)?;
             let mut ids: Vec<ChunkId> = Vec::new();
             loop {
@@ -498,6 +590,8 @@ pub fn publish_pipelined(
     };
     let digest = manifest.logical_digest();
     store.put_manifest(&digest, &manifest.to_bytes())?;
+    // Bind the fingerprints to the manifest they describe — `PrevPublish::new` refuses any other pairing.
+    new_cache.manifest_digest = digest.clone();
     let wall = t0.elapsed().as_secs_f64();
     Ok(PublishStats {
         manifest: digest,
@@ -517,6 +611,9 @@ pub fn publish_pipelined(
         pack_upload_secs: 0.0,
         wall_secs: wall,
         hash_throughput_mbps: raw_bytes as f64 / 1e6 / wall.max(1e-9),
+        skipped_files,
+        skipped_mb: skipped_bytes as f64 / 1e6,
+        stat_cache: new_cache,
         compress_throughput_mbps: new_raw_bytes as f64 / 1e6 / wall.max(1e-9),
     })
 }

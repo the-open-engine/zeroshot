@@ -84,7 +84,7 @@ fn audit_e6_pipelined_equivalence_with_hardlinks() {
 
     for w in [1usize, 2, 3, 4, 8, 16] {
         let s = LocalBlobStore::new(d.path().join(format!("sp{}", w))).unwrap();
-        let p = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, 8).unwrap();
+        let p = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, 8, None).unwrap();
         assert_eq!(base.manifest, p.manifest, "digest mismatch at w={w}");
         assert_eq!(base.new_chunks, p.new_chunks, "dedup mismatch at w={w}");
         assert_eq!(base.total_chunks, p.total_chunks, "total mismatch at w={w}");
@@ -440,7 +440,7 @@ fn audit_e6_min_buffers_no_deadlock() {
     let base = publish(&tree, &s0, &ChunkIndex::new(), None).unwrap();
     for (w, cap) in [(1usize, 1usize), (2, 1), (4, 1), (8, 1), (3, 2)] {
         let s = LocalBlobStore::new(d.path().join(format!("s_{}_{}", w, cap))).unwrap();
-        let p = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, cap).unwrap();
+        let p = publish_pipelined(&tree, &s, &ChunkIndex::new(), None, w, cap, None).unwrap();
         assert_eq!(base.manifest, p.manifest, "digest at w={w} cap={cap}");
     }
     println!("[AUDIT-E6-DEADLOCK] cap=1 across w=1..8 completed, no deadlock: OK");
@@ -499,7 +499,7 @@ fn audit_e6_put_block_failure_is_clean_err_no_hang() {
         calls: AtomicUsize::new(0),
         fail_after: 0, // fail on the very first block flush
     };
-    let r = publish_pipelined(&tree, &store, &ChunkIndex::new(), None, 4, 8);
+    let r = publish_pipelined(&tree, &store, &ChunkIndex::new(), None, 4, 8, None);
     println!(
         "[AUDIT-E6-ERRPATH] put_block always-fails -> publish_pipelined err? {}",
         r.is_err()
