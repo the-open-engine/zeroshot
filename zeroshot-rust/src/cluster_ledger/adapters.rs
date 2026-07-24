@@ -5,7 +5,8 @@ mod state;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    canonical_value_bytes, ApplyResult, Generation, Phase, RunId, StopResult, UpdateResult,
+    canonical_value_bytes, ApplyResult, Generation, Phase, RetryResult, RunId, StopResult,
+    UpdateResult,
 };
 use openengine_cluster_server::admission::{
     AdmissionSnapshot, AdmissionStore, CancellationSignal, CommitProposal, ControlJournal,
@@ -13,8 +14,8 @@ use openengine_cluster_server::admission::{
     VerifiedSeed,
 };
 use openengine_cluster_server::lifecycle::{
-    CompletionResult, DispatchPermit, LifecycleSnapshot, LifecycleStore, StopProposal,
-    UpdateProposal, VerifiedCompletion,
+    CompletionResult, DispatchPermit, FailedCompletion, LifecycleSnapshot, LifecycleStore,
+    RetryProposal, StopProposal, UpdateProposal, VerifiedCompletion,
 };
 
 use super::record::{CanonicalDigest, RecordPayload};
@@ -462,5 +463,26 @@ impl LifecycleStore for ClusterLedgerAdapters {
         _completion: VerifiedCompletion,
     ) -> Result<CompletionResult, ProtocolStoreError> {
         Err(ProtocolStoreError::UnknownLease)
+    }
+
+    async fn fail_dispatch(
+        &self,
+        _failure: FailedCompletion,
+    ) -> Result<CompletionResult, ProtocolStoreError> {
+        Err(ProtocolStoreError::UnknownLease)
+    }
+
+    async fn retry_lifecycle(
+        &self,
+        _proposal: RetryProposal,
+    ) -> Result<RetryResult, ProtocolStoreError> {
+        Err(ProtocolStoreError::DispatchDenied {
+            current: self
+                .folded()
+                .await?
+                .lifecycle
+                .dispatch_state()
+                .unwrap_or(openengine_cluster_protocol::DispatchState::Stopped),
+        })
     }
 }

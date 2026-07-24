@@ -4,7 +4,8 @@ pub mod ports;
 pub use ports::*;
 
 use openengine_cluster_protocol::{
-    admission_fingerprint, RequestFingerprint, StopParams, UpdateParams, INTERNAL_ERROR_CODE,
+    admission_fingerprint, RequestFingerprint, RetryParams, StopParams, UpdateParams,
+    INTERNAL_ERROR_CODE,
 };
 use serde_json::Value;
 
@@ -18,6 +19,10 @@ pub(crate) fn update_fingerprint(
 
 pub(crate) fn stop_fingerprint(params: &StopParams) -> Result<RequestFingerprint, BackendError> {
     method_fingerprint("stop", params)
+}
+
+pub(crate) fn retry_fingerprint(params: &RetryParams) -> Result<RequestFingerprint, BackendError> {
+    method_fingerprint("retry", params)
 }
 
 pub(crate) fn method_fingerprint<T>(

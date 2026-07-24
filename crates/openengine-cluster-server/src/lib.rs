@@ -7,16 +7,18 @@ pub mod stdio;
 pub mod watch;
 pub mod worker_registry;
 
+mod wire;
+pub(crate) use wire::{serialize_backend_error, serialize_error, serialize_success};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, DomainErrorData, GetParams, GetResult, InitializeParams,
-    InitializeResult, JsonRpcError, JsonRpcErrorResponse, JsonRpcSuccess, PlanParams, PlanResult,
-    RequestId, APPLICATION_ERROR, INTERNAL_ERROR, INTERNAL_ERROR_CODE, INVALID_PARAMS,
-    INVALID_PHASE, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND, PARSE_ERROR,
-    PROTOCOL_VERSION, SCHEMA_VIOLATION, StopParams, StopResult, UNSUPPORTED_PROTOCOL_VERSION,
-    UpdateParams, UpdateResult, WatchParams, WatchResult,
+    InitializeResult, PlanParams, PlanResult, RequestId, APPLICATION_ERROR, INTERNAL_ERROR_CODE,
+    INVALID_PARAMS, INVALID_PHASE, INVALID_REQUEST, JSON_RPC_VERSION, METHOD_NOT_FOUND,
+    PARSE_ERROR, PROTOCOL_VERSION, SCHEMA_VIOLATION, RetryParams, RetryResult, StopParams,
+    StopResult, UNSUPPORTED_PROTOCOL_VERSION, UpdateParams, UpdateResult, WatchParams, WatchResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -147,6 +149,18 @@ pub trait ClusterBackend: Send + Sync + 'static {
         ))
     }
 
+    async fn retry(
+        &self,
+        _context: &ConnectionContext,
+        _params: RetryParams,
+    ) -> Result<RetryResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support lifecycle retry",
+            None,
+        ))
+    }
+
     async fn watch(
         &self,
         _context: &ConnectionContext,
@@ -239,6 +253,7 @@ where
             "get" => ImplementedMethod::Get,
             "update" => ImplementedMethod::Update,
             "stop" => ImplementedMethod::Stop,
+            "retry" => ImplementedMethod::Retry,
             _ => {
                 return serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None);
             }
@@ -259,6 +274,7 @@ where
             ImplementedMethod::Get => self.dispatch_get(id, params).await,
             ImplementedMethod::Update => self.dispatch_update(id, params).await,
             ImplementedMethod::Stop => self.dispatch_stop(id, params).await,
+            ImplementedMethod::Retry => self.dispatch_retry(id, params).await,
         }
     }
 
@@ -387,6 +403,27 @@ where
             Err(error) => serialize_backend_error(id, error),
         }
     }
+
+    async fn dispatch_retry(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<RetryParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return serialize_error(
+                    Some(id),
+                    INVALID_PARAMS,
+                    "Invalid params",
+                    Some(DomainErrorData {
+                        code: SCHEMA_VIOLATION.to_owned(),
+                        details: Some(json!({ "reason": error.to_string() })),
+                    }),
+                );
+            }
+        };
+        match self.backend.retry(&self.context, params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
 }
 
 enum ImplementedMethod {
@@ -396,71 +433,5 @@ enum ImplementedMethod {
     Get,
     Update,
     Stop,
-}
-
-pub(crate) fn serialize_success<T>(id: RequestId, result: T) -> String
-where
-    T: serde::Serialize,
-{
-    serde_json::to_string(&JsonRpcSuccess {
-        jsonrpc: JSON_RPC_VERSION.to_owned(),
-        id,
-        result,
-    })
-    .expect("protocol response serialization must succeed")
-}
-
-pub(crate) fn serialize_backend_error(id: RequestId, error: BackendError) -> String {
-    let code = if error.code.is_empty() {
-        INTERNAL_ERROR_CODE.to_owned()
-    } else {
-        error.code
-    };
-    match error.kind {
-        BackendErrorKind::Internal => serialize_error(
-            Some(id),
-            INTERNAL_ERROR,
-            "Internal error",
-            Some(DomainErrorData {
-                code,
-                details: None,
-            }),
-        ),
-        BackendErrorKind::InvalidParams => serialize_error(
-            Some(id),
-            INVALID_PARAMS,
-            "Invalid params",
-            Some(DomainErrorData {
-                code,
-                details: error.details,
-            }),
-        ),
-        BackendErrorKind::Application => serialize_error(
-            Some(id),
-            APPLICATION_ERROR,
-            &error.message,
-            Some(DomainErrorData {
-                code,
-                details: error.details,
-            }),
-        ),
-    }
-}
-
-pub(crate) fn serialize_error(
-    id: Option<RequestId>,
-    code: i64,
-    message: &str,
-    data: Option<DomainErrorData>,
-) -> String {
-    serde_json::to_string(&JsonRpcErrorResponse {
-        jsonrpc: JSON_RPC_VERSION.to_owned(),
-        id,
-        error: JsonRpcError {
-            code,
-            message: message.to_owned(),
-            data,
-        },
-    })
-    .expect("protocol error serialization must succeed")
+    Retry,
 }

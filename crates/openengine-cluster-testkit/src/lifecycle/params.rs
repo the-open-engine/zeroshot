@@ -1,6 +1,9 @@
 //! Typed lifecycle parameter constructors for deterministic fixtures.
 
-use openengine_cluster_protocol::{Generation, IdempotencyKey, StopMode, StopParams, UpdateParams};
+use openengine_cluster_protocol::{
+    Generation, IdempotencyKey, RetryParams, StopMode, StopParams, TurnFailureKind, UpdateParams,
+};
+use openengine_cluster_server::lifecycle::{FailedCompletion, LeaseId};
 
 #[must_use]
 pub fn suspend(generation: u64, key: &str) -> UpdateParams {
@@ -28,6 +31,22 @@ pub fn stop(mode: StopMode, generation: u64, key: &str) -> StopParams {
         mode,
         if_generation: fixture_generation(generation),
         idempotency_key: fixture_key(key),
+    }
+}
+
+#[must_use]
+pub fn retry(generation: u64, key: &str) -> RetryParams {
+    RetryParams {
+        if_generation: fixture_generation(generation),
+        idempotency_key: fixture_key(key),
+    }
+}
+
+#[must_use]
+pub fn fail(kind: TurnFailureKind, lease_id: &str) -> FailedCompletion {
+    FailedCompletion {
+        lease_id: LeaseId::new(lease_id),
+        kind,
     }
 }
 

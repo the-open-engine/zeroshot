@@ -20,9 +20,9 @@ use tokio::sync::mpsc;
 use crate::admission::{InMemoryAdmissionStore, StoreState};
 
 /// Projects an operational lifecycle mutation to the closed public watch event algebra. The
-/// `Dispatched`/`Verified`/`Void` dispatch/lease turn events are internal cursor advances with no
-/// public fold change; `Updated`/`StopRequested` fold into the observable phase; `Finished` is
-/// always the terminal event for its run.
+/// `Dispatched`/`Verified`/`Void`/`Failed`/`Retried` dispatch/lease turn events are internal
+/// cursor advances with no public fold change; `Updated`/`StopRequested` fold into the observable
+/// phase; `Finished` is always the terminal event for its run.
 pub(crate) fn watch_event_for_lifecycle(
     event: &LifecycleEvent,
     status: ClusterStatus,
@@ -30,7 +30,9 @@ pub(crate) fn watch_event_for_lifecycle(
     match event {
         LifecycleEvent::Dispatched { .. }
         | LifecycleEvent::Verified { .. }
-        | LifecycleEvent::Void { .. } => WatchEvent::Bookmark,
+        | LifecycleEvent::Void { .. }
+        | LifecycleEvent::Failed { .. }
+        | LifecycleEvent::Retried { .. } => WatchEvent::Bookmark,
         LifecycleEvent::Updated { .. } | LifecycleEvent::StopRequested { .. } => {
             WatchEvent::Phase {
                 status,

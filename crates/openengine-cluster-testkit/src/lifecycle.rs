@@ -2,21 +2,20 @@
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    Cursor, DispatchState, Generation, IdempotencyKey, Phase, RunId, StopMode, StopResult,
-    UpdateResult,
+    Cursor, DispatchState, Generation, IdempotencyKey, Phase, RetryResult, RunId, StopMode,
+    StopResult, UpdateResult,
 };
-use openengine_cluster_server::admission::{CancellationSignal, IdempotencyRecord, StoreError};
+use openengine_cluster_server::admission::{IdempotencyRecord, StoreError};
 use openengine_cluster_server::lifecycle::{
-    CompletionResult, DispatchPermit, LeaseId, LifecycleEvent, LifecycleRecord, LifecycleSnapshot,
-    LifecycleStore, MutationReceipt, StopProposal, TurnId, UpdateProposal, VerifiedCompletion,
-    VerifiedTurn, VoidTurn,
+    CompletionResult, DispatchPermit, FailedCompletion, LifecycleEvent, LifecycleRecord,
+    LifecycleSnapshot, LifecycleStore, MutationReceipt, RetryProposal, StopProposal, TurnId,
+    UpdateProposal, VerifiedCompletion, VoidTurn,
 };
-use crate::admission::{
-    append, enforce_generation, ActiveLease, AppendKind, InMemoryAdmissionStore, StoreState,
-};
+use crate::admission::{append, enforce_generation, AppendKind, InMemoryAdmissionStore, StoreState};
 
+mod dispatch;
 mod params;
-pub use params::{resume, stop, suspend};
+pub use params::{fail, resume, retry, stop, suspend};
 
 fn dispatch_state_for_suspension(suspended: bool) -> DispatchState {
     if suspended {
@@ -312,146 +311,6 @@ impl StoreState {
         })
     }
 
-    fn acquire_dispatch(&mut self, turn_id: TurnId) -> Result<DispatchPermit, StoreError> {
-        let current = self
-            .lifecycle
-            .operational
-            .as_ref()
-            .map_or(DispatchState::Stopped, |status| status.dispatch_state);
-        if self.control.phase != Phase::Running || current != DispatchState::Active {
-            return Err(StoreError::DispatchDenied { current });
-        }
-        let turn_exists = self.leases.values().any(|lease| lease.turn_id == turn_id)
-            || self
-                .lifecycle
-                .verified_turns
-                .iter()
-                .any(|turn| turn.turn_id == turn_id)
-            || self
-                .lifecycle
-                .void_turns
-                .iter()
-                .any(|turn| turn.turn_id == turn_id);
-        if turn_exists {
-            return Err(StoreError::SchemaViolation(
-                "turn id has already been dispatched".into(),
-            ));
-        }
-        self.next_lease += 1;
-        let lease_id = LeaseId::new(format!("lease-{}", self.next_lease));
-        let cancellation = CancellationSignal::default();
-        self.leases.insert(
-            lease_id.clone(),
-            ActiveLease {
-                turn_id: turn_id.clone(),
-                cancellation: cancellation.clone(),
-            },
-        );
-        self.lifecycle
-            .operational
-            .as_mut()
-            .expect("active lifecycle metadata exists")
-            .in_flight = u32::try_from(self.leases.len())
-            .map_err(|_| StoreError::Internal("in-flight count exceeds u32".into()))?;
-        let cursor = self.append_lifecycle(LifecycleEvent::Dispatched {
-            turn_id: turn_id.clone(),
-        });
-        Ok(DispatchPermit {
-            lease_id,
-            turn_id,
-            cancellation: cancellation.observer(),
-            at_cursor: cursor,
-        })
-    }
-
-    fn complete_dispatch(
-        &mut self,
-        completion: VerifiedCompletion,
-    ) -> Result<CompletionResult, StoreError> {
-        if self.cancelled_leases.contains(&completion.lease_id)
-            || self.control.phase == Phase::Finished
-        {
-            return Err(StoreError::CompletionRejected);
-        }
-        let lease = self
-            .leases
-            .get(&completion.lease_id)
-            .ok_or(StoreError::UnknownLease)?;
-        if lease.cancellation.is_cancelled() {
-            self.record_cancelled_completion(&completion.lease_id)?;
-            return Err(StoreError::CompletionRejected);
-        }
-        let lease = self
-            .leases
-            .remove(&completion.lease_id)
-            .expect("dispatch lease was validated under the aggregate lock");
-        let cursor = self.append_lifecycle(LifecycleEvent::Verified {
-            turn_id: lease.turn_id.clone(),
-        });
-        self.lifecycle.verified_turns.push(VerifiedTurn {
-            turn_id: lease.turn_id.clone(),
-            output: completion.output,
-            cursor: cursor.clone(),
-        });
-        append(self, Some(cursor.clone()), AppendKind::VerifiedOutput);
-        let remaining = u32::try_from(self.leases.len())
-            .map_err(|_| StoreError::Internal("in-flight count exceeds u32".into()))?;
-        let draining = {
-            let operational = self
-                .lifecycle
-                .operational
-                .as_mut()
-                .ok_or_else(|| StoreError::Internal("lifecycle metadata is absent".into()))?;
-            operational.in_flight = remaining;
-            operational.dispatch_state == DispatchState::Draining
-        };
-        let terminalized = draining && remaining == 0;
-        if terminalized {
-            self.finish(StopMode::Drain);
-        }
-        Ok(CompletionResult {
-            turn_id: lease.turn_id,
-            at_cursor: self
-                .lifecycle
-                .latest_cursor
-                .clone()
-                .expect("completion allocates a cursor"),
-            terminalized,
-        })
-    }
-
-    fn record_cancelled_completion(&mut self, lease_id: &LeaseId) -> Result<(), StoreError> {
-        let lease = self
-            .leases
-            .remove(lease_id)
-            .expect("cancelled dispatch lease was validated under the aggregate lock");
-        self.cancelled_leases.insert(lease_id.clone());
-        let cursor = self.append_lifecycle(LifecycleEvent::Void {
-            turn_id: lease.turn_id.clone(),
-        });
-        self.lifecycle.void_turns.push(VoidTurn {
-            turn_id: lease.turn_id,
-            cursor: cursor.clone(),
-        });
-        append(self, Some(cursor), AppendKind::Void);
-
-        let remaining = u32::try_from(self.leases.len())
-            .map_err(|_| StoreError::Internal("in-flight count exceeds u32".into()))?;
-        let draining = {
-            let operational = self
-                .lifecycle
-                .operational
-                .as_mut()
-                .ok_or_else(|| StoreError::Internal("lifecycle metadata is absent".into()))?;
-            operational.in_flight = remaining;
-            operational.dispatch_state == DispatchState::Draining
-        };
-        if draining && remaining == 0 {
-            self.finish(StopMode::Drain);
-        }
-        Ok(())
-    }
-
     fn finish(&mut self, mode: StopMode) {
         if self.control.phase == Phase::Finished {
             return;
@@ -494,5 +353,16 @@ impl LifecycleStore for InMemoryAdmissionStore {
         completion: VerifiedCompletion,
     ) -> Result<CompletionResult, StoreError> {
         self.state.lock().await.complete_dispatch(completion)
+    }
+
+    async fn fail_dispatch(
+        &self,
+        failure: FailedCompletion,
+    ) -> Result<CompletionResult, StoreError> {
+        self.state.lock().await.fail_dispatch(failure)
+    }
+
+    async fn retry_lifecycle(&self, proposal: RetryProposal) -> Result<RetryResult, StoreError> {
+        self.state.lock().await.retry_lifecycle(proposal)
     }
 }

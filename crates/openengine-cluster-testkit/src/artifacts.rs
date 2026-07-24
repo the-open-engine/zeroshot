@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, ArtifactRef, CompiledGraphIr, EventNotification, GetParams,
     GetResult, GraphDiagnostic, GraphSpec, InitializeParams, InitializeResult, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, PlanParams, PlanResult, StopParams, StopResult,
-    StructuralBounds, SubscriptionCancelParams, SubscriptionClosedNotification, UpdateParams,
-    UpdateResult, WatchParams, WatchResult,
+    JsonRpcRequest, JsonRpcResponse, PlanParams, PlanResult, RetryParams, RetryResult, StopParams,
+    StopResult, StructuralBounds, SubscriptionCancelParams, SubscriptionClosedNotification,
+    UpdateParams, UpdateResult, WatchParams, WatchResult,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -55,6 +55,8 @@ pub struct ImplementedProtocolSchema {
     pub update_response: JsonRpcResponse<UpdateResult>,
     pub stop_request: JsonRpcRequest<StopParams>,
     pub stop_response: JsonRpcResponse<StopResult>,
+    pub retry_request: JsonRpcRequest<RetryParams>,
+    pub retry_response: JsonRpcResponse<RetryResult>,
     pub watch_request: JsonRpcRequest<WatchParams>,
     pub watch_response: JsonRpcResponse<WatchResult>,
     pub event_notification: JsonRpcNotification<EventNotification>,
