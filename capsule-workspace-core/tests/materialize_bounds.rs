@@ -461,7 +461,7 @@ fn block_batches_never_exceed_the_memory_budget() {
 
 // And the end-to-end counterpart: a real materialize over many blocks must never hold them all.
 #[test]
-fn materialize_holds_only_a_bounded_slice_of_blocks() {
+fn materialize_fetches_a_bounded_number_of_blocks_concurrently() {
     use capsule_workspace_core::cas::{BlobStore, BlockId};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -531,11 +531,36 @@ fn materialize_holds_only_a_bounded_slice_of_blocks() {
     );
 
     s.peak.store(0, Ordering::SeqCst);
-    materialize(&s, &dig, &d.path().join("o")).unwrap();
-    println!(
-        "[bound] distinct blocks={} peak concurrent get_block={}",
-        distinct.len(),
-        s.peak.load(Ordering::SeqCst)
+    // `peak` is min(batch size, rayon pool size), and the GLOBAL pool defaults to host core count — so on a
+    // <=CAP-core box (GitHub's standard runner is 4 vCPU) the fan-out is capped by cores, not by the
+    // grouping, and an un-grouped `materialize` would still show peak==CAP, making this assertion vacuous
+    // exactly where CI runs. A DEDICATED pool sized above CAP makes the grouping the binding limit
+    // regardless of host cores. Do NOT "simplify" this back to the global pool: it re-vacuums the guard on
+    // CI while staying green on a developer's larger machine.
+    let cap = capsule_workspace_core::daemon::MATERIALIZE_BLOCK_CAP;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(cap * 2)
+        .build()
+        .unwrap();
+    pool.install(|| materialize(&s, &dig, &d.path().join("o")).unwrap());
+    let peak = s.peak.load(Ordering::SeqCst);
+
+    // Non-vacuity: the fixture must produce far more distinct blocks than the cap, or "peak did not exceed
+    // the cap" would be trivially true. (Measured: 40 distinct vs cap 4.)
+    assert!(
+        distinct.len() > cap,
+        "fixture vacuous: {} distinct blocks <= cap {cap}",
+        distinct.len()
+    );
+    // `== CAP`, not `<= CAP`: materialize fetches each group in parallel and groups are capped at CAP, so
+    // peak must be EXACTLY the cap here. `<=` would also pass if a future fixture stopped driving fan-out to
+    // the cap (leaving the bound un-exercised); `==` fails loudly and forces the fixture to keep exercising
+    // it. Un-grouping the fetch drives peak to `cap*2` and trips this at any core count. NOTE: this pins
+    // fetch CONCURRENCY (in-flight GETs), not residency — the `held`-map hoist raises how long compressed
+    // blocks live, which `peak` cannot see; that remains open debt (see HANDOVER).
+    assert_eq!(
+        peak, cap,
+        "expected materialize's block fan-out to hit exactly the cap {cap}, got {peak}"
     );
 }
 

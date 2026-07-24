@@ -725,6 +725,16 @@ impl Drop for ClearOutOnFailure<'_> {
 /// (once by 8x, once by 2x) and no test could see either.
 const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 
+// COMPILE-TIME guard, the same form as the pair below on the block budget. This was the largest UNGUARDED
+// memory lever in materialize: a runtime test could not protect it (raising it just raises the peak every
+// test tolerates), and mutating it to 4 GiB left the whole suite green while multiplying peak RSS ~7x on
+// the killer file shape. As a `const` assertion a bad value does not build.
+const _: () = assert!(
+    MATERIALIZE_WAVE_BYTES <= 512 * 1024 * 1024,
+    "a materialize wave holds ~2x this in logical bytes plus a compressed batch; on small pods that \
+     scales peak RSS directly, so raising it is a deliberate operational decision, not a tweak"
+);
+
 /// Compressed bytes a wave may hold at once. THIS is the memory bound.
 ///
 /// KNOWN COST, stated rather than denied: because a batch is fetched in parallel and then drained, this

@@ -196,13 +196,24 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 
 - `publish_pipelined` dropping `blen` is untested (only `publish` is covered); the `0 ⇒ BLOCK_TARGET`
   old-manifest fallback is unobservable; deleting the grouper's byte check leaves the suite green.
-- **`MATERIALIZE_WAVE_BYTES` is the largest unguarded memory lever** — mutating it to 4 GiB costs **7.1x
-  peak RSS with a green suite**, and it is covered by neither `const` assertion. Pre-existing, not
-  introduced by this campaign. If you touch materialize's memory, guard this the way the other two are.
-- **Hoisting the per-group `held` map out of its loop reintroduces unbounded residency** (6.2x, green
-  suite). No constant is involved, so no assertion can catch it;
-  `materialize_holds_only_a_bounded_slice_of_blocks` prints peak concurrency but asserts nothing about it.
-  Adding that assertion is the cheapest way to close it.
+- ~~`MATERIALIZE_WAVE_BYTES` is the largest unguarded memory lever~~ **CLOSED (O28).** Mutating it to 4 GiB
+  cost 7.1x peak RSS with a green suite; it now carries the same `const _: () = assert!(… <= 512 MiB …)`
+  guard as the other two materialize budgets, so a bad value fails to COMPILE. Pre-existing lever, not
+  introduced by the campaign.
+- **The `held`-map residency hoist remains open debt** (hoisting the per-group `held` out of its loop keeps
+  compressed blocks alive across batches — 6.2x, green suite). Its guard is NOT the concurrency assertion
+  added in O28: `materialize_fetches_a_bounded_number_of_blocks_concurrently` pins peak in-flight GETs at
+  `MATERIALIZE_BLOCK_CAP` (an earlier draft of this bullet wrongly called that "the cheapest way to close"
+  the hoist), but `peak` measures FETCH CONCURRENCY, not RESIDENCY — the hoist changes how long `held` lives,
+  not how many blocks are fetched at once, so the assertion cannot see it (confirmed against daemon.rs
+  ~989-995: batches iterate sequentially, `held` is loop-local, `chunks` is what accumulates). Closing it
+  needs residency instrumentation INSIDE materialize (peak live bytes in `held`+`chunks`), which the test
+  double cannot measure — it sees fetches, not drops. Out of scope for O28.
+- Gotcha on that O28 concurrency test: it fetches inside a DEDICATED rayon pool sized above the cap. `peak`
+  is `min(batch, pool_size)` and the global pool defaults to host cores, so on a <=CAP-core box (GitHub's
+  standard runner is 4 vCPU) an un-grouped materialize still shows `peak==CAP` and the assertion goes
+  vacuous — green on a dev laptop, guarding nothing on CI. The dedicated pool makes the grouping the binding
+  limit regardless of host. Do not revert it to the global pool.
 - Refetch amplification, as recorded across the campaign: **2.28x → 2.78x** on a realistic lineage shape,
   **3.00x** at 40 blocks, **13.00x at 200 blocks**. (An earlier draft of this line said "2.47-3.00x" — an
   unprovenanced range that also dropped the 13x worst case. Restored.) Ranged reads, item 1 above, are the

@@ -1494,3 +1494,40 @@ without needing a real exFAT volume. It also upgrades the probe from a proxy to 
 golden digest unchanged. (O25/O26 reported "110/129" for the same suites; the counts here were verified by
 summing `cargo test` output rather than asserted — a campaign that has shipped six commits describing
 changes absent from their diffs should not be quoting test counts from memory.)
+
+### 2026-07-24 — O28: guard the last materialize memory lever + de-vacuum its bound test
+
+Two mechanical closes the gate scoped after O27, each pre-approved as a design and verified to bind before
+commit.
+
+**`MATERIALIZE_WAVE_BYTES` const assertion.** It was the largest UNGUARDED memory lever in materialize —
+mutating it to 4 GiB compiled and left the whole suite green while multiplying peak RSS ~7.1x on the killer
+file shape. Now carries the same `const _: () = assert!(… <= 512 MiB …)` guard as the block-budget pair
+beside it, so a bad value is `error[E0080]` at compile time. Runtime tests could never protect it (raising
+the budget just raises the peak every test tolerates); this is the only form of the guard that cannot be
+argued with.
+
+**`materialize_holds_only_a_bounded_slice_of_blocks` was vacuous** — it computed peak concurrent `get_block`
+(the quantity its name is about) and only `println!`d it; the sole `assert!` pinned an unrelated `blen > 0`
+prerequisite. Renamed to `materialize_fetches_a_bounded_number_of_blocks_concurrently` (the old name read as
+residency, which is exactly the property it does NOT pin) and given a real assertion: `peak == CAP`, plus a
+`distinct > CAP` non-vacuity line (fixture produces 40 distinct blocks vs a cap of 4).
+
+The gate caught a CI-vacuity trap in the first cut of that assertion, which is the whole reason this test is
+worth having. `peak = min(batch_size, rayon_pool_size)`, and the GLOBAL rayon pool defaults to host cores.
+On the 18-core dev box the un-group regression drove peak to 18 and the assertion fired — but on GitHub's
+4-vCPU runner it would have shown `peak == 4 == CAP` even un-grouped, going silently vacuous exactly where CI
+runs. Fixed by fetching inside a DEDICATED pool sized `CAP*2`, which makes the grouping the binding limit
+regardless of host. Verified: real code `peak == 4` deterministically and the un-group mutation trips
+(`got 8`) at `RAYON_NUM_THREADS` 1, 2 and 4 alike; both mutations (un-group, and 4 GiB wave) die at every
+core count. A comment on the test forbids reverting to the global pool.
+
+Recorded honestly, not closed: this assertion pins fetch CONCURRENCY, not RESIDENCY. The `held`-map hoist
+(6.2x, green suite) changes how long compressed blocks live, not how many are fetched at once, so `peak`
+cannot see it; a draft HANDOVER bullet calling the assertion "the cheapest way to close" the hoist was
+wrong. The hoist stays open debt — it needs residency instrumentation inside materialize, which the test
+double cannot provide.
+
+122 tests green by default, 141 with `pg,s3`; clippy 0 on both feature sets; golden digest unchanged. This
+closes the last item the gate ruled worth code; remaining work (ranged reads, manifest compression, the
+held-hoist residency guard) is either feature work or needs fault injection — deferred debt, gate-ruled STOP.
