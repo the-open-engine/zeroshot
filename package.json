@@ -28,7 +28,7 @@
     "test:agent-cli-provider": "node --test tests/agent-cli-provider/*.test.js",
     "check:agent-cli-provider:ci": "npm run typecheck:agent-cli-provider && npm run lint:agent-cli-provider && npm run build:agent-cli-provider && npm run test:agent-cli-provider",
     "dev:link": "npm link",
-    "lint": "eslint .",
+    "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "validate:templates": "node scripts/validate-templates.js",
     "format": "prettier --write .",
