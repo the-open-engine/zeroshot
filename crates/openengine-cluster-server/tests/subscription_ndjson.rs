@@ -216,6 +216,31 @@ async fn duplicate_request_ids_are_rejected() {
     shut_down(harness).await;
 }
 
+#[tokio::test]
+async fn excess_requests_are_rejected_without_unbounded_task_admission() {
+    const MAX_CONNECTION_TASKS: i64 = 256;
+
+    let store = Arc::new(FixtureStore::new(RunId::new("run-1"), Vec::new(), 8));
+    let gate = Arc::new(Notify::new());
+    let mut harness = spawn_server(GatedBackend {
+        inner: FixtureBackend::new(store),
+        gate,
+    });
+
+    for id in 1..=MAX_CONNECTION_TASKS + 1 {
+        write_line(&mut harness.write, &request_line(id, "get", json!({}))).await;
+    }
+
+    let rejected = tokio::time::timeout(Duration::from_secs(1), read_value(&mut harness.read))
+        .await
+        .expect("the bounded admission rejection must not wait for blocked backend calls");
+    assert_eq!(rejected["id"], MAX_CONNECTION_TASKS + 1);
+    assert_eq!(rejected["error"]["code"], -32000);
+    assert_eq!(rejected["error"]["data"]["code"], "SERVER_BUSY");
+
+    shut_down(harness).await;
+}
+
 /// Publishes one bookmark event and asserts both `sub_a` and `sub_b` observe it as `cursor-1`.
 async fn assert_shared_bookmark_delivered(
     harness: &mut Harness,

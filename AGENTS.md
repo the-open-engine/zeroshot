@@ -87,6 +87,10 @@ Destructive commands (need permission): `zeroshot kill`, `zeroshot clear`, `zero
 | Watch minimal test fixture   | `crates/openengine-cluster-server/src/watch/fixtures.rs`                |
 | Watch wire types/framing     | `crates/openengine-cluster-protocol/src/watch.rs`                       |
 | Client watch/reconnect       | `crates/openengine-cluster-client/src/watch.rs`                         |
+| NDJSON stdio binding         | `crates/openengine-cluster-server/src/stdio.rs`                         |
+| NDJSON watch client          | `crates/openengine-cluster-client/src/ndjson_watch.rs`                  |
+| NDJSON task admission        | `crates/openengine-cluster-server/src/stdio/admission.rs`               |
+| NDJSON response pump         | `crates/openengine-cluster-client/src/ndjson_pump.rs`                   |
 | Cluster typed transports     | `crates/openengine-cluster-client/`                                     |
 | Cluster fixtures/artifacts   | `crates/openengine-cluster-testkit/`                                    |
 | Scripted admission fixtures  | `crates/openengine-cluster-testkit/src/admission.rs`                    |
@@ -196,6 +200,11 @@ production full-graph executor.
 `AdmissionStore` and `ObservationStore` remain separate ports. A watch-capable
 `AdmissionCoordinator` requires both; never satisfy the observation boundary with a runtime
 placeholder that rejects every subscription.
+The NDJSON server caps and continuously reaps per-connection request/subscription tasks;
+`subscription/cancel` bypasses admission. The client response pump must never await a
+per-subscription consumer: local queue overflow closes that stream as `SLOW_CONSUMER` from its
+exact caller-delivered cursor and cancels the server subscription. Watch request IDs are allocated
+by the shared transport, never by individual watch-client facades.
 Authoritative admission snapshots fail closed: `empty` has no durable fields, `running` has the
 complete matching control/seed tuple, and transient `admitting` preserves one of those two shapes.
 Operational suspend is a dispatch gate: existing leases may land verified I/O, but successors wait

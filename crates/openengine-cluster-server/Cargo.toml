@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 async-trait.workspace = true
 openengine-cluster-protocol.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
