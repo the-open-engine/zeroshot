@@ -30,9 +30,10 @@ from the latest durable cursor.
 
 `stop({mode, ifGeneration, idempotencyKey})` accepts `drain` or `force`.
 
-- Drain closes the dispatch gate and waits for every existing lease. The final verified completion
-  atomically appends the single terminal `finished` record. With no in-flight lease, stop finishes
-  immediately. Drain invokes no `onComplete` or other hook absent from the authored graph contract.
+- Drain closes the dispatch gate and waits for every existing lease. The final verified or failed
+  settlement atomically appends the single terminal `finished` record. With no in-flight lease,
+  stop finishes immediately. Drain invokes no `onComplete` or other hook absent from the authored
+  graph contract.
 - Force closes the gate, signals every lease cancellation token, records each cancelled turn as
   structural void state with no outcome, and appends the single terminal `finished` record. A force
   request escalates an existing drain; a drain request never downgrades force.
@@ -49,21 +50,22 @@ record.
 targets its own store-tracked latest unconsumed failed dispatch frontier. A closed request rejects
 `mode`, `turnId`, `executionId`, `session`, `workspacePath`, `provider`, and any other unknown field.
 
-Only a pending failed frontier admits retry. Every other observable state fails closed with
-`NO_RETRYABLE_FRONTIER` and a `reason`: `exhausted` (no turn has ever failed), `success` (the
-frontier turn already completed), `active` (a turn is currently leased — either the original turn
-or a superseding dispatch), or `consumed` (the frontier was already retried). A stale generation
+Only a pending retryable failed frontier admits retry. Every other observable state fails closed
+with `NO_RETRYABLE_FRONTIER` and a closed `reason`: `exhausted` (no turn has failed or the authored
+attempt allowance is exhausted), `success` (the frontier turn already completed), `active` (one or
+more turns are still leased), or `consumed` (the frontier was already retried). A stale generation
 returns `GENERATION_CONFLICT`; a terminal graph or a non-`active` dispatch state (suspended,
 draining, force-stopping, stopped) returns `INVALID_PHASE`.
 
 Retry reuses the exact recorded verified input, admitted target, workspace policy, and deadline of
 the original run; it never accepts caller-supplied replacement data and never allocates a new run
-ID or generation. It mints one new internal turn identity for the retried attempt and atomically
-races any competing error-successor continuation: a concurrent new dispatch (`acquire_dispatch`)
-silently supersedes — clears — a pending failed frontier it did not consume, so at most one side of
-that race ever wins the frontier. Retry is a same-run intent record only; it does not itself
-establish a new dispatch lease or invoke a worker, and no automatic or background code path in this
-protocol ever calls it.
+ID or generation. It mints and durably reserves one new internal turn identity for the retried
+attempt. Until that reserved retry turn is dispatched, a stale error-successor dispatch is rejected.
+A concurrent error-successor may instead win first by atomically clearing the failed frontier, in
+which case retry fails closed; exactly one side is accepted. Dispatching the reserved retry turn
+consumes the intent, and every turn identity remains single-use across failures as well as successes.
+Retry is a same-run intent record only; it does not itself establish a new dispatch lease or invoke
+a worker, and no automatic or background code path in this protocol ever calls it.
 
 ## CAS, idempotency, and acknowledgements
 

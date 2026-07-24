@@ -15,7 +15,7 @@ use crate::admission::{append, enforce_generation, AppendKind, InMemoryAdmission
 
 mod dispatch;
 mod params;
-pub use params::{fail, resume, retry, stop, suspend};
+pub use params::{fail, fail_exhausted, resume, retry, stop, suspend};
 
 fn dispatch_state_for_suspension(suspended: bool) -> DispatchState {
     if suspended {
@@ -327,6 +327,8 @@ impl StoreState {
         }
         self.control.phase = Phase::Finished;
         self.append_lifecycle(LifecycleEvent::Finished { mode });
+        self.lifecycle.pending_failed_frontier = None;
+        self.lifecycle.pending_retry_turn = None;
     }
 }
 

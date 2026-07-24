@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{
 };
 
 use crate::admission::AdmissionSnapshot;
-use crate::lifecycle::{LifecycleEvent, LifecycleSnapshot};
+use crate::lifecycle::{FailureRetryability, LifecycleEvent, LifecycleSnapshot};
 use crate::BackendError;
 
 pub(super) fn validate_snapshot(
@@ -113,11 +113,13 @@ fn stop_state_matches(operational: &openengine_cluster_protocol::OperationalStat
 
 #[derive(Default)]
 struct LifecycleFold {
+    dispatched: std::collections::BTreeSet<crate::lifecycle::TurnId>,
     in_flight: std::collections::BTreeSet<crate::lifecycle::TurnId>,
     outcomes: std::collections::BTreeSet<crate::lifecycle::TurnId>,
     operational: OperationalStatus,
     finished: bool,
     pending_failed_frontier: Option<crate::lifecycle::TurnId>,
+    pending_retry_turn: Option<crate::lifecycle::TurnId>,
 }
 
 fn lifecycle_record_fold_is_valid(lifecycle: &LifecycleSnapshot) -> bool {
@@ -149,7 +151,11 @@ fn fold_record(
             accepted_mode,
             effective_mode,
         } => fold_stop_request(fold, *accepted_mode, *effective_mode),
-        LifecycleEvent::Failed { turn_id, kind: _ } => fold_failed(fold, turn_id),
+        LifecycleEvent::Failed {
+            turn_id,
+            kind: _,
+            retryability,
+        } => fold_failed(fold, turn_id, *retryability),
         LifecycleEvent::Retried {
             failed_turn_id,
             retry_turn_id,
@@ -159,18 +165,28 @@ fn fold_record(
 
 fn fold_dispatch(fold: &mut LifecycleFold, turn_id: &crate::lifecycle::TurnId) -> bool {
     if fold.operational.dispatch_state != DispatchState::Active
-        || fold.outcomes.contains(turn_id)
+        || !fold.dispatched.insert(turn_id.clone())
         || !fold.in_flight.insert(turn_id.clone())
+        || fold
+            .pending_retry_turn
+            .as_ref()
+            .is_some_and(|pending| pending != turn_id)
     {
         return false;
     }
-    // A new dispatch (e.g. an error-successor continuation) supersedes any pending failed
-    // frontier, mirroring the store's un-recorded `acquire_dispatch` clear.
-    fold.pending_failed_frontier = None;
+    if fold.pending_retry_turn.as_ref() == Some(turn_id) {
+        fold.pending_retry_turn = None;
+    } else {
+        fold.pending_failed_frontier = None;
+    }
     sync_in_flight(fold)
 }
 
-fn fold_failed(fold: &mut LifecycleFold, turn_id: &crate::lifecycle::TurnId) -> bool {
+fn fold_failed(
+    fold: &mut LifecycleFold,
+    turn_id: &crate::lifecycle::TurnId,
+    retryability: FailureRetryability,
+) -> bool {
     if matches!(
         fold.operational.dispatch_state,
         DispatchState::ForceStopping | DispatchState::Stopped
@@ -178,7 +194,10 @@ fn fold_failed(fold: &mut LifecycleFold, turn_id: &crate::lifecycle::TurnId) -> 
     {
         return false;
     }
-    fold.pending_failed_frontier = Some(turn_id.clone());
+    fold.pending_failed_frontier = match retryability {
+        FailureRetryability::Retryable => Some(turn_id.clone()),
+        FailureRetryability::AttemptsExhausted => None,
+    };
     sync_in_flight(fold)
 }
 
@@ -188,11 +207,14 @@ fn fold_retried(
     retry_turn_id: &crate::lifecycle::TurnId,
 ) -> bool {
     if fold.pending_failed_frontier.as_ref() != Some(failed_turn_id)
+        || fold.pending_retry_turn.is_some()
         || failed_turn_id == retry_turn_id
+        || fold.dispatched.contains(retry_turn_id)
     {
         return false;
     }
     fold.pending_failed_frontier = None;
+    fold.pending_retry_turn = Some(retry_turn_id.clone());
     true
 }
 
@@ -298,6 +320,8 @@ fn fold_finished(fold: &mut LifecycleFold, mode: StopMode) -> bool {
     fold.operational.dispatch_state = DispatchState::Stopped;
     fold.operational.in_flight = 0;
     fold.finished = true;
+    fold.pending_failed_frontier = None;
+    fold.pending_retry_turn = None;
     true
 }
 
@@ -322,6 +346,7 @@ fn fold_counts_match(fold: &LifecycleFold, lifecycle: &LifecycleSnapshot) -> boo
     count_matches
         && fold.outcomes.len() == outcome_count
         && lifecycle.pending_failed_frontier == fold.pending_failed_frontier
+        && lifecycle.pending_retry_turn == fold.pending_retry_turn
         && lifecycle
             .operational
             .as_ref()

@@ -1,4 +1,6 @@
-use openengine_cluster_protocol::{Generation, IdempotencyKey, RetryParams, TurnFailureKind};
+use openengine_cluster_protocol::{
+    Generation, IdempotencyKey, NoRetryableFrontierReason, RetryParams, TurnFailureKind,
+};
 use serde_json::json;
 
 #[test]
@@ -33,6 +35,23 @@ fn retry_wire_is_closed_and_carries_no_execution_selector() {
             "schema accepted {invalid}"
         );
     }
+}
+
+#[test]
+fn no_retryable_frontier_reasons_are_closed_wire_values() {
+    for (reason, wire) in [
+        (NoRetryableFrontierReason::Exhausted, "exhausted"),
+        (NoRetryableFrontierReason::Success, "success"),
+        (NoRetryableFrontierReason::Active, "active"),
+        (NoRetryableFrontierReason::Consumed, "consumed"),
+    ] {
+        assert_eq!(serde_json::to_value(reason).unwrap(), json!(wire));
+        assert_eq!(
+            serde_json::from_value::<NoRetryableFrontierReason>(json!(wire)).unwrap(),
+            reason
+        );
+    }
+    assert!(serde_json::from_value::<NoRetryableFrontierReason>(json!("unknown")).is_err());
 }
 
 #[test]

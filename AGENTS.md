@@ -208,10 +208,13 @@ by the shared transport, never by individual watch-client facades.
 Authoritative admission snapshots fail closed: `empty` has no durable fields, `running` has the
 complete matching control/seed tuple, and transient `admitting` preserves one of those two shapes.
 Operational suspend is a dispatch gate: existing leases may land verified I/O, but successors wait
-for resume. Drain waits without inventing graph hooks; force cancels and voids leases without
-fabricating output. Each stopped run has one final `finished` event. Stop acknowledgements never
-claim rollback or absence of external side effects. These are deterministic scripted-backend
-semantics, not a native graph scheduler or worker executor.
+for resume. Manual retry admits only a retryable settled frontier after every peer lease settles;
+exhausted authored attempts never create a frontier. An accepted retry intent reserves its next
+single-use turn and rejects a stale error-successor until that reserved turn begins. Drain waits
+without inventing graph hooks and terminalizes after the final verified or failed settlement; force
+cancels and voids leases without fabricating output. Each stopped run has one final `finished`
+event. Stop acknowledgements never claim rollback or absence of external side effects. These are
+deterministic scripted-backend semantics, not a native graph scheduler or worker executor.
 
 The TUI is not included in this release. Use `zeroshot list`, `zeroshot status <id>`,
 and `zeroshot logs <id> -f` or `zeroshot logs <id> -w` for monitoring.

@@ -27,6 +27,7 @@ pub(crate) async fn generate_lifecycle_goldens() -> Vec<Artifact> {
         .fail_dispatch(FailedCompletion {
             lease_id: permit.lease_id,
             kind: TurnFailureKind::Timeout,
+            retryability: openengine_cluster_server::lifecycle::FailureRetryability::Retryable,
         })
         .await
         .expect("golden dispatch failure succeeds");
