@@ -182,9 +182,21 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 6. Explicitly **NEVER**: `[u8;32]` ids (measured ~2% of RSS for a crate-wide, format-adjacent change) and
    the per-file syscall diet (measured and refuted: 1.04x write path, 1.01x reflink pass).
 
-**Known and accepted** (gate-ruled coverage debt, not hazard — the derived count cap backstops all of it):
-`publish_pipelined` dropping `blen` is untested; the `0 ⇒ BLOCK_TARGET` old-manifest fallback is
-unobservable; refetch amplification is 2.78x on a realistic lineage shape.
+**Known and accepted** (gate-ruled coverage debt, not hazard). Carry these forward; none is a live bug:
+- `publish_pipelined` dropping `blen` is untested (only `publish` is covered); the `0 ⇒ BLOCK_TARGET`
+  old-manifest fallback is unobservable; deleting the grouper's byte check leaves the suite green.
+- **`MATERIALIZE_WAVE_BYTES` is the largest unguarded memory lever** — mutating it to 4 GiB costs **7.1x
+  peak RSS with a green suite**, and it is covered by neither `const` assertion. Pre-existing, not
+  introduced by this campaign. If you touch materialize's memory, guard this the way the other two are.
+- **Hoisting the per-group `held` map out of its loop reintroduces unbounded residency** (6.2x, green
+  suite). No constant is involved, so no assertion can catch it;
+  `materialize_holds_only_a_bounded_slice_of_blocks` prints peak concurrency but asserts nothing about it.
+  Adding that assertion is the cheapest way to close it.
+- Refetch amplification is **2.47-3.00x** on realistic and multi-wave shapes (ranged reads, item 1 above,
+  is the fix — the deleted `BlockPool` never affected it).
+- Cosmetic: `tests/materialize_bounds.rs` still mentions `BlockPool` in the present tense inside a
+  paragraph about "the previous attempt". Delete it next time that file is touched — this campaign has a
+  specific history of comments describing code that does not exist.
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).
