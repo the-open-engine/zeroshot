@@ -24,16 +24,26 @@ fn sha256_uses_the_hardware_backend() {
     }
     let mbps = (n as f64) / t.elapsed().as_secs_f64();
 
-    // Measured on aarch64: ~1765 MB/s hardware vs ~344 MB/s software (5.1x apart). 700 leaves 2x margin
-    // below hardware and comfortably above software.
+    // Measured on aarch64 by THIS microbenchmark: ~1765 MiB/s hardware vs ~531 MiB/s software. (An
+    // earlier comment cited 344 MiB/s — that figure came from a full publish, which also walks, chunks and
+    // compresses, so it is not comparable to a raw hash loop. The honest separation here is ~3.3x, and the
+    // 700 floor sits 1.3x above software, not the 2x previously claimed.)
     const FLOOR_MBPS: f64 = 700.0;
+
+    // A machine with no SHA extensions at all lands on the software path however this crate is built, so
+    // the assertion below would be a permanent red rather than a signal. Allow an explicit opt-out — it
+    // has to be set deliberately, which is the point.
+    if std::env::var("CAPWS_ALLOW_SOFT_SHA").is_ok() {
+        println!("[sha] {mbps:.0} MiB/s — floor check skipped via CAPWS_ALLOW_SOFT_SHA");
+        return;
+    }
     assert!(
         mbps > FLOOR_MBPS,
         "sha256 measured at {mbps:.0} MB/s, below the {FLOOR_MBPS:.0} MB/s floor.\n\
          The most likely cause is that the `asm` feature on the `sha2` dependency was dropped, which \
          silently selects the SOFTWARE backend on aarch64 (digests stay identical, so nothing else \
-         fails). Check Cargo.toml. If this machine is genuinely just slow, say so explicitly rather \
-         than lowering the floor."
+         fails). Check Cargo.toml. If this machine genuinely lacks SHA extensions, set \
+         CAPWS_ALLOW_SOFT_SHA=1 rather than lowering the floor."
     );
     println!("[sha] {mbps:.0} MB/s");
 }

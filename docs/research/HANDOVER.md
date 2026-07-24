@@ -192,8 +192,13 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
   suite). No constant is involved, so no assertion can catch it;
   `materialize_holds_only_a_bounded_slice_of_blocks` prints peak concurrency but asserts nothing about it.
   Adding that assertion is the cheapest way to close it.
-- Refetch amplification is **2.47-3.00x** on realistic and multi-wave shapes (ranged reads, item 1 above,
-  is the fix — the deleted `BlockPool` never affected it).
+- Refetch amplification, as recorded across the campaign: **2.28x → 2.78x** on a realistic lineage shape,
+  **3.00x** at 40 blocks, **13.00x at 200 blocks**. (An earlier draft of this line said "2.47-3.00x" — an
+  unprovenanced range that also dropped the 13x worst case. Restored.) Ranged reads, item 1 above, are the
+  fix; the deleted `BlockPool` never affected it.
+- `cross_wave_block_refetch_is_measured_and_bounded` runs on a fixture that produces a SINGLE wave, so it
+  cannot observe cross-wave refetch at all — the same vacuity as the one-block fixture it replaced, on a
+  different axis. Give it a genuinely multi-wave fixture before trusting it.
 - Cosmetic: `tests/materialize_bounds.rs` still mentions `BlockPool` in the present tense inside a
   paragraph about "the previous attempt". Delete it next time that file is touched — this campaign has a
   specific history of comments describing code that does not exist.

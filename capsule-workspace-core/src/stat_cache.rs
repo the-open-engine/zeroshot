@@ -547,8 +547,13 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
     let mut worst_gap_ns: i64 = 0;
     let mut seen = 0usize;
     let mut byte = 1u8;
+    // Time since the LAST ctime transition — that interval IS the granularity. An earlier version reset
+    // this at the top of every iteration, so it only ever measured one rewrite+stat (~20 us) and the
+    // headroom check below could never fire: a dead clause behind a comment claiming it measured
+    // granularity. The behaviour was still safe (three transitions inside SETTLE_NS bounds G on its own),
+    // but the stated mechanism did not exist.
+    let mut since_transition = std::time::Instant::now();
     while seen < TRANSITIONS && (start.elapsed().as_nanos() as i64) < SETTLE_NS {
-        let mark = std::time::Instant::now();
         if !rewrite(&probe, byte) {
             cleanup(&probe);
             return Fidelity::Unusable;
@@ -556,7 +561,8 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
         byte = byte.wrapping_add(1);
         if let Some(k) = stat(&probe) {
             if k.ctime_ns != prev.ctime_ns {
-                worst_gap_ns = worst_gap_ns.max(mark.elapsed().as_nanos() as i64);
+                worst_gap_ns = worst_gap_ns.max(since_transition.elapsed().as_nanos() as i64);
+                since_transition = std::time::Instant::now();
                 prev = k;
                 seen += 1;
                 continue;
@@ -565,10 +571,11 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     cleanup(&probe);
-    // Demand real headroom: the observed granularity must be a small FRACTION of the margin we are about
-    // to trust, not merely smaller than it. On ext4/XFS/APFS each rewrite moves ctime in microseconds, so
-    // this still passes essentially instantly.
-    if seen == TRANSITIONS && worst_gap_ns.saturating_mul(8) <= SETTLE_NS {
+    // Safety needs G < SETTLE_NS (a write during a scan truncates mtime down by at most G, and the settle
+    // margin has to cover that). Demand 2x headroom rather than the bare inequality. This is deliberately
+    // NOT the 8x an earlier comment claimed: 8x would reject a 300 ms-granularity filesystem that is
+    // comfortably safe at a 2 s margin.
+    if seen == TRANSITIONS && worst_gap_ns.saturating_mul(2) <= SETTLE_NS {
         Fidelity::Ok {
             observed_ns: worst_gap_ns,
         }

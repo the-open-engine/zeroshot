@@ -1260,3 +1260,34 @@ byte-budget check from the grouper leaves the suite green; refetch amplification
 realistic lineage shape and this campaign made it slightly worse (2.28x → 2.78x).
 
 109 tests green by default, 128 with `pg,s3`; clippy 0 warnings on both feature sets.
+
+### 2026-07-24 — O24: the last gate pass, over the seven increments that never had one
+A process audit found seven increments had been committed without ever passing a review gate — including
+`d488801` (ARMv8 hardware SHA + four gap fixes), which was substantive code. All seven were then gated.
+Ruling: **STOP upheld** — "nothing found requires code before stopping". Verdicts: `740d623` and three docs
+commits PASS; `d488801`, `979ccf9`, `6c5bedf`, `f1454f4` PASS WITH NOTES; `7c2ff5c` FAIL as committed,
+already remediated in place.
+
+The gate proved the one thing that could have been catastrophic is impossible: enabling `sha2/asm` **cannot
+change a digest** — it removed the feature and reran the golden test, getting the identical digest, and
+confirmed `sha_backend` is the only test in 109 that can observe the difference. No stored manifest can be
+orphaned.
+
+**One defect of the campaign's signature kind, found and fixed here.** `probe_fidelity`'s `worst_gap_ns`
+was inert: `Instant::now()` sat at the top of every loop iteration, so it measured a single rewrite (~20 µs)
+rather than the interval between ctime transitions, and its `* 8 <= SETTLE_NS` headroom check could never
+fire. The source comment and this log both claimed it "measures granularity". Behaviour was nonetheless
+safe — three transitions inside the margin bounds granularity on its own, giving an effective ~1 s ceiling
+against a 2 s requirement — but the stated mechanism did not exist. Now it measures the real
+transition-to-transition gap, with **2x** headroom rather than the 8x the old comment claimed (8x would
+reject a 300 ms-granularity filesystem that is comfortably safe at a 2 s margin).
+
+Also corrected: `sha_backend`'s floor comment cited 344 MiB/s software (a full-publish figure, not
+comparable to a raw hash loop) against a measured 531 — the real margin is 1.3x, not 2x — and the test now
+takes `CAPWS_ALLOW_SOFT_SHA` so it is not a permanent red on a machine with no SHA extensions. HANDOVER's
+"2.47-3.00x" refetch range, which I added after the previous ruling, had no provenance and dropped the
+recorded **13.00x at 200 blocks**; the real figures are restored.
+
+**Carried forward as debt, not fixed** (gate-ruled): `cross_wave_block_refetch_is_measured_and_bounded`
+runs on a single-wave fixture and therefore cannot observe cross-wave refetch — the same vacuity as the
+one-block fixture it replaced, on a different axis.
