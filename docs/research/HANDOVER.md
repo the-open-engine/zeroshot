@@ -199,6 +199,12 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 - `cross_wave_block_refetch_is_measured_and_bounded` runs on a fixture that produces a SINGLE wave, so it
   cannot observe cross-wave refetch at all — the same vacuity as the one-block fixture it replaced, on a
   different axis. Give it a genuinely multi-wave fixture before trusting it.
+- **The probe's granularity MEASUREMENT is unpinned, only its verdict is.** `fidelity_verdict` is
+  unit-tested and mutation-verified, but reverting the `since_transition` timer that feeds it leaves the
+  suite green — which would silently restore the old accept curve (worst_gap pinned at ~20 us, the x3
+  clause never firing, the 660ms-1s per-restart lottery back). Safety is unaffected either way (three
+  transitions inside a 2s deadline bounds G on its own), so this is debt, not hazard. To close it, drive
+  the loop against a simulated clock.
 - `CAPWS_ALLOW_SOFT_SHA` (the `sha_backend` opt-out) is presence-only — `=0` and `=` also skip — and under
   default `cargo test` output the skip prints nothing, so a box with it set would hide a dropped `asm`
   feature. Blast radius is a silent perf regression, not data loss. Marking the test `ignored` instead

@@ -24,10 +24,11 @@ fn sha256_uses_the_hardware_backend() {
     }
     let mbps = (n as f64) / t.elapsed().as_secs_f64();
 
-    // Measured on aarch64 by THIS microbenchmark: ~1765 MiB/s hardware vs ~531 MiB/s software. (An
-    // earlier comment cited 344 MiB/s — that figure came from a full publish, which also walks, chunks and
-    // compresses, so it is not comparable to a raw hash loop. The honest separation here is ~3.3x, and the
-    // 700 floor sits 1.3x above software, not the 2x previously claimed.)
+    // Software measured by THIS microbenchmark on aarch64: ~531 MiB/s. The floor sits 1.3x above that —
+    // not the 2x an earlier comment claimed, which compared against 344 MB/s, a WHOLE-PUBLISH rate that
+    // also includes walking, chunking and compressing. The 1765 MB/s figure quoted elsewhere is likewise
+    // whole-publish; the hardware raw-loop rate was never measured on Graviton, though it is comfortably
+    // above this floor (>2000 MiB/s observed on aarch64 dev hardware).
     const FLOOR_MBPS: f64 = 700.0;
 
     // A machine with no SHA extensions at all lands on the software path however this crate is built, so

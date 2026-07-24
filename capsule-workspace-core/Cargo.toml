@@ -15,8 +15,10 @@ license = "MIT"
 # LOAD-BEARING FEATURE, not a tuning knob. `sha2` compiles its ARMv8 hardware SHA-256 backend ONLY under
 # `asm` (sha256.rs: `cfg(all(feature = "asm", target_arch = "aarch64"))`). Without it an aarch64 build —
 # i.e. every Graviton node this runs on — silently uses software SHA. Measured on aarch64: publish of a
-# 1 GiB tree 3.12s -> 0.61s (5.1x). (A raw hash loop measures ~531 -> ~1765 MiB/s; an earlier note here
-# cited 344, which was a whole-publish figure and not comparable.) Digests are byte-identical either
+# 1 GiB tree 3.12s -> 0.61s (5.1x). BOTH 344 and 1765 MB/s are WHOLE-PUBLISH rates (1 GiB / 3.12s and
+# 1 GiB / 0.61s) — they include walking, chunking and compressing, so neither is a hash-loop figure. The
+# raw loop measures ~531 MiB/s software; its hardware counterpart was never measured on Graviton (it is
+# >~2700 MiB/s if the 5.1x publish speedup holds). Digests are byte-identical either
 # way, which is exactly why a soft build is invisible; `tests/sha_backend.rs` fails if it regresses.
 sha2 = { version = "0.10", features = ["asm"] }
 zstd = "0.13"

@@ -1315,3 +1315,20 @@ in `Cargo.toml` — labelled "hash throughput", the exact mislabel O24 said it w
 O18 table. Both corrected; `sha_backend`'s floor sits **1.3x** above the raw-loop software rate.
 
 110 tests green by default; clippy 0 warnings on both feature sets; golden digest unchanged.
+
+### 2026-07-24 — O26: closing record correction
+The gate's closing ruling was **STOP** ("nothing found requires code"), with two documentation edits. It
+also caught a **third** instance of this campaign's signature pattern, in the very item O25 set out to
+reconcile: O25 attributed 1765 MB/s to a raw hash loop, when 1765 has the SAME whole-publish provenance as
+344 — `1765/344 = 5.13`, identical to the publish ratio `3.12/0.61`, and a 5.1x publish speedup is
+arithmetically impossible if the hash loop only improved 3.3x. Corrected in `Cargo.toml` and
+`tests/sha_backend.rs`: **both 344 and 1765 MB/s are whole-publish rates**; the raw loop is ~531 MiB/s
+software with its hardware counterpart never measured on Graviton (>2000 MiB/s observed on aarch64 dev
+hardware). The floor and the "1.3x above software" claim were unaffected and remain correct.
+
+Also recorded as debt: the probe's granularity MEASUREMENT is unpinned — reverting the `since_transition`
+timer leaves the suite green, silently restoring the old accept curve. Only the verdict is pinned. Safety
+is unaffected (three transitions inside a 2 s deadline bounds G on its own).
+
+**Campaign closed.** 110 tests green by default, 129 with `pg,s3`; clippy 0 warnings on both feature sets;
+golden digest unchanged since `0687563`.
