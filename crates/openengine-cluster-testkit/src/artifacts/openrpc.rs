@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::{ApplyParams, StopParams, UpdateParams};
+use openengine_cluster_protocol::{ApplyParams, RetryParams, StopParams, UpdateParams};
 use schemars::schema_for;
 use serde_json::{json, Value};
 
@@ -15,6 +15,7 @@ pub(super) fn document() -> Value {
             apply_method(),
             update_method(),
             stop_method(),
+            retry_method(),
             get_method(),
             watch_method(),
         ],
@@ -150,6 +151,23 @@ fn stop_method() -> Value {
         "result": {
             "name": "stopResult",
             "schema": { "$ref": "schema.json#/$defs/StopResult" }
+        }
+    })
+}
+
+fn retry_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(RetryParams))
+        .expect("retry parameter JSON Schema serialization must succeed");
+    json!({
+        "name": "retry",
+        "paramStructure": "by-name",
+        "params": [
+            { "name": "ifGeneration", "required": true, "schema": property_schema(&schema, "ifGeneration") },
+            { "name": "idempotencyKey", "required": true, "schema": property_schema(&schema, "idempotencyKey") }
+        ],
+        "result": {
+            "name": "retryResult",
+            "schema": { "$ref": "schema.json#/$defs/RetryResult" }
         }
     })
 }

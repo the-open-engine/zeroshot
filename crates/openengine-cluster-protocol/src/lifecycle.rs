@@ -90,6 +90,15 @@ pub enum StopMode {
     Force,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnFailureKind {
+    Failed,
+    Refused,
+    Timeout,
+    Crash,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct OperationalStatus {
@@ -238,6 +247,26 @@ pub struct StopResult {
     pub phase: Phase,
     pub accepted_mode: StopMode,
     pub effective_mode: StopMode,
+    pub operational: OperationalStatus,
+    pub at_cursor: Cursor,
+    pub deduped: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RetryParams {
+    pub if_generation: Generation,
+    pub idempotency_key: IdempotencyKey,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RetryResult {
+    pub generation: Generation,
+    pub run_id: RunId,
+    pub phase: Phase,
+    pub retried_turn_id: String,
+    pub retry_turn_id: String,
     pub operational: OperationalStatus,
     pub at_cursor: Cursor,
     pub deduped: bool,

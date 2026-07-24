@@ -13,6 +13,7 @@ pub const GENERATION_CONFLICT: &str = "GENERATION_CONFLICT";
 pub const IDEMPOTENCY_REUSE: &str = "IDEMPOTENCY_REUSE";
 pub const INVALID_PHASE: &str = "INVALID_PHASE";
 pub const CANCELLED: &str = "CANCELLED";
+pub const NO_RETRYABLE_FRONTIER: &str = "NO_RETRYABLE_FRONTIER";
 pub const MAX_IDEMPOTENCY_KEY_LENGTH: usize = 256;
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

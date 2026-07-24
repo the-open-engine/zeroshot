@@ -117,6 +117,7 @@ struct LifecycleFold {
     outcomes: std::collections::BTreeSet<crate::lifecycle::TurnId>,
     operational: OperationalStatus,
     finished: bool,
+    pending_failed_frontier: Option<crate::lifecycle::TurnId>,
 }
 
 fn lifecycle_record_fold_is_valid(lifecycle: &LifecycleSnapshot) -> bool {
@@ -148,6 +149,11 @@ fn fold_record(
             accepted_mode,
             effective_mode,
         } => fold_stop_request(fold, *accepted_mode, *effective_mode),
+        LifecycleEvent::Failed { turn_id, kind: _ } => fold_failed(fold, turn_id),
+        LifecycleEvent::Retried {
+            failed_turn_id,
+            retry_turn_id,
+        } => fold_retried(fold, failed_turn_id, retry_turn_id),
     }
 }
 
@@ -158,7 +164,36 @@ fn fold_dispatch(fold: &mut LifecycleFold, turn_id: &crate::lifecycle::TurnId) -
     {
         return false;
     }
+    // A new dispatch (e.g. an error-successor continuation) supersedes any pending failed
+    // frontier, mirroring the store's un-recorded `acquire_dispatch` clear.
+    fold.pending_failed_frontier = None;
     sync_in_flight(fold)
+}
+
+fn fold_failed(fold: &mut LifecycleFold, turn_id: &crate::lifecycle::TurnId) -> bool {
+    if matches!(
+        fold.operational.dispatch_state,
+        DispatchState::ForceStopping | DispatchState::Stopped
+    ) || !fold.in_flight.remove(turn_id)
+    {
+        return false;
+    }
+    fold.pending_failed_frontier = Some(turn_id.clone());
+    sync_in_flight(fold)
+}
+
+fn fold_retried(
+    fold: &mut LifecycleFold,
+    failed_turn_id: &crate::lifecycle::TurnId,
+    retry_turn_id: &crate::lifecycle::TurnId,
+) -> bool {
+    if fold.pending_failed_frontier.as_ref() != Some(failed_turn_id)
+        || failed_turn_id == retry_turn_id
+    {
+        return false;
+    }
+    fold.pending_failed_frontier = None;
+    true
 }
 
 fn fold_update(
@@ -286,6 +321,7 @@ fn fold_counts_match(fold: &LifecycleFold, lifecycle: &LifecycleSnapshot) -> boo
         .saturating_add(lifecycle.void_turns.len());
     count_matches
         && fold.outcomes.len() == outcome_count
+        && lifecycle.pending_failed_frontier == fold.pending_failed_frontier
         && lifecycle
             .operational
             .as_ref()

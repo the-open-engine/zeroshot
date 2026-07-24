@@ -1604,6 +1604,29 @@
           "type": "string"
         },
         "params": {
+          "$ref": "#/$defs/RetryParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest8": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
           "$ref": "#/$defs/WatchParams"
         }
       },
@@ -1679,6 +1702,16 @@
       "anyOf": [
         {
           "$ref": "#/$defs/JsonRpcSuccess7"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse8": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess8"
         },
         {
           "$ref": "#/$defs/JsonRpcErrorResponse"
@@ -1800,6 +1833,25 @@
       "type": "object"
     },
     "JsonRpcSuccess7": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RetryResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess8": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -2246,6 +2298,69 @@
           "type": "integer"
         }
       ]
+    },
+    "RetryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "idempotencyKey": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "ifGeneration": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ifGeneration",
+        "idempotencyKey"
+      ],
+      "type": "object"
+    },
+    "RetryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "atCursor": {
+          "type": "string"
+        },
+        "deduped": {
+          "type": "boolean"
+        },
+        "generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operational": {
+          "$ref": "#/$defs/OperationalStatus"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "retriedTurnId": {
+          "type": "string"
+        },
+        "retryTurnId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "runId",
+        "phase",
+        "retriedTurnId",
+        "retryTurnId",
+        "operational",
+        "atCursor",
+        "deduped"
+      ],
+      "type": "object"
     },
     "ServerCapabilities": {
       "additionalProperties": false,
@@ -2934,6 +3049,12 @@
     "plan_response": {
       "$ref": "#/$defs/JsonRpcResponse2"
     },
+    "retry_request": {
+      "$ref": "#/$defs/JsonRpcRequest7"
+    },
+    "retry_response": {
+      "$ref": "#/$defs/JsonRpcResponse7"
+    },
     "stop_request": {
       "$ref": "#/$defs/JsonRpcRequest6"
     },
@@ -2953,10 +3074,10 @@
       "$ref": "#/$defs/JsonRpcResponse5"
     },
     "watch_request": {
-      "$ref": "#/$defs/JsonRpcRequest7"
+      "$ref": "#/$defs/JsonRpcRequest8"
     },
     "watch_response": {
-      "$ref": "#/$defs/JsonRpcResponse7"
+      "$ref": "#/$defs/JsonRpcResponse8"
     }
   },
   "required": [
@@ -2972,6 +3093,8 @@
     "update_response",
     "stop_request",
     "stop_response",
+    "retry_request",
+    "retry_response",
     "watch_request",
     "watch_response",
     "event_notification",

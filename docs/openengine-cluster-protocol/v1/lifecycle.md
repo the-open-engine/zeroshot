@@ -42,11 +42,35 @@ new stop mutations are rejected without appending lifecycle or verified-I/O reco
 of a previously accepted idempotency key remains available and cannot append a second terminal
 record.
 
+## Retry
+
+`retry({ifGeneration, idempotencyKey})` is the single authoritative same-run manual retry. Unlike
+`update` and `stop`, `retry` carries no turn, input, or other execution selector: the server always
+targets its own store-tracked latest unconsumed failed dispatch frontier. A closed request rejects
+`mode`, `turnId`, `executionId`, `session`, `workspacePath`, `provider`, and any other unknown field.
+
+Only a pending failed frontier admits retry. Every other observable state fails closed with
+`NO_RETRYABLE_FRONTIER` and a `reason`: `exhausted` (no turn has ever failed), `success` (the
+frontier turn already completed), `active` (a turn is currently leased — either the original turn
+or a superseding dispatch), or `consumed` (the frontier was already retried). A stale generation
+returns `GENERATION_CONFLICT`; a terminal graph or a non-`active` dispatch state (suspended,
+draining, force-stopping, stopped) returns `INVALID_PHASE`.
+
+Retry reuses the exact recorded verified input, admitted target, workspace policy, and deadline of
+the original run; it never accepts caller-supplied replacement data and never allocates a new run
+ID or generation. It mints one new internal turn identity for the retried attempt and atomically
+races any competing error-successor continuation: a concurrent new dispatch (`acquire_dispatch`)
+silently supersedes — clears — a pending failed frontier it did not consume, so at most one side of
+that race ever wins the frontier. Retry is a same-run intent record only; it does not itself
+establish a new dispatch lease or invoke a worker, and no automatic or background code path in this
+protocol ever calls it.
+
 ## CAS, idempotency, and acknowledgements
 
-Both methods require an exact generation CAS. Fingerprints bind the method and canonical validated
-parameters except `idempotencyKey`. Same-key replay returns the original receipt with
-`deduped:true`; changed parameters or cross-method key reuse returns `IDEMPOTENCY_REUSE`.
+All three mutation methods require an exact generation CAS. Fingerprints bind the method and
+canonical validated parameters except `idempotencyKey`. Same-key replay returns the original
+receipt with `deduped:true`; changed parameters or cross-method key reuse returns
+`IDEMPOTENCY_REUSE`.
 
 Stop receipts acknowledge the accepted mode, effective monotonic mode, and durable lifecycle
 state. They do not claim that external side effects were rolled back, that cancellation made an

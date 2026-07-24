@@ -200,6 +200,8 @@ pub enum StoreError {
     UnknownRun,
     #[error("run history was deleted")]
     RunGone { tombstoned_at: Option<Cursor> },
+    #[error("no retryable failed frontier is pending: {reason}")]
+    NoRetryableFrontier { reason: &'static str },
 }
 
 /// Logical durable control-journal view.
