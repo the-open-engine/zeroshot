@@ -1,19 +1,24 @@
 //! NDJSON stdio transport: multiplexes unary JSON-RPC request/response traffic and generic
 //! `watch` subscription notifications over one bounded-frame connection.
 
+mod admission;
+
+use admission::{acquire_task_slot, reject_duplicate, run_writer, InFlightIds, MAX_CONNECTION_TASKS};
+
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex;
 use openengine_cluster_protocol::{
     DomainErrorData, EventNotification, JsonRpcNotification, JsonRpcRequest, RequestId,
     SubscriptionCancelParams, SubscriptionClosedNotification, SubscriptionId, WatchParams,
-    INVALID_PARAMS, INVALID_REQUEST, JSON_RPC_VERSION, PARSE_ERROR, SCHEMA_VIOLATION,
+    INVALID_PARAMS, JSON_RPC_VERSION, PARSE_ERROR, SCHEMA_VIOLATION,
 };
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Notify, Semaphore};
 use tokio::task::JoinSet;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
@@ -30,26 +35,17 @@ const MAX_FRAME_BYTES: usize = 1_048_576;
 /// than growing memory without bound.
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 
-/// Grace period given to already-spawned tasks to finish on their own once the connection is
-/// shutting down (EOF or fatal I/O error). Bounded unary/watch-establishment dispatches finish
-/// well within this window and get their response flushed; a `watch` subscription's streaming
-/// loop has no natural end once its live channel goes idle (cancellation is only observed on the
-/// stream's next poll, and nothing left will ever poll it), so once the grace period elapses
-/// whatever tasks remain are assumed stuck and force-aborted rather than awaited forever.
+/// Grace period given to already-spawned bounded backend dispatches to finish once the connection
+/// closes. Subscription tasks are notified through their cancellation handles before shutdown;
+/// any backend operation that does not finish inside this bound is force-aborted.
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(200);
-
-/// Domain error code for a request id reused while its first request is still in flight. Specific
-/// to this multiplexed NDJSON binding: an unmultiplexed unary transport has no concept of two
-/// requests in flight at once.
-const DUPLICATE_REQUEST_ID: &str = "DUPLICATE_REQUEST_ID";
 
 /// Per-subscription cancellation signal: notifying it wakes `run_watch_subscription`'s streaming
 /// loop immediately, even while parked awaiting the next live event, instead of relying solely on
 /// `WatchEventStream`'s own cancelled flag, which is only re-checked at the top of `next()` and so
 /// never observed on an idle run once the task is parked inside `next_live`'s
 /// `receiver.recv().await`.
-type SubscriptionMap = Arc<StdMutex<HashMap<SubscriptionId, Arc<Notify>>>>;
-type InFlightIds = Arc<StdMutex<HashSet<RequestId>>>;
+type SubscriptionMap = Arc<Mutex<HashMap<SubscriptionId, Arc<Notify>>>>;
 
 /// Per-connection state shared by every spawned request/subscription task: the outbound write
 /// queue and the tracking maps used for cancellation and duplicate-id rejection.
@@ -75,8 +71,9 @@ where
     let (outbound_tx, outbound_rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
     let writer_task = tokio::spawn(run_writer(writer, outbound_rx));
 
-    let subscriptions: SubscriptionMap = Arc::new(StdMutex::new(HashMap::new()));
-    let in_flight_ids: InFlightIds = Arc::new(StdMutex::new(HashSet::new()));
+    let subscriptions: SubscriptionMap = Arc::new(Mutex::new(HashMap::new()));
+    let in_flight_ids: InFlightIds = Arc::new(Mutex::new(HashSet::new()));
+    let task_slots = Arc::new(Semaphore::new(MAX_CONNECTION_TASKS));
     let mut tasks: JoinSet<()> = JoinSet::new();
     let state = ConnectionState {
         outbound_tx: outbound_tx.clone(),
@@ -86,7 +83,17 @@ where
 
     let mut lines = Framed::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
     loop {
-        let line = match lines.next().await {
+        // Reap completed request tasks even while the connection remains idle. A concurrency cap
+        // alone is insufficient: `JoinSet` retains every completed output until it is joined.
+        let next_line = loop {
+            tokio::select! {
+                completed = tasks.join_next(), if !tasks.is_empty() => {
+                    let _ = completed;
+                }
+                line = lines.next() => break line,
+            }
+        };
+        let line = match next_line {
             Some(Ok(line)) => line,
             Some(Err(LinesCodecError::MaxLineLengthExceeded)) => {
                 let _ = outbound_tx
@@ -116,7 +123,7 @@ where
 
         match classify_ndjson_line(&line) {
             NdjsonLineKind::Cancel(subscription_id) => {
-                if let Some(cancel) = subscriptions.lock().unwrap().remove(&subscription_id) {
+                if let Some(cancel) = subscriptions.lock().remove(&subscription_id) {
                     cancel.notify_one();
                 }
             }
@@ -124,12 +131,18 @@ where
                 if reject_duplicate(&in_flight_ids, &outbound_tx, id.clone()).await {
                     continue;
                 }
-                tasks.spawn(run_watch_subscription(
-                    dispatcher.clone(),
-                    id,
-                    params,
-                    state.clone(),
-                ));
+                let Some(permit) =
+                    acquire_task_slot(&task_slots, &outbound_tx, Some(id.clone())).await
+                else {
+                    in_flight_ids.lock().remove(&id);
+                    continue;
+                };
+                let task_dispatcher = dispatcher.clone();
+                let task_state = state.clone();
+                tasks.spawn(async move {
+                    let _permit = permit;
+                    run_watch_subscription(task_dispatcher, id, params, task_state).await;
+                });
             }
             NdjsonLineKind::Passthrough { id } => {
                 if let Some(id) = id.clone() {
@@ -137,14 +150,25 @@ where
                         continue;
                     }
                 }
-                tasks.spawn(run_passthrough_request(
-                    dispatcher.clone(),
-                    id,
-                    line,
-                    state.clone(),
-                ));
+                let Some(permit) = acquire_task_slot(&task_slots, &outbound_tx, id.clone()).await
+                else {
+                    if let Some(id) = id {
+                        in_flight_ids.lock().remove(&id);
+                    }
+                    continue;
+                };
+                let task_dispatcher = dispatcher.clone();
+                let task_state = state.clone();
+                tasks.spawn(async move {
+                    let _permit = permit;
+                    run_passthrough_request(task_dispatcher, id, line, task_state).await;
+                });
             }
         }
+    }
+
+    for cancel in subscriptions.lock().drain().map(|(_, cancel)| cancel) {
+        cancel.notify_one();
     }
 
     let drain_naturally = async { while tasks.join_next().await.is_some() {} };
@@ -161,47 +185,6 @@ where
     Ok(())
 }
 
-/// Registers `id` as in flight, or sends a `DUPLICATE_REQUEST_ID` error and returns `true` if it
-/// was already in flight.
-async fn reject_duplicate(
-    in_flight_ids: &InFlightIds,
-    outbound_tx: &mpsc::Sender<String>,
-    id: RequestId,
-) -> bool {
-    let inserted = in_flight_ids.lock().unwrap().insert(id.clone());
-    if inserted {
-        return false;
-    }
-    let _ = outbound_tx
-        .send(serialize_error(
-            Some(id),
-            INVALID_REQUEST,
-            "Invalid Request",
-            Some(DomainErrorData::new(DUPLICATE_REQUEST_ID)),
-        ))
-        .await;
-    true
-}
-
-/// Drains the bounded outbound queue, writing one NDJSON line per queued frame. Stops on the
-/// first write failure (the peer is gone) or once every sender half is dropped.
-async fn run_writer<W>(mut writer: W, mut outbound_rx: mpsc::Receiver<String>)
-where
-    W: AsyncWrite + Unpin,
-{
-    while let Some(line) = outbound_rx.recv().await {
-        if writer.write_all(line.as_bytes()).await.is_err() {
-            break;
-        }
-        if writer.write_all(b"\n").await.is_err() {
-            break;
-        }
-        if writer.flush().await.is_err() {
-            break;
-        }
-    }
-}
-
 /// Dispatches a non-`watch` request or notification line, releasing its in-flight id (if any)
 /// once the backend call returns and before the response is enqueued.
 async fn run_passthrough_request<B>(
@@ -214,7 +197,7 @@ async fn run_passthrough_request<B>(
 {
     let response = dispatcher.dispatch(&line).await;
     if let Some(id) = id {
-        state.in_flight_ids.lock().unwrap().remove(&id);
+        state.in_flight_ids.lock().remove(&id);
     }
     let _ = state.outbound_tx.send(response).await;
 }
@@ -242,7 +225,7 @@ async fn run_watch_subscription<B>(
         in_flight_ids,
     } = state;
     let (response, established) = dispatcher.dispatch_watch(id.clone(), params).await;
-    in_flight_ids.lock().unwrap().remove(&id);
+    in_flight_ids.lock().remove(&id);
     let Some((subscription_id, mut stream, _handle)) = established else {
         let _ = outbound_tx.send(response).await;
         return;
@@ -254,10 +237,9 @@ async fn run_watch_subscription<B>(
     // register-before-resolve ordering in `NdjsonTransport::run_pump`).
     subscriptions
         .lock()
-        .unwrap()
         .insert(subscription_id.clone(), Arc::clone(&cancel));
     if outbound_tx.send(response).await.is_err() {
-        subscriptions.lock().unwrap().remove(&subscription_id);
+        subscriptions.lock().remove(&subscription_id);
         return;
     }
 
@@ -308,7 +290,7 @@ async fn run_watch_subscription<B>(
             break;
         }
     }
-    subscriptions.lock().unwrap().remove(&subscription_id);
+    subscriptions.lock().remove(&subscription_id);
 }
 
 pub async fn serve_stdio<B>(dispatcher: Dispatcher<B>) -> io::Result<()>
@@ -425,11 +407,11 @@ mod tests {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(1);
         outbound_tx.send("occupied".to_owned()).await.unwrap();
 
-        let subscriptions: SubscriptionMap = Arc::new(StdMutex::new(HashMap::new()));
+        let subscriptions: SubscriptionMap = Arc::new(Mutex::new(HashMap::new()));
         let state = ConnectionState {
             outbound_tx,
             subscriptions: Arc::clone(&subscriptions),
-            in_flight_ids: Arc::new(StdMutex::new(HashSet::new())),
+            in_flight_ids: Arc::new(Mutex::new(HashSet::new())),
         };
 
         tokio::spawn(run_watch_subscription(
@@ -446,7 +428,7 @@ mod tests {
         // full `cargo test --workspace` run; yielding is deterministic regardless of load and the
         // attempt cap still fails the test if registration never happens.
         let mut attempts = 0;
-        while subscriptions.lock().unwrap().len() != 1 {
+        while subscriptions.lock().len() != 1 {
             attempts += 1;
             assert!(
                 attempts < 100_000,

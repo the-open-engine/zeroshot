@@ -1,14 +1,19 @@
 //! Typed transport-neutral Cluster Protocol client.
 
+mod ndjson_pump;
+
+use ndjson_pump::forward_notification;
+
 pub mod ndjson_watch;
 pub mod watch;
 pub use ndjson_watch::*;
 pub use watch::*;
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::collections::{hash_map::Entry, HashMap};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 
+use parking_lot::Mutex as ParkingMutex;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, GetParams, GetResult, InitializeParams, InitializeResult,
@@ -81,9 +86,8 @@ where
 const MAX_FRAME_BYTES: usize = 1_048_576;
 
 /// Bounded per-subscription local buffer of raw notification lines awaiting
-/// [`NdjsonReconnectingEventStream::next`]. Independent of (and smaller-scoped than) the server's
-/// own per-subscription delivery queue: this only smooths delivery on the client side of an
-/// already-accepted subscription.
+/// [`NdjsonReconnectingEventStream::next`]. Delivery into this queue is non-blocking so one
+/// abandoned subscription cannot stall the connection's sole response pump.
 const SUBSCRIPTION_QUEUE_CAPACITY: usize = 1024;
 
 /// One demultiplexed unary response: the raw response line plus, only for a successful `watch`
@@ -91,20 +95,32 @@ const SUBSCRIPTION_QUEUE_CAPACITY: usize = 1024;
 /// notifications.
 struct PumpedResponse {
     line: String,
-    subscription: Option<mpsc::Receiver<String>>,
+    subscription: Option<PumpedSubscription>,
 }
 
-type PendingMap = Arc<StdMutex<HashMap<RequestId, oneshot::Sender<PumpedResponse>>>>;
-type SubscriptionMap = Arc<StdMutex<HashMap<SubscriptionId, mpsc::Sender<String>>>>;
+pub(crate) struct PumpedSubscription {
+    pub(crate) receiver: mpsc::Receiver<String>,
+    pub(crate) overflowed: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct SubscriptionRegistration {
+    sender: mpsc::Sender<String>,
+    overflowed: Arc<AtomicBool>,
+}
+
+type PendingMap = Arc<ParkingMutex<HashMap<RequestId, oneshot::Sender<PumpedResponse>>>>;
+type SubscriptionMap = Arc<ParkingMutex<HashMap<SubscriptionId, SubscriptionRegistration>>>;
 
 /// NDJSON stdio transport that demultiplexes unary request/response traffic and generic `watch`
 /// subscription notifications sharing one connection, correlating by request id and subscription
 /// id respectively. A background pump task owns the read half; [`Self::request`] and the
 /// subscription-establishing/cancelling methods below only ever take the write half's lock.
 pub struct NdjsonTransport<R, W> {
-    writer: Mutex<W>,
+    writer: Arc<Mutex<W>>,
     pending: PendingMap,
     pump: JoinHandle<()>,
+    next_watch_id: AtomicU64,
     _reader: std::marker::PhantomData<fn() -> R>,
 }
 
@@ -115,23 +131,26 @@ where
 {
     #[must_use]
     pub fn new(reader: R, writer: W) -> Self {
-        let pending: PendingMap = Arc::new(StdMutex::new(HashMap::new()));
-        let subscriptions: SubscriptionMap = Arc::new(StdMutex::new(HashMap::new()));
-        let pump = tokio::spawn(run_pump(reader, Arc::clone(&pending), subscriptions));
+        let pending: PendingMap = Arc::new(ParkingMutex::new(HashMap::new()));
+        let subscriptions: SubscriptionMap = Arc::new(ParkingMutex::new(HashMap::new()));
+        let writer = Arc::new(Mutex::new(writer));
+        let pump = tokio::spawn(run_pump(
+            reader,
+            Arc::clone(&pending),
+            subscriptions,
+            Arc::clone(&writer),
+        ));
         Self {
-            writer: Mutex::new(writer),
+            writer,
             pending,
             pump,
+            next_watch_id: AtomicU64::new(1),
             _reader: std::marker::PhantomData,
         }
     }
 
     async fn write_line(&self, line: &str) -> Result<(), TransportError> {
-        let mut writer = self.writer.lock().await;
-        writer.write_all(line.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
-        Ok(())
+        write_shared_line(&self.writer, line).await
     }
 
     /// Registers `id` as pending, writes `request`, and awaits its demultiplexed response.
@@ -141,9 +160,21 @@ where
         id: RequestId,
     ) -> Result<PumpedResponse, TransportError> {
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id.clone(), sender);
+        {
+            let mut pending = self.pending.lock();
+            match pending.entry(id.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(sender);
+                }
+                Entry::Occupied(_) => {
+                    return Err(TransportError::Protocol(format!(
+                        "request id is already pending: {id:?}"
+                    )));
+                }
+            }
+        }
         if let Err(error) = self.write_line(&request).await {
-            self.pending.lock().unwrap().remove(&id);
+            self.pending.lock().remove(&id);
             return Err(error);
         }
         receiver.await.map_err(|_| {
@@ -154,16 +185,23 @@ where
     /// Sends a `watch` request and returns its response line plus the receiver registered for its
     /// subscription's notifications. Errors if the response carried no `subscriptionId` (either a
     /// backend error, or a malformed/unexpected response).
-    pub async fn open_subscription(
+    pub(crate) async fn open_subscription(
         &self,
         request: String,
         id: RequestId,
-    ) -> Result<(String, mpsc::Receiver<String>), TransportError> {
+    ) -> Result<(String, PumpedSubscription), TransportError> {
         let response = self.send_request(request, id).await?;
         let subscription = response.subscription.ok_or_else(|| {
             TransportError::Protocol("watch response carried no subscriptionId".to_owned())
         })?;
         Ok((response.line, subscription))
+    }
+
+    pub(crate) fn next_watch_request_id(&self) -> RequestId {
+        RequestId::String(format!(
+            "watch-{}",
+            self.next_watch_id.fetch_add(1, Ordering::Relaxed)
+        ))
     }
 
     /// Sends a `subscription/cancel` notification. Fire-and-forget: cancellation has no response
@@ -222,9 +260,14 @@ fn extract_request_id(request: &str) -> RequestId {
 /// response carrying a `result.subscriptionId` registers that subscription's channel before
 /// resolving the pending oneshot, so no `event` racing the response can be missed. On stream end
 /// every pending request fails and every open subscription ends (dropping its sender).
-async fn run_pump<R>(reader: R, pending: PendingMap, subscriptions: SubscriptionMap)
-where
+async fn run_pump<R, W>(
+    reader: R,
+    pending: PendingMap,
+    subscriptions: SubscriptionMap,
+    writer: Arc<Mutex<W>>,
+) where
     R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
     while let Some(Ok(line)) = lines.next().await {
@@ -232,13 +275,15 @@ where
             continue;
         };
         if value.get("method").is_some() {
-            forward_notification(&value, line, &subscriptions).await;
+            if let Some(subscription_id) = forward_notification(&value, line, &subscriptions) {
+                let _ = write_subscription_cancel(&writer, subscription_id).await;
+            }
             continue;
         }
         let Some(id) = value.get("id").and_then(RequestId::from_json_value) else {
             continue;
         };
-        let Some(sender) = pending.lock().unwrap().remove(&id) else {
+        let Some(sender) = pending.lock().remove(&id) else {
             continue;
         };
         let subscription = value
@@ -246,40 +291,53 @@ where
             .and_then(|result| result.get("subscriptionId"))
             .and_then(Value::as_str)
             .map(|subscription_id| {
-                let (tx, rx) = mpsc::channel(SUBSCRIPTION_QUEUE_CAPACITY);
-                subscriptions
-                    .lock()
-                    .unwrap()
-                    .insert(SubscriptionId::new(subscription_id), tx);
-                rx
+                let (sender, receiver) = mpsc::channel(SUBSCRIPTION_QUEUE_CAPACITY);
+                let overflowed = Arc::new(AtomicBool::new(false));
+                subscriptions.lock().insert(
+                    SubscriptionId::new(subscription_id),
+                    SubscriptionRegistration {
+                        sender,
+                        overflowed: Arc::clone(&overflowed),
+                    },
+                );
+                PumpedSubscription {
+                    receiver,
+                    overflowed,
+                }
             });
         let _ = sender.send(PumpedResponse { line, subscription });
     }
-    for (_, sender) in pending.lock().unwrap().drain() {
+    for (_, sender) in pending.lock().drain() {
         drop(sender);
     }
-    subscriptions.lock().unwrap().clear();
+    subscriptions.lock().clear();
 }
 
-/// Forwards one `event`/`subscription/closed` notification line to its subscription's registered
-/// channel, if still open. Removes the registration on `subscription/closed` (the terminal
-/// notification for that subscription).
-async fn forward_notification(value: &Value, line: String, subscriptions: &SubscriptionMap) {
-    let Some(subscription_id) = value
-        .get("params")
-        .and_then(|params| params.get("subscriptionId"))
-        .and_then(Value::as_str)
-    else {
-        return;
-    };
-    let subscription_id = SubscriptionId::new(subscription_id);
-    let sender = subscriptions.lock().unwrap().get(&subscription_id).cloned();
-    if let Some(sender) = sender {
-        let _ = sender.send(line).await;
-    }
-    if value.get("method").and_then(Value::as_str) == Some("subscription/closed") {
-        subscriptions.lock().unwrap().remove(&subscription_id);
-    }
+async fn write_subscription_cancel<W>(
+    writer: &Arc<Mutex<W>>,
+    subscription_id: SubscriptionId,
+) -> Result<(), TransportError>
+where
+    W: AsyncWrite + Unpin,
+{
+    let notification = serde_json::to_string(&JsonRpcNotification {
+        jsonrpc: JSON_RPC_VERSION.to_owned(),
+        method: "subscription/cancel".to_owned(),
+        params: SubscriptionCancelParams { subscription_id },
+    })
+    .expect("subscription cancel notification serialization must succeed");
+    write_shared_line(writer, &notification).await
+}
+
+async fn write_shared_line<W>(writer: &Arc<Mutex<W>>, line: &str) -> Result<(), TransportError>
+where
+    W: AsyncWrite + Unpin,
+{
+    let mut writer = writer.lock().await;
+    writer.write_all(line.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+    Ok(())
 }
 
 pub struct ClusterClient<T> {

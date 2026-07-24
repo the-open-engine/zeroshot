@@ -4,12 +4,12 @@
 //! `subscription/closed` notifications instead of the in-process [`Dispatcher`] passthrough.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::Ordering;
 
 use openengine_cluster_protocol::{
     Cursor, EventNotification, JsonRpcErrorResponse, JsonRpcNotification, JsonRpcRequest,
-    JsonRpcSuccess, RequestId, RunId, SubscriptionClosedNotification, SubscriptionId, WatchParams,
-    WatchResult, JSON_RPC_VERSION,
+    JsonRpcSuccess, RequestId, RunId, SubscriptionCloseReason, SubscriptionClosedNotification,
+    SubscriptionId, WatchParams, WatchResult, JSON_RPC_VERSION,
 };
 use openengine_cluster_server::watch::PublicEventRecord;
 use serde_json::Value;
@@ -17,15 +17,14 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
 use crate::watch::admit_event;
+use crate::PumpedSubscription;
 use crate::{validate_response_identity, ClientError, EventOrClosed, NdjsonTransport};
 
-/// Typed NDJSON watch client. Uses its own `watch-<n>` string request-id namespace (distinct
-/// from [`crate::ClusterClient`]'s integer ids) so `watch` requests issued on one connection can
-/// never collide with concurrent unary requests issued by a [`crate::ClusterClient`] sharing the
-/// same [`NdjsonTransport`].
+/// Typed NDJSON watch client. Request ids come from the shared [`NdjsonTransport`] rather than a
+/// client-local counter, so independently constructed watch clients on one connection cannot
+/// replace each other's pending response waiters.
 pub struct NdjsonWatchClient<'a, R, W> {
     transport: &'a NdjsonTransport<R, W>,
-    next_id: AtomicI64,
 }
 
 impl<'a, R, W> NdjsonWatchClient<'a, R, W>
@@ -35,10 +34,7 @@ where
 {
     #[must_use]
     pub const fn new(transport: &'a NdjsonTransport<R, W>) -> Self {
-        Self {
-            transport,
-            next_id: AtomicI64::new(1),
-        }
+        Self { transport }
     }
 
     pub async fn watch(
@@ -52,14 +48,19 @@ where
             method: "watch".to_owned(),
             params: params.clone(),
         })?;
-        let (line, receiver) = self
+        let (line, subscription) = self
             .transport
             .open_subscription(request, id.clone())
             .await?;
         let result = parse_watch_response(&line, &id)?;
+        let PumpedSubscription {
+            receiver,
+            overflowed,
+        } = subscription;
         let stream = NdjsonReconnectingEventStream {
             transport: self.transport,
             receiver,
+            overflowed,
             subscription_id: result.subscription_id.clone(),
             seen: HashSet::new(),
             last_delivered: params.from_cursor,
@@ -69,10 +70,7 @@ where
     }
 
     fn next_request_id(&self) -> RequestId {
-        RequestId::String(format!(
-            "watch-{}",
-            self.next_id.fetch_add(1, Ordering::Relaxed)
-        ))
+        self.transport.next_watch_request_id()
     }
 }
 
@@ -97,6 +95,7 @@ fn parse_watch_response(line: &str, expected_id: &RequestId) -> Result<WatchResu
 pub struct NdjsonReconnectingEventStream<'a, R, W> {
     transport: &'a NdjsonTransport<R, W>,
     receiver: mpsc::Receiver<String>,
+    overflowed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     subscription_id: SubscriptionId,
     seen: HashSet<(RunId, Cursor)>,
     last_delivered: Option<Cursor>,
@@ -113,7 +112,16 @@ where
     /// (cancelled locally, or the transport's connection ended).
     pub async fn next(&mut self) -> Option<EventOrClosed> {
         loop {
-            let line = self.receiver.recv().await?;
+            let line = match self.receiver.recv().await {
+                Some(line) => line,
+                None if self.overflowed.swap(false, Ordering::AcqRel) => {
+                    return Some(EventOrClosed::Closed {
+                        reason: SubscriptionCloseReason::SlowConsumer,
+                        last_delivered_cursor: self.last_delivered.clone(),
+                    });
+                }
+                None => return None,
+            };
             let value: Value =
                 serde_json::from_str(&line).expect("subscription notification must be valid JSON");
             match value.get("method").and_then(Value::as_str) {
