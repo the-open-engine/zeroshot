@@ -1130,6 +1130,10 @@ clippy is 0 warnings on both feature sets `--all-targets`; 106 tests green by de
 against real Postgres**.
 
 ### 2026-07-24 — O21: the bound finally has a test, and stops throttling fetches
+> **RETRACTED — see O23.** Both headline claims here are false. The "test" used a `CAPWS_BLOCK_BYTES`
+> override that REPLACED the constants it claimed to pin (mutating them left the suite green), and the
+> grouping-by-summed-`clen` scheme described below was itself unsound and has since been replaced. The
+> fetch-concurrency improvement it claims was also undone by the fix in O22.
 A verification review confirmed O19's three fixes (reproducing each against the baseline) and found two
 problems with the fix itself.
 
@@ -1189,7 +1193,11 @@ the **fourth** unobservable memory bound in the campaign and the first whose com
 mutation-verification. The env knob is deleted (it was also a live production hazard: unclamped, unlogged,
 able to silently remove the bound or triple S3 GETs). The two constants are now guarded by `const`
 assertions — a bad value **fails to compile**, which is the only version of this guard that cannot be
-argued with. All five mutations that previously passed now fail.
+argued with.
+>
+> **RETRACTION (O23):** "All five mutations that previously passed now fail" was FALSE. The gate found
+> `MATERIALIZE_BLOCK_BATCH: 4 → 100_000` still passed with a green suite while costing 6x peak RSS
+> (350 MB → 2105 MB). That constant belonged to a component since deleted; see O23.
 
 **3. "Refetch 3.00× → 1.00×" — true only of the fixture it was measured on.** That fixture printed
 `distinct blocks=1`, so its assertion read `1 <= 1.5` and could never fail. Real figures: **2.44× on a
@@ -1197,9 +1205,10 @@ realistic fixture, 3.00× at 40 blocks, 13.00× at 200.** The test now runs on 4
 comment states plainly what it does *not* cover — the worst case needs blocks too large for a group to hold
 a whole wave, where the honest fix is ranged reads, not the pool.
 
-Also fixed: `BlockPool`'s cap evicted to `cap.max(want.len())`, so its real ceiling was the largest group
-ever passed in rather than `cap`; the cleanup guard inferred emptiness from its own failure list while
-`read_dir().flatten()` silently dropped enumeration errors.
+**RETRACTION (O23):** this entry also claimed "`BlockPool`'s cap evicted to `cap.max(want.len())`" was
+fixed. **It was not — the code was byte-identical.** Only a doc comment was added, asserting behaviour the
+code three lines below did not implement. That was the fourth consecutive commit in this campaign whose
+message described a change absent from its own diff. The cleanup-guard fix in that entry IS real.
 
 **The gate's ranked remaining work** (recorded verbatim for the next person, since it overrules this log's
 earlier "no-op against the measured profile" verdict):
@@ -1216,3 +1225,38 @@ earlier "no-op against the measured profile" verdict):
 
 109 tests green by default, **128 with `pg,s3` against a real Postgres verifiably exercised**; clippy 0
 warnings on both feature sets.
+
+### 2026-07-24 — O23: gate ruling; the inert pool deleted; the record corrected
+The gate reviewed O22 and ruled **CONTINUE (narrowly)** — "not because the software is unsafe, but because
+the record is." Its findings, and what changed:
+
+**`BlockPool` was inert, and the commit that claimed to fix it did not.** O22 asserted the eviction ceiling
+was changed from `cap.max(want.len())` to `want.len() + cap`; `git diff` shows the code byte-identical —
+only a comment was added, describing a retention policy the code did not implement. Worse, the pool was
+measurably doing nothing: setting its constant to 0 (deleting its entire purpose) produced **identical peak
+RSS and byte-identical output** on every shape (verified independently here: 215 MB vs 216 MB). It has been
+**deleted**. That removes the false comment, the dead component, and an unguarded constant that the gate
+showed could restore a **6x RSS regression** (350 MB → 2105 MB) with the suite still green.
+
+**The fetch-concurrency cost is now stated, not denied.** With `MATERIALIZE_BLOCK_CAP` derived as
+budget/`BLOCK_TARGET` = 4, small-block fan-out fetches 4 blocks at a time where the unbounded version
+managed ~18 — the gate measured **4.4x slower fetch at 20 ms/GET**. The source comment beside the constant
+claimed the opposite ("small blocks now yield many concurrent fetches"); it now records the real trade and
+names ranged block reads as the actual fix.
+
+**What actually fixed the bound.** The gate's audit is worth recording because O22 attributed it wrongly:
+the load-bearing change was `MATERIALIZE_BLOCK_CAP: 64 → 4` (derived from the budget), not `blen`. `blen`
+is genuine defence-in-depth — the only thing that would catch a block larger than `BLOCK_TARGET` — and it
+verified exact in both publish paths, correct for dedup-reused chunks, and digest-neutral. But stripping it
+entirely leaves peak RSS unchanged, so the headline named the wrong mechanism.
+
+Bound re-verified after deleting the pool: killer shape (31 blocks, 1920 MiB of real block bytes)
+**638 MB**; 3 GB incompressible **773 MB**; 2 GiB compressible **575 MB**; 100k small files **472 MB**.
+
+**Known and accepted, recorded rather than fixed** (the gate explicitly ruled these coverage debt, not
+hazard, because the derived count cap backstops them): `publish_pipelined` dropping `blen` is untested
+(only `publish` is covered); the `0 ⇒ BLOCK_TARGET` old-manifest fallback is unobservable; deleting the
+byte-budget check from the grouper leaves the suite green; refetch amplification is **2.78x** on a
+realistic lineage shape and this campaign made it slightly worse (2.28x → 2.78x).
+
+109 tests green by default, 128 with `pg,s3`; clippy 0 warnings on both feature sets.

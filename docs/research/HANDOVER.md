@@ -140,33 +140,51 @@ but **that delta's attribution was retracted** — the reflink pass is ~0.02s (m
 two EC2 runs weren't comparable (the with-ref run paid first-in-batch S3 TLS/DNS warmup). O9 added
 `reflink_secs` so the next batch can attribute it. Full numbers in the build log's O8 entry.
 
-**Optimization campaign: CLOSED on performance, and here is why.** Three independent adversarial reviews
-converged on the same call — the remaining wins are micro-optimizations of things that stopped being the
-bottleneck. Measured at realistic scale (100k files / 520 MB): a steady-state publish cycle is ~0.58s and is
-now STAT-bound, not hash/compress/network-bound; a cold materialize is ~7s dominated by per-file syscalls.
-What landed: parallel S3 uploads (O6), reflink warm resume + the daemon reference lifecycle (O7/O8), the
-publish re-hash skip (O10, idle cycle 2.56s → 0.58s at 100k files), manifest memoization (O11), a real
-materialize memory bound (O13/O17), and a bounded block cache (O16).
+**Optimization campaign: closed, but read this before you believe any number in it.**
 
-**What is genuinely left, ranked:**
-1. **Nothing performance-shaped is worth doing before integration.** The honest list of remaining ideas
-   (ARMv8 SHA verification, `create_dir_all` hoisting, zstd context reuse, manifest compression, tree-
-   structured manifests) is either a no-op against the measured profile or a large format change whose
-   benefit O11 already captured in steady state. Revisit only if a cold-start profile demands it.
-2. **A soak test** — N cycles of an agent-like writer against a full-rehash oracle, asserting equality every
-   cycle. This is the one test shape that finds timing-dependent skips, and it is the shape this system most
-   needs before it runs against real agent work.
-3. **A coarse-granularity-filesystem test in CI** (loopback ext3/FAT image). A reviewer found a live
-   data-loss bug this way that no in-repo test could see.
-4. **Re-measure O6/O8 on EC2 with the 100k fixture.** Those numbers were taken on 256 large files.
+Measured at realistic scale (100k files / 520 MB): a steady-state publish cycle is ~0.58s and is now
+STAT-bound; a cold materialize is ~7s, per-file-syscall-bound. What landed: parallel S3 uploads (O6),
+reflink warm resume + the daemon reference lifecycle (O7/O8), the publish re-hash skip (O10), manifest
+memoization (O11), a bounded materialize working set (O13→O23), a bounded block cache (O16), and ARMv8
+hardware SHA-256 (O18, 5.1x — it had never been enabled, so **every EC2 number in the build log predates
+it and understates hash-bound paths by up to ~5x**).
 
-**READ THIS BEFORE OPTIMIZING ANYTHING ELSE.** Three separate defects in this campaign were invisible to
-their own benchmarks because the fixture was 256 large incompressible files: the reflink per-file cost
-(22ms at 256 files, ~10.8s at 95k), a wall regression that only appeared at 100k files, and a memory
-"bound" that only held at compression ratio ~1. Twice, a safety mechanism shipped that provably did nothing
-while its tests passed — `force_full_rehash` as an unused parameter, and a racy-window guard whose tests
-moved the safety-critical timestamp in the permissive direction. **Benchmark on a production-shaped fixture,
-and mutation-test every guard** (revert it; the test must fail).
+**The campaign's own failure mode, stated plainly because it will bite you too.** Of the last ten commits,
+six fixed defects introduced by earlier ones in the same campaign. **Four memory bounds shipped that no
+test could observe.** Three safety mechanisms shipped that provably did nothing while their tests passed
+(a valve that was an unused parameter; a racy-window guard whose tests moved the safety-critical field
+permissively; a block pool whose claimed fix was never in its own diff). Every one was caught by an
+independent review or by a test written specifically to be able to see the failure — **never by the
+change's own benchmarks**. Two rules came out of that, and they are not optional:
+- **Benchmark on a production-shaped fixture** (~100k small files, mixed compressibility). A 256-large-file
+  fixture hid three separate defects: per-file cost (22ms at 256 files vs ~10.8s at 95k), a wall regression
+  visible only at 100k, and a memory bound that only held at compression ratio ~1.
+- **Mutation-test every guard.** Revert it; the test must fail. Where the guard is a constant, a runtime
+  test cannot do this (asserting "groups fit the budget" passes vacuously if you raise the budget) — use a
+  `const _: () = assert!(...)` so a bad value fails to COMPILE.
+
+**Ranked remaining work, per the review gate** (this supersedes an earlier verdict here that nothing
+performance-shaped was worth doing — that was wrong at 100k-file scale):
+1. **Ranged/partial block reads.** The real remaining S3 win and NOT a constant factor: a whole 64 MiB
+   block is currently fetched to read one 256 KiB chunk. Measured **4880 MiB → 1604 MiB (3.0x)** on a
+   realistic fixture, **250x** on an eroded one. It also makes the block-size estimate exact by
+   construction, dissolving the memory-bound problem rather than patching it, and removes the 4.4x
+   fetch-concurrency cost the current bound imposes. A defaulted `get_block_range` on `BlobStore` keeps
+   every existing impl and test double compiling.
+2. **Manifest compression at rest.** 100k-file manifest **30.2 MiB JSON → 7.43 MiB zstd L1 (4.1x)**, 27ms
+   encode / 11ms decode. Identity is `logical_digest` over logical content, so compression cannot perturb
+   it; sniff magic bytes for back-compat.
+3. **A soak test** — N cycles of an agent-like writer against a full-rehash oracle, real timestamps. The
+   only shape that finds timing-dependent skips, and the one this system most needs before real work.
+4. **A coarse-granularity-filesystem test in CI.** A reviewer found a live data-loss bug that way; nothing
+   in CI covers it.
+5. **Re-measure O5/O6/O8 on EC2** with the 100k fixture AND hardware SHA before quoting any of them.
+6. Explicitly **NEVER**: `[u8;32]` ids (measured ~2% of RSS for a crate-wide, format-adjacent change) and
+   the per-file syscall diet (measured and refuted: 1.04x write path, 1.01x reflink pass).
+
+**Known and accepted** (gate-ruled coverage debt, not hazard — the derived count cap backstops all of it):
+`publish_pipelined` dropping `blen` is untested; the `0 ⇒ BLOCK_TARGET` old-manifest fallback is
+unobservable; refetch amplification is 2.78x on a realistic lineage shape.
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).

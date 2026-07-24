@@ -648,61 +648,6 @@ pub struct MaterializeStats {
     pub write_throughput_mbps: f64,
 }
 
-/// A bounded pool of decompressed-from blocks, held across waves.
-///
-/// Waves are contiguous file runs, so consecutive waves frequently need the SAME block — and a compressible
-/// tree can put the entire store in one block, which every wave then needs. Fetching per wave made that a
-/// re-download per wave (measured 3.00x amplification on a 3-wave compressible tree; over S3 those are real
-/// GETs). Keeping the last few blocks costs the same memory the batch bound already permits, so it is free.
-struct BlockPool<'a> {
-    store: &'a dyn BlobStore,
-    held: Vec<(BlockId, Vec<u8>)>,
-    cap: usize,
-    fetches: usize,
-}
-
-impl<'a> BlockPool<'a> {
-    fn new(store: &'a dyn BlobStore, cap: usize) -> Self {
-        Self {
-            store,
-            held: Vec::with_capacity(cap),
-            cap,
-            fetches: 0,
-        }
-    }
-    /// Ensure `want` are resident, evicting oldest first. Fetches only what is missing.
-    ///
-    /// Retention is capped at `cap` blocks BEYOND the current group. Evicting to `cap.max(want.len())`
-    /// instead made the pool's real ceiling the largest group ever passed in, so the "cap" bounded nothing.
-    fn load(&mut self, want: &[&BlockId]) -> Result<()> {
-        let missing: Vec<&BlockId> = want
-            .iter()
-            .filter(|b| !self.held.iter().any(|(h, _)| h == **b))
-            .copied()
-            .collect();
-        if missing.is_empty() {
-            return Ok(());
-        }
-        // Evict oldest entries not in `want` to make room, keeping the pool at its cap.
-        while self.held.len() + missing.len() > self.cap.max(want.len()) {
-            let Some(pos) = self.held.iter().position(|(h, _)| !want.contains(&h)) else {
-                break;
-            };
-            self.held.remove(pos);
-        }
-        let fetched: Vec<(BlockId, Vec<u8>)> = missing
-            .par_iter()
-            .map(|b| -> Result<_> { Ok(((*b).clone(), self.store.get_block(b)?)) })
-            .collect::<Result<Vec<_>>>()?;
-        self.fetches += fetched.len();
-        self.held.extend(fetched);
-        Ok(())
-    }
-    fn get(&self, b: &BlockId) -> Option<&Vec<u8>> {
-        self.held.iter().find(|(h, _)| h == b).map(|(_, v)| v)
-    }
-}
-
 /// Armed once `out` has been claimed (after `load_verified_manifest` proved it empty/absent) and disarmed
 /// only on success: if materialize returns early for ANY reason, `out` is cleared.
 ///
@@ -774,7 +719,7 @@ impl Drop for ClearOutOnFailure<'_> {
 
 /// Ceiling on the LOGICAL (decompressed) bytes a single materialize wave holds.
 ///
-/// Real peak is roughly **2x this plus [`MATERIALIZE_BLOCK_BATCH`] x `BLOCK_TARGET`**: the wave's chunk
+/// Real peak is roughly **2x this plus one batch of compressed blocks**: the wave's chunk
 /// map and the per-file assembly buffers are alive at the same time, and a batch of compressed blocks sits
 /// alongside them. Stated precisely because two earlier versions of this comment understated the bound
 /// (once by 8x, once by 2x) and no test could see either.
@@ -782,11 +727,16 @@ const MATERIALIZE_WAVE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Compressed bytes a wave may hold at once. THIS is the memory bound.
 ///
-/// Kept separate from fetch concurrency on purpose. A single constant serving as both meant capping
-/// in-flight GETs at 4 regardless of block size, which measured **4.4x slower** fetch at 20 ms/GET on
-/// exactly the high-fan-out shape the bound exists for — and on S3 the fetch phase is latency-dominated.
-/// Blocks are sized from the chunk index (the summed `clen` of the chunks we need from each), so small
-/// blocks now yield many concurrent fetches while large ones still yield few.
+/// KNOWN COST, stated rather than denied: because a batch is fetched in parallel and then drained, this
+/// budget also caps in-flight GETs. With `MATERIALIZE_BLOCK_CAP` derived as budget/`BLOCK_TARGET` = 4,
+/// small-block fan-out fetches 4 at a time where an unbounded version managed ~18 — measured at **4.4x
+/// slower fetch at 20 ms/GET** on that shape. That is the price of the bound as built. The real fix is
+/// ranged block reads (fetch only the bytes a chunk needs), which makes the working set exact and removes
+/// the trade entirely; it is the top item in the handover, not something this constant can solve.
+///
+/// An earlier version of this comment claimed the opposite — that sizing by the chunk index let small
+/// blocks fetch many concurrently. That was true of a scheme since replaced, and false once the derived
+/// cap landed.
 pub const MATERIALIZE_BLOCK_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Hard ceiling on blocks resident at once. Set so that even if EVERY block is unknown-sized and assumed
@@ -809,19 +759,6 @@ const _: () = assert!(
     "materialize's working-set budget scales peak RSS directly and this runs on small pods; raising it \
      is a deliberate operational decision, not a tweak"
 );
-
-/// Blocks the pool RETAINS across waves, beyond the current group. Small on purpose: its only job is to
-/// avoid re-fetching a block a neighbouring wave also needs, and every retained block is resident memory
-/// on top of the group's own.
-///
-/// Bounding the DECOMPRESSED side alone is not enough. A wave fetches every distinct block its files
-/// touch, and nothing caps that count: a long-lived daemon republishes against the parent manifest, so an
-/// unchanged file keeps the `ChunkLoc` of whichever generation first stored it, and a contiguous run of
-/// files fans out across many block generations (measured: 5 distinct blocks on a fresh publish, 65 after
-/// 60 generations). With blocks up to `BLOCK_TARGET` (64 MiB) that fan-out is linear in tree size again —
-/// exactly the property the wave rewrite exists to remove. So blocks are fetched, drained and dropped a
-/// batch at a time; compressed peak is at most this many x `BLOCK_TARGET`.
-const MATERIALIZE_BLOCK_BATCH: usize = 4;
 
 /// Group `blocks` into batches whose ESTIMATED compressed size stays under [`MATERIALIZE_BLOCK_BYTES`].
 ///
@@ -940,7 +877,6 @@ fn write_regular_files(
 
     let (mut fetch_secs, mut decompress_secs, mut write_secs) = (0.0, 0.0, 0.0);
     let mut all_blocks: BTreeSet<&BlockId> = BTreeSet::new();
-    let mut pool = BlockPool::new(store, MATERIALIZE_BLOCK_BATCH);
 
     // Decompress+VERIFY a set of chunks from already-fetched blocks. Every guarantee the read path makes
     // about content lives here: span bounds, decompression bomb ceiling, declared length, and hash == id.
@@ -1008,12 +944,13 @@ fn write_regular_files(
                 for grp in group_blocks_by_bytes(&need_v, &block_clen) {
                     let grp = &grp[..];
                     let t = Instant::now();
-                    pool.load(grp)?;
+                    let held: HashMap<&BlockId, Vec<u8>> = grp
+                        .par_iter()
+                        .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+                        .collect::<Result<HashMap<_, _>>>()?;
                     fetch_secs += t.elapsed().as_secs_f64();
-                    let resident: HashMap<&BlockId, &Vec<u8>> = grp
-                        .iter()
-                        .filter_map(|b| pool.get(b).map(|v| (*b, v)))
-                        .collect();
+                    let resident: HashMap<&BlockId, &Vec<u8>> =
+                        held.iter().map(|(b, v)| (*b, v)).collect();
                     let mine: Vec<&ChunkId> = batch
                         .iter()
                         .copied()
@@ -1052,12 +989,12 @@ fn write_regular_files(
         for batch in group_blocks_by_bytes(&need_v, &block_clen) {
             let batch = &batch[..];
             let t = Instant::now();
-            pool.load(batch)?;
+            let held: HashMap<&BlockId, Vec<u8>> = batch
+                .par_iter()
+                .map(|b| -> Result<_> { Ok((*b, store.get_block(b)?)) })
+                .collect::<Result<HashMap<_, _>>>()?;
             fetch_secs += t.elapsed().as_secs_f64();
-            let resident: HashMap<&BlockId, &Vec<u8>> = batch
-                .iter()
-                .filter_map(|b| pool.get(b).map(|v| (*b, v)))
-                .collect();
+            let resident: HashMap<&BlockId, &Vec<u8>> = held.iter().map(|(b, v)| (*b, v)).collect();
             let mine: Vec<&ChunkId> = cids
                 .iter()
                 .copied()
