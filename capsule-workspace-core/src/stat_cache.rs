@@ -436,11 +436,346 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let before: Vec<_> = std::fs::read_dir(d.path()).unwrap().flatten().collect();
         match probe_fidelity(d.path()) {
-            Fidelity::Ok { observed_ns } => assert!(observed_ns >= 0),
+            // Bounded on BOTH sides, and the lower bound is the load-bearing one. `>= 0` was vacuous —
+            // `worst_gap_ns` starts at 0 and is a max of saturating subtractions, so it cannot be
+            // negative — and its vacuity hid a real hazard: changing the adapter's clock to
+            // `as_millis()` makes every measured gap 0, so `gap * 3 <= SETTLE_NS` always holds and the
+            // probe degenerates into accept-everything, including on the 10s-granularity filesystems it
+            // exists to refuse. One token, whole suite green. Measured on real local filesystems:
+            // 24.6-47.1us, so the 1us floor has ~25x margin.
+            Fidelity::Ok { observed_ns } => assert!(
+                (1_000..SETTLE_NS).contains(&observed_ns),
+                "implausible measured granularity {observed_ns}ns — check the adapter's clock units"
+            ),
+            // This arm is also what pins the adapter's FIELD CHOICE: because the probe backdates the file's
+            // mtime each cycle, a build that measured `mtime_ns` instead of `ctime_ns` would see it frozen,
+            // refuse, and land here — so this otherwise-ordinary "it passes on a normal FS" test is the one
+            // that kills the `ctime -> mtime` mutation (a silent wrong-accept on frozen-ctime filesystems).
             Fidelity::Unusable => panic!("a local filesystem must support the skip's guards"),
         }
         let after: Vec<_> = std::fs::read_dir(d.path()).unwrap().flatten().collect();
         assert_eq!(before.len(), after.len(), "probe left debris behind");
+    }
+
+    // ---- the probe's MEASUREMENT, driven by a simulated clock ------------------------------------
+    //
+    // `fidelity_verdict` pins the DECISION, but until now nothing pinned the granularity measurement that
+    // feeds it: reverting the `since_transition` timer left the whole suite green while silently
+    // restoring the old accept curve (worst_gap pinned at ~20us, the x3 clause never firing). That is the
+    // failure this codebase has shipped repeatedly — a mechanism revertible with a green suite.
+    //
+    // The fake filesystem is a TRUNCATION GRID: `ctime(t) = ((t + phase) / G) * G`, which is how a coarse
+    // filesystem actually behaves. A "ctime advances by G after each write" model is NOT equivalent — it
+    // would let a TRANSITIONS -> 1 mutation survive.
+    const ITER_NS: i64 = 20_000; // cost of one rewrite+stat, matching the real loop
+
+    /// Drive the COMPOSED probe (measure + verdict) against the same simulated filesystem. A4/A5/A6 go
+    /// through this rather than calling `fidelity_verdict` by hand, so the composition is covered too.
+    fn sim_verdict(g: i64, phase: i64) -> Fidelity {
+        let now = std::cell::Cell::new(0i64);
+        let ct = move |t: i64| ((t + phase) / g) * g;
+        probe_verdict(
+            || {
+                now.set(now.get() + ITER_NS);
+                ProbeStep::Ctime(ct(now.get()))
+            },
+            || now.get(),
+            |ns| now.set(now.get() + ns),
+        )
+    }
+
+    /// Drive `measure_granularity` against a simulated clock and a grid-truncating filesystem.
+    fn sim(g: i64, phase: i64) -> (usize, i64) {
+        let now = std::cell::Cell::new(0i64);
+        let ct = move |t: i64| ((t + phase) / g) * g;
+        measure_granularity(
+            || {
+                now.set(now.get() + ITER_NS);
+                ProbeStep::Ctime(ct(now.get()))
+            },
+            || now.get(),
+            |ns| now.set(now.get() + ns),
+        )
+    }
+
+    // A1 — the measurement TRACKS granularity. Two-sided on purpose: the LOWER bound is the half that
+    // kills the reverted timer (which reports ~20us at every G), a bare upper bound would pass at 0.
+    #[test]
+    fn measurement_tracks_granularity() {
+        for g_ms in [100i64, 300, 600, 700, 800] {
+            let g = g_ms * 1_000_000;
+            for phase in [0, g / 4, g / 2, 3 * g / 4, g - 1] {
+                let (seen, gap) = sim(g, phase);
+                // Asserted, not `if`-guarded: a condition here would let the assertion below VANISH
+                // rather than fail, which is the silent-skip shape this whole file exists to stamp out.
+                assert!(
+                    seen >= 2,
+                    "G={g_ms}ms phase={phase}: only {seen} transitions"
+                );
+                assert!(
+                    (gap - g).abs() <= 5_000_000,
+                    "G={g_ms}ms phase={phase}: measured gap {gap}ns should track G={g}ns"
+                );
+            }
+        }
+    }
+
+    // A2 — a normal filesystem. Upper bound ONLY: at microsecond granularity the loop correctly measures
+    // its own ~20us iteration cost, so A1's two-sided bound must NOT be applied here.
+    #[test]
+    fn measurement_on_a_fine_grained_filesystem() {
+        let (seen, gap) = sim(1_000, 0); // G = 1us
+        assert_eq!(seen, TRANSITIONS);
+        assert!(gap <= 1_000_000, "expected sub-millisecond, got {gap}ns");
+    }
+
+    // A3 — harness fidelity against the figures measured on REAL filesystems (build log O24/O25).
+    #[test]
+    fn simulated_clock_reproduces_real_filesystem_measurements() {
+        let (_, gap100) = sim(100_000_000, 0);
+        assert!(
+            (gap100 - 100_000_000).abs() <= 3_000_000,
+            "G=100ms -> {gap100}ns"
+        );
+        let (_, gap660) = sim(660_000_000, 0);
+        assert!(
+            (gap660 - 660_000_000).abs() <= 3_000_000,
+            "G=660ms -> {gap660}ns"
+        );
+    }
+
+    // A4 — G=700ms must be REFUSED, at EVERY phase. The second assertion is the load-bearing one: it
+    // proves at least one phase reaches TRANSITIONS and is therefore refused BY THE GAP CLAUSE, not by the
+    // deadline. Without it this test would silently degenerate into a deadline-only test the moment the
+    // measurement window shifted, and the headroom mutations would survive it.
+    #[test]
+    fn coarse_granularity_is_refused_by_the_gap_not_the_deadline() {
+        let g = 700_000_000i64;
+        let mut gap_bound = 0;
+        for i in 0..24 {
+            let phase = g / 24 * i;
+            let (seen, gap) = sim(g, phase);
+            assert_eq!(
+                sim_verdict(g, phase),
+                Fidelity::Unusable,
+                "phase={phase}: 700ms granularity must be refused (seen={seen} gap={gap})"
+            );
+            if seen == TRANSITIONS {
+                gap_bound += 1;
+            }
+        }
+        assert!(
+            gap_bound > 0,
+            "no phase reached {TRANSITIONS} transitions, so this test proved only that the DEADLINE \
+             refuses 700ms — the gap clause went unexercised"
+        );
+    }
+
+    // Acceptance must be a clean CUT in granularity, not a per-restart lottery: a filesystem must not be
+    // accepted on one daemon start and refused on the next because of where in a ctime tick the daemon
+    // happened to begin. That lottery (85% accept at 700ms, 50% at 800ms, 22% at 900ms) is the wart the x3
+    // headroom was introduced to remove, and nothing tested it.
+    //
+    // The honest property is an INTERVAL one, not invariance. A hard threshold on a measurement quantized
+    // to the poll quantum always leaves a boundary band; what matters is that the band is no wider than
+    // that quantum, so it cannot span a granularity anyone would care about. An earlier version of this
+    // test asserted flat phase-invariance and passed only because the ten granularities it sampled
+    // straddled the real band (660ms and 670ms sit either side of it) — a global claim resting on sampling
+    // luck, which is the vacuity this file exists to remove. So the bounds below are MEASURED here, not
+    // asserted from constants.
+    #[test]
+    fn acceptance_is_a_clean_cut_in_granularity_not_a_per_restart_lottery() {
+        let unanimous = |g: i64| -> Option<bool> {
+            let first = matches!(sim_verdict(g, 0), Fidelity::Ok { .. });
+            (1..24)
+                .all(|i| matches!(sim_verdict(g, g / 24 * i), Fidelity::Ok { .. }) == first)
+                .then_some(first)
+        };
+
+        // Everything comfortably below the x3 threshold (2s/3 = 666.7ms) is unanimously ACCEPTED, and
+        // everything above it unanimously REFUSED, all the way out to a 10s-granularity filesystem.
+        for g_ms in (1..=664).step_by(3) {
+            assert_eq!(
+                unanimous(g_ms * 1_000_000),
+                Some(true),
+                "G={g_ms}ms must be accepted at every phase"
+            );
+        }
+        for g_us in (668_000..=10_000_000).step_by(97_000) {
+            assert_eq!(
+                unanimous(g_us * 1_000),
+                Some(false),
+                "G={g_us}us must be refused at every phase"
+            );
+        }
+
+        // The undecided band between them must be at most one poll quantum wide — that is what makes it
+        // a cut rather than a lottery.
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        for g in (655_000_000..=680_000_000).step_by(100_000) {
+            let (mut any_ok, mut any_no) = (false, false);
+            for i in 0..24 {
+                match sim_verdict(g, g / 24 * i) {
+                    Fidelity::Ok { .. } => any_ok = true,
+                    Fidelity::Unusable => any_no = true,
+                }
+            }
+            if any_no {
+                lo = lo.min(g);
+            }
+            if any_ok {
+                hi = hi.max(g);
+            }
+        }
+        let quantum = ITER_NS + PROBE_POLL_NS;
+        assert!(
+            hi > lo && hi - lo <= quantum,
+            "undecided band [{lo}, {hi}] is {}ns wide, more than the {quantum}ns poll quantum — \
+             acceptance has become phase-dependent over a range that matters",
+            hi - lo
+        );
+    }
+
+    // A5 — filesystems that are genuinely SAFE at a 2s settle margin must not be refused. This is what
+    // rules out an over-strict multiplier (x8 would refuse 300ms).
+    #[test]
+    fn safe_granularities_are_accepted() {
+        for g_ms in [300i64, 600] {
+            let g = g_ms * 1_000_000;
+            for phase in [0, g / 4, g / 2, 3 * g / 4, g - 1] {
+                let (seen, gap) = sim(g, phase);
+                assert!(
+                    matches!(sim_verdict(g, phase), Fidelity::Ok { .. }),
+                    "G={g_ms}ms phase={phase} is safe at a 2s margin and must be accepted \
+                     (seen={seen} gap={gap})"
+                );
+            }
+        }
+    }
+
+    // A6 — the documented worst case, at EVERY phase. The old probe false-passed here at ~20% because it
+    // only needed to observe one tick inside its window; this asserts it away.
+    #[test]
+    fn very_coarse_granularity_is_refused_at_every_phase() {
+        let g = 10_000_000_000i64; // 10s
+        for i in 0..24 {
+            let phase = g / 24 * i;
+            let (seen, gap) = sim(g, phase);
+            assert_eq!(
+                sim_verdict(g, phase),
+                Fidelity::Unusable,
+                "G=10s phase={phase} must be refused (seen={seen} gap={gap})"
+            );
+        }
+    }
+
+    // A rewrite failure must abort IMMEDIATELY, not retry to the deadline: the assertion is that the
+    // simulated clock barely advanced.
+    #[test]
+    fn rewrite_failure_aborts_without_burning_the_deadline() {
+        let now = std::cell::Cell::new(0i64);
+        let (seen, gap) = measure_granularity(
+            || {
+                now.set(now.get() + ITER_NS);
+                ProbeStep::RewriteFailed
+            },
+            || now.get(),
+            |ns| now.set(now.get() + ns),
+        );
+        assert_eq!((seen, gap), (0, 0));
+        assert!(
+            now.get() < SETTLE_NS / 100,
+            "a rewrite failure must abort immediately, but the clock advanced {}ns",
+            now.get()
+        );
+    }
+
+    // A stat failure is transient and must RETRY until the deadline — the opposite of a rewrite failure.
+    #[test]
+    fn stat_failure_retries_until_the_deadline() {
+        let now = std::cell::Cell::new(0i64);
+        let (seen, _) = measure_granularity(
+            || {
+                now.set(now.get() + ITER_NS);
+                ProbeStep::StatFailed
+            },
+            || now.get(),
+            |ns| now.set(now.get() + ns),
+        );
+        assert_eq!(seen, 0);
+        assert!(now.get() >= SETTLE_NS, "should have run to the deadline");
+    }
+
+    // A slow FIRST write must not be charged to the first measured interval. Creating and first-writing
+    // the probe file can be far slower than steady state (cold page cache, allocation, journal commit); if
+    // `since_transition` still points at loop entry when the baseline lands, that setup cost is measured as
+    // granularity and a perfectly fine filesystem is REFUSED. This is the false-refusal direction, which
+    // costs the whole stat-cache skip on every daemon start.
+    #[test]
+    fn a_slow_first_write_is_not_charged_to_the_first_interval() {
+        let now = std::cell::Cell::new(0i64);
+        let n = std::cell::Cell::new(0u32);
+        let g = 1_000_000i64; // 1ms granularity: comfortably fine, must be accepted
+        let step = || {
+            n.set(n.get() + 1);
+            now.set(now.get() + if n.get() == 1 { 800_000_000 } else { ITER_NS });
+            ProbeStep::Ctime((now.get() / g) * g)
+        };
+        let v = probe_verdict(step, || now.get(), |ns| now.set(now.get() + ns));
+        assert!(
+            matches!(v, Fidelity::Ok { .. }),
+            "an 800ms first write must not be measured as granularity, got {v:?}"
+        );
+    }
+
+    // A filesystem whose ctime NEVER moves — vfat/exFAT (creation time only), SMB/CIFS, several FUSE
+    // backends. This is the population the probe exists to refuse, and it pins three things no other test
+    // does: that the baseline observation is not miscounted as a transition (seed it with a sentinel the
+    // filesystem cannot return and this reports 1), that the loop terminates on the DEADLINE rather than
+    // spinning forever, and that the end-to-end verdict is refusal.
+    #[test]
+    fn a_filesystem_whose_ctime_never_moves_is_refused() {
+        let now = std::cell::Cell::new(0i64);
+        let step = || {
+            now.set(now.get() + ITER_NS);
+            ProbeStep::Ctime(1_700_000_000_000_000_000) // a plausible, unmoving ctime
+        };
+        let (seen, gap) = measure_granularity(step, || now.get(), |ns| now.set(now.get() + ns));
+        assert_eq!(seen, 0, "an unmoving ctime is not a transition");
+        assert_eq!(gap, 0);
+        assert!(
+            now.get() >= SETTLE_NS && now.get() < SETTLE_NS * 2,
+            "must stop at the deadline, not spin: clock at {}ns",
+            now.get()
+        );
+        assert_eq!(fidelity_verdict(seen, gap), Fidelity::Unusable);
+    }
+
+    // The kept gap must be the WORST one, not the last. A filesystem that stalls once and then ticks
+    // quickly has to be judged on the stall — with `worst_gap_ns = last` the 900ms stall is overwritten by
+    // two ~20us ticks and the filesystem is ACCEPTED. The truncation grid above structurally CANNOT see
+    // this: on a uniform grid every full interval equals G, so max == last in all 25 of its cases.
+    #[test]
+    fn the_worst_gap_is_kept_not_the_last_one() {
+        let now = std::cell::Cell::new(0i64);
+        let ctime = std::cell::Cell::new(0i64);
+        let (seen, gap) = measure_granularity(
+            || {
+                now.set(now.get() + ITER_NS);
+                if now.get() >= 900_000_000 {
+                    ctime.set(ctime.get() + 1); // after the stall, a transition every step
+                }
+                ProbeStep::Ctime(ctime.get())
+            },
+            || now.get(),
+            |ns| now.set(now.get() + ns),
+        );
+        assert_eq!(seen, TRANSITIONS);
+        assert!(
+            gap >= 900_000_000,
+            "the 900ms stall must survive two fast ticks, got {gap}ns"
+        );
+        assert_eq!(fidelity_verdict(seen, gap), Fidelity::Unusable);
     }
 
     // Pins the probe's DECISION, which until now nothing could observe: the previous fix to this logic
@@ -449,24 +784,21 @@ mod tests {
     #[test]
     fn fidelity_verdict_rejects_coarse_granularity() {
         // too few transitions seen -> never usable, whatever the gap
-        assert_eq!(fidelity_verdict(2, 3, 1_000), Fidelity::Unusable);
+        assert_eq!(fidelity_verdict(2, 1_000), Fidelity::Unusable);
         // a normal filesystem: microsecond granularity
-        assert!(matches!(
-            fidelity_verdict(3, 3, 20_000),
-            Fidelity::Ok { .. }
-        ));
+        assert!(matches!(fidelity_verdict(3, 20_000), Fidelity::Ok { .. }));
         // 300 ms is comfortably safe at a 2 s settle margin and must NOT be refused (x8 would refuse it)
         assert!(matches!(
-            fidelity_verdict(3, 3, 300_000_000),
+            fidelity_verdict(3, 300_000_000),
             Fidelity::Ok { .. }
         ));
         // 700 ms must be refused. This is the assertion that pins the multiplier: at x2 (or the bare
         // inequality) 700 ms passes, so weakening it fails here.
-        assert_eq!(fidelity_verdict(3, 3, 700_000_000), Fidelity::Unusable);
+        assert_eq!(fidelity_verdict(3, 700_000_000), Fidelity::Unusable);
         // the documented data-loss case
-        assert_eq!(fidelity_verdict(3, 3, 1_000_000_000), Fidelity::Unusable);
+        assert_eq!(fidelity_verdict(3, 1_000_000_000), Fidelity::Unusable);
         // absurd values saturate toward refusal rather than wrapping into acceptance
-        assert_eq!(fidelity_verdict(3, 3, i64::MAX), Fidelity::Unusable);
+        assert_eq!(fidelity_verdict(3, i64::MAX), Fidelity::Unusable);
     }
 
     #[test]
@@ -502,6 +834,92 @@ pub enum Fidelity {
     /// coarser than the margin. Either way the racy-window guard is not sound here and the skip must be
     /// refused.
     Unusable,
+}
+
+/// One iteration's observation of the probe file.
+///
+/// Three-state, not `Option`: a REWRITE failure means the filesystem is unusable and must abort
+/// immediately, while a STAT failure is transient and must retry until the deadline. Collapsing them
+/// would turn a failing filesystem into a full `SETTLE_NS` startup stall plus ~1000 futile writes.
+enum ProbeStep {
+    Ctime(i64),
+    StatFailed,
+    RewriteFailed,
+}
+
+/// How long to wait between polls when ctime has not moved.
+const PROBE_POLL_NS: i64 = 2_000_000; // 2ms
+
+/// Consecutive ctime transitions the probe must observe. Reaching this many requires TWO FULL
+/// inter-transition intervals inside the deadline, which is what bounds granularity on its own — the
+/// first interval is a partial and does not count. Hence >= 2 is load-bearing.
+const TRANSITIONS: usize = 3;
+
+/// The probe's measurement loop, with its I/O and clock INJECTED so it can be driven by a simulated
+/// clock against a simulated coarse-granularity filesystem.
+///
+/// `SETTLE_NS` and `TRANSITIONS` are read here rather than passed in, deliberately. Parameterising them
+/// would move the policy into an untested argument list, where the real adapter could pass `i64::MAX`
+/// and `1` with every unit test still green — the same "the guard is one level up and unobserved" defect
+/// this function has already shipped twice. A simulated clock makes real-scale constants free, so there
+/// is no testability reason to hoist them.
+///
+/// Returns `(transitions_seen, worst_gap_ns)`. A rewrite failure returns `(0, 0)` immediately, which
+/// `fidelity_verdict` reads as unusable.
+fn measure_granularity(
+    mut step: impl FnMut() -> ProbeStep,
+    now_ns: impl Fn() -> i64,
+    mut sleep_ns: impl FnMut(i64),
+) -> (usize, i64) {
+    let start = now_ns();
+    // The baseline ctime is taken by this loop from its OWN first step — `None` until then — not supplied
+    // by the caller. Passing it in was a second policy seam: seed it with anything the filesystem cannot
+    // return (0, say) and iteration one becomes a spurious transition, so the probe needs only two real
+    // ones — one full interval, silently halving the invariant below. There is now nothing to pass, and
+    // the baseline is taken at the single site below rather than by a duplicate `match` up here.
+    let mut prev: Option<i64> = None;
+    let mut worst_gap_ns: i64 = 0;
+    let mut seen = 0usize;
+    // Time since the LAST ctime transition — that interval IS the granularity. Initialised BEFORE the
+    // loop, so the first interval is a partial and only the 2nd and 3rd are full: that is why
+    // TRANSITIONS >= 2 is load-bearing. An earlier version reset this every iteration, so it measured a
+    // single rewrite (~20us) and the headroom check could never fire.
+    let mut since_transition = now_ns();
+    while seen < TRANSITIONS && now_ns().saturating_sub(start) < SETTLE_NS {
+        match step() {
+            ProbeStep::RewriteFailed => return (0, 0),
+            // First observation: the baseline. NOT a transition — counting it would fabricate one and
+            // leave only one full inter-transition interval measured.
+            ProbeStep::Ctime(c) if prev.is_none() => {
+                prev = Some(c);
+                since_transition = now_ns();
+                continue;
+            }
+            ProbeStep::Ctime(c) if prev != Some(c) => {
+                worst_gap_ns = worst_gap_ns.max(now_ns().saturating_sub(since_transition));
+                since_transition = now_ns();
+                prev = Some(c);
+                seen += 1;
+                continue; // no sleep after a transition
+            }
+            _ => {}
+        }
+        sleep_ns(PROBE_POLL_NS);
+    }
+    (seen, worst_gap_ns)
+}
+
+/// Measure, then judge. Composed HERE rather than in `probe_fidelity`, so that the composition itself is
+/// covered by the simulated-clock tests. Left in the adapter, `fidelity_verdict(seen, seen, gap)` was a
+/// one-token edit that made the probe accept a filesystem whose ctime never moves at all — with the whole
+/// suite green. The adapter is now pure I/O, holding no policy and no composition.
+fn probe_verdict(
+    step: impl FnMut() -> ProbeStep,
+    now_ns: impl Fn() -> i64,
+    sleep_ns: impl FnMut(i64),
+) -> Fidelity {
+    let (seen, worst_gap_ns) = measure_granularity(step, now_ns, sleep_ns);
+    fidelity_verdict(seen, worst_gap_ns)
 }
 
 /// Probe `dir`'s filesystem for the ONE property the skip's safety actually rests on: that an in-place
@@ -544,12 +962,34 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
 
     // Rewrite IN PLACE over an open fd — not `fs::write`, which truncates. The threat being modelled is a
     // same-size overwrite, and a backend can plausibly stamp ctime on truncate but not on a pure overwrite.
+    //
+    // Then backdate the file's mtime to a fixed old instant. This makes the probe validate the EXACT
+    // property `may_skip` leans on — that CTIME advances on an in-place rewrite EVEN WHEN mtime is pushed
+    // backward — rather than a proxy for it. On a frozen-ctime filesystem (vfat/exFAT/SMB report a creation
+    // time; mtime there is live and fine-grained) the loop reads ctime, sees it frozen, and refuses; a
+    // build that mistakenly read mtime instead would see it pinned at this old value, never transition, and
+    // also refuse — so reading the wrong field is no longer silently safe on a normal filesystem, where
+    // mtime and ctime otherwise move together and hide the mistake. `set_times` itself also bumps ctime, so
+    // the guarantee widens from "ctime moves on a pure overwrite" to "…on an overwrite or a utimes" — inert,
+    // because a backend that stamps ctime on `utimensat` but not on `write()` inverts the usual
+    // metadata-strength ordering and is not a real backend.
+    //
+    // BEST-EFFORT, deliberately: the `set_times` result is dropped. A backend without `utimensat` must not
+    // turn a working filesystem into a permanent false-refuse (which would disable the skip everywhere on
+    // it); a set_times failure can only weaken the wrong-field guard on that exotic backend, never flip the
+    // real ctime verdict. Folding it into `rewrite`'s success would reintroduce exactly that false-refuse.
     let rewrite = |f: &Path, byte: u8| -> bool {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(f)
-            .and_then(|mut fh| fh.write_all(&[byte; 4096]))
-            .is_ok()
+        let Ok(mut fh) = std::fs::OpenOptions::new().write(true).open(f) else {
+            return false;
+        };
+        if fh.write_all(&[byte; 4096]).is_err() {
+            return false;
+        }
+        let _ = fh.set_times(
+            std::fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(100)),
+        );
+        true
     };
     if std::fs::write(&probe, [0u8; 4096]).is_err() {
         // `fs::write` creates then writes, so an ENOSPC/EIO after create leaves the file behind — inside
@@ -557,47 +997,33 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
         cleanup(&probe);
         return Fidelity::Unusable;
     }
-    let Some(first) = stat(&probe) else {
+    // Fail fast: the loop treats a stat failure as transient and retries to the deadline, so without this
+    // a filesystem where stat is broken outright would stall startup for the full SETTLE_NS. It no longer
+    // seeds the measurement — the loop takes its own baseline.
+    if stat(&probe).is_none() {
         cleanup(&probe);
         return Fidelity::Unusable;
-    };
-
-    // MEASURE the granularity; do not merely observe that ctime moved once. Seeing a single tick inside a
-    // window of length T does NOT prove granularity <= T: if the real granularity is G > T, a tick still
-    // lands in that window with probability ~T/G, so a bare existence check FALSE-PASSES at a measurable
-    // rate on exactly the filesystems this exists to reject (measured ~20% at G = 10s, and each daemon
-    // start re-rolls). Require several consecutive transitions and keep the LARGEST gap observed.
-    const TRANSITIONS: usize = 3;
-    let start = std::time::Instant::now();
-    let mut prev = first;
-    let mut worst_gap_ns: i64 = 0;
-    let mut seen = 0usize;
-    let mut byte = 1u8;
-    // Time since the LAST ctime transition — that interval IS the granularity. An earlier version reset
-    // this at the top of every iteration, so it only ever measured one rewrite+stat (~20 us) and the
-    // headroom check below could never fire: a dead clause behind a comment claiming it measured
-    // granularity. The behaviour was still safe (three transitions inside SETTLE_NS bounds G on its own),
-    // but the stated mechanism did not exist.
-    let mut since_transition = std::time::Instant::now();
-    while seen < TRANSITIONS && (start.elapsed().as_nanos() as i64) < SETTLE_NS {
-        if !rewrite(&probe, byte) {
-            cleanup(&probe);
-            return Fidelity::Unusable;
-        }
-        byte = byte.wrapping_add(1);
-        if let Some(k) = stat(&probe) {
-            if k.ctime_ns != prev.ctime_ns {
-                worst_gap_ns = worst_gap_ns.max(since_transition.elapsed().as_nanos() as i64);
-                since_transition = std::time::Instant::now();
-                prev = k;
-                seen += 1;
-                continue;
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
     }
+
+    // Thin real-I/O adapter over `measure_granularity` — all policy lives in there.
+    let t0 = std::time::Instant::now();
+    let mut byte = 1u8;
+    let verdict = probe_verdict(
+        || {
+            if !rewrite(&probe, byte) {
+                return ProbeStep::RewriteFailed;
+            }
+            byte = byte.wrapping_add(1);
+            match stat(&probe) {
+                Some(k) => ProbeStep::Ctime(k.ctime_ns),
+                None => ProbeStep::StatFailed,
+            }
+        },
+        || t0.elapsed().as_nanos() as i64,
+        |ns| std::thread::sleep(std::time::Duration::from_nanos(ns.max(0) as u64)),
+    );
     cleanup(&probe);
-    fidelity_verdict(seen, TRANSITIONS, worst_gap_ns)
+    verdict
 }
 
 /// The probe's decision, split out from the I/O so it can be tested without a coarse-granularity
@@ -615,8 +1041,8 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
 /// wart — in the band the deadline alone leaves undecided, the SAME filesystem was accepted or rejected at
 /// random across daemon restarts. ×8 would be too strict, refusing a 300 ms filesystem that is comfortably
 /// safe at a 2 s margin.
-fn fidelity_verdict(seen: usize, want: usize, worst_gap_ns: i64) -> Fidelity {
-    if seen == want && worst_gap_ns.saturating_mul(3) <= SETTLE_NS {
+fn fidelity_verdict(seen: usize, worst_gap_ns: i64) -> Fidelity {
+    if seen == TRANSITIONS && worst_gap_ns.saturating_mul(3) <= SETTLE_NS {
         Fidelity::Ok {
             observed_ns: worst_gap_ns,
         }

@@ -11,6 +11,7 @@ drop into the `zeroshot-cloud` platform later. **It is NOT integrated into the p
 not integrate it** — this is still the experimentation/optimization phase.
 
 ## 0. READ THESE FIRST (authoritative, in order)
+
 1. `docs/research/production-build-log.md` — **THE running log.** Every phase, every review verdict,
    every fix, all the AWS measurements. This is your primary source of truth; read it fully.
 2. `planning/plans/0001-production-backends.md` — the approved plan (architecture decisions MF1–MF4,
@@ -18,15 +19,17 @@ not integrate it** — this is still the experimentation/optimization phase.
 3. `docs/research/design-decision-experiments.md` — the prototype experiments + the **three-invariant
    GC safety model** (the E8 section) and F1 (the reuse clock). Load-bearing for anything touching GC.
 4. The code (crate `capsule-workspace-core/`): `src/{cas,s3,cache,lineage,pg,refclock,gc,gc_pg,daemon,
-   daemon_loop,manifest,ifaces}.rs`, `src/main.rs`, and the `tests/`.
+daemon_loop,manifest,ifaces}.rs`, `src/main.rs`, and the `tests/`.
 
 ## 1. Where things are
+
 - Repo: `zeroshot` (the-open-engine/zeroshot). **This is a git worktree**; cwd is the worktree root.
 - Branch: `claude/zeroshot-workspace-file-transfer-13f0be` (pushed; work goes here, PRs later).
 - Crate: `capsule-workspace-core/` (its own `[workspace]`, so `cargo` commands run from that dir).
 - Tracker/spec + all progress comments: GitHub issue **the-open-engine/zeroshot#744**.
 
 ## 2. Current state (all done, validated, pushed)
+
 - **Prototype** (chunk/hash/zstd → 64 MiB blocks + per-publish manifest; grace-period mark-sweep GC),
   hardened through an independent audit + 2 adversarial rounds + a final review. Three-invariant GC.
 - **Production backends (Phases 1–5)**, each independently senior-reviewed and pushed:
@@ -48,6 +51,7 @@ not integrate it** — this is still the experimentation/optimization phase.
   `e2e_aws` on real S3+RDS). clippy + rustfmt clean. All AWS torn down.
 
 ## 3. HARD CONSTRAINTS (non-negotiable — violating these is the main failure mode)
+
 - **DO NOT integrate into `zeroshot-cloud` / the platform.** Standalone only. The user will say when to
   integrate. (When that happens, `src/ifaces.rs` is the compatibility seam; it mirrors the real
   zeroshot-cloud shapes — labels say which are literal mirrors vs. neutral generalizations.)
@@ -69,6 +73,7 @@ not integrate it** — this is still the experimentation/optimization phase.
 - Do NOT edit the repo's `CLAUDE.md`.
 
 ## 4. Architecture invariants you must not break
+
 - **Sync traits, async CONTAINED in adapters.** `BlobStore`/`LineageStore`/`RefClock` are sync; the
   whole publish/materialize/GC pipeline is CPU-bound rayon batch work. `S3BlobStore` and `PgLineageStore`
   each hold their OWN bounded multi-thread tokio runtime and `block_on` inside the sync methods (there's
@@ -80,7 +85,7 @@ not integrate it** — this is still the experimentation/optimization phase.
   (2) MARK — a block referenced by any live-HEAD manifest is never collected regardless of age;
   (3) refresh-on-every-reference — every referenced block is `touch`ed young before commit. GC deletes
   are **row-claim-first** (atomic `DELETE ... WHERE last_referenced_at < clock_timestamp()-grace
-  RETURNING`, re-checked server-side), then the S3 object (MF1).
+RETURNING`, re-checked server-side), then the S3 object (MF1).
 - **F2 (data-loss footgun):** `gc_pg::collect`'s `live` set MUST be **store-wide** (ALL lineages' HEADs,
   via `all_head_digests()`), never per-lineage — a per-lineage sweep deletes other lineages' live blocks.
   GC is a **store-wide singleton actor** (the `gc` subcommand), separate from the per-lineage daemons.
@@ -91,12 +96,14 @@ not integrate it** — this is still the experimentation/optimization phase.
   index. Don't reintroduce either into the digest (it caused the F1 churn).
 
 ## 5. How to build / test / run
+
 From `capsule-workspace-core/`:
+
 - Default (lean, no AWS/PG): `cargo test --release` (59 tests). `cargo clippy --all-targets`, `cargo fmt`.
 - S3 tests: `cargo build --features s3`. Local via MinIO:
   `docker run -d -p 9010:9000 minio/minio server /data`, make a bucket, then
   `S3_ENDPOINT_URL=http://localhost:9010 S3_BUCKET=... AWS_ACCESS_KEY_ID=minioadmin
-  AWS_SECRET_ACCESS_KEY=minioadmin AWS_REGION=us-east-1 cargo test --features s3 --test blobstore_conformance`.
+AWS_SECRET_ACCESS_KEY=minioadmin AWS_REGION=us-east-1 cargo test --features s3 --test blobstore_conformance`.
   Real S3: set `S3_IT=1` + `S3_BUCKET` + creds (no `S3_ENDPOINT_URL`).
 - PG tests: `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=capsule postgres:17.10-alpine`,
   then `DATABASE_URL='postgres://postgres:pg@localhost:5433/capsule?sslmode=disable' cargo test --features pg`.
@@ -104,17 +111,18 @@ From `capsule-workspace-core/`:
 - Full stack e2e (real AWS): `tests/e2e_aws.rs`, gated on `S3_IT=1 + S3_BUCKET + DATABASE_URL` (RDS,
   `sslmode=require` — RDS enforces force_ssl; the crate's sqlx has `tls-rustls-ring`).
 - Daemon CLI: `cargo run --features pg,s3 -- daemon --tree <dir> --store s3://<bucket> --db
-  <postgres-url> --lineage <id> [--cache-dir <nvme>] [--publish-interval N] [--health-addr ip:port]
-  [--once]`. GC actor: `... gc --store <uri> --db <url> --grace-secs N`.
+<postgres-url> --lineage <id> [--cache-dir <nvme>] [--publish-interval N] [--health-addr ip:port]
+[--once]`. GC actor: `... gc --store <uri> --db <url> --grace-secs N`.
 - **AWS experiment rig pattern** (from the build log): build the Linux binary in Docker (native arm64 on
   a Mac: `docker run --platform linux/arm64 -v $PWD:/work -e CARGO_TARGET_DIR=/tmp/target -w /work
-  rust:1-bookworm cargo build --release --features pg,s3`), upload to S3, launch Graviton **`c*gd`**
+rust:1-bookworm cargo build --release --features pg,s3`), upload to S3, launch Graviton **`c*gd`**
   instances (NVMe instance store; user-data `mkfs.xfs /dev/nvme1n1 → /mnt/nvme`), IAM instance profile
   (`AmazonSSMManagedInstanceCore` + `AmazonS3FullAccess`), drive via **SSM `send-command`** (base64 the
   script to dodge CLI quoting), RDS `db.t4g.micro` PG17 with an SG scoped to the EC2 SG + your IP.
   `c7gd` capacity is flaky per-AZ — fall back across AZs/types. Throwaway RDS password; tear everything down.
 
 ## 6. Open work — pick up here (prioritized)
+
 **DONE since the last handover:** O6 **parallel S3 block uploads** (packer round-robins finalized blocks
 to `workers` uploader threads; reviewed — fixed a GiB-scale channel-buffering regression + a debug-only
 test) and O7 **reflink incremental resume** (`materialize_incremental` reflinks unchanged files from a
@@ -156,6 +164,7 @@ test could observe.** Three safety mechanisms shipped that provably did nothing 
 permissively; a block pool whose claimed fix was never in its own diff). Every one was caught by an
 independent review or by a test written specifically to be able to see the failure — **never by the
 change's own benchmarks**. Two rules came out of that, and they are not optional:
+
 - **Benchmark on a production-shaped fixture** (~100k small files, mixed compressibility). A 256-large-file
   fixture hid three separate defects: per-file cost (22ms at 256 files vs ~10.8s at 95k), a wall regression
   visible only at 100k, and a memory bound that only held at compression ratio ~1.
@@ -165,6 +174,7 @@ change's own benchmarks**. Two rules came out of that, and they are not optional
 
 **Ranked remaining work, per the review gate** (this supersedes an earlier verdict here that nothing
 performance-shaped was worth doing — that was wrong at 100k-file scale):
+
 1. **Ranged/partial block reads.** The real remaining S3 win and NOT a constant factor: a whole 64 MiB
    block is currently fetched to read one 256 KiB chunk. Measured **4880 MiB → 1604 MiB (3.0x)** on a
    realistic fixture, **250x** on an eroded one. It also makes the block-size estimate exact by
@@ -183,6 +193,7 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
    the per-file syscall diet (measured and refuted: 1.04x write path, 1.01x reflink pass).
 
 **Known and accepted** (gate-ruled coverage debt, not hazard). Carry these forward; none is a live bug:
+
 - `publish_pipelined` dropping `blen` is untested (only `publish` is covered); the `0 ⇒ BLOCK_TARGET`
   old-manifest fallback is unobservable; deleting the grouper's byte check leaves the suite green.
 - **`MATERIALIZE_WAVE_BYTES` is the largest unguarded memory lever** — mutating it to 4 GiB costs **7.1x
@@ -199,12 +210,52 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 - `cross_wave_block_refetch_is_measured_and_bounded` runs on a fixture that produces a SINGLE wave, so it
   cannot observe cross-wave refetch at all — the same vacuity as the one-block fixture it replaced, on a
   different axis. Give it a genuinely multi-wave fixture before trusting it.
-- **The probe's granularity MEASUREMENT is unpinned, only its verdict is.** `fidelity_verdict` is
-  unit-tested and mutation-verified, but reverting the `since_transition` timer that feeds it leaves the
-  suite green — which would silently restore the old accept curve (worst_gap pinned at ~20 us, the x3
-  clause never firing, the 660ms-1s per-restart lottery back). Safety is unaffected either way (three
-  transitions inside a 2s deadline bounds G on its own), so this is debt, not hazard. To close it, drive
-  the loop against a simulated clock.
+- ~~The probe's granularity MEASUREMENT is unpinned, only its verdict is.~~ **CLOSED (O27).** The loop is
+  now `measure_granularity(step, now_ns, sleep_ns)` — dependencies injected, `SETTLE_NS`/`TRANSITIONS` read
+  internally — driven by a simulated clock against a truncation-grid filesystem (`ctime(t) = ((t+phase)/G)*G`,
+  swept over phase, which a "ctime advances by G per write" model would NOT catch). 24 of 25 mutations to
+  the measurement and the verdict are killed (the one survivor, `from_nanos`->`from_millis`, is fail-safe and
+  named below). Three seams found by review and closed with it: `fidelity_verdict` no longer takes `want`
+  (the adapter could pass `seen, seen`, accepting a filesystem whose ctime never moves, suite green); the
+  baseline ctime is no longer a caller argument (seeding it with a value the filesystem cannot return
+  fabricated a transition and halved the interval invariant); and the adapter's field choice `ctime` vs
+  `mtime` is now observable (a wrong-accept — see the next bullet). What remains untested in `probe_fidelity`
+  is fail-safe I/O only — open/write/stat/`Instant`/`sleep`.
+- **That adapter is NOT "irreducible", and TWO drafts of this bullet made a false safety claim about it that
+  a one-line change disproved each time.** (1) Its clock units were unguarded: `as_nanos()` -> `as_millis()`
+  makes every measured gap 0, so the headroom check always passes and the probe becomes **accept-everything**
+  on exactly the filesystems it exists to refuse. It survived because the only assertion on the measured
+  value was `observed_ns >= 0`, which cannot fail. Closed by bounding `observed_ns` both sides against
+  measured hardware values. (2) **The adapter reads the wrong-field-safely too, until O27 made it
+  observable.** `ProbeStep::Ctime(k.ctime_ns)` -> `k.mtime_ns` was a SILENT WRONG-ACCEPT: on a frozen-ctime
+  filesystem (vfat/exFAT/SMB freeze ctime, mtime is live and fine) it measures the live mtime and ACCEPTS,
+  enabling the skip on precisely the backend where `may_skip`'s ctime guard — the only backdating-proof one
+  — is dead. A draft of THIS bullet asserted the residual seams were "all fail-safe, never wrongly accept";
+  that was false, and it was the wrong-accept it missed. Closed by backdating the probe file's mtime each
+  cycle, so any mtime-reading build sees it frozen and refuses — killed by the ordinary normal-filesystem
+  test. Lesson, twice earned: before writing off an adapter seam as untestable, look for the one-line change
+  that makes it observable; do not assert a safety property over a seam you have not mutation-tested.
+- Residual in that adapter, and — RE-MEASURED, not asserted from a remembered list — all genuinely fail-safe
+  (they can only make the probe REFUSE or stall, never wrongly accept), reachable only on coarse or failing
+  filesystems a fast local disk never exercises: nothing pins that the adapter ever returns `RewriteFailed`
+  (its stated purpose — avoiding a 2s stall plus ~1000 futile writes — is defeatable green); deleting the
+  fail-fast pre-stat survives (2s startup stall); `Duration::from_nanos` -> `from_millis` survives (poll
+  inflated 1e6x, so a coarse filesystem is refused after one poll instead of measured); and the mtime
+  backdate is best-effort BY CONSTRUCTION (`let _ =`) but not test-guarded — making it non-best-effort
+  survives the suite, because only a `utimensat`-less backend would then false-refuse and no test has one
+  (false-refuse is a perf loss, not data loss). Equivalent mutations that also survive and are genuinely
+  harmless: the probe's start byte, its per-cycle byte increment, and its 4096-byte write size (any write
+  moves ctime). Closing the fail-safe seams needs a fault-injecting filesystem, disproportionate for a
+  direction that cannot lose data. Do NOT restate this list as a count without re-measuring — earlier drafts
+  said "both" (there were more) and "all fail-safe" (one was a wrong-accept).
+- Newly pinned by O27: acceptance is a clean CUT in granularity rather than a per-restart lottery. Note the
+  property is an INTERVAL one, not flat phase-invariance — a draft asserting invariance was disproved
+  against the real code (at G ~= 667ms, 148 of 240 phases accept), and its test passed only because the
+  granularities it sampled straddled the band. Flat invariance is unachievable: a hard threshold on a
+  measurement quantized to the poll quantum always leaves a boundary band. What holds, and is now measured
+  by the test rather than asserted from constants: unanimous accept <= 664ms, unanimous refuse >= 668ms out
+  to 10s, undecided band narrower than one poll quantum (1.1ms vs 2.02ms). Preserve the band-width
+  assertion if either constant is retuned.
 - `CAPWS_ALLOW_SOFT_SHA` (the `sha_backend` opt-out) is presence-only — `=0` and `=` also skip — and under
   default `cargo test` output the skip prints nothing, so a box with it set would hide a dropped `asm`
   feature. Blast radius is a silent perf regression, not data loss. Marking the test `ignored` instead
@@ -214,6 +265,7 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
   specific history of comments describing code that does not exist.
 
 **Deferred integration/hardening (do NOT start integration without the user's go):**
+
 - Manifest GC (blocks are GC'd; manifests aren't — tiny, but they accumulate).
 - Per-publisher lease to fully close the narrow claim→delete straddle (documented residual).
 - Single-flight GC advisory lock (correctness is already in the per-block atomic claim; this avoids
@@ -223,6 +275,7 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 - RDS IAM auth + `sslmode=verify-full` with the RDS CA (today password + `sslmode=require`).
 
 ## 7. Working discipline (what the user expects)
+
 Research first → write/adjust a plan → implement in reviewable phases → **spawn an independent
 senior-review agent as a gate on each meaningful change** (they have caught real bugs every time:
 an R1-corrupting GC ordering, a touch() that would fail every publish, a grace=0 live-loss) → apply

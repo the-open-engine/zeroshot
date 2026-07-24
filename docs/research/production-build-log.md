@@ -41,6 +41,7 @@ integrated into the rest of the platform yet:
 Flow: research → plan (planner + senior-reviewer iterate to approval) → implement phase-by-phase,
 each phase gated on senior-reviewer approval → push every approved phase → full relevant test suite
 before declaring complete. Adaptations for this context:
+
 - **Not** branching fresh from `origin/main` (the prototype is on the current feature branch
   `claude/zeroshot-workspace-file-transfer-13f0be`; extend it, keep it pushed).
 - **k8s local (kind) gate deferred**: the skill requires kind testing for k8s-facing deploys, but
@@ -50,14 +51,16 @@ before declaring complete. Adaptations for this context:
 ## Timeline / findings
 
 ### 2026-07-21 — Phase 0: kickoff
+
 - Marked new chapter. Set up `planning/plans/`, this log.
 - Spawned 3 read-only research agents against `zeroshot-cloud` (main checkout): (a) S3/object-store
   patterns, (b) Postgres/lineage/fencing schema, (c) capsule pod runtime + daemon contract.
 - Next: synthesize research → write plan → planner/senior-reviewer iterate.
 
 ### 2026-07-21 — Research finding A: S3 in zeroshot-cloud
+
 - **No existing Rust S3 code.** Backend links `aws-config =1.9.0`, `aws-sdk-kms`, `aws-sdk-rds`; NO
-  `aws-sdk-s3`, no rusoto/object_store. So "drop-in" = match *conventions*, not replace code. We are
+  `aws-sdk-s3`, no rusoto/object_store. So "drop-in" = match _conventions_, not replace code. We are
   the first S3 consumer.
 - **S3 is provisioned but keyless**: IaC `iac/modules/blob` makes a per-cell bucket `${prefix}-blob`
   (SSE-KMS, versioned, TLS-only, VPCE-locked); `data-cell` binds `prefix_intents = {}` (no keys yet).
@@ -79,9 +82,9 @@ before declaring complete. Adaptations for this context:
   tests are gated behind a feature/env (template: `admin/tests/kms_provider.rs`).
 
 **Decisions for our standalone build (informed by A):**
+
 - Test on **our internal account 993939946442** with our **own throwaway bucket** (plain, no VPCE/KMS
-  needed for a functional test) — zeroshot-cloud's real `-blob` bucket (accounts 794285265617 /
-  703091483677) is for *later* integration, not this standalone phase. The account "mismatch" the
+  needed for a functional test) — zeroshot-cloud's real `-blob` bucket (accounts 794285265617 / 703091483677) is for _later_ integration, not this standalone phase. The account "mismatch" the
   agent flagged is expected and correct.
 - `aws-sdk-s3` **1.x latest** (standalone crate = own Cargo.lock, no need to co-resolve zeroshot-cloud's
   smithy versions). Behind the existing `s3` feature.
@@ -90,7 +93,8 @@ before declaring complete. Adaptations for this context:
   (blocks ≤64 MiB fit a single PUT; multipart is a later retry-granularity optimization, not v1).
 
 **STRATEGIC FLAGS to raise with the user before/at plan review (do NOT silently decide):**
-1. **Kopia overlap** — the zeroshot-cloud spec's *intended* S3 uploader is **Kopia** (already
+
+1. **Kopia overlap** — the zeroshot-cloud spec's _intended_ S3 uploader is **Kopia** (already
    content-addressed/dedup/chunked). Our custom chunk store reimplements Kopia's job. Building the
    prototype was effectively the decision to evaluate custom-vs-Kopia; worth an explicit confirm.
 2. **This data plane is the DEFERRED/experimental lane** — V1 uses plain gp3 EBS PVCs; the
@@ -99,6 +103,7 @@ before declaring complete. Adaptations for this context:
    yet," but the user should know we're building the experimental lane, not the shipping V1 path.
 
 ### 2026-07-21 — Research finding B: Postgres/fencing/lineage in zeroshot-cloud
+
 - **Stack**: `sqlx =0.9.0` (workspace-pinned) against **PostgreSQL 17.10**. 100% runtime `sqlx::query`
   (NO `query!` compile-time macros, NO `.sqlx` dir → no build-time DATABASE_URL). Native `PgPool` in a
   repository struct (api-gateway/billing) is the simplest template; admin uses bb8+RDS-IAM tokens.
@@ -119,11 +124,12 @@ before declaring complete. Adaptations for this context:
 - **Testing**: `testcontainers =0.27.3` (Rust crate) spins Docker `postgres:17.10-alpine`; tests
   tagged `// test-tier: integration|interface`; testcontainers drives Docker (no CI services: block).
 - **DDL recommendations** (mirroring their conventions): `lineage_head(lineage_id, manifest_digest,
-  fence BIGINT CHECK>0, timestamps)`; `block_ref(block_digest PK, byte_length, first/last_referenced_at,
-  CHECK last>=first, INDEX on last_referenced_at)`. Reuse `signed()`/`positive_u64()`. StaleFence on
+fence BIGINT CHECK>0, timestamps)`; `block_ref(block_digest PK, byte_length, first/last_referenced_at,
+CHECK last>=first, INDEX on last_referenced_at)`. Reuse `signed()`/`positive_u64()`. StaleFence on
   `rows_affected != 1`.
 
 **Decisions for our standalone build (informed by B):**
+
 - **Own schema, own DB, native `PgPool`** — we are NOT extending a zeroshot-cloud service's
   `0001_bootstrap.sql` (that's integration, deferred). Ship our own bootstrap SQL applied via
   `sqlx::raw_sql(include_str!(...))`, exactly their mechanism, in our crate.
@@ -150,11 +156,12 @@ would let the sweep run purely in SQL (`AND NOT EXISTS ... live manifest referen
 orphan row, not a leaked object) — mirrors the prototype's NotFound-tolerant idempotent delete.
 
 ### 2026-07-21 — Research finding C: capsule pod runtime + daemon contract
+
 - **Pod is EXACTLY two containers** (golden-tested `pod_contract.rs` + admission-enforced
   `admission.yaml`): trusted `capsule-agent` (uid 65532, mounts agent-state `/var/lib/zeroshot-capsule-agent`)
-  + tenant `runtime-stub-v1` (uid 65533, mounts workspace `/workspace`), sharing a `/run/zeroshot-capsule`
-  emptyDir (Unix-socket control plane). **A third sidecar cannot be added** without changing the golden
-  contract + admission policy → integration home is later capsule-agent-fold OR node-level checkpoint-agent.
+  - tenant `runtime-stub-v1` (uid 65533, mounts workspace `/workspace`), sharing a `/run/zeroshot-capsule`
+    emptyDir (Unix-socket control plane). **A third sidecar cannot be added** without changing the golden
+    contract + admission policy → integration home is later capsule-agent-fold OR node-level checkpoint-agent.
 - **Today's durability = physical volume reattach** (NVMe TopoLVM VolumeSnapshots XOR encrypted EBS,
   admission "never both"); recovery fences the old runtime and re-binds the **same PVC UIDs in the same
   AZ** (`runtime_fencing.rs validate_replacement`). Our content store **replaces this** and removes the
@@ -169,6 +176,7 @@ orphan row, not a leaked object) — mirrors the prototype's NotFound-tolerant i
 
 **RESEARCH CORRECTION (honesty — the prototype overstated its "mirror"):** `ifaces.rs` claims "every
 type mirrors an existing zeroshot-cloud shape (verified 2026-07-20)." Reality from finding C:
+
 - REAL mirrors: `Fence` ↔ `cloud_run_billing.fencing_token`/orchestrator `current_fence` ✅;
   `RecoveryStatusCompletedParts` ↔ `common::funded_run::recovery::RecoveryStatusCompletedParts` ✅
   (though our copy DROPS `run_id`, `reservation_id`, `fence` — finding B mismatch #3).
@@ -181,6 +189,7 @@ type mirrors an existing zeroshot-cloud shape (verified 2026-07-20)." Reality fr
   `RecoveryStatusCompletedParts` fields for a true drop-in. (Fold into the impl phases.)
 
 **Scope decisions for the standalone daemon (informed by C):**
+
 - **Workspace tree ONLY** this phase. Agent-state is the trusted sidecar's live SQLite store — publishing
   it needs a consistent DB checkpoint (WAL/VACUUM), a different problem than an opaque file tree. Out of
   scope; note it.
@@ -196,10 +205,12 @@ type mirrors an existing zeroshot-cloud shape (verified 2026-07-20)." Reality fr
   1–5 GB `/workspace` (ties back to R2 <5s resume).
 
 ### 2026-07-21 — Plan drafting
+
 - All 3 research reports synthesized above. Writing `planning/plans/0001-production-backends.md`, then an
   independent senior-reviewer agent iterates it to approval (team-programming step 3) before any code.
 
 ### 2026-07-21 — Plan review round 1: REVISE-AND-RESUBMIT (high-value finding)
+
 Independent senior-reviewer verdict on plan 0001. Endorsed the architecture (sync/`block_on` bet,
 scoping discipline, two-tier testing, materialize integrity carrying to S3 for free) but found **one
 genuine R1-corrupting flaw** + 3 more must-fixes. Resolutions folded into plan Revision 1:
@@ -208,9 +219,9 @@ genuine R1-corrupting flaw** + 3 more must-fixes. Resolutions folded into plan R
   "DeleteObject(S3) first, then block_ref row" is backwards: under a concurrent publish+GC, GC computes
   candidates (old, unmarked) at select time, then a racing republish touches the block young, but GC's
   delete doesn't re-check freshness → deletes a block the about-to-commit manifest needs. The prototype
-  only ever tested publish and GC *serialized*, so this was unproven, not just untested (the fs GC has
+  only ever tested publish and GC _serialized_, so this was unproven, not just untested (the fs GC has
   the same latent TOCTOU). **Fix:** GC claims each block via an atomic **`DELETE FROM block_ref WHERE
-  block_digest=$1 AND last_referenced_at < clock_timestamp() - $grace RETURNING`** (age re-checked
+block_digest=$1 AND last_referenced_at < clock_timestamp() - $grace RETURNING`** (age re-checked
   SERVER-SIDE at delete, never `SystemTime::now()` on the GC host → no cross-host skew), and only on a
   won claim does it `DeleteObject`. Operational invariant added: **grace > max(publish duration, GC
   sweep duration)**; single-flight GC via a PG advisory lock; per-block claim-then-delete (no
@@ -261,6 +272,7 @@ Verdict interpretation: reviewer said "fix these four → APPROVED-WITH-CHANGES.
 plan-review round needed.
 
 ### 2026-07-21 — Phase 1: S3BlobStore (implemented + validated on real MinIO)
+
 - **Trait change**: added idempotent `delete_block`/`delete_manifest` (returns `bool` "did-remove";
   NotFound⇒false) to `BlobStore`; `LocalBlobStore` impl via `rm_idempotent`. Updated the 2 `FlakyStore`
   doubles (delegate to inner). **50→51 default tests green** (added `local_blobstore_conformance`).
@@ -291,6 +303,7 @@ plan-review round needed.
 multi-thread genuinely required for concurrent `par_iter` gets), the `on()` tripwire, GetObject
 `NoSuchKey`→NotFound, the HEAD-vs-GET 404 asymmetry, the `StoreError` refactor (50 green holds; `gc.rs`
 raw-fs NotFound matches untouched; F1 `touch_mtime` intact), OQ4 unconditional PUT. Should-fixes applied:
+
 - **S1** (silent orphan): `del()` HEAD now distinguishes a modeled 404 (`is_not_found()` ⇒ absent) from a
   TRANSIENT error (propagates), so GC re-drives instead of skipping DeleteObject and leaking bytes.
   `has_block` keeps transient⇒false (safe direction). Re-validated on MinIO.
@@ -301,6 +314,7 @@ raw-fs NotFound matches untouched; F1 `touch_mtime` intact), OQ4 unconditional P
 - **N2**: fixed the misleading "one part" test comment.
 
 **PHASE-5 WATCH ITEMS (real-AWS behaviors MinIO cannot exercise) — set up before/at Phase 5:**
+
 1. **s3:ListBucket is load-bearing** — without it real S3 returns **403 (not 404 NoSuchKey)** for a missing
    key, which our code would classify as transient, breaking the NotFound-dependent GC/republish logic.
    The Phase-5 bucket policy/role MUST grant `s3:ListBucket`. (Code comment added at `s3.rs` get().)
@@ -311,13 +325,16 @@ raw-fs NotFound matches untouched; F1 `touch_mtime` intact), OQ4 unconditional P
    plain SSE-S3 test bucket).
 4. **Throttling/503, large-object (64 MiB) PUT/GET wall-time + single-PUT retry replaying 64 MiB, versioned-
    bucket reclamation** — none exercised at 300 KB on MinIO. Confirm the Phase-5 bucket is versioning-OFF.
+
 - Next: push Phase 1 → Phase 2 (PgLineageStore + block_ref, testcontainers Postgres).
 
 ### 2026-07-21 — Phase 2: PgLineageStore + block_ref (implemented via worker agent, reviewed, fixed)
+
 Implemented by a worker subagent (team-programming worker role) to a precise spec; I read every line,
 reproduced the tests on real Postgres, then ran a senior-review gate. Deviation from the plan: used a
 **manually-run `postgres:17.10-alpine` container gated on `DATABASE_URL`** (same pattern as the S3 MinIO
 test) instead of the `testcontainers` crate — simpler, avoids a heavy dev-dep, consistent with Phase 1.
+
 - **`LineageStore` trait**: `advance(&mut self)`→`advance(&self)` (pooled store shared); `FileLineageStore`
   wraps its map in a `Mutex` (behavior identical); added typed `LineageError::StaleFence{expected,current}`
   (matchable). Fixed the one caller (`let mut ls`→`let ls`). Default suite stays **51 green**.
@@ -342,6 +359,7 @@ test) instead of the `testcontainers` crate — simpler, avoids a heavy dev-dep,
 
 **Phase 2 senior-review: CHANGES-REQUIRED → fixed.** The reviewer PROVED the fence CAS and the atomic
 claim correct under every interleaving (incl. ABA and same/different-digest first-writer races), and found:
+
 - **M1 (must-fix, real bug the 5 original tests missed)**: `touch` fed Postgres an `ON CONFLICT DO UPDATE`
   with duplicate keys → `ERROR: cannot affect row a second time`. In prod a manifest references each block
   hundreds of times (one per packed chunk), so **every real publish's touch would fail**. Fixed: `touch`
@@ -370,11 +388,14 @@ manifests — needs a design decision (a `manifest_ref` clock, or accept that on
 Also: the claim→`delete_block` straddle means Phase 3's sweep MUST keep dedup-reusable (live-HEAD-marked)
 blocks OUT of the candidate set (invariant #2), since a block re-referenced after a won claim but before
 DeleteObject is a live-byte loss the claim primitive alone can't prevent.
+
 - Next: push Phase 2 → Phase 3 (PG-driven GC).
 
 ### 2026-07-21 — Phase 3: Postgres-driven GC (implemented inline — the crux)
+
 Implemented myself (load-bearing MF1 correctness). Generic over the `BlobStore` + `RefClock` traits so
 it runs with the in-memory fake (fast) AND real S3+PG (Phase 5).
+
 - **`gc::mark_live_blocks(&dyn BlobStore, &[String]) -> HashSet<BlockId>`** (shared MARK, invariant #2):
   reads live manifests via the trait; a genuinely-absent live manifest is skipped (via the uniform
   `StoreError::NotFound` downcast), not fatal. The file-backed `gc::collect` keeps its own path-based
@@ -388,7 +409,7 @@ it runs with the in-memory fake (fast) AND real S3+PG (Phase 5).
   server-side) → only on a won claim `delete_block`** (row-claim-FIRST, object-delete-second, MF1). A
   `delete_block` failure after a won claim → counted as `orphaned` (row gone, object remains → cost
   leak, reconciler reclaims), does NOT abort the sweep. `GcPgStats{scanned,deleted,kept_marked,
-  raced_young,orphaned}`.
+raced_young,orphaned}`.
 - **Tests (`tests/gc_pg.rs`, 4, default-feature, no Docker)**: reclaims aged orphans + keeps live-HEAD
   blocks + HEAD materializes; a marked block is never collected even at grace=0 (invariant #2); the
   MemRefClock atomic re-check (a re-touch defeats a 1h-grace claim, mirroring the PgRefClock test);
@@ -397,7 +418,7 @@ it runs with the in-memory fake (fast) AND real S3+PG (Phase 5).
 
 **Insight the failing concurrent test surfaced (and how it was resolved).** My first cut swept at
 **grace=0**, and it FAILED — correctly. At grace=0 there is NO youth window: a block a publisher just
-wrote+touched but that a *stale* GC read hasn't marked yet (GC still on the previous HEAD) is
+wrote+touched but that a _stale_ GC read hasn't marked yet (GC still on the previous HEAD) is
 immediately "old" and unmarked → GC collects it → the about-to-be-live HEAD loses a block. That is not
 a GC defect — it's the **operational invariant `grace > max(publish, sweep) duration` being violated**.
 Fixed the test to use a realistic grace (50 ms) with inter-gen spacing (20 ms): a freshly-touched block
@@ -416,6 +437,7 @@ grace=0 live-loss (5/5) and grace=50ms safety (5/5), and verified each attack is
 named invariant: in-flight block → grace clock + server-side re-check; dedup-reused block → MARK;
 HEAD-commits-mid-sweep → grace clock; two concurrent sweepers → the per-block atomic claim (genuinely
 safe, just wasteful — single-flight lock correctly deferred). Should-fixes applied:
+
 - **S1 (honesty, R1-critical file)**: the `gc_pg.rs` header under-stated the claim→delete straddle as
   "only a cost leak." Corrected: it's a genuine NARROW live-byte-loss residual — if the GC thread STALLS
   between the won claim and `delete_block`, and a publisher resurrects that same (previously-orphan)
@@ -443,12 +465,15 @@ manifest is ~89 MB @ 300k files, not "tiny"), and the whole sweep must stay < gr
 claim→delete straddle is exercised by NO local test (needs a precisely-injected stall) — watch the e2e;
 (4) manifest growth — deferring manifest GC is correctness-fine but orphaned manifests accumulate real S3
 cost over long runs; track it.
+
 - Next: push Phase 3 → Phase 4 (daemon), enforcing the MF3 known⊆mark seeding.
 
 ### 2026-07-21 — Phase 4: the daemon (implemented via worker agent, verified)
+
 The production loop: blobs in `--store` (`file://` LocalBlobStore | `s3://` S3BlobStore), lineage + GC
 clock in `--db` (Postgres, required). I read the load-bearing core (`daemon_loop.rs`) and reproduced the
 full suite.
+
 - **`src/daemon_loop.rs`** (library, so `tests/` can drive it): `publish_cycle` + `materialize_on_start`
   (feature `pg`) + a std-only `/health` server. **`publish_cycle` is the MF3+MF4 core**: (1) `ls.head()`
   FALLIBLE read (a DB blip is Err, not "fresh lineage"); (2) **MF3** — seed dedup `known` from the parent
@@ -481,9 +506,10 @@ full suite.
 neither crasher exists: **MF2** — no nested-runtime path (sync `fn main`; signals/health/pipeline on std
 threads; adapters' `block_on` only ever from non-tokio threads; concurrent `block_on` from `par_iter`
 rayon threads is the supported multi-thread-runtime case); **MF3/MF4** — no live-block loss (touch-after-
-upload is the *correct* realization: block ids aren't known until packed, and an untouched fresh block
+upload is the _correct_ realization: block ids aren't known until packed, and an untouched fresh block
 has no `block_ref` row → invisible to GC; continuous cover no-row→young→marked; MF3 `known` is a
 fail-safe single-source-of-truth from the one `head()` read). Should-fixes applied:
+
 - **S1**: health server now sets `set_read_timeout`/`set_write_timeout` (2s) — a half-open/slow client
   could otherwise wedge the single-threaded accept loop → block all probes → kubelet kills the pod.
 - **S2**: the daemon now **backs off exponentially on a genuine fence streak** (capped 600s; reset on a
@@ -511,13 +537,16 @@ an in-flight publish isn't interrupted by SIGTERM; cold-materialize wall-time vs
 (Phase-5 measurement). (5) manifest growth — deferred manifest GC + fenced churn leak orphan manifests.
 
 ### Phases 1–4 COMPLETE. Standalone build done; only the real-AWS e2e (Phase 5) remains — it needs the
+
 user's `aws sso login` (internal account 993939946442). Test totals: 55 default + 3 S3 (MinIO) + 12 PG
 (7 lineage + 5 daemon) + the gc_pg/e8 already in default. All green.
 
 ### 2026-07-21 — Phase 5: real-AWS end-to-end (internal account 993939946442) — PASSED, torn down
+
 User chose RDS `db.t4g.micro`. Provisioned a throwaway S3 bucket + RDS Postgres 17.10 (public, SG scoped
 to my IP:5432) in us-east-1, added the **sqlx `tls-rustls-ring`** feature (RDS requires TLS), ran the
 real-AWS validation, then **tore everything down**.
+
 - **Real S3** (`S3_IT=1`, no `S3_ENDPOINT_URL`): `blobstore_conformance` (round-trip, typed NotFound,
   idempotent delete) + `s3_concurrent_block_on` — **pass**. The NotFound test passing on real S3 confirms
   the 403-vs-404 concern is a non-issue with these creds (missing key → 404 NoSuchKey).
@@ -533,7 +562,7 @@ real-AWS validation, then **tore everything down**.
     kept the marked live block, gen2 re-materialized byte-identically.
   - `e2e_fence_cas_over_rds`: two concurrent first-writers over real RDS → exactly one wins, one typed
     StaleFence.
-  - (A first run surfaced a *test-scenario* bug — a partial-overwrite gen2 dedup-reused gen1's block so it
+  - (A first run surfaced a _test-scenario_ bug — a partial-overwrite gen2 dedup-reused gen1's block so it
     stayed correctly live, no orphan; fixed to fully-distinct gen2. The CODE was right; the test proved
     block-level dedup keeps a shared block live under GC, which is itself reassuring.)
 - **Teardown**: RDS deleted (`--skip-final-snapshot`), S3 bucket emptied + deleted, security group
@@ -541,19 +570,22 @@ real-AWS validation, then **tore everything down**.
   env only). Est. cost < $0.10 (RDS ~1 hr + a few S3 ops).
 
 **PHASE 5 COMPLETE.** The five backend COMPONENTS — S3BlobStore + PgLineageStore + block_ref reuse-clock
-+ gc_pg + the daemon — are built and **validated against the real services they target** (S3 + RDS
-Postgres over TLS), behind the prototype's sync traits, standalone (not integrated into zeroshot-cloud).
-Every load-bearing PER-COMPONENT invariant (R1/R2, MF1–MF4) is proven by tests on real infra + reproduced
-by independent reviewers, and the seams compose for a single publish/materialize/GC path.
+
+- gc_pg + the daemon — are built and **validated against the real services they target** (S3 + RDS
+  Postgres over TLS), behind the prototype's sync traits, standalone (not integrated into zeroshot-cloud).
+  Every load-bearing PER-COMPONENT invariant (R1/R2, MF1–MF4) is proven by tests on real infra + reproduced
+  by independent reviewers, and the seams compose for a single publish/materialize/GC path.
 
 ### 2026-07-21 — Final holistic (cross-phase) review: SHIP-WITH-FOLLOWUPS
+
 An independent final reviewer traced the WHOLE wired system (the view no per-phase reviewer had) and
 verified the seams compose (uniform fence-0↔1, uniform `StoreError::NotFound` plumbing P1→P3/P4, MF1
 atomic-claim consistency, MF2 no-nested-runtime, MF4 touch-after-upload). **Honest correction to the
-record: the *components* are done + real-AWS-proven; the daemon as a DEPLOYABLE WHOLE is not** — the
+record: the _components_ are done + real-AWS-proven; the daemon as a DEPLOYABLE WHOLE is not** — the
 system-level reclamation actor was designed, built, and tested, then intentionally left unwired (the user
 deferred platform integration). The critical cross-phase follow-ups (blockers before the daemon runs in a
 pod — an INTEGRATION-phase job, out of scope here, but surfaced loudly):
+
 - **F1 (manifest churn):** `parent` is part of `logical_digest` identity AND changes every cycle, so the
   daemon mints a UNIQUE manifest every interval even on a byte-identical tree → ~2,880 orphaned
   manifests/day idle, and manifest GC isn't implemented. `parent` is currently write-only (nothing reads
@@ -571,11 +603,12 @@ pod — an INTEGRATION-phase job, out of scope here, but surfaced loudly):
   takes `&Path`, physically can't accept an S3 store).
 - **F6:** materialize masks setuid/setgid/sticky (in `logical_digest`), so a tree with special-mode files
   isn't a publish fixed-point across restart (dominated by F1 today).
-Plan deviations noted as CORRECT: `--fence` flag dropped (fence authority = `lineage_head` CAS, better);
-ifaces "drop-in" labels now honest. §2 non-goals all still honored (no scope creep); all deferrals
-documented.
+  Plan deviations noted as CORRECT: `--fence` flag dropped (fence authority = `lineage_head` CAS, better);
+  ifaces "drop-in" labels now honest. §2 non-goals all still honored (no scope creep); all deferrals
+  documented.
 
 ### 2026-07-21 — Cross-node + in-region experiments (64-vCPU quota approved) — PASSED, torn down
+
 Quota increased to 64 vCPU on the internal account → ran the two quota-gated experiments on REAL
 multi-node EC2, using the COMPLETED production daemon binary (Linux arm64, built locally in Docker,
 distributed via S3). Provisioned: S3 bucket + RDS `db.t4g.micro` PG17 + 2× **c7gd.2xlarge** Graviton
@@ -585,12 +618,12 @@ bucket + IAM + SGs removed).
 
 - **2-node cross-node transfer (R1 + R4) — the core thesis, PROVEN.** Node A (us-east-1a) generated a
   **2.0 GB / 840-file** workspace on its NVMe and published it to S3+RDS (**publish 37.8s**: walk + chunk
-  + sha256 + zstd + upload 2 GB incompressible + fence advance → HEAD fence 1). Node B (us-east-1c —
-  **different AZ, a FRESH instance that never saw node A's disk**) ran the daemon: materialize-on-start
-  reconstructed the ENTIRE workspace from the content store (S3 blocks + RDS lineage HEAD) onto its own
-  empty NVMe. **Tree checksum identical on both nodes** (`f256ae0f…`) → byte-for-byte transfer with **no
-  shared filesystem**. This is R1 (survive node loss → resume elsewhere) + R4 (node/AZ flexibility)
-  end-to-end on real infra, using the exact S3BlobStore + PgLineageStore + daemon that were built.
+  - sha256 + zstd + upload 2 GB incompressible + fence advance → HEAD fence 1). Node B (us-east-1c —
+    **different AZ, a FRESH instance that never saw node A's disk**) ran the daemon: materialize-on-start
+    reconstructed the ENTIRE workspace from the content store (S3 blocks + RDS lineage HEAD) onto its own
+    empty NVMe. **Tree checksum identical on both nodes** (`f256ae0f…`) → byte-for-byte transfer with **no
+    shared filesystem**. This is R1 (survive node loss → resume elsewhere) + R4 (node/AZ flexibility)
+    end-to-end on real infra, using the exact S3BlobStore + PgLineageStore + daemon that were built.
 - **In-region cold-materialize at scale (R2) — the open number, CLOSED.** Node B's cold-materialize of
   the 2 GB / 840-file tree from S3 to fresh NVMe, timed via the daemon's OWN health-readiness signal
   (503→200 when materialize-on-start completes — validating that endpoint on real infra): **6.60s**.
@@ -606,7 +639,9 @@ bucket + IAM + SGs removed).
 - Est. cost: 2× c7gd.2xlarge (~$0.36/hr each) + RDS, < 1 hr → ~$1. Nothing left running.
 
 ### 2026-07-21 — Optimization pass (threads 1+2+4, still standalone; user: "optimize as much as possible before integrating")
+
 Code done locally (O1/O2/O4), measured on real EC2 (O5), all torn down.
+
 - **O1 — kill manifest churn (F1).** `logical_digest` now EXCLUDES `parent` → content-only manifest
   identity: a byte-identical tree always yields the same digest, so an idle re-publish is idempotent
   (`put_manifest` dedups, no orphan leak) and identical trees dedup. Daemon `publish_cycle` gained
@@ -623,16 +658,17 @@ Code done locally (O1/O2/O4), measured on real EC2 (O5), all torn down.
   manifest, ~2× less publish CPU.
 - **O4 — the store-wide GC actor (F2).** `gc` subcommand + `PgLineageStore::all_head_digests()` (marks
   against EVERY lineage's HEAD — store-wide, the F2 requirement). Test `gc_store_wide_live_set_protects_
-  all_lineages` DEMONSTRATES the per-lineage footgun (deletes another lineage's blocks → materialize fails).
+all_lineages` DEMONSTRATES the per-lineage footgun (deletes another lineage's blocks → materialize fails).
 
 **O5 — real-EC2 measurements** (c6gd.8xlarge, 32 vCPU + NVMe, us-east-1a; RDS PG17/TLS; S3; via SSM; torn
 down):
-| Metric | Result |
-|---|---|
-| **Warm vs cold resume (2 GB, R2 — the O2 payoff)** | **cold 3.74s → warm 1.48s (2.5× faster); warm restore byte-identical.** 1.48s is UNDER the <5s R2 target; the cache eliminates the S3 fetch. |
-| Publish 2 GB → S3 | 43.8s (upload-dominated: ~23s network + ~20s CPU) |
-| **Publish pipeline scaling (2 GB local, incompressible)** | workers 0→**20.4s**, 4→15.7s, 8→13.5s, 16→**10.4s**, 32→10.4s. **~2× at 16 workers**, plateaus there → drove O3. |
-| 5 GB scale (local) | publish 25.2s (16w), **materialize 3.22s** — linear, fast resume path |
+
+| Metric                                                    | Result                                                                                                                                       |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Warm vs cold resume (2 GB, R2 — the O2 payoff)**        | **cold 3.74s → warm 1.48s (2.5× faster); warm restore byte-identical.** 1.48s is UNDER the <5s R2 target; the cache eliminates the S3 fetch. |
+| Publish 2 GB → S3                                         | 43.8s (upload-dominated: ~23s network + ~20s CPU)                                                                                            |
+| **Publish pipeline scaling (2 GB local, incompressible)** | workers 0→**20.4s**, 4→15.7s, 8→13.5s, 16→**10.4s**, 32→10.4s. **~2× at 16 workers**, plateaus there → drove O3.                             |
+| 5 GB scale (local)                                        | publish 25.2s (16w), **materialize 3.22s** — linear, fast resume path                                                                        |
 
 **Findings:** (1) the warm cache hits the aggressive <5s resume target (1.48s/2 GB warm) and even cold in-
 region is under it on a fast node (3.74s). (2) Publish CPU halves with the pipeline (now wired). (3) S3
@@ -648,6 +684,7 @@ avoids even re-hashing; the orphan-object reconciler (needs a `BlobStore.list`).
 fork not yet measured.
 
 ### 2026-07-21 — O6: parallel S3 block uploads (implemented, reviewed, fixed)
+
 The biggest remaining publish lever (O5: S3 publish of 2 GB was ~43.8s, ~23s serial upload). The packer
 previously called `put_block` serially as it finalized each 64 MiB block. Now `publish_pipelined` has an
 UPLOAD stage: `workers` uploader threads (round-robin channels) `put_block` blocks CONCURRENTLY; the
@@ -659,6 +696,7 @@ blocks durable → `put_manifest`). Same logical manifest (pipeline-equivalence 
 deadlock — traced every thread-death; no silent upload failure — `put_manifest` runs only after every
 uploader joins `Ok`, empirically 0 manifests written on an injected upload failure; same output as
 streaming) and found two real must-fixes:
+
 - **Memory regression (real):** the upload channels reused the 256 KiB-chunk bound `cap`(=8) for
   **64 MiB BLOCK** items → up to `workers·cap` blocks buffered ≈ **2.4 GiB @4 workers / 9 GiB @16**. Fixed:
   upload channel bound = **1** (block-tier peak now ~`2·workers·64 MiB` = queued+in-flight, scales with
@@ -667,14 +705,15 @@ streaming) and found two real must-fixes:
 - **Test red in debug:** `parallel_uploads_overlap` (a latency-injecting store asserting max-concurrent
   `put_block` ≥ 2) passed in `--release` but FAILED 6/6 in debug — debug's sha256-bound block production
   is slower than the 80 ms simulated latency, so blocks never coexist. Fixed: `#[cfg_attr(debug_assertions,
-  ignore)]` (release-only, with a reason) — `cargo test` shows it ignored, `cargo test --release` runs it.
+ignore)]` (release-only, with a reason) — `cargo test` shows it ignored, `cargo test --release` runs it.
 - Reviewer's 3rd item (the standalone crate isn't wired into the JS-root CI, so its tests have no CI
   protection) is real but an INTEGRATION concern (the crate has its own `[workspace]` on purpose) —
   deferred/noted, consistent with "don't integrate yet". All testing remains manual/local + real-AWS.
-59 default green + 1 ignored (the release-only overlap test); clippy/fmt clean. Real-S3 speedup to be
-re-measured in the next EC2 batch.
+  59 default green + 1 ignored (the release-only overlap test); clippy/fmt clean. Real-S3 speedup to be
+  re-measured in the next EC2 batch.
 
 ### 2026-07-21 — O7: reflink incremental warm resume (implemented, reviewed, tested)
+
 The biggest remaining R2 lever. `materialize`'s fetch/decompress/write + link phases were refactored
 into shared helpers (`write_regular_files`, `write_links`, `load_verified_manifest`) — behavior-
 preserving (all 16 existing materialize/tamper/symlink/hardlink/mode security tests still green). New
@@ -711,6 +750,7 @@ error currently crash-loops the daemon), RDS IAM auth / `verify-full` CA, in-reg
 1–5 GB scale.
 
 ### 2026-07-22 — O6+O7 measured on real EC2 (parallel S3 uploads; reflink on XFS)
+
 Throwaway rig (internal acct 993939946442, us-east-1, torn down): one **c6gd.4xlarge** (16 vCPU,
 up-to-10 Gbps), instance-store NVMe formatted **XFS reflink=1**, **local Postgres on the NVMe** (the
 lineage store — RDS+TLS was already proven in O5, so this batch didn't re-pay for it), binary rebuilt
@@ -724,12 +764,12 @@ pipeline width. LOCAL store = CPU+local-write baseline (isolates compute); S3 = 
 width-dependent gap between them is the exposed upload latency:
 
 | workers | LOCAL wall (CPU+write) | S3 wall (e2e, run1/run2) | exposed upload ≈ S3−local |
-|--:|--:|--:|--:|
-| 1  | 17.0s | 24.2 / 24.4s | **~7.2s** |
-| 2  | 16.5s | 17.3 / 17.3s | ~0.8s |
-| 4  | 15.3s | 16.2 / 16.1s | ~0.9s |
-| 8  | 13.0s | 14.2 / 13.8s | ~0.9s |
-| 16 | 9.8s  | 10.9 / 10.7s | ~1.0s |
+| ------: | ---------------------: | -----------------------: | ------------------------: |
+|       1 |                  17.0s |             24.2 / 24.4s |                 **~7.2s** |
+|       2 |                  16.5s |             17.3 / 17.3s |                     ~0.8s |
+|       4 |                  15.3s |             16.2 / 16.1s |                     ~0.9s |
+|       8 |                  13.0s |             14.2 / 13.8s |                     ~0.9s |
+|      16 |                   9.8s |             10.9 / 10.7s |                     ~1.0s |
 
 - **O6's specific win:** going 1→2 uploaders collapses exposed upload latency **~7.2s → ~0.8s** — a
   single S3 PUT stream (~0.7 Gbps here) can't keep up with the packer, so at W=1 the pipeline stalls on
@@ -741,17 +781,17 @@ width-dependent gap between them is the exposed upload latency:
   ~43.8s for 2 GB on a serial-upload daemon — not a same-instance control, but directionally consistent.
 
 **O7 — reflink incremental resume (XFS reflink=1).** gen2 = 13/256 files rewritten (~5% churn); LOCAL
-store to isolate the CoW effect from network (which makes this a *lower bound* on the real win — see
+store to isolate the CoW effect from network (which makes this a _lower bound_ on the real win — see
 below). Full `materialize` vs `materialize --reference`:
 
-| metric | FULL materialize | INCREMENTAL (reflink) |
-|---|--:|--:|
-| wall time | 1.297s | **0.506s (2.6×)** |
-| blocks fetched from store | 34 | **2 (17× less)** |
-| files reflinked | 0 | 243 / 256 |
-| disk actually written (df delta) | ~2049 MiB | **101 MiB (20× less)** |
-| apparent size | 2049 MiB | 2049 MiB |
-| output vs FULL | — | **IDENTICAL** |
+| metric                           | FULL materialize |  INCREMENTAL (reflink) |
+| -------------------------------- | ---------------: | ---------------------: |
+| wall time                        |           1.297s |      **0.506s (2.6×)** |
+| blocks fetched from store        |               34 |       **2 (17× less)** |
+| files reflinked                  |                0 |              243 / 256 |
+| disk actually written (df delta) |        ~2049 MiB | **101 MiB (20× less)** |
+| apparent size                    |         2049 MiB |               2049 MiB |
+| output vs FULL                   |                — |          **IDENTICAL** |
 
 - True CoW confirmed: only **101 MiB** hit the disk (the changed delta) though the tree is 2049 MiB
   apparent — the 243 unchanged files share extents with the reference. Byte-identical output.
@@ -762,7 +802,7 @@ below). Full `materialize` vs `materialize --reference`:
   unchanged-fraction, and store latency.
 - Still gated on the same integration obligation as before: needs a **pristine retained reference** (never
   the agent's mutated live workspace) + "full materialize on any doubt". `materialize_incremental` now has
-  a CLI caller but still no *daemon* caller — that wiring is the next integration-PR step.
+  a CLI caller but still no _daemon_ caller — that wiring is the next integration-PR step.
 
 Net: both optimizations validated on real hardware. Parallel uploads make S3 publish compute-bound rather
 than network-bound (uploads hidden behind hashing/compression); reflink makes warm resume pay ~the delta
@@ -770,6 +810,7 @@ in both disk and store-fetch. Rig fully torn down (instance, bucket, IAM role/pr
 empty). 65 default tests green; clippy/fmt clean.
 
 ### 2026-07-22 — O8: reflink warm resume wired into the daemon (`resume_via_reference`)
+
 Where the O7 reflink win lands in production. Materialize-on-start could already do a full cold
 `materialize`; O8 adds an OPT-IN warm-resume path behind `daemon --ref-dir <R>` (**omit ⇒ today's behavior
 byte-for-byte** — zero default change). When set, the daemon keeps a **pristine, daemon-owned reference**
@@ -807,9 +848,10 @@ clean-crash corruption path). Fixes implemented: (#1) a completeness **sentinel*
 trust an externally-planted/partial dir; (#2) **per-lineage scoping** (`lineage_ref_subdir` hashes the
 lineage id) so lineages can share a `--ref-dir` without clobbering each other's refs/GC; (#3) validate
 `target`; (#4) lstat (not `is_dir`) in GC + the sentinel check; (#5) reject `--ref-dir` nested with `--tree`
-+ document cross-fs as a REGRESSION (full copy). The code review's one should-fix (power-loss durability on
-NON-ephemeral `ref_root`) is closed by documenting the ephemeral-storage requirement (it matches the system's
-"NVMe is a pure cache" premise) and deferring a full fsync barrier.
+
+- document cross-fs as a REGRESSION (full copy). The code review's one should-fix (power-loss durability on
+  NON-ephemeral `ref_root`) is closed by documenting the ephemeral-storage requirement (it matches the system's
+  "NVMe is a pure cache" premise) and deferring a full fsync barrier.
 
 Tests (`tests/resume.rs`, 12, all non-pg): cold→warm-incremental (delta-only fetch + byte-identical
 workspace + old ref & sentinel GC'd); **the agent-mutation safety test** (scribble garbage into a resumed
@@ -828,6 +870,7 @@ not surfaced in stats (`reflink_or_copy` returns `Option<u64>`); no per-(lineage
 (single-writer is a deployment invariant — an RWO PV reattached to the next pod provides it).
 
 ### 2026-07-22 — O8 measured end-to-end on real EC2 (daemon `--ref-dir` over real S3 + XFS)
+
 Throwaway rig (internal acct, us-east-1, torn down + verified empty): **c6gd.4xlarge**, instance-store NVMe
 as **XFS reflink=1**, local Postgres, real S3 store, 2.1 GB / 256-file incompressible tree. **No
 `--cache-dir` anywhere**, so every block fetch goes to real S3 — a clean cold-vs-warm comparison. The
@@ -838,11 +881,11 @@ exactly the production warm-resume case. Metric = **time to workspace-ready**, m
 own health endpoint (503→200 flips precisely when materialize-on-start completes) — i.e. how long until the
 agent can start working.
 
-| resume of gen2 | `--ref-dir` | time to ready | speedup |
-|---|---|--:|--:|
-| COLD full materialize (today's default) | no | 4.01s | 1.0× |
-| **WARM INCREMENTAL** (reference one gen behind) | yes | **1.42s** | **2.8×** |
-| **REF REUSED** (restart at the same HEAD) | yes | **0.23s** | **17.4×** |
+| resume of gen2                                  | `--ref-dir` | time to ready |   speedup |
+| ----------------------------------------------- | ----------- | ------------: | --------: |
+| COLD full materialize (today's default)         | no          |         4.01s |      1.0× |
+| **WARM INCREMENTAL** (reference one gen behind) | yes         |     **1.42s** |  **2.8×** |
+| **REF REUSED** (restart at the same HEAD)       | yes         |     **0.23s** | **17.4×** |
 
 Daemon telemetry confirms the mechanism: warm → `WarmIncremental ref_blocks_fetched=2 ref_reflinked=243
 workspace_files=256` (only the delta's 2 blocks crossed the network; 243 of 256 files reflinked); reuse →
@@ -875,6 +918,7 @@ the full tree), reflinks the rest, produces a byte-identical workspace, and cost
 torn down (instance, bucket, IAM role/policy/profile, SG, volumes — verified empty).
 
 ### 2026-07-23 — O9: parallel reflink pass + `reflink_secs` (and a retracted attribution)
+
 The reflink loop in `materialize_incremental` was sequential (per-file lstat + create_dir_all + FICLONE +
 chmod) while the fetch/decompress/write path beside it is rayon-parallel. Split into a pure-manifest
 classification (no I/O) + a rayon-parallel reflink, with `reflink_secs` separated from `write_secs`.
@@ -889,7 +933,8 @@ DNS/TLS/page-cache). That attribution is retracted above; `reflink_secs` now mak
 change: it is free, helps where FICLONE is slower than APFS clonefile, and the telemetry ends the guessing.
 
 ### 2026-07-23 — O10: publish stops re-hashing quiescent files (the biggest win of the campaign)
-**The measured problem.** `publish` read + sha256'd EVERY file EVERY cycle; only the *upload* was deduped.
+
+**The measured problem.** `publish` read + sha256'd EVERY file EVERY cycle; only the _upload_ was deduped.
 On a 1 GB / 256-file tree: cold 2.86s, **idle republish 1.81s, 0.4%-churn republish 1.81s** — cost tracks
 TREE SIZE, is independent of churn, and recurs every publish interval forever. (For comparison a full
 materialize of the same tree from a local store is 0.25s, so publish was ~8× materialize's per-GB cost.)
@@ -897,6 +942,7 @@ materialize of the same tree from a local store is 0.25s, so publish was ~8× ma
 **The change.** A node-local `StatCache` (deliberately NOT in the manifest, so `logical_digest` stays pure
 content identity and O1 idle-republish idempotence holds) lets a publish reuse the PARENT MANIFEST's chunk
 list for a file, skipping the read+hash entirely. A skip requires ALL FOUR:
+
 1. `may_skip` — stat fingerprint (`size+mtime_ns+ctime_ns+ino+dev`) identical AND the file was quiescent
    BEFORE the previous scan began (git-style racy-index guard, so a write landing in the same coarse
    timestamp tick as that scan can never be invisible);
@@ -906,11 +952,11 @@ list for a file, skipping the read+hash entirely. A skip requires ALL FOUR:
 4. every reused chunk is already in `known` — a skip can never emit a manifest referencing a non-durable
    chunk, whatever the caller passed. (The index assembly's `ok_or_else` fail-fast backstops this.)
 
-| publish | churn | before | after |
-|---|--:|--:|--:|
-| cold | 100% | 2.86s | 2.90s (no cache yet) |
-| **idle** | 0% | 1.81s | **0.01s (~180×)** |
-| **light** | 0.4% (1 file of 256) | 1.81s | **0.02s (~90×)** |
+| publish   |                churn | before |                after |
+| --------- | -------------------: | -----: | -------------------: |
+| cold      |                 100% |  2.86s | 2.90s (no cache yet) |
+| **idle**  |                   0% |  1.81s |    **0.01s (~180×)** |
+| **light** | 0.4% (1 file of 256) |  1.81s |     **0.02s (~90×)** |
 
 **A data-loss bug found while wiring it.** A publish can store its manifest and write its cache and then
 LOSE THE FENCE, leaving HEAD on the previous generation. Pairing that cache (describing gen N+1's tree) with
@@ -933,6 +979,7 @@ unaffected. Opt-in via `publish --stat-cache` / `daemon --stat-cache`; without i
 unchanged. 91 tests green; clippy/fmt clean on default and `pg,s3`.
 
 ### 2026-07-23 — O11-O15: manifest round-trips, a latent OOM, and two safety mechanisms that were not running
+
 Driven by two independent adversarial reviews. Both re-measured at REALISTIC workspace scale (100k files)
 instead of the 256-file fixture this campaign had been using, and that reframing is the most valuable thing
 to come out of the whole effort — the same per-file cost reads as 22ms on the old fixture and ~10.8s at
@@ -949,10 +996,10 @@ one by digest.
 needed block AND EVERY decompressed chunk in RAM at once, then assembled each file in a third buffer.
 Measured same-machine A/B (identical output both ways):
 
-| tree | OLD peak RSS | NEW peak RSS |
-|---|--:|--:|
-| 1 GB | 2665 MB (2.60x) | 700 MB |
-| 3 GB | **7882 MB (2.57x)** | **744 MB** |
+| tree |        OLD peak RSS | NEW peak RSS |
+| ---- | ------------------: | -----------: |
+| 1 GB |     2665 MB (2.60x) |       700 MB |
+| 3 GB | **7882 MB (2.57x)** |   **744 MB** |
 
 Old scales linearly with tree size; new is FLAT. A 4 GB workspace needed ~11 GB, i.e. an OOM during
 materialize-on-start, leaving a partial `tree` that fails the empty-dir check on every subsequent start: a
@@ -963,6 +1010,7 @@ tampered manifest cannot turn the offset math into a stray write). Size validati
 byte is written. Also 2.4x faster.
 
 **Two safety mechanisms that were not actually running.** Worth recording as a pattern, not as two bugs:
+
 - O10 as first committed silently DESTROYED a file. A reviewer built an HFS+ (1s granularity) harness and
   demonstrated it end-to-end: same-size in-place rewrite inside one timestamp tick → identical fingerprint →
   skipped → and because the fingerprint never changes again, the stale chunk list is re-emitted FOREVER
@@ -998,6 +1046,7 @@ the skip is active, and a resume into a fresh workspace restores the tree byte-i
 default, 113 with `pg,s3` against real Postgres.
 
 ### 2026-07-23 — O17: the memory bound made real, and what the campaign got wrong
+
 A third adversarial review measured the previous commit's claims instead of accepting them, and the
 headline claim did not survive. Recording the corrections, because the pattern matters more than the bugs.
 
@@ -1009,11 +1058,11 @@ was incompressible. Rewritten with FILE-ordered waves (a contiguous run of files
 logical size), which bounds the decompressed working set directly at any zstd ratio; a single file larger
 than the ceiling is streamed rather than assembled.
 
-| shape | OLD peak RSS | NEW peak RSS | OLD wall | NEW wall |
-|---|--:|--:|--:|--:|
-| 100k small files (520 MB) | 653 MB | **463 MB** | 6.49s | 6.98s |
-| 3 GB incompressible | 7884 MB | **705 MB** | 1.02s | 0.59s |
-| 2 GiB compressible (1 block) | 6185 MB | **559 MB** | 0.56s | 0.46s |
+| shape                        | OLD peak RSS | NEW peak RSS | OLD wall | NEW wall |
+| ---------------------------- | -----------: | -----------: | -------: | -------: |
+| 100k small files (520 MB)    |       653 MB |   **463 MB** |    6.49s |    6.98s |
+| 3 GB incompressible          |      7884 MB |   **705 MB** |    1.02s |    0.59s |
+| 2 GiB compressible (1 block) |      6185 MB |   **559 MB** |    0.56s |    0.46s |
 
 **The commit that claimed to fix a crash loop had created one.** Pre-creating every file at final length
 meant a failed materialize left a complete-LOOKING tree: right file count, right sizes, right modes, all
@@ -1043,16 +1092,17 @@ guard** — twice here a safety mechanism was shipped that provably did nothing 
 99 tests green by default, **118 with `pg,s3` against a real Postgres**; no warnings, fmt clean.
 
 ### 2026-07-23 — O18: the whole campaign was benchmarked on SOFTWARE SHA-256
+
 `sha2` compiles its ARMv8 hardware SHA-256 backend **only** under the `asm` feature
 (`sha256.rs`: `cfg(all(feature = "asm", target_arch = "aarch64"))`). `Cargo.toml` said plain
 `sha2 = "0.10"`. So every aarch64 build — **every Graviton EC2 run in this log, and every local
 benchmark on the aarch64 dev machine** — used software SHA. Measured after enabling it, same binary,
 same fixture, digests byte-identical:
 
-| | software | hardware (`sha2/asm`) |
-|---|--:|--:|
-| publish, 1 GiB | 3.12s | **0.61s (5.1×)** |
-| sha256 throughput (whole publish) | 344 MB/s | **1765 MB/s** |
+|                                   | software | hardware (`sha2/asm`) |
+| --------------------------------- | -------: | --------------------: |
+| publish, 1 GiB                    |    3.12s |      **0.61s (5.1×)** |
+| sha256 throughput (whole publish) | 344 MB/s |         **1765 MB/s** |
 
 **How to read the earlier entries in this log:** every hash-bound number here (cold publish, the
 publish-width sweeps of O3/O6, the full re-hash cost, cold materialize's verify phase) understates the
@@ -1079,6 +1129,7 @@ scale (100k files) is stat-bound on publish and per-file-syscall-bound on materi
 default, **121 with `pg,s3` against real Postgres**.
 
 ### 2026-07-24 — O19: three defects the O17 "fix" did not fix
+
 A verification review reproduced each of these end-to-end against the committed code. O17's message
 claimed all three were closed. They were not, and the pattern (three consecutive commits each fixing the
 previous one's claim) is the most useful thing in this entry.
@@ -1112,6 +1163,7 @@ were 21 warnings the whole time. Fixed rather than qualified.
 105 tests green by default, **124 with `pg,s3` against real Postgres**; fmt clean.
 
 ### 2026-07-24 — O20: the refetch the wave rewrite introduced (found by counting, not by reading)
+
 File-ordered waves bounded memory but re-fetched a block once per wave that referenced it, where the
 block-keyed design fetched each exactly once. It surfaced only because a test COUNTS `get_block` calls
 instead of trusting `blocks_fetched`, which reports DISTINCT blocks and so hides amplification by
@@ -1130,12 +1182,13 @@ clippy is 0 warnings on both feature sets `--all-targets`; 106 tests green by de
 against real Postgres**.
 
 ### 2026-07-24 — O21: the bound finally has a test, and stops throttling fetches
+
 > **RETRACTED — see O23.** Both headline claims here are false. The "test" used a `CAPWS_BLOCK_BYTES`
 > override that REPLACED the constants it claimed to pin (mutating them left the suite green), and the
 > grouping-by-summed-`clen` scheme described below was itself unsound and has since been replaced. The
 > fetch-concurrency improvement it claims was also undone by the fix in O22.
-A verification review confirmed O19's three fixes (reproducing each against the baseline) and found two
-problems with the fix itself.
+> A verification review confirmed O19's three fixes (reproducing each against the baseline) and found two
+> problems with the fix itself.
 
 **The bound had no test.** Mutating the batch constant to 100_000 — removing the bound outright — kept the
 whole suite green, and O19's message had claimed "every fix in this entry is mutation-verified" (true for
@@ -1171,12 +1224,13 @@ above, is the argument for stopping here and spending the next effort on the soa
 coarse-filesystem CI test instead.
 
 ### 2026-07-24 — O22: the review gate overrules "stop"; three claims in this log were false
+
 The campaign's stop decision was made unilaterally. Put to a senior review gate, it came back **CONTINUE
-(narrowly)**: the *reasoning* for stopping was upheld, but the stopped-at state was not safe. Three claims
+(narrowly)**: the _reasoning_ for stopping was upheld, but the stopped-at state was not safe. Three claims
 in the entries above were disproved by measurement.
 
 **1. "The bound is a bound" — it was not.** The batch was sized from the summed `clen` of the chunks a
-manifest *happens to reference* per block. That under-reports by exactly the un-referenced fraction:
+manifest _happens to reference_ per block. That under-reports by exactly the un-referenced fraction:
 measured **15.6× over the ceiling (4.24 GB RSS)** on a manifest referencing one chunk per 62.5 MiB block,
 and **1.50× (1.18 GB)** on a realistic 100k-file fixture. `MATERIALIZE_BLOCK_CAP = 64` compounded it,
 permitting 64 × 64 MiB = **4 GiB** — described in the source as "a floor of safety", in fact a licence.
@@ -1187,14 +1241,14 @@ is now derived from the budget. **Verified on the shape that broke it: 31 blocks
 block bytes materialize at 785 MB peak RSS, against a documented ~768 MiB.**
 
 **2. "The bound is mutation-verified" — it was not.** The test set an env override (`CAPWS_BLOCK_BYTES=1`)
-that *replaced* the constants it claimed to pin, and asserted on fetch CONCURRENCY rather than residency.
+that _replaced_ the constants it claimed to pin, and asserted on fetch CONCURRENCY rather than residency.
 A reviewer mutated the budget to 1 TiB and the cap to 100 000 and the entire suite stayed green. This was
 the **fourth** unobservable memory bound in the campaign and the first whose commit message claimed
 mutation-verification. The env knob is deleted (it was also a live production hazard: unclamped, unlogged,
 able to silently remove the bound or triple S3 GETs). The two constants are now guarded by `const`
 assertions — a bad value **fails to compile**, which is the only version of this guard that cannot be
 argued with.
->
+
 > **RETRACTION (O23):** "All five mutations that previously passed now fail" was FALSE. The gate found
 > `MATERIALIZE_BLOCK_BATCH: 4 → 100_000` still passed with a green suite while costing 6x peak RSS
 > (350 MB → 2105 MB). That constant belonged to a component since deleted; see O23.
@@ -1202,7 +1256,7 @@ argued with.
 **3. "Refetch 3.00× → 1.00×" — true only of the fixture it was measured on.** That fixture printed
 `distinct blocks=1`, so its assertion read `1 <= 1.5` and could never fail. Real figures: **2.44× on a
 realistic fixture, 3.00× at 40 blocks, 13.00× at 200.** The test now runs on 40 distinct blocks, and its
-comment states plainly what it does *not* cover — the worst case needs blocks too large for a group to hold
+comment states plainly what it does _not_ cover — the worst case needs blocks too large for a group to hold
 a whole wave, where the honest fix is ranged reads, not the pool.
 
 **RETRACTION (O23):** this entry also claimed "`BlockPool`'s cap evicted to `cap.max(want.len())`" was
@@ -1212,7 +1266,8 @@ message described a change absent from its own diff. The cleanup-guard fix in th
 
 **The gate's ranked remaining work** (recorded verbatim for the next person, since it overrules this log's
 earlier "no-op against the measured profile" verdict):
-1. **Ranged/partial block reads** — the real remaining S3 win and *not* a constant factor: measured
+
+1. **Ranged/partial block reads** — the real remaining S3 win and _not_ a constant factor: measured
    **4880 MiB → 1604 MiB (3.0×)** on a realistic fixture, **250×** on an eroded one. It also makes the
    block-size estimate exact by construction, dissolving the bound problem rather than patching it. A
    defaulted `get_block_range` keeps every existing impl compiling.
@@ -1227,6 +1282,7 @@ earlier "no-op against the measured profile" verdict):
 warnings on both feature sets.
 
 ### 2026-07-24 — O23: gate ruling; the inert pool deleted; the record corrected
+
 The gate reviewed O22 and ruled **CONTINUE (narrowly)** — "not because the software is unsafe, but because
 the record is." Its findings, and what changed:
 
@@ -1262,6 +1318,7 @@ realistic lineage shape and this campaign made it slightly worse (2.28x → 2.78
 109 tests green by default, 128 with `pg,s3`; clippy 0 warnings on both feature sets.
 
 ### 2026-07-24 — O24: the last gate pass, over the seven increments that never had one
+
 A process audit found seven increments had been committed without ever passing a review gate — including
 `d488801` (ARMv8 hardware SHA + four gap fixes), which was substantive code. All seven were then gated.
 Ruling: **STOP upheld** — "nothing found requires code before stopping". Verdicts: `740d623` and three docs
@@ -1293,6 +1350,7 @@ runs on a single-wave fixture and therefore cannot observe cross-wave refetch �
 one-block fixture it replaced, on a different axis.
 
 ### 2026-07-24 — O25: the headroom clause made live, and the last two claims reconciled
+
 The gate accepted O24's timer fix (verified: `worst_gap_ns` now tracks real granularity — 101 ms at G=100 ms,
 660 ms at G=660 ms, where it previously pinned at ~20 µs regardless) but caught the same signature defect
 one iteration on: the comment claimed "2x headroom rather than the bare inequality", and ×1 ≡ ×2 at every G.
@@ -1317,6 +1375,7 @@ O18 table. Both corrected; `sha_backend`'s floor sits **1.3x** above the raw-loo
 110 tests green by default; clippy 0 warnings on both feature sets; golden digest unchanged.
 
 ### 2026-07-24 — O26: closing record correction
+
 The gate's closing ruling was **STOP** ("nothing found requires code"), with two documentation edits. It
 also caught a **third** instance of this campaign's signature pattern, in the very item O25 set out to
 reconcile: O25 attributed 1765 MB/s to a raw hash loop, when 1765 has the SAME whole-publish provenance as
@@ -1332,3 +1391,106 @@ is unaffected (three transitions inside a 2 s deadline bounds G on its own).
 
 **Campaign closed.** 110 tests green by default, 129 with `pg,s3`; clippy 0 warnings on both feature sets;
 golden digest unchanged since `0687563`.
+
+### 2026-07-24 — O27: the probe's granularity MEASUREMENT, pinned by a simulated clock
+
+Reopened the campaign's last accepted debt item — the one O26 closed as "debt, not hazard". A review gate
+had ruled STOP, then two later gate reviews found the reasoning behind that ruling did not survive contact
+with the code.
+
+**The debt.** `fidelity_verdict` (the decision) was unit-tested; the measurement that feeds it was not.
+Reverting the `since_transition` timer left the whole suite green while silently restoring the old accept
+curve — worst_gap pinned at ~20 us, the ×3 clause never firing, the 660 ms-1 s per-restart lottery back.
+
+**The fix.** `measure_granularity(step, now_ns, sleep_ns)` — I/O and clock injected, `SETTLE_NS` and
+`TRANSITIONS` read internally. A pre-implementation gate review rejected the first design outright: passing
+`deadline_ns` and `want_transitions` as parameters would have moved the POLICY into an untested argument
+list, where the real adapter could pass `i64::MAX, 1` with every new test still green — the identical defect
+one frame over. The fake filesystem is a **truncation grid**, `ctime(t) = ((t + phase) / G) * G`, swept over
+phase; a "ctime advances by G after each write" model is not equivalent and would let `TRANSITIONS -> 1`
+survive.
+
+**Two further seams, found by the post-implementation gate before this shipped.** Both were verified
+surviving the full suite, not argued:
+
+- `fidelity_verdict(seen, want, gap)` took `want` from the caller. `fidelity_verdict(seen, seen, gap)` makes
+  the check vacuous, and a filesystem whose ctime NEVER moves (vfat/exFAT, SMB/CIFS, several FUSE backends)
+  is then ACCEPTED — the daemon logs "stat-cache skip ENABLED (fs moved ctime in 0.0ms)" and publishes skip
+  files that changed. `want` is gone; measure and verdict are composed in `probe_verdict`, which the
+  simulated clock drives. The adapter now holds no policy and no composition.
+- The baseline ctime was a caller argument. Seeding it with anything the filesystem cannot return (0, say)
+  makes iteration one a spurious transition, so the probe needs only two real ones — one full interval,
+  silently halving the invariant it documents. The loop now takes its own baseline; there is nothing to
+  pass. Cost: one extra loop iteration, ~20 us. (A first draft of this entry claimed the change "moved the
+  G ~= 700 ms band from gap-refused to deadline-refused". The gate measured it: 1713/2000 phases at 700 ms
+  are gap-refused, and old vs new is byte-identical across 2,398,200 (G, phase) pairs. Nothing moved. The
+  diff's own A4 test asserts 700 ms is gap-refused, so the claim contradicted a test shipping beside it.)
+- `worst_gap_ns.max(...)` -> plain assignment also survived: on a uniform grid every full interval equals G,
+  so `max == last` in all 25 sim cases. A filesystem that stalls once then ticks fast needs a non-uniform
+  fixture to catch, and now has one.
+
+**Newly pinned property — and a false claim caught before it shipped.** The wart the ×3 headroom was
+introduced to remove is a per-restart lottery: the same filesystem accepted on one daemon start and refused
+on the next, depending only on where in a ctime tick the daemon began (85% accept at 700 ms, 50% at 800 ms,
+22% at 900 ms). Nothing tested it. A first version of this work asserted flat **phase-invariance** — and the
+gate disproved it against the real code: at G ~= 667 ms, 148 of 240 phases accept. The test passed only
+because the ten granularities it sampled straddled the band (660 ms and 670 ms sit either side). A global
+property resting on sampling luck is precisely the vacuity this campaign exists to remove, and it was newly
+introduced by this diff.
+
+Flat invariance is in fact **unachievable**: a hard threshold on a measurement quantized to the poll quantum
+always leaves a boundary band. The true property is an INTERVAL one and is stronger than what was claimed —
+every G <= 664 ms unanimously accepted, every G >= 668 ms unanimously refused out to 10 s, and the undecided
+band between them **narrower than one poll quantum** (measured 1.1 ms vs a 2.02 ms quantum). The test now
+measures those bounds rather than asserting sampled constants. Also verified by the gate: self-seeding did
+not weaken safety — across 2,398,200 (G, phase) pairs the accept/refuse flips are symmetric quantization
+noise at the threshold (22 one way, 18 the other, all inside [666.7, 667.6] ms), so no band that was
+correctly refused before is accepted now.
+
+**Mutation matrix: 24 of 25 killed, and the one survivor is named below rather than omitted** — the `since_transition` revert, `TRANSITIONS` 3->1 and 3->2, headroom ×3
+-> ×1 and -> ×8, gap clause deleted, `RewriteFailed` no longer aborting, `worst_gap` hardcoded to 0, the
+deadline deleted (killed by hang — which faithfully models production: with the deadline gone, a filesystem
+whose ctime never moves spins forever and the daemon never starts), worst-gap -> last-gap, the verdict's gap
+and seen arguments neutered, the baseline seeded with a sentinel, the baseline counted as a transition, and
+`since_transition` not reset at the baseline (which charges a slow first write — cold cache, allocation,
+journal commit — to the first measured interval and REFUSES a fine filesystem). Six more were added after
+the gate disproved a claim of irreducibility in the I/O adapter: `fidelity_verdict`'s `seen` clause deleted
+and weakened to `>= 1`, the measurement's clock switched to `as_millis()` and `as_micros()`, and the two
+headroom mutations re-checked against the new cut test. The clock-unit pair is the sharpest of the campaign:
+`as_nanos` -> `as_millis` is a one-token edit that makes every measured gap 0, so `gap * 3 <= SETTLE_NS`
+always holds and the probe degenerates into **accept-everything** — including on the 10 s-granularity
+filesystems it exists to refuse — with the whole suite green. It survived because the only assertion on the
+measured value was `observed_ns >= 0`, which is vacuous: `worst_gap_ns` starts at 0 and is a max of
+saturating subtractions, so it cannot be negative. Now bounded on both sides, against measured real-hardware
+values (24.6-47.1 us, so the 1 us floor has ~25x margin).
+
+**The surviving mutant, stated plainly:** the adapter's `Duration::from_nanos` -> `from_millis` inflates the
+poll interval 1e6x and survives, because a fast local filesystem transitions before the first sleep ever
+executes, so no test reaches that line. It is fail-safe — it can only make the probe refuse or stall, never
+wrongly accept — and catching it needs a fault-injecting filesystem. Recorded in HANDOVER with the other two
+adapter-seam survivors rather than written off; an earlier draft of that bullet said "both" when there were
+three, which is why it now says do not restate the list as a count without re-measuring.
+
+**A fourth seam, found after the third review APPROVED and raised back to the gate before committing.** The
+gate's approval rested on "the residual adapter seams can only make the probe refuse or stall, never wrongly
+accept." Enumerating all ten mutable statements in the I/O adapter (the review had sampled the clock, sleep,
+failure-mode and byte statements but not the FIELD it reads) turned up one that survived AND was a
+wrong-accept: `ProbeStep::Ctime(k.ctime_ns)` -> `k.mtime_ns`. On a frozen-ctime filesystem (vfat/exFAT/SMB
+freeze ctime; mtime is live and ~10ms there) it measures the live mtime, ACCEPTS, and enables the skip on
+exactly the backend where `may_skip`'s ctime guard — the only defence against `tar -x`/`rsync -t` mtime
+backdating — is dead. Same shape and severity as the clock-units hazard, which this gate had ruled blocking;
+"never wrongly accept" was false. The gate, re-reviewing, verified the wrong-accept against the code's own
+filesystem model and reversed its own premise.
+
+Closed by backdating the probe file's mtime to a fixed old instant each cycle (best-effort — a `utimensat`
+-less backend must not become a permanent false-refuse). The real probe reads ctime, which still advances on
+the write; a build that read mtime would see it pinned old, never transition, and refuse — so the ordinary
+"passes on a normal filesystem" test now KILLS the `ctime -> mtime` mutation, on any developer's disk,
+without needing a real exFAT volume. It also upgrades the probe from a proxy to the exact threat model:
+"ctime advances on an in-place overwrite even when mtime is pushed backward." Verified: full suite green,
+`observed_ns` 42us (unchanged), mutant D killed.
+
+**122 tests green by default, 141 with `pg,s3`**; clippy 0 warnings on both feature sets; `cargo fmt` clean;
+golden digest unchanged. (O25/O26 reported "110/129" for the same suites; the counts here were verified by
+summing `cargo test` output rather than asserted — a campaign that has shipped six commits describing
+changes absent from their diffs should not be quoting test counts from memory.)
