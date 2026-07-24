@@ -56,6 +56,20 @@ pub enum RequestId {
     Integer(i64),
 }
 
+impl RequestId {
+    /// Parses a JSON-RPC id from a decoded [`Value`]: a string, or a number representable as an
+    /// `i64`. Shared by the server's request dispatcher and the client's response demultiplexer
+    /// so both apply the exact same id-shape rules.
+    #[must_use]
+    pub fn from_json_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::String(value) => Some(Self::String(value.clone())),
+            Value::Number(value) => value.as_i64().map(Self::Integer),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsonRpcRequest<P> {

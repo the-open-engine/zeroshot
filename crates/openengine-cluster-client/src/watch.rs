@@ -11,6 +11,24 @@ use openengine_cluster_server::watch::{
 };
 use openengine_cluster_server::{BackendError, ClusterBackend, Dispatcher};
 
+/// Admits a durable event into a `(runId, cursor)` de-dup set, returning `true` the first time
+/// this pair is seen (updating `last_delivered`) or `false` for a legal at-least-once physical
+/// duplicate redelivery the caller must drop. Shared by [`ReconnectingEventStream::next`]
+/// (in-process) and [`crate::NdjsonReconnectingEventStream::next`] (NDJSON), which otherwise
+/// source events from entirely different transports.
+pub(crate) fn admit_event(
+    seen: &mut HashSet<(RunId, Cursor)>,
+    last_delivered: &mut Option<Cursor>,
+    record: &PublicEventRecord,
+) -> bool {
+    let key = (record.run_id.clone(), record.cursor.clone());
+    if !seen.insert(key) {
+        return false;
+    }
+    *last_delivered = Some(record.cursor.clone());
+    true
+}
+
 /// One item observed by [`ReconnectingEventStream`]: a durable public event not yet seen by this
 /// stream, or a terminal close.
 #[derive(Clone, Debug, PartialEq)]
@@ -99,11 +117,9 @@ impl ReconnectingEventStream {
                     self.subscription_params
                         .run_id
                         .get_or_insert_with(|| record.run_id.clone());
-                    let key = (record.run_id.clone(), record.cursor.clone());
-                    if !self.seen.insert(key) {
+                    if !admit_event(&mut self.seen, &mut self.last_delivered, &record) {
                         continue;
                     }
-                    self.last_delivered = Some(record.cursor.clone());
                     return Some(EventOrClosed::Event(record));
                 }
                 WatchStreamItem::Closed {

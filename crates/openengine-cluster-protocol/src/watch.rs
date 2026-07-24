@@ -15,7 +15,7 @@ pub const SLOW_CONSUMER: &str = "SLOW_CONSUMER";
 /// Default bounded per-subscription live-delivery queue capacity.
 pub const DEFAULT_SUBSCRIPTION_QUEUE_CAPACITY: usize = 1024;
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SubscriptionId(String);
 

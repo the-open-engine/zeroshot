@@ -63,9 +63,7 @@ async fn watch_replays_seeded_history_then_switches_to_live_delivery() {
         AMPLE_CAPACITY,
     ));
     let dispatcher = Dispatcher::new(
-        FixtureBackend {
-            store: Arc::clone(&store),
-        },
+        FixtureBackend::new(Arc::clone(&store)),
         ConnectionContext::default(),
     );
 
@@ -102,9 +100,7 @@ async fn dropping_the_handle_cancels_without_delivering_more_events() {
         AMPLE_CAPACITY,
     ));
     let dispatcher = Dispatcher::new(
-        FixtureBackend {
-            store: Arc::clone(&store),
-        },
+        FixtureBackend::new(Arc::clone(&store)),
         ConnectionContext::default(),
     );
 
@@ -118,9 +114,7 @@ async fn queue_overflow_closes_with_slow_consumer_and_the_last_delivered_cursor(
     let run_id = RunId::new("run-1");
     let store = Arc::new(FixtureStore::new(run_id.clone(), Vec::new(), 1));
     let context = ConnectionContext::default();
-    let backend = FixtureBackend {
-        store: Arc::clone(&store),
-    };
+    let backend = FixtureBackend::new(Arc::clone(&store));
     let (result, mut stream, _handle) = backend
         .watch(&context, WatchParams::default(), AMPLE_CAPACITY)
         .await

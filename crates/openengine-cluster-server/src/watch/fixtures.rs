@@ -4,7 +4,8 @@
 //! `openengine-cluster-client`'s reconnect tests so both exercise identical
 //! subscribe/replay/overflow semantics against one implementation.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,14 +13,48 @@ use openengine_cluster_protocol::{
     ClusterStatus, Cursor, GetParams, GetResult, InitializeParams, InitializeResult, RunId,
     ServerCapabilities, SubscriptionId, WatchEvent, WatchParams, WatchResult,
 };
+use tokio::io::DuplexStream;
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 use super::{
     subscribe_and_stream, ObservationStore, PublicEventRecord, ReplayPageRequest,
     ResolvedSubscription, SubscribeRequest, WatchEventStream, WatchHandle,
 };
 use crate::admission::StoreError;
-use crate::{BackendError, ClusterBackend, ConnectionContext};
+use crate::stdio::serve_ndjson;
+use crate::{BackendError, ClusterBackend, ConnectionContext, Dispatcher};
+
+/// Wires `backend` to a fresh [`serve_ndjson`] task over an in-memory duplex pipe pair, returning
+/// the pipe's client-facing write/read halves and the server task's join handle. Shared by this
+/// crate's own NDJSON multiplexing tests and by `openengine-cluster-client`'s NDJSON reconnect and
+/// cancel tests so both drive the exact same wiring against [`FixtureBackend`].
+pub fn spawn_ndjson<B>(backend: B) -> (DuplexStream, DuplexStream, JoinHandle<io::Result<()>>)
+where
+    B: ClusterBackend,
+{
+    let (client_write, server_read) = tokio::io::duplex(1 << 16);
+    let (server_write, client_read) = tokio::io::duplex(1 << 16);
+    let dispatcher = Dispatcher::new(backend, ConnectionContext::default());
+    let server = tokio::spawn(serve_ndjson(
+        dispatcher,
+        server_read,
+        server_write,
+        tokio::io::sink(),
+    ));
+    (client_write, client_read, server)
+}
+
+/// Awaits a [`spawn_ndjson`] server task's join handle within a short bound, panicking with a
+/// descriptive message if it hangs, panicked, or returned an error. Shared by this crate's own
+/// and `openengine-cluster-client`'s NDJSON tests for asserting deterministic shutdown.
+pub async fn await_ndjson_shutdown(server: JoinHandle<io::Result<()>>) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), server)
+        .await
+        .expect("serve_ndjson task did not terminate within the timeout")
+        .expect("serve_ndjson task panicked")
+        .expect("serve_ndjson task returned an error");
+}
 
 #[derive(Default)]
 struct FixtureState {
@@ -166,6 +201,17 @@ impl ObservationStore for FixtureStore {
 /// status since these fixtures exist only to exercise `watch`.
 pub struct FixtureBackend {
     pub store: Arc<FixtureStore>,
+    next_subscription_id: AtomicU64,
+}
+
+impl FixtureBackend {
+    #[must_use]
+    pub fn new(store: Arc<FixtureStore>) -> Self {
+        Self {
+            store,
+            next_subscription_id: AtomicU64::new(1),
+        }
+    }
 }
 
 #[async_trait]
@@ -200,10 +246,14 @@ impl ClusterBackend for FixtureBackend {
         queue_capacity: usize,
     ) -> Result<(WatchResult, WatchEventStream, WatchHandle), BackendError> {
         let store: Arc<dyn ObservationStore> = Arc::clone(&self.store) as Arc<dyn ObservationStore>;
+        let subscription_id = SubscriptionId::new(format!(
+            "sub-{}",
+            self.next_subscription_id.fetch_add(1, Ordering::Relaxed)
+        ));
         subscribe_and_stream(
             &store,
             super::SubscribeAndStreamRequest {
-                subscription_id: SubscriptionId::new("sub-fixture"),
+                subscription_id,
                 params,
                 queue_capacity,
             },
