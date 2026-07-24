@@ -199,6 +199,10 @@ performance-shaped was worth doing — that was wrong at 100k-file scale):
 - `cross_wave_block_refetch_is_measured_and_bounded` runs on a fixture that produces a SINGLE wave, so it
   cannot observe cross-wave refetch at all — the same vacuity as the one-block fixture it replaced, on a
   different axis. Give it a genuinely multi-wave fixture before trusting it.
+- `CAPWS_ALLOW_SOFT_SHA` (the `sha_backend` opt-out) is presence-only — `=0` and `=` also skip — and under
+  default `cargo test` output the skip prints nothing, so a box with it set would hide a dropped `asm`
+  feature. Blast radius is a silent perf regression, not data loss. Marking the test `ignored` instead
+  would be visible by default.
 - Cosmetic: `tests/materialize_bounds.rs` still mentions `BlockPool` in the present tense inside a
   paragraph about "the previous attempt". Delete it next time that file is touched — this campaign has a
   specific history of comments describing code that does not exist.

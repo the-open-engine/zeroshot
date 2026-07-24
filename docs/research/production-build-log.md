@@ -1052,7 +1052,7 @@ same fixture, digests byte-identical:
 | | software | hardware (`sha2/asm`) |
 |---|--:|--:|
 | publish, 1 GiB | 3.12s | **0.61s (5.1×)** |
-| sha256 throughput | 344 MB/s | **1765 MB/s** |
+| sha256 throughput (whole publish) | 344 MB/s | **1765 MB/s** |
 
 **How to read the earlier entries in this log:** every hash-bound number here (cold publish, the
 publish-width sweeps of O3/O6, the full re-hash cost, cold materialize's verify phase) understates the
@@ -1291,3 +1291,27 @@ recorded **13.00x at 200 blocks**; the real figures are restored.
 **Carried forward as debt, not fixed** (gate-ruled): `cross_wave_block_refetch_is_measured_and_bounded`
 runs on a single-wave fixture and therefore cannot observe cross-wave refetch — the same vacuity as the
 one-block fixture it replaced, on a different axis.
+
+### 2026-07-24 — O25: the headroom clause made live, and the last two claims reconciled
+The gate accepted O24's timer fix (verified: `worst_gap_ns` now tracks real granularity — 101 ms at G=100 ms,
+660 ms at G=660 ms, where it previously pinned at ~20 µs regardless) but caught the same signature defect
+one iteration on: the comment claimed "2x headroom rather than the bare inequality", and ×1 ≡ ×2 at every G.
+Reaching three transitions already requires two full inter-transition intervals inside the deadline, so
+`seen == 3` alone implies G ≲ 1 s and a ×2 test decides nothing.
+
+Set to **×3**, the smallest multiplier that binds. It rejects G > ~666 ms outright, which also removes a
+real operational wart the gate measured: in the band the deadline alone left undecided (660 ms-1 s), the
+SAME filesystem was accepted or rejected **at random across daemon restarts** (85% at 700 ms, 50% at 800 ms,
+22% at 900 ms). Now deterministic. Verified on real hardware by the gate: APFS accepted 5/5, a real 1 s
+-granularity HFS+ volume rejected 8/8.
+
+**The decision is now observable.** The gate found O24's fix shipped with zero coverage — reverting it kept
+109/109 green. `fidelity_verdict` is split out from the I/O and unit-tested, so no coarse-granularity
+filesystem is needed: reverting ×3 to ×2 now fails, because 700 ms passes at ×2 and must not.
+
+Reconciled the last discredited figure: **344 MB/s is a WHOLE-PUBLISH rate** (it includes walking, chunking
+and compressing) and is not comparable to a raw hash loop, which measures ~531 MiB/s software. It survived
+in `Cargo.toml` — labelled "hash throughput", the exact mislabel O24 said it was fixing — and in this log's
+O18 table. Both corrected; `sha_backend`'s floor sits **1.3x** above the raw-loop software rate.
+
+110 tests green by default; clippy 0 warnings on both feature sets; golden digest unchanged.

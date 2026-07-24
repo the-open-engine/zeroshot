@@ -443,6 +443,32 @@ mod tests {
         assert_eq!(before.len(), after.len(), "probe left debris behind");
     }
 
+    // Pins the probe's DECISION, which until now nothing could observe: the previous fix to this logic
+    // could be reverted with the entire suite still green. Driving the verdict directly means no
+    // coarse-granularity filesystem is needed to test it.
+    #[test]
+    fn fidelity_verdict_rejects_coarse_granularity() {
+        // too few transitions seen -> never usable, whatever the gap
+        assert_eq!(fidelity_verdict(2, 3, 1_000), Fidelity::Unusable);
+        // a normal filesystem: microsecond granularity
+        assert!(matches!(
+            fidelity_verdict(3, 3, 20_000),
+            Fidelity::Ok { .. }
+        ));
+        // 300 ms is comfortably safe at a 2 s settle margin and must NOT be refused (x8 would refuse it)
+        assert!(matches!(
+            fidelity_verdict(3, 3, 300_000_000),
+            Fidelity::Ok { .. }
+        ));
+        // 700 ms must be refused. This is the assertion that pins the multiplier: at x2 (or the bare
+        // inequality) 700 ms passes, so weakening it fails here.
+        assert_eq!(fidelity_verdict(3, 3, 700_000_000), Fidelity::Unusable);
+        // the documented data-loss case
+        assert_eq!(fidelity_verdict(3, 3, 1_000_000_000), Fidelity::Unusable);
+        // absurd values saturate toward refusal rather than wrapping into acceptance
+        assert_eq!(fidelity_verdict(3, 3, i64::MAX), Fidelity::Unusable);
+    }
+
     #[test]
     fn fidelity_probe_fails_safe_on_an_unwritable_path() {
         assert_eq!(
@@ -571,11 +597,26 @@ pub fn probe_fidelity(dir: &Path) -> Fidelity {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     cleanup(&probe);
-    // Safety needs G < SETTLE_NS (a write during a scan truncates mtime down by at most G, and the settle
-    // margin has to cover that). Demand 2x headroom rather than the bare inequality. This is deliberately
-    // NOT the 8x an earlier comment claimed: 8x would reject a 300 ms-granularity filesystem that is
-    // comfortably safe at a 2 s margin.
-    if seen == TRANSITIONS && worst_gap_ns.saturating_mul(2) <= SETTLE_NS {
+    fidelity_verdict(seen, TRANSITIONS, worst_gap_ns)
+}
+
+/// The probe's decision, split out from the I/O so it can be tested without a coarse-granularity
+/// filesystem to hand. The previous fix to this logic shipped with NO test able to observe it — reverting
+/// it left the whole suite green — which is the exact failure this codebase keeps repeating.
+///
+/// Safety needs G < `SETTLE_NS`: a write during a scan truncates mtime down by at most G, and the settle
+/// margin has to cover that.
+///
+/// Note what already bounds G before this test: reaching `want` transitions requires two FULL
+/// inter-transition intervals inside the loop's `SETTLE_NS` deadline, so `seen == want` alone implies
+/// G ≲ 1 s. A ×2 test here (G ≤ `SETTLE_NS`/2 = 1 s) is therefore exactly EQUIVALENT to the bare
+/// inequality — it decides nothing, which is precisely what a previous comment here claimed it did. ×3 is
+/// the smallest multiplier that actually binds: it rejects G > ~666 ms outright, which also removes a real
+/// wart — in the band the deadline alone leaves undecided, the SAME filesystem was accepted or rejected at
+/// random across daemon restarts. ×8 would be too strict, refusing a 300 ms filesystem that is comfortably
+/// safe at a 2 s margin.
+fn fidelity_verdict(seen: usize, want: usize, worst_gap_ns: i64) -> Fidelity {
+    if seen == want && worst_gap_ns.saturating_mul(3) <= SETTLE_NS {
         Fidelity::Ok {
             observed_ns: worst_gap_ns,
         }
