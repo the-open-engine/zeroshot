@@ -228,7 +228,7 @@ where
         let Some(id_value) = object.get("id") else {
             return serialize_error(None, INVALID_REQUEST, "Invalid Request", None);
         };
-        let Some(id) = parse_request_id(id_value) else {
+        let Some(id) = RequestId::from_json_value(id_value) else {
             return serialize_error(None, INVALID_REQUEST, "Invalid Request", None);
         };
 
@@ -398,15 +398,7 @@ enum ImplementedMethod {
     Stop,
 }
 
-fn parse_request_id(value: &Value) -> Option<RequestId> {
-    match value {
-        Value::String(value) => Some(RequestId::String(value.clone())),
-        Value::Number(value) => value.as_i64().map(RequestId::Integer),
-        _ => None,
-    }
-}
-
-fn serialize_success<T>(id: RequestId, result: T) -> String
+pub(crate) fn serialize_success<T>(id: RequestId, result: T) -> String
 where
     T: serde::Serialize,
 {
@@ -418,7 +410,7 @@ where
     .expect("protocol response serialization must succeed")
 }
 
-fn serialize_backend_error(id: RequestId, error: BackendError) -> String {
+pub(crate) fn serialize_backend_error(id: RequestId, error: BackendError) -> String {
     let code = if error.code.is_empty() {
         INTERNAL_ERROR_CODE.to_owned()
     } else {
@@ -455,7 +447,7 @@ fn serialize_backend_error(id: RequestId, error: BackendError) -> String {
     }
 }
 
-fn serialize_error(
+pub(crate) fn serialize_error(
     id: Option<RequestId>,
     code: i64,
     message: &str,
