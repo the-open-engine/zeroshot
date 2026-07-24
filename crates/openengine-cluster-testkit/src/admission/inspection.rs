@@ -109,6 +109,7 @@ impl InMemoryAdmissionStore {
                 verified_turns: Vec::new(),
                 void_turns: Vec::new(),
                 pending_failed_frontier: None,
+                pending_retry_turn: None,
             }
         };
     }

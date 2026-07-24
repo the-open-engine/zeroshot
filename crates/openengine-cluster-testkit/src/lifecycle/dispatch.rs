@@ -1,10 +1,13 @@
 //! Per-turn dispatch lease lifecycle: acquire, verified/void/failed completion, and retry.
 
-use openengine_cluster_protocol::{Cursor, DispatchState, Phase, RetryResult, StopMode};
+use openengine_cluster_protocol::{
+    Cursor, DispatchState, NoRetryableFrontierReason, Phase, RetryResult, StopMode,
+};
 use openengine_cluster_server::admission::{CancellationSignal, StoreError};
 use openengine_cluster_server::lifecycle::{
-    CompletionResult, DispatchPermit, FailedCompletion, LeaseId, LifecycleEvent, MutationReceipt,
-    RetryProposal, TurnId, VerifiedCompletion, VerifiedTurn, VoidTurn,
+    CompletionResult, DispatchPermit, FailedCompletion, FailureRetryability, LeaseId,
+    LifecycleEvent, MutationReceipt, RetryProposal, TurnId, VerifiedCompletion, VerifiedTurn,
+    VoidTurn,
 };
 
 use crate::admission::{
@@ -24,18 +27,17 @@ impl StoreState {
         if self.control.phase != Phase::Running || current != DispatchState::Active {
             return Err(StoreError::DispatchDenied { current });
         }
-        let turn_exists = self.leases.values().any(|lease| lease.turn_id == turn_id)
-            || self
-                .lifecycle
-                .verified_turns
-                .iter()
-                .any(|turn| turn.turn_id == turn_id)
-            || self
-                .lifecycle
-                .void_turns
-                .iter()
-                .any(|turn| turn.turn_id == turn_id);
-        if turn_exists {
+        if self
+            .lifecycle
+            .pending_retry_turn
+            .as_ref()
+            .is_some_and(|pending| pending != &turn_id)
+        {
+            return Err(StoreError::SchemaViolation(
+                "a pending retry intent must dispatch before another turn".into(),
+            ));
+        }
+        if self.turn_was_dispatched(&turn_id) {
             return Err(StoreError::SchemaViolation(
                 "turn id has already been dispatched".into(),
             ));
@@ -56,9 +58,14 @@ impl StoreState {
             .expect("active lifecycle metadata exists")
             .in_flight = u32::try_from(self.leases.len())
             .map_err(|_| StoreError::Internal("in-flight count exceeds u32".into()))?;
-        // A fresh dispatch (e.g. an error-successor continuation) supersedes any pending failed
-        // frontier left behind by an earlier failure on a different turn.
-        self.lifecycle.pending_failed_frontier = None;
+        if self.lifecycle.pending_retry_turn.as_ref() == Some(&turn_id) {
+            self.lifecycle.pending_retry_turn = None;
+        } else {
+            // A fresh error-successor dispatch wins the frontier CAS against manual retry.
+            if self.lifecycle.pending_failed_frontier.take().is_some() {
+                self.retryable_history = RetryableHistory::Consumed;
+            }
+        }
         let cursor = self.append_lifecycle(LifecycleEvent::Dispatched {
             turn_id: turn_id.clone(),
         });
@@ -81,30 +88,47 @@ impl StoreState {
         let cursor = self.append_lifecycle(LifecycleEvent::Failed {
             turn_id: lease.turn_id.clone(),
             kind: failure.kind,
+            retryability: failure.retryability,
         });
-        self.lifecycle.pending_failed_frontier = Some(lease.turn_id.clone());
+        match failure.retryability {
+            FailureRetryability::Retryable => {
+                self.lifecycle.pending_failed_frontier = Some(lease.turn_id.clone());
+            }
+            FailureRetryability::AttemptsExhausted => {
+                self.lifecycle.pending_failed_frontier = None;
+                self.retryable_history = RetryableHistory::Exhausted;
+            }
+        }
         let remaining = u32::try_from(self.leases.len())
             .map_err(|_| StoreError::Internal("in-flight count exceeds u32".into()))?;
-        self.lifecycle
-            .operational
-            .as_mut()
-            .ok_or_else(|| StoreError::Internal("lifecycle metadata is absent".into()))?
-            .in_flight = remaining;
+        let draining = {
+            let operational = self
+                .lifecycle
+                .operational
+                .as_mut()
+                .ok_or_else(|| StoreError::Internal("lifecycle metadata is absent".into()))?;
+            operational.in_flight = remaining;
+            operational.dispatch_state == DispatchState::Draining
+        };
+        let terminalized = draining && remaining == 0;
+        if terminalized {
+            self.finish(StopMode::Drain);
+        }
         Ok(CompletionResult {
             turn_id: lease.turn_id,
             at_cursor: cursor,
-            terminalized: false,
+            terminalized,
         })
     }
 
-    fn no_retryable_frontier_reason(&self) -> &'static str {
+    fn no_retryable_frontier_reason(&self) -> NoRetryableFrontierReason {
         if !self.leases.is_empty() {
-            "active"
+            NoRetryableFrontierReason::Active
         } else {
             match self.retryable_history {
-                RetryableHistory::Exhausted => "exhausted",
-                RetryableHistory::Success => "success",
-                RetryableHistory::Consumed => "consumed",
+                RetryableHistory::Exhausted => NoRetryableFrontierReason::Exhausted,
+                RetryableHistory::Success => NoRetryableFrontierReason::Success,
+                RetryableHistory::Consumed => NoRetryableFrontierReason::Consumed,
             }
         }
     }
@@ -130,14 +154,24 @@ impl StoreState {
         if current != DispatchState::Active {
             return Err(StoreError::DispatchDenied { current });
         }
+        if !self.leases.is_empty() {
+            return Err(StoreError::NoRetryableFrontier {
+                reason: NoRetryableFrontierReason::Active,
+            });
+        }
+        if self.lifecycle.pending_retry_turn.is_some() {
+            return Err(StoreError::NoRetryableFrontier {
+                reason: NoRetryableFrontierReason::Consumed,
+            });
+        }
         let Some(failed_turn_id) = self.lifecycle.pending_failed_frontier.clone() else {
             return Err(StoreError::NoRetryableFrontier {
                 reason: self.no_retryable_frontier_reason(),
             });
         };
-        self.next_retry_turn += 1;
-        let retry_turn_id = TurnId::new(format!("retry-{}", self.next_retry_turn));
+        let retry_turn_id = self.next_retry_turn_id();
         self.lifecycle.pending_failed_frontier = None;
+        self.lifecycle.pending_retry_turn = Some(retry_turn_id.clone());
         self.retryable_history = RetryableHistory::Consumed;
         let cursor = self.append_lifecycle(LifecycleEvent::Retried {
             failed_turn_id: failed_turn_id.clone(),
@@ -150,6 +184,29 @@ impl StoreState {
             MutationReceipt::Retry(result.clone()),
         );
         Ok(result)
+    }
+
+    fn turn_was_dispatched(&self, turn_id: &TurnId) -> bool {
+        self.lifecycle.records.iter().any(|record| {
+            matches!(
+                &record.event,
+                LifecycleEvent::Dispatched {
+                    turn_id: dispatched
+                } if dispatched == turn_id
+            )
+        })
+    }
+
+    fn next_retry_turn_id(&mut self) -> TurnId {
+        loop {
+            self.next_retry_turn += 1;
+            let candidate = TurnId::new(format!("retry-{}", self.next_retry_turn));
+            if !self.turn_was_dispatched(&candidate)
+                && self.lifecycle.pending_retry_turn.as_ref() != Some(&candidate)
+            {
+                return candidate;
+            }
+        }
     }
 
     fn replay_retry(&self, proposal: &RetryProposal) -> Result<Option<RetryResult>, StoreError> {

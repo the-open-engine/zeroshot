@@ -7,7 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ApplyResult, ClusterStatus, CompiledGraphIr, Cursor, DispatchState, Generation,
-    GraphDiagnostic, GraphSpec, IdempotencyKey, Phase, RequestFingerprint, RunId,
+    GraphDiagnostic, GraphSpec, IdempotencyKey, NoRetryableFrontierReason, Phase,
+    RequestFingerprint, RunId,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -201,7 +202,7 @@ pub enum StoreError {
     #[error("run history was deleted")]
     RunGone { tombstoned_at: Option<Cursor> },
     #[error("no retryable failed frontier is pending: {reason}")]
-    NoRetryableFrontier { reason: &'static str },
+    NoRetryableFrontier { reason: NoRetryableFrontierReason },
 }
 
 /// Logical durable control-journal view.

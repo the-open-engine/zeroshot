@@ -3,7 +3,7 @@
 use openengine_cluster_protocol::{
     Generation, IdempotencyKey, RetryParams, StopMode, StopParams, TurnFailureKind, UpdateParams,
 };
-use openengine_cluster_server::lifecycle::{FailedCompletion, LeaseId};
+use openengine_cluster_server::lifecycle::{FailedCompletion, FailureRetryability, LeaseId};
 
 #[must_use]
 pub fn suspend(generation: u64, key: &str) -> UpdateParams {
@@ -44,9 +44,23 @@ pub fn retry(generation: u64, key: &str) -> RetryParams {
 
 #[must_use]
 pub fn fail(kind: TurnFailureKind, lease_id: &str) -> FailedCompletion {
+    failed_completion(kind, lease_id, FailureRetryability::Retryable)
+}
+
+#[must_use]
+pub fn fail_exhausted(kind: TurnFailureKind, lease_id: &str) -> FailedCompletion {
+    failed_completion(kind, lease_id, FailureRetryability::AttemptsExhausted)
+}
+
+fn failed_completion(
+    kind: TurnFailureKind,
+    lease_id: &str,
+    retryability: FailureRetryability,
+) -> FailedCompletion {
     FailedCompletion {
         lease_id: LeaseId::new(lease_id),
         kind,
+        retryability,
     }
 }
 

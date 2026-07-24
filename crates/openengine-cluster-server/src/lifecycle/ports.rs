@@ -62,10 +62,17 @@ pub struct VerifiedCompletion {
     pub output: Value,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailureRetryability {
+    Retryable,
+    AttemptsExhausted,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FailedCompletion {
     pub lease_id: LeaseId,
     pub kind: TurnFailureKind,
+    pub retryability: FailureRetryability,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +127,7 @@ pub enum LifecycleEvent {
     Failed {
         turn_id: TurnId,
         kind: TurnFailureKind,
+        retryability: FailureRetryability,
     },
     Retried {
         failed_turn_id: TurnId,
@@ -135,6 +143,7 @@ pub struct LifecycleSnapshot {
     pub verified_turns: Vec<VerifiedTurn>,
     pub void_turns: Vec<VoidTurn>,
     pub pending_failed_frontier: Option<TurnId>,
+    pub pending_retry_turn: Option<TurnId>,
 }
 
 impl LifecycleSnapshot {
