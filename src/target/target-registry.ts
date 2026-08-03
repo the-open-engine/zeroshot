@@ -1,6 +1,18 @@
 import crypto from 'node:crypto';
 import type { TargetDiscoveryDescriptor } from './discovery.js';
 
+export type RuntimeValueSource = string | { readonly from: string };
+
+export interface HostedRuntimeConfig {
+  readonly provider: string;
+  readonly model?: string;
+  readonly command?: string;
+  readonly setupCommand?: string;
+  readonly environment: Readonly<Record<string, RuntimeValueSource>>;
+  readonly files: Readonly<Record<string, RuntimeValueSource>>;
+  readonly settings: Readonly<Record<string, unknown>>;
+}
+
 export interface TargetRecord {
   readonly id: string;
   readonly url: string;
@@ -8,6 +20,7 @@ export interface TargetRecord {
   readonly deviceToken: string;
   readonly organization?: { readonly id: string; readonly name?: string };
   readonly refreshInvalidated?: true;
+  readonly runtime?: HostedRuntimeConfig;
   readonly createdAt: string;
 }
 
@@ -101,7 +114,8 @@ export function addTarget(
   name: string,
   rawUrl: string,
   settings: SettingsPort,
-  descriptor: TargetDiscoveryDescriptor
+  descriptor: TargetDiscoveryDescriptor,
+  runtime?: HostedRuntimeConfig
 ): TargetRecord {
   validateTargetName(name);
   const url = normalizeAndValidateUrl(rawUrl);
@@ -119,6 +133,7 @@ export function addTarget(
     url,
     adapterVersion: `v${descriptor.adapter.majorVersion}`,
     deviceToken: crypto.randomUUID(),
+    ...(runtime === undefined ? {} : { runtime }),
     createdAt: new Date().toISOString(),
   };
 

@@ -134,6 +134,28 @@ describe('addTarget', () => {
     assert.equal(loaded._targets?.['staging']?.url, 'https://api.example.com');
   });
 
+  it('persists an opaque hosted runtime when supplied', () => {
+    const settings = makeSettingsPort();
+    const origin = 'https://api.example.com';
+    const runtime = {
+      provider: 'openrouter',
+      model: 'openai/gpt-5',
+      environment: { OPENROUTER_API_KEY: { from: 'OPENROUTER_API_KEY' } },
+      files: {},
+      settings: {},
+    };
+    const record = addTarget(
+      'staging',
+      origin,
+      settings,
+      makeDiscoveryEndpoints(origin).descriptor,
+      runtime
+    );
+
+    assert.deepEqual(record.runtime, runtime);
+    assert.deepEqual(getTarget('staging', settings)?.runtime, runtime);
+  });
+
   it('rejects a descriptor from another authority before settings mutation', () => {
     const settings = makeSettingsPort();
     assert.throws(

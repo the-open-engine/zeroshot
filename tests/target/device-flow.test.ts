@@ -146,6 +146,24 @@ describe('pollForToken', () => {
 
 describe('pollForToken retry state', () => {
 
+  it('adds device identity only when the target requires it', async () => {
+    const http = new FakeHttpTransport();
+    const clock = new FakeClock(0);
+    enqueueToken(http, {
+      access_token: 'access-123',
+      refresh_token: 'refresh-456',
+    });
+
+    await poll(http, {
+      clock,
+      exchange: { token: 'stable-device-token', label: 'Zeroshot CLI' },
+    });
+
+    const body = new URLSearchParams(http.requests[0]!.body ?? '');
+    assert.equal(body.get('device_token'), 'stable-device-token');
+    assert.equal(body.get('device_label'), 'Zeroshot CLI');
+  });
+
   it('continues polling on authorization_pending', async () => {
     const http = new FakeHttpTransport();
     const clock = new FakeClock(0);

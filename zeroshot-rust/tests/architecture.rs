@@ -153,6 +153,7 @@ fn workspace_metadata_preserves_package_lib_and_bin_identity() {
         })
         .collect::<BTreeSet<_>>();
     for required in [
+        ("zeroshot-oecp-server".to_owned(), "bin".to_owned()),
         ("zeroshot-rust".to_owned(), "bin".to_owned()),
         ("zeroshot_engine".to_owned(), "lib".to_owned()),
         ("admission_manifest".to_owned(), "test".to_owned()),
@@ -211,6 +212,7 @@ fn workspace_metadata_preserves_package_lib_and_bin_identity() {
             .cloned()
             .collect::<BTreeSet<_>>(),
         BTreeSet::from([
+            ("zeroshot-oecp-server".to_owned(), "bin".to_owned()),
             ("zeroshot-rust".to_owned(), "bin".to_owned()),
             ("zeroshot_engine".to_owned(), "lib".to_owned()),
         ]),
@@ -448,6 +450,7 @@ fn product_modules_require_issue_authorization() {
             "admission_manifest.rs",
             "artifact_store",
             "artifact_store.rs",
+            "bin",
             "cluster_ledger",
             "cluster_ledger.rs",
             "daemon_auth.rs",
@@ -458,6 +461,8 @@ fn product_modules_require_issue_authorization() {
             "fault",
             "fault.rs",
             "full_v1_reducer.rs",
+            "hosted_oecp",
+            "hosted_oecp.rs",
             "issue_provider",
             "issue_provider.rs",
             "lib.rs",

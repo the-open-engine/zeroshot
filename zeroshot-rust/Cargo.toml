@@ -14,8 +14,13 @@ path = "src/lib.rs"
 name = "zeroshot-rust"
 path = "src/main.rs"
 
+[[bin]]
+name = "zeroshot-oecp-server"
+path = "src/bin/zeroshot-oecp-server.rs"
+
 [dependencies]
 async-trait.workspace = true
+axum.workspace = true
 fs2.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
@@ -30,6 +35,7 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [

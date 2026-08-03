@@ -37,6 +37,8 @@ export {
   TargetUrlInvalidError,
   type TargetRecord,
   type SettingsPort,
+  type HostedRuntimeConfig,
+  type RuntimeValueSource,
 } from './target-registry.js';
 
 export {

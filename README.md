@@ -116,6 +116,103 @@ zeroshot cmdproof check <id>    # reuse a verified command result
 
 </details>
 
+## Hosted capsule runs
+
+Named Zero Cloud targets use the same issue, file, stdin, and prompt inputs as local runs. Login
+uses the device flow and stores only the rotating refresh token in the OS credential service. The
+CLI resolves a target's provider runtime for each run and uploads it under the short-lived capsule
+access grant. A runtime can select any provider supported by local Zeroshot and can carry arbitrary
+environment variables, settings, files, a setup command, and an executable wrapper.
+
+Create a target runtime JSON file. String environment and text-file values are literal;
+`{"from":"X"}` reads an environment variable or local text file when the run starts. Local file
+references are anchored to the runtime JSON's directory. Relative destination paths are
+materialized below the capsule's private home directory. `setupCommand` runs once after those files
+are installed. `command` is optional and provides a fallback wrapper for the executable expected by
+the selected provider when that executable is not already available from the setup or base image.
+
+Treat runtime configuration as trusted executable configuration. `setupCommand`, `command`, and
+the selected harness can disclose the credentials available to their process just as a local
+harness can. They do not gain access to another capsule through this mechanism.
+
+For example, Claude Code through OpenRouter can be configured as:
+
+```json
+{
+  "provider": "claude",
+  "model": "sonnet",
+  "setupCommand": "npm install --global --prefix \"$HOME/.local\" @anthropic-ai/claude-code@2.1.220",
+  "environment": {
+    "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+    "ANTHROPIC_AUTH_TOKEN": { "from": "OPENROUTER_API_KEY" },
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "~anthropic/claude-sonnet-latest",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "~anthropic/claude-sonnet-latest",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "~anthropic/claude-sonnet-latest",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "~anthropic/claude-sonnet-latest"
+  },
+  "files": {},
+  "settings": {}
+}
+```
+
+A Codex runtime can instead supply its ordinary local configuration without any capsule-side
+OpenRouter knowledge:
+
+```json
+{
+  "provider": "codex",
+  "model": "gpt-5.4",
+  "setupCommand": "npm install --global --prefix \"$HOME/.local\" @openai/codex@0.146.0",
+  "environment": {
+    "OPENROUTER_API_KEY": { "from": "OPENROUTER_API_KEY" },
+    "CODEX_HOME": "/workspace/.zeroshot-runtime/.codex"
+  },
+  "files": {
+    ".codex/config.toml": { "from": "~/.codex/config.toml" }
+  },
+  "settings": {}
+}
+```
+
+The bundled `gateway` provider needs no harness installation and can target any compatible OpenAI
+or Anthropic endpoint through `providerSettings.gateway`.
+
+```bash
+zeroshot target add production --url https://cloud.example \
+  --runtime-config ~/.zeroshot/cloud/claude-openrouter.json
+zeroshot target login production
+
+export GH_TOKEN=...                 # optional when `gh auth token` works
+export OPENROUTER_API_KEY=...
+zeroshot run org/repo#123 --target production --pr
+```
+
+`--provider` and `--model` override the target runtime's defaults. A provider override does not
+inherit the original provider's model or executable wrapper, but it still uses that target's setup
+command, environment, and files. Use separate named targets when harnesses need different runtime
+configuration. Only the selected provider's explicit settings are uploaded; unrelated local
+Zeroshot settings are not copied. Environment and file mappings are resolved afresh for every run,
+so the CLI remains authoritative. Literal environment, file, and settings values are accepted
+intentionally. `HOME`, `PATH`, `TMPDIR`, Git/GitHub authentication variables, and Zeroshot's hosted
+control variables are reserved so runtime configuration cannot replace capsule isolation or
+repository authentication.
+
+Targets created without `--runtime-config` remain readable and usable for login and target
+management, but cannot start capsule runs. Remove and re-add them with runtime configuration first.
+
+`--size tiny|small|standard|large` selects the capsule tier; it is optional and defaults to
+`standard`.
+
+`--pr` runs in an isolated worktree, pushes the implementation branch, creates a pull request for
+human review, verifies that GitHub reports it, and prints the pull request URL. Without `--pr`, the
+hosted run does not push repository changes.
+
+For one-shot non-interactive automation, `ZEROSHOT_TARGET_REFRESH_TOKEN` supplies a process-only
+login and is never written to the target metadata file. Because Zero Cloud rotates refresh tokens,
+repeat runs should use the persistent Secret Service login rather than reusing that environment
+value.
+
 ## Providers and backends
 
 Zeroshot shells out to provider CLIs; it stores no API keys and manages no auth. Pick a default and override per run.

@@ -102,6 +102,7 @@ const {
 const { checkBinDirOnPath, printPathWarning } = require('../lib/path-check');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
 const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
+const { runHosted } = require('./hosted/run');
 
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Prevent silent process death
@@ -2681,6 +2682,9 @@ program
   .option('--workers <n>', 'Max sub-agents for worker to spawn in parallel', parseInt)
   .option('--provider <provider>', `Override all agents to use a provider (${PROVIDER_CHOICES})`)
   .option('--model <model>', 'Override all agent models (provider-specific model id)')
+  .option('--target <name>', 'Run in a capsule on a named Zero Cloud target')
+  .option('--size <tier>', 'Capsule size: tiny, small, standard, or large (default: standard)')
+  .option('--repository <owner/name>', 'GitHub repository for a hosted prompt or numeric issue')
   .option(
     '--sim <mode>',
     'Token-free simulation gate for templates (off|fast|deep). Default: fast',
@@ -2736,6 +2740,13 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
   )
   .action(async (inputArg, options) => {
     try {
+      if (options.target) {
+        await runHosted(inputArg, options);
+        return;
+      }
+      if (options.size !== undefined) {
+        throw new Error('--size requires --target');
+      }
       // Normalize options (--ship → --pr → --worktree flags)
       normalizeRunOptions(options);
 
@@ -4495,7 +4506,180 @@ settingsCmd.action(() => {
   formatSettingsList(settings, true);
 });
 
-// Hosted target commands intentionally are not registered on the stable CLI.
+// Target modules are compiled during install/package preparation for the Node 18+ CLI.
+const importTarget = (mod) => import(`../lib/target/${mod}.js`);
+const targetCmd = program.command('target').description('Manage named remote targets');
+
+targetCmd
+  .command('add <name>')
+  .description('Register a named remote target')
+  .requiredOption('--url <url>', 'Service URL for the target')
+  .option('--runtime-config <file>', 'Trusted hosted runtime JSON for capsule runs')
+  .action(async (name, options) => {
+    try {
+      const { addTarget } = await importTarget('target-registry');
+      const { discoverTarget } = await importTarget('discovery');
+      const runtime = options.runtimeConfig
+        ? require('./hosted/runtime-config').readRuntimeConfig(options.runtimeConfig)
+        : undefined;
+      const settingsPort = {
+        load: () => loadSettings(),
+        mutate: (fn) => mutateSettings(fn),
+      };
+      const http = { fetch: (url, init) => fetch(url, init) };
+      const descriptor = await discoverTarget(options.url, http);
+      const record = addTarget(name, options.url, settingsPort, descriptor, runtime);
+      console.log(chalk.green(`✓ Target "${name}" added (${record.url})`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd
+  .command('login <name>')
+  .description('Authenticate with a remote target via device login')
+  .action(async (name) => {
+    try {
+      const { getTarget } = await importTarget('target-registry');
+      const { targetLogin } = await importTarget('target-session');
+      const { KeyringCredentialStore } = await importTarget('credential-store');
+      const { acquireTargetLock } = await importTarget('credential-lock');
+      const { discoverTargetSessionEndpoints } = await importTarget('discovery');
+      const settingsPort = {
+        load: () => loadSettings(),
+        mutate: (fn) => mutateSettings(fn),
+      };
+      const target = getTarget(name, settingsPort);
+      if (!target) throw new Error(`Target "${name}" not found.`);
+
+      const http = { fetch: (url, init) => fetch(url, init) };
+      const discoveryEndpoints = await discoverTargetSessionEndpoints(target.url, http);
+      const credentialStore = await KeyringCredentialStore.create();
+      const openPkg = await import('open');
+      const browserOpen = openPkg.default || openPkg;
+      const result = await targetLogin(
+        name,
+        target,
+        credentialStore,
+        () => acquireTargetLock(target.id),
+        settingsPort,
+        {
+          http,
+          clock: { now: () => Date.now() },
+          browserOpener: { open: async (url) => browserOpen(url) },
+          stderr: process.stderr,
+          discoveryEndpoints,
+        }
+      );
+      const organization = result.organization.name || result.organization.id;
+      console.log(chalk.green(`✓ Logged in to "${name}" (organization: ${organization})`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd
+  .command('list')
+  .description('List registered remote targets')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const { listTargets } = await importTarget('target-registry');
+      const settingsPort = {
+        load: () => loadSettings(),
+        mutate: (fn) => mutateSettings(fn),
+      };
+      const targets = listTargets(settingsPort);
+      if (options.json) {
+        const output = targets.map(({ name, record }) => ({
+          name,
+          id: record.id,
+          url: record.url,
+          organization: record.organization ?? null,
+          loggedIn: false,
+          runtimeConfigured: record.runtime !== undefined,
+          createdAt: record.createdAt,
+        }));
+        try {
+          const { KeyringCredentialStore, targetServiceKey, TARGET_ACCOUNT } =
+            await importTarget('credential-store');
+          const store = await KeyringCredentialStore.create();
+          for (const item of output) {
+            const matchingTarget = targets.find((target) => target.name === item.name);
+            if (matchingTarget) {
+              item.loggedIn =
+                (await store.get(targetServiceKey(matchingTarget.record.id), TARGET_ACCOUNT)) !==
+                null;
+            }
+          }
+        } catch {
+          // Keyring availability is optional for listing targets.
+        }
+        console.log(JSON.stringify(output, null, 2));
+        return;
+      }
+      if (targets.length === 0) {
+        console.log(
+          chalk.dim(
+            'No targets registered. Use `zeroshot target add <name> --url <url>` to add one.'
+          )
+        );
+        return;
+      }
+      for (const { name, record } of targets) {
+        const orgName = record.organization?.name || record.organization?.id;
+        const organization = orgName ? ` (org: ${orgName})` : '';
+        console.log(`  ${chalk.bold(name)}  ${record.url}${organization}`);
+      }
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd
+  .command('remove <name>')
+  .description('Remove a named remote target')
+  .option('--force', 'Remove even if remote revocation fails')
+  .action(async (name, options) => {
+    try {
+      const { getTarget, removeTarget } = await importTarget('target-registry');
+      const { revokeAndCleanup } = await importTarget('target-session');
+      const { acquireTargetLock } = await importTarget('credential-lock');
+      const { discoverTargetSessionEndpoints } = await importTarget('discovery');
+      const settingsPort = {
+        load: () => loadSettings(),
+        mutate: (fn) => mutateSettings(fn),
+      };
+      const target = getTarget(name, settingsPort);
+      if (!target) throw new Error(`Target "${name}" not found.`);
+      try {
+        const { KeyringCredentialStore } = await importTarget('credential-store');
+        const credentialStore = await KeyringCredentialStore.create();
+        const http = { fetch: (url, init) => fetch(url, init) };
+        const discoveryEndpoints = await discoverTargetSessionEndpoints(target.url, http);
+        await revokeAndCleanup(
+          target,
+          credentialStore,
+          () => acquireTargetLock(target.id),
+          { http, discoveryEndpoints, settings: settingsPort, targetName: name },
+          !!options.force
+        );
+      } catch (error) {
+        if (!options.force) throw error;
+      }
+      removeTarget(name, settingsPort);
+      console.log(chalk.green(`✓ Target "${name}" removed`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd.action(() => targetCmd.help());
+
 // Providers management
 const providersCmd = program.command('providers').description('Manage AI providers');
 providersCmd.action(async () => {
