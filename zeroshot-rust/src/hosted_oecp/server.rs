@@ -31,6 +31,7 @@ use tokio_tungstenite::{
 use super::{
     backend::HostedBackend,
     credentials::{router as credential_router, CREDENTIAL_PORT},
+    run_intent::router as run_intent_router,
 };
 
 pub const OECP_PORT: u16 = 8_083;
@@ -51,8 +52,9 @@ where
 {
     let credential_listener =
         TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, CREDENTIAL_PORT))).await?;
-    let credential_server =
-        axum::serve(credential_listener, credential_router(Arc::clone(&backend))).into_future();
+    let control_router =
+        credential_router(Arc::clone(&backend)).merge(run_intent_router(Arc::clone(&backend)));
+    let credential_server = axum::serve(credential_listener, control_router).into_future();
     tokio::pin!(credential_server);
     let capacity = Arc::new(Semaphore::new(ACTIVE_CONNECTION_CAPACITY));
     let mut connections = JoinSet::new();

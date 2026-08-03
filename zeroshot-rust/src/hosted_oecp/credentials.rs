@@ -120,7 +120,7 @@ pub struct CredentialBundle {
 }
 
 impl CredentialBundle {
-    fn validate(&self) -> Result<(), &'static str> {
+    pub(super) fn validate(&self) -> Result<(), &'static str> {
         if self.github_token.expose().trim().is_empty() || self.github_token.expose().len() > 4_096
         {
             return Err("githubToken must be nonempty and at most 4096 bytes");

@@ -7,6 +7,7 @@
 mod backend;
 mod credentials;
 mod journal;
+mod run_intent;
 mod server;
 mod worker;
 

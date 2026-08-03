@@ -3,6 +3,8 @@
 const { loadSettings, mutateSettings } = require('../../lib/settings');
 
 const PROCESS_REFRESH_TOKEN_ENV = 'ZEROSHOT_TARGET_REFRESH_TOKEN';
+const PROCESS_ACCESS_TOKEN_ENV = 'ZEROSHOT_TARGET_ACCESS_TOKEN';
+const PROCESS_ORGANIZATION_ENV = 'ZEROSHOT_TARGET_ORGANIZATION';
 
 class ProcessRefreshTokenStore {
   #token;
@@ -56,6 +58,25 @@ function defaultSettingsPort() {
   };
 }
 
+function processAccessAuthority(environment) {
+  const accessToken = environment[PROCESS_ACCESS_TOKEN_ENV]?.trim();
+  const organization = environment[PROCESS_ORGANIZATION_ENV]?.trim();
+  if ((accessToken && !organization) || (!accessToken && organization)) {
+    throw new Error(
+      `${PROCESS_ACCESS_TOKEN_ENV} and ${PROCESS_ORGANIZATION_ENV} must be provided together`
+    );
+  }
+  return accessToken ? { accessToken, organization } : null;
+}
+
+function credentialStoreFor(runtime, environment, processAccess) {
+  if (processAccess) return null;
+  const processRefreshToken = environment[PROCESS_REFRESH_TOKEN_ENV];
+  return typeof processRefreshToken === 'string' && processRefreshToken.trim()
+    ? new ProcessRefreshTokenStore(processRefreshToken)
+    : runtime.KeyringCredentialStore.create();
+}
+
 async function createHostedTargetSession(targetName, options = {}) {
   const environment = options.environment || process.env;
   const runtime = options.runtime || loadTargetRuntime();
@@ -70,17 +91,17 @@ async function createHostedTargetSession(targetName, options = {}) {
 
   const http = options.http || { fetch: (url, init) => fetch(url, init) };
   const discoveryEndpoints = await runtime.discoverTargetSessionEndpoints(target.url, http);
-  const processRefreshToken = environment[PROCESS_REFRESH_TOKEN_ENV];
-  const credentialStore =
-    typeof processRefreshToken === 'string' && processRefreshToken.trim()
-      ? new ProcessRefreshTokenStore(processRefreshToken)
-      : await runtime.KeyringCredentialStore.create();
+  const processAccess = processAccessAuthority(environment);
+  const credentialStore = await credentialStoreFor(runtime, environment, processAccess);
 
   return {
     endpoint: target.url,
-    organization: target.organization?.id || null,
+    organization: processAccess?.organization || target.organization?.id || null,
     runtime: target.runtime || null,
     refresh() {
+      if (processAccess) {
+        return Promise.resolve({ accessToken: processAccess.accessToken, expiresIn: 0 });
+      }
       return runtime.refreshAccessToken(
         targetName,
         target,
@@ -93,6 +114,8 @@ async function createHostedTargetSession(targetName, options = {}) {
 }
 
 module.exports = {
+  PROCESS_ACCESS_TOKEN_ENV,
+  PROCESS_ORGANIZATION_ENV,
   PROCESS_REFRESH_TOKEN_ENV,
   ProcessRefreshTokenStore,
   createHostedTargetSession,

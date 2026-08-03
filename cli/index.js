@@ -102,7 +102,7 @@ const {
 const { checkBinDirOnPath, printPathWarning } = require('../lib/path-check');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
 const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
-const { runHosted } = require('./hosted/run');
+const { cancelHostedRun, runHosted, statusHostedRun } = require('./hosted/run-intent');
 
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Prevent silent process death
@@ -2685,6 +2685,7 @@ program
   .option('--target <name>', 'Run in a capsule on a named Zero Cloud target')
   .option('--size <tier>', 'Capsule size: tiny, small, standard, or large (default: standard)')
   .option('--repository <owner/name>', 'GitHub repository for a hosted prompt or numeric issue')
+  .option('--submission-key <uuid>', 'Idempotency key for recovering a hosted submission')
   .option(
     '--sim <mode>',
     'Token-free simulation gate for templates (off|fast|deep). Default: fast',
@@ -2746,6 +2747,9 @@ Force provider flags: -G (GitHub), -L (GitLab), -J (Jira), -D (DevOps), -N (Line
       }
       if (options.size !== undefined) {
         throw new Error('--size requires --target');
+      }
+      if (options.submissionKey !== undefined) {
+        throw new Error('--submission-key requires --target');
       }
       // Normalize options (--ship → --pr → --worktree flags)
       normalizeRunOptions(options);
@@ -4574,6 +4578,31 @@ targetCmd
       );
       const organization = result.organization.name || result.organization.id;
       console.log(chalk.green(`✓ Logged in to "${name}" (organization: ${organization})`));
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd
+  .command('status <name> <intent>')
+  .description('Read or follow a queued hosted run')
+  .option('--follow', 'Follow until the run reaches a terminal state')
+  .action(async (name, intent, options) => {
+    try {
+      await statusHostedRun(name, intent, !!options.follow);
+    } catch (error) {
+      console.error(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+targetCmd
+  .command('cancel <name> <intent>')
+  .description('Cancel a queued or active hosted run')
+  .action(async (name, intent) => {
+    try {
+      await cancelHostedRun(name, intent);
     } catch (error) {
       console.error(chalk.red(error.message));
       process.exit(1);

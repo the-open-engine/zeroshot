@@ -56,6 +56,33 @@ describe('hosted target CLI', function () {
     assert.equal(await store.get(), null);
   });
 
+  it('uses paired process access authority without opening the keyring', async function () {
+    const session = await createHostedTargetSession('local', {
+      environment: {
+        ZEROSHOT_TARGET_ACCESS_TOKEN: 'access-token',
+        ZEROSHOT_TARGET_ORGANIZATION: '019f7437-8701-71e3-a056-2ba05c37609c',
+      },
+      runtime: {
+        getTarget: () => ({
+          id: 'target-id',
+          url: 'http://127.0.0.1:8080',
+          runtime: runtimeConfig(),
+        }),
+        discoverTargetSessionEndpoints: () => Promise.resolve({}),
+        KeyringCredentialStore: {
+          create: () => {
+            throw new Error('process access authority must not open the keyring');
+          },
+        },
+      },
+      settingsPort: { load: () => ({}), mutate() {} },
+      http: { fetch: () => Promise.reject(new Error('unused')) },
+    });
+
+    assert.equal(session.organization, '019f7437-8701-71e3-a056-2ba05c37609c');
+    assert.deepEqual(await session.refresh(), { accessToken: 'access-token', expiresIn: 0 });
+  });
+
   it('uses upstream target metadata and session rotation for hosted capsule authority', async function () {
     const environment = { ZEROSHOT_TARGET_REFRESH_TOKEN: 'process-refresh' };
     const target = {
