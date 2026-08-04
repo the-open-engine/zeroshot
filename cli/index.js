@@ -4571,7 +4571,7 @@ targetCmd
         {
           http,
           clock: { now: () => Date.now() },
-          browserOpener: { open: async (url) => browserOpen(url) },
+          browserOpener: { open: (url) => browserOpen(url) },
           stderr: process.stderr,
           discoveryEndpoints,
         }
