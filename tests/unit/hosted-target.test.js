@@ -8,12 +8,11 @@ const { describe, it } = require('mocha');
 
 const {
   credentialsForRun,
-  graph,
   issueInput,
   resolveInput,
   validateHostedOptions,
-  websocketUrl,
-} = require('../../cli/hosted/run');
+} = require('../../cli/hosted/contract');
+const { graph, websocketUrl } = require('../../cli/hosted/direct-transport');
 const { normalizeRuntimeConfig, readRuntimeConfig } = require('../../cli/hosted/runtime-config');
 const {
   ProcessRefreshTokenStore,

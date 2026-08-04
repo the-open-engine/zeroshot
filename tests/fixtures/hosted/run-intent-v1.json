@@ -1,0 +1,57 @@
+{
+  "envelope": {
+    "version": "zeroshot.run-intent/v1",
+    "credentials": {
+      "githubToken": "github-test-token",
+      "repository": "the-open-engine/zeroshot",
+      "runtime": {
+        "provider": "gemini",
+        "executable": "gemini",
+        "model": "gemini-2.5-pro",
+        "environment": {
+          "GEMINI_API_KEY": "model-test-token"
+        },
+        "files": {},
+        "settings": {
+          "defaultProvider": "gemini",
+          "providerSettings": {
+            "gemini": {}
+          }
+        }
+      }
+    },
+    "request": {
+      "source": "prompt",
+      "prompt": "exercise the durable queue",
+      "artifacts": [],
+      "isolationProfile": "isolation.worktree@1",
+      "providerProfile": "provider.hosted@1"
+    }
+  },
+  "runtimeResponses": {
+    "running": {
+      "status": 202,
+      "body": {
+        "state": "running"
+      }
+    },
+    "succeeded": {
+      "status": 200,
+      "body": {
+        "state": "succeeded",
+        "result": {
+          "summary": "Task completed.",
+          "status": "succeeded",
+          "artifacts": []
+        }
+      }
+    },
+    "failed": {
+      "status": 422,
+      "body": {
+        "state": "failed",
+        "error_code": "worker_failed"
+      }
+    }
+  }
+}

@@ -102,7 +102,7 @@ const {
 const { checkBinDirOnPath, printPathWarning } = require('../lib/path-check');
 const { StatusFooter, AGENT_STATE, ACTIVE_STATES } = require('../src/status-footer');
 const { EVENT_COPY, formatMergeStatus } = require('./event-copy');
-const { cancelHostedRun, runHosted, statusHostedRun } = require('./hosted/run-intent');
+const { cancelHostedRun, runHosted, statusHostedRun } = require('./hosted/run');
 
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Prevent silent process death

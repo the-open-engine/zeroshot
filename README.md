@@ -120,9 +120,12 @@ zeroshot cmdproof check <id>    # reuse a verified command result
 
 Named Zero Cloud targets use the same issue, file, stdin, and prompt inputs as local runs. Login
 uses the device flow and stores only the rotating refresh token in the OS credential service. The
-CLI resolves a target's provider runtime for each run and uploads it under the short-lived capsule
-access grant. A runtime can select any provider supported by local Zeroshot and can carry arbitrary
-environment variables, settings, files, a setup command, and an executable wrapper.
+CLI resolves a target's provider runtime for each run and submits it inside a versioned opaque
+RunIntent. Zero Cloud durably queues the encrypted payload, admits it when entitlement is
+available, provisions the capsule, and forwards it to the in-capsule Zeroshot server. The CLI may
+disconnect without cancelling; `zeroshot target status <target> <intent> --follow` reconnects to
+the durable run. A runtime can select any provider supported by local Zeroshot and can carry
+arbitrary environment variables, settings, files, a setup command, and an executable wrapper.
 
 Create a target runtime JSON file. String environment and text-file values are literal;
 `{"from":"X"}` reads an environment variable or local text file when the run starts. Local file
@@ -187,6 +190,10 @@ export GH_TOKEN=...                 # optional when `gh auth token` works
 export OPENROUTER_API_KEY=...
 zeroshot run org/repo#123 --target production --pr
 ```
+
+Use `--detach` to return after the queue accepts the run. The CLI prints the intent ID and exact
+status command needed to reconnect. `zeroshot target cancel <target> <intent>` requests
+cancellation independently of any attached CLI process.
 
 `--provider` and `--model` override the target runtime's defaults. A provider override does not
 inherit the original provider's model or executable wrapper, but it still uses that target's setup

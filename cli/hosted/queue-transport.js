@@ -2,12 +2,15 @@
 
 const crypto = require('node:crypto');
 
+const {
+  MAX_RUN_INTENT_BYTES,
+  buildHostedRun,
+  runIntentEnvelope,
+  validateHostedOptions,
+} = require('./contract');
 const { HostedHttpError, request } = require('./http');
-const { credentialsForRun, resolveInput, validateHostedOptions } = require('./run');
-const { createHostedTargetSession } = require('./target-session');
+const { createHostedTargetSession, organizationFromToken } = require('./target-session');
 
-const RUN_INTENT_VERSION = 'zeroshot.run-intent/v1';
-const MAX_RUN_INTENT_BYTES = 10 * 1024 * 1024 + 64 * 1024;
 const RUN_INTENT_POLL_MS = 500;
 const TERMINAL_STATES = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
 const RUN_INTENT_STATES = new Set([
@@ -24,29 +27,11 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function validateHostedQueueOptions(options) {
+function validateOptions(options) {
   validateHostedOptions({ ...options, detach: undefined });
   if (options.submissionKey !== undefined && !SUBMISSION_KEY.test(options.submissionKey)) {
     throw new Error('hosted runs require --submission-key to be a random UUID');
   }
-}
-
-function organizationFromToken(token, expectedOrganization = null) {
-  const segments = token.split('.');
-  if (segments.length !== 3) throw new Error('Zero Cloud returned an invalid access token');
-  let claims;
-  try {
-    claims = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
-  } catch {
-    throw new Error('Zero Cloud returned an invalid access token');
-  }
-  if (typeof claims.org_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(claims.org_id)) {
-    throw new Error('target login is not bound to an organization');
-  }
-  if (expectedOrganization && claims.org_id !== expectedOrganization) {
-    throw new Error('target login organization does not match the configured target');
-  }
-  return expectedOrganization || claims.org_id;
 }
 
 function isObject(value) {
@@ -102,14 +87,6 @@ async function runIntentRequest(context, suffix, options = {}) {
   return validateRunIntent((await send()).body);
 }
 
-function runIntentEnvelope(credentials, requestInput) {
-  return {
-    version: RUN_INTENT_VERSION,
-    credentials,
-    request: requestInput,
-  };
-}
-
 function displayState(intent) {
   return intent.waiting_reason ? `${intent.state} (${intent.waiting_reason})` : intent.state;
 }
@@ -140,16 +117,15 @@ async function follow(context, initial) {
   throw new Error(`hosted run ${intent.state}${detail}`);
 }
 
-async function runHosted(input, options) {
-  validateHostedQueueOptions(options);
+async function run(input, options) {
+  validateOptions(options);
   const targetSession = await createHostedTargetSession(options.target);
-  const resolved = await resolveInput(input, options);
-  const credentials = credentialsForRun(resolved, targetSession.runtime, options);
+  const hostedRun = await buildHostedRun(input, targetSession.runtime, options);
   const context = await createContext(options.target, targetSession);
   const body = {
     label: 'zeroshot-cli',
     size: options.size || 'standard',
-    intent: runIntentEnvelope(credentials, resolved.request),
+    intent: runIntentEnvelope(hostedRun.credentials, hostedRun.request),
   };
   if (Buffer.byteLength(JSON.stringify(body)) > MAX_RUN_INTENT_BYTES) {
     throw new Error('hosted run intent exceeds the 10 MiB upload limit');
@@ -178,7 +154,7 @@ async function runHosted(input, options) {
   return follow(context, created);
 }
 
-async function statusHostedRun(targetName, intentId, shouldFollow) {
+async function status(targetName, intentId, shouldFollow) {
   if (!UUID.test(intentId)) throw new Error('run intent id must be a UUID');
   const context = await createContext(targetName);
   const intent = await runIntentRequest(context, `/${encodeURIComponent(intentId)}`);
@@ -193,7 +169,7 @@ async function statusHostedRun(targetName, intentId, shouldFollow) {
   return follow(context, intent);
 }
 
-async function cancelHostedRun(targetName, intentId) {
+async function cancel(targetName, intentId) {
   if (!UUID.test(intentId)) throw new Error('run intent id must be a UUID');
   const context = await createContext(targetName);
   const intent = await runIntentRequest(context, `/${encodeURIComponent(intentId)}`, {
@@ -204,10 +180,11 @@ async function cancelHostedRun(targetName, intentId) {
   return intent;
 }
 
-module.exports = {
-  cancelHostedRun,
-  runHosted,
-  runIntentEnvelope,
-  statusHostedRun,
-  validateHostedQueueOptions,
-};
+module.exports = Object.freeze({
+  kind: 'queue',
+  cancel,
+  run,
+  status,
+  validateOptions,
+  validateRunIntent,
+});

@@ -32,6 +32,7 @@ use super::{
     backend::HostedBackend,
     credentials::{router as credential_router, CREDENTIAL_PORT},
     run_intent::router as run_intent_router,
+    run_intent_executor::{HostedRunIntentExecutor, RunIntentExecutor},
 };
 
 pub const OECP_PORT: u16 = 8_083;
@@ -52,8 +53,9 @@ where
 {
     let credential_listener =
         TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, CREDENTIAL_PORT))).await?;
-    let control_router =
-        credential_router(Arc::clone(&backend)).merge(run_intent_router(Arc::clone(&backend)));
+    let executor: Arc<dyn RunIntentExecutor> =
+        Arc::new(HostedRunIntentExecutor::new(Arc::clone(&backend)));
+    let control_router = credential_router(Arc::clone(&backend)).merge(run_intent_router(executor));
     let credential_server = axum::serve(credential_listener, control_router).into_future();
     tokio::pin!(credential_server);
     let capacity = Arc::new(Semaphore::new(ACTIVE_CONNECTION_CAPACITY));

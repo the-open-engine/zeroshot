@@ -14,8 +14,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::{
-    backend::{HostedBackend, RunIntentIdentity, RunIntentLookup, RunIntentStatus},
     credentials::CredentialBundle,
+    run_intent_executor::{
+        RunIntentExecutor, RunIntentIdentity, RunIntentLookup, RunIntentStatus, RunIntentSubmission,
+    },
 };
 
 pub(super) const MAX_RUN_INTENT_BYTES: usize = 10 * 1_024 * 1_024 + 64 * 1_024;
@@ -31,18 +33,18 @@ struct RunIntent {
     request: LegacyShipRequest,
 }
 
-pub(super) fn router(backend: Arc<HostedBackend>) -> Router {
+pub(super) fn router(executor: Arc<dyn RunIntentExecutor>) -> Router {
     Router::new()
         .route(
             "/internal/run-intents/{intent_id}",
             put(put_run_intent).get(get_run_intent),
         )
         .layer(DefaultBodyLimit::max(MAX_RUN_INTENT_BYTES))
-        .with_state(backend)
+        .with_state(executor)
 }
 
 async fn put_run_intent(
-    State(backend): State<Arc<HostedBackend>>,
+    State(executor): State<Arc<dyn RunIntentExecutor>>,
     Path(intent_id): Path<String>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
@@ -55,8 +57,12 @@ async fn put_run_intent(
         Ok(intent) => intent,
         Err((status, code)) => return error_response(status, code),
     };
-    match backend
-        .submit_run_intent(identity, intent.credentials, intent.request)
+    match executor
+        .submit(RunIntentSubmission::new(
+            identity,
+            intent.credentials,
+            intent.request,
+        ))
         .await
     {
         Ok(status) => status_response(status),
@@ -97,7 +103,7 @@ fn decode_run_intent(
 }
 
 async fn get_run_intent(
-    State(backend): State<Arc<HostedBackend>>,
+    State(executor): State<Arc<dyn RunIntentExecutor>>,
     Path(intent_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
@@ -107,7 +113,8 @@ async fn get_run_intent(
     let Some(digest) = intent_digest(&headers) else {
         return error_response(StatusCode::BAD_REQUEST, "invalid_digest");
     };
-    match backend.get_run_intent(&intent_id, &digest).await {
+    let identity = RunIntentIdentity::new(intent_id, digest);
+    match executor.lookup(&identity).await {
         RunIntentLookup::Found(status) => status_response(status),
         RunIntentLookup::NotFound => error_response(StatusCode::NOT_FOUND, "intent_not_found"),
         RunIntentLookup::Conflict => error_response(StatusCode::CONFLICT, "intent_conflict"),
@@ -184,38 +191,44 @@ fn canonical_uuid(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
 
+    use async_trait::async_trait;
     use axum::body::to_bytes;
     use axum::http::HeaderValue;
     use serde_json::json;
 
     use super::*;
 
+    #[derive(Default)]
+    struct FakeExecutor {
+        submitted: AtomicBool,
+    }
+
+    #[async_trait]
+    impl RunIntentExecutor for FakeExecutor {
+        async fn submit(&self, _submission: RunIntentSubmission) -> Result<RunIntentStatus, ()> {
+            self.submitted.store(true, Ordering::SeqCst);
+            Ok(RunIntentStatus::Running)
+        }
+
+        async fn lookup(&self, _identity: &RunIntentIdentity) -> RunIntentLookup {
+            RunIntentLookup::NotFound
+        }
+    }
+
+    fn golden() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../tests/fixtures/hosted/run-intent-v1.json"
+        ))
+        .expect("golden fixture is JSON")
+    }
+
     fn generic_intent() -> Value {
-        json!({
-            "version": RUN_INTENT_VERSION,
-            "credentials": {
-                "githubToken": "github",
-                "repository": "the-open-engine/zeroshot",
-                "runtime": {
-                    "provider": "gemini",
-                    "executable": "gemini",
-                    "model": "gemini-2.5-pro",
-                    "command": "npx --yes @google/gemini-cli",
-                    "environment": {"GOOGLE_API_KEY": "provider-secret"},
-                    "files": {".config/harness.json": "{\"enabled\":true}"},
-                    "settings": {"defaultProvider": "gemini"}
-                }
-            },
-            "request": {
-                "source": "prompt",
-                "prompt": "ship it",
-                "artifacts": [],
-                "isolationProfile": "isolation.worktree@1",
-                "providerProfile": "provider.hosted@1"
-            }
-        })
+        golden()["envelope"].clone()
     }
 
     #[test]
@@ -234,6 +247,41 @@ mod tests {
             .expect("fixture is an object")
             .insert("graph".to_owned(), Value::Null);
         assert!(serde_json::from_value::<RunIntent>(open).is_err());
+    }
+
+    #[tokio::test]
+    async fn internal_status_responses_match_the_shared_golden_contract() {
+        let fixture = golden();
+        let cases = [
+            (
+                RunIntentStatus::Running,
+                fixture["runtimeResponses"]["running"].clone(),
+            ),
+            (
+                RunIntentStatus::Succeeded(
+                    fixture["runtimeResponses"]["succeeded"]["body"]["result"].clone(),
+                ),
+                fixture["runtimeResponses"]["succeeded"].clone(),
+            ),
+            (
+                RunIntentStatus::Failed("worker_failed"),
+                fixture["runtimeResponses"]["failed"].clone(),
+            ),
+        ];
+        for (status, expected) in cases {
+            let response = status_response(status);
+            assert_eq!(
+                u64::from(response.status().as_u16()),
+                expected["status"].as_u64().expect("golden HTTP status")
+            );
+            let body = to_bytes(response.into_body(), MAX_RUN_INTENT_BYTES)
+                .await
+                .expect("bounded response body");
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).expect("response is JSON"),
+                expected["body"]
+            );
+        }
     }
 
     #[test]
@@ -256,7 +304,8 @@ mod tests {
 
     #[tokio::test]
     async fn endpoint_errors_are_bounded_json_and_do_not_reserve_a_run() {
-        let backend = Arc::new(HostedBackend::new());
+        let fake = Arc::new(FakeExecutor::default());
+        let executor: Arc<dyn RunIntentExecutor> = fake.clone();
         let intent_id = "019f7437-8701-71e3-a056-2ba05c37609c";
         let body = Bytes::from_static(br#"{"version":"unknown"}"#);
         let digest = digest_bytes(&body);
@@ -267,7 +316,7 @@ mod tests {
         );
 
         let invalid = put_run_intent(
-            State(Arc::clone(&backend)),
+            State(Arc::clone(&executor)),
             Path(intent_id.to_owned()),
             headers.clone(),
             Ok(body),
@@ -282,16 +331,8 @@ mod tests {
             json!({"state": "failed", "error_code": "invalid_run_intent"})
         );
 
-        let missing = get_run_intent(
-            State(Arc::clone(&backend)),
-            Path(intent_id.to_owned()),
-            headers,
-        )
-        .await;
+        let missing = get_run_intent(State(executor), Path(intent_id.to_owned()), headers).await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
-        assert_eq!(
-            backend.get_run_intent(intent_id, &digest).await,
-            RunIntentLookup::NotFound
-        );
+        assert!(!fake.submitted.load(Ordering::SeqCst));
     }
 }

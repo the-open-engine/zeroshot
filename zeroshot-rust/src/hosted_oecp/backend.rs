@@ -10,13 +10,12 @@ use openengine_cluster_protocol::{
     legacy_ship_request_payload_type, legacy_ship_result_payload_type, ApplyParams, ApplyResult,
     ClusterStatus, Cursor, DiagnosticSeverity, DispatchState, Generation, GetParams, GetResult,
     GraphDiagnostic, GraphDiagnosticCode, GraphNode, GraphProfile, GraphProfileSet, GraphSpec,
-    IdempotencyKey, InitializeParams, InitializeResult, Labels, LegacyShipRequest,
-    LegacyShipResult, LegacyShipStatus, LogLevel, NodeAddress, NonEmptyVec, OperationalStatus,
-    Phase, PlanParams, PlanResult, PositiveInteger, RunId, ServerCapabilities, StopParams,
-    StopResult, StructuralBounds, SubscriptionId, TerminationWitness, WatchEvent, WatchParams,
-    WatchResult, WorkerDescriptor, WorkerErrorCode, WorkerOutcome, WorkerRef, GENERATION_CONFLICT,
-    GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, INVALID_PHASE, RUN_CONFLICT,
-    SCHEMA_VIOLATION,
+    InitializeParams, InitializeResult, Labels, LegacyShipRequest, LegacyShipResult, LogLevel,
+    NodeAddress, NonEmptyVec, OperationalStatus, Phase, PlanParams, PlanResult, PositiveInteger,
+    RunId, ServerCapabilities, StopParams, StopResult, StructuralBounds, SubscriptionId,
+    TerminationWitness, WatchEvent, WatchParams, WatchResult, WorkerDescriptor, WorkerErrorCode,
+    WorkerOutcome, WorkerRef, GENERATION_CONFLICT, GRAPH_INVALID, IDEMPOTENCY_REUSE,
+    INTERNAL_ERROR_CODE, INVALID_PHASE, RUN_CONFLICT, SCHEMA_VIOLATION,
 };
 use openengine_cluster_server::{
     watch::{
@@ -27,12 +26,11 @@ use openengine_cluster_server::{
     BackendError, ClusterBackend, ConnectionContext,
 };
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 
 use super::{
     credentials::{CredentialBundle, CredentialSlot},
     journal::EventJournal,
-    run_intent::MAX_RUN_INTENT_BYTES,
     worker::{WorkerClient, WorkerError},
 };
 
@@ -67,7 +65,6 @@ struct HostedState {
     stop_receipt: Option<(StopParams, StopResult)>,
     worker: Option<Arc<WorkerClient>>,
     finished: bool,
-    run_intent: Option<RunIntentRecord>,
 }
 
 impl Default for HostedState {
@@ -84,52 +81,8 @@ impl Default for HostedState {
             stop_receipt: None,
             worker: None,
             finished: false,
-            run_intent: None,
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum RunIntentStatus {
-    Running,
-    Succeeded(Value),
-    Failed(&'static str),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct RunIntentIdentity {
-    intent_id: String,
-    digest: String,
-}
-
-impl RunIntentIdentity {
-    pub(super) fn new(intent_id: String, digest: String) -> Self {
-        Self { intent_id, digest }
-    }
-
-    pub(super) fn digest(&self) -> &str {
-        &self.digest
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct RunIntentRecord {
-    identity: RunIntentIdentity,
-    status: RunIntentStatus,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum RunIntentReservation {
-    Reserved,
-    Existing(RunIntentStatus),
-    Conflict,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum RunIntentLookup {
-    Found(RunIntentStatus),
-    NotFound,
-    Conflict,
 }
 
 #[derive(Clone)]
@@ -138,16 +91,19 @@ pub struct HostedBackend {
     credentials: CredentialSlot,
     journal: Arc<EventJournal>,
     next_subscription: Arc<AtomicU64>,
+    completion: watch::Sender<Option<WorkerOutcome>>,
 }
 
 impl HostedBackend {
     #[must_use]
     pub fn new() -> Self {
+        let (completion, _receiver) = watch::channel(None);
         Self {
             state: Arc::new(Mutex::new(HostedState::default())),
             credentials: CredentialSlot::default(),
             journal: Arc::new(EventJournal::new()),
             next_subscription: Arc::new(AtomicU64::new(1)),
+            completion,
         }
     }
 
@@ -163,90 +119,28 @@ impl HostedBackend {
         Ok(())
     }
 
-    pub(super) async fn submit_run_intent(
-        &self,
-        identity: RunIntentIdentity,
-        credentials: CredentialBundle,
-        request: LegacyShipRequest,
-    ) -> Result<RunIntentStatus, ()> {
-        match self.reserve_run_intent(identity.clone()).await {
-            RunIntentReservation::Existing(status) => Ok(status),
-            RunIntentReservation::Conflict => Err(()),
-            RunIntentReservation::Reserved => {
-                let backend = self.clone();
-                tokio::spawn(async move {
-                    backend
-                        .execute_run_intent(identity, credentials, request)
-                        .await;
-                });
-                Ok(RunIntentStatus::Running)
-            }
-        }
-    }
-
-    pub(super) async fn get_run_intent(&self, intent_id: &str, digest: &str) -> RunIntentLookup {
-        let state = self.state.lock().await;
-        let Some(record) = &state.run_intent else {
-            return RunIntentLookup::NotFound;
-        };
-        if record.identity.intent_id != intent_id {
-            return RunIntentLookup::NotFound;
-        }
-        if record.identity.digest != digest {
-            return RunIntentLookup::Conflict;
-        }
-        RunIntentLookup::Found(record.status.clone())
-    }
-
-    async fn reserve_run_intent(&self, identity: RunIntentIdentity) -> RunIntentReservation {
+    pub(super) async fn reserve_internal_admission(&self) -> Result<(), ()> {
         let mut state = self.state.lock().await;
-        if let Some(record) = &state.run_intent {
-            return if record.identity == identity {
-                RunIntentReservation::Existing(record.status.clone())
-            } else {
-                RunIntentReservation::Conflict
-            };
-        }
         if state.phase != Phase::Empty
             || state.committed.is_some()
             || self.credentials.lock().await.is_some()
         {
-            return RunIntentReservation::Conflict;
+            return Err(());
         }
         state.phase = Phase::Admitting;
-        state.run_intent = Some(RunIntentRecord {
-            identity,
-            status: RunIntentStatus::Running,
-        });
-        RunIntentReservation::Reserved
+        Ok(())
     }
 
-    async fn execute_run_intent(
-        &self,
-        identity: RunIntentIdentity,
-        credentials: CredentialBundle,
-        request: LegacyShipRequest,
-    ) {
-        let result = match run_intent_apply_params(&identity.intent_id, request) {
-            Ok(params) => self.begin_run(params, &credentials).await,
-            Err(error) => Err(error),
-        };
-        if result.is_err() {
-            self.fail_run_intent(&identity, "worker_start_failed").await;
-        }
+    pub(super) fn subscribe_completion(&self) -> watch::Receiver<Option<WorkerOutcome>> {
+        self.completion.subscribe()
     }
 
-    async fn fail_run_intent(&self, identity: &RunIntentIdentity, error_code: &'static str) {
+    pub(super) async fn fail_reserved_admission(&self) {
         let mut state = self.state.lock().await;
-        let Some(record) = state.run_intent.as_mut() else {
-            return;
-        };
-        if &record.identity != identity || !matches!(record.status, RunIntentStatus::Running) {
-            return;
+        if state.phase == Phase::Admitting {
+            state.phase = Phase::Finished;
+            state.finished = true;
         }
-        record.status = RunIntentStatus::Failed(error_code);
-        state.phase = Phase::Finished;
-        state.finished = true;
     }
 
     pub async fn shutdown(&self) {
@@ -305,7 +199,7 @@ impl HostedBackend {
 
     async fn settle(&self, receipt: Result<Value, WorkerError>) {
         let outcome = worker_outcome(receipt);
-        let intent_status = run_intent_status(&outcome);
+        let completed = outcome.clone();
         let (run_id, node) = {
             let mut state = self.state.lock().await;
             if state.finished {
@@ -314,9 +208,6 @@ impl HostedBackend {
             state.finished = true;
             state.phase = Phase::Finished;
             state.worker = None;
-            if let Some(record) = state.run_intent.as_mut() {
-                record.status = intent_status;
-            }
             let Some(run_id) = state.run_id.clone() else {
                 return;
             };
@@ -345,6 +236,7 @@ impl HostedBackend {
             },
         )
         .await;
+        self.completion.send_replace(Some(completed));
     }
 
     async fn status(&self) -> ClusterStatus {
@@ -352,7 +244,7 @@ impl HostedBackend {
         status_from(&state)
     }
 
-    async fn begin_run(
+    pub(super) async fn begin_reserved_run(
         &self,
         params: ApplyParams,
         credentials: &CredentialBundle,
@@ -567,7 +459,7 @@ impl ClusterBackend for HostedBackend {
             )
         });
         match credentials {
-            Ok(credentials) => match self.begin_run(params, &credentials).await {
+            Ok(credentials) => match self.begin_reserved_run(params, &credentials).await {
                 Ok(result) => Ok(result),
                 Err(error) => {
                     self.state.lock().await.phase = Phase::Empty;
@@ -792,66 +684,6 @@ fn new_run_id() -> RunId {
         .as_millis();
     let sequence = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
     RunId::new(format!("hosted-{time:x}-{sequence:x}"))
-}
-
-fn run_intent_apply_params(
-    intent_id: &str,
-    request: LegacyShipRequest,
-) -> Result<ApplyParams, BackendError> {
-    let input = serde_json::to_value(request)
-        .map_err(|error| BackendError::new(INTERNAL_ERROR_CODE, error.to_string()))?;
-    Ok(ApplyParams {
-        graph: intent_graph()?,
-        input: Some(input),
-        dry_run: false,
-        if_generation: Some(Generation::new(0).expect("zero is a safe generation")),
-        idempotency_key: Some(
-            IdempotencyKey::new(format!("run-intent:{intent_id}"))
-                .map_err(|error| BackendError::new(INTERNAL_ERROR_CODE, error))?,
-        ),
-    })
-}
-
-fn intent_graph() -> Result<GraphSpec, BackendError> {
-    serde_json::from_value(json!({
-        "profile": "openengine.graph.single-worker/v1",
-        "initialInput": legacy_ship_request_payload_type(),
-        "policy": { "policy": "policy.strict@1", "default": "deny" },
-        "root": {
-            "kind": "step",
-            "name": "zeroshot",
-            "worker": "legacy.zeroshot.ship@1",
-            "input": legacy_ship_request_payload_type(),
-            "output": legacy_ship_result_payload_type(),
-            "inputBindings": [],
-            "writeBindings": [],
-            "timeoutMs": 3_600_000,
-            "attempts": 1
-        }
-    }))
-    .map_err(|error| BackendError::new(INTERNAL_ERROR_CODE, error.to_string()))
-}
-
-fn run_intent_status(outcome: &WorkerOutcome) -> RunIntentStatus {
-    match outcome {
-        WorkerOutcome::Verified { output, .. } => {
-            let Ok(result) = serde_json::from_value::<LegacyShipResult>(output.clone()) else {
-                return RunIntentStatus::Failed("malformed_result");
-            };
-            if result.status == LegacyShipStatus::Failed {
-                return RunIntentStatus::Failed("worker_failed");
-            }
-            let response = json!({ "state": "succeeded", "result": output });
-            if serde_json::to_vec(&response).is_ok_and(|bytes| bytes.len() <= MAX_RUN_INTENT_BYTES)
-            {
-                RunIntentStatus::Succeeded(output.clone())
-            } else {
-                RunIntentStatus::Failed("result_too_large")
-            }
-        }
-        WorkerOutcome::Verifier { .. } => RunIntentStatus::Failed("verification_failed"),
-        WorkerOutcome::Error { code, .. } => RunIntentStatus::Failed(code.as_str()),
-    }
 }
 
 fn legacy_descriptor() -> Result<WorkerDescriptor, serde_json::Error> {

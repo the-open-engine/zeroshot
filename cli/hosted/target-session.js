@@ -69,6 +69,24 @@ function processAccessAuthority(environment) {
   return accessToken ? { accessToken, organization } : null;
 }
 
+function organizationFromToken(token, expectedOrganization = null) {
+  const segments = token.split('.');
+  if (segments.length !== 3) throw new Error('Zero Cloud returned an invalid access token');
+  let claims;
+  try {
+    claims = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('Zero Cloud returned an invalid access token');
+  }
+  if (typeof claims.org_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(claims.org_id)) {
+    throw new Error('target login is not bound to an organization');
+  }
+  if (expectedOrganization && claims.org_id !== expectedOrganization) {
+    throw new Error('target login organization does not match the configured target');
+  }
+  return expectedOrganization || claims.org_id;
+}
+
 function credentialStoreFor(runtime, environment, processAccess) {
   if (processAccess) return null;
   const processRefreshToken = environment[PROCESS_REFRESH_TOKEN_ENV];
@@ -120,4 +138,5 @@ module.exports = {
   ProcessRefreshTokenStore,
   createHostedTargetSession,
   loadTargetRuntime,
+  organizationFromToken,
 };

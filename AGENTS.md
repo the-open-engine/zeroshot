@@ -741,6 +741,18 @@ Agent A -> publish() -> SQLite Ledger -> LogicEngine -> trigger match -> Agent B
 single-worker run and the child `zeroshot-cluster-worker`; it never allocates, bills, stops, or
 terminates the capsule. Zero Cloud owns that lifecycle outside OECP.
 
+Hosted CLI construction belongs in `cli/hosted/contract.js`; it must not depend on a transport.
+`cli/hosted/run.js` selects one explicit adapter from `queue-transport.js` or
+`direct-transport.js`. Transport adapters may consume the shared contract but must not import one
+another. Queue is the default product path; the direct OECP adapter remains an independently
+replaceable diagnostic path.
+
+The internal RunIntent HTTP router depends only on `RunIntentExecutor`. The
+`HostedRunIntentExecutor` wrapper owns intent identity, idempotency, and terminal projection;
+`HostedBackend` owns only OECP admission and execution state. Keep the versioned envelope and
+runtime response examples synchronized through `tests/fixtures/hosted/run-intent-v1.json`, which
+is consumed by both JavaScript and Rust tests.
+
 The public OECP protocol carries graph/input data only. A separate capsule-access-authorized
 upload installs the CLI-resolved GitHub credential and generic Zeroshot runtime bundle once. The
 bundle may contain any provider supported by the local registry, an executable wrapper, setup
