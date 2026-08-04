@@ -22,9 +22,13 @@ FROM node@sha256:c2cc26d8f991c2db236ad51a61efee843c482372d6d22570787309d51169411
 RUN apk add --no-cache build-base python3
 WORKDIR /opt/zeroshot
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
-    && npm rebuild better-sqlite3 node-pty
+RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY . .
+RUN npm run build:agent-cli-provider \
+    && npm run build:cluster \
+    && npm run build:target \
+    && npm prune --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm rebuild better-sqlite3 node-pty
 
 FROM node@sha256:c2cc26d8f991c2db236ad51a61efee843c482372d6d22570787309d511694110 AS runtime
 ARG ZEROSHOT_MIN_DISK_GB=10

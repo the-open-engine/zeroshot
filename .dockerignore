@@ -4,4 +4,6 @@ coverage
 node_modules
 target
 **/target
+!src/target
+!src/target/**
 *.log
