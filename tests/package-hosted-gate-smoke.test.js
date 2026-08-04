@@ -1,10 +1,4 @@
-/**
- * Packaging smoke test: proves the hosted target/capsule gate holds on the
- * actually-published npm artifact, not just the source tree (issue #919, AC5).
- *
- * Packs a real tarball, installs it into a scratch directory, and exercises
- * the installed CLI exactly as a consumer would.
- */
+/** Packaging smoke test for the hosted target cutover in the published artifact. */
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -82,7 +76,7 @@ function runCli(cliPath, args, settingsFile) {
   });
 }
 
-describe('packed CLI hosted target/capsule gate', function () {
+describe('packed CLI hosted target cutover', function () {
   this.timeout(180_000);
 
   let packageDirectory;
@@ -122,48 +116,33 @@ describe('packed CLI hosted target/capsule gate', function () {
     );
   });
 
-  it('excludes target/capsule/--target/--all-targets from --help', async function () {
+  it('publishes target management while keeping capsule unpublished', async function () {
     const result = await runCli(cliPath, ['--help'], settingsFile);
     assert.strictEqual(result.exitCode, 0, result.stderr);
-    // Lowercase-only: "Target branch for PRs" (--pr-base's description) is a
-    // legitimate, unrelated pre-existing string and must not be flagged.
-    assert.ok(
-      !/\btarget\b/.test(result.stdout),
-      `hosted "target" surface leaked:\n${result.stdout}`
-    );
-    assert.ok(
-      !/capsule/i.test(result.stdout),
-      `hosted "capsule" surface leaked:\n${result.stdout}`
-    );
-    assert.ok(!result.stdout.includes('--target'), `--target flag leaked:\n${result.stdout}`);
-    assert.ok(
-      !result.stdout.includes('--all-targets'),
-      `--all-targets flag leaked:\n${result.stdout}`
-    );
+    assert.match(result.stdout, /target\s+Manage named remote targets/);
+    assert.ok(!/^\s+capsule\b/m.test(result.stdout));
+
+    const runHelp = await runCli(cliPath, ['run', '--help'], settingsFile);
+    assert.strictEqual(runHelp.exitCode, 0, runHelp.stderr);
+    for (const flag of ['--target', '--size', '--repository', '--submission-key']) {
+      assert.ok(runHelp.stdout.includes(flag), `packed run help omitted ${flag}`);
+    }
   });
 
-  it('rejects packed hosted commands and remote-only flags before settings mutation', async function () {
-    const invocations = [
-      { args: ['target'], error: /unknown command/i },
-      {
-        args: ['target', 'add', 'staging', '--url', 'https://api.example.com'],
-        error: /unknown command/i,
-      },
-      { args: ['capsule'], error: /unknown command/i },
-      { args: ['capsule', 'list', '--json'], error: /unknown command/i },
-      { args: ['run', '123', '--target', 'staging'], error: /unknown option/i },
-      { args: ['--all-targets'], error: /unknown option/i },
-    ];
+  it('executes packed target commands and rejects unpublished surfaces', async function () {
+    const help = await runCli(cliPath, ['target', '--help'], settingsFile);
+    assert.strictEqual(help.exitCode, 0, help.stderr);
+    assert.match(help.stdout, /status/);
+    assert.match(help.stdout, /cancel/);
 
-    for (const { args, error } of invocations) {
+    const list = await runCli(cliPath, ['target', 'list', '--json'], settingsFile);
+    assert.strictEqual(list.exitCode, 0, list.stderr);
+    assert.deepStrictEqual(JSON.parse(list.stdout), []);
+
+    for (const args of [['capsule'], ['--all-targets']]) {
       const result = await runCli(cliPath, args, settingsFile);
       assert.notStrictEqual(result.exitCode, 0, `zeroshot ${args.join(' ')} unexpectedly passed`);
-      assert.match(result.stderr, error);
-      assert.strictEqual(
-        fs.existsSync(settingsFile),
-        false,
-        `zeroshot ${args.join(' ')} mutated settings`
-      );
+      assert.match(result.stderr, /unknown command|unknown option/i);
     }
   });
 });

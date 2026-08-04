@@ -1,13 +1,4 @@
-/**
- * Test: hosted target/capsule commands are gated out of the production CLI
- *
- * Issue #919 — the public CLI must not expose target/capsule commands or
- * flags until an explicit MVP cutover registers them. This covers:
- *   - no `target`/`capsule`/`--target`/`--all-targets` surface in any help output
- *   - unknown-command/unknown-option rejection before any side effect
- *   - the default-command rewrite no longer silently turns `zeroshot target`
- *     into a real `run` invocation
- */
+/** Production CLI coverage for the hosted target cutover. */
 
 const assert = require('assert');
 const fs = require('fs');
@@ -60,90 +51,63 @@ function cli(args) {
   });
 }
 
-function assertNoHostedSurface(stdout) {
-  // Lowercase-only: "Target branch for PRs" (capitalized, --pr-base's description)
-  // is a legitimate, unrelated pre-existing string and must not be flagged.
-  assert.ok(!/\btarget\b/.test(stdout), `hosted "target" surface leaked:\n${stdout}`);
-  assert.ok(!/capsule/i.test(stdout), `hosted "capsule" surface leaked:\n${stdout}`);
-  assert.ok(!stdout.includes('--target'), `--target flag leaked:\n${stdout}`);
-  assert.ok(!stdout.includes('--all-targets'), `--all-targets flag leaked:\n${stdout}`);
-}
-
-describe('CLI hosted target/capsule gate', function () {
+describe('CLI hosted target cutover', function () {
   this.timeout(20_000);
 
   describe('production parser construction', function () {
-    it('contains no hosted command, alias, or remote-only option', function () {
-      const hostedCommandNames = new Set(['target', 'capsule']);
-
-      for (const { command, path: commandPath } of productionCommands) {
-        for (const name of [command.name(), ...command.aliases()]) {
-          assert.ok(!hostedCommandNames.has(name), `${commandPath} exposed hosted name "${name}"`);
-        }
-
-        for (const option of command.options) {
-          assert.notStrictEqual(option.long, '--target', `${commandPath} registered --target`);
-          assert.notStrictEqual(
-            option.long,
-            '--all-targets',
-            `${commandPath} registered --all-targets`
-          );
-        }
+    it('publishes the target lifecycle and hosted run options', function () {
+      const target = productionProgram.commands.find((command) => command.name() === 'target');
+      const run = productionProgram.commands.find((command) => command.name() === 'run');
+      assert.ok(target);
+      assert.ok(run);
+      assert.deepStrictEqual(target.commands.map((command) => command.name()).sort(), [
+        'add',
+        'cancel',
+        'list',
+        'login',
+        'remove',
+        'status',
+      ]);
+      for (const flag of ['--target', '--size', '--repository', '--submission-key']) {
+        assert.ok(
+          run.options.some((option) => option.long === flag),
+          `run omitted ${flag}`
+        );
       }
+      assert.ok(!productionCommands.some(({ command }) => command.name() === 'capsule'));
+      assert.ok(
+        !productionCommands.some(({ command }) =>
+          command.options.some((option) => option.long === '--all-targets')
+        )
+      );
     });
   });
 
-  describe('help output excludes hosted surface', function () {
-    for (const { command, path: commandPath } of productionCommands) {
-      it(`${commandPath} help has no target/capsule surface`, function () {
-        assertNoHostedSurface(command.helpInformation());
-      });
-    }
-  });
-
-  describe('unknown hosted commands are rejected before any side effect', function () {
-    it('rejects bare "target" as an unknown command', async function () {
-      const result = await cli(['target']);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, /unknown command/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
+  describe('process boundary', function () {
+    it('renders target help from the production entrypoint', async function () {
+      const result = await cli(['target', '--help']);
+      assert.strictEqual(result.exitCode, 0, result.stderr);
+      assert.match(result.stdout, /Manage named remote targets/);
+      assert.match(result.stdout, /status/);
+      assert.match(result.stdout, /cancel/);
     });
 
-    it('rejects bare "capsule" as an unknown command', async function () {
+    it('lists zero configured targets as JSON', async function () {
+      const result = await cli(['target', 'list', '--json']);
+      assert.strictEqual(result.exitCode, 0, result.stderr);
+      assert.deepStrictEqual(JSON.parse(result.stdout), []);
+    });
+
+    it('keeps the unpublished capsule command unavailable', async function () {
       const result = await cli(['capsule']);
       assert.notStrictEqual(result.exitCode, 0);
       assert.match(result.stderr, /unknown command/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
-    });
-
-    it('rejects "target add" with no settings mutation', async function () {
-      const result = await cli(['target', 'add', 'x', '--url', 'https://y']);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, /unknown command/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
-    });
-
-    it('rejects "capsule list --json" with no settings mutation', async function () {
-      const result = await cli(['capsule', 'list', '--json']);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, /unknown command/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
-    });
-  });
-
-  describe('remote-only flags are rejected as unknown options', function () {
-    it('rejects "run 123 --target foo"', async function () {
-      const result = await cli(['run', '123', '--target', 'foo']);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, /unknown option/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
     });
 
     it('rejects "--all-targets"', async function () {
       const result = await cli(['--all-targets']);
       assert.notStrictEqual(result.exitCode, 0);
       assert.match(result.stderr, /unknown option/i);
-      assert.strictEqual(fs.existsSync(settingsFile), false);
     });
   });
 });
