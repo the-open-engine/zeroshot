@@ -195,17 +195,14 @@ export function updateTargetOrganization(
   });
 }
 
-export function targetRefreshIsInvalidated(
-  name: string,
-  settings: SettingsPort,
-): boolean {
+export function targetRefreshIsInvalidated(name: string, settings: SettingsPort): boolean {
   return settings.load()._targets?.[name]?.refreshInvalidated === true;
 }
 
 export function setTargetRefreshInvalidated(
   name: string,
   invalidated: boolean,
-  settings: SettingsPort,
+  settings: SettingsPort
 ): void {
   settings.mutate((state) => {
     const targets = state._targets;

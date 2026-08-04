@@ -48,7 +48,6 @@ describe('requestDeviceCode', () => {
 });
 
 describe('requestDeviceCode validation', () => {
-
   it('rejects additive and unsafe device responses before returning them', async () => {
     const http = new FakeHttpTransport();
     http.enqueue(
@@ -70,17 +69,19 @@ describe('requestDeviceCode validation', () => {
 
   it('rejects a browser completion URL on a different authority', async () => {
     const http = new FakeHttpTransport();
-    http.enqueue(respond(200, {
-      device_code: 'dev-code-123',
-      user_code: 'ABCD-1234',
-      verification_uri: 'https://auth.example.com/device',
-      verification_uri_complete: 'https://attacker.example/device?code=ABCD-1234',
-      expires_in: 900,
-      interval: 5,
-    }));
+    http.enqueue(
+      respond(200, {
+        device_code: 'dev-code-123',
+        user_code: 'ABCD-1234',
+        verification_uri: 'https://auth.example.com/device',
+        verification_uri_complete: 'https://attacker.example/device?code=ABCD-1234',
+        expires_in: 900,
+        interval: 5,
+      })
+    );
     await assert.rejects(
       requestDeviceCode('https://auth.example.com/oauth/device', 'cli', http),
-      /Device code response is malformed/,
+      /Device code response is malformed/
     );
   });
 
@@ -89,16 +90,13 @@ describe('requestDeviceCode validation', () => {
     const http = { fetch: async () => oversized.response };
     await assert.rejects(
       requestDeviceCode('https://auth.example.com/oauth/device', 'cli', http),
-      /size limit/,
+      /size limit/
     );
     assert.equal(oversized.wasCancelled(), true);
   });
 });
 
-function poll(
-  http: FakeHttpTransport,
-  overrides: Partial<Omit<PollForTokenRequest, 'http'>> = {},
-) {
+function poll(http: FakeHttpTransport, overrides: Partial<Omit<PollForTokenRequest, 'http'>> = {}) {
   return pollForToken({
     tokenEndpoint: 'https://auth.example.com/oauth/token',
     clientId: 'cli',
@@ -131,21 +129,19 @@ describe('pollForToken', () => {
 
   it('requires the authority refresh lifetime and scope fields', async () => {
     const http = new FakeHttpTransport();
-    http.enqueue(respond(200, {
-      access_token: 'access-123',
-      refresh_token: 'refresh-456',
-      token_type: 'Bearer',
-      expires_in: 3600,
-    }));
-    await assert.rejects(
-      poll(http, { deviceCode: 'device' }),
-      /Token response is malformed/,
+    http.enqueue(
+      respond(200, {
+        access_token: 'access-123',
+        refresh_token: 'refresh-456',
+        token_type: 'Bearer',
+        expires_in: 3600,
+      })
     );
+    await assert.rejects(poll(http, { deviceCode: 'device' }), /Token response is malformed/);
   });
 });
 
 describe('pollForToken retry state', () => {
-
   it('adds device identity only when the target requires it', async () => {
     const http = new FakeHttpTransport();
     const clock = new FakeClock(0);
@@ -199,17 +195,13 @@ describe('pollForToken retry state', () => {
 });
 
 describe('pollForToken failures', () => {
-
   it('throws DeviceFlowDeniedError on access_denied', async () => {
     const http = new FakeHttpTransport();
     const clock = new FakeClock(0);
 
     http.enqueue(respond(400, { error: 'access_denied' }));
 
-    await assert.rejects(
-      poll(http, { clock }),
-      DeviceFlowDeniedError
-    );
+    await assert.rejects(poll(http, { clock }), DeviceFlowDeniedError);
   });
 
   it('throws DeviceFlowExpiredError on expired_token', async () => {
@@ -218,10 +210,7 @@ describe('pollForToken failures', () => {
 
     http.enqueue(respond(400, { error: 'expired_token' }));
 
-    await assert.rejects(
-      poll(http, { clock }),
-      DeviceFlowExpiredError
-    );
+    await assert.rejects(poll(http, { clock }), DeviceFlowExpiredError);
   });
 
   it('reports unknown OAuth failures without copying token canaries', async () => {
@@ -229,24 +218,18 @@ describe('pollForToken failures', () => {
     const clock = new FakeClock(0);
     http.enqueue(respond(400, { error: 'CANARY_REFRESH_920' }));
 
-    await assert.rejects(
-      poll(http, { clock }),
-      (error: Error) => {
-        assert.equal(error.message, 'Token endpoint returned an unsupported OAuth error');
-        assert.equal(error.message.includes('CANARY_REFRESH_920'), false);
-        return true;
-      }
-    );
+    await assert.rejects(poll(http, { clock }), (error: Error) => {
+      assert.equal(error.message, 'Token endpoint returned an unsupported OAuth error');
+      assert.equal(error.message.includes('CANARY_REFRESH_920'), false);
+      return true;
+    });
   });
 
   it('throws DeviceFlowExpiredError when deadline exceeded', async () => {
     const http = new FakeHttpTransport();
     const clock = new FakeClock(1_000_000);
 
-    await assert.rejects(
-      poll(http, { expiresIn: 0, clock }),
-      DeviceFlowExpiredError
-    );
+    await assert.rejects(poll(http, { expiresIn: 0, clock }), DeviceFlowExpiredError);
   });
 
   it('throws on abort signal', async () => {
