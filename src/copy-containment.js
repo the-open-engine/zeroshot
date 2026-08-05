@@ -78,18 +78,19 @@ function assertPinnedRoot(root, label, relativePath) {
   }
 }
 
-function validateRelativePath(relativePath) {
+function validateRelativePath(relativePath, pathApi = path) {
   if (typeof relativePath !== 'string' || relativePath.length === 0) {
     throw containmentError(relativePath, 'path must be a non-empty relative string');
   }
   if (relativePath.includes('\0')) {
     throw containmentError(relativePath, 'path contains a null byte');
   }
-  if (path.isAbsolute(relativePath) || path.parse(relativePath).root) {
+  if (pathApi.isAbsolute(relativePath) || pathApi.parse(relativePath).root) {
     throw containmentError(relativePath, 'absolute paths are not allowed');
   }
 
-  const components = relativePath.split(path.sep);
+  const components =
+    pathApi.sep === '\\' ? relativePath.split(/[\\/]/) : relativePath.split(pathApi.sep);
   if (components.some((component) => component === '' || component === '.' || component === '..')) {
     throw containmentError(
       relativePath,
@@ -97,7 +98,7 @@ function validateRelativePath(relativePath) {
     );
   }
 
-  return path.normalize(relativePath);
+  return pathApi.normalize(relativePath);
 }
 
 function resolveSourcePath(boundary, relativePath) {
