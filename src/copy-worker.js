@@ -8,36 +8,52 @@
 const { parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
 const path = require('path');
+const {
+  createCopyBoundary,
+  isCopyContainmentError,
+  resolveCopyPath,
+} = require('./copy-containment');
 
-const { files, sourceBase, destBase } = workerData;
+const { files, sourceBase, destBase, expectedBoundary } = workerData;
+const copyBoundary = createCopyBoundary(sourceBase, destBase, expectedBoundary);
 
 let copied = 0;
 let skipped = 0;
-const errors = [];
+let error = null;
 
 for (const relativePath of files) {
-  const srcPath = path.join(sourceBase, relativePath);
-  const destPath = path.join(destBase, relativePath);
-
   try {
     // Ensure parent directory exists
-    const destDir = path.dirname(destPath);
-    if (!fs.existsSync(destDir)) {
-      fs.mkdirSync(destDir, { recursive: true });
+    const parentRelativePath = path.dirname(relativePath);
+    if (parentRelativePath !== '.') {
+      const { destinationPath: destDir } = resolveCopyPath(copyBoundary, parentRelativePath);
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
     }
 
     // Copy the file
-    fs.copyFileSync(srcPath, destPath);
+    const { sourcePath, destinationPath } = resolveCopyPath(copyBoundary, relativePath);
+    fs.copyFileSync(sourcePath, destinationPath);
     copied++;
   } catch (err) {
     // Skip files we can't copy (permission denied, broken symlinks, etc.)
-    if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT') {
+    if (
+      !isCopyContainmentError(err) &&
+      (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT')
+    ) {
       skipped++;
       continue;
     }
-    errors.push({ file: relativePath, error: err.message });
+    error = {
+      file: relativePath,
+      name: err.name,
+      code: err.code,
+      message: err.message,
+    };
+    break;
   }
 }
 
 // Report results back to main thread
-parentPort.postMessage({ copied, skipped, errors });
+parentPort.postMessage({ copied, skipped, error });

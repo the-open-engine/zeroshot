@@ -1,0 +1,214 @@
+const fs = require('fs');
+const path = require('path');
+
+const CONTAINMENT_ERROR_CODE = 'ERR_COPY_CONTAINMENT';
+
+class CopyContainmentError extends Error {
+  constructor(relativePath, reason) {
+    super(`Copy containment violation for ${JSON.stringify(relativePath)}: ${reason}`);
+    this.name = 'CopyContainmentError';
+    this.code = CONTAINMENT_ERROR_CODE;
+    this.relativePath = relativePath;
+  }
+}
+
+function isContained(rootPath, targetPath) {
+  const relative = path.relative(rootPath, targetPath);
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+  );
+}
+
+function containmentError(relativePath, reason, cause) {
+  const error = new CopyContainmentError(relativePath, reason);
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
+}
+
+function statIdentity(targetPath) {
+  const stats = fs.statSync(targetPath, { bigint: true });
+  return {
+    device: stats.dev.toString(),
+    inode: stats.ino.toString(),
+    directory: stats.isDirectory(),
+  };
+}
+
+function pinRoot(rootPath, label, expectedRoot) {
+  const requestedPath = path.resolve(rootPath);
+  const canonicalPath = fs.realpathSync.native(requestedPath);
+  const identity = statIdentity(canonicalPath);
+
+  if (!identity.directory) {
+    throw containmentError('', `${label} root is not a directory`);
+  }
+
+  const pinnedRoot = {
+    requestedPath,
+    canonicalPath,
+    device: identity.device,
+    inode: identity.inode,
+  };
+
+  if (
+    expectedRoot &&
+    (expectedRoot.canonicalPath !== pinnedRoot.canonicalPath ||
+      expectedRoot.device !== pinnedRoot.device ||
+      expectedRoot.inode !== pinnedRoot.inode)
+  ) {
+    throw containmentError('', `${label} root changed after it was pinned`);
+  }
+
+  return pinnedRoot;
+}
+
+function assertPinnedRoot(root, label, relativePath) {
+  let canonicalPath;
+  let identity;
+  try {
+    canonicalPath = fs.realpathSync.native(root.canonicalPath);
+    identity = statIdentity(canonicalPath);
+  } catch (err) {
+    throw containmentError(relativePath, `${label} root can no longer be resolved`, err);
+  }
+
+  if (
+    canonicalPath !== root.canonicalPath ||
+    identity.device !== root.device ||
+    identity.inode !== root.inode ||
+    !identity.directory
+  ) {
+    throw containmentError(relativePath, `${label} root changed after it was pinned`);
+  }
+}
+
+function validateRelativePath(relativePath) {
+  if (typeof relativePath !== 'string' || relativePath.length === 0) {
+    throw containmentError(relativePath, 'path must be a non-empty relative string');
+  }
+  if (relativePath.includes('\0')) {
+    throw containmentError(relativePath, 'path contains a null byte');
+  }
+  if (
+    path.posix.isAbsolute(relativePath) ||
+    path.win32.isAbsolute(relativePath) ||
+    path.win32.parse(relativePath).root
+  ) {
+    throw containmentError(relativePath, 'absolute paths are not allowed');
+  }
+
+  const components = relativePath.split(/[\\/]/);
+  if (components.some((component) => component === '' || component === '.' || component === '..')) {
+    throw containmentError(
+      relativePath,
+      'empty, current-directory, and traversal components are not allowed'
+    );
+  }
+
+  return path.normalize(relativePath);
+}
+
+function resolveSourcePath(boundary, relativePath) {
+  const normalizedPath = validateRelativePath(relativePath);
+  const root = boundary.sourceRoot;
+  assertPinnedRoot(root, 'source', relativePath);
+
+  const candidatePath = path.resolve(root.canonicalPath, normalizedPath);
+  if (!isContained(root.canonicalPath, candidatePath)) {
+    throw containmentError(relativePath, 'source path escapes its pinned root');
+  }
+
+  let canonicalPath;
+  try {
+    canonicalPath = fs.realpathSync.native(candidatePath);
+  } catch (err) {
+    if (err.code === 'ELOOP') {
+      throw containmentError(relativePath, 'source path contains a symlink cycle', err);
+    }
+    throw err;
+  }
+
+  if (!isContained(root.canonicalPath, canonicalPath)) {
+    throw containmentError(relativePath, 'resolved source path escapes its pinned root');
+  }
+  return canonicalPath;
+}
+
+function resolveDestinationPath(boundary, relativePath) {
+  const normalizedPath = validateRelativePath(relativePath);
+  const root = boundary.destinationRoot;
+  assertPinnedRoot(root, 'destination', relativePath);
+
+  const candidatePath = path.resolve(root.canonicalPath, normalizedPath);
+  if (!isContained(root.canonicalPath, candidatePath)) {
+    throw containmentError(relativePath, 'destination path escapes its pinned root');
+  }
+
+  let existingPath = candidatePath;
+  while (true) {
+    try {
+      fs.lstatSync(existingPath);
+      break;
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        throw err;
+      }
+      const parentPath = path.dirname(existingPath);
+      if (parentPath === existingPath) {
+        throw containmentError(relativePath, 'destination has no resolvable ancestor', err);
+      }
+      existingPath = parentPath;
+    }
+  }
+
+  let canonicalExistingPath;
+  try {
+    canonicalExistingPath = fs.realpathSync.native(existingPath);
+  } catch (err) {
+    throw containmentError(relativePath, 'destination contains an unresolved symlink', err);
+  }
+
+  if (!isContained(root.canonicalPath, canonicalExistingPath)) {
+    throw containmentError(relativePath, 'resolved destination path escapes its pinned root');
+  }
+
+  const unresolvedSuffix = path.relative(existingPath, candidatePath);
+  const resolvedPath = unresolvedSuffix
+    ? path.join(canonicalExistingPath, unresolvedSuffix)
+    : canonicalExistingPath;
+  if (!isContained(root.canonicalPath, resolvedPath)) {
+    throw containmentError(relativePath, 'resolved destination path escapes its pinned root');
+  }
+  return resolvedPath;
+}
+
+function createCopyBoundary(sourceBase, destinationBase, expectedBoundary) {
+  return {
+    sourceRoot: pinRoot(sourceBase, 'source', expectedBoundary?.sourceRoot),
+    destinationRoot: pinRoot(destinationBase, 'destination', expectedBoundary?.destinationRoot),
+  };
+}
+
+function resolveCopyPath(boundary, relativePath) {
+  return {
+    sourcePath: resolveSourcePath(boundary, relativePath),
+    destinationPath: resolveDestinationPath(boundary, relativePath),
+  };
+}
+
+function isCopyContainmentError(error) {
+  return error?.code === CONTAINMENT_ERROR_CODE;
+}
+
+module.exports = {
+  CONTAINMENT_ERROR_CODE,
+  CopyContainmentError,
+  createCopyBoundary,
+  isCopyContainmentError,
+  resolveCopyPath,
+  resolveSourcePath,
+  validateRelativePath,
+};
