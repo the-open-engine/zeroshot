@@ -7,7 +7,6 @@
 
 const { parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
-const path = require('path');
 const {
   createCopyBoundary,
   isCopyContainmentError,
@@ -23,16 +22,8 @@ let error = null;
 
 for (const relativePath of files) {
   try {
-    // Ensure parent directory exists
-    const parentRelativePath = path.dirname(relativePath);
-    if (parentRelativePath !== '.') {
-      const { destinationPath: destDir } = resolveCopyPath(copyBoundary, parentRelativePath);
-      if (!fs.existsSync(destDir)) {
-        fs.mkdirSync(destDir, { recursive: true });
-      }
-    }
-
-    // Copy the file
+    // Phase two creates every parent directory. Re-resolve the source and
+    // destination immediately before the only worker filesystem effect.
     const { sourcePath, destinationPath } = resolveCopyPath(copyBoundary, relativePath);
     fs.copyFileSync(sourcePath, destinationPath);
     copied++;
@@ -50,6 +41,7 @@ for (const relativePath of files) {
       name: err.name,
       code: err.code,
       message: err.message,
+      relativePath: err.relativePath || relativePath,
     };
     break;
   }

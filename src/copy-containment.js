@@ -66,21 +66,14 @@ function pinRoot(rootPath, label, expectedRoot) {
 }
 
 function assertPinnedRoot(root, label, relativePath) {
-  let canonicalPath;
   let identity;
   try {
-    canonicalPath = fs.realpathSync.native(root.canonicalPath);
-    identity = statIdentity(canonicalPath);
+    identity = statIdentity(root.canonicalPath);
   } catch (err) {
     throw containmentError(relativePath, `${label} root can no longer be resolved`, err);
   }
 
-  if (
-    canonicalPath !== root.canonicalPath ||
-    identity.device !== root.device ||
-    identity.inode !== root.inode ||
-    !identity.directory
-  ) {
+  if (identity.device !== root.device || identity.inode !== root.inode || !identity.directory) {
     throw containmentError(relativePath, `${label} root changed after it was pinned`);
   }
 }
@@ -92,15 +85,11 @@ function validateRelativePath(relativePath) {
   if (relativePath.includes('\0')) {
     throw containmentError(relativePath, 'path contains a null byte');
   }
-  if (
-    path.posix.isAbsolute(relativePath) ||
-    path.win32.isAbsolute(relativePath) ||
-    path.win32.parse(relativePath).root
-  ) {
+  if (path.isAbsolute(relativePath) || path.parse(relativePath).root) {
     throw containmentError(relativePath, 'absolute paths are not allowed');
   }
 
-  const components = relativePath.split(/[\\/]/);
+  const components = relativePath.split(path.sep);
   if (components.some((component) => component === '' || component === '.' || component === '..')) {
     throw containmentError(
       relativePath,
@@ -147,21 +136,17 @@ function resolveDestinationPath(boundary, relativePath) {
     throw containmentError(relativePath, 'destination path escapes its pinned root');
   }
 
-  let existingPath = candidatePath;
-  while (true) {
-    try {
-      fs.lstatSync(existingPath);
-      break;
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        throw err;
-      }
-      const parentPath = path.dirname(existingPath);
-      if (parentPath === existingPath) {
-        throw containmentError(relativePath, 'destination has no resolvable ancestor', err);
-      }
-      existingPath = parentPath;
+  let existingPath;
+  try {
+    fs.lstatSync(candidatePath);
+    existingPath = candidatePath;
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      throw err;
     }
+    // The copy pipeline creates directories parent-first in phase two, so the
+    // immediate parent must exist before any mkdir/copy effect is attempted.
+    existingPath = path.dirname(candidatePath);
   }
 
   let canonicalExistingPath;
@@ -203,9 +188,23 @@ function isCopyContainmentError(error) {
   return error?.code === CONTAINMENT_ERROR_CODE;
 }
 
+function copyErrorFromPayload(payload) {
+  const error =
+    payload.code === CONTAINMENT_ERROR_CODE
+      ? new CopyContainmentError(payload.relativePath, 'worker rejected an unsafe path')
+      : new Error(payload.message);
+  error.name = payload.name || error.name;
+  error.message = payload.message;
+  if (payload.code) {
+    error.code = payload.code;
+  }
+  return error;
+}
+
 module.exports = {
   CONTAINMENT_ERROR_CODE,
   CopyContainmentError,
+  copyErrorFromPayload,
   createCopyBoundary,
   isCopyContainmentError,
   resolveCopyPath,
