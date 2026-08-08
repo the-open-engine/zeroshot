@@ -33,6 +33,14 @@ const {
 const { getProvider } = require('./providers');
 const { readRepoSettings } = require('../lib/repo-settings');
 const { provisionClaudeCredentials } = require('./claude-credentials');
+const {
+  CopyContainmentError,
+  copyErrorFromPayload,
+  createCopyBoundary,
+  resolveCopyPath,
+  resolveSourcePath,
+  validateRelativePath,
+} = require('./copy-containment');
 
 const DEFAULT_WORKTREE_SETUP_TIMEOUT_MS = 15 * 60 * 1000;
 const FRESH_BASE_REF_PREFIX = 'refs/zeroshot/base-fetch';
@@ -1284,6 +1292,7 @@ class IsolationManager {
     // Phase 1: Collect all files and directories
     const files = [];
     const directories = new Set();
+    const copyBoundary = createCopyBoundary(src, dest);
 
     const shouldIgnoreFsError = (err) =>
       err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ENOENT';
@@ -1314,12 +1323,13 @@ class IsolationManager {
       }
     };
 
-    function handleEntry(entry, srcPath, relPath, relativePath) {
+    function handleEntry(entry, relPath, relativePath, ancestorDirectories) {
       if (entry.isSymbolicLink()) {
-        const targetStats = fs.statSync(srcPath);
+        const resolvedSourcePath = resolveSourcePath(copyBoundary, relPath);
+        const targetStats = fs.statSync(resolvedSourcePath);
         if (targetStats.isDirectory()) {
           directories.add(relPath);
-          collectFiles(srcPath, relPath);
+          collectFiles(relPath, ancestorDirectories);
           return;
         }
 
@@ -1330,7 +1340,7 @@ class IsolationManager {
 
       if (entry.isDirectory()) {
         directories.add(relPath);
-        collectFiles(srcPath, relPath);
+        collectFiles(relPath, ancestorDirectories);
         return;
       }
 
@@ -1338,7 +1348,15 @@ class IsolationManager {
       ensureParentDirTracked(relativePath);
     }
 
-    function collectFiles(currentSrc, relativePath = '') {
+    function collectFiles(relativePath = '', ancestorDirectories = new Set()) {
+      const currentSrc = relativePath
+        ? resolveSourcePath(copyBoundary, relativePath)
+        : copyBoundary.sourceRoot.canonicalPath;
+      if (ancestorDirectories.has(currentSrc)) {
+        throw new CopyContainmentError(relativePath, 'source directory symlink creates a cycle');
+      }
+      const childAncestors = new Set(ancestorDirectories);
+      childAncestors.add(currentSrc);
       const entries = readEntries(currentSrc);
 
       for (const entry of entries) {
@@ -1346,11 +1364,11 @@ class IsolationManager {
           continue;
         }
 
-        const srcPath = path.join(currentSrc, entry.name);
-        const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+        const entryName = validateRelativePath(entry.name);
+        const relPath = relativePath ? path.join(relativePath, entryName) : entryName;
 
         try {
-          handleEntry(entry, srcPath, relPath, relativePath);
+          handleEntry(entry, relPath, relativePath, childAncestors);
         } catch (err) {
           if (shouldIgnoreFsError(err)) {
             continue;
@@ -1360,7 +1378,7 @@ class IsolationManager {
       }
     }
 
-    collectFiles(src);
+    collectFiles();
 
     // Phase 2: Create directory structure (sequential - must exist before file copy)
     // Sort directories by depth to ensure parents are created before children
@@ -1371,7 +1389,7 @@ class IsolationManager {
     });
 
     for (const dir of sortedDirs) {
-      const destDir = path.join(dest, dir);
+      const { destinationPath: destDir } = resolveCopyPath(copyBoundary, dir);
       try {
         fs.mkdirSync(destDir, { recursive: true });
       } catch (err) {
@@ -1385,10 +1403,9 @@ class IsolationManager {
     // For small file counts (<100), use synchronous copy (worker overhead not worth it)
     if (files.length < 100) {
       for (const relPath of files) {
-        const srcPath = path.join(src, relPath);
-        const destPath = path.join(dest, relPath);
         try {
-          fs.copyFileSync(srcPath, destPath);
+          const { sourcePath, destinationPath } = resolveCopyPath(copyBoundary, relPath);
+          fs.copyFileSync(sourcePath, destinationPath);
         } catch (err) {
           if (err.code !== 'EACCES' && err.code !== 'EPERM' && err.code !== 'ENOENT') {
             throw err;
@@ -1410,18 +1427,22 @@ class IsolationManager {
     }
 
     // Spawn workers and wait for completion
+    const workers = [];
     const workerPromises = chunks.map((chunk) => {
       return new Promise((resolve, reject) => {
         const worker = new Worker(workerPath, {
           workerData: {
             files: chunk,
-            sourceBase: src,
-            destBase: dest,
+            sourceBase: copyBoundary.sourceRoot.canonicalPath,
+            destBase: copyBoundary.destinationRoot.canonicalPath,
+            expectedBoundary: copyBoundary,
           },
         });
+        workers.push(worker);
+        let result = null;
 
-        worker.on('message', (result) => {
-          resolve(result);
+        worker.on('message', (workerResult) => {
+          result = workerResult;
         });
 
         worker.on('error', (err) => {
@@ -1431,6 +1452,12 @@ class IsolationManager {
         worker.on('exit', (code) => {
           if (code !== 0) {
             reject(new Error(`Worker exited with code ${code}`));
+          } else if (!result) {
+            reject(new Error('Copy worker exited without reporting a result'));
+          } else if (result.error) {
+            reject(copyErrorFromPayload(result.error));
+          } else {
+            resolve(result);
           }
         });
       });
@@ -1439,7 +1466,12 @@ class IsolationManager {
     // Wait for all workers to complete (proper async/await - no busy-wait!)
     // FIX: Previous version used busy-wait which blocked the event loop,
     // preventing worker thread messages from being processed (timeout bug)
-    await Promise.all(workerPromises);
+    try {
+      await Promise.all(workerPromises);
+    } catch (err) {
+      await Promise.all(workers.map((worker) => worker.terminate().catch(() => undefined)));
+      throw err;
+    }
   }
 
   /**
