@@ -5,15 +5,18 @@ async fn corrected_output(
     provider: CodexProvider,
 ) -> (WorkerOutcome, String) {
     let capture = directory.child("capture");
-    let (credential_name, credential_value) = match provider {
-        CodexProvider::OpenAi => ("OPENAI_API_KEY", "fake-openai-key"),
-        CodexProvider::OpenRouter => ("OPENROUTER_API_KEY", "fake-openrouter-key"),
-    };
+    let configuration = match provider {
+        CodexProvider::OpenAi => Some(("OPENAI_API_KEY", "fake-openai-key", "gpt-5.6-sol")),
+        CodexProvider::OpenRouter => Some((
+            "OPENROUTER_API_KEY",
+            "fake-openrouter-key",
+            "openai/gpt-5.6-sol",
+        )),
+        CodexProvider::Bedrock => None,
+    }
+    .assert_value_with("correction fixture supports OpenAI and OpenRouter");
+    let (credential_name, credential_value, model) = configuration;
     let adapter = scripted_adapter(directory, provider);
-    let model = match provider {
-        CodexProvider::OpenAi => "gpt-5.6-sol",
-        CodexProvider::OpenRouter => "openai/gpt-5.6-sol",
-    };
     let admitted = admitted(
         binding_with_model(
             model,

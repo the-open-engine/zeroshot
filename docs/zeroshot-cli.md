@@ -613,9 +613,10 @@ RUNTIME CONFIGURATION
         }
       }
 
-    Known-incompatible harness/provider pairs are codex/anthropic and claude/openai. Model IDs are
-    passed unchanged to the selected harness and provider; Zeroshot does not maintain or validate
-    provider model catalogs.
+    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
+    claude/openrouter, and claude/bedrock. Known-incompatible harness/provider pairs are
+    codex/anthropic and claude/openai. Model IDs are passed unchanged to the selected harness and
+    provider; Zeroshot does not maintain or validate provider model catalogs.
 
     Sizes are small, medium, and large.
 

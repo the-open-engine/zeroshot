@@ -1,8 +1,9 @@
 //! Claude CLI adapter for native-v2 graph nodes.
 //!
-//! One adapter is constructed for the graph-wide Anthropic or OpenRouter lane. Admission has
-//! already selected the model, effort, session scope, and declared environment for each node;
-//! It preserves those choices without consulting legacy coordination or ambient process state.
+//! One adapter is constructed for the graph-wide Anthropic, OpenRouter, or Amazon Bedrock lane.
+//! Admission has already selected the model, effort, session scope, and declared environment for
+//! each node; it preserves those choices without consulting legacy coordination or ambient process
+//! state.
 
 #[path = "native_v2_claude/command.rs"]
 mod command;
@@ -30,8 +31,8 @@ use crate::native_v2_runner::{
     LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
 };
 use command::{
-    ClaudeTurnArguments, claude_arguments, configure_openrouter, extend_declared_environment,
-    prompt, reject_provider_controls, workspace_access,
+    ClaudeTurnArguments, claude_arguments, configure_bedrock, configure_openrouter,
+    extend_declared_environment, prompt, reject_provider_controls, workspace_access,
 };
 use session::{ClaudeSession, attempt_session_id, observe_session};
 use transcript::{ClaudeAttempt, ClaudeEmission, ClaudeTranscript};
@@ -252,13 +253,24 @@ impl ClaudeAdapter {
                 "Claude declared environment contains a provider-owned control variable",
             )
         })?;
-        if self.provider == ClaudeProvider::OpenRouter {
-            configure_openrouter(&mut environment).map_err(|error| {
-                with_driver_detail(
-                    error,
-                    "Claude OpenRouter credentials are missing or conflict with Anthropic credentials",
-                )
-            })?;
+        match self.provider {
+            ClaudeProvider::Anthropic => {}
+            ClaudeProvider::OpenRouter => {
+                configure_openrouter(&mut environment).map_err(|error| {
+                    with_driver_detail(
+                        error,
+                        "Claude OpenRouter credentials are missing or conflict with Anthropic credentials",
+                    )
+                })?;
+            }
+            ClaudeProvider::Bedrock => {
+                configure_bedrock(&mut environment).map_err(|error| {
+                    with_driver_detail(
+                        error,
+                        "Claude Bedrock credentials are missing or conflict with other provider credentials",
+                    )
+                })?;
+            }
         }
         Ok(environment)
     }

@@ -7,11 +7,17 @@ use crate::native_v2_runner::{
 };
 use crate::worker_catalog::ReasoningEffort;
 
+pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
+pub(super) const AWS_REGION: &str = "AWS_REGION";
 pub(super) const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api";
 pub(super) const OPENROUTER_KEY: &str = "OPENROUTER_API_KEY";
 const ANTHROPIC_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
 pub(super) const ANTHROPIC_KEY: &str = "ANTHROPIC_API_KEY";
 const ANTHROPIC_BASE_URL: &str = "ANTHROPIC_BASE_URL";
+const ANTHROPIC_BEDROCK_BASE_URL: &str = "ANTHROPIC_BEDROCK_BASE_URL";
+const ANTHROPIC_BEDROCK_MANTLE_BASE_URL: &str = "ANTHROPIC_BEDROCK_MANTLE_BASE_URL";
+const CLAUDE_CODE_OAUTH_REFRESH_TOKEN: &str = "CLAUDE_CODE_OAUTH_REFRESH_TOKEN";
+const CLAUDE_CODE_OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
 pub(super) struct ClaudeTurnArguments<'a> {
     pub(super) model: &'a str,
@@ -78,10 +84,16 @@ pub(super) fn extend_declared_environment(
 pub(super) fn reject_provider_controls(
     environment: &BTreeMap<String, String>,
 ) -> Result<(), NodeRunnerError> {
-    const CONTROLS: [&str; 5] = [
+    const CONTROLS: [&str; 11] = [
         ANTHROPIC_BASE_URL,
+        ANTHROPIC_BEDROCK_BASE_URL,
+        ANTHROPIC_BEDROCK_MANTLE_BASE_URL,
         "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
         "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_GATEWAY",
+        "CLAUDE_CODE_USE_MANTLE",
         "CLAUDE_CODE_USE_VERTEX",
         "CLAUDE_CODE_USE_FOUNDRY",
     ];
@@ -90,6 +102,29 @@ pub(super) fn reject_provider_controls(
         .all(|name| !environment.contains_key(*name))
         .then_some(())
         .ok_or(NodeRunnerError::Driver)
+}
+
+pub(super) fn configure_bedrock(
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), NodeRunnerError> {
+    if [AWS_BEARER_TOKEN_BEDROCK, AWS_REGION].iter().any(|name| {
+        !environment
+            .get(*name)
+            .is_some_and(|value| !value.is_empty())
+    }) || [
+        ANTHROPIC_TOKEN,
+        ANTHROPIC_KEY,
+        CLAUDE_CODE_OAUTH_REFRESH_TOKEN,
+        CLAUDE_CODE_OAUTH_TOKEN,
+        OPENROUTER_KEY,
+    ]
+    .iter()
+    .any(|name| environment.contains_key(*name))
+    {
+        return Err(NodeRunnerError::Driver);
+    }
+    environment.insert("CLAUDE_CODE_USE_BEDROCK".to_owned(), "1".to_owned());
+    Ok(())
 }
 
 pub(super) fn configure_openrouter(

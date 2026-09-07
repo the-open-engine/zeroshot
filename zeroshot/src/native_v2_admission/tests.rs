@@ -317,14 +317,14 @@ async fn rejects_inconsistent_worker_reuse() {
 }
 
 #[tokio::test]
-async fn preserves_provider_owned_models_and_effort() {
+async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
         initial_input: json!({"items":[null]}),
         runtime: RuntimePlan::Codex {
-            provider: CodexProvider::OpenAi,
+            provider: CodexProvider::Bedrock,
             size: RunSize::Small,
             nodes: BTreeMap::from([(
                 named("work"),
@@ -335,20 +335,38 @@ async fn preserves_provider_owned_models_and_effort() {
         submission_key: IdempotencyKey::new("opaque-codex-model").assert_value(),
     };
     let admitted = NativeV2Admission.admit(codex_runtime).await.assert_value();
+    let provider = match &admitted.runtime {
+        RuntimePlan::Codex { provider, .. } => Some(provider),
+        RuntimePlan::Claude { .. } => None,
+    };
+    let provider = provider.assert_value_with("admission preserves the Codex harness");
+    assert_eq!(*provider, CodexProvider::Bedrock);
     assert!(matches!(
         admitted.runtime.nodes().get(&named("work")),
         Some(NodeRuntimeBinding::Agent { model, effort: Some(ReasoningEffort::Max), .. })
             if model.as_str() == "provider/future-model"
     ));
 
-    let claude_runtime = submission(
+    let mut claude_runtime = submission(
         graph,
         BTreeMap::from([(
             named("work"),
             binding("claude-haiku-4-5", Some(ReasoningEffort::Low)),
         )]),
     );
+    let provider = match &mut claude_runtime.runtime {
+        RuntimePlan::Claude { provider, .. } => Some(provider),
+        RuntimePlan::Codex { .. } => None,
+    };
+    let provider = provider.assert_value_with("submission fixture uses Claude");
+    *provider = ClaudeProvider::Bedrock;
     let admitted = NativeV2Admission.admit(claude_runtime).await.assert_value();
+    let provider = match &admitted.runtime {
+        RuntimePlan::Claude { provider, .. } => Some(provider),
+        RuntimePlan::Codex { .. } => None,
+    };
+    let provider = provider.assert_value_with("admission preserves the Claude harness");
+    assert_eq!(*provider, ClaudeProvider::Bedrock);
     assert!(matches!(
         admitted.runtime.nodes().get(&named("work")),
         Some(NodeRuntimeBinding::Agent { model, effort: Some(ReasoningEffort::Low), .. })

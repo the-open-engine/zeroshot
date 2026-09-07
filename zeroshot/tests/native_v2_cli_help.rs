@@ -91,6 +91,11 @@ fn help_explains_runtime_configuration() {
         SessionScope::NodeInstance,
     ]));
     let contract_prose = [
+        concat!(
+            "provider choices are codex/openai, codex/openrouter, codex/bedrock, ",
+            "claude/anthropic, claude/openrouter, and claude/bedrock."
+        )
+        .to_owned(),
         "known-incompatible harness/provider pairs are codex/anthropic and claude/openai."
             .to_owned(),
         concat!(

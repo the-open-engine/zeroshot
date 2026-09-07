@@ -24,7 +24,9 @@ use openengine_cluster_protocol::{
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
 
-use super::command::{ANTHROPIC_KEY, OPENROUTER_BASE_URL, OPENROUTER_KEY};
+use super::command::{
+    ANTHROPIC_KEY, AWS_BEARER_TOKEN_BEDROCK, AWS_REGION, OPENROUTER_BASE_URL, OPENROUTER_KEY,
+};
 use super::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeProcessEnvironment};
 use crate::execution::{SessionScope, process::HostedProcessPool};
 use crate::native_v2_candidate::test_support::{
@@ -320,6 +322,9 @@ printf '%s\n' "${ANTHROPIC_API_KEY-unset}" > anthropic-key.txt
 printf '%s\n' "${ANTHROPIC_AUTH_TOKEN-unset}" > anthropic-token.txt
 printf '%s\n' "${ANTHROPIC_BASE_URL-unset}" > anthropic-base-url.txt
 printf '%s\n' "${OPENROUTER_API_KEY-unset}" > openrouter-key.txt
+printf '%s\n' "${AWS_BEARER_TOKEN_BEDROCK-unset}" > bedrock-key.txt
+printf '%s\n' "${AWS_REGION-unset}" > aws-region.txt
+printf '%s\n' "${CLAUDE_CODE_USE_BEDROCK-unset}" > use-bedrock.txt
 printf '%s\n' "${UNDECLARED_AMBIENT_SENTINEL-unset}" > ambient.txt
 printf '%s\n' "$HOME" >> homes.txt
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-1"}'
@@ -337,30 +342,6 @@ printf '%s%s%s%s\n' \
   '","session_id":"session-1","usage":{"input_tokens":11,"output_tokens":4,' \
   '"cache_read_input_tokens":6,"cache_creation_input_tokens":2}}'
 "#;
-
-fn assert_provider_environment(
-    workspace: &TestDirectory,
-    provider: ClaudeProvider,
-    provider_value: &str,
-) {
-    match provider {
-        ClaudeProvider::Anthropic => {
-            assert_eq!(workspace.read("anthropic-key.txt").trim(), provider_value);
-            assert_eq!(workspace.read("anthropic-token.txt").trim(), "unset");
-            assert_eq!(workspace.read("anthropic-base-url.txt").trim(), "unset");
-            assert_eq!(workspace.read("openrouter-key.txt").trim(), "unset");
-        }
-        ClaudeProvider::OpenRouter => {
-            assert_eq!(workspace.read("anthropic-key.txt"), "\n");
-            assert_eq!(workspace.read("anthropic-token.txt").trim(), provider_value);
-            assert_eq!(
-                workspace.read("anthropic-base-url.txt").trim(),
-                OPENROUTER_BASE_URL
-            );
-            assert_eq!(workspace.read("openrouter-key.txt").trim(), provider_value);
-        }
-    }
-}
 
 #[tokio::test]
 async fn node_instance_scope_resumes_the_exact_claude_session() {

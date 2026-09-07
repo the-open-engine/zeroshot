@@ -415,7 +415,8 @@
     "ClaudeProvider": {
       "enum": [
         "anthropic",
-        "openrouter"
+        "openrouter",
+        "bedrock"
       ],
       "type": "string"
     },
@@ -463,7 +464,8 @@
     "CodexProvider": {
       "enum": [
         "openai",
-        "openrouter"
+        "openrouter",
+        "bedrock"
       ],
       "type": "string"
     },

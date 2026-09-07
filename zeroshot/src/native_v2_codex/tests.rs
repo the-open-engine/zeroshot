@@ -29,6 +29,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
 
 use super::*;
+use super::command::{AWS_BEARER_TOKEN_BEDROCK, AWS_REGION};
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
     NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
@@ -53,7 +54,10 @@ prompt=$(/usr/bin/cat)
   /usr/bin/printf 'prompt=%s\n' "$prompt"
   /usr/bin/printf 'codex_home=%s\n' "$CODEX_HOME"
   /usr/bin/printf 'openrouter_key=%s\n' "${OPENROUTER_API_KEY-unset}"
+  /usr/bin/printf 'openai_key=%s\n' "${OPENAI_API_KEY-unset}"
   /usr/bin/printf 'codex_key=%s\n' "${CODEX_API_KEY-unset}"
+  /usr/bin/printf 'bedrock_key=%s\n' "${AWS_BEARER_TOKEN_BEDROCK-unset}"
+  /usr/bin/printf 'aws_region=%s\n' "${AWS_REGION-unset}"
   /usr/bin/printf 'path=%s\n' "${PATH-unset}"
   /usr/bin/printf 'home=%s\n' "${HOME-unset}"
   /usr/bin/printf 'ambient=%s\n' "${AMBIENT_SENTINEL-unset}"

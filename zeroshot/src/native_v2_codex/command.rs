@@ -7,6 +7,8 @@ use crate::native_v2_contract::{CodexProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{NodeRole, NodeRunnerError, ResolvedEnvironment};
 use crate::worker_catalog::{ModelId, ReasoningEffort};
 
+pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
+pub(super) const AWS_REGION: &str = "AWS_REGION";
 const CODEX_HOME: &str = "CODEX_HOME";
 const CODEX_API_KEY: &str = "CODEX_API_KEY";
 const HOME: &str = "HOME";
@@ -43,12 +45,26 @@ pub(super) fn configure_provider_auth(
 ) -> Result<(), NodeRunnerError> {
     match provider {
         CodexProvider::OpenAi => configure_openai_auth(values, has_local_user),
+        CodexProvider::Bedrock => configure_bedrock_auth(values),
         CodexProvider::OpenRouter => values
             .get("OPENROUTER_API_KEY")
             .is_some_and(|value| !value.is_empty())
             .then_some(())
             .ok_or(NodeRunnerError::Driver),
     }
+}
+
+fn configure_bedrock_auth(values: &BTreeMap<String, String>) -> Result<(), NodeRunnerError> {
+    if [AWS_BEARER_TOKEN_BEDROCK, AWS_REGION]
+        .iter()
+        .any(|name| !values.get(*name).is_some_and(|value| !value.is_empty()))
+        || [CODEX_API_KEY, OPENAI_API_KEY, "OPENROUTER_API_KEY"]
+            .iter()
+            .any(|name| values.contains_key(*name))
+    {
+        return Err(NodeRunnerError::Driver);
+    }
+    Ok(())
 }
 
 fn configure_openai_auth(
@@ -70,6 +86,7 @@ pub(super) fn add_provider_args(argv: &mut Vec<String>, provider: CodexProvider)
         match provider {
             CodexProvider::OpenAi => "model_provider=\"openai\"".to_owned(),
             CodexProvider::OpenRouter => "model_provider=\"openrouter\"".to_owned(),
+            CodexProvider::Bedrock => "model_provider=\"amazon-bedrock\"".to_owned(),
         },
     ]);
     if provider == CodexProvider::OpenRouter {

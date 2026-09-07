@@ -275,6 +275,58 @@ async fn uniform_runtime_is_materialized_by_rust_against_the_selected_graph() {
 }
 
 #[tokio::test]
+async fn uniform_bedrock_runtime_materializes_for_both_harnesses_with_exact_defaults() {
+    for harness in ["codex", "claude"] {
+        let (_files, command) = uniform_runtime_command(
+            &format!("Uniform Bedrock {harness} runtime"),
+            json!({
+                "harness":harness,
+                "provider":"bedrock",
+                "model":"provider-owned-model"
+            }),
+        );
+        let backend = FakeBackend::default();
+        let available = |name: &str| match name {
+            "AWS_BEARER_TOKEN_BEDROCK" => Some(OsString::from("bedrock-secret")),
+            "AWS_REGION" => Some(OsString::from("us-east-1")),
+            _ => None,
+        };
+        execute_with_environment(command, &backend, &available)
+            .await
+            .assert_value();
+
+        let calls = backend.calls();
+        let (runtime, connections) = match calls.as_slice() {
+            [
+                Call::Submit {
+                    runtime,
+                    connections,
+                    ..
+                },
+            ] => Some((runtime, connections)),
+            _ => None,
+        }
+        .assert_value();
+        let runtime = serde_json::to_value(runtime).assert_value();
+        assert_eq!(runtime.pointer("/harness"), Some(&json!(harness)));
+        assert_eq!(runtime.pointer("/provider"), Some(&json!("bedrock")));
+        assert_eq!(
+            runtime.pointer("/nodes/worker/connections/bedrock"),
+            Some(&json!(["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]))
+        );
+        assert_eq!(
+            serde_json::to_value(connections).assert_value(),
+            json!({
+                "bedrock": {
+                    "AWS_BEARER_TOKEN_BEDROCK": "bedrock-secret",
+                    "AWS_REGION": "us-east-1"
+                }
+            })
+        );
+    }
+}
+
+#[tokio::test]
 async fn uniform_runtime_requires_harness_without_contacting_backend() {
     let (_files, command) = uniform_runtime_command(
         "Explicit harness",

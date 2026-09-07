@@ -1,4 +1,4 @@
-//! Native-v2 Codex harness for the OpenAI and OpenRouter provider lanes.
+//! Native-v2 Codex harness for the OpenAI, OpenRouter, and Amazon Bedrock provider lanes.
 //!
 //! The graph-wide provider is fixed when the adapter is constructed. Model, effort, session
 //! scope, input, and declared environment remain per-node admitted values. Provider sessions are
@@ -66,7 +66,7 @@ pub struct NativeV2CodexUser {
     pub codex_home: PathBuf,
 }
 
-/// One graph-wide Codex/OpenAI-or-OpenRouter adapter.
+/// One graph-wide Codex provider adapter.
 pub struct NativeV2CodexAdapter {
     config: NativeV2CodexConfig,
     runners: ProviderProcessRunners,

@@ -9,9 +9,9 @@ mod json_read;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    RunId, RunListParams, RunListResult, RunSize, RunStatus, RunStatusResult, RunSubmitParams,
-    RunSubmitResult, RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    ResolvedSource,
+    ClaudeProvider, CodexProvider, ResolvedSource, RunId, RunListParams, RunListResult, RunSize,
+    RunStatus, RunStatusResult, RunSubmitParams, RunSubmitResult, RunTitle, SourceBranchId,
+    SourceRepositoryId, SourceRevisionId,
 };
 use serde_json::{json, Value};
 
@@ -99,6 +99,26 @@ fn legacy_run_sizes_reopen_and_serialize_with_current_names() {
         assert_eq!(size, expected);
         assert_eq!(serde_json::to_value(size).assert_value(), json!(current));
     }
+}
+
+#[test]
+fn both_harness_provider_enums_round_trip_bedrock() {
+    assert_eq!(
+        serde_json::to_value(CodexProvider::Bedrock).assert_value(),
+        json!("bedrock")
+    );
+    assert_eq!(
+        serde_json::from_value::<CodexProvider>(json!("bedrock")).assert_value(),
+        CodexProvider::Bedrock
+    );
+    assert_eq!(
+        serde_json::to_value(ClaudeProvider::Bedrock).assert_value(),
+        json!("bedrock")
+    );
+    assert_eq!(
+        serde_json::from_value::<ClaudeProvider>(json!("bedrock")).assert_value(),
+        ClaudeProvider::Bedrock
+    );
 }
 
 #[test]

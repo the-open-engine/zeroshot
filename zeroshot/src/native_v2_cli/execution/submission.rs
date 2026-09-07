@@ -303,6 +303,7 @@ enum UniformProvider {
     #[serde(rename = "openrouter")]
     OpenRouter,
     Anthropic,
+    Bedrock,
 }
 
 const KNOWN_INCOMPATIBLE_HARNESS_PROVIDER_PAIRS: &[(UniformHarness, UniformProvider)] = &[
@@ -336,7 +337,7 @@ impl UniformRuntimePlan {
         let connections = self
             .connections
             .clone()
-            .map_or_else(|| default_uniform_connections(self.provider), Ok)?;
+            .map_or_else(|| default_connections(self.provider), Ok)?;
         let mut nodes = BTreeMap::new();
         for (name, delivery) in executable_runtime_roles(&graph.root) {
             nodes.insert(name, self.binding(delivery, &connections)?);
@@ -382,6 +383,11 @@ impl UniformRuntimePlan {
                 size: self.size,
                 nodes,
             }),
+            (UniformHarness::Codex, UniformProvider::Bedrock) => Ok(RuntimePlan::Codex {
+                provider: CodexProvider::Bedrock,
+                size: self.size,
+                nodes,
+            }),
             (UniformHarness::Claude, UniformProvider::Anthropic) => Ok(RuntimePlan::Claude {
                 provider: ClaudeProvider::Anthropic,
                 size: self.size,
@@ -392,6 +398,11 @@ impl UniformRuntimePlan {
                 size: self.size,
                 nodes,
             }),
+            (UniformHarness::Claude, UniformProvider::Bedrock) => Ok(RuntimePlan::Claude {
+                provider: ClaudeProvider::Bedrock,
+                size: self.size,
+                nodes,
+            }),
             _ => Err(NativeV2CliError::Usage(
                 "unsupported harness/provider pair".to_owned(),
             )),
@@ -399,29 +410,31 @@ impl UniformRuntimePlan {
     }
 }
 
-fn default_uniform_connections(
-    provider: UniformProvider,
-) -> Result<DeclaredConnections, NativeV2CliError> {
-    let (key, name) = match provider {
-        UniformProvider::OpenAi => ("openai", "OPENAI_API_KEY"),
-        UniformProvider::OpenRouter => ("openrouter", "OPENROUTER_API_KEY"),
-        UniformProvider::Anthropic => ("anthropic", "ANTHROPIC_API_KEY"),
+fn default_connections(provider: UniformProvider) -> Result<DeclaredConnections, NativeV2CliError> {
+    let (key, names): (&str, &[&str]) = match provider {
+        UniformProvider::OpenAi => ("openai", &["OPENAI_API_KEY"]),
+        UniformProvider::OpenRouter => ("openrouter", &["OPENROUTER_API_KEY"]),
+        UniformProvider::Anthropic => ("anthropic", &["ANTHROPIC_API_KEY"]),
+        UniformProvider::Bedrock => ("bedrock", &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]),
     };
-    single_connection(key, name)
+    connection(key, names)
 }
 
 fn git_delivery_binding() -> Result<NodeRuntimeBinding, NativeV2CliError> {
-    let connections = single_connection(
+    let connections = connection(
         crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-        GITHUB_TOKEN_ENV,
+        &[GITHUB_TOKEN_ENV],
     )?;
     Ok(NodeRuntimeBinding::GitDelivery { connections })
 }
 
-fn single_connection(key: &str, name: &str) -> Result<DeclaredConnections, NativeV2CliError> {
-    let name = EnvironmentVariableName::new(name)
+fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2CliError> {
+    let names = names
+        .iter()
+        .map(|name| EnvironmentVariableName::new(*name))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    let environment = DeclaredEnvironment::new([name])
+    let environment = DeclaredEnvironment::new(names)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     DeclaredConnections::single(key, environment)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))
