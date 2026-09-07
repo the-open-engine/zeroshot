@@ -202,7 +202,7 @@ jobs:
           assert len(wheels) == 1, wheels
           with zipfile.ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
-          assert 'zeroshot/_bin/zeroshot' in names
+          assert any(name.endswith('/zeroshot/_bin/zeroshot') for name in names), names
           PY
 
   target-image:
