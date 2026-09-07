@@ -200,7 +200,11 @@ fn validate_revision(value: &str) -> Result<(), NativeV2RunValueError> {
 }
 
 fn validate_model(value: &str) -> Result<(), NativeV2RunValueError> {
-    validate_non_control_bytes(value, 2_048, "model ID must be 1..=2048 non-control bytes")
+    validate_non_control_text(
+        value,
+        2_048,
+        "model ID must be 1..=2048 non-control characters",
+    )
 }
 
 fn validate_environment_name(value: &str) -> Result<(), NativeV2RunValueError> {
@@ -434,7 +438,12 @@ mod tests {
         );
         assert!(profile.len() > 128);
         assert!(ModelId::new(profile).is_ok());
-        assert!(ModelId::new("x".repeat(2_049)).is_err());
+    }
+
+    #[test]
+    fn model_id_length_matches_json_schema_character_semantics() {
+        assert!(ModelId::new("é".repeat(2_048)).is_ok());
+        assert!(ModelId::new("é".repeat(2_049)).is_err());
     }
 
     #[test]
