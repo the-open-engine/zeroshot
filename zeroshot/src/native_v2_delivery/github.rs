@@ -3,8 +3,6 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::Value;
-use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -17,10 +15,8 @@ use super::{
     GitHubReviewState, valid_head_update, valid_revision,
 };
 
-// A GitHub page may contain 100 checks or comments, including bounded user/check
-// output fields. Keep subprocess output bounded while allowing many pages.
-const MAX_API_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-const MAX_CHECK_LOG_TAIL_BYTES: usize = 64 * 1024;
+mod api;
+
 const DEFAULT_API_DEADLINE: Duration = Duration::from_secs(2 * 60);
 const DEFAULT_PUSH_DEADLINE: Duration = Duration::from_secs(10 * 60);
 const PULL_REQUEST_TITLE: &str = "feat: complete Zeroshot task";
@@ -57,25 +53,6 @@ impl GhCliDeliveryAuthority {
     #[must_use]
     pub fn new(config: GhCliAuthorityConfig) -> Self {
         Self { config }
-    }
-
-    async fn api(
-        &self,
-        arguments: &[String],
-        credential: GitHubCredential<'_>,
-    ) -> Result<Value, GitHubAuthorityError> {
-        let output = self.api_output(arguments, credential).await?;
-        serde_json::from_slice(&output).map_err(|_| GitHubAuthorityError::Rejected)
-    }
-
-    async fn api_output(
-        &self,
-        arguments: &[String],
-        credential: GitHubCredential<'_>,
-    ) -> Result<Vec<u8>, GitHubAuthorityError> {
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
-        command.arg("api").args(arguments).stdout(Stdio::piped());
-        bounded_output(command, self.config.api_deadline).await
     }
 
     async fn find_review(
@@ -242,7 +219,10 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
     ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
         let review = match self.find_review(request, credential).await? {
             Some(review) => Ok(review),
-            None => self.create_review(request, credential).await,
+            None => {
+                self.confirm_review_head(request, credential).await?;
+                self.create_review(request, credential).await
+            }
         }?;
         connect_source_issue(self, request, &review, credential).await?;
         Ok(review)
@@ -369,6 +349,7 @@ mod source_issue;
 mod wire;
 use policy::{PolicySnapshot, classify_policy, include_check_logs, query_arguments};
 use source_issue::{connect_source_issue, pull_request_body};
+use api::check_log_tail;
 use wire::{PullRequestWire, review_receipt};
 
 fn clean_command(
@@ -440,47 +421,6 @@ async fn bounded_status(
         .success()
         .then_some(())
         .ok_or(GitHubAuthorityError::Rejected)
-}
-
-async fn bounded_output(
-    mut command: Command,
-    deadline: Duration,
-) -> Result<Vec<u8>, GitHubAuthorityError> {
-    command.stdout(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or(GitHubAuthorityError::Unavailable)?;
-    let mut output = Vec::new();
-    let mut bounded = stdout.take((MAX_API_OUTPUT_BYTES + 1) as u64);
-    let (status, ()) = timeout(deadline, async {
-        tokio::try_join!(child.wait(), async {
-            bounded.read_to_end(&mut output).await?;
-            Ok::<(), std::io::Error>(())
-        })
-    })
-    .await
-    .map_err(|_| GitHubAuthorityError::Unavailable)?
-    .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    if !status.success() {
-        return Err(GitHubAuthorityError::Rejected);
-    }
-    validate_api_output(output)
-}
-
-fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, GitHubAuthorityError> {
-    if output.is_empty() || output.len() > MAX_API_OUTPUT_BYTES {
-        return Err(GitHubAuthorityError::Rejected);
-    }
-    Ok(output)
-}
-
-fn check_log_tail(output: &[u8]) -> String {
-    let start = output.len().saturating_sub(MAX_CHECK_LOG_TAIL_BYTES);
-    String::from_utf8_lossy(output.get(start..).unwrap_or_default()).into_owned()
 }
 
 #[cfg(test)]

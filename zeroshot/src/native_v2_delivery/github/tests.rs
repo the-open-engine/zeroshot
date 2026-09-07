@@ -1,5 +1,5 @@
 use openengine_cluster_testkit::assertions::AssertValue;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::*;
 use super::policy::MergeMethod;
@@ -106,27 +106,6 @@ fn classify_conclusion(conclusion: &str, merge_state: &str) -> PolicySnapshot {
         )]),
         (false, Some(conclusion)),
     ))
-}
-
-#[test]
-fn api_payload_budget_and_log_tail_are_bounded() {
-    let payload = vec![b'x'; 512 * 1024];
-    assert_eq!(
-        validate_api_output(payload).assert_value().len(),
-        512 * 1024
-    );
-    assert_eq!(
-        validate_api_output(vec![b'x'; MAX_API_OUTPUT_BYTES + 1]),
-        Err(GitHubAuthorityError::Rejected)
-    );
-
-    let mut output = b"discard".to_vec();
-    output.extend(vec![b'x'; MAX_CHECK_LOG_TAIL_BYTES]);
-    output.extend_from_slice(b"failure at end");
-    let tail = check_log_tail(&output);
-    assert_eq!(tail.len(), MAX_CHECK_LOG_TAIL_BYTES);
-    assert!(!tail.contains("discard"));
-    assert!(tail.ends_with("failure at end"));
 }
 
 #[test]

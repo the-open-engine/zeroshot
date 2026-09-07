@@ -37,6 +37,8 @@ use crate::v2_run_ledger::{CreateRun, RunLedger};
 mod github_fixture;
 #[path = "tests/head_update.rs"]
 mod head_update;
+#[path = "tests/review_sync.rs"]
+mod review_sync;
 #[path = "tests/routing.rs"]
 mod routing;
 
@@ -167,17 +169,6 @@ async fn repeated_merge_deferral_is_not_misclassified_as_policy_refusal() {
     );
     assert!(authority.merge_requests.load(Ordering::SeqCst) > 2);
     assert!(authority.inspections.load(Ordering::SeqCst) > 2);
-}
-
-#[tokio::test]
-async fn pushed_review_head_is_retried_during_github_visibility_lag() {
-    let repo = TempRepo::delivery();
-    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::ReviewSyncRace));
-
-    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
-
-    assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
-    assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

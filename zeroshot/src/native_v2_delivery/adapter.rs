@@ -3,6 +3,7 @@ use super::*;
 mod head;
 mod input;
 mod review;
+mod sync;
 use input::source_issue;
 use review::{crash_outcome, review_completion, ReviewProgress, ReviewStep};
 
@@ -232,29 +233,6 @@ impl NativeV2DeliveryAdapter {
         )
         .await?;
         Ok(review)
-    }
-
-    async fn synchronize_review(
-        &self,
-        request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
-        control: &DriverControl,
-    ) -> Result<GitHubReviewReceipt, DeliveryStop> {
-        for attempt in 0..REVIEW_SYNC_ATTEMPTS {
-            match self
-                .authority
-                .open_or_update_review(request, credential)
-                .await
-            {
-                Ok(review) => return Ok(review),
-                Err(_) if attempt + 1 < REVIEW_SYNC_ATTEMPTS => {
-                    emit(control, "delivery: waiting for pushed review head").await?;
-                    tokio::time::sleep(REVIEW_SYNC_INTERVAL).await;
-                }
-                Err(_) => return Err(crash_outcome()),
-            }
-        }
-        Err(crash_outcome())
     }
 
     async fn prepare_head(

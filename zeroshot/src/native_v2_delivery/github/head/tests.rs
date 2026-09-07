@@ -1,5 +1,5 @@
 use openengine_cluster_testkit::assertions::AssertValue;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::*;
 use crate::native_v2_candidate::test_support::{TestGitRepository, git, git_output};

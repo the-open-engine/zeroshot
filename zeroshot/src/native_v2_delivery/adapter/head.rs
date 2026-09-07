@@ -80,7 +80,7 @@ impl NativeV2DeliveryAdapter {
                     drive.credentials.refresh().await?;
                     wait_for_poll(drive.control, self.config.poll.interval).await?;
                 }
-                Err(GitHubAuthorityError::Unavailable | GitHubAuthorityError::Rejected) => {
+                Err(_) => {
                     return Err(crash_outcome());
                 }
             }

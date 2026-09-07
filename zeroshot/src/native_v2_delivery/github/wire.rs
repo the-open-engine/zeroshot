@@ -21,6 +21,20 @@ pub(super) struct IssueWire {
 }
 
 #[derive(Deserialize)]
+pub(super) struct GitReferenceWire {
+    #[serde(rename = "ref")]
+    reference: String,
+    object: GitReferenceObjectWire,
+}
+
+#[derive(Deserialize)]
+struct GitReferenceObjectWire {
+    sha: String,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Deserialize)]
 struct ReviewBranchWire {
     #[serde(rename = "ref")]
     branch: String,
@@ -45,16 +59,17 @@ pub(super) fn review_receipt(
         head_branch: wire.head.branch,
         head_revision: wire.head.sha,
     };
-    if receipt.repository == request.target.repository
+    let valid_identity = receipt.repository == request.target.repository
         && receipt.target_branch == request.target.target_branch
         && receipt.head_branch == request.head_branch
-        && receipt.head_revision == request.head_revision
-        && wire.head.repo.full_name == request.target.repository
-    {
-        Ok(receipt)
-    } else {
-        Err(GitHubAuthorityError::Rejected)
+        && wire.head.repo.full_name == request.target.repository;
+    if !valid_identity {
+        return Err(GitHubAuthorityError::Rejected);
     }
+    if receipt.head_revision != request.head_revision {
+        return Err(GitHubAuthorityError::review_head_not_visible());
+    }
+    Ok(receipt)
 }
 
 pub(super) fn require_review_identity(
@@ -69,3 +84,22 @@ pub(super) fn require_review_identity(
         && wire.head.sha == review.head_revision;
     valid.then_some(()).ok_or(GitHubAuthorityError::Rejected)
 }
+
+pub(super) fn require_review_head(
+    wire: GitReferenceWire,
+    request: &GitHubReviewRequest,
+) -> Result<(), GitHubAuthorityError> {
+    let valid_identity = wire.reference == format!("refs/heads/{}", request.head_branch)
+        && wire.object.kind == "commit";
+    if !valid_identity {
+        return Err(GitHubAuthorityError::Rejected);
+    }
+    if wire.object.sha != request.head_revision {
+        return Err(GitHubAuthorityError::review_head_not_visible());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "wire/tests.rs"]
+mod tests;

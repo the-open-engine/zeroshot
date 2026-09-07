@@ -6,6 +6,7 @@
 //! conflict and CI failure remain routable attempt results.
 
 mod adapter;
+mod authority_error;
 pub(crate) mod contract;
 mod git;
 #[doc(hidden)]
@@ -15,6 +16,7 @@ mod review_head;
 #[cfg(test)]
 mod tests;
 
+pub use authority_error::{GitHubApiFailure, GitHubAuthorityError};
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 pub use review_head::{GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome};
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
@@ -63,8 +65,10 @@ const DELIVERY_HEAD_REVISION_FIELD: &str = "headRevision";
 const DELIVERY_PULL_REQUEST_ID_FIELD: &str = "pullRequestId";
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(20);
-const REVIEW_SYNC_ATTEMPTS: usize = 5;
+const REVIEW_SYNC_ATTEMPTS: usize = 10;
+const REVIEW_SYNC_DEADLINE: Duration = Duration::from_secs(60);
 const REVIEW_SYNC_INTERVAL: Duration = Duration::from_secs(1);
+const REVIEW_SYNC_MAX_INTERVAL: Duration = Duration::from_secs(8);
 const MAX_TOKEN_BYTES: usize = 4_096;
 const MAX_REVIEW_ID_BYTES: usize = 32;
 
@@ -271,14 +275,6 @@ pub struct GitHubReviewObservation {
     pub head_branch: String,
     pub head_revision: String,
     pub state: GitHubReviewState,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum GitHubAuthorityError {
-    #[error("GitHub delivery authority is unavailable")]
-    Unavailable,
-    #[error("GitHub rejected delivery")]
-    Rejected,
 }
 
 /// Target-owned, bounded GitHub effects. Implementations must bound every network operation.

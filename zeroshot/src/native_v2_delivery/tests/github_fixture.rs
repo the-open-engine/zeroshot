@@ -193,7 +193,13 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         assert!(self.pushed.load(Ordering::SeqCst));
         let attempt = self.review_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::ReviewSyncRace) && attempt == 1 {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(GitHubAuthorityError::api(
+                Some(422),
+                concat!(
+                    "HTTP 422: validation failed; PullRequest head invalid ",
+                    "pull request head revision is not visible"
+                ),
+            ));
         }
         self.reviews
             .lock()
@@ -383,6 +389,11 @@ for argument in "$@"; do
   previous=$argument
 done
 case "$endpoint:$method" in
+  repos/acme/project/git/ref/heads/zeroshot/v2-test:GET)
+    /usr/bin/printf '%s%s\n' \
+      '{"ref":"refs/heads/zeroshot/v2-test","object":{"sha":' \
+      '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"commit"}}'
+    ;;
   repos/acme/project/pulls:GET)
     /usr/bin/printf '%s\n' '[]'
     ;;
