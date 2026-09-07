@@ -99,7 +99,7 @@ where
         }
         let remaining = maximum_bytes.saturating_add(1).saturating_sub(output.len());
         let retained = remaining.min(read);
-        output.extend_from_slice(&buffer[..retained]);
+        output.extend_from_slice(buffer.get(..retained).unwrap_or_default());
     }
 }
 
@@ -143,7 +143,10 @@ fn github_api_error_value(text: &str) -> Option<Value> {
         .or_else(|| {
             text.char_indices()
                 .filter(|(_, character)| *character == '{')
-                .find_map(|(index, _)| serde_json::from_str(&text[index..]).ok())
+                .find_map(|(index, _)| {
+                    text.get(index..)
+                        .and_then(|suffix| serde_json::from_str(suffix).ok())
+                })
         })
 }
 

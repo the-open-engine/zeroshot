@@ -1,4 +1,4 @@
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
@@ -35,11 +35,11 @@ fn stale_review_head_is_retryable_but_changed_identity_is_rejected() {
         }
     });
     let stale = serde_json::from_value(value.clone()).assert_value();
-    let error = review_receipt(stale, &request()).expect_err("stale head must defer");
+    let error = review_receipt(stale, &request()).assert_error_with("stale head must defer");
     assert_eq!(error, GitHubAuthorityError::review_head_not_visible());
     assert!(error.retryable_review_sync());
 
-    value["base"]["ref"] = json!("other");
+    *value.pointer_mut("/base/ref").assert_value() = json!("other");
     let changed = serde_json::from_value(value).assert_value();
     assert_eq!(
         review_receipt(changed, &request()),
@@ -57,11 +57,11 @@ fn stale_reference_head_is_retryable_but_changed_reference_is_rejected() {
         }
     });
     let stale = serde_json::from_value(value.clone()).assert_value();
-    let error = require_review_head(stale, &request()).expect_err("stale head must defer");
+    let error = require_review_head(stale, &request()).assert_error_with("stale head must defer");
     assert_eq!(error, GitHubAuthorityError::review_head_not_visible());
     assert!(error.retryable_review_sync());
 
-    value["ref"] = json!("refs/heads/other");
+    *value.get_mut("ref").assert_value() = json!("refs/heads/other");
     let changed = serde_json::from_value(value).assert_value();
     assert_eq!(
         require_review_head(changed, &request()),

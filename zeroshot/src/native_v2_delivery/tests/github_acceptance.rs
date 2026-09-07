@@ -141,7 +141,7 @@ exit 1
     let error = authority
         .open_or_update_review(&request, GitHubCredential("test-token"))
         .await
-        .expect_err("GitHub API rejection should be preserved");
+        .assert_error_with("GitHub API rejection should be preserved");
 
     assert_eq!(
         error,
@@ -179,4 +179,4 @@ async fn production_gh_transport_rejects_malformed_or_changed_authority() {
     }
 }
 
-use openengine_cluster_testkit::assertions::{AssertValue};
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
