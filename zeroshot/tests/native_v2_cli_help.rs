@@ -201,27 +201,24 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
         ],
     );
 
-    for flag in ["-h", "--help"] {
-        let target_serve = successful_stdout(&["target", "serve", flag]);
-        assert_prose(
-            &target_serve,
-            &[
-                "unauthenticated unless --bootstrap-key-file is set",
-                "one-time key file consumed and removed at startup",
-            ],
-        );
-    }
+    let target_serve_short = successful_stdout(&["target", "serve", "-h"]);
+    assert_prose(&target_serve_short, &["serve a native-v2 target"]);
 
-    let target_serve = successful_stdout(&["target", "serve", "--help"]);
+    let target_serve_long = successful_stdout(&["target", "serve", "--help"]);
     assert_prose(
-        &target_serve,
+        &target_serve_long,
         &[
-            "--bootstrap-key-file",
-            "private authenticated access",
-            "consumes and removes",
-            "unauthenticated direct connections",
+            "serve a native-v2 target",
+            "direct mode is unauthenticated",
+            "only on trusted networks",
         ],
     );
+
+    assert_prose(
+        &target_serve_long,
+        &["--listen", "--public-origin", "--storage"],
+    );
+    assert!(!target_serve_long.contains("bootstrap"));
 }
 
 #[test]

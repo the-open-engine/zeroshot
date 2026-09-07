@@ -103,11 +103,9 @@ enum TargetCommand {
     /// This changes only the local named-target registry; it does not configure the remote target.
     Setup(TargetSetupArgs),
 
-    /// Serve a native-v2 target, unauthenticated unless --bootstrap-key-file is set.
+    /// Serve a native-v2 target.
     ///
-    /// Without --bootstrap-key-file, clients connect directly with no authentication. With a
-    /// bootstrap key, the server enables private authenticated access and consumes and removes the
-    /// key file while starting.
+    /// Direct mode is unauthenticated. Bind or publish it only on trusted networks.
     Serve(TargetServeArgs),
 }
 
@@ -257,11 +255,7 @@ struct TargetServeArgs {
     #[arg(long, value_name = "DIRECTORY")]
     storage: PathBuf,
 
-    /// Enable private auth with a one-time key file consumed and removed at startup.
-    ///
-    /// The target consumes and removes this file while starting. If omitted, the target accepts
-    /// unauthenticated direct connections.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", hide = true)]
     bootstrap_key_file: Option<PathBuf>,
 }
 

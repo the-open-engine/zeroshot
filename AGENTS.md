@@ -74,8 +74,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
-- Target bootstrap keys are one-time file inputs. Secret values never enter run ledgers, target
-  configuration, or observation records.
+- Secret-bearing target setup inputs never enter run ledgers, target configuration, or observation
+  records.
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.

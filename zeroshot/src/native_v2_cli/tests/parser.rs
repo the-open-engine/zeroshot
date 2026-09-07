@@ -365,6 +365,32 @@ async fn target_serve_stops_at_the_process_execution_boundary() {
 }
 
 #[test]
+fn target_serve_accepts_hidden_private_bootstrap_file() {
+    let command = parse_native_v2_args(args(&[
+        "target",
+        "serve",
+        "--listen",
+        "127.0.0.1:8080",
+        "--public-origin",
+        "http://127.0.0.1:8080",
+        "--storage",
+        "/tmp/zeroshot-target",
+        "--bootstrap-key-file",
+        "/tmp/zeroshot-bootstrap-key",
+    ]))
+    .assert_value();
+    let target = match command {
+        NativeV2CliCommand::TargetServe(target) => Some(target),
+        _ => None,
+    }
+    .assert_value_with("target serve command");
+    assert_eq!(
+        target.bootstrap_key_file,
+        Some(PathBuf::from("/tmp/zeroshot-bootstrap-key"))
+    );
+}
+
+#[test]
 fn target_add_requires_an_explicit_direct_flag() {
     let direct = parse_native_v2_args(args(&[
         "target",

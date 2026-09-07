@@ -5,34 +5,26 @@ contains the native `zeroshot` executable plus pinned Codex and Claude harness C
 
 ## Run
 
+The image runs an unauthenticated direct target:
+
 ```bash
-docker run --rm \
-  -p 8080:8080 \
+docker run --rm --detach --name zeroshot-target \
+  -p 127.0.0.1:8080:8080 \
   -v zeroshot-data:/var/lib/zeroshot/native-v2 \
   ghcr.io/the-open-engine/zeroshot-target:latest
 ```
 
-The default command serves an unauthenticated direct target at `http://127.0.0.1:8080`. Register it
-with:
+The container listens on port `8080` internally. With the loopback-only host publish above, register
+it at `http://127.0.0.1:8080`:
 
 ```bash
 zeroshot target add local --url http://127.0.0.1:8080 --direct
 zeroshot target setup local --repository owner/repository --branch main
 ```
 
-## Private bootstrap
-
-Set `ZEROSHOT_TARGET_BOOTSTRAP_KEY` to start the generic private bootstrap flow. The entrypoint writes
-it to a mode-0600 temporary file, unsets the environment variable, passes the file to the target,
-and removes it on exit. The target consumes the file while starting.
-
-```bash
-docker run --rm \
-  -p 8080:8080 \
-  -e ZEROSHOT_TARGET_BOOTSTRAP_KEY \
-  -v zeroshot-data:/var/lib/zeroshot/native-v2 \
-  ghcr.io/the-open-engine/zeroshot-target:latest
-```
+By default, the target performs no application-level authentication. Anyone who can reach the
+published port can use it. Run the container only on a private machine and private network, and do
+not expose the port to the public internet.
 
 ## Build
 

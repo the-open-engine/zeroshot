@@ -47,7 +47,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target, unauthenticated unless --bootstrap-key-file is set
+  serve  Serve a native-v2 target
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -122,11 +122,11 @@ Options:
 #### `zeroshot target serve`
 
 ```text
-Serve a native-v2 target, unauthenticated unless --bootstrap-key-file is set.
+Serve a native-v2 target.
 
-Without --bootstrap-key-file, clients connect directly with no authentication. With a bootstrap key, the server enables private authenticated access and consumes and removes the key file while starting.
+Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
-Usage: zeroshot target serve [OPTIONS] --listen <ADDRESS> --public-origin <ORIGIN> --storage <DIRECTORY>
+Usage: zeroshot target serve --listen <ADDRESS> --public-origin <ORIGIN> --storage <DIRECTORY>
 
 Options:
       --listen <ADDRESS>
@@ -137,11 +137,6 @@ Options:
 
       --storage <DIRECTORY>
           Directory that stores target state and run data
-
-      --bootstrap-key-file <PATH>
-          Enable private auth with a one-time key file consumed and removed at startup.
-
-          The target consumes and removes this file while starting. If omitted, the target accepts unauthenticated direct connections.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -158,7 +153,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target, unauthenticated unless --bootstrap-key-file is set
+  serve  Serve a native-v2 target
   help   Print this message or the help of the given subcommand(s)
 ```
 
