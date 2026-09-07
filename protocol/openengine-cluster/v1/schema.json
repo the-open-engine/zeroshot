@@ -3208,7 +3208,7 @@
               "type": "string"
             },
             "model": {
-              "maxLength": 128,
+              "maxLength": 2048,
               "minLength": 1,
               "type": "string"
             },
