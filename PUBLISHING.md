@@ -1,278 +1,75 @@
-# Node publishing setup for @the-open-engine/zeroshot
+# Zeroshot publishing
 
-This document covers only the Node product's automated npm release. Zeroshot Rust has an independent
-manual release described in [docs/zeroshot-rust-distribution.md](docs/zeroshot-rust-distribution.md).
-Rust-only commits do not participate in Node versioning or generated Node release notes.
+Zeroshot has one canonical release train. The explicit `.github/workflows/release.yml` workflow
+publishes an exact commit from `main` as `vX.Y.Z`; v8 is the first release on this contract.
 
-## Prerequisites
+## Published outputs
 
-Before you can publish the package, you need to:
+One successful release produces the same version across:
 
-1. **Create the @the-open-engine npm organization** (if it doesn't exist yet)
-2. **Create the initial @the-open-engine/zeroshot package** with an interactive 2FA publish if it does not exist yet
-3. **Configure npm trusted publishing** for this GitHub Actions workflow
+- GitHub tag and Release: `vX.Y.Z`
+- native archives: `zeroshot-vX.Y.Z-<target>.tar.gz`
+- checksum manifest: `SHA256SUMS`
+- npm package: `@the-open-engine-company/zeroshot@X.Y.Z`
+- target image: `ghcr.io/the-open-engine/zeroshot-target:X.Y.Z`
+- target image source tag: `sha-<full-commit>`
+- Python revision 1: `the-open-engine-zeroshot==X.Y.Z.post1`
 
-Do not add an `NPM_TOKEN` publish fallback. This repository is configured to fail closed if OIDC trusted publishing is not available.
+The checked-in Cargo and npm versions are development placeholders. The release workspace stages the
+explicit version and never commits it back to `main`.
 
-## Step 1: Create the @the-open-engine npm Organization
+## Release prerequisites
 
-The package name `@the-open-engine/zeroshot` uses the `@the-open-engine` scope, which requires an npm organization.
+1. The exact commit is an ancestor of `origin/main`.
+2. The commit has a successful `CI / required` check.
+3. The requested version is `8.0.0` or newer and is greater than the highest canonical `vX.Y.Z` tag.
+4. The `release` GitHub environment permits the publishing jobs.
+5. npm trusted publishing is configured for `@the-open-engine-company/zeroshot` and
+   `.github/workflows/release.yml`.
+6. PyPI trusted publishing is configured for `the-open-engine-zeroshot` and
+   `.github/workflows/release-python.yml`.
+7. GitHub Packages permits publishing `ghcr.io/the-open-engine/zeroshot-target`; make the package
+   public after its first publication when anonymous pulls are required.
 
-### Check if the organization exists:
+Do not add long-lived npm or PyPI tokens. Publishing uses GitHub OIDC trusted publishing.
 
-```bash
-npm org ls @the-open-engine
-```
+## Run a dry run
 
-If you get an error or "organization not found", you need to create it:
+Dispatch `Release Zeroshot` with:
 
-### Create the organization:
+- `action`: `dry-run`
+- `version`: the intended `X.Y.Z`
+- `release_commit`: the exact 40-character commit SHA
 
-1. Log in to npm:
+The workflow builds every native archive, verifies checksums and static Linux binaries, builds and
+smokes the target image, packs the npm package, and performs `npm publish --dry-run`. It does not
+create tags or publish registries.
 
-   ```bash
-   npm login
-   ```
+## Publish
 
-2. Visit https://www.npmjs.com/org/create
+Dispatch the same workflow with `action: release`. The workflow:
 
-3. Create an organization named `the-open-engine`
+1. verifies the exact source and canonical version ordering;
+2. builds the five declared native targets;
+3. creates and verifies `SHA256SUMS`;
+4. builds the canonical target image from the same source;
+5. creates or verifies the GitHub Release and uploads exact artifacts;
+6. publishes immutable image tags and `latest` when this is the newest release;
+7. packs, installs, smokes, and publishes `@the-open-engine-company/zeroshot`;
+8. invokes the Python SDK workflow for revision `1`.
 
-4. Choose the organization type:
-   - **Free** (for public packages only)
-   - **Paid** (if you need private packages)
+Later Python-only revisions may dispatch `Release Python SDK` with the same Zeroshot version, a
+higher positive SDK revision, and an exact `main` commit containing the SDK changes.
 
-5. Verify the organization exists:
-   ```bash
-   npm org ls @the-open-engine
-   ```
+## One-time npm bootstrap
 
-## Step 2: Create the Initial Package with 2FA
-
-npm trusted publishing is configured per package. If `@the-open-engine/zeroshot` does not exist yet, npm cannot attach a trusted publisher to it. Create the package once with an interactive maintainer publish:
-
-```bash
-npm login
-npm ci
-npm publish --access public --otp <your-2fa-code>
-```
-
-Run this from a clean checkout of the `main` commit that should seed the new package scope. Do not create or store an automation publish token for this step.
-
-## Step 3: Configure Trusted Publishing
-
-The release workflow is configured for npm trusted publishing via GitHub Actions OIDC. Configure the package on npm with:
-
-- **GitHub organization/user:** `the-open-engine`
-- **Repository:** `zeroshot`
-- **Workflow filename:** `release.yml`
-- **Allowed action:** `npm publish`
-
-The package's `repository.url` in `package.json` must continue to match `git+https://github.com/the-open-engine/zeroshot.git`.
-
-## Step 4: Verify Package Configuration
-
-The package.json is already configured correctly:
-
-```json
-{
-  "name": "@the-open-engine/zeroshot",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  }
-}
-```
-
-### Key settings:
-
-- **`"access": "public"`** - Required for scoped packages to be public
-- **`"registry"`** - Explicit npm registry URL
-- **`"name"`** - Scoped package name with @the-open-engine org
-
-The checked-in version is not release authority. semantic-release derives the next version from
-Git tags and rewrites the manifest in its isolated publication workspace before `npm publish`.
-Git tags, npm metadata, and GitHub Releases are the durable version authorities.
-
-## Step 5: Test Publishing Locally (Optional)
-
-Before relying on CI/CD, test packaging manually:
-
-### Dry run:
-
-```bash
-npm publish --dry-run
-```
-
-This shows what would be published without actually publishing.
-
-### Manual first publish:
-
-```bash
-npm login
-npm publish --access public --otp <your-2fa-code>
-```
-
-Use manual publish only for the initial package creation or emergency recovery. Normal releases should go through GitHub Actions trusted publishing.
-
-## Step 6: How Automated Publishing Works
-
-Once trusted publishing is configured, publishing happens automatically from `main` after CI passes.
-
-### Trigger a release:
-
-1. **Make changes** to the codebase
-
-2. **Commit with conventional commit messages**:
-
-   ```bash
-   git commit -m "feat: add new feature"      # Minor version bump (0.1.0 → 0.2.0)
-   git commit -m "fix: fix bug"               # Patch version bump (0.1.0 → 0.1.1)
-   git commit -m "feat!: breaking change"     # Major version bump (0.1.0 → 1.0.0)
-   ```
-
-3. **Merge through the protected trunk flow**:
-
-   ```bash
-   gh pr create --base main
-   gh pr merge --auto --squash
-   ```
-
-   The squash commit uses the PR title, so keep the PR title conventional (`fix:`, `feat:`, or a
-   breaking form). There is no separate release-promotion PR.
-
-4. **GitHub Actions runs** the release workflow after the exact merged `main` commit passes CI:
-   - Analyzes commit messages
-   - Determines version bump
-   - Uses `docs/releases/vX.Y.Z.md` when curated notes exist, otherwise generates conventional notes
-   - Creates the immutable tag and GitHub Release
-   - Publishes to npm
-
-### Check the release:
-
-- **GitHub**: https://github.com/the-open-engine/zeroshot/releases
-- **npm**: https://www.npmjs.com/package/@the-open-engine/zeroshot
-
-## Conventional Commit Format
-
-semantic-release uses conventional commits to determine version bumps:
-
-| Commit Type                       | Version Bump          | Example                       |
-| --------------------------------- | --------------------- | ----------------------------- |
-| `fix:`                            | Patch (0.1.0 → 0.1.1) | `fix: resolve memory leak`    |
-| `feat:`                           | Minor (0.1.0 → 0.2.0) | `feat: add cluster resume`    |
-| `feat!:` or `BREAKING CHANGE:`    | Major (0.1.0 → 1.0.0) | `feat!: change API signature` |
-| `docs:`, `chore:`, `style:`, etc. | No release            | `docs: update README`         |
-
-### Breaking changes:
-
-Use `!` after the type or include `BREAKING CHANGE:` in the commit body:
-
-```bash
-git commit -m "feat!: remove deprecated API"
-
-# OR
-
-git commit -m "feat: new API" -m "BREAKING CHANGE: removes old API"
-```
-
-## Legacy @covibes Bridge
-
-The old `@covibes/zeroshot` npm package is deprecated in favor of
-`@the-open-engine/zeroshot`.
-
-The bridge package lives in `legacy/covibes-zeroshot-bridge` and publishes as
-`@covibes/zeroshot@5.4.1`. Its CLI prints a migration notice on every run, delegates normal
-commands to `@the-open-engine/zeroshot`, and makes `zeroshot update` install
-`@the-open-engine/zeroshot@latest` with `--force` so the global `zeroshot` bin moves to the new
-package.
-
-Publish the bridge with the manual `Publish Covibes Bridge` workflow
-(`.github/workflows/publish-covibes-bridge.yml`). It defaults to dry-run. Before running with
-`dry_run=false`, configure npm trusted publishing for:
-
-- package: `@covibes/zeroshot`
-- repository: `the-open-engine/zeroshot`
-- workflow filename: `publish-covibes-bridge.yml`
-
-After the bridge version is published, deprecate the old package versions with an npm maintainer
-account:
-
-```bash
-npm deprecate '@covibes/zeroshot@<=5.4.0' \
-  'Zeroshot has moved to @the-open-engine/zeroshot. Run: npm install -g @the-open-engine/zeroshot'
-```
-
-## Troubleshooting
-
-### Error: "npm ERR! 404 Not Found - PUT https://registry.npmjs.org/@the-open-engine%2fzeroshot"
-
-**Cause:** The @the-open-engine organization or package is missing, or trusted publishing is not configured for `the-open-engine/zeroshot` + `release.yml`.
-
-**Fix:** Create the organization, create the first package version with interactive 2FA if needed, verify `package.json#repository.url`, and configure trusted publishing.
-
-### Error: "npm ERR! 403 Forbidden"
-
-**Cause:** Your npm account does not have permission to publish to @the-open-engine, or the trusted publisher is not allowed to publish this package.
-
-**Fix:**
-
-1. Verify you're a member of the @the-open-engine npm organization
-2. Verify the package trusted publisher is configured for `the-open-engine/zeroshot` + `release.yml`
-3. Verify the package is public and `package.json#repository.url` matches the GitHub repository
-
-### Error: "npm ERR! need auth This command requires you to be logged in"
-
-**Cause:** Trusted publishing is not configured or the package cannot be matched to the configured publisher.
-
-**Fix:** Configure trusted publishing in npm package settings and verify the workflow filename is `release.yml`.
-
-### No release created
-
-**Cause:** No commit since the latest tag has a release-worthy conventional type.
-
-**Fix:** Use `feat:`, `fix:`, or another release-worthy conventional type when publication is
-intended. `docs:` and `chore:` commits intentionally produce no release and are treated as a
-successful no-op.
+If the scoped npm package does not yet exist, an npm organization owner must create
+`@the-open-engine-company/zeroshot` and configure the trusted publisher before the automated release
+can publish. Use the exact packed artifact from a reviewed workflow if npm requires an initial
+interactive publish; do not create a second package name or temporary compatibility package.
 
 ## Recovery
 
-Do not publish a normal release from a developer checkout. The `Release` workflow provides three
-manual actions:
-
-- `dry-run` validates the current protected `main` without publishing.
-- `recover-npm` republishes only when the requested immutable tag has no npm version.
-- `recover-github-release` recreates only a missing GitHub Release.
-
-Both recovery actions require a `vX.Y.Z` tag and its full commit SHA. The workflow verifies that the
-tag, checkout, supplied SHA, and `main` ancestry agree. An existing artifact is verified and treated
-as a no-op; an inconsistent artifact fails closed.
-
-Interactive 2FA publishing is reserved for creating a package before trusted publishing can be
-configured. It is not a release recovery path.
-
-## Security Best Practices
-
-1. Prefer trusted publishing over long-lived tokens.
-2. Do not add an `NPM_TOKEN` publish fallback.
-3. Use interactive 2FA for the one-time initial package creation.
-4. Enable 2FA on npm maintainer accounts.
-5. Revoke any historical publish tokens that can access this package.
-
-## Next Steps
-
-1. ✅ Create @the-open-engine npm organization (if needed)
-2. ✅ Create the initial `@the-open-engine/zeroshot` package with interactive 2FA if needed
-3. ✅ Configure trusted publishing for `the-open-engine/zeroshot` + `release.yml`
-4. ✅ Make a commit with `feat:` or `fix:`
-5. ✅ Merge the feature PR to main through the protected merge queue
-6. ✅ Watch GitHub Actions run the release
-7. ✅ Verify package published to npm
-
-## Resources
-
-- [npm Organizations](https://docs.npmjs.com/organizations)
-- [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)
-- [Conventional Commits](https://www.conventionalcommits.org/)
-- [semantic-release](https://semantic-release.gitbook.io/)
-- [GitHub Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
+Release jobs are designed to verify already-published immutable artifacts before completing missing
+steps. Recovery must use the same version, tag, and source commit. Never overwrite a different npm
+tarball, GitHub asset, image source label, or tag target.

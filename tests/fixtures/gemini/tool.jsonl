@@ -1,3 +1,0 @@
-{"type":"tool_use","tool_name":"read_file","parameters":{"path":"README.md"},"tool_call_id":"tool-42"}
-{"type":"tool_result","tool_call_id":"tool-42","status":"success","output":"README contents"}
-{"type":"result","status":"success","stats":{"models":{"input_tokens":2,"output_tokens":6}}}

@@ -1,5 +1,5 @@
 site_name: Zeroshot Python SDK
-site_description: Async Python client for the Zeroshot Rust run engine
+site_description: Async Python client for the Zeroshot run engine
 docs_dir: docs
 strict: true
 theme:

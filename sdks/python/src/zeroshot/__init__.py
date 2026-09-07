@@ -1,4 +1,4 @@
-"""Typed async Python SDK for the Zeroshot Rust single-run engine."""
+"""Typed async Python SDK for the Zeroshot single-run engine."""
 
 from ._version import __version__ as __version__
 from .client import Client as Client

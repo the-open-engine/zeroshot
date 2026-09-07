@@ -1,4 +1,4 @@
-"""Async subprocess transport for the bundled Zeroshot Rust CLI."""
+"""Async subprocess transport for the bundled Zeroshot CLI."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class NativeProcess:
         try:
             return json.loads(stdout)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ProtocolError("Zeroshot Rust emitted malformed JSON") from error
+            raise ProtocolError("Zeroshot emitted malformed JSON") from error
 
     async def text(self, arguments: Sequence[str]) -> str:
         """Run a unary command and decode its successful UTF-8 text output."""
@@ -55,7 +55,7 @@ class NativeProcess:
         try:
             return stdout.decode("utf-8")
         except UnicodeDecodeError as error:
-            raise ProtocolError("Zeroshot Rust emitted malformed UTF-8") from error
+            raise ProtocolError("Zeroshot emitted malformed UTF-8") from error
 
     async def check(self, arguments: Sequence[str]) -> None:
         """Run a successful command that intentionally emits no output."""
@@ -77,9 +77,9 @@ class NativeProcess:
                 try:
                     value = json.loads(line)
                 except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                    raise ProtocolError("Zeroshot Rust emitted malformed NDJSON") from error
+                    raise ProtocolError("Zeroshot emitted malformed NDJSON") from error
                 if not isinstance(value, dict):
-                    raise ProtocolError("Zeroshot Rust emitted a non-object NDJSON event")
+                    raise ProtocolError("Zeroshot emitted a non-object NDJSON event")
                 yield value
             return_code = await process.wait()
             stderr = await stderr_task
@@ -113,7 +113,7 @@ class NativeProcess:
             await self._stop_and_communicate(process)
             raise
         except OSError as error:
-            raise TargetError(f"could not start Zeroshot Rust: {error}") from error
+            raise TargetError(f"could not start Zeroshot: {error}") from error
 
     async def _communicate(self, process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
         try:
@@ -151,9 +151,9 @@ class NativeProcess:
             assert isinstance(redacted, dict)
             return _project_diagnostic(redacted, exit_code)
         message = _redact_text(raw, self._secrets)
-        if message.startswith("zeroshot-rust: "):
-            message = message.removeprefix("zeroshot-rust: ")
-        message = message or "Zeroshot Rust exited unsuccessfully"
+        if message.startswith("zeroshot: "):
+            message = message.removeprefix("zeroshot: ")
+        message = message or "Zeroshot exited unsuccessfully"
         return TargetError(message, exit_code=exit_code)
 
 
@@ -173,7 +173,7 @@ def _project_diagnostic(value: Mapping[str, Any], exit_code: int) -> ZeroshotErr
     assert node is None or isinstance(node, str)
     projector = _DIAGNOSTIC_PROJECTORS.get(kind)
     if projector is None:
-        return ProtocolError("Zeroshot Rust emitted an unknown error diagnostic kind")
+        return ProtocolError("Zeroshot emitted an unknown error diagnostic kind")
     return projector(message, code, details, node, _diagnostic_path(path), exit_code)
 
 
@@ -192,7 +192,7 @@ def _valid_diagnostic_fields(
 
 
 def _malformed_diagnostic() -> ProtocolError:
-    return ProtocolError("Zeroshot Rust emitted a malformed error diagnostic")
+    return ProtocolError("Zeroshot emitted a malformed error diagnostic")
 
 
 def _invalid_request_diagnostic(

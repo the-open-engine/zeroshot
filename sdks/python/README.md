@@ -1,15 +1,15 @@
 # Zeroshot Python SDK
 
-Install the `zeroshot-rust` distribution from PyPI and import it as `zeroshot`:
+Install the `the-open-engine-zeroshot` distribution from PyPI and import it as `zeroshot`:
 
 ```console
-pip install zeroshot-rust
+pip install the-open-engine-zeroshot
 ```
 
-`zeroshot` is a fully typed async client for the native Zeroshot Rust run engine. Each platform
-wheel contains the matching `zeroshot-rust` sidecar. Python owns ergonomic orchestration and typed
-projections; Rust remains the sole source of truth for templates, runtime materialization,
-provider capabilities, graph validation, execution, and durable run state.
+`zeroshot` is a fully typed async client for the Zeroshot run engine. Each platform wheel contains
+the matching `zeroshot` executable. Python owns ergonomic orchestration and typed projections; the
+executable remains the sole source of truth for templates, runtime materialization, provider
+capabilities, graph validation, execution, and durable run state.
 
 ```python
 from zeroshot import Client, UniformRuntime
@@ -101,16 +101,17 @@ millisecond captured at the producer and preserved unchanged by durable replay.
 
 With `environment=None`, declared values are read from `os.environ` at submission. An explicit
 mapping is the complete credential source, apart from ordinary process variables needed to start
-the sidecar. Runtime documents contain names only; Rust selects and forwards only the names declared
-by the effective runtime. Uniform provider defaults are owned by Rust.
+the sidecar. Runtime documents contain names only; Zeroshot selects and forwards only the names
+declared by the effective runtime. Uniform provider defaults are owned by the executable.
 
 ## Packaging and versions
 
 The package is released only as platform wheels because each wheel bundles one matching native
 executable; there is no first-run download, Node dependency, PyO3 ABI, or auth dependency. The
-distribution and import name are both `zeroshot`, and `py.typed` is included.
+distribution name is `the-open-engine-zeroshot`, the import package remains `zeroshot`, and
+`py.typed` is included.
 
-An SDK release tag is `zeroshot-python-vRUST_SDK`, for example
-`zeroshot-python-v0.3.1_1`; its PEP 440 package version is `0.3.1.post1`. Revision `1` is released
-automatically after the corresponding Rust release. Later SDK-only revisions may be released
-independently against the same immutable Rust release.
+An SDK release tag is `zeroshot-python-vZEROSHOT_SDK`, for example
+`zeroshot-python-v8.0.0_1`; its PEP 440 package version is `8.0.0.post1`. Revision `1` is released
+automatically after the corresponding Zeroshot release. Later SDK-only revisions may be released
+independently against the same immutable Zeroshot release.

@@ -132,7 +132,7 @@ def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> 
     assert all("--uniform-runtime-config" not in item["args"] for item in runs)
 
 
-def test_presets_are_read_from_rust(fake_native: Path) -> None:
+def test_presets_are_read_from_executable(fake_native: Path) -> None:
     async def exercise() -> None:
         async with Client() as client:
             assert await client.list_presets() == ("single-worker", "software-change")

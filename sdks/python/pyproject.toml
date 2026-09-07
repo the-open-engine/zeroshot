@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=77", "wheel>=0.45"]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zeroshot-rust"
+name = "the-open-engine-zeroshot"
 dynamic = ["version"]
-description = "Async Python SDK for the Zeroshot Rust run engine"
+description = "Async Python SDK for the Zeroshot run engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -31,6 +31,7 @@ dev = [
   "pre-commit==4.3.0",
   "pydoclint==0.7.3",
   "pytest==8.4.2",
+  "PyYAML==6.0.3",
   "ruff==0.13.2",
   "twine==6.2.0",
 ]
@@ -47,7 +48,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-zeroshot = ["py.typed", "_bin/zeroshot-rust", "_bin/zeroshot-rust.exe"]
+zeroshot = ["py.typed", "_bin/zeroshot", "_bin/zeroshot.exe"]
 
 [tool.ruff]
 line-length = 100

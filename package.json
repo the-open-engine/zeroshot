@@ -1,72 +1,21 @@
 {
-  "name": "@the-open-engine/zeroshot",
+  "name": "@the-open-engine-company/zeroshot-repository",
   "version": "0.0.0-development",
-  "description": "Independent executor–verifier orchestration for software changes.",
-  "main": "src/orchestrator.js",
-  "bin": {
-    "zeroshot": "./cli/index.js",
-    "zeroshot-agent-provider": "./lib/agent-cli-provider/executable.js",
-    "zeroshot-cluster-worker": "./bin/zeroshot-cluster-worker.js"
-  },
-  "directories": {
-    "example": "examples",
-    "test": "tests"
-  },
-  "release": {
-    "branches": [
-      "main"
-    ],
-    "plugins": [
-      "./scripts/node-release-analyzer.js",
-      "./scripts/semantic-release-notes.js",
-      [
-        "@semantic-release/npm",
-        {
-          "npmPublish": true
-        }
-      ],
-      "@semantic-release/github"
-    ]
-  },
+  "private": true,
+  "description": "Repository tooling for the Zeroshot native product.",
   "scripts": {
-    "pretest": "npm run build:agent-cli-provider && npm run build:target && npm run build:legacy-lib && npm run build:legacy-runtime && npm run build:task-lib && npm run build:cli-runtime",
-    "test": "node tests/run-tests.js",
-    "test:unit": "node tests/run-tests.js",
-    "test:e2e": "mocha 'tests/e2e/**/*.test.js' --timeout 120000",
-    "test:e2e:docker": "bash tests/integration/e2e-isolation-and-auto.test.sh",
-    "test:slow": "mocha 'tests/integration/**/*.test.js' 'tests/providers/**/*.test.js' --timeout 180000",
-    "test:all": "npm run test && npm run test:e2e && npm run test:slow",
-    "test:coverage": "c8 npm run test:unit",
-    "test:coverage:report": "c8 --reporter=html npm run test:unit && echo 'Coverage report generated at coverage/index.html'",
-    "postinstall": "node scripts/postinstall.js",
-    "start": "node cli/index.js",
-    "typecheck": "tsc --noEmit && npm run typecheck:legacy-lib && npm run typecheck:legacy-runtime && npm run typecheck:task-lib && npm run typecheck:cluster && npm run typecheck:hosted-target && npm run typecheck:hosted-session && npm run typecheck:target",
-    "typecheck:agent-cli-provider": "tsc --project tsconfig.agent-cli-provider.json",
-    "typecheck:legacy-lib": "tsc --project tsconfig.legacy-lib.json",
-    "typecheck:legacy-runtime": "tsc --project tsconfig.legacy-runtime.json",
-    "typecheck:task-lib": "tsc --project tsconfig.task-lib.json",
-    "typecheck:hosted-target": "tsc --project tsconfig.hosted-target.json",
-    "typecheck:hosted-session": "tsc --project tsconfig.hosted-session.json",
-    "test:hosted-target": "npm run build:cluster && npm run build:target && node --test tests/hosted-target/*.test.ts",
-    "test:target": "npm run build:agent-cli-provider && npm run build:target && node --test tests/target/*.test.ts",
-    "typecheck:target": "tsc --project tsconfig.target.json",
-    "typecheck:cluster": "tsc --project tsconfig.cluster.json",
-    "lint:agent-cli-provider": "eslint \"src/agent-cli-provider/**/*.ts\" \"tests/agent-cli-provider/**/*.ts\"",
-    "build:agent-cli-provider": "tsc --project tsconfig.agent-cli-provider.build.json",
-    "build:cli-runtime": "node scripts/build-cli-runtime.js",
-    "build:legacy-lib": "tsc --project tsconfig.legacy-lib.build.json",
-    "build:legacy-runtime": "tsc --project tsconfig.legacy-runtime.build.json",
-    "build:task-lib": "tsc --project tsconfig.task-lib.build.json",
-    "build:target": "tsc --project tsconfig.target.build.json",
-    "build:cluster": "npm run protocol:generate && tsc --project tsconfig.cluster.cjs.json && tsc --project tsconfig.cluster.esm.json && tsc --project tsconfig.hosted-target.cjs.json && tsc --project tsconfig.hosted-target.esm.json && tsc --project tsconfig.hosted-session.cjs.json && tsc --project tsconfig.hosted-session.esm.json && node scripts/build-cluster.js",
-    "test:agent-cli-provider": "node --test tests/agent-cli-provider/*.test.js",
-    "test:omp": "npm run build:agent-cli-provider && npm run build:task-lib && node --test tests/agent-cli-provider/omp-*.test.js && node tests/run-tests.js 'tests/omp-rpc-watcher*.test.js' tests/omp-isolation-capability.test.js tests/omp-docker-auth.test.js tests/omp-docker-fresh-only.test.js",
-    "test:providers:live": "npm run build:agent-cli-provider && node scripts/live-provider-smoke.js",
-    "check:agent-cli-provider": "npm run check:agent-cli-provider:ci",
-    "check:agent-cli-provider:ci": "npm run typecheck:agent-cli-provider && npm run lint:agent-cli-provider && npm run build:agent-cli-provider && npm run test:agent-cli-provider",
-    "test:cluster-client": "npm run build:cluster && node --test tests/cluster/client.test.js tests/cluster/client-lifecycle.test.js tests/cluster/parity.test.js tests/cluster/architecture.test.js tests/cluster/verifier-regressions.test.js tests/cluster/request-validation.test.js tests/hosted-session/coordinator.test.js tests/hosted-session/coordinator-cancellation.test.js",
-    "test:cluster-package": "npm run build:agent-cli-provider && npm run build:cluster && npm run build:target && node --test tests/cluster/package.test.js",
-    "dev:link": "npm link",
+    "test": "node --test tests/tooling/*.test.js",
+    "lint": "eslint .github/ci-path-classifier.js scripts/*.js npm/zeroshot/**/*.js tests/tooling/*.js commitlint.config.js",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "protocol:check": "cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check",
+    "distribution:check": "node scripts/distribution.js check-repository",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:test": "cargo test --workspace",
+    "rust:docs": "RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps",
+    "rust:check": "npm run rust:fmt && npm run rust:clippy && npm run rust:test && npm run rust:docs",
     "opcore:status": "opcore status --repo . --json",
     "opcore:scan": "opcore --repo . --json",
     "opcore:check": "node scripts/opcore-introduced-check.js",
@@ -75,185 +24,19 @@
     "opcore:graph:build": "opcore graph build --repo . --json",
     "opcore:graph:update": "opcore graph update --repo . --json",
     "opcore:measure": "opcore measure --repo . --json",
-    "audit:production": "node scripts/audit-production-dependencies.js",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "validate:templates": "node scripts/validate-templates.js",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "protocol:generate": "node scripts/generate-cluster-types.js",
-    "protocol:check": "cargo run -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check && node scripts/generate-cluster-types.js --check",
-    "rust:distribution:check": "node scripts/rust-distribution.js check-repository",
-    "rust:check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "deadcode": "ts-prune --skip node_modules",
-    "deadcode:files": "unimported",
-    "deadcode:deps": "depcheck",
-    "deadcode:all": "npm run deadcode && npm run deadcode:files && npm run deadcode:deps",
-    "dupcheck": "jscpd src/ --min-lines 5 --min-tokens 50 --threshold 5",
-    "check": "npm run typecheck && npm run lint",
-    "check:all": "npm run check && npm run deadcode:all",
-    "release": "semantic-release",
-    "release:preflight": "node scripts/release-preflight.js",
-    "release:recover": "node scripts/release-recovery.js",
-    "release:assert-published": "node scripts/assert-release-published.js",
-    "prepack": "npm run build:cluster && npm run build:target && npm run build:legacy-lib && npm run build:legacy-runtime && npm run build:task-lib && npm run build:cli-runtime",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run check:agent-cli-provider:ci",
-    "prepare": "npm run build:agent-cli-provider && npm run build:target && npm run build:legacy-lib && npm run build:legacy-runtime && npm run build:task-lib && npm run build:cli-runtime && husky"
+    "check": "npm run lint && npm test && npm run distribution:check && npm run protocol:check",
+    "prepare": "husky"
   },
-  "c8": {
-    "reporter": [
-      "text",
-      "lcov",
-      "html"
-    ],
-    "include": [
-      "src/**/*.js",
-      "lib/**/*.js",
-      "cli/**/*.js"
-    ],
-    "exclude": [
-      "**/*.test.js",
-      "**/tests/**"
-    ],
-    "all": true
-  },
-  "keywords": [
-    "ai",
-    "agents",
-    "multi-agent",
-    "orchestration",
-    "claude",
-    "codex",
-    "gemini",
-    "automation"
-  ],
-  "author": "Covibes",
-  "license": "MIT",
-  "homepage": "https://github.com/the-open-engine/zeroshot",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/the-open-engine/zeroshot.git"
-  },
-  "bugs": {
-    "url": "https://github.com/the-open-engine/zeroshot/issues"
-  },
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "ompSdkHostContainment": {
-    "platforms": [
-      "linux:arm64",
-      "linux:x64"
-    ],
-    "supervisor": "scripts/omp/host-supervisor.ts",
-    "protocolVersion": 1
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
-  "exports": {
-    ".": "./src/orchestrator.js",
-    "./cluster": {
-      "types": "./lib/cluster/index.d.ts",
-      "import": "./lib/cluster/index.mjs",
-      "require": "./lib/cluster/index.cjs",
-      "default": "./lib/cluster/index.cjs"
-    },
-    "./hosted-session": {
-      "types": "./lib/hosted-session/index.d.ts",
-      "import": "./lib/hosted-session/index.mjs",
-      "require": "./lib/hosted-session/index.cjs",
-      "default": "./lib/hosted-session/index.cjs"
-    },
-    "./package.json": "./package.json",
-    "./*": "./*"
-  },
-  "files": [
-    "src/",
-    "lib/",
-    "bin/",
-    "cli/",
-    "task-lib/",
-    "cluster-templates/",
-    "cluster-hooks/",
-    "docker/zeroshot-cluster/",
-    "scripts/",
-    "!scripts/build-cli-runtime.js",
-    "!scripts/rust-distribution.js",
-    "protocol/openengine-cluster/v1/worker.schema.json",
-    "docs/openengine-cluster-protocol/v1/legacy-worker.md",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md",
-    "npm-shrinkwrap.json"
-  ],
   "dependencies": {
-    "@oh-my-pi/pi-coding-agent": "17.2.1",
-    "ajv": "^8.18.0",
-    "ansi-to-html": "^0.7.2",
-    "better-sqlite3": "^12.6.2",
-    "bun": "1.3.14",
-    "chalk": "^4.1.2",
-    "commander": "^14.0.2",
-    "js-yaml": "^4.3.1",
-    "node-pty": "^1.1.0",
-    "omelette": "^0.4.17",
-    "open": "^10.1.0",
-    "pidusage": "^4.0.1",
-    "proper-lockfile": "^4.1.2"
-  },
-  "optionalDependencies": {
-    "@napi-rs/keyring": "^1.1.6",
-    "ws": "^8.18.3"
+    "js-yaml": "^4.3.1"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "@semantic-release/github": "^11.0.6",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.0.3",
-    "c8": "^10.1.3",
-    "chai": "^6.2.1",
-    "depcheck": "^1.4.7",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-security": "^3.0.1",
-    "eslint-plugin-sonarjs": "^3.0.5",
-    "eslint-plugin-unused-imports": "^4.3.0",
     "husky": "^9.1.7",
-    "jscpd": "^3.5.10",
-    "lint-staged": "^16.2.7",
-    "mocha": "^11.7.5",
     "opcore": "0.2.1",
-    "prettier": "^3.7.4",
-    "semantic-release": "^25.0.2",
-    "sinon": "^21.0.0",
-    "ts-prune": "^0.10.3",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.59.4",
-    "unimported": "^1.31.0"
-  },
-  "overrides": {
-    "cosmiconfig": {
-      "js-yaml": "4.3.1"
-    },
-    "adm-zip": "0.6.0",
-    "sharp": "0.35.3",
-    "xml2js": "^0.5.0",
-    "diff": ">=8.0.3",
-    "tar": ">=7.5.8",
-    "undici": ">=7.18.2",
-    "minimatch": ">=10.2.1",
-    "lodash": ">=4.17.24",
-    "marked": ">=15.0.7"
-  },
-  "lint-staged": {
-    "*.{js,mjs,cjs}": [
-      "eslint --fix"
-    ],
-    "*.{js,mjs,cjs,json,md}": [
-      "prettier --write"
-    ]
+    "prettier": "^3.7.4"
   }
 }

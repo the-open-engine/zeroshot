@@ -1,387 +1,67 @@
-name: Release
+name: Release Zeroshot
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       action:
-        description: Validate the Node release or recover one missing artifact from an immutable tag.
+        description: Build without publishing or release the complete Zeroshot distribution.
         required: true
         default: dry-run
         type: choice
         options:
           - dry-run
-          - recover-npm
-          - recover-github-release
-      release_tag:
-        description: Recovery tag in vX.Y.Z form.
-        required: false
+          - release
+      version:
+        description: Explicit Zeroshot release version in X.Y.Z form.
+        required: true
         type: string
       release_commit:
-        description: Full immutable commit SHA referenced by release_tag.
-        required: false
+        description: Exact full lowercase commit SHA from main.
+        required: true
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-main
+  group: release-zeroshot
   cancel-in-progress: false
 
+env:
+  ZEROSHOT_IMAGE: ghcr.io/the-open-engine/zeroshot-target
+
 jobs:
-  node-relevance:
-    if: |
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      vars.RELEASE_AUTOMATION_ENABLED == 'true'
+  plan:
     runs-on: ubuntu-latest
     permissions:
+      checks: read
       contents: read
     outputs:
-      relevant: ${{ steps.classify.outputs.node }}
+      commit: ${{ steps.release.outputs.commit }}
+      tag: ${{ steps.release.outputs.tag }}
+      tag-exists: ${{ steps.release.outputs.tag-exists }}
+      publish-latest: ${{ steps.release.outputs.publish-latest }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - name: Checkout exact CI-tested main commit
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Classify unreleased Node history
-        id: classify
+      - name: Validate explicit release inputs
         shell: bash
         env:
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          latest_node_tag="$(
-            git describe --tags --match 'v[0-9]*' --abbrev=0 "$TESTED_SHA" 2>/dev/null || true
-          )"
-          {
-            if [[ -n "$latest_node_tag" ]]; then
-              git rev-list --reverse "$latest_node_tag..$TESTED_SHA"
-            else
-              git rev-list --reverse "$TESTED_SHA"
-            fi
-          } | node scripts/node-release-commits.js >> "$GITHUB_OUTPUT"
-
-  install-matrix:
-    needs: [node-relevance]
-    if: |
-      always() &&
-      (
-        (github.event_name == 'workflow_dispatch' && inputs.action == 'dry-run') ||
-        (
-          github.event_name == 'workflow_run' &&
-          needs.node-relevance.result == 'success' &&
-          needs.node-relevance.outputs.relevant == 'true'
-        )
-      ) &&
-      (
-        github.event_name != 'workflow_run' ||
-        vars.RELEASE_AUTOMATION_ENABLED == 'true'
-      )
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            node: 22
-          - os: macos-latest
-            node: 22
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout tested candidate
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Link and smoke CLI
-        run: |
-          npm link
-          zeroshot --help
-          zeroshot --version
-          zeroshot list
-
-      - name: Test platform process metrics
-        run: |
-          node - <<'NODE'
-          const { getProcessMetrics, isPlatformSupported } = require('./src/process-metrics');
-          (async () => {
-            const metrics = await getProcessMetrics(process.pid, { samplePeriodMs: 100 });
-            if (!metrics.exists) throw new Error('Process should exist');
-            if (typeof metrics.cpuPercent !== 'number') throw new Error('cpuPercent must be numeric');
-            if (typeof metrics.memoryMB !== 'number') throw new Error('memoryMB must be numeric');
-            console.log({ platform: process.platform, supported: isPlatformSupported(), metrics });
-          })().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-  dry-run:
-    needs: [install-matrix]
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      inputs.action == 'dry-run' &&
-      needs.install-matrix.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout exact dispatched candidate
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install pinned dependencies
-        run: npm ci
-
-      - name: Fetch immutable release history
-        run: git fetch --tags --force
-
-      - name: Release preflight
-        run: npm run release:preflight
-
-      - name: Verify package tarball
-        shell: bash
-        run: |
-          set -euo pipefail
-          pack_dir="$(mktemp -d)"
-          prefix_dir="$(mktemp -d)"
-          trap 'rm -rf "$pack_dir" "$prefix_dir"' EXIT
-
-          npm pack --pack-destination "$pack_dir"
-          tarball="$(find "$pack_dir" -maxdepth 1 -name '*.tgz' -print -quit)"
-          npm install --global --prefix "$prefix_dir" "$tarball"
-          "$prefix_dir/bin/zeroshot" --version
-          "$prefix_dir/bin/zeroshot" --help
-          "$prefix_dir/bin/zeroshot" list
-
-      - name: Run semantic-release dry run
-        id: semantic-dry-run
-        run: node scripts/release-dry-run.js
-
-  release-plan:
-    outputs:
-      version: ${{ steps.semantic-plan.outputs.version }}
-      tag: ${{ steps.planned-tag.outputs.tag }}
-    needs: [install-matrix]
-    if: |
-      always() &&
-      needs.install-matrix.result == 'success' &&
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      vars.RELEASE_AUTOMATION_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout exact CI-tested main commit
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Verify this is the CI-tested main commit
-        id: candidate
-        shell: bash
-        env:
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          current_sha="$(git rev-parse HEAD)"
-          remote_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
-          if [[ "$current_sha" != "$TESTED_SHA" || "$remote_sha" != "$TESTED_SHA" ]]; then
-            echo "Skipping obsolete release: tested=$TESTED_SHA checkout=$current_sha main=$remote_sha"
-            echo "current=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "current=true" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node.js
-        if: steps.candidate.outputs.current == 'true'
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install pinned dependencies
-        if: steps.candidate.outputs.current == 'true'
-        run: npm ci
-
-      - name: Fetch immutable release history
-        if: steps.candidate.outputs.current == 'true'
-        run: git fetch --tags --force
-
-      - name: Release preflight
-        if: steps.candidate.outputs.current == 'true'
-        run: npm run release:preflight
-
-      - name: Verify package tarball
-        if: steps.candidate.outputs.current == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          pack_dir="$(mktemp -d)"
-          prefix_dir="$(mktemp -d)"
-          trap 'rm -rf "$pack_dir" "$prefix_dir"' EXIT
-
-          npm pack --pack-destination "$pack_dir"
-          tarball="$(find "$pack_dir" -maxdepth 1 -name '*.tgz' -print -quit)"
-          npm install --global --prefix "$prefix_dir" "$tarball"
-          "$prefix_dir/bin/zeroshot" --version
-          "$prefix_dir/bin/zeroshot" --help
-          "$prefix_dir/bin/zeroshot" list
-
-      - name: Resolve semantic-release version before native builds
-        id: semantic-plan
-        if: steps.candidate.outputs.current == 'true'
-        env:
-          GITHUB_REF_NAME: main
-        run: node scripts/release-dry-run.js
-
-      - name: Resolve planned immutable release tag
-        id: planned-tag
-        if: steps.semantic-plan.outputs.version != ''
-        env:
-          RELEASE_VERSION: ${{ steps.semantic-plan.outputs.version }}
-        run: echo "tag=v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-        shell: bash
-
-  release:
-    outputs:
-      created: ${{ steps.semantic-release.outputs.created }}
-      tag: ${{ steps.semantic-release.outputs.tag }}
-    needs: [install-matrix, release-plan]
-    if: |
-      always() &&
-      needs.install-matrix.result == 'success' &&
-      needs.release-plan.result == 'success' &&
-      needs.release-plan.outputs.version != '' &&
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      vars.RELEASE_AUTOMATION_ENABLED == 'true'
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - name: Checkout exact CI-tested main commit
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install pinned dependencies
-        run: npm ci
-
-      - name: Fetch immutable release history
-        run: git fetch --tags --force
-
-      - name: Recheck main immediately before publication and confirm planned version
-        id: final-plan
-        shell: bash
-        env:
-          EXPECTED_VERSION: ${{ needs.release-plan.outputs.version }}
-          GITHUB_REF_NAME: main
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          current_sha="$(git rev-parse HEAD)"
-          remote_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
-          if [[ "$current_sha" != "$TESTED_SHA" || "$remote_sha" != "$TESTED_SHA" ]]; then
-            echo "::error::main moved after release validation: tested=$TESTED_SHA checkout=$current_sha main=$remote_sha"
-            exit 1
-          fi
-          actual_version="$(node scripts/release-dry-run.js | sed -n 's/^RELEASE_DRY_RUN_RESULT=//p' | tail -1)"
-          if [[ "$actual_version" != "$EXPECTED_VERSION" ]]; then
-            echo "::error::semantic-release version changed after planning: expected=$EXPECTED_VERSION actual=$actual_version"
-            exit 1
-          fi
-
-      - name: Run semantic-release
-        id: semantic-release
-        shell: bash
-        env:
-          EXPECTED_TAG: ${{ needs.release-plan.outputs.tag }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tags_before="$(git tag --points-at HEAD --list 'v*')"
-          npx semantic-release
-          tags_after="$(git tag --points-at HEAD --list 'v*')"
-          if [[ "$tags_after" != "$EXPECTED_TAG" || "$tags_after" == "$tags_before" ]]; then
-            echo "::error::semantic-release did not create expected tag $EXPECTED_TAG (before=$tags_before after=$tags_after)"
-            exit 1
-          fi
-          echo "created=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$tags_after" >> "$GITHUB_OUTPUT"
-
-      - name: Assert release state
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: npm run release:assert-published
-
-  recover:
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.action == 'recover-npm' || inputs.action == 'recover-github-release')
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - name: Validate recovery inputs
-        shell: bash
-        env:
+          RELEASE_ACTION: ${{ inputs.action }}
           RELEASE_COMMIT: ${{ inputs.release_commit }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "::error::release_tag must match vX.Y.Z"
+          [[ "$RELEASE_ACTION" == "dry-run" || "$RELEASE_ACTION" == "release" ]] || {
+            echo "::error::action must be dry-run or release"
+            exit 1
+          }
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::version must match X.Y.Z"
+            exit 1
+          }
+          major="${RELEASE_VERSION%%.*}"
+          [[ "$major" -ge 8 ]] || {
+            echo "::error::Zeroshot releases must use major version 8 or newer"
             exit 1
           }
           [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
@@ -389,12 +69,526 @@ jobs:
             exit 1
           }
 
-      - name: Checkout immutable release commit
+      - name: Checkout exact Zeroshot release source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.release_commit }}
+
+      - name: Verify exact main commit and independent tag
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ACTION: ${{ inputs.action }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          current_commit="$(git rev-parse HEAD)"
+          [[ "$current_commit" == "$RELEASE_COMMIT" ]] || {
+            echo "::error::checkout resolved to $current_commit, not $RELEASE_COMMIT"
+            exit 1
+          }
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main || {
+            echo "::error::release commit $RELEASE_COMMIT is not on main"
+            exit 1
+          }
+
+          release_tag="v$RELEASE_VERSION"
+          tag_exists=false
+          if tag_commit="$(git rev-parse -q --verify "refs/tags/${release_tag}^{commit}")"; then
+            [[ "$tag_commit" == "$RELEASE_COMMIT" ]] || {
+              echo "::error::$release_tag already resolves to $tag_commit"
+              exit 1
+            }
+            tag_exists=true
+          fi
+          if [[ "$tag_exists" == "false" ]]; then
+            green_required="$(
+              gh api "/repos/$GITHUB_REPOSITORY/commits/$RELEASE_COMMIT/check-runs?per_page=100" \
+                --jq '[.check_runs[] | select(.name == "required" and .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")] | length'
+            )"
+            [[ "$green_required" -gt 0 ]] || {
+              echo "::error::$RELEASE_COMMIT has no successful CI / required check"
+              exit 1
+            }
+          fi
+
+          latest_tag="$(
+            git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1
+          )"
+          publish_latest=false
+          if [[ "$tag_exists" == "false" ]]; then
+            if [[ -n "$latest_tag" ]]; then
+              latest_version="${latest_tag#v}"
+              highest_version="$(printf '%s\n%s\n' "$latest_version" "$RELEASE_VERSION" | sort -V | tail -n 1)"
+              [[ "$highest_version" == "$RELEASE_VERSION" && "$latest_version" != "$RELEASE_VERSION" ]] || {
+                echo "::error::new Zeroshot version $RELEASE_VERSION must be newer than $latest_version"
+                exit 1
+              }
+            fi
+            publish_latest=true
+          elif [[ "$latest_tag" == "$release_tag" ]]; then
+            publish_latest=true
+          fi
+
+          {
+            echo "commit=$RELEASE_COMMIT"
+            echo "tag=$release_tag"
+            echo "tag-exists=$tag_exists"
+            echo "publish-latest=$publish_latest"
+            echo "version=$RELEASE_VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+  binaries:
+    needs: [plan]
+    if: inputs.action == 'dry-run' || inputs.action == 'release'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            executable: zeroshot
+            c-compiler: musl-gcc
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            executable: zeroshot
+            c-compiler: musl-gcc
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            executable: zeroshot
+            c-compiler: cc
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            executable: zeroshot
+            c-compiler: cc
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            executable: zeroshot.exe
+            c-compiler: cl.exe
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    env:
+      BINARY_PATH: target/${{ matrix.target }}/release/${{ matrix.executable }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned script dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Setup Rust 1.97.0 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          targets: ${{ matrix.target }}
+
+      - name: Install static Linux C toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          C_COMPILER: ${{ matrix.c-compiler }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          command -v "$C_COMPILER"
+          echo "CC=$C_COMPILER" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=-lgcc" >> "$GITHUB_ENV"
+
+      - name: Verify bundled SQLite C toolchain
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          C_COMPILER: ${{ matrix.c-compiler }}
+        run: command -v "$C_COMPILER"
+
+      - name: Verify bundled SQLite MSVC toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $installation) {
+            throw 'MSVC C toolchain required by bundled SQLite is unavailable'
+          }
+
+      - name: Stage explicit Zeroshot package version
+        run: node scripts/distribution.js stage-version --tag "$RELEASE_TAG"
+        shell: bash
+
+      - name: Verify staged Zeroshot package version
+        run: node scripts/distribution.js check-version --tag "$RELEASE_TAG"
+        shell: bash
+
+      - name: Build standalone Zeroshot release binary
+        run: cargo build --release --locked -p zeroshot --bin zeroshot --target ${{ matrix.target }}
+
+      - name: Verify static Linux release binary
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if readelf --program-headers "$BINARY_PATH" | grep -q INTERP; then
+            echo "::error::Linux release binary has a dynamic interpreter"
+            exit 1
+          fi
+
+      - name: Run standalone Zeroshot release binary
+        run: node scripts/distribution.js smoke --binary "$BINARY_PATH"
+        shell: bash
+
+      - name: Package target archive
+        run: |
+          node scripts/distribution.js package \
+            --target "${{ matrix.target }}" \
+            --version "$RELEASE_TAG" \
+            --binary "$BINARY_PATH" \
+            --out release-assets
+        shell: bash
+
+      - name: Run executable extracted from target archive
+        run: |
+          node scripts/distribution.js smoke-archive \
+            --target "${{ matrix.target }}" \
+            --archive "release-assets/zeroshot-v${{ needs.plan.outputs.version }}-${{ matrix.target }}.tar.gz"
+        shell: bash
+
+      - name: Upload target archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zeroshot-archive-${{ matrix.target }}
+          path: release-assets/*.tar.gz
+          if-no-files-found: error
+
+  manifest:
+    needs: [plan, binaries]
+    if: always() && needs.binaries.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned script dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download every target archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: zeroshot-archive-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build and verify complete checksum manifest
+        run: node scripts/distribution.js manifest --version "$RELEASE_TAG" --dir release-assets
+        shell: bash
+
+      - name: Upload complete Zeroshot distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zeroshot-distribution-v${{ needs.plan.outputs.version }}
+          path: |
+            release-assets/*.tar.gz
+            release-assets/SHA256SUMS
+          if-no-files-found: error
+
+  image-input:
+    needs: [plan]
+    if: inputs.action == 'dry-run' || inputs.action == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned script dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Stage explicit Zeroshot package version
+        run: node scripts/distribution.js stage-version --tag "$RELEASE_TAG"
+
+      - name: Build linux/amd64 target image
+        run: |
+          docker build --platform linux/amd64 \
+            --build-arg "VCS_REF=$RELEASE_COMMIT" \
+            --build-arg "ZEROSHOT_VERSION=$RELEASE_VERSION" \
+            --file docker/zeroshot-target/Dockerfile \
+            --tag "$ZEROSHOT_IMAGE:$RELEASE_VERSION" .
+
+      - name: Smoke target image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            "$ZEROSHOT_IMAGE:$RELEASE_VERSION" --help >/dev/null
+          actual_version="$(
+            docker run --rm --platform linux/amd64 \
+              "$ZEROSHOT_IMAGE:$RELEASE_VERSION" --version
+          )"
+          [[ "$actual_version" == "zeroshot $RELEASE_VERSION" ]] || {
+            echo "::error::target image reports $actual_version"
+            exit 1
+          }
+
+      - name: Save exact image publication input
+        run: |
+          mkdir -p image-artifact
+          docker image save --output image-artifact/zeroshot-target.tar "$ZEROSHOT_IMAGE:$RELEASE_VERSION"
+
+      - name: Upload exact image publication input
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zeroshot-target-image-v${{ needs.plan.outputs.version }}
+          path: image-artifact/zeroshot-target.tar
+          if-no-files-found: error
+
+  image-publish:
+    needs: [plan, image-input, publish]
+    if: |
+      inputs.action == 'release' &&
+      needs.image-input.result == 'success' &&
+      needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      PUBLISH_LATEST: ${{ needs.plan.outputs.publish-latest }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Download exact image publication input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-target-image-v${{ needs.plan.outputs.version }}
+          path: image-artifact
+
+      - name: Load exact target image publication input
+        run: |
+          docker image load --input image-artifact/zeroshot-target.tar
+          docker image tag "$ZEROSHOT_IMAGE:$RELEASE_VERSION" "$ZEROSHOT_IMAGE:release-candidate"
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Publish source-verified image tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$ZEROSHOT_IMAGE:release-candidate"
+          candidate_id="$(docker image inspect --format '{{.Id}}' "$candidate")"
+          pull_log="$RUNNER_TEMP/zeroshot-image-pull.log"
+
+          image_label() {
+            docker image inspect --format "{{ index .Config.Labels \"$1\" }}" "$2"
+          }
+
+          pull_verified() {
+            reference="$1"
+            if docker pull "$reference" >"$pull_log" 2>&1; then
+              existing_revision="$(image_label org.opencontainers.image.revision "$reference")"
+              existing_version="$(image_label org.opencontainers.image.version "$reference")"
+              existing_id="$(docker image inspect --format '{{.Id}}' "$reference")"
+              [[ "$existing_revision" == "$RELEASE_COMMIT" && "$existing_version" == "$RELEASE_VERSION" ]] || {
+                echo "::error::$reference already belongs to $existing_revision / $existing_version"
+                exit 1
+              }
+              [[ "$existing_id" == "$candidate_id" ]] || {
+                echo "::error::$reference does not match the exact uploaded image input"
+                exit 1
+              }
+              return 0
+            fi
+            if ! grep --quiet --ignore-case --extended-regexp 'manifest unknown|not found' "$pull_log"; then
+              cat "$pull_log" >&2
+              exit 1
+            fi
+            return 1
+          }
+
+          candidate_revision="$(image_label org.opencontainers.image.revision "$candidate")"
+          candidate_version="$(image_label org.opencontainers.image.version "$candidate")"
+          [[ "$candidate_revision" == "$RELEASE_COMMIT" && "$candidate_version" == "$RELEASE_VERSION" ]] || {
+            echo "::error::candidate image does not identify the exact release source"
+            exit 1
+          }
+
+          version_ref="$ZEROSHOT_IMAGE:$RELEASE_VERSION"
+          commit_ref="$ZEROSHOT_IMAGE:sha-$RELEASE_COMMIT"
+          version_exists=false
+          commit_exists=false
+          if pull_verified "$version_ref"; then version_exists=true; fi
+          if pull_verified "$commit_ref"; then commit_exists=true; fi
+
+          canonical="$candidate"
+
+          if [[ "$version_exists" == "false" ]]; then
+            docker image tag "$canonical" "$version_ref"
+            docker push "$version_ref"
+          fi
+          if [[ "$commit_exists" == "false" ]]; then
+            docker image tag "$canonical" "$commit_ref"
+            docker push "$commit_ref"
+          fi
+          if [[ "$PUBLISH_LATEST" == "true" ]]; then
+            docker image tag "$canonical" "$ZEROSHOT_IMAGE:latest"
+            docker push "$ZEROSHOT_IMAGE:latest"
+          else
+            echo "Keeping latest on the newer Zeroshot release"
+          fi
+
+      - name: Verify anonymous image installation
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/zeroshot-anonymous-docker
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          docker pull "$ZEROSHOT_IMAGE:$RELEASE_VERSION"
+
+  publish:
+    needs: [plan, image-input, manifest]
+    if: |
+      always() &&
+      inputs.action == 'release' &&
+      needs.image-input.result == 'success' &&
+      needs.manifest.result == 'success'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+      PUBLISH_LATEST: ${{ needs.plan.outputs.publish-latest }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      TAG_EXISTS: ${{ needs.plan.outputs.tag-exists }}
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install pinned script dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download complete Zeroshot distribution
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-distribution-v${{ needs.plan.outputs.version }}
+          path: release-assets
+
+      - name: Create or verify independent GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "$RELEASE_TAG already has a GitHub Release"
+          elif [[ "$TAG_EXISTS" == "true" ]]; then
+            gh release create "$RELEASE_TAG" \
+              --verify-tag --latest="$PUBLISH_LATEST" \
+              --title "Zeroshot v$RELEASE_VERSION" \
+              --notes "Standalone Zeroshot v$RELEASE_VERSION."
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "$RELEASE_COMMIT" --latest="$PUBLISH_LATEST" \
+              --title "Zeroshot v$RELEASE_VERSION" \
+              --notes "Standalone Zeroshot v$RELEASE_VERSION."
+          fi
+          gh release edit "$RELEASE_TAG" --latest="$PUBLISH_LATEST"
+          latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+          if [[ "$PUBLISH_LATEST" == "true" ]]; then
+            [[ "$latest_tag" == "$RELEASE_TAG" ]] || {
+              echo "::error::$RELEASE_TAG did not acquire Latest ownership"
+              exit 1
+            }
+          else
+            [[ "$latest_tag" != "$RELEASE_TAG" ]] || {
+              echo "::error::$RELEASE_TAG retained Latest ownership"
+              exit 1
+            }
+          fi
+
+      - name: Verify existing assets and upload only missing names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/distribution.js publish-assets --tag "$RELEASE_TAG" --dir release-assets
+
+  shim-input:
+    needs: [plan, manifest, publish]
+    if: |
+      always() &&
+      needs.plan.result == 'success' &&
+      needs.manifest.result == 'success' &&
+      (
+        inputs.action == 'dry-run' ||
+        (inputs.action == 'release' && needs.publish.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
 
       - name: Setup Node.js
         uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
@@ -403,26 +597,157 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
-      - name: Install pinned dependencies
-        run: npm ci
+      - name: Install pinned script dependencies
+        run: npm ci --ignore-scripts
 
-      - name: Fetch protected refs
-        run: |
-          git fetch origin main
-          git fetch origin "refs/tags/${{ inputs.release_tag }}:refs/tags/${{ inputs.release_tag }}"
+      - name: Download dry-run Zeroshot distribution
+        if: inputs.action == 'dry-run'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-distribution-v${{ needs.plan.outputs.version }}
+          path: release-assets
 
-      - name: Verify recovery package
-        run: |
-          npm run release:preflight
-          npm run lint
-          npm run typecheck
-          npm run check:agent-cli-provider:ci
-          npm pack --dry-run --json
-
-      - name: Recover missing artifact
+      - name: Download published Zeroshot distribution
+        if: inputs.action == 'release'
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RECOVERY_ACTION: ${{ inputs.action }}
-          RELEASE_COMMIT: ${{ inputs.release_commit }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: npm run release:recover
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" \
+            --pattern 'SHA256SUMS' \
+            --pattern "zeroshot-v${RELEASE_VERSION}-*.tar.gz" \
+            --dir release-assets
+
+      - name: Verify exact shim distribution inputs
+        run: node scripts/distribution.js verify --version "$RELEASE_VERSION" --dir release-assets
+
+      - name: Stage explicit npm shim version
+        working-directory: npm/zeroshot
+        run: npm version "$RELEASE_VERSION" --no-git-tag-version
+
+      - name: Pack exact npm shim publication input
+        shell: bash
+        run: |
+          mkdir -p shim-release
+          npm pack ./npm/zeroshot --pack-destination shim-release
+
+      - name: Install exact shim tarball against verified release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/zeroshot-shim-install"
+          tarballs=(./shim-release/*.tgz)
+          [[ "${#tarballs[@]}" -eq 1 ]]
+          npm install --ignore-scripts --prefix "$install_root" "${tarballs[0]}"
+          package_root="$install_root/node_modules/@the-open-engine-company/zeroshot"
+          node - "$package_root" "$PWD/release-assets" <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const [packageRoot, releaseDirectory] = process.argv.slice(2);
+          const { install } = require(path.join(packageRoot, 'lib', 'install'));
+          install({
+            packageRoot,
+            platform: 'linux',
+            arch: 'x64',
+            fetchBuffer(url) {
+              const filename = path.basename(new URL(url).pathname);
+              return Promise.resolve(fs.readFileSync(path.join(releaseDirectory, filename)));
+            },
+          }).catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+          actual_version="$("$install_root/node_modules/.bin/zeroshot" --version)"
+          [[ "$actual_version" == "zeroshot $RELEASE_VERSION" ]]
+
+      - name: Dry-run npm shim publication
+        if: inputs.action == 'dry-run'
+        shell: bash
+        run: |
+          npm publish --dry-run --access public ./shim-release/*.tgz
+
+      - name: Upload exact npm shim publication input
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zeroshot-shim-v${{ needs.plan.outputs.version }}
+          path: shim-release/*.tgz
+          if-no-files-found: error
+
+  shim-publish:
+    needs: [plan, image-publish, shim-input]
+    if: |
+      always() &&
+      inputs.action == 'release' &&
+      needs.image-publish.result == 'success' &&
+      needs.shim-input.result == 'success'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Download exact npm shim publication input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-shim-v${{ needs.plan.outputs.version }}
+          path: shim-release
+
+      - name: Idempotently publish standalone Zeroshot shim package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="@the-open-engine-company/zeroshot@$RELEASE_VERSION"
+          tarballs=(./shim-release/*.tgz)
+          [[ "${#tarballs[@]}" -eq 1 ]]
+          local_integrity="$(
+            node - "${tarballs[0]}" <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const digest = crypto
+            .createHash('sha512')
+            .update(fs.readFileSync(process.argv[2]))
+            .digest('base64');
+          process.stdout.write(`sha512-${digest}`);
+          NODE
+          )"
+          if published="$(npm view "$package" version 2>/dev/null)"; then
+            [[ "$published" == "$RELEASE_VERSION" ]] || {
+              echo "::error::$package resolved to unexpected version $published"
+              exit 1
+            }
+            registry_integrity="$(npm view "$package" dist.integrity)"
+            [[ "$registry_integrity" == "$local_integrity" ]] || {
+              echo "::error::$package exists with different tarball integrity"
+              exit 1
+            }
+            echo "$package is already published; recovery is complete"
+          else
+            npm publish --provenance --access public ./shim-release/*.tgz
+          fi
+
+  python-sdk-release:
+    needs: [plan, shim-publish]
+    if: |
+      always() &&
+      inputs.action == 'release' &&
+      needs.plan.result == 'success' &&
+      needs.shim-publish.result == 'success'
+    permissions:
+      checks: read
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-python.yml
+    with:
+      action: release
+      zeroshot_version: ${{ needs.plan.outputs.version }}
+      sdk_revision: 1
+      release_commit: ${{ needs.plan.outputs.commit }}
+    secrets: inherit

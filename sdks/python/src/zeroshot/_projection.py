@@ -81,7 +81,7 @@ def _log_event(value: object) -> LogEvent:
     record = _mapping(root.get("record"), "log event.record")
     execution = root.get("execution")
     if execution is not None and not isinstance(execution, str):
-        raise ProtocolError("Zeroshot Rust emitted a non-string log execution selector")
+        raise ProtocolError("Zeroshot emitted a non-string log execution selector")
     return LogEvent(
         run_id=_string(root, "runId", "log event"),
         cursor=_string(root, "cursor", "log event"),
@@ -115,7 +115,7 @@ def _terminal_result(run_id: str, value: object) -> RunResult:
     )
     if kind == "succeeded":
         if "output" not in terminal:
-            raise ProtocolError("Zeroshot Rust omitted terminal success output")
+            raise ProtocolError("Zeroshot omitted terminal success output")
         return RunResult(
             run_id=run_id,
             succeeded=True,
@@ -133,25 +133,25 @@ def _cursor(value: Mapping[str, object]) -> str:
         candidate = value.get(name)
         if isinstance(candidate, str):
             return candidate
-    raise ProtocolError("Zeroshot Rust omitted the run status cursor")
+    raise ProtocolError("Zeroshot omitted the run status cursor")
 
 
 def _mapping(value: object, kind: str) -> Mapping[str, object]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ProtocolError(f"Zeroshot Rust emitted malformed {kind}")
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}")
     return value
 
 
 def _mapping_list(value: object, kind: str) -> tuple[Mapping[str, object], ...]:
     if not isinstance(value, list):
-        raise ProtocolError(f"Zeroshot Rust emitted malformed {kind}")
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}")
     return tuple(_mapping(item, kind) for item in value)
 
 
 def _string(value: Mapping[str, object], name: str, kind: str) -> str:
     selected = value.get(name)
     if not isinstance(selected, str):
-        raise ProtocolError(f"Zeroshot Rust emitted malformed {kind}.{name}")
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected
 
 
@@ -162,7 +162,7 @@ def _positive_javascript_safe_integer(
 ) -> int:
     selected = value.get(name)
     if type(selected) is not int or not 1 <= selected <= _MAX_JAVASCRIPT_SAFE_INTEGER:
-        raise ProtocolError(f"Zeroshot Rust emitted malformed {kind}.{name}")
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected
 
 
@@ -174,5 +174,5 @@ def _enum_string(
 ) -> str:
     selected = _string(value, name, kind)
     if selected not in allowed:
-        raise ProtocolError(f"Zeroshot Rust emitted unsupported {kind}.{name} {selected!r}")
+        raise ProtocolError(f"Zeroshot emitted unsupported {kind}.{name} {selected!r}")
     return selected

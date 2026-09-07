@@ -33,7 +33,7 @@ class ProtocolError(ZeroshotError):
 
 
 class InvalidRequestError(ZeroshotError):
-    """Raised when Rust rejects graph, input, runtime, or run options.
+    """Raised when Zeroshot rejects graph, input, runtime, or run options.
 
     Args:
         message: Complete secret-safe native diagnostic.

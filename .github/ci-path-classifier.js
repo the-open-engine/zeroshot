@@ -2,80 +2,56 @@
 
 const fs = require('node:fs');
 
-const SHARED_PREFIXES = ['crates/openengine-cluster-protocol/', 'protocol/'];
-const SHARED_PATHS = new Set([
-  '.github/ci-path-classifier.js',
-  '.github/dependabot.yml',
-  '.github/workflows/ci.yml',
-  '.github/workflows/pr-policy.yml',
-  '.dockerignore',
-  'eslint.config.mjs',
-  'npm-shrinkwrap.json',
-  'package-lock.json',
-  'package.json',
-  'scripts/generate-cluster-types.js',
-  'scripts/opcore-introduced-check.js',
-  'tests/unit/ci-path-classifier.test.js',
-  'tests/unit/release-hygiene.test.js',
-  'tests/unit/release-topology.test.js',
-]);
+const SHARED_PATHS = new Set(['.github/ci-path-classifier.js', '.github/workflows/ci.yml']);
 
-const RUST_PREFIXES = [
-  'crates/openengine-cluster-client/',
-  'crates/openengine-cluster-server/',
-  'crates/openengine-cluster-testkit/',
-  'crates/openengine-test-support/',
-  'zeroshot-rust/',
-  'npm/zeroshot-rust/',
+const NATIVE_PREFIXES = [
+  'crates/',
   'distribution/',
-  'docker/zeroshot-rust-target/',
-  // Keep deletions from the one-time public rename in the Rust lane.
-  'docker/zeroshot-v2-target/',
-  'docs/zeroshot-rust',
-  'tests/unit/rust-',
+  'docker/zeroshot-target/',
+  'docs/zeroshot-cli',
+  'docs/zeroshot-distribution',
+  'npm/zeroshot/',
+  'protocol/',
+  'zeroshot/',
 ];
-const RUST_PATHS = new Set([
-  '.github/workflows/release-rust.yml',
+const NATIVE_PATHS = new Set([
+  '.github/workflows/release.yml',
   'Cargo.lock',
   'Cargo.toml',
   'clippy.toml',
   'rust-toolchain.toml',
   'rustfmt.toml',
-  'scripts/rust-distribution.js',
+  'scripts/distribution.js',
 ]);
 
 const PYTHON_PREFIXES = ['sdks/python/'];
 const PYTHON_PATHS = new Set(['.github/workflows/release-python.yml']);
+const MULTI_LANE_PATHS = new Map([['.github/workflows/release-python.yml', ['python', 'tooling']]]);
 
-const NODE_PREFIXES = [
+const TOOLING_PREFIXES = [
+  '.agents/',
+  '.codex/',
+  '.github/',
   '.husky/',
-  'bin/',
-  'cli/',
-  'cluster-hooks/',
-  'cluster-scripts/',
-  'cluster-templates/',
-  'docker/zeroshot-cluster/',
-  'docs/',
-  'legacy/',
-  'lib/',
-  'private/',
+  '.opcore/',
   'scripts/',
-  'src/',
-  'task-lib/',
-  'test-support/',
   'tests/',
 ];
-const NODE_PATHS = new Set([
-  '.github/workflows/codeql.yml',
-  '.github/workflows/release.yml',
-  '.jscpd.json',
-  '.mocharc.cjs',
-  '.nvmrc',
+const TOOLING_PATHS = new Set([
+  '.dockerignore',
+  '.gitignore',
   '.prettierignore',
   '.prettierrc.json',
-  'build-image.sh',
-  'codecov.yml',
+  'AGENTS.md',
+  'CHANGELOG.md',
+  'CONTRIBUTING.md',
+  'PUBLISHING.md',
+  'README.md',
   'commitlint.config.js',
+  'eslint.config.mjs',
+  'opcore-zero.docs.json',
+  'package-lock.json',
+  'package.json',
 ]);
 
 function hasPrefix(pathname, prefixes) {
@@ -89,45 +65,40 @@ function normalizePath(pathname) {
 
 function classifyPath(pathname) {
   const normalized = normalizePath(pathname);
-
-  if (SHARED_PATHS.has(normalized) || hasPrefix(normalized, SHARED_PREFIXES)) {
-    return 'shared';
-  }
-  if (RUST_PATHS.has(normalized) || hasPrefix(normalized, RUST_PREFIXES)) {
-    return 'rust';
-  }
-  if (PYTHON_PATHS.has(normalized) || hasPrefix(normalized, PYTHON_PREFIXES)) {
-    return 'python';
-  }
-  if (NODE_PATHS.has(normalized) || hasPrefix(normalized, NODE_PREFIXES)) {
-    return 'node';
-  }
-
-  // New and ambiguous paths run both lanes until ownership is made explicit.
+  if (SHARED_PATHS.has(normalized)) return 'shared';
+  if (PYTHON_PATHS.has(normalized) || hasPrefix(normalized, PYTHON_PREFIXES)) return 'python';
+  if (NATIVE_PATHS.has(normalized) || hasPrefix(normalized, NATIVE_PREFIXES)) return 'native';
+  if (TOOLING_PATHS.has(normalized) || hasPrefix(normalized, TOOLING_PREFIXES)) return 'tooling';
   return 'shared';
 }
 
+function recordOwnership(ownership, selected, pathname, kinds) {
+  for (const kind of kinds) {
+    ownership[kind].push(pathname);
+    selected.add(kind);
+  }
+}
+
 function classifyPaths(paths) {
-  const ownership = { node: [], rust: [], python: [], shared: [] };
+  const ownership = { native: [], python: [], tooling: [], shared: [] };
   const selected = new Set();
 
   for (const pathname of paths) {
     const normalized = normalizePath(pathname);
-    if (normalized.length === 0) continue;
-    const kind = classifyPath(normalized);
-    ownership[kind].push(normalized);
-    selected.add(kind);
+    if (!normalized) continue;
+    const kinds = MULTI_LANE_PATHS.get(normalized) ?? [classifyPath(normalized)];
+    recordOwnership(ownership, selected, normalized, kinds);
   }
 
   if (selected.size === 0) {
-    return { node: true, rust: true, python: true, ownership };
+    return { native: true, python: true, tooling: true, ownership };
   }
-
+  const shared = selected.has('shared');
+  const native = selected.has('native') || shared;
   return {
-    node: selected.has('node') || selected.has('shared'),
-    rust: selected.has('rust') || selected.has('shared'),
-    // The SDK wraps the native executable, so every Rust or shared change rechecks Python.
-    python: selected.has('python') || selected.has('rust') || selected.has('shared'),
+    native,
+    python: selected.has('python') || native || shared,
+    tooling: selected.has('tooling') || native || shared,
     ownership,
   };
 }
@@ -141,15 +112,16 @@ function changedPathsFromStdin() {
 
 function main() {
   const result = classifyPaths(changedPathsFromStdin());
-  const { node, rust, python, shared } = result.ownership;
-  process.stdout.write(`node=${result.node}\nrust=${result.rust}\npython=${result.python}\n`);
+  const { native, python, tooling, shared } = result.ownership;
+  process.stdout.write(
+    `native=${result.native}\npython=${result.python}\ntooling=${result.tooling}\n`
+  );
   process.stderr.write(
-    `CI ownership: node=${node.length}, rust=${rust.length}, python=${python.length}, shared=${shared.length}\n`
+    `CI ownership: native=${native.length}, python=${python.length}, ` +
+      `tooling=${tooling.length}, shared=${shared.length}\n`
   );
 }
 
 module.exports = { classifyPath, classifyPaths };
 
-if (require.main === module) {
-  main();
-}
+if (require.main === module) main();

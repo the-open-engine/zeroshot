@@ -17,10 +17,8 @@ def resolve_binary() -> Path:
     if override:
         binary = Path(override).expanduser().resolve()
     else:
-        executable = "zeroshot-rust.exe" if os.name == "nt" else "zeroshot-rust"
+        executable = "zeroshot.exe" if os.name == "nt" else "zeroshot"
         binary = Path(str(files("zeroshot").joinpath("_bin", executable)))
     if not binary.is_file():
-        raise TargetError(
-            "the Zeroshot Rust sidecar is missing; install a supported platform wheel"
-        )
+        raise TargetError("the Zeroshot sidecar is missing; install a supported platform wheel")
     return binary

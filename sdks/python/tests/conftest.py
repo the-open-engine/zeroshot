@@ -47,7 +47,7 @@ if log_path:
         stream.write(json.dumps(entry) + "\n")
 
 if args == ["--version"]:
-    print("zeroshot-rust 0.3.1")
+    print("zeroshot 0.3.1")
 elif args[:2] == ["template", "list"]:
     print(json.dumps(["single-worker", "software-change"]))
 elif args[:2] == ["template", "show"]:
@@ -134,7 +134,7 @@ elif args and args[0] == "force-stop":
         "v2:4",
     )))
 else:
-    print(f"zeroshot-rust: unsupported fake arguments: {args}", file=sys.stderr)
+    print(f"zeroshot: unsupported fake arguments: {args}", file=sys.stderr)
     raise SystemExit(1)
 """
 
@@ -142,7 +142,7 @@ else:
 @pytest.fixture
 def fake_native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Install a fake sidecar and expose its invocation log to a test."""
-    executable = tmp_path / "zeroshot-rust"
+    executable = tmp_path / "zeroshot"
     executable.write_text(_FAKE_NATIVE, encoding="utf-8")
     executable.chmod(0o755)
     log = tmp_path / "native.jsonl"

@@ -1,4 +1,4 @@
-"""Async single-run client over the bundled Zeroshot Rust sidecar."""
+"""Async single-run client over the bundled Zeroshot sidecar."""
 
 from __future__ import annotations
 
@@ -80,11 +80,11 @@ class _RunOptions(_SubmitOptions, total=False):
 
 
 class Client:
-    """Submit and observe one-turn graph agents through Zeroshot Rust.
+    """Submit and observe one-turn graph agents through Zeroshot.
 
     Args:
         target: Local target by default, or an unauthenticated direct target such as Docker.
-        preset: Default Rust-owned graph preset. None selects software-change.
+        preset: Default executable-owned graph preset. None selects software-change.
         runtime: Default runtime. None requires a runtime on each string submission.
         environment: Source for runtime-declared environment values. None reads the ambient
             environment at submission time. An explicit mapping is the complete value source.
@@ -181,8 +181,8 @@ class Client:
             The terminal result. Graph failure remains data until raise_for_failure() is called.
 
         Raises:
-            InvalidRequestError: If a string submission has no effective preset or runtime, or Rust
-                rejects the request.
+            InvalidRequestError: If a string submission has no effective preset or runtime,
+                or Zeroshot rejects the request.
             RunWaitTimeout: If observation expires; its run attribute can resume waiting.
             TargetError: If the sidecar or selected target is unavailable.
             ProtocolError: If native output is malformed or incompatible.
@@ -207,7 +207,7 @@ class Client:
         task: str | RunRequest,
         **options: Unpack[_SubmitOptions],
     ) -> Run:
-        """Preflight in Rust, submit one durable run, and return its handle.
+        """Preflight in Zeroshot, submit one durable run, and return its handle.
 
         Args:
             task: Task text for a built-in preset, or a complete exact RunRequest.
@@ -236,7 +236,7 @@ class Client:
             await self._ready()
             receipt = await self._native().json(arguments)
         if not isinstance(receipt, dict) or not isinstance(receipt.get("runId"), str):
-            raise ProtocolError("Zeroshot Rust returned a malformed submission receipt")
+            raise ProtocolError("Zeroshot returned a malformed submission receipt")
         return Run(self, receipt["runId"])
 
     def get_run(self, run_id: str) -> Run:
@@ -260,35 +260,35 @@ class Client:
         await self._ready()
         value = await self._native().json(["list", *self._route_arguments()])
         if not isinstance(value, dict) or not isinstance(value.get("runs"), list):
-            raise ProtocolError("Zeroshot Rust returned a malformed run inventory")
+            raise ProtocolError("Zeroshot returned a malformed run inventory")
         return tuple(_summary(_status(item)) for item in value["runs"])
 
     async def list_presets(self) -> tuple[str, ...]:
-        """Return built-in preset names read dynamically from the bundled Rust binary."""
+        """Return built-in preset names read dynamically from the bundled executable."""
         value = await self._native(static=True).json(["template", "list"])
         if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
-            raise ProtocolError("Zeroshot Rust returned a malformed template catalog")
+            raise ProtocolError("Zeroshot returned a malformed template catalog")
         return tuple(value)
 
     async def get_preset(self, name: str, *, delivery: str = "none") -> GraphSpec:
-        """Materialize one built-in preset through the bundled Rust binary.
+        """Materialize one built-in preset through the bundled executable.
 
         Args:
             name: Exact native preset name.
             delivery: Native delivery selector, such as none, pull_request, or merge.
 
         Returns:
-            The lossless Rust-emitted GraphSpec.
+            The lossless Zeroshot-emitted GraphSpec.
 
         Raises:
-            InvalidRequestError: If Rust rejects the name or delivery combination.
-            ProtocolError: If Rust emits a malformed graph document.
+            InvalidRequestError: If Zeroshot rejects the name or delivery combination.
+            ProtocolError: If Zeroshot emits a malformed graph document.
         """
         value = await self._native(static=True).json(
             ["template", "show", name, "--delivery", delivery]
         )
         if not isinstance(value, dict):
-            raise ProtocolError("Zeroshot Rust returned a malformed GraphSpec")
+            raise ProtocolError("Zeroshot returned a malformed GraphSpec")
         return GraphSpec.from_dict(value)
 
     def _submission(self, request: str | RunRequest, overrides: _Overrides) -> _Submission:
@@ -413,12 +413,12 @@ class Client:
             environment.update(self._provided_environment)
             secrets = tuple(self._provided_environment.values())
         if isinstance(self.target, LocalTarget) and self.target.state_dir is not None:
-            environment["ZEROSHOT_RUST_STATE_DIR"] = str(
+            environment["ZEROSHOT_STATE_DIR"] = str(
                 Path(self.target.state_dir).expanduser().resolve()
             )
         if isinstance(self.target, DirectTarget) and self._direct_directory is not None:
-            environment["ZEROSHOT_RUST_CONFIG_DIR"] = self._direct_directory.name
-        environment["ZEROSHOT_RUST_ERROR_FORMAT"] = "json"
+            environment["ZEROSHOT_CONFIG_DIR"] = self._direct_directory.name
+        environment["ZEROSHOT_ERROR_FORMAT"] = "json"
         return environment, secrets
 
     def _route_arguments(self) -> list[str]:
@@ -473,7 +473,7 @@ class Run:
 
     @property
     def id(self) -> str:
-        """Return the opaque public Rust run identity."""
+        """Return the opaque public Zeroshot run identity."""
         return self._id
 
     async def status(self) -> RunStatus:
@@ -554,7 +554,7 @@ class Run:
             current = await self.status()
             if current.result is not None:
                 return current.result
-            raise ProtocolError("Zeroshot Rust watch closed before a terminal result")
+            raise ProtocolError("Zeroshot watch closed before a terminal result")
 
         if wait_timeout is None:
             return await observe()

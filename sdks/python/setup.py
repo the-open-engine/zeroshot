@@ -1,4 +1,4 @@
-"""Build a platform wheel containing the matching Zeroshot Rust executable."""
+"""Build a platform wheel containing the matching Zeroshot executable."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_py import build_py
 
-_BINARY_ENV = "ZEROSHOT_RUST_BINARY"
+_BINARY_ENV = "ZEROSHOT_BINARY"
 _PLATFORM_ENV = "ZEROSHOT_PYTHON_WHEEL_PLATFORM"
 
 
@@ -32,7 +32,7 @@ class BuildPythonWithNative(build_py):
             return
         if not source.is_file():
             raise RuntimeError(f"{_BINARY_ENV} does not identify a file: {source}")
-        executable = "zeroshot-rust.exe" if os.name == "nt" else "zeroshot-rust"
+        executable = "zeroshot.exe" if os.name == "nt" else "zeroshot"
         destination = package_root / "_bin" / executable
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)

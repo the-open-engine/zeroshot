@@ -2,47 +2,27 @@
   "schemaVersion": 1,
   "bindings": [
     {
-      "source": "src/target/index.ts",
-      "document": "AGENTS.md"
-    },
-    {
-      "source": "src/hosted-target/index.ts",
-      "document": "AGENTS.md"
-    },
-    {
-      "source": "src/agent-cli-provider/types.ts",
-      "document": "AGENTS.md"
-    },
-    {
-      "source": "src/agent-cli-provider/provider-registry.ts",
-      "document": "AGENTS.md"
-    },
-    {
-      "source": "src/cluster/generated/protocol.ts",
-      "document": "AGENTS.md"
-    },
-    {
-      "source": "zeroshot-rust/src/full_v1_reducer.rs",
+      "source": "zeroshot/src/full_v1_reducer.rs",
       "document": "docs/openengine-cluster-protocol/v1/graph-contract.md"
     },
     {
-      "source": "zeroshot-rust/src/native_v2_delivery.rs",
+      "source": "zeroshot/src/native_v2_delivery.rs",
       "document": "AGENTS.md"
     },
     {
-      "source": "zeroshot-rust/src/native_v2_admission.rs",
+      "source": "zeroshot/src/native_v2_admission.rs",
       "document": "AGENTS.md"
     },
     {
-      "source": "zeroshot-rust/src/native_v2_supervisor.rs",
+      "source": "zeroshot/src/native_v2_supervisor.rs",
       "document": "AGENTS.md"
     },
     {
-      "source": "zeroshot-rust/src/native_v2_cloud.rs",
+      "source": "zeroshot/src/native_v2_cloud.rs",
       "document": "AGENTS.md"
     },
     {
-      "source": "zeroshot-rust/src/native_v2_cli/diagnostic.rs",
+      "source": "zeroshot/src/native_v2_cli/diagnostic.rs",
       "document": "AGENTS.md"
     },
     {

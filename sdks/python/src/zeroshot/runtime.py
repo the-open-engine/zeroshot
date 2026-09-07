@@ -13,7 +13,7 @@ from .values import JsonValue
 
 @dataclass(frozen=True, slots=True)
 class LocalTarget:
-    """Execute against the local Zeroshot Rust controller.
+    """Execute against the local Zeroshot controller.
 
     Args:
         workspace: Git workspace used in place by new runs. None captures the current directory
@@ -28,7 +28,7 @@ class LocalTarget:
 
 @dataclass(frozen=True, slots=True)
 class DirectTarget:
-    """Connect to an auth-less Zeroshot Rust target, including the Docker image.
+    """Connect to an auth-less Zeroshot target, including the Docker image.
 
     Args:
         origin: Target HTTP(S) origin. Native validation permits plain HTTP only on loopback.
@@ -46,7 +46,7 @@ Target: TypeAlias = LocalTarget | DirectTarget
 
 @dataclass(frozen=True, slots=True)
 class Preset:
-    """Select a Rust-owned built-in graph template.
+    """Select an executable-owned built-in graph template.
 
     Args:
         name: Exact name returned by Client.list_presets().
@@ -70,7 +70,7 @@ class _OpaqueDocument:
 
 @dataclass(frozen=True, slots=True)
 class GraphSpec(_OpaqueDocument):
-    """Lossless custom GraphSpec passed unchanged to Zeroshot Rust.
+    """Lossless custom GraphSpec passed unchanged to Zeroshot.
 
     Args:
         document: JSON-compatible GraphSpec mapping. Python performs no semantic validation.
@@ -88,17 +88,17 @@ class GraphSpec(_OpaqueDocument):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class UniformRuntime:
-    """Ask Rust to bind one agent runtime across every executable graph node.
+    """Ask Zeroshot to bind one agent runtime across every executable graph node.
 
     Args:
         provider: Native provider name.
         model: Native model identifier.
-        harness: Optional codex or claude override. Rust infers it only when unambiguous.
+        harness: Optional codex or claude override. Zeroshot infers it only when unambiguous.
         effort: Optional native reasoning effort.
         size: Native run size.
         session_scope: Native execution or node_instance session scope.
-        env: Environment variable names available to agent nodes. Rust owns provider defaults when
-            this tuple is empty; values are read only from Client.environment.
+        env: Environment variable names available to agent nodes. Zeroshot owns provider
+            defaults when this tuple is empty; values are read only from Client.environment.
     """
 
     provider: str
@@ -110,7 +110,7 @@ class UniformRuntime:
     env: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, JsonValue]:
-        """Encode the declarative uniform runtime consumed and validated by Rust."""
+        """Encode the declarative uniform runtime consumed and validated by Zeroshot."""
         value: dict[str, JsonValue] = {
             "provider": self.provider,
             "model": self.model,
@@ -128,7 +128,7 @@ class UniformRuntime:
 
 @dataclass(frozen=True, slots=True)
 class RuntimePlan(_OpaqueDocument):
-    """Lossless exact native runtime plan passed unchanged to Zeroshot Rust.
+    """Lossless exact native runtime plan passed unchanged to Zeroshot.
 
     Args:
         document: JSON-compatible RuntimePlan mapping. Python performs no semantic validation.

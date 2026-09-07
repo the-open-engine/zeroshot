@@ -1,0 +1,32 @@
+[
+  {
+    "platform": "linux",
+    "arch": "x64",
+    "target": "x86_64-unknown-linux-musl",
+    "executable": "zeroshot"
+  },
+  {
+    "platform": "linux",
+    "arch": "arm64",
+    "target": "aarch64-unknown-linux-musl",
+    "executable": "zeroshot"
+  },
+  {
+    "platform": "darwin",
+    "arch": "x64",
+    "target": "x86_64-apple-darwin",
+    "executable": "zeroshot"
+  },
+  {
+    "platform": "darwin",
+    "arch": "arm64",
+    "target": "aarch64-apple-darwin",
+    "executable": "zeroshot"
+  },
+  {
+    "platform": "win32",
+    "arch": "x64",
+    "target": "x86_64-pc-windows-msvc",
+    "executable": "zeroshot.exe"
+  }
+]

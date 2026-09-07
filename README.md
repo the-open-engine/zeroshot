@@ -5,246 +5,123 @@
   <img alt="Zeroshot. Self-driving software engineering. Layer 01 · Verification, The Open Engine." src="docs/brand/zeroshot-hero-light.png" width="100%">
 </picture>
 
-&nbsp;
-
-<a href="https://theopenengine.com"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="Website" src="docs/brand/social/website-light.png" height="30"></picture></a>
-<a href="https://x.com/OpenEngineCo"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineCo" src="docs/brand/social/x-light.png" height="30"></picture></a>
-<a href="https://www.linkedin.com/company/the-open-engine-company"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/linkedin-dark.png"><img alt="LinkedIn" src="docs/brand/social/linkedin-light.png" height="30"></picture></a>
-<a href="https://discord.gg/fZyzf2Cut9"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-dark.png"><img alt="Discord" src="docs/brand/social/discord-light.png" height="30"></picture></a>
-
-[![npm](https://img.shields.io/npm/v/@the-open-engine/zeroshot?style=flat&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine/zeroshot)
+[![npm](https://img.shields.io/npm/v/%40the-open-engine-company%2Fzeroshot?style=flat&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine-company/zeroshot)
 [![CI](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?style=flat&labelColor=171411&label=CI)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
-[![node](https://img.shields.io/badge/node-%E2%89%A5%2022-171411?style=flat)](#install)
-[![platforms](https://img.shields.io/badge/platforms-linux%20%C2%B7%20macos-171411?style=flat)](#install)
-[![stars](https://img.shields.io/github/stars/the-open-engine/zeroshot?style=flat&labelColor=171411&color=171411)](https://github.com/the-open-engine/zeroshot)
-[![Layer 01 · The Open Engine](https://img.shields.io/badge/Layer_01-The_Open_Engine-C2240C?style=flat&labelColor=171411)](#the-open-engine)
 
 </div>
 
-**The agent that wrote the code shouldn't be the one that says it works.**
+> [!IMPORTANT]
+> **Zeroshot v8 is a hard interface cutover.** The former Node.js product, commands, configuration,
+> state, and release train are discontinued; v8 does not provide aliases, migration, or compatibility
+> shims for them.
 
-Independent executor–verifier orchestration for software changes.
+# Zeroshot
+
+Zeroshot runs durable multi-agent graph workloads locally or on named targets. The canonical product
+is the native `zeroshot` executable in this repository.
 
 ## Install
 
-<!-- install-placeholder -->
+The npm package downloads a verified release archive and exposes the canonical command:
 
 ```bash
-npm install -g @the-open-engine/zeroshot
-zeroshot
+npm install -g @the-open-engine-company/zeroshot
+zeroshot version
 ```
 
-Requires **Node ≥ 22** and one supported provider. Guided setup detects installed providers, chooses a default, and configures worktree isolation for fresh repositories. Linux and macOS today; Windows is deferred.
+The npm installer supports Linux x64/arm64, macOS x64/arm64, and Windows x64. Direct native archives
+and `SHA256SUMS` are attached to each `vX.Y.Z` GitHub Release.
 
-This repository also contains **Zeroshot Rust**, the independent native product and `zeroshot-rust`
-CLI. It has its own releases and self-hosted target image; see the
-[Markdown CLI reference](docs/zeroshot-rust-cli.md),
-[standalone HTML CLI reference](docs/zeroshot-rust-cli.html),
-[distribution contract](docs/zeroshot-rust-distribution.md), and
-[target image guide](docker/zeroshot-rust-target/README.md). The remainder of this README describes
-the established Node product.
-
-## First run
+Python users install a platform wheel while importing the unchanged package name:
 
 ```bash
-cd your-repo
-zeroshot run "Add a --json flag with tests"
+pip install the-open-engine-zeroshot
 ```
 
-In a git repository, the guided default runs in a separate worktree, so the current checkout is not edited. Use `--no-isolation` only when you explicitly want the run to modify the current checkout.
+```python
+from zeroshot import Client
+```
 
-Observe the result from another terminal:
+The target server image is:
+
+```text
+ghcr.io/the-open-engine/zeroshot-target
+```
+
+## Run Locally
+
+A run needs an input document plus an exact runtime plan or profile. For example:
+
+```bash
+cp docker/zeroshot-target/examples/software-change-input.json /tmp/zeroshot-input.json
+cp docker/zeroshot-target/examples/claude-anthropic-runtime.json /tmp/zeroshot-runtime.json
+
+zeroshot run \
+  --title "Implement the requested change" \
+  --template software-change \
+  --input /tmp/zeroshot-input.json \
+  --runtime-config /tmp/zeroshot-runtime.json
+```
+
+Foreground runs stream NDJSON until completion. Use `--detach` to return after submission.
 
 ```bash
 zeroshot list
-zeroshot logs <id> -f
+zeroshot status <run-id>
+zeroshot watch <run-id>
+zeroshot logs <run-id>
+zeroshot force-stop <run-id>
 ```
 
-<div align="center">
-  <img src="docs/assets/zeroshot-demo.gif" alt="Zeroshot resolving an issue through the executor-verifier loop" width="760">
-  <br>
-  <em>Unattended, 100× speed · 90-minute run · 5 iterations to approval.</em>
-</div>
+Model IDs are provider-owned opaque strings. Zeroshot does not infer a harness from a model and does
+not maintain model catalogs.
 
-## How it works
+## Run a Target
 
-Zeroshot drives a coding agent through an **executor–verifier loop**. A conductor sizes the workflow, an executor implements the change in an isolated workspace, and a separate verifier judges the observable result. Validators do not share the executor's session or reasoning context; they may receive explicit handoff artifacts and must reproduce reported failures. The loop continues until the change is verified or returns a concrete reason it is not.
-
-Every step is written to a crash-safe SQLite ledger. Bring your own provider and backend: Zeroshot orchestrates their CLIs without storing provider keys.
-
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zeroshot-architecture-dark.webp">
-    <img alt="One Zeroshot run drawn as a graph: an issue enters, a conductor sizes the cluster, an executor implements it, and validators reject or approve the result" src="docs/assets/zeroshot-architecture-light.webp" width="100%">
-  </picture>
-  <br>
-  <em>One run: classify, execute, verify, and repeat when evidence fails.</em>
-</div>
-
-## Classification and routing
-
-The conductor scores every task on complexity (TRIVIAL, SIMPLE, STANDARD, CRITICAL) and type (INQUIRY, TASK, DEBUG) before any code is written, and that score picks the workflow. A junior model runs the pass; when it can't call it, it answers UNCERTAIN and a senior model decides instead.
-
-Rules are evaluated top down, first match wins:
-
-| Classification                         | Workflow           | Agents                                                        |
-| -------------------------------------- | ------------------ | ------------------------------------------------------------- |
-| DEBUG above TRIVIAL, any complexity    | `debug-workflow`   | investigator, fixer, tester, completion-detector              |
-| TRIVIAL TASK or DEBUG, `--pr`/`--ship` | `worker-validator` | worker, 1 validator                                           |
-| TRIVIAL                                | `single-worker`    | worker only, **no validator**                                 |
-| SIMPLE                                 | `worker-validator` | worker, 1 validator                                           |
-| STANDARD                               | `full-workflow`    | planner, worker, 2 validators                                 |
-| CRITICAL                               | `full-workflow`    | planner, worker, meta-coordinator, 4 validators in two stages |
-
-TRIVIAL is the row worth knowing about: one worker, no verifier, so the executor–verifier split doesn't apply on that path. CRITICAL is meant to be rare in the other direction, and the conductor is instructed to pick STANDARD whenever it's torn, since CRITICAL spends a senior model and four validators.
-
-## Custom workflows
-
-Each workflow above is a JSON file in [`cluster-templates/base-templates/`](cluster-templates/base-templates/), and none of them is privileged. Underneath is a message bus: agents subscribe to topics, publish to topics, and the graph is that wiring.
+Start the published target image:
 
 ```bash
-zeroshot config list                   # available workflows
-zeroshot config show full-workflow     # read one
-zeroshot config validate ./mine.json   # check yours
-zeroshot run 123 --config ./mine.json  # run it
+docker run --rm -p 8080:8080 \
+  -v zeroshot-data:/var/lib/zeroshot/native-v2 \
+  ghcr.io/the-open-engine/zeroshot-target:latest
 ```
 
-Agent ids, roles, and topic names are free strings, and a trigger can carry a JavaScript predicate deciding whether a message wakes its agent. Cycles are legal, reject-and-retry being one, though `zeroshot config validate` fails a ring of three or more unless something in it carries escape logic. Sub-clusters nest five deep.
-
-## Providers and issue sources
-
-Provider engines come from the registry: **Claude, Codex, bundled Gateway, Gemini, OpenCode, Pi, OMP, Kiro, and Copilot**. Model gateways stay behind the single Gateway provider.
+Register a direct target and its source defaults:
 
 ```bash
-zeroshot providers
-zeroshot providers set-default codex
-zeroshot run 123 --provider gemini
+zeroshot target add local --url http://127.0.0.1:8080 --direct
+zeroshot target setup local --repository owner/repository --branch main
 ```
 
-Issue sources are auto-detected from repository context or explicit URLs: **GitHub, GitLab, Jira, Azure DevOps, and Linear**. Each source requires its own authenticated client where applicable. See [`docs/providers.md`](docs/providers.md) for provider installation, model levels, and credentials.
+Then add `--target local` to `zeroshot run`.
 
-## Isolation and delivery
+## Interfaces
 
-Guided setup defaults fresh repositories to git worktree isolation. Delivery flags cascade: `--ship` implies `--pr`, which implies `--worktree`.
+- [CLI reference](docs/zeroshot-cli.md)
+- [Standalone HTML CLI reference](docs/zeroshot-cli.html)
+- [Distribution contract](docs/zeroshot-distribution.md)
+- [Target image guide](docker/zeroshot-target/README.md)
+- [Python SDK](sdks/python/README.md)
+- [OpenEngine cluster protocol](docs/openengine-cluster-protocol/v1/graph-contract.md)
 
-| Mode             | Flag             | Behavior                                            |
-| ---------------- | ---------------- | --------------------------------------------------- |
-| Git worktree     | `--worktree`     | isolated branch and checkout; guided default        |
-| Docker           | `--docker`       | container isolation for riskier workloads           |
-| Current checkout | `--no-isolation` | explicit escape hatch; modifies the active checkout |
-| Pull request     | `--pr`           | worktree plus PR creation                           |
-| Ship             | `--ship`         | worktree, PR, and merge after approval              |
-
-<details>
-<summary><strong>Command reference</strong></summary>
+The CLI references are generated from the typed Clap command model. Regenerate them with:
 
 ```bash
-zeroshot run <input>             # issue, URL, markdown file, or inline text
-zeroshot run 123 --docker        # container isolation
-zeroshot run 123 --pr            # worktree + pull request
-zeroshot run 123 --ship          # worktree + PR + merge after approval
-zeroshot run 123 --pr --pr-body $'## Summary\n\nCustom text\n\n{{issue_reference}}'
-zeroshot run 123 -d              # background run
-zeroshot run 123 --config ./mine.json  # custom workflow graph
-
-zeroshot list                    # tasks and clusters (--json)
-zeroshot status <id>             # detailed status (--json)
-zeroshot logs <id> -f            # stream logs
-zeroshot resume <id> [prompt]    # resume a stopped or failed run
-zeroshot stop <id>               # graceful stop
-zeroshot kill <id>               # force stop
-zeroshot export <id> --format trace --output run.trace.jsonl
-zeroshot export <id> --format semantic --output run.semantic.jsonl
-
-zeroshot providers               # provider availability and defaults
-zeroshot settings                # effective settings
-zeroshot agents list             # available agents
-zeroshot config list             # workflow graphs (config show / config validate)
+cargo run -p zeroshot --example generate_cli_docs -- --write
 ```
 
-`--pr-body` supplies a deterministic pull-request body for `--pr` and `--ship` runs. The
-template supports `{{issue_number}}`, `{{issue_title}}`, and `{{issue_reference}}`; all three
-expand to empty text for tasks without an issue, so manual runs never emit `Closes #unknown`.
-The unrendered template is retained for detached and resumed runs.
-
-The `trace` export is a deterministic, provider-neutral research bundle. It preserves the ordered
-cluster ledger, exact selected prompts, and exact raw task-log bytes without interpreting a Claude,
-Codex, Pi, or other provider protocol. Missing evidence is recorded explicitly in its footer. File
-exports are create-only: choose a new output path rather than replacing an existing bundle. Live
-tasks are exported only as explicitly incomplete snapshots.
-The separate `semantic` export runs those task bytes through Zeroshot's existing stateful provider
-adapters and emits bounded `text`, `thinking`, `tool_call`, `tool_result`, and `result` events.
-Zeroshot-owned wrapper and stderr records remain native-only. Parser diagnostics affect only
-semantic completeness; they do not alter the native trace or run.
-
-</details>
-
-<details>
-<summary><strong>Docker credential configuration</strong></summary>
-
-Docker mounts and environment forwarding are explicit and provider-aware. Defaults include `gh`, `git`, and `ssh`; provider-specific authentication follows the registry contract.
+## Development
 
 ```bash
-zeroshot settings set dockerMounts '["gh","git","ssh","aws"]'
-zeroshot run 123 --docker --mount ~/.aws:/root/.aws:ro
-zeroshot run 123 --docker --no-mounts
+npm ci
+npm run check
+cargo test --workspace
 ```
 
-See [`docs/providers.md`](docs/providers.md) for details.
-
-</details>
-
-## Scope and status
-
-Zeroshot performs best when a task has **clear acceptance criteria**. If you can't say what "done" means, an independent verifier can't confirm it.
-
-| Task                                            | Good fit? | Why                     |
-| ----------------------------------------------- | --------- | ----------------------- |
-| Add rate limiting (sliding window, per-IP, 429) | Yes       | clear requirements      |
-| Refactor auth to JWT                            | Yes       | defined end state       |
-| Fix a login bug                                 | Yes       | success is measurable   |
-| "Make the app faster"                           | No        | needs exploration first |
-| "Improve the codebase"                          | No        | no acceptance criteria  |
-
-- **Pre-1.0 in spirit.** Interfaces still move between releases; pin your version. (The npm version auto-increments on every merge, so read it as a build counter, not a stability promise.)
-- **Crash-safe.** All state persists to a SQLite ledger; `zeroshot resume <id>` continues at any time.
-- **No TUI in this release.** Monitor with `zeroshot logs <id> -f`, `zeroshot list`, and `zeroshot status <id>`.
-
-<details>
-<summary><strong>Architecture, quality gates and command proofs</strong></summary>
-
-Zeroshot is a message-driven coordination layer: a conductor classifies each task by complexity and type, a workflow template selects agents and validators, agents publish results to a SQLite ledger, and validators approve or reject with specific findings.
-
-- **Required handoff quality gates**: in `--pr`/`--ship` flows, the git-pusher fails closed until every configured gate has fresh passing evidence.
-- **Cmdproof**: make expensive exact commands reusable across agents with `zeroshot cmdproof check <id>`.
-
-See [CLAUDE.md](./CLAUDE.md) for the cluster schema, primitives, and the conductor's classification model.
-
-</details>
-
-## The Open Engine
-
-Zeroshot is **Layer 01 · Verification** of [The Open Engine](https://theopenengine.com), the open stack for autonomous software production. Generating code is easy; trusting it is not. The engine is layered because trust is layered:
-
-|        | Layer                      | Status                      |
-| ------ | -------------------------- | --------------------------- |
-| **01** | **Verification: Zeroshot** | This repo · open · shipping |
-| 02     | Constraints: **Opcore**    | Sibling · alpha             |
-| 03-05  | Intent · Context · Runtime | In development              |
-
-Zeroshot runs the loop: an agent writes the change, and **independent** verifiers decide whether it holds, approving it or rejecting it with the specific objections that blocked it. **Opcore** is the sibling layer, a deterministic, local, read-only **constraints** gate for coding agents. Zeroshot packages Opcore `0.2.1` and uses introduced-change validation so existing repository debt never blocks an otherwise clean change. Verification asks _"does this meet the goal?"_; constraints ask _"is this within tolerance?"_
-
-Each layer ships the same way: extracted from the platform we run, then opened. **Trust nothing. Verify everything.**
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating, and [SECURITY.md](SECURITY.md) for security reports. More in [`docs/`](docs/) and [CLAUDE.md](./CLAUDE.md).
-
-<!-- discord-placeholder -->
-
-Questions and help: [Discord](https://discord.gg/fZyzf2Cut9).
+Node.js is repository tooling and the npm delivery mechanism only; it is not a second Zeroshot
+runtime. See [CONTRIBUTING.md](CONTRIBUTING.md) and [PUBLISHING.md](PUBLISHING.md).
 
 ## License
 
-MIT. [The Open Engine Company](https://github.com/the-open-engine).
+MIT. See [LICENSE](LICENSE).

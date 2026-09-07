@@ -6,7 +6,7 @@ members = [
   "crates/openengine-cluster-client",
   "crates/openengine-cluster-testkit",
   "crates/openengine-cluster-testkit/tests/external-backend-fixture",
-  "zeroshot-rust",
+  "zeroshot",
 ]
 
 [workspace.package]

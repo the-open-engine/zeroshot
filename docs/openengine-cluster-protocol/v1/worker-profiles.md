@@ -23,7 +23,7 @@ with `malformed_result`. Rust serialization/deserialization and JSON Schema reje
 | --------------- | ------- | ------------------------------ | ------------------------------------------------------------------------------------------------ |
 | ACP             | `1`     | `openengine.worker.acp/v1`     | Testkit mock conformance only                                                                    |
 | A2A             | `1.0`   | `openengine.worker.a2a/1.0`    | Testkit mock conformance only                                                                    |
-| Legacy Zeroshot | `1`     | `legacy.zeroshot.ship/v1`      | Reserved future facade contract                                                                  |
+| Legacy Zeroshot | `1`     | `legacy.zeroshot.ship/v1`      | Closed historical schema and conformance fixture only; no runtime binding                        |
 | Builtin         | `1`     | `openengine.worker.builtin/v1` | Protocol-owned binding for native in-process built-ins; no product IDs, commands, or credentials |
 
 The ACP and A2A mock normalizers are deterministic fixtures. They add no sockets, subprocesses,
@@ -47,19 +47,20 @@ The reusable pre-admission check traverses steps and verifiers in source order a
 The check returns deterministic diagnostics. It does not admit, persist, schedule, or execute a
 graph.
 
-## Reserved `legacy.zeroshot.ship@1`
+## Historical `legacy.zeroshot.ship@1` fixture
 
-The reserved worker is allowed only in `openengine.graph.single-worker/v1`. Its input selects exactly
-one source: a nonempty issue reference, a nonempty prompt, or one or more `ArtifactRef` receipts.
-Isolation and provider selections are opaque registry-owned profile references. The request has no
-commands, endpoints, environment names, filesystem paths, raw credentials, tokens, or arbitrary
-provider configuration.
+The worker descriptor is retained only for Rust schema, validation, and conformance fixtures. It is
+not accepted by the v8 CLI or target and must not be used to reconstruct a removed runtime surface.
+Its fixture input selects exactly one source: a nonempty issue reference, a nonempty prompt, or one
+or more `ArtifactRef` receipts. Isolation and provider selections are opaque registry-owned profile
+references. The request has no commands, endpoints, environment names, filesystem paths, raw
+credentials, tokens, or arbitrary provider configuration.
 
 Its terminal output contains only a summary, normalized `succeeded`/`failed` status, and zero or more
 durable `ArtifactRef` receipts. Errors are the closed worker errors: `timeout`, `crash`, `malformed`,
 and `refusal`. The descriptor is valid only when its declared input and output equal these canonical
-payload types and it declares no verifier contract. The executable Node facade and raw logs/output
-are outside this contract.
+payload types and it declares no verifier contract. No executable, Node facade, compatibility
+adapter, or raw runtime output exists for this fixture.
 
 ## Artifact results
 

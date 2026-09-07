@@ -1,33 +1,6 @@
-# Block multiple implementation files (anti-pattern #4)
-BAD_FILES=$(git diff --cached --name-only | grep -E '(-v[0-9]+|-new|-old|-backup)\.[jt]sx?$' || true)
-if [ -n "$BAD_FILES" ]; then
-  echo "ERROR: Multiple implementation files detected:"
-  echo "$BAD_FILES"
-  echo "Use ONE file per concept. Refactor, don't duplicate."
-  exit 1
-fi
+#!/bin/sh
+set -eu
 
-# Enforce Rust formatting when Rust files are staged
-if git diff --cached --name-only --diff-filter=ACM -- '*.rs' | grep -q .; then
-  if ! command -v rustfmt >/dev/null 2>&1; then
-    echo "ERROR: rustfmt is required to format Rust (install Rust toolchain)."
-    exit 1
-  fi
-  git diff --cached --name-only -z --diff-filter=ACM -- '*.rs' | xargs -0 rustfmt --edition 2021 --check
-fi
-
-# Block only policy diagnostics introduced by staged changes; existing repository debt is non-blocking.
-npm run opcore:check:staged
-
-# Lint and format only staged files
-node scripts/run-lint-staged-no-stash.js
-
-# Type check the entire project (can't be limited to staged files)
-npm run typecheck
-
-# Validate cluster templates only when template files are staged (catches hardcoded model names, broken configs)
-STAGED_TEMPLATES=$(git diff --cached --name-only --diff-filter=ACM -- 'cluster-templates/**/*.json' || true)
-if [ -n "$STAGED_TEMPLATES" ]; then
-  CHANGED_ARG=$(echo "$STAGED_TEMPLATES" | tr '\n' ',' | sed 's/,$//')
-  node scripts/validate-templates.js --changed="$CHANGED_ARG"
-fi
+cargo fmt --all -- --check
+npm run lint
+npm test

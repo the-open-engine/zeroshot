@@ -16,7 +16,7 @@ class RunRequest:
     Args:
         title: Human-readable persisted run title.
         graph: Exact opaque GraphSpec.
-        initial_input: Exact closed JSON input validated by Rust against the graph.
+        initial_input: Exact closed JSON input validated by Zeroshot against the graph.
         runtime: Exact opaque RuntimePlan.
         branch: Direct-target source branch override.
         submission_key: Stable idempotency key; None generates one before native preflight.

@@ -1,2 +1,0 @@
-[warn] extension "example" failed to load
-[debug] falling back to default configuration
