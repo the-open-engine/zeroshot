@@ -45,7 +45,8 @@ waits through non-terminal policy states and merge deferrals without a work-dura
 the provider-native merge operation so merge queues remain transparent, and declares success only
 after an exact merged observation. Outside merge queues, strict branch freshness advances only by
 a provider-authorized compare-and-swap response; the exact returned head is adopted in the local
-workspace before delivery continues, and any untrusted head change is rejected.
+workspace before delivery continues. The returned receipt is retained before retrying idempotent
+local adoption, and any untrusted head change is rejected.
 
 Native-v2 Claude and Codex JSONL readers never cap cumulative stdout bytes or event counts. They
 share only a 64 MiB unfinished-record allocation guard, tolerate whitespace and a complete final

@@ -12,8 +12,9 @@ use crate::native_v2_delivery::git_auth::encode_basic_credential;
 
 use super::{
     GitHubAuthorityError, GitHubChecks, GitHubCredential, GitHubDeliveryAuthority,
-    GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation,
-    GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState, valid_head_update, valid_revision,
+    GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
+    GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest,
+    GitHubReviewState, valid_head_update, valid_revision,
 };
 
 // A GitHub page may contain 100 checks or comments, including bounded user/check
@@ -314,6 +315,14 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
             GitHubReviewState::Merged { .. } => Ok(GitHubHeadUpdateOutcome::Pending),
             GitHubReviewState::Closed => Err(GitHubAuthorityError::Rejected),
         }
+    }
+
+    async fn synchronize_review_head(
+        &self,
+        request: GitHubHeadSynchronization<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<(), GitHubAuthorityError> {
+        head::synchronize_review_head(self, request, credential).await
     }
 }
 

@@ -10,6 +10,17 @@ async fn repeated_base_advances_form_an_authorized_head_chain() {
     assert_head_updates(Script::RepeatedBehind, 2, 3, 5).await;
 }
 
+#[tokio::test]
+async fn provider_receipt_survives_a_transient_local_adoption_failure() {
+    let (repo, authority) = delivery_harness(Script::HeadAdoptionRace);
+
+    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+
+    assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
+    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
+}
+
 async fn assert_head_updates(
     script: Script,
     expected_updates: usize,

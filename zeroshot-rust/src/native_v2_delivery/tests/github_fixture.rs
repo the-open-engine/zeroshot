@@ -19,6 +19,7 @@ pub(super) enum Script {
     MultipleRegistrationWaves,
     DeferredMerge,
     StrictBehind,
+    HeadAdoptionRace,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -34,6 +35,7 @@ pub(super) struct FakeGitHub {
     merge_requested: AtomicBool,
     pub(super) merge_requests: AtomicUsize,
     pub(super) head_updates: AtomicUsize,
+    pub(super) head_sync_attempts: AtomicUsize,
     pub(super) inspections: AtomicUsize,
     pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
@@ -48,6 +50,7 @@ impl FakeGitHub {
             merge_requested: AtomicBool::new(false),
             merge_requests: AtomicUsize::new(0),
             head_updates: AtomicUsize::new(0),
+            head_sync_attempts: AtomicUsize::new(0),
             inspections: AtomicUsize::new(0),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
@@ -70,7 +73,9 @@ impl FakeGitHub {
             Script::Conflict => GitHubReviewState::Conflict,
             Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
-            Script::StrictBehind | Script::RepeatedBehind => self.no_ci_state(),
+            Script::StrictBehind | Script::HeadAdoptionRace | Script::RepeatedBehind => {
+                self.no_ci_state()
+            }
             Script::ProtectedBranch | Script::NeverConfirmsMerge => {
                 open_review(GitHubChecks::Passed)
             }
@@ -234,7 +239,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             return Ok(GitHubMergeRequestOutcome::Conflict);
         }
         let updates = self.head_updates.load(Ordering::SeqCst);
-        if (matches!(self.script, Script::StrictBehind) && updates == 0)
+        if (matches!(self.script, Script::StrictBehind | Script::HeadAdoptionRace) && updates == 0)
             || (matches!(self.script, Script::RepeatedBehind) && updates < 2)
         {
             return Ok(GitHubMergeRequestOutcome::HeadUpdateRequired);
@@ -253,7 +258,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubHeadUpdateOutcome, GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
-        if !matches!(self.script, Script::StrictBehind | Script::RepeatedBehind) {
+        if !matches!(
+            self.script,
+            Script::StrictBehind | Script::HeadAdoptionRace | Script::RepeatedBehind
+        ) {
             return Ok(GitHubHeadUpdateOutcome::Pending);
         }
         let status = tokio::process::Command::new("/usr/bin/git")
@@ -303,6 +311,19 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         let mut updated = review.clone();
         updated.head_revision = head_revision;
         Ok(GitHubHeadUpdateOutcome::Updated(updated))
+    }
+
+    async fn synchronize_review_head(
+        &self,
+        _request: GitHubHeadSynchronization<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<(), GitHubAuthorityError> {
+        assert_eq!(credential.expose(), "test-token");
+        let attempt = self.head_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if matches!(self.script, Script::HeadAdoptionRace) && attempt == 1 {
+            return Err(GitHubAuthorityError::Unavailable);
+        }
+        Ok(())
     }
 }
 

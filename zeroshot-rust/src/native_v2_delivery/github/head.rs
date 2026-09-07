@@ -90,9 +90,24 @@ pub(super) async fn update_review_head(
             context.credential,
         )
         .await?;
-    let updated = updated_receipt(value, request.review, request.pull_request_id)?;
-    adopt_local_head(context, request.review, &updated).await?;
-    Ok(updated)
+    updated_receipt(value, request.review, request.pull_request_id)
+}
+
+pub(super) async fn synchronize_review_head(
+    authority: &GhCliDeliveryAuthority,
+    request: GitHubHeadSynchronization<'_>,
+    credential: GitHubCredential<'_>,
+) -> Result<(), GitHubAuthorityError> {
+    adopt_local_head(
+        HeadUpdateContext {
+            authority,
+            workspace: request.workspace,
+            credential,
+        },
+        request.previous,
+        request.updated,
+    )
+    .await
 }
 
 fn update_arguments(pull_request_id: &str, expected_head: &str) -> Vec<String> {
@@ -165,6 +180,9 @@ async fn adopt_local_head(
     previous: &GitHubReviewReceipt,
     updated: &GitHubReviewReceipt,
 ) -> Result<(), GitHubAuthorityError> {
+    if !local_transition_required(context, previous, updated).await? {
+        return Ok(());
+    }
     let mut fetch = authenticated_git_command(
         &context.authority.config,
         context.workspace,
@@ -178,6 +196,17 @@ async fn adopt_local_head(
         &updated.head_revision,
     ]);
     bounded_status(fetch, context.authority.config.push_deadline).await?;
+    adopt_fetched_head(context, previous, updated).await
+}
+
+async fn adopt_fetched_head(
+    context: HeadUpdateContext<'_>,
+    previous: &GitHubReviewReceipt,
+    updated: &GitHubReviewReceipt,
+) -> Result<(), GitHubAuthorityError> {
+    if !local_transition_required(context, previous, updated).await? {
+        return Ok(());
+    }
     let mut ancestor = git_command(
         &context.authority.config,
         context.workspace,
@@ -198,6 +227,21 @@ async fn adopt_local_head(
     fast_forward.args(["merge", "--ff-only", &updated.head_revision]);
     bounded_status(fast_forward, context.authority.config.api_deadline).await?;
     require_local_head(context, &updated.head_revision).await
+}
+
+async fn local_transition_required(
+    context: HeadUpdateContext<'_>,
+    previous: &GitHubReviewReceipt,
+    updated: &GitHubReviewReceipt,
+) -> Result<bool, GitHubAuthorityError> {
+    if require_local_head(context, &updated.head_revision)
+        .await
+        .is_ok()
+    {
+        return Ok(false);
+    }
+    require_local_head(context, &previous.head_revision).await?;
+    Ok(true)
 }
 
 async fn git_output(

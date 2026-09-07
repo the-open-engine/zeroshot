@@ -9,12 +9,7 @@ impl NativeV2DeliveryAdapter {
         let outcome = self.request_head_update(drive).await?;
         match outcome {
             GitHubHeadUpdateOutcome::Updated(updated) => {
-                if !valid_head_update(&drive.review, &updated) {
-                    return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
-                }
-                drive.review = updated;
-                emit(drive.control, "delivery: adopted updated pull request head").await?;
-                Ok(ReviewStep::Continue)
+                self.adopt_updated_head(drive, updated).await
             }
             GitHubHeadUpdateOutcome::Pending => {
                 emit(
@@ -31,6 +26,58 @@ impl NativeV2DeliveryAdapter {
                     "GitHub authoritatively rejected branch update due to conflict",
                 )
                 .await
+            }
+        }
+    }
+
+    async fn adopt_updated_head(
+        &self,
+        drive: &mut ReviewDrive<'_>,
+        updated: GitHubReviewReceipt,
+    ) -> Result<ReviewStep, DeliveryStop> {
+        if !valid_head_update(&drive.review, &updated) {
+            return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
+        }
+        let previous = std::mem::replace(&mut drive.review, updated);
+        emit(
+            drive.control,
+            "delivery: GitHub authorized updated pull request head",
+        )
+        .await?;
+        self.synchronize_updated_head(drive, &previous).await?;
+        emit(drive.control, "delivery: adopted updated pull request head").await?;
+        Ok(ReviewStep::Continue)
+    }
+
+    async fn synchronize_updated_head(
+        &self,
+        drive: &mut ReviewDrive<'_>,
+        previous: &GitHubReviewReceipt,
+    ) -> Result<(), DeliveryStop> {
+        loop {
+            ensure_active(drive.control)?;
+            match self
+                .authority
+                .synchronize_review_head(
+                    GitHubHeadSynchronization {
+                        workspace: &self.config.workspace,
+                        previous,
+                        updated: &drive.review,
+                    },
+                    drive.credentials.current(),
+                )
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    emit(
+                        drive.control,
+                        "delivery: waiting to adopt GitHub pull request head",
+                    )
+                    .await?;
+                    let _ = drive.credentials.refresh().await;
+                    wait_for_poll(drive.control, self.config.poll.interval).await?;
+                }
             }
         }
     }

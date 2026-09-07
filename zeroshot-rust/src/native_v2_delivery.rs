@@ -16,7 +16,7 @@ mod review_head;
 mod tests;
 
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
-pub use review_head::{GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome};
+pub use review_head::{GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome};
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
 pub(crate) use contract::{delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels};
@@ -273,19 +273,6 @@ pub struct GitHubReviewObservation {
     pub state: GitHubReviewState,
 }
 
-impl GitHubReviewReceipt {
-    pub(crate) fn observation(&self, state: GitHubReviewState) -> GitHubReviewObservation {
-        GitHubReviewObservation {
-            review_id: self.review_id.clone(),
-            repository: self.repository.clone(),
-            target_branch: self.target_branch.clone(),
-            head_branch: self.head_branch.clone(),
-            head_revision: self.head_revision.clone(),
-            state,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum GitHubAuthorityError {
     #[error("GitHub delivery authority is unavailable")]
@@ -325,8 +312,6 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError>;
 
     /// Advances a stale non-queue review head through one provider-authorized CAS transition.
-    /// The returned receipt is authoritative only after the implementation has adopted the same
-    /// exact revision in `workspace`.
     async fn update_review_head(
         &self,
         _workspace: &std::path::Path,
@@ -334,6 +319,16 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
         _credential: GitHubCredential<'_>,
     ) -> Result<GitHubHeadUpdateOutcome, GitHubAuthorityError> {
         Ok(GitHubHeadUpdateOutcome::Pending)
+    }
+
+    /// Adopts one provider-authorized review-head transition in the local workspace.
+    /// Existing authorities that adopt before returning `Updated` may use this no-op default.
+    async fn synchronize_review_head(
+        &self,
+        _request: GitHubHeadSynchronization<'_>,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<(), GitHubAuthorityError> {
+        Ok(())
     }
 }
 

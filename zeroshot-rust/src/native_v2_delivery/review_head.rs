@@ -1,4 +1,24 @@
-use super::{GitHubReviewReceipt, valid_revision};
+use super::{GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewState, valid_revision};
+
+#[derive(Clone, Copy)]
+pub struct GitHubHeadSynchronization<'a> {
+    pub workspace: &'a std::path::Path,
+    pub previous: &'a GitHubReviewReceipt,
+    pub updated: &'a GitHubReviewReceipt,
+}
+
+impl GitHubReviewReceipt {
+    pub(crate) fn observation(&self, state: GitHubReviewState) -> GitHubReviewObservation {
+        GitHubReviewObservation {
+            review_id: self.review_id.clone(),
+            repository: self.repository.clone(),
+            target_branch: self.target_branch.clone(),
+            head_branch: self.head_branch.clone(),
+            head_revision: self.head_revision.clone(),
+            state,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GitHubMergeRequestOutcome {

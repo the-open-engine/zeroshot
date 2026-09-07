@@ -2,6 +2,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 
 use super::*;
+use crate::native_v2_candidate::test_support::{TestGitRepository, git, git_output};
 
 const OLD_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const NEW_HEAD: &str = "cccccccccccccccccccccccccccccccccccccccc";
@@ -85,4 +86,69 @@ fn mutation_response_rejects_missing_invalid_or_unchanged_heads() {
         assert!(updated_receipt(invalid, &review(), "PR_node_17").is_err());
     }
     assert!(updated_receipt(json!({"data": {}}), &review(), "PR_node_17").is_err());
+}
+
+#[tokio::test]
+async fn fetched_head_adoption_accepts_only_the_authorized_transition_and_its_retry() {
+    let repository = TestGitRepository::candidate();
+    let workspace = &repository.workspace;
+    git(
+        workspace,
+        &[
+            "-c",
+            "user.name=GitHub",
+            "-c",
+            "user.email=noreply@github.com",
+            "commit",
+            "--allow-empty",
+            "--message",
+            "previous",
+        ],
+    );
+    let previous_head = git_output(workspace, &["rev-parse", "HEAD"]);
+    git(
+        workspace,
+        &[
+            "-c",
+            "user.name=GitHub",
+            "-c",
+            "user.email=noreply@github.com",
+            "commit",
+            "--allow-empty",
+            "--message",
+            "updated",
+        ],
+    );
+    let updated_head = git_output(workspace, &["rev-parse", "HEAD"]);
+    let mut previous = review();
+    previous.head_revision = previous_head.clone();
+    let mut updated = previous.clone();
+    updated.head_revision = updated_head.clone();
+    let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        git_program: PathBuf::from("/usr/bin/git"),
+        gh_program: PathBuf::from("/usr/bin/false"),
+        home_directory: repository.root.path().to_path_buf(),
+        api_deadline: Duration::from_secs(5),
+        push_deadline: Duration::from_secs(5),
+    });
+    let context = HeadUpdateContext {
+        authority: &authority,
+        workspace,
+        credential: GitHubCredential("test-token"),
+    };
+
+    git(workspace, &["reset", "--hard", &repository.base]);
+    assert_eq!(
+        adopt_fetched_head(context, &previous, &updated).await,
+        Err(GitHubAuthorityError::Rejected)
+    );
+
+    git(workspace, &["reset", "--hard", &previous_head]);
+    adopt_fetched_head(context, &previous, &updated)
+        .await
+        .assert_value();
+    assert_eq!(git_output(workspace, &["rev-parse", "HEAD"]), updated_head);
+    adopt_fetched_head(context, &previous, &updated)
+        .await
+        .assert_value();
 }
