@@ -389,6 +389,7 @@ jobs:
       - name: Create or complete independent SDK GitHub Release
         shell: bash
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           SDK_TAG: ${{ needs.plan.outputs.sdk-tag }}

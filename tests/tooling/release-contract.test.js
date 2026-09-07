@@ -61,6 +61,7 @@ describe('v8 hard cutover contract', () => {
     );
     assert.match(pythonRelease, /git show -s --format=%ct/);
     assert.match(pythonRelease, /if remote != local:/);
+    assert.match(pythonRelease, /GH_REPO: \$\{\{ github\.repository \}\}/);
     assert.match(pythonRelease, /gh release download "\$SDK_TAG"/);
     assert.match(pythonRelease, /"\$local_sha" == "\$remote_sha"/);
     assert.match(pythonRelease, /if: steps\.pypi\.outputs\.exists == 'false'/);
