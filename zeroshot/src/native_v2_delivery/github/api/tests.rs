@@ -53,4 +53,5 @@ fn api_error_parser_preserves_bounded_provider_status_and_reason() {
 
     let unauthorized = GitHubAuthorityError::api(Some(401), "HTTP 401: Bad credentials");
     assert!(!unauthorized.retryable_review_sync());
+    assert!(unauthorized.authentication_failed());
 }

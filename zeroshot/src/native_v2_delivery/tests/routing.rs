@@ -1,6 +1,16 @@
 use super::*;
 use openengine_cluster_protocol::GraphSpec;
 
+#[test]
+fn hosted_delivery_polling_has_no_work_duration_limit() {
+    assert!(DeliveryPollPolicy::default().has_next(usize::MAX));
+    assert!(
+        !DeliveryPollPolicy::new(3, Duration::ZERO)
+            .assert_value()
+            .has_next(3)
+    );
+}
+
 struct RepairSession;
 
 #[async_trait]

@@ -28,6 +28,7 @@ pub(super) enum Script {
     CiFailsThenMerges,
     NeverConfirmsMerge,
     CredentialExpires,
+    ReviewSyncCredentialExpires,
 }
 
 pub(super) struct FakeGitHub {
@@ -62,6 +63,7 @@ impl FakeGitHub {
     fn review_state(&self, inspection: usize) -> GitHubReviewState {
         match self.script {
             Script::NoCi | Script::CredentialExpires | Script::ReviewSyncRace => self.no_ci_state(),
+            Script::ReviewSyncCredentialExpires => self.no_ci_state(),
             Script::RegistrationRace => self.registration_race_state(inspection),
             Script::MultipleRegistrationWaves => self.multiple_registration_waves_state(inspection),
             Script::CiFailsThenMerges => self.ci_repair_state(inspection),
@@ -136,6 +138,13 @@ impl FakeGitHub {
             _ => false,
         }
     }
+
+    fn uses_refreshed_credential(&self) -> bool {
+        matches!(
+            self.script,
+            Script::CredentialExpires | Script::ReviewSyncCredentialExpires
+        )
+    }
 }
 
 pub(super) fn delivery_harness(script: Script) -> (TempRepo, Arc<FakeGitHub>) {
@@ -189,9 +198,22 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         request: &GitHubReviewRequest,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
-        assert_eq!(credential.expose(), "test-token");
         assert!(self.pushed.load(Ordering::SeqCst));
         let attempt = self.review_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if matches!(self.script, Script::ReviewSyncCredentialExpires)
+            && credential.expose() == "test-token"
+        {
+            return Err(GitHubAuthorityError::api(
+                Some(401),
+                "HTTP 401: bad credentials",
+            ));
+        }
+        let expected = if matches!(self.script, Script::ReviewSyncCredentialExpires) {
+            "refreshed-token"
+        } else {
+            "test-token"
+        };
+        assert_eq!(credential.expose(), expected);
         if matches!(self.script, Script::ReviewSyncRace) && attempt == 1 {
             return Err(GitHubAuthorityError::api(
                 Some(422),
@@ -223,7 +245,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         if matches!(self.script, Script::CredentialExpires) && credential.expose() == "test-token" {
             return Err(GitHubAuthorityError::Rejected);
         }
-        let expected = if matches!(self.script, Script::CredentialExpires) {
+        let expected = if self.uses_refreshed_credential() {
             "refreshed-token"
         } else {
             "test-token"
@@ -238,7 +260,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         _review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
-        let expected = if matches!(self.script, Script::CredentialExpires) {
+        let expected = if self.uses_refreshed_credential() {
             "refreshed-token"
         } else {
             "test-token"
@@ -476,13 +498,3 @@ pub(super) const GH_MISMATCH_SCRIPT: &str = r#"#!/bin/sh
   '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
   '"repo":{"full_name":"acme/project"}}}]'
 "#;
-
-#[test]
-fn hosted_delivery_polling_has_no_work_duration_limit() {
-    assert!(DeliveryPollPolicy::default().has_next(usize::MAX));
-    assert!(
-        !DeliveryPollPolicy::new(3, Duration::ZERO)
-            .assert_value()
-            .has_next(3)
-    );
-}

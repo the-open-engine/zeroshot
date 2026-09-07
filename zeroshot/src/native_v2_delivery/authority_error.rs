@@ -32,6 +32,10 @@ impl GitHubApiFailure {
         self.status
             .is_none_or(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599))
     }
+
+    fn authentication_failed(&self) -> bool {
+        matches!(self.status, Some(401 | 403))
+    }
 }
 
 impl fmt::Display for GitHubApiFailure {
@@ -61,6 +65,10 @@ impl GitHubAuthorityError {
             Self::Rejected => false,
             Self::Api(failure) => failure.retryable_review_sync(),
         }
+    }
+
+    pub(super) fn authentication_failed(&self) -> bool {
+        matches!(self, Self::Api(failure) if failure.authentication_failed())
     }
 
     pub(super) fn review_head_not_visible() -> Self {

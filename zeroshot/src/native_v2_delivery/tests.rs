@@ -190,6 +190,16 @@ struct RefreshedDeliveryEnvironment {
     binding: NodeRuntimeBinding,
 }
 
+async fn delivery_runtime_binding(repo: &TempRepo, mode: DeliveryMode) -> NodeRuntimeBinding {
+    let admitted = admitted(repo, mode).await;
+    admitted
+        .runtime
+        .nodes()
+        .get(&NodeName::new("deliver").assert_value())
+        .assert_value()
+        .clone()
+}
+
 #[async_trait]
 impl crate::native_v2_runner::RuntimeEnvironmentRefresh for RefreshedDeliveryEnvironment {
     async fn refresh(
@@ -213,13 +223,7 @@ async fn delivery_refreshes_an_expired_dynamic_github_credential() {
         repo.remote.clone(),
         Script::CredentialExpires,
     ));
-    let admitted = admitted(&repo, DeliveryMode::Merge).await;
-    let binding = admitted
-        .runtime
-        .nodes()
-        .get(&NodeName::new("deliver").assert_value())
-        .assert_value()
-        .clone();
+    let binding = delivery_runtime_binding(&repo, DeliveryMode::Merge).await;
     let outcome = run_delivery_with_id(
         DeliveryRunRequest {
             repo: &repo,

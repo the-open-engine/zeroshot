@@ -7,6 +7,42 @@ struct ReviewSyncInvocation<'a> {
     remaining: Duration,
 }
 
+struct ReviewSyncState<'a, 'environment> {
+    request: &'a GitHubReviewRequest,
+    credentials: &'a mut DeliveryCredentials<'environment>,
+    control: &'a DriverControl,
+    deadline: tokio::time::Instant,
+    credential_refreshed: bool,
+}
+
+impl ReviewSyncState<'_, '_> {
+    fn invocation(&self) -> ReviewSyncInvocation<'_> {
+        ReviewSyncInvocation {
+            request: self.request,
+            credential: self.credentials.current(),
+            control: self.control,
+            remaining: self
+                .deadline
+                .saturating_duration_since(tokio::time::Instant::now()),
+        }
+    }
+
+    fn should_refresh_credential(&self, progress: &ReviewSyncProgress) -> bool {
+        matches!(
+            progress,
+            ReviewSyncProgress::Failed(error) if error.authentication_failed()
+        ) && self.credentials.can_refresh()
+            && !self.credential_refreshed
+    }
+
+    async fn refresh_credential(&mut self) -> Result<(), DeliveryStop> {
+        emit(self.control, "delivery: refreshing GitHub credential").await?;
+        self.credentials.refresh().await?;
+        self.credential_refreshed = true;
+        Ok(())
+    }
+}
+
 enum ReviewSyncProgress {
     Complete(GitHubReviewReceipt),
     Failed(GitHubAuthorityError),
@@ -31,22 +67,21 @@ impl NativeV2DeliveryAdapter {
     pub(super) async fn synchronize_review(
         &self,
         request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
+        credentials: &mut DeliveryCredentials<'_>,
         control: &DriverControl,
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
         let deadline = tokio::time::Instant::now() + REVIEW_SYNC_DEADLINE;
         let mut retry_interval = REVIEW_SYNC_INTERVAL;
+        let mut state = ReviewSyncState {
+            request,
+            credentials,
+            control,
+            deadline,
+            credential_refreshed: false,
+        };
         for attempt in 1..=REVIEW_SYNC_ATTEMPTS {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            let error = match self
-                .review_sync_attempt(ReviewSyncInvocation {
-                    request,
-                    credential,
-                    control,
-                    remaining,
-                })
-                .await?
-            {
+            let progress = self.review_sync_progress(&mut state).await?;
+            let error = match progress {
                 ReviewSyncProgress::Complete(review) => return Ok(review),
                 ReviewSyncProgress::Failed(error) => error,
                 ReviewSyncProgress::TimedOut => return review_sync_timeout(control).await,
@@ -69,6 +104,18 @@ impl NativeV2DeliveryAdapter {
                 .min(REVIEW_SYNC_MAX_INTERVAL);
         }
         Err(crash_outcome())
+    }
+
+    async fn review_sync_progress(
+        &self,
+        state: &mut ReviewSyncState<'_, '_>,
+    ) -> Result<ReviewSyncProgress, DeliveryStop> {
+        let mut progress = self.review_sync_attempt(state.invocation()).await?;
+        if state.should_refresh_credential(&progress) {
+            state.refresh_credential().await?;
+            progress = self.review_sync_attempt(state.invocation()).await?;
+        }
+        Ok(progress)
     }
 
     async fn review_sync_attempt(
