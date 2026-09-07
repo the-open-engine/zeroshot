@@ -20,6 +20,7 @@ pub(super) enum Script {
     DeferredMerge,
     StrictBehind,
     HeadAdoptionRace,
+    HeadAdoptionRejected,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -73,9 +74,10 @@ impl FakeGitHub {
             Script::Conflict => GitHubReviewState::Conflict,
             Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
-            Script::StrictBehind | Script::HeadAdoptionRace | Script::RepeatedBehind => {
-                self.no_ci_state()
-            }
+            Script::StrictBehind
+            | Script::HeadAdoptionRace
+            | Script::HeadAdoptionRejected
+            | Script::RepeatedBehind => self.no_ci_state(),
             Script::ProtectedBranch | Script::NeverConfirmsMerge => {
                 open_review(GitHubChecks::Passed)
             }
@@ -239,7 +241,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             return Ok(GitHubMergeRequestOutcome::Conflict);
         }
         let updates = self.head_updates.load(Ordering::SeqCst);
-        if (matches!(self.script, Script::StrictBehind | Script::HeadAdoptionRace) && updates == 0)
+        if (matches!(
+            self.script,
+            Script::StrictBehind | Script::HeadAdoptionRace | Script::HeadAdoptionRejected
+        ) && updates == 0)
             || (matches!(self.script, Script::RepeatedBehind) && updates < 2)
         {
             return Ok(GitHubMergeRequestOutcome::HeadUpdateRequired);
@@ -260,7 +265,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         assert_eq!(credential.expose(), "test-token");
         if !matches!(
             self.script,
-            Script::StrictBehind | Script::HeadAdoptionRace | Script::RepeatedBehind
+            Script::StrictBehind
+                | Script::HeadAdoptionRace
+                | Script::HeadAdoptionRejected
+                | Script::RepeatedBehind
         ) {
             return Ok(GitHubHeadUpdateOutcome::Pending);
         }
@@ -322,6 +330,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         let attempt = self.head_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::HeadAdoptionRace) && attempt == 1 {
             return Err(GitHubAuthorityError::Unavailable);
+        }
+        if matches!(self.script, Script::HeadAdoptionRejected) {
+            return Err(GitHubAuthorityError::Rejected);
         }
         Ok(())
     }

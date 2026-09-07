@@ -69,7 +69,7 @@ impl NativeV2DeliveryAdapter {
                 .await
             {
                 Ok(()) => return Ok(()),
-                Err(_) => {
+                Err(GitHubAuthorityError::Unavailable) => {
                     emit(
                         drive.control,
                         "delivery: waiting to adopt GitHub pull request head",
@@ -78,6 +78,7 @@ impl NativeV2DeliveryAdapter {
                     let _ = drive.credentials.refresh().await;
                     wait_for_poll(drive.control, self.config.poll.interval).await?;
                 }
+                Err(GitHubAuthorityError::Rejected) => return Err(crash_outcome()),
             }
         }
     }

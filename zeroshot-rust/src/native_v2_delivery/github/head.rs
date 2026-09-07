@@ -195,7 +195,9 @@ async fn adopt_local_head(
         &format!("https://github.com/{}.git", previous.repository),
         &updated.head_revision,
     ]);
-    bounded_status(fetch, context.authority.config.push_deadline).await?;
+    bounded_status(fetch, context.authority.config.push_deadline)
+        .await
+        .map_err(|_| GitHubAuthorityError::Unavailable)?;
     adopt_fetched_head(context, previous, updated).await
 }
 
