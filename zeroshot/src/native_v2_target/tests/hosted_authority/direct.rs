@@ -7,6 +7,8 @@ use super::{CapturedHttpRequest, read_http_request, write_http_response_with_sta
 enum RunResponse {
     Accepted,
     Rejected,
+    RejectedConnection,
+    RejectedMessageOnly,
 }
 
 pub(in crate::native_v2_target::tests) async fn spawn_direct_target_authority(
@@ -19,6 +21,26 @@ pub(in crate::native_v2_target::tests) async fn spawn_rejecting_direct_target_au
 -> (String, tokio::task::JoinHandle<()>) {
     let (origin, server) =
         spawn_direct_target_authority_with_response(2, RunResponse::Rejected).await;
+    (
+        origin,
+        tokio::spawn(async move { drop(server.await.assert_value()) }),
+    )
+}
+
+pub(super) async fn spawn_problem_rejecting_target_authority()
+-> (String, tokio::task::JoinHandle<()>) {
+    let (origin, server) =
+        spawn_direct_target_authority_with_response(2, RunResponse::RejectedConnection).await;
+    (
+        origin,
+        tokio::spawn(async move { drop(server.await.assert_value()) }),
+    )
+}
+
+pub(super) async fn spawn_message_only_rejecting_target_authority()
+-> (String, tokio::task::JoinHandle<()>) {
+    let (origin, server) =
+        spawn_direct_target_authority_with_response(2, RunResponse::RejectedMessageOnly).await;
     (
         origin,
         tokio::spawn(async move { drop(server.await.assert_value()) }),
@@ -83,8 +105,24 @@ fn run_submission_response(response: &RunResponse) -> (&'static str, String) {
         ),
         RunResponse::Rejected => (
             "400 Bad Request",
-            r#"{"message":"required payload target issueNumber is not defined by a binding"}"#
-                .to_owned(),
+            json!({
+                "code": "run.rejected",
+                "message": "required payload target issueNumber is not defined by a binding"
+            })
+            .to_string(),
+        ),
+        RunResponse::RejectedConnection => (
+            "400 Bad Request",
+            json!({
+                "code": "connection_unavailable",
+                "message": "required connection \"openrouter\" is unavailable or incomplete",
+                "details": {"connection": "openrouter"}
+            })
+            .to_string(),
+        ),
+        RunResponse::RejectedMessageOnly => (
+            "400 Bad Request",
+            r#"{"message":"legacy rejection"}"#.to_owned(),
         ),
     }
 }

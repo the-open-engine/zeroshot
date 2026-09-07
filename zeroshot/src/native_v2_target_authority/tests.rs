@@ -174,6 +174,27 @@ fn run_id() -> RunId {
     RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991")
 }
 
+async fn direct_test_server(
+    factory: Arc<dyn TargetControllerFactory>,
+) -> (
+    std::net::SocketAddr,
+    String,
+    tokio::task::JoinHandle<Result<(), std::io::Error>>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let address = listener.local_addr().assert_value();
+    let endpoint = format!("ws://{address}{OECP_PATH}");
+    let server = Arc::new(
+        NativeV2TargetServer::new_direct(
+            Arc::new(NativeV2TargetAuthority::new(factory)),
+            identity(),
+            endpoint.clone(),
+        )
+        .assert_value(),
+    );
+    (address, endpoint, tokio::spawn(server.serve(listener)))
+}
+
 fn request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: run_id(),
@@ -244,15 +265,12 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     assert_eq!(document.kind, DISCOVERY_KIND);
 
     let encoded = serde_json::to_vec(&request()).assert_value();
-    assert_eq!(
-        http(
-            address,
-            TestHttpRequest::body("POST", RUN_PATH, None, &encoded)
-        )
-        .await
-        .status,
-        401
-    );
+    http(
+        address,
+        TestHttpRequest::body("POST", RUN_PATH, None, &encoded),
+    )
+    .await
+    .assert_problem(401, "request.unauthorized", "unauthorized");
     let accepted = http(
         address,
         TestHttpRequest::body("POST", RUN_PATH, Some("control-token"), &encoded),
@@ -280,18 +298,25 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
 }
 
 #[tokio::test]
+async fn malformed_and_unknown_http_requests_return_structured_problems() {
+    let (address, _, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
+
+    http(address, TestHttpRequest::body("POST", RUN_PATH, None, b"{"))
+        .await
+        .assert_problem(400, "request.invalid", "target run request is malformed");
+    http(
+        address,
+        TestHttpRequest::empty("GET", "/native-v2/missing", None),
+    )
+    .await
+    .assert_problem(404, "request.not_found", "target route was not found");
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn run_rejection_returns_a_bounded_public_diagnostic() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
-    let address = listener.local_addr().assert_value();
-    let server = Arc::new(
-        NativeV2TargetServer::new_direct(
-            Arc::new(NativeV2TargetAuthority::new(Arc::new(RejectingFactory))),
-            identity(),
-            format!("ws://{address}{OECP_PATH}"),
-        )
-        .assert_value(),
-    );
-    let task = tokio::spawn(server.serve(listener));
+    let (address, _, task) = direct_test_server(Arc::new(RejectingFactory)).await;
     let encoded = serde_json::to_vec(&request()).assert_value();
     let rejected = http(
         address,
@@ -300,7 +325,8 @@ async fn run_rejection_returns_a_bounded_public_diagnostic() {
     .await;
 
     assert_eq!(rejected.status, 400);
-    let detail = serde_json::from_slice::<TargetRunRejection>(&rejected.body).assert_value();
+    let detail = serde_json::from_slice::<TargetHttpProblem>(&rejected.body).assert_value();
+    assert_eq!(detail.code(), TARGET_RUN_REJECTED_CODE);
     assert_eq!(
         detail.message(),
         "graph verification rejected the graph: required payload target issueNumber is not defined by a binding"
@@ -310,20 +336,7 @@ async fn run_rejection_returns_a_bounded_public_diagnostic() {
 
 #[tokio::test]
 async fn direct_target_remains_auth_free_without_private_bootstrap() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
-    let address = listener.local_addr().assert_value();
-    let endpoint = format!("ws://{address}{OECP_PATH}");
-    let server = Arc::new(
-        NativeV2TargetServer::new_direct(
-            Arc::new(NativeV2TargetAuthority::new(Arc::new(
-                FakeFactory::default(),
-            ))),
-            identity(),
-            endpoint.clone(),
-        )
-        .assert_value(),
-    );
-    let task = tokio::spawn(server.serve(listener));
+    let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
     let session = http(
         address,
         TestHttpRequest::body("POST", SESSION_PATH, None, b"{}"),

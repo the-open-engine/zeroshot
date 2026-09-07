@@ -1,12 +1,22 @@
 use std::net::SocketAddr;
 
 use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_protocol::TargetHttpProblem;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 pub(super) struct TestHttpResponse {
     pub(super) status: u16,
     pub(super) body: Vec<u8>,
+}
+
+impl TestHttpResponse {
+    pub(super) fn assert_problem(self, status: u16, code: &str, message: &str) {
+        assert_eq!(self.status, status);
+        let problem = serde_json::from_slice::<TargetHttpProblem>(&self.body).assert_value();
+        assert_eq!(problem.code(), code);
+        assert_eq!(problem.message(), message);
+    }
 }
 
 pub(super) struct TestHttpRequest<'a> {

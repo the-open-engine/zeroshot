@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_client::{
@@ -12,12 +13,23 @@ use openengine_cluster_protocol::{
 use serde_json::json;
 use zeroshot_engine::native_v2_cli::{PreparedRunRequest, TargetRunIntent};
 
+use super::super::controller_authority::credentials::test_support::{
+    MemoryCredentialStore, MemoryDeviceCodeNotifier,
+};
 use super::super::*;
 
 pub(super) type TempRoot = openengine_cluster_testkit::TemporaryDirectory;
 
 pub(super) fn temp_root() -> TempRoot {
     TempRoot::for_test("zeroshot-native-v2-target")
+}
+
+pub(super) fn test_http_authority(refresh_lock_directory: PathBuf) -> TargetHttpControlAuthority {
+    TargetHttpControlAuthority::with_dependencies(
+        Arc::new(MemoryCredentialStore::default()),
+        Arc::new(MemoryDeviceCodeNotifier::default()),
+        refresh_lock_directory,
+    )
 }
 
 #[derive(Clone, Default)]

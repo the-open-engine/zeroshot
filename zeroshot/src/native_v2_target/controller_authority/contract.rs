@@ -7,10 +7,12 @@ use zeroshot_engine::native_v2_target_authority::{
 
 mod connections;
 mod hosted_runs;
+mod http_error;
 mod profiles;
 
 use hosted_runs::build_hosted_runs_descriptor;
 pub(super) use hosted_runs::HostedRunsDescriptor;
+pub(super) use http_error::{http_error, read_success_json};
 use connections::build_connections_descriptor;
 pub(super) use connections::ConnectionsDescriptor;
 use profiles::build_profiles_descriptor;

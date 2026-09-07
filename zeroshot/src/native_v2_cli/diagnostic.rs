@@ -10,6 +10,7 @@ use crate::native_v2_supervisor::RunEnvironmentError;
 pub const ERROR_FORMAT_ENV: &str = "ZEROSHOT_ERROR_FORMAT";
 pub const JSON_ERROR_FORMAT: &str = "json";
 const ERROR_SCHEMA: &str = "zeroshot.error/v1";
+const CONNECTION_SET_HELP_COMMAND: &str = "zeroshot connection set --help";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,9 +104,12 @@ fn request_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic>
             None,
             json!({"environment": name.as_str()}),
         ),
-        NativeV2CliError::RunEnvironment(source) => {
-            request(environment_code(source), error.to_string(), None, json!({}))
-        }
+        NativeV2CliError::RunEnvironment(source) => request(
+            environment_code(source),
+            error.to_string(),
+            None,
+            environment_details(source),
+        ),
         NativeV2CliError::GitHubToken => request(
             "runtime.invalid_environment",
             error.to_string(),
@@ -155,6 +159,21 @@ fn environment_code(source: &RunEnvironmentError) -> &'static str {
             "runtime.missing_environment"
         }
         _ => "runtime.invalid_environment",
+    }
+}
+
+fn environment_details(source: &RunEnvironmentError) -> Value {
+    match source {
+        RunEnvironmentError::MissingConnection(key) => json!({
+            "connection": key.as_str(),
+            "helpCommand": CONNECTION_SET_HELP_COMMAND,
+        }),
+        RunEnvironmentError::MissingField(key, field) => json!({
+            "connection": key.as_str(),
+            "requiredFields": [field.as_str()],
+            "helpCommand": CONNECTION_SET_HELP_COMMAND,
+        }),
+        _ => json!({}),
     }
 }
 
@@ -219,7 +238,14 @@ fn run_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic> {
 }
 
 fn remote_diagnostic(code: &str, message: &str, details: Option<Value>) -> NativeV2CliDiagnostic {
-    let details = object_details(details.unwrap_or_else(|| json!({})));
+    let mut details = object_details(details.unwrap_or_else(|| json!({})));
+    if code.eq_ignore_ascii_case("connection_unavailable") {
+        if let Value::Object(details) = &mut details {
+            details
+                .entry("helpCommand".to_owned())
+                .or_insert_with(|| json!(CONNECTION_SET_HELP_COMMAND));
+        }
+    }
     match code {
         NOT_FOUND => {
             NativeV2CliDiagnostic::new(DiagnosticKind::RunNotFound, "run.not_found", message)
@@ -278,7 +304,7 @@ pub(super) fn client_error(error: ClientError) -> NativeV2CliError {
 
 #[cfg(test)]
 mod tests {
-    use openengine_cluster_protocol::NodeName;
+    use openengine_cluster_protocol::{ConnectionKey, EnvironmentVariableName, NodeName};
     use openengine_cluster_testkit::assertions::{AssertValue, JsonAt};
     use serde_json::json;
 
@@ -308,6 +334,25 @@ mod tests {
         assert_eq!(
             value.assert_key("details").assert_key("existingRunId"),
             &run_id
+        );
+    }
+
+    #[test]
+    fn missing_connection_field_diagnostic_names_recovery_inputs() {
+        let error = NativeV2CliError::RunEnvironment(RunEnvironmentError::MissingField(
+            ConnectionKey::new("openrouter").assert_value(),
+            EnvironmentVariableName::new("OPENROUTER_API_KEY").assert_value(),
+        ));
+        let value = serde_json::to_value(error.diagnostic()).assert_value();
+        let details = value.assert_key("details");
+        assert_eq!(details.assert_key("connection"), "openrouter");
+        assert_eq!(
+            details.assert_key("requiredFields"),
+            &json!(["OPENROUTER_API_KEY"])
+        );
+        assert_eq!(
+            details.assert_key("helpCommand"),
+            CONNECTION_SET_HELP_COMMAND
         );
     }
 }

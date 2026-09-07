@@ -18,7 +18,8 @@ use self::contract::{
     build_auth_descriptor, build_controller_descriptor, validate_metadata_routes,
     ControllerDescriptor, DeviceCodeWire, DevicePoll, HostedAuthDescriptor, OAuthErrorWire,
     OAuthMetadataWire, TargetSessionWire, TokenWire, authority_error, parse_origin, read_json,
-    require_response_route, validate_device_code, validate_secret, validate_token,
+    read_success_json, require_response_route, validate_device_code, validate_secret,
+    validate_token,
 };
 use self::credentials::{
     CredentialStorePreparation, DeviceCodeNotifier, StderrDeviceCodeNotifier, TargetRefreshGuard,
@@ -297,11 +298,8 @@ impl TargetHttpControlAuthority {
             .map_err(|_| {
                 TargetAuthorityError::disconnected("target session verification failed")
             })?;
-        require_response_route(&response, &auth.session_endpoint)?;
-        if !response.status().is_success() {
-            return Err(authority_error("target session verification failed"));
-        }
-        let session: TargetSessionWire = read_json(response, "target session").await?;
+        let session: TargetSessionWire =
+            read_success_json(response, &auth.session_endpoint, "target session").await?;
         if session.kind != SESSION_KIND
             || session.organization_id.is_empty()
             || session.organization_id.len() > 256
@@ -364,14 +362,7 @@ impl TargetHttpControlAuthority {
             .map_err(|_| {
                 TargetAuthorityError::disconnected(format!("{operation} request failed"))
             })?;
-        require_response_route(&response, url)?;
-        if !response.status().is_success() {
-            return Err(authority_error(format!(
-                "{operation} request failed with status {}",
-                response.status().as_u16()
-            )));
-        }
-        read_json(response, operation).await
+        read_success_json(response, url, operation).await
     }
 
     async fn post_form_json<T: DeserializeOwned>(
@@ -389,14 +380,7 @@ impl TargetHttpControlAuthority {
             .map_err(|_| {
                 TargetAuthorityError::disconnected(format!("{operation} request failed"))
             })?;
-        require_response_route(&response, url)?;
-        if !response.status().is_success() {
-            return Err(authority_error(format!(
-                "{operation} request failed with status {}",
-                response.status().as_u16()
-            )));
-        }
-        read_json(response, operation).await
+        read_success_json(response, url, operation).await
     }
 }
 

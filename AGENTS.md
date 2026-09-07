@@ -76,6 +76,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
 - Target bootstrap keys are one-time file inputs. Secret values never enter run ledgers, target
   configuration, or observation records.
+- Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
+  bodies are invalid, and details contain only user-safe structured metadata.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 

@@ -7,7 +7,7 @@ use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
 use reqwest::{RequestBuilder, Response, Url};
 use serde::de::DeserializeOwned;
 
-use super::contract::{HostedRunsDescriptor, read_json, require_response_route};
+use super::contract::{HostedRunsDescriptor, http_error, read_success_json, require_response_route};
 use super::TargetHttpControlAuthority;
 use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
 use zeroshot_engine::native_v2_cli::{
@@ -133,14 +133,7 @@ impl TargetHttpControlAuthority {
         let response = request.send().await.map_err(|_| {
             TargetAuthorityError::disconnected(format!("{operation} request failed"))
         })?;
-        require_response_route(&response, url)?;
-        if !response.status().is_success() {
-            return Err(TargetAuthorityError::new(format!(
-                "{operation} request failed with status {}",
-                response.status().as_u16()
-            )));
-        }
-        read_json(response, operation).await
+        read_success_json(response, url, operation).await
     }
 
     async fn hosted_stream<E>(
@@ -163,10 +156,7 @@ impl TargetHttpControlAuthority {
             })?;
         require_response_route(&response, &url)?;
         if !response.status().is_success() {
-            return Err(TargetAuthorityError::new(format!(
-                "{operation} request failed with status {}",
-                response.status().as_u16()
-            )));
+            return Err(http_error(response, operation).await);
         }
         Ok(BoxedSubscription::new(HostedRunSubscription::new(response)))
     }

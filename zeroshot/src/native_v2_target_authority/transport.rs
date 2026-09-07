@@ -33,7 +33,8 @@ use super::private_access::{PrivateTargetAccess, TargetBootstrapKey};
 mod http;
 use http::{
     HttpRequest, HttpResponse, RequestHead, authority_error_response, peek_request_head,
-    run_error_response, read_http_request, write_and_close, write_http_response,
+    invalid_request_response, not_found_response, read_http_request, request_timeout_response,
+    run_error_response, unavailable_response, write_and_close, write_http_response,
 };
 
 const MAX_HEADER_BYTES: usize = 32 * 1024;
@@ -130,20 +131,24 @@ impl NativeV2TargetServer {
     /// Routes one real TCP connection. WebSocket handshakes remain on the same target authority
     /// as discovery/session, and the resulting OECP backend is the shared target controller.
     pub async fn serve_connection(&self, mut stream: TcpStream) -> io::Result<()> {
-        let head = tokio::time::timeout(REQUEST_HEAD_TIMEOUT, peek_request_head(&stream))
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "request headers timed out"))??;
+        let head = match read_request_head(&stream).await {
+            Ok(head) => head,
+            Err(error) => return write_request_error(&mut stream, error).await,
+        };
         if head.is_websocket_upgrade() {
             return self.serve_oecp(stream, head).await;
         }
-        let request = read_http_request(&mut stream, head).await?;
+        let request = match read_http_request(&mut stream, head).await {
+            Ok(request) => request,
+            Err(error) => return write_request_error(&mut stream, error).await,
+        };
         let response = self.handle_http(request).await;
         write_http_response(&mut stream, response).await
     }
 
     async fn serve_oecp(&self, stream: TcpStream, head: RequestHead) -> io::Result<()> {
         if head.method != "GET" || head.path != OECP_PATH {
-            return write_and_close(stream, HttpResponse::empty(404)).await;
+            return write_and_close(stream, not_found_response()).await;
         }
         let identity = match self.authenticate_oecp(&head).await {
             Ok(identity) => identity,
@@ -179,22 +184,22 @@ impl NativeV2TargetServer {
             ("POST", TARGET_PRIVATE_BOOTSTRAP_PATH) => self.handle_private_bootstrap(request).await,
             ("POST", RUN_PATH) => self.handle_run(request).await,
             ("POST", SESSION_PATH) => self.handle_session(request).await,
-            _ => HttpResponse::empty(404),
+            _ => not_found_response(),
         }
     }
 
     async fn handle_private_bootstrap(&self, request: HttpRequest) -> HttpResponse {
         let TargetServerAccess::Private { access, .. } = &self.access else {
-            return HttpResponse::empty(404);
+            return not_found_response();
         };
         let request = match serde_json::from_slice::<TargetPrivateBootstrapRequest>(&request.body) {
             Ok(request) => request,
-            Err(_) => return HttpResponse::empty(400),
+            Err(_) => return invalid_request_response("private bootstrap request is malformed"),
         };
         match access.bootstrap(&request).await {
             Ok(()) => HttpResponse::empty(204),
             Err(error) if error.kind() == super::TargetAuthorityErrorKind::Unavailable => {
-                HttpResponse::empty(404)
+                not_found_response()
             }
             Err(error) => authority_error_response(error),
         }
@@ -206,10 +211,10 @@ impl NativeV2TargetServer {
         }
         let submission = match serde_json::from_slice::<TargetRunRequest>(&request.body) {
             Ok(submission) => submission,
-            Err(_) => return HttpResponse::empty(400),
+            Err(_) => return invalid_request_response("target run request is malformed"),
         };
         if !is_canonical_uuid_v7(&submission.run_id) {
-            return HttpResponse::empty(400);
+            return invalid_request_response("target run ID must be a canonical UUIDv7");
         }
         match self.target.submit(submission).await {
             Ok(receipt) => HttpResponse::private_json(200, &receipt),
@@ -225,7 +230,7 @@ impl NativeV2TargetServer {
         let session_request =
             match serde_json::from_slice::<TargetOecpSessionRequest>(&request.body) {
                 Ok(request) if request.run_id.as_ref().is_none_or(is_canonical_uuid_v7) => request,
-                _ => return HttpResponse::empty(400),
+                _ => return invalid_request_response("target OECP session request is malformed"),
             };
         if let Err(error) = self.target.controller().await {
             return authority_error_response(error);
@@ -250,7 +255,8 @@ impl NativeV2TargetServer {
                             },
                         )
                     }
-                    _ => HttpResponse::empty(503),
+                    Ok(_) => unavailable_response(),
+                    Err(error) => authority_error_response(error),
                 }
             }
             TargetServerAccess::Private { access, .. } => match access.token().await {
@@ -311,6 +317,26 @@ impl NativeV2TargetServer {
             }
             TargetServerAccess::Direct(identity) => Ok(identity.clone()),
         }
+    }
+}
+
+async fn read_request_head(stream: &TcpStream) -> io::Result<RequestHead> {
+    tokio::time::timeout(REQUEST_HEAD_TIMEOUT, peek_request_head(stream))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "request headers timed out"))?
+}
+
+async fn write_request_error(stream: &mut TcpStream, error: io::Error) -> io::Result<()> {
+    match error.kind() {
+        io::ErrorKind::InvalidData => {
+            write_http_response(
+                stream,
+                invalid_request_response("target HTTP request is malformed"),
+            )
+            .await
+        }
+        io::ErrorKind::TimedOut => write_http_response(stream, request_timeout_response()).await,
+        _ => Err(error),
     }
 }
 

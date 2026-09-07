@@ -15,7 +15,7 @@ Usage: zeroshot [COMMAND]
 
 Commands:
   target      Manage named targets or serve a direct target
-  connection  Manage static credentials by connection key
+  connection  Inspect and manage named runtime connections
   profile     Manage reusable graph/runtime profiles
   template    Inspect built-in graph templates
   run         Submit a graph run locally or to a named target
@@ -165,7 +165,7 @@ Commands:
 ### `zeroshot connection`
 
 ```text
-Manage static credentials by connection key
+Inspect and manage named runtime connections
 
 Usage: zeroshot connection <COMMAND>
 
@@ -177,7 +177,27 @@ Commands:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+CONNECTIONS
+A runtime declares a connection key and the exact environment fields it needs. Zeroshot injects
+only those fields; secret values never belong in runtime configuration.
+
+`list` returns each key, scope, kind, and field names, never secret values. `set` creates or replaces
+a complete static connection, so include every required field. Omit --target for local storage; use
+--target NAME for hosted storage. Organization scope requires a hosted target.
+
+Target-managed dynamic kinds are configured through the target rather than `connection set`; `list`
+reports each connection's kind.
+
+When a run reports `connection_unavailable`, list connections for the same target and scope, then
+set the named key with every required field.
+
+EXAMPLES
+  zeroshot connection list
+  zeroshot connection list --target prod --scope org
+  zeroshot connection set openrouter --field OPENROUTER_API_KEY
+  zeroshot connection set openrouter --target prod --field OPENROUTER_API_KEY
 ```
 
 #### `zeroshot connection list`
@@ -229,7 +249,14 @@ Options:
           [possible values: user, org]
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+INPUT
+Use --field ENV to prompt without echo; repeat it for every required field. Use --json-stdin to read
+one non-empty JSON object mapping field names to secret values.
+
+`set` replaces the complete stored static connection for KEY. Existing fields not supplied are
+removed. Do not put secret values in shell arguments or runtime configuration.
 ```
 
 #### `zeroshot connection delete`
@@ -775,7 +802,7 @@ Usage: zeroshot help [COMMAND]
 
 Commands:
   target      Manage named targets or serve a direct target
-  connection  Manage static credentials by connection key
+  connection  Inspect and manage named runtime connections
   profile     Manage reusable graph/runtime profiles
   template    Inspect built-in graph templates
   run         Submit a graph run locally or to a named target

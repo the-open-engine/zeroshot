@@ -4,8 +4,20 @@ use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use super::super::{TargetAuthorityError, TargetAuthorityErrorKind};
+use super::super::{
+    TARGET_RUN_REJECTED_CODE, TargetAuthorityError, TargetAuthorityErrorKind, TargetHttpProblem,
+};
 use super::{MAX_HEADER_BYTES, MAX_PRIVATE_REQUEST_BYTES, valid_issued_bearer};
+
+const INVALID_REQUEST_CODE: &str = "request.invalid";
+const UNAUTHORIZED_CODE: &str = "request.unauthorized";
+const NOT_FOUND_CODE: &str = "request.not_found";
+const CONFLICT_CODE: &str = "request.conflict";
+const REQUEST_TIMEOUT_CODE: &str = "request.timeout";
+const TARGET_UNAVAILABLE_CODE: &str = "target.unavailable";
+const TARGET_INTERNAL_ERROR_CODE: &str = "target.internal_error";
+const INTERNAL_PROBLEM_BODY: &[u8] =
+    br#"{"code":"target.internal_error","message":"target request failed"}"#;
 
 #[derive(Clone)]
 pub(super) struct RequestHead {
@@ -166,7 +178,11 @@ impl HttpResponse {
                 no_store: false,
                 body,
             },
-            Err(_) => Self::empty(500),
+            Err(_) => Self::problem(
+                500,
+                TARGET_INTERNAL_ERROR_CODE,
+                "target response serialization failed",
+            ),
         }
     }
 
@@ -175,14 +191,51 @@ impl HttpResponse {
         response.no_store = true;
         response
     }
+
+    pub(super) fn problem(status: u16, code: &str, message: &str) -> Self {
+        let body = TargetHttpProblem::new(code, message, None)
+            .ok()
+            .and_then(|problem| serde_json::to_vec(&problem).ok())
+            .unwrap_or_else(|| INTERNAL_PROBLEM_BODY.to_vec());
+        Self {
+            status,
+            content_type: Some("application/json"),
+            no_store: true,
+            body,
+        }
+    }
+}
+
+pub(super) fn invalid_request_response(message: &str) -> HttpResponse {
+    HttpResponse::problem(400, INVALID_REQUEST_CODE, message)
+}
+
+pub(super) fn request_timeout_response() -> HttpResponse {
+    HttpResponse::problem(408, REQUEST_TIMEOUT_CODE, "target request timed out")
+}
+
+pub(super) fn not_found_response() -> HttpResponse {
+    HttpResponse::problem(404, NOT_FOUND_CODE, "target route was not found")
+}
+
+pub(super) fn unavailable_response() -> HttpResponse {
+    HttpResponse::problem(
+        503,
+        TARGET_UNAVAILABLE_CODE,
+        "target is temporarily unavailable",
+    )
 }
 
 pub(super) fn authority_error_response(error: TargetAuthorityError) -> HttpResponse {
     match error.kind() {
-        TargetAuthorityErrorKind::Invalid => HttpResponse::empty(400),
-        TargetAuthorityErrorKind::Unauthorized => HttpResponse::empty(401),
-        TargetAuthorityErrorKind::Conflict => HttpResponse::empty(409),
-        TargetAuthorityErrorKind::Unavailable => HttpResponse::empty(503),
+        TargetAuthorityErrorKind::Invalid => invalid_request_response(error.message()),
+        TargetAuthorityErrorKind::Unauthorized => {
+            HttpResponse::problem(401, UNAUTHORIZED_CODE, "unauthorized")
+        }
+        TargetAuthorityErrorKind::Conflict => {
+            HttpResponse::problem(409, CONFLICT_CODE, error.message())
+        }
+        TargetAuthorityErrorKind::Unavailable => unavailable_response(),
     }
 }
 
@@ -190,10 +243,7 @@ pub(super) fn run_error_response(error: TargetAuthorityError) -> HttpResponse {
     if error.kind() != TargetAuthorityErrorKind::Invalid {
         return authority_error_response(error);
     }
-    match super::super::TargetRunRejection::new(error.message()) {
-        Ok(rejection) => HttpResponse::private_json(400, &rejection),
-        Err(_) => HttpResponse::empty(400),
-    }
+    HttpResponse::problem(400, TARGET_RUN_REJECTED_CODE, error.message())
 }
 
 pub(super) async fn write_and_close(
@@ -232,8 +282,69 @@ fn http_reason(status: u16) -> &'static str {
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
+        408 => "Request Timeout",
         409 => "Conflict",
         503 => "Service Unavailable",
         _ => "Internal Server Error",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use openengine_cluster_testkit::assertions::AssertValue;
+
+    use super::*;
+
+    fn decode_problem(response: HttpResponse) -> TargetHttpProblem {
+        assert_eq!(response.content_type, Some("application/json"));
+        assert!(response.no_store);
+        serde_json::from_slice(&response.body).assert_value()
+    }
+
+    #[test]
+    fn authority_failures_are_structured_and_status_specific() {
+        let cases = [
+            (
+                TargetAuthorityError::invalid("invalid target request"),
+                400,
+                INVALID_REQUEST_CODE,
+                "invalid target request",
+            ),
+            (
+                TargetAuthorityError::unauthorized(),
+                401,
+                UNAUTHORIZED_CODE,
+                "unauthorized",
+            ),
+            (
+                TargetAuthorityError::conflict("run already exists"),
+                409,
+                CONFLICT_CODE,
+                "run already exists",
+            ),
+            (
+                TargetAuthorityError::unavailable("internal provider failure"),
+                503,
+                TARGET_UNAVAILABLE_CODE,
+                "target is temporarily unavailable",
+            ),
+        ];
+
+        for (error, status, code, message) in cases {
+            let response = authority_error_response(error);
+            assert_eq!(response.status, status);
+            let problem = decode_problem(response);
+            assert_eq!(problem.code(), code);
+            assert_eq!(problem.message(), message);
+        }
+    }
+
+    #[test]
+    fn invalid_public_diagnostic_fails_closed_without_an_empty_body() {
+        let response = authority_error_response(TargetAuthorityError::invalid("x".repeat(1_025)));
+        assert_eq!(response.status, 400);
+        let problem = decode_problem(response);
+        assert_eq!(problem.code(), TARGET_INTERNAL_ERROR_CODE);
+        assert_eq!(problem.message(), "target request failed");
     }
 }

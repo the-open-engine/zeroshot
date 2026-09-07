@@ -8,9 +8,12 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-mod rejection;
+mod problem;
 
-pub use rejection::{TargetRunRejection, MAX_TARGET_RUN_REJECTION_MESSAGE_BYTES};
+pub use problem::{
+    MAX_TARGET_HTTP_PROBLEM_CODE_BYTES, MAX_TARGET_HTTP_PROBLEM_DETAILS_BYTES,
+    MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES, TARGET_RUN_REJECTED_CODE, TargetHttpProblem,
+};
 
 use crate::{
     ConnectionKey, EnvironmentVariableName, NativeV2RunValueError, RunId, RunSubmission,

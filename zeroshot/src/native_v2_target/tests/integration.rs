@@ -251,11 +251,7 @@ async fn direct_authority_skips_hosted_auth_and_all_authorization_headers() {
 async fn direct_authority_surfaces_bounded_run_rejection_feedback() {
     let root = temp_root();
     let (origin, server) = spawn_rejecting_direct_target_authority().await;
-    let authority = TargetHttpControlAuthority::with_dependencies(
-        Arc::new(MemoryCredentialStore::default()),
-        Arc::new(MemoryDeviceCodeNotifier::default()),
-        root.path("refresh-locks"),
-    );
+    let authority = test_http_authority(root.path("refresh-locks"));
     let error = authority
         .submit(&direct_target(origin), &exact_run_request())
         .await
@@ -271,11 +267,7 @@ async fn direct_authority_surfaces_bounded_run_rejection_feedback() {
 async fn direct_target_rejects_hosted_controller_discovery() {
     let root = temp_root();
     let (origin, server) = spawn_target_authority(1).await;
-    let authority = TargetHttpControlAuthority::with_dependencies(
-        Arc::new(MemoryCredentialStore::default()),
-        Arc::new(MemoryDeviceCodeNotifier::default()),
-        root.path("refresh-locks"),
-    );
+    let authority = test_http_authority(root.path("refresh-locks"));
     let target = direct_target(origin);
     assert!(authority.discover(&target).await.is_err());
     server.await.assert_value();

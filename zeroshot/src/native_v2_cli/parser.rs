@@ -31,7 +31,7 @@ enum CliCommand {
         command: TargetCommand,
     },
 
-    /// Manage static credentials by connection key.
+    /// Inspect and manage named runtime connections.
     Connection {
         #[command(subcommand)]
         command: ConnectionCommand,
@@ -112,6 +112,25 @@ enum TargetCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(after_long_help = r#"CONNECTIONS
+A runtime declares a connection key and the exact environment fields it needs. Zeroshot injects
+only those fields; secret values never belong in runtime configuration.
+
+`list` returns each key, scope, kind, and field names, never secret values. `set` creates or replaces
+a complete static connection, so include every required field. Omit --target for local storage; use
+--target NAME for hosted storage. Organization scope requires a hosted target.
+
+Target-managed dynamic kinds are configured through the target rather than `connection set`; `list`
+reports each connection's kind.
+
+When a run reports `connection_unavailable`, list connections for the same target and scope, then
+set the named key with every required field.
+
+EXAMPLES
+  zeroshot connection list
+  zeroshot connection list --target prod --scope org
+  zeroshot connection set openrouter --field OPENROUTER_API_KEY
+  zeroshot connection set openrouter --target prod --field OPENROUTER_API_KEY"#)]
 enum ConnectionCommand {
     /// List connection metadata without secret values.
     List(ConnectionRouteArgs),
@@ -142,7 +161,15 @@ struct ConnectionRouteArgs {
 }
 
 #[derive(Debug, Args)]
-#[command(group = ArgGroup::new("connection_input").args(["field", "json_stdin"]).required(true).multiple(false))]
+#[command(
+    group = ArgGroup::new("connection_input").args(["field", "json_stdin"]).required(true).multiple(false),
+    after_long_help = r#"INPUT
+Use --field ENV to prompt without echo; repeat it for every required field. Use --json-stdin to read
+one non-empty JSON object mapping field names to secret values.
+
+`set` replaces the complete stored static connection for KEY. Existing fields not supplied are
+removed. Do not put secret values in shell arguments or runtime configuration."#
+)]
 struct ConnectionSetArgs {
     /// Unique connection key within the selected scope.
     #[arg(value_name = "KEY")]

@@ -31,6 +31,7 @@ use openengine_cluster_protocol::{
 
 mod access;
 mod authority;
+mod authority_error;
 mod contract;
 mod controller_authority;
 mod oecp;
@@ -46,40 +47,13 @@ pub use controller_authority::TargetHttpControlAuthority;
 pub use serve::{TargetServeError, serve_direct_target};
 pub use access::{TargetAccess, TargetOecpAccess};
 pub use authority::TargetControlAuthority;
+pub use authority_error::TargetAuthorityError;
 
 #[cfg(test)]
 use contract::normalize_origin;
 #[cfg(test)]
 #[path = "native_v2_target/tests.rs"]
 mod tests;
-
-#[derive(Debug, Error)]
-#[error("{message}")]
-pub struct TargetAuthorityError {
-    message: String,
-    disconnected: bool,
-}
-
-impl TargetAuthorityError {
-    #[must_use]
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            disconnected: false,
-        }
-    }
-
-    fn disconnected(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            disconnected: true,
-        }
-    }
-
-    const fn is_disconnected(&self) -> bool {
-        self.disconnected
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -164,7 +138,7 @@ where
         self.authority
             .discover(&target)
             .await
-            .map_err(cli_target_error)?;
+            .map_err(cli_authority_error)?;
         self.registry.insert(target).map_err(cli_target_error)
     }
 
@@ -174,7 +148,7 @@ where
         self.authority
             .login(&target)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError> {
@@ -195,7 +169,7 @@ where
         self.authority
             .connection_list(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn connection_set(
@@ -208,7 +182,7 @@ where
         self.authority
             .connection_set(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn connection_delete(
@@ -221,7 +195,7 @@ where
         self.authority
             .connection_delete(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn profile_list(
@@ -233,7 +207,7 @@ where
         self.authority
             .profile_list(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn profile_show(
@@ -245,7 +219,7 @@ where
         self.authority
             .profile_show(&target, selector)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn profile_set(
@@ -257,7 +231,7 @@ where
         self.authority
             .profile_set(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn profile_delete(
@@ -269,7 +243,7 @@ where
         self.authority
             .profile_delete(&target, selector)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn profile_default(
@@ -281,7 +255,7 @@ where
         self.authority
             .profile_default(&target, request)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn submit(
@@ -325,7 +299,7 @@ where
                     },
                 )
                 .await
-                .map_err(cli_target_error);
+                .map_err(cli_authority_error);
         }
         self.authority
             .submit(
@@ -346,7 +320,7 @@ where
                 },
             )
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
     }
 
     async fn connect(
@@ -379,7 +353,7 @@ where
         self.authority
             .hosted_run_list(&target, params)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
             .map(Some)
     }
 
@@ -395,7 +369,7 @@ where
         self.authority
             .hosted_run_status(&target, params)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
             .map(Some)
     }
 
@@ -443,7 +417,7 @@ where
         self.authority
             .hosted_run_force(&target, params)
             .await
-            .map_err(cli_target_error)
+            .map_err(cli_authority_error)
             .map(Some)
     }
 }
@@ -463,11 +437,7 @@ fn cli_target_error(error: impl fmt::Display) -> NativeV2CliError {
 }
 
 fn cli_authority_error(error: TargetAuthorityError) -> NativeV2CliError {
-    if error.is_disconnected() {
-        NativeV2CliError::Disconnected
-    } else {
-        cli_target_error(error)
-    }
+    error.into_cli()
 }
 
 fn cli_connector_error(error: TargetConnectorError) -> NativeV2CliError {

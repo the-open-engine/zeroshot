@@ -24,6 +24,10 @@ const HELP_PATHS: &[&[&str]] = &[
     &["target", "login"],
     &["target", "setup"],
     &["target", "serve"],
+    &["connection"],
+    &["connection", "list"],
+    &["connection", "set"],
+    &["connection", "delete"],
     &["template"],
     &["template", "list"],
     &["template", "show"],
@@ -108,6 +112,38 @@ fn help_explains_runtime_configuration() {
     for expected in &contract_prose {
         assert_prose(&run, &[expected]);
     }
+}
+
+#[test]
+fn help_explains_connection_storage_and_recovery() {
+    let connection = successful_stdout(&["connection", "--help"]);
+    assert_prose(
+        &connection,
+        &[
+            "runtime declares a connection key",
+            "exact environment fields it needs",
+            "never secret values",
+            "creates or replaces a complete static connection",
+            "organization scope requires a hosted target",
+            "target-managed dynamic kinds",
+            "connection_unavailable",
+            "same target and scope",
+            "zeroshot connection set openrouter --field openrouter_api_key",
+        ],
+    );
+
+    let set = successful_stdout(&["connection", "set", "--help"]);
+    assert_prose(
+        &set,
+        &[
+            "prompt without echo",
+            "repeat it for every required field",
+            "one non-empty json object",
+            "replaces the complete stored static connection",
+            "existing fields not supplied are removed",
+            "do not put secret values in shell arguments",
+        ],
+    );
 }
 
 #[test]
