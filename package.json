@@ -5,7 +5,7 @@
   "description": "Repository tooling for the Zeroshot native product.",
   "scripts": {
     "test": "node --test tests/tooling/*.test.js",
-    "lint": "eslint .github/ci-path-classifier.js scripts/*.js npm/zeroshot/**/*.js tests/tooling/*.js commitlint.config.js",
+    "lint": "eslint .github/ci-path-classifier.js scripts/*.js scripts/distribution/*.js npm/zeroshot/**/*.js tests/tooling/*.js commitlint.config.js",
     "lint:fix": "npm run lint -- --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

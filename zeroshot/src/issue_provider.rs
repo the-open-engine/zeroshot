@@ -30,8 +30,6 @@ use crate::provider_value::{
     bounded_bytes_type, bounded_text_type, profile_descriptor_type, provider_contract_types,
     provider_descriptor_type, validate_serialized, BoundedVec,
 };
-use crate::source_code_provider::SourceMergeReceipt;
-
 const PROFILE_ID_MAX: usize = 128;
 const EXTERNAL_ID_MAX: usize = 256;
 const PUBLIC_URL_MAX: usize = 2_048;

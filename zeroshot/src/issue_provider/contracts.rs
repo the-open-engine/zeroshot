@@ -1,5 +1,7 @@
 use super::*;
 
+type SourceMergeReceipt = crate::source_code_provider::SourceMergeReceipt;
+
 /// Account and canonical issue identity returned by resolution.
 pub type IssueResolutionIdentity = (IssueAccountId, IssueId);
 

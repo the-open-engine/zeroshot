@@ -247,7 +247,9 @@ function main() {
   const repo = git(process.cwd(), ['rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
   }).trim();
-  git(repo, ['rev-parse', '--verify', `${options.base}^{commit}`]);
+  const baseCommit = git(repo, ['rev-parse', '--verify', options.base + '^{commit}'], {
+    encoding: 'utf8',
+  }).trim();
   const changes = parseChanges(repo, options);
   if (changes.length === 0) {
     emit(runOpcoreDirect(repo, ['check', '--changed', '--json']));
@@ -258,10 +260,10 @@ function main() {
   const baseline = path.join(tempRoot, 'repo');
   try {
     const baselineEnv = withoutGitLocalEnv(repo);
-    git(repo, ['clone', '--quiet', '--shared', '--no-checkout', repo, baseline], {
+    git(repo, ['clone', '--quiet', '--no-checkout', repo, baseline], {
       env: baselineEnv,
     });
-    git(baseline, ['checkout', '--quiet', '--detach', options.base], {
+    git(baseline, ['checkout', '--quiet', '--detach', baseCommit], {
       env: baselineEnv,
     });
     linkDependencies(repo, baseline);

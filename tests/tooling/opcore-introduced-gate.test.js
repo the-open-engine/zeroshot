@@ -189,6 +189,68 @@ function deletedCloneSourceCase() {
   }
 }
 
+function symbolicBaseCase() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-opcore-symbolic-base-'));
+  try {
+    fs.writeFileSync(
+      path.join(repo, 'Cargo.toml'),
+      '[package]\nname = "symbolic-base"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "lib.rs"\n'
+    );
+    fs.writeFileSync(path.join(repo, 'lib.rs'), 'pub fn value() -> i32 {\n    0\n}\n');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Zeroshot Test',
+        '-c',
+        'user.email=test@zeroshot.invalid',
+        'commit',
+        '-qm',
+        'old main',
+      ],
+      { cwd: repo }
+    );
+    const oldMain = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['branch', 'main', oldMain], { cwd: repo });
+    fs.writeFileSync(path.join(repo, 'support.rs'), 'pub fn value() -> i32 {\n    1\n}\n');
+    execFileSync('git', ['add', 'support.rs'], { cwd: repo });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Zeroshot Test',
+        '-c',
+        'user.email=test@zeroshot.invalid',
+        'commit',
+        '-qm',
+        'remote main',
+      ],
+      { cwd: repo }
+    );
+    const remoteMain = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', remoteMain], { cwd: repo });
+    fs.writeFileSync(
+      path.join(repo, 'lib.rs'),
+      'mod support;\n\npub fn value() -> i32 {\n    support::value()\n}\n'
+    );
+
+    const run = runOpcore(repo, ['--base', 'origin/main'], 'rust.cargo-check');
+    const result = parseResult(run);
+    assert.strictEqual(run.status, 0, `${run.stderr}\n${run.stdout}`);
+    assert.strictEqual(result.validationResult.status, 'passed');
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+}
+
 function agentGateCase() {
   const clean = runAgentGate('pub fn clean() -> i32 {\n    0\n}\n');
   assert.strictEqual(clean.status, 0, clean.stderr);
@@ -204,6 +266,7 @@ describe('Opcore introduced-change gate', { timeout: 90000 }, function () {
   it('validates the staged index rather than an unstaged replacement', stagedIndexCase);
   it('does not validate a path after it is deleted', deletedFileCase);
   it('removes deleted sources before checking moved code for clones', deletedCloneSourceCase);
+  it('pins symbolic base refs before cloning the validation tree', symbolicBaseCase);
   it(
     'allows a clean pre-write and blocks an introduced violation within its deadline',
     agentGateCase

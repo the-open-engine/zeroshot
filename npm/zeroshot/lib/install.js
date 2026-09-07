@@ -1,96 +1,31 @@
 'use strict';
 
-const crypto = require('crypto');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const { URL } = require('url');
-const zlib = require('zlib');
+const {
+  archiveName,
+  extractExecutable,
+  parseChecksumManifest,
+  targetForHost,
+  verifyArchive,
+} = require('./release-artifacts');
 
 const RELEASE_BASE_URL = 'https://github.com/the-open-engine/zeroshot/releases/download';
 const RELEASE_TAG_PREFIX = 'v';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+const TARGETS = Object.freeze(
+  require('../targets.json').map((declaration) => Object.freeze({ ...declaration }))
+);
 const HOST_TARGETS = Object.freeze(
-  Object.fromEntries(
-    require('../targets.json').map(({ platform, arch, target, executable }) => [
-      `${platform}/${arch}`,
-      Object.freeze({ target, executable }),
-    ])
-  )
+  Object.fromEntries(TARGETS.map((target) => [`${target.platform}/${target.arch}`, target]))
 );
 
 function selectTarget(platform = process.platform, arch = process.arch) {
-  const host = `${platform}/${arch}`;
-  const selected = HOST_TARGETS[host];
-  if (!selected) {
-    const supportedHosts = Object.keys(HOST_TARGETS).join(', ');
-    throw new Error(
-      `UNSUPPORTED_ZEROSHOT_HOST: no prebuilt binary for ${host}; ` +
-        `supported hosts: ${supportedHosts}`
-    );
-  }
-  return selected;
-}
-
-function archiveName(version, target) {
-  return `zeroshot-v${version}-${target}.tar.gz`;
-}
-
-function parseChecksumManifest(text) {
-  const checksums = new Map();
-  for (const line of text.split(/\r?\n/)) {
-    if (!line) continue;
-    const match = /^([0-9a-f]{64}) {2}([^/\\]+)$/.exec(line);
-    if (!match) throw new Error(`invalid SHA256SUMS line: ${line}`);
-    if (checksums.has(match[2])) throw new Error(`duplicate SHA256SUMS entry: ${match[2]}`);
-    checksums.set(match[2], match[1]);
-  }
-  return checksums;
-}
-
-function verifyArchive(filename, archive, manifestText) {
-  const expected = parseChecksumManifest(manifestText).get(filename);
-  if (!expected) throw new Error(`CHECKSUM_MISSING: SHA256SUMS has no entry for ${filename}`);
-  const actual = crypto.createHash('sha256').update(archive).digest('hex');
-  if (actual !== expected) {
-    throw new Error(`CHECKSUM_MISMATCH: ${filename} expected ${expected} but received ${actual}`);
-  }
-}
-
-function parseTarSize(header) {
-  const value = header.toString('ascii').replace(/\0.*$/, '').trim();
-  if (!/^[0-7]+$/.test(value)) throw new Error('invalid tar entry size');
-  return Number.parseInt(value, 8);
-}
-
-function extractExecutable(archive, expectedName) {
-  let tar;
-  try {
-    tar = zlib.gunzipSync(archive);
-  } catch (error) {
-    throw new Error(`ARCHIVE_INVALID: cannot decompress release archive: ${error.message}`);
-  }
-  let offset = 0;
-  let executable = null;
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
-    const size = parseTarSize(header.subarray(124, 136));
-    const start = offset + 512;
-    const end = start + size;
-    if (end > tar.length) throw new Error('ARCHIVE_INVALID: truncated tar entry');
-    if (name === expectedName) {
-      if (executable) throw new Error(`ARCHIVE_INVALID: duplicate ${expectedName}`);
-      executable = Buffer.from(tar.subarray(start, end));
-    } else {
-      throw new Error(`ARCHIVE_INVALID: unexpected archive entry ${name}`);
-    }
-    offset = start + Math.ceil(size / 512) * 512;
-  }
-  if (!executable) throw new Error(`ARCHIVE_INVALID: archive does not contain ${expectedName}`);
-  return executable;
+  const { target, executable } = targetForHost(TARGETS, platform, arch);
+  return { target, executable };
 }
 
 function download(url, maximumBytes, redirects = 0) {

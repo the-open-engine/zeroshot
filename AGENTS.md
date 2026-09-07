@@ -104,7 +104,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | npm package                   | `npm/zeroshot/`                                                                                |
 | Target image                  | `docker/zeroshot-target/`                                                                      |
 | Target declarations           | `distribution/zeroshot-targets.json`                                                           |
-| Distribution tooling          | `scripts/distribution.js`                                                                      |
+| Distribution tooling          | `scripts/distribution.js`, `scripts/distribution/`, `npm/zeroshot/lib/release-artifacts.js`    |
 | Python SDK                    | `sdks/python/`                                                                                 |
 | Release workflow              | `.github/workflows/release.yml`                                                                |
 | Python release workflow       | `.github/workflows/release-python.yml`                                                         |
