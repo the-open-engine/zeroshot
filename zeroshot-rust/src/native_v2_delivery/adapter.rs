@@ -159,7 +159,9 @@ impl<'a> DeliveryCredentials<'a> {
     }
 
     async fn refresh(&mut self) -> Result<(), DeliveryStop> {
-        let environment = self.environment.ok_or_else(crash_outcome)?;
+        let Some(environment) = self.environment else {
+            return Ok(());
+        };
         let refreshed = crate::native_v2_runner::refresh_environment(environment)
             .await
             .map_err(|_| crash_outcome())?;
