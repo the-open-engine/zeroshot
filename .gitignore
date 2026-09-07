@@ -22,6 +22,4 @@ tmp/
 *.tmp
 .zeroshot/
 .eslintcache
-.opcore/*
-!.opcore/config
 *.cast

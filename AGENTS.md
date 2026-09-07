@@ -116,6 +116,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Fix root causes and keep changes scoped.
 - Use existing patterns; do not add parallel registries, provider lists, model catalogs, or release
   authorities.
+- Keep optional developer and agent analysis tools external to the repository. Do not add package
+  dependencies, hooks, CI gates, skills, or checked-in state for personal analysis tooling.
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
@@ -144,15 +146,6 @@ python -m ruff check src tests examples
 python -m ruff format --check src tests examples
 python -m mypy src examples
 python -m pytest
-```
-
-For graph-sensitive or introduced-change work, run:
-
-```bash
-npm run opcore:status
-opcore-zero check --repo . --changed --json
-opcore-zero sense --repo . --json
-npm run opcore:graph:update
 ```
 
 ## Release convention

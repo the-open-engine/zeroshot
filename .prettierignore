@@ -1,5 +1,4 @@
 node_modules
-.opcore/graph
 target
 **/target
 sdks/python/.venv

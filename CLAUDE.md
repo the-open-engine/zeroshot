@@ -43,10 +43,6 @@ release trains, semantic-release, or a `dev` branch workflow.
 | Python release       | `.github/workflows/release-python.yml` |
 | Tooling tests        | `tests/tooling/`                       |
 
-## Claude Hook
-
-`.claude/settings.json` runs `scripts/opcore-agent-gate.js` before writes. Do not bypass it.
-
 ## Validation
 
 Run the narrowest relevant checks, then the complete affected lanes:
@@ -67,12 +63,4 @@ python -m ruff format --check src tests examples
 python -m mypy src examples
 python -m pytest
 python -m mkdocs build --strict
-```
-
-For graph-sensitive changes:
-
-```bash
-opcore-zero check --repo . --changed --json
-opcore-zero sense --repo . --json
-npm run opcore:graph:update
 ```

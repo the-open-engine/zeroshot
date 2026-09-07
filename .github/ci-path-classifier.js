@@ -28,15 +28,7 @@ const PYTHON_PREFIXES = ['sdks/python/'];
 const PYTHON_PATHS = new Set(['.github/workflows/release-python.yml']);
 const MULTI_LANE_PATHS = new Map([['.github/workflows/release-python.yml', ['python', 'tooling']]]);
 
-const TOOLING_PREFIXES = [
-  '.agents/',
-  '.codex/',
-  '.github/',
-  '.husky/',
-  '.opcore/',
-  'scripts/',
-  'tests/',
-];
+const TOOLING_PREFIXES = ['.github/', '.husky/', 'scripts/', 'tests/'];
 const TOOLING_PATHS = new Set([
   '.dockerignore',
   '.gitignore',
@@ -49,7 +41,6 @@ const TOOLING_PATHS = new Set([
   'README.md',
   'commitlint.config.js',
   'eslint.config.mjs',
-  'opcore-zero.docs.json',
   'package-lock.json',
   'package.json',
 ]);

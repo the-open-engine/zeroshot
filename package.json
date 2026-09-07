@@ -16,14 +16,6 @@
     "rust:test": "cargo test --workspace",
     "rust:docs": "RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps",
     "rust:check": "npm run rust:fmt && npm run rust:clippy && npm run rust:test && npm run rust:docs",
-    "opcore:status": "opcore status --repo . --json",
-    "opcore:scan": "opcore --repo . --json",
-    "opcore:check": "node scripts/opcore-introduced-check.js",
-    "opcore:check:staged": "node scripts/opcore-introduced-check.js --staged",
-    "opcore:install:rust-metrics": "cargo install rust-code-analysis-cli --version 0.0.25 --locked",
-    "opcore:graph:build": "opcore graph build --repo . --json",
-    "opcore:graph:update": "opcore graph update --repo . --json",
-    "opcore:measure": "opcore measure --repo . --json",
     "check": "npm run lint && npm test && npm run distribution:check && npm run protocol:check",
     "prepare": "husky"
   },
@@ -36,7 +28,6 @@
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
-    "opcore": "0.2.1",
     "prettier": "^3.7.4"
   }
 }

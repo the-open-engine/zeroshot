@@ -3,7 +3,6 @@ import prettierConfig from 'eslint-config-prettier';
 export default [
   {
     ignores: [
-      '.opcore/graph/**',
       'docs/zeroshot-cli.html',
       'node_modules/**',
       'protocol/**',

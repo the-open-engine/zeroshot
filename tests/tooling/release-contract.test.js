@@ -90,9 +90,6 @@ describe('v8 hard cutover contract', () => {
   it('keeps repository-owned agent guidance aligned with v8', () => {
     const agents = read('AGENTS.md');
     const claude = read('CLAUDE.md');
-    const opcoreAgents = read('.agents/skills/opcore/SKILL.md');
-    const opcoreClaude = read('.claude/skills/opcore/SKILL.md');
-    const claudeSettings = JSON.parse(read('.claude/settings.json'));
 
     for (const guidance of [agents, claude]) {
       assert.match(guidance, /@the-open-engine-company\/zeroshot/);
@@ -104,8 +101,5 @@ describe('v8 hard cutover contract', () => {
     assert.doesNotMatch(claude, /cluster-templates\/base-templates/);
     assert.doesNotMatch(claude, /Feature branches merge into `dev`/);
     assert.doesNotMatch(claude, /semantic-release publishes/);
-    assert.equal(opcoreAgents, opcoreClaude);
-    assert.match(JSON.stringify(claudeSettings), /scripts\\?\/opcore-agent-gate\.js/);
-    assert.equal(fs.existsSync(path.join(root, 'scripts/opcore-agent-gate.js')), true);
   });
 });

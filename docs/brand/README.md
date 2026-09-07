@@ -1,6 +1,6 @@
 # Zeroshot brand assets
 
-Zeroshot's repo/social visuals, part of the shared **The Open Engine** system (sibling to Opcore). Fraunces wordmark with a rust period (`Zeroshot.`), the engraved **guilloché seal** (a verification variant of the family: an executor-verifier lemniscate whose two lobes cross on the rust verdict node), engineering-plate registration ticks, and the `№ 001` serial.
+Zeroshot's repo/social visuals, part of the shared **The Open Engine** system. Fraunces wordmark with a rust period (`Zeroshot.`), the engraved **guilloché seal** (a verification variant of the family: an executor-verifier lemniscate whose two lobes cross on the rust verdict node), engineering-plate registration ticks, and the `№ 001` serial.
 
 ## Files
 
