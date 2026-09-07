@@ -1,4 +1,7 @@
+use std::future::Future;
+
 use super::*;
+use crate::execution::driver::DriverCancellation;
 
 struct ReviewSyncInvocation<'a> {
     request: &'a GitHubReviewRequest,
@@ -35,17 +38,33 @@ impl ReviewSyncState<'_, '_> {
             && !self.credential_refreshed
     }
 
-    async fn refresh_credential(&mut self) -> Result<(), DeliveryStop> {
+    async fn refresh_credential(&mut self) -> Result<CredentialRefreshProgress, DeliveryStop> {
         emit(self.control, "delivery: refreshing GitHub credential").await?;
-        self.credentials.refresh().await?;
-        self.credential_refreshed = true;
-        Ok(())
+        ensure_active(self.control)?;
+        let remaining = self
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        let progress = refresh_within_deadline(
+            self.credentials.refresh(),
+            self.control.cancellation(),
+            remaining,
+        )
+        .await?;
+        if matches!(progress, CredentialRefreshProgress::Complete) {
+            self.credential_refreshed = true;
+        }
+        Ok(progress)
     }
 }
 
 enum ReviewSyncProgress {
     Complete(GitHubReviewReceipt),
     Failed(GitHubAuthorityError),
+    TimedOut,
+}
+
+enum CredentialRefreshProgress {
+    Complete,
     TimedOut,
 }
 
@@ -112,8 +131,12 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<ReviewSyncProgress, DeliveryStop> {
         let mut progress = self.review_sync_attempt(state.invocation()).await?;
         if state.should_refresh_credential(&progress) {
-            state.refresh_credential().await?;
-            progress = self.review_sync_attempt(state.invocation()).await?;
+            progress = match state.refresh_credential().await? {
+                CredentialRefreshProgress::Complete => {
+                    self.review_sync_attempt(state.invocation()).await?
+                }
+                CredentialRefreshProgress::TimedOut => ReviewSyncProgress::TimedOut,
+            };
         }
         Ok(progress)
     }
@@ -142,6 +165,29 @@ impl NativeV2DeliveryAdapter {
             Ok(Err(error)) => ReviewSyncProgress::Failed(error),
             Err(_) => ReviewSyncProgress::TimedOut,
         })
+    }
+}
+
+async fn refresh_within_deadline<F>(
+    refresh: F,
+    mut cancellation: DriverCancellation,
+    remaining: Duration,
+) -> Result<CredentialRefreshProgress, DeliveryStop>
+where
+    F: Future<Output = Result<(), DeliveryStop>>,
+{
+    if remaining.is_zero() {
+        return Ok(CredentialRefreshProgress::TimedOut);
+    }
+    let result = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => return Err(NodeRunnerError::Cancelled.into()),
+        result = tokio::time::timeout(remaining, refresh) => result,
+    };
+    match result {
+        Ok(Ok(())) => Ok(CredentialRefreshProgress::Complete),
+        Ok(Err(stop)) => Err(stop),
+        Err(_) => Ok(CredentialRefreshProgress::TimedOut),
     }
 }
 
@@ -191,4 +237,39 @@ async fn handle_review_sync_failure(
 async fn review_sync_timeout(control: &DriverControl) -> Result<GitHubReviewReceipt, DeliveryStop> {
     emit(control, "delivery: GitHub review synchronization timed out").await?;
     Err(crash_outcome())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn credential_refresh_respects_remaining_deadline() {
+        let (_sender, receiver) = tokio::sync::watch::channel(false);
+        let result = refresh_within_deadline(
+            std::future::pending::<Result<(), DeliveryStop>>(),
+            DriverCancellation::new(receiver),
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert!(matches!(result, Ok(CredentialRefreshProgress::TimedOut)));
+    }
+
+    #[tokio::test]
+    async fn credential_refresh_respects_cancellation() {
+        let (sender, receiver) = tokio::sync::watch::channel(false);
+        assert!(sender.send(true).is_ok());
+        let result = refresh_within_deadline(
+            std::future::pending::<Result<(), DeliveryStop>>(),
+            DriverCancellation::new(receiver),
+            Duration::from_secs(1),
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(DeliveryStop::Runner(NodeRunnerError::Cancelled))
+        ));
+    }
 }
