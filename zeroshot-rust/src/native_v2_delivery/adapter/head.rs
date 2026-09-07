@@ -1,5 +1,7 @@
 use super::*;
 
+const HEAD_SYNC_ATTEMPTS: usize = 5;
+
 impl NativeV2DeliveryAdapter {
     pub(super) async fn advance_review_head(
         &self,
@@ -54,7 +56,7 @@ impl NativeV2DeliveryAdapter {
         drive: &mut ReviewDrive<'_>,
         previous: &GitHubReviewReceipt,
     ) -> Result<(), DeliveryStop> {
-        loop {
+        for attempt in 0..HEAD_SYNC_ATTEMPTS {
             ensure_active(drive.control)?;
             match self
                 .authority
@@ -69,18 +71,21 @@ impl NativeV2DeliveryAdapter {
                 .await
             {
                 Ok(()) => return Ok(()),
-                Err(GitHubAuthorityError::Unavailable) => {
+                Err(GitHubAuthorityError::Unavailable) if attempt + 1 < HEAD_SYNC_ATTEMPTS => {
                     emit(
                         drive.control,
                         "delivery: waiting to adopt GitHub pull request head",
                     )
                     .await?;
-                    let _ = drive.credentials.refresh().await;
+                    drive.credentials.refresh().await?;
                     wait_for_poll(drive.control, self.config.poll.interval).await?;
                 }
-                Err(GitHubAuthorityError::Rejected) => return Err(crash_outcome()),
+                Err(GitHubAuthorityError::Unavailable | GitHubAuthorityError::Rejected) => {
+                    return Err(crash_outcome());
+                }
             }
         }
+        Err(crash_outcome())
     }
 
     async fn request_head_update(

@@ -21,6 +21,7 @@ pub(super) enum Script {
     StrictBehind,
     HeadAdoptionRace,
     HeadAdoptionRejected,
+    HeadAdoptionUnavailable,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -77,6 +78,7 @@ impl FakeGitHub {
             Script::StrictBehind
             | Script::HeadAdoptionRace
             | Script::HeadAdoptionRejected
+            | Script::HeadAdoptionUnavailable
             | Script::RepeatedBehind => self.no_ci_state(),
             Script::ProtectedBranch | Script::NeverConfirmsMerge => {
                 open_review(GitHubChecks::Passed)
@@ -243,7 +245,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         let updates = self.head_updates.load(Ordering::SeqCst);
         if (matches!(
             self.script,
-            Script::StrictBehind | Script::HeadAdoptionRace | Script::HeadAdoptionRejected
+            Script::StrictBehind
+                | Script::HeadAdoptionRace
+                | Script::HeadAdoptionRejected
+                | Script::HeadAdoptionUnavailable
         ) && updates == 0)
             || (matches!(self.script, Script::RepeatedBehind) && updates < 2)
         {
@@ -268,6 +273,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             Script::StrictBehind
                 | Script::HeadAdoptionRace
                 | Script::HeadAdoptionRejected
+                | Script::HeadAdoptionUnavailable
                 | Script::RepeatedBehind
         ) {
             return Ok(GitHubHeadUpdateOutcome::Pending);
@@ -333,6 +339,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         }
         if matches!(self.script, Script::HeadAdoptionRejected) {
             return Err(GitHubAuthorityError::Rejected);
+        }
+        if matches!(self.script, Script::HeadAdoptionUnavailable) {
+            return Err(GitHubAuthorityError::Unavailable);
         }
         Ok(())
     }

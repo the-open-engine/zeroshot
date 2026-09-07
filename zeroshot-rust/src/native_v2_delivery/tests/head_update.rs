@@ -35,6 +35,20 @@ async fn permanent_local_adoption_rejection_fails_closed_without_retrying_cas() 
     assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test]
+async fn repeated_local_adoption_unavailability_is_bounded_without_retrying_cas() {
+    let (repo, authority) = delivery_harness(Script::HeadAdoptionUnavailable);
+
+    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+
+    assert_eq!(
+        outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 5);
+}
+
 async fn assert_head_updates(
     script: Script,
     expected_updates: usize,
