@@ -82,6 +82,47 @@ function checkReleaseJobs(document) {
   }
 }
 
+function checkOptionalPyPiInputs(releaseDocument, pythonDocument) {
+  const releaseInput = releaseDocument.on?.workflow_dispatch?.inputs?.publish_pypi;
+  if (releaseInput?.type !== 'boolean' || releaseInput.default !== true) {
+    failIntegrity('release workflow must default publish_pypi to true');
+  }
+  const delegatedInput = releaseDocument.jobs?.['python-sdk-release']?.with?.publish_pypi;
+  if (delegatedInput !== '${{ inputs.publish_pypi }}') {
+    failIntegrity('release workflow must pass publish_pypi to the Python SDK workflow');
+  }
+
+  for (const trigger of ['workflow_dispatch', 'workflow_call']) {
+    const input = pythonDocument.on?.[trigger]?.inputs?.publish_pypi;
+    if (input?.type !== 'boolean' || input.default !== true) {
+      failIntegrity(`release-python ${trigger} must default publish_pypi to true`);
+    }
+  }
+}
+
+function checkOptionalPyPiSteps(pythonDocument) {
+  const publishSteps = new Map(
+    pythonDocument.jobs?.publish?.steps?.map((step) => [step.name, step]) ?? []
+  );
+  const expectedConditions = new Map([
+    ['Setup Python 3.12', 'inputs.publish_pypi'],
+    ['Verify existing PyPI version before recovery', 'inputs.publish_pypi'],
+    ['Record intentionally deferred PyPI publication', 'inputs.publish_pypi == false'],
+    [
+      'Publish Python SDK with trusted publishing',
+      "inputs.publish_pypi && steps.pypi.outputs.exists == 'false'",
+    ],
+  ]);
+  for (const [name, condition] of expectedConditions) {
+    if (publishSteps.get(name)?.if !== condition) {
+      failIntegrity(`release-python ${name} must use condition: ${condition}`);
+    }
+  }
+  if (publishSteps.get('Create or complete independent SDK GitHub Release')?.if !== undefined) {
+    failIntegrity('release-python GitHub wheel publication must not depend on publish_pypi');
+  }
+}
+
 function checkObsoleteWorkflowIdentities(workflow) {
   const forbidden = [
     'zeroshot-rust',
@@ -116,6 +157,7 @@ function checkReleaseFragments(workflow) {
     'node scripts/distribution.js publish-assets --tag "$RELEASE_TAG" --dir release-assets',
     'npm publish --provenance --access public ./shim-release/*.tgz',
     'uses: ./.github/workflows/release-python.yml',
+    'publish_pypi: ${{ inputs.publish_pypi }}',
   ]);
 }
 
@@ -128,10 +170,15 @@ function checkPythonReleaseFragments(workflow) {
     'gh release download "$SDK_TAG" --pattern "$name" --dir "$existing_dir"',
     '[[ "$local_sha" == "$remote_sha" ]]',
     'gh release edit "$SDK_TAG" --latest=false',
-    "if: steps.pypi.outputs.exists == 'false'",
+    'if: inputs.publish_pypi == false',
+    "if: inputs.publish_pypi && steps.pypi.outputs.exists == 'false'",
+    'Rerun this workflow with the same immutable inputs and publish_pypi enabled to recover.',
   ]);
   if (workflow.includes('skip-existing: true')) {
     failIntegrity('release-python workflow must verify existing files instead of skipping them');
+  }
+  if (workflow.includes('continue-on-error')) {
+    failIntegrity('release-python workflow must not hide publication failures');
   }
 }
 
@@ -174,8 +221,10 @@ function checkToolingManifest(packageManifest, packageLock) {
 function checkRepository(options = {}) {
   const contract = repositoryContract(options);
   const document = parseReleaseWorkflow(contract.workflow);
-  parsePythonReleaseWorkflow(contract.pythonWorkflow);
+  const pythonDocument = parsePythonReleaseWorkflow(contract.pythonWorkflow);
   checkReleaseJobs(document);
+  checkOptionalPyPiInputs(document, pythonDocument);
+  checkOptionalPyPiSteps(pythonDocument);
   checkObsoleteWorkflowIdentities(contract.workflow);
   checkReleaseFragments(contract.workflow);
   checkPythonReleaseFragments(contract.pythonWorkflow);

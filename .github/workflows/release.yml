@@ -19,6 +19,11 @@ on:
         description: Exact full lowercase commit SHA from main.
         required: true
         type: string
+      publish_pypi:
+        description: Publish Python revision 1 to PyPI; disable only when trusted publishing is unavailable.
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -750,4 +755,5 @@ jobs:
       zeroshot_version: ${{ needs.plan.outputs.version }}
       sdk_revision: 1
       release_commit: ${{ needs.plan.outputs.commit }}
+      publish_pypi: ${{ inputs.publish_pypi }}
     secrets: inherit

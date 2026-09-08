@@ -30,6 +30,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
   `ZEROSHOT.postSDK`. Canonical releases publish SDK revision `1`; later SDK revisions may release
   independently from an exact `main` commit descended from the canonical tag.
+- Canonical releases always publish revision `1` wheels to an immutable GitHub Release.
+  `publish_pypi` defaults to `true`; operators may set it to `false` only when PyPI trusted
+  publishing is known to be unavailable, then recover the same revision from the same source later.
 - Checked-in Cargo/npm versions are development placeholders. Tags, registry metadata, and GitHub
   Releases are authoritative. Never commit a staged release version to `main`.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
@@ -160,6 +163,8 @@ python -m pytest
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.
+- Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by
+  default and may be explicitly deferred with `publish_pypi: false`.
 - `.github/workflows/release-python.yml` may publish later SDK-only revisions.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.

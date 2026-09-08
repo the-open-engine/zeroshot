@@ -24,6 +24,11 @@ on:
         description: Exact full lowercase SDK source commit from main.
         required: true
         type: string
+      publish_pypi:
+        description: Publish to PyPI; disable only when trusted publishing is unavailable.
+        required: true
+        default: true
+        type: boolean
   workflow_call:
     inputs:
       action:
@@ -38,6 +43,10 @@ on:
       release_commit:
         required: true
         type: string
+      publish_pypi:
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -330,11 +339,13 @@ jobs:
           path: sdk-release
 
       - name: Setup Python 3.12
+        if: inputs.publish_pypi
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: '3.12'
 
       - name: Verify existing PyPI version before recovery
+        if: inputs.publish_pypi
         id: pypi
         env:
           PACKAGE_VERSION: ${{ needs.plan.outputs.package-version }}
@@ -385,6 +396,21 @@ jobs:
           with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
               output.write('exists=true\n')
           PY
+
+      - name: Record intentionally deferred PyPI publication
+        if: inputs.publish_pypi == false
+        env:
+          PACKAGE_VERSION: ${{ needs.plan.outputs.package-version }}
+        run: |
+          message="PyPI publication for $PACKAGE_VERSION was explicitly disabled"
+          message="$message because trusted publishing is unavailable."
+          echo "::warning::$message"
+          {
+            echo "### PyPI publication deferred"
+            echo
+            echo "$message"
+            echo "Rerun this workflow with the same immutable inputs and publish_pypi enabled to recover."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or complete independent SDK GitHub Release
         shell: bash
@@ -446,7 +472,7 @@ jobs:
           }
 
       - name: Publish Python SDK with trusted publishing
-        if: steps.pypi.outputs.exists == 'false'
+        if: inputs.publish_pypi && steps.pypi.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@ec4db0b4ddc65acdf4bff5fa45ac92d78b56bdf0 # v1.9.0
         with:
           packages-dir: sdk-release/

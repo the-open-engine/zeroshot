@@ -51,6 +51,47 @@ describe('v8 hard cutover contract', () => {
     assert.match(versionModule, /version\("the-open-engine-zeroshot"\)/);
     assert.match(pyproject, /"PyYAML==6\.0\.3"/);
   });
+});
+
+describe('Python release publication contract', () => {
+  it('requires an explicit opt-out to defer PyPI publication', () => {
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const pythonRelease = yaml.load(read('.github/workflows/release-python.yml'));
+    const releaseInput = release.on.workflow_dispatch.inputs.publish_pypi;
+
+    assert.equal(releaseInput.type, 'boolean');
+    assert.equal(releaseInput.default, true);
+    assert.equal(releaseInput.required, true);
+    assert.equal(
+      release.jobs['python-sdk-release'].with.publish_pypi,
+      '${{ inputs.publish_pypi }}'
+    );
+
+    for (const trigger of ['workflow_dispatch', 'workflow_call']) {
+      const input = pythonRelease.on[trigger].inputs.publish_pypi;
+      assert.equal(input.type, 'boolean', trigger);
+      assert.equal(input.default, true, trigger);
+    }
+
+    const publishSteps = new Map(pythonRelease.jobs.publish.steps.map((step) => [step.name, step]));
+    assert.equal(publishSteps.get('Setup Python 3.12').if, 'inputs.publish_pypi');
+    assert.equal(
+      publishSteps.get('Verify existing PyPI version before recovery').if,
+      'inputs.publish_pypi'
+    );
+    assert.equal(
+      publishSteps.get('Record intentionally deferred PyPI publication').if,
+      'inputs.publish_pypi == false'
+    );
+    assert.equal(
+      publishSteps.get('Publish Python SDK with trusted publishing').if,
+      "inputs.publish_pypi && steps.pypi.outputs.exists == 'false'"
+    );
+    assert.equal(
+      publishSteps.get('Create or complete independent SDK GitHub Release').if,
+      undefined
+    );
+  });
 
   it('keeps release recovery exact and fail-closed', () => {
     const pythonRelease = read('.github/workflows/release-python.yml');
@@ -64,10 +105,18 @@ describe('v8 hard cutover contract', () => {
     assert.match(pythonRelease, /GH_REPO: \$\{\{ github\.repository \}\}/);
     assert.match(pythonRelease, /gh release download "\$SDK_TAG"/);
     assert.match(pythonRelease, /"\$local_sha" == "\$remote_sha"/);
-    assert.match(pythonRelease, /if: steps\.pypi\.outputs\.exists == 'false'/);
+    assert.match(pythonRelease, /if: inputs\.publish_pypi == false/);
+    assert.match(
+      pythonRelease,
+      /if: inputs\.publish_pypi && steps\.pypi\.outputs\.exists == 'false'/
+    );
+    assert.match(pythonRelease, /same immutable inputs and publish_pypi enabled to recover/);
     assert.doesNotMatch(pythonRelease, /skip-existing:\s*true/);
+    assert.doesNotMatch(pythonRelease, /continue-on-error/);
   });
+});
 
+describe('v8 hard cutover contract', () => {
   it('keeps every workflow syntactically valid YAML', () => {
     const workflows = fs.readdirSync(path.join(root, '.github', 'workflows'));
     for (const filename of workflows.filter((name) => name.endsWith('.yml'))) {

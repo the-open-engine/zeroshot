@@ -11,6 +11,8 @@ Zeroshot uses one explicit release workflow: `.github/workflows/release.yml`. An
 - target manifest: `distribution/zeroshot-targets.json`
 - npm package: `@the-open-engine-company/zeroshot`
 - target image: `ghcr.io/the-open-engine/zeroshot-target`
+- Python wheel release: `zeroshot-python-vX.Y.Z_1`
+- Python package: `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled
 
 No alternate tag prefix, package, image, executable alias, source-build fallback, or compatibility
 artifact is published.
@@ -37,6 +39,8 @@ verifies the exact coupling before compilation. Release automation never commits
 4. Create or verify the canonical GitHub Release and exact assets.
 5. Publish the image version, source-commit, and eligible `latest` tags.
 6. Pack, install, smoke, and publish `@the-open-engine-company/zeroshot`.
-7. Publish Python SDK revision `1` from the same canonical release.
+7. Build and publish Python SDK revision `1` as an immutable GitHub wheel release.
+8. Publish that exact wheel set to PyPI unless the operator explicitly defers unavailable trusted
+   publishing with `publish_pypi: false`.
 
 See `PUBLISHING.md` for operator setup and recovery rules.
