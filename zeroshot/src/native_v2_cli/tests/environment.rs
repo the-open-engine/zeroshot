@@ -77,7 +77,7 @@ async fn assert_declared_environment_rejected(
 }
 
 #[tokio::test]
-async fn template_run_materializes_internal_input_and_owned_delivery_binding() {
+async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
     let files = FixtureFiles::with_runtime(
         graph(),
         json!({"task":"ship it"}),
@@ -120,9 +120,9 @@ async fn template_run_materializes_internal_input_and_owned_delivery_binding() {
     }
     .assert_value();
     assert_eq!(submitted.1.pointer("/task"), Some(&json!("ship it")));
-    assert_eq!(submitted.1.pointer("/acceptanceFeedback"), Some(&json!("")));
-    assert_eq!(submitted.1.pointer("/codeFeedback"), Some(&json!("")));
-    assert_eq!(submitted.1.pointer("/deliveryFeedback"), Some(&json!("")));
+    assert!(submitted.1.pointer("/acceptanceFeedback").is_none());
+    assert!(submitted.1.pointer("/codeFeedback").is_none());
+    assert!(submitted.1.pointer("/deliveryFeedback").is_none());
     let authored_input = std::fs::read(&files.input).assert_value();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&authored_input).assert_value(),

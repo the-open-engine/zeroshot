@@ -2,6 +2,7 @@
 mod assert_value;
 
 use assert_value::AssertValue;
+use serde_json::json;
 use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{EnumLabel, FieldName, NonEmptyEnumSet, PayloadType, RecordField};
@@ -103,6 +104,71 @@ fn closed_payload_subtyping_matches_the_normative_rules() {
     );
     assert!(record(&[]).is_subtype_of(&record(&[("x", PayloadType::String, false)])));
     assert!(!record(&[]).is_subtype_of(&record(&[("x", PayloadType::String, true)])));
+}
+
+#[test]
+fn required_empty_root_state_fields_are_materializable() {
+    let input = record(&[("task", PayloadType::String, true)]);
+    let state = record(&[
+        ("task", PayloadType::String, true),
+        ("feedback", PayloadType::String, true),
+        ("marker", PayloadType::Null, true),
+        (
+            "nested",
+            record(&[
+                ("feedback", PayloadType::String, true),
+                ("marker", PayloadType::Null, true),
+            ]),
+            true,
+        ),
+    ]);
+
+    assert!(input.materialized_subtype_of(&state).is_some());
+    let mut value = json!({"task":"ship it"});
+    state.materialize_missing_fields(&mut value);
+    assert_eq!(
+        value,
+        json!({
+            "task":"ship it",
+            "feedback":"",
+            "marker":null,
+            "nested":{"feedback":"","marker":null}
+        })
+    );
+
+    let non_empty_state = record(&[
+        ("task", PayloadType::String, true),
+        ("attempts", PayloadType::Integer, true),
+    ]);
+    assert!(input.materialized_subtype_of(&non_empty_state).is_none());
+}
+
+#[test]
+fn optional_record_defaults_do_not_require_source_only_descendants() {
+    let input = record(&[(
+        "config",
+        record(&[("note", PayloadType::String, true)]),
+        false,
+    )]);
+    let state = record(&[(
+        "config",
+        record(&[
+            ("note", PayloadType::String, false),
+            ("marker", PayloadType::String, true),
+        ]),
+        true,
+    )]);
+    let effective = input.materialized_subtype_of(&state).assert_value();
+
+    let mut omitted = json!({});
+    state.materialize_missing_fields(&mut omitted);
+    assert_eq!(omitted, json!({"config":{"marker":""}}));
+    effective.validate_value(&omitted).assert_value();
+
+    let mut provided = json!({"config":{"note":"keep"}});
+    state.materialize_missing_fields(&mut provided);
+    assert_eq!(provided, json!({"config":{"note":"keep","marker":""}}));
+    effective.validate_value(&provided).assert_value();
 }
 
 #[test]

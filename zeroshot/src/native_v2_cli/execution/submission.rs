@@ -189,10 +189,6 @@ fn prepare_intent(
 ) -> Result<TargetRunIntent, NativeV2CliError> {
     validate_graph_profile(&graph)?;
     let initial_input = read_json::<serde_json::Value>("input", &run.input)?;
-    let initial_input = match &run.selection {
-        RunSelection::Inline { graph, .. } => materialize_initial_input(graph, initial_input)?,
-        RunSelection::Profile(_) => initial_input,
-    };
     graph
         .initial_input
         .validate_value(&initial_input)
@@ -239,18 +235,6 @@ where
         }
     }
     Ok(selected)
-}
-
-fn materialize_initial_input(
-    selection: &RunGraph,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, NativeV2CliError> {
-    match selection {
-        RunGraph::File(_) => Ok(input),
-        RunGraph::Template { template, .. } => template
-            .materialize_input(input)
-            .map_err(|error| NativeV2CliError::InitialInput(error.to_string())),
-    }
 }
 
 fn materialize_graph(selection: &RunGraph) -> Result<GraphSpec, NativeV2CliError> {

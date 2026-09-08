@@ -8,20 +8,6 @@ pub(super) fn executable_output(node: &GraphNode) -> Option<&PayloadType> {
     }
 }
 
-pub(super) fn node_state(node: &GraphNode) -> Option<&PayloadType> {
-    match node {
-        GraphNode::Seq(group) => Some(&group.state),
-        GraphNode::Choice(group) => Some(&group.state),
-        GraphNode::Par(group) => Some(&group.state),
-        GraphNode::Loop(group) => Some(&group.state),
-        GraphNode::Map(group) => Some(&group.state),
-        GraphNode::Step(_)
-        | GraphNode::Verifier(_)
-        | GraphNode::Succeed(_)
-        | GraphNode::Fail(_) => None,
-    }
-}
-
 pub(super) fn required_leaf_paths(payload: &PayloadType) -> Vec<FieldPath> {
     fn collect(
         payload: &PayloadType,

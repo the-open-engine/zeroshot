@@ -95,7 +95,7 @@ pub(super) fn review_repair_input_type() -> Result<PayloadType, BuiltinTemplateE
 }
 
 pub(super) fn software_input_type() -> Result<PayloadType, BuiltinTemplateError> {
-    review_repair_input_type()
+    task_type()
 }
 
 pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {

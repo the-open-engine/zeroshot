@@ -26,15 +26,23 @@ impl<'a> Analyzer<'a> {
         self.index_node(&self.graph.root, root_path, 1);
         self.validate_global_limits();
 
+        let materialized_state = self
+            .graph
+            .root
+            .state()
+            .and_then(|state| self.graph.initial_input.materialized_subtype_of(state));
+        let initial_state = materialized_state
+            .as_ref()
+            .unwrap_or(&self.graph.initial_input);
         let initial = Flow {
-            defined: required_paths_with_types(&self.graph.initial_input),
+            defined: required_paths_with_types(initial_state),
             ..Flow::default()
         };
         self.validate_node(
             &self.graph.root,
             NodeValidationContext {
                 incoming: &initial,
-                state: &self.graph.initial_input,
+                state: initial_state,
                 item: None,
                 map_index_targets: None,
             },

@@ -127,9 +127,12 @@ impl<'a> FullV1Reducer<'a> {
     }
 
     pub fn reduce(&self, input: ReductionInput<'_>) -> Result<Reduction, ReducerError> {
-        let initial_input = input.initial_input.clone();
+        let mut initial_state = input.initial_input.clone();
+        if let Some(state) = self.graph.compiled_ir.root.state() {
+            state.materialize_missing_fields(&mut initial_state);
+        }
         let mut engine = Engine::new(input, &self.graph.compiled_ir.root, self.execution_mode)?;
-        let mut context = Context::new(initial_input);
+        let mut context = Context::new(initial_state);
         let status = engine.eval(
             &self.graph.compiled_ir.root,
             &mut context,

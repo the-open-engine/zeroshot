@@ -53,6 +53,84 @@ async fn required_initial_paths_survive_optional_group_state_widening() {
 }
 
 #[tokio::test]
+async fn root_state_additions_require_implicit_empty_values() {
+    let mut materializable = valid_graph();
+    let fields = materializable
+        .assert_at_mut("root")
+        .assert_at_mut("state")
+        .assert_at_mut("fields")
+        .as_object_mut()
+        .assert_value();
+    fields.insert(
+        "feedback".to_owned(),
+        json!({"type":{"kind":"string"},"required":true}),
+    );
+    fields.insert(
+        "marker".to_owned(),
+        json!({"type":{"kind":"null"},"required":true}),
+    );
+    let graph: GraphSpec = serde_json::from_value(materializable).assert_value();
+    assert_graph_accepted(&graph).await;
+
+    let mut rejected = valid_graph();
+    rejected
+        .assert_at_mut("root")
+        .assert_at_mut("state")
+        .assert_at_mut("fields")
+        .as_object_mut()
+        .assert_value()
+        .insert(
+            "attempts".to_owned(),
+            json!({"type":{"kind":"integer"},"required":true}),
+        );
+    let graph: GraphSpec = serde_json::from_value(rejected).assert_value();
+    assert_graph_rejected_with(&graph, GraphDiagnosticCode::SchemaSafety).await;
+}
+
+#[tokio::test]
+async fn materialized_optional_records_do_not_define_source_only_descendants() {
+    let mut value = valid_graph();
+    let insert_config = |value: &mut Value, pointer: &str, config: Value| {
+        value
+            .pointer_mut(pointer)
+            .assert_value()
+            .as_object_mut()
+            .assert_value()
+            .insert("config".to_owned(), config);
+    };
+    insert_config(
+        &mut value,
+        "/initialInput/fields",
+        json!({"type":{"kind":"record","fields":{
+                "note":{"type":{"kind":"string"},"required":true}
+            }},"required":false}),
+    );
+    insert_config(
+        &mut value,
+        "/root/state/fields",
+        json!({"type":{"kind":"record","fields":{
+                "note":{"type":{"kind":"string"},"required":false},
+                "marker":{"type":{"kind":"string"},"required":true}
+            }},"required":true}),
+    );
+    set_root_children(&mut value, |_| {
+        json!([{
+            "kind":"succeed","name":"done",
+            "output":{"kind":"record","fields":{
+                "note":{"type":{"kind":"string"},"required":true}
+            }},
+            "bindings":[{
+                "target":["note"],
+                "value":{"source":"state","path":["config","note"]}
+            }]
+        }])
+    });
+    let graph: GraphSpec = serde_json::from_value(value).assert_value();
+
+    assert_undefined_read_without_schema_error(&graph).await;
+}
+
+#[tokio::test]
 async fn success_routing_does_not_define_an_optional_output_path() {
     let mut value = valid_graph();
     *value

@@ -1,7 +1,6 @@
 //! Public built-in template selection and local materialization seams.
 
 use openengine_cluster_protocol::{GraphSpec, NodeName};
-use serde_json::Value;
 use thiserror::Error;
 
 use crate::native_v2_contract::{
@@ -10,10 +9,7 @@ use crate::native_v2_contract::{
 };
 use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 
-use super::{
-    node_name, single_worker_graph, software_change_graph, static_value, ACCEPTANCE_FEEDBACK_FIELD,
-    CODE_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD, DELIVERY_NODE,
-};
+use super::{node_name, single_worker_graph, software_change_graph, static_value, DELIVERY_NODE};
 
 /// The deliberately small set of built-in graph templates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,25 +72,6 @@ impl BuiltinGraphTemplate {
         )))
     }
 
-    /// Adds template-owned state fields while preserving the user-authored task value.
-    pub(crate) fn materialize_input(self, mut input: Value) -> Result<Value, BuiltinTemplateError> {
-        if self == Self::SoftwareChange {
-            let object = input
-                .as_object_mut()
-                .ok_or(BuiltinTemplateError::InputMustBeObject)?;
-            object.insert(
-                ACCEPTANCE_FEEDBACK_FIELD.to_owned(),
-                Value::String(String::new()),
-            );
-            object.insert(CODE_FEEDBACK_FIELD.to_owned(), Value::String(String::new()));
-            object.insert(
-                DELIVERY_FEEDBACK_FIELD.to_owned(),
-                Value::String(String::new()),
-            );
-        }
-        Ok(input)
-    }
-
     fn validate_delivery(self, delivery: TemplateDelivery) -> Result<(), BuiltinTemplateError> {
         if self == Self::SingleWorker && delivery != TemplateDelivery::None {
             Err(BuiltinTemplateError::UnsupportedDelivery {
@@ -141,6 +118,4 @@ pub(crate) enum BuiltinTemplateError {
     },
     #[error("a built-in graph template contains an invalid static contract")]
     InvalidStaticContract,
-    #[error("built-in template input must be a JSON object")]
-    InputMustBeObject,
 }

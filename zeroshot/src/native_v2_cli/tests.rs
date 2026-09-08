@@ -223,15 +223,24 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
         Some(&json!("openengine.graph.full/v1"))
     );
     assert_eq!(
-        shown.pointer("/initialInput/fields/acceptanceFeedback/required"),
+        shown.pointer("/initialInput/fields/task/required"),
+        Some(&json!(true))
+    );
+    assert!(
+        shown
+            .pointer("/initialInput/fields/acceptanceFeedback")
+            .is_none()
+    );
+    assert_eq!(
+        shown.pointer("/root/state/fields/acceptanceFeedback/required"),
         Some(&json!(true))
     );
     assert_eq!(
-        shown.pointer("/initialInput/fields/codeFeedback/required"),
+        shown.pointer("/root/state/fields/codeFeedback/required"),
         Some(&json!(true))
     );
     assert_eq!(
-        shown.pointer("/initialInput/fields/deliveryFeedback/required"),
+        shown.pointer("/root/state/fields/deliveryFeedback/required"),
         Some(&json!(true))
     );
     assert!(shown.to_string().contains("builtin.git-delivery.pr@1"));

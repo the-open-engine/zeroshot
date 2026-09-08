@@ -19,7 +19,7 @@ mod support;
 use support::*;
 
 #[test]
-fn catalog_and_template_owned_input_are_closed() {
+fn catalog_and_template_inputs_are_closed() {
     assert_eq!(
         BuiltinGraphTemplate::all(),
         &[
@@ -38,22 +38,25 @@ fn catalog_and_template_owned_input_are_closed() {
     ));
 
     let authored = json!({"task":"repair checkout"});
-    assert_eq!(
-        BuiltinGraphTemplate::SingleWorker
-            .materialize_input(authored.clone())
-            .assert_value(),
-        authored
-    );
-    assert_eq!(
-        BuiltinGraphTemplate::SoftwareChange
-            .materialize_input(authored)
-            .assert_value(),
-        json!({
-            "task":"repair checkout",
-            "acceptanceFeedback":"",
-            "codeFeedback":"",
-            "deliveryFeedback":""
-        })
+    let single = BuiltinGraphTemplate::SingleWorker
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    single
+        .initial_input
+        .validate_value(&authored)
+        .assert_value();
+    let software = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    software
+        .initial_input
+        .validate_value(&authored)
+        .assert_value();
+    assert!(
+        software
+            .initial_input
+            .validate_value(&json!({"task":"repair checkout","acceptanceFeedback":""}))
+            .is_err()
     );
 }
 
@@ -357,9 +360,7 @@ async fn assert_admissible(
     assert_instruction_ownership(&leaves);
 
     let runtime = runtime_for(template, delivery, &leaves);
-    let initial_input = template
-        .materialize_input(json!({"task":"implement the requested change"}))
-        .assert_value();
+    let initial_input = json!({"task":"implement the requested change"});
     let policy = if delivery == TemplateDelivery::None {
         DeliveryPolicy::Optional
     } else {
@@ -395,9 +396,7 @@ async fn verified_software_template(
     let template = BuiltinGraphTemplate::SoftwareChange;
     let graph = template.materialize(delivery).assert_value();
     let runtime = runtime_for(template, delivery, &executable_leaves(&graph.root));
-    let initial_input = template
-        .materialize_input(json!({"task":"repair checkout"}))
-        .assert_value();
+    let initial_input = json!({"task":"repair checkout"});
     let admitted = NativeV2Admission
         .admit(RunSubmission {
             title: RunTitle::new("Template behavior").assert_value(),

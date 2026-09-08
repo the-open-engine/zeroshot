@@ -456,4 +456,16 @@ impl GraphNode {
             Self::Fail(node) => &node.name,
         }
     }
+
+    #[must_use]
+    pub fn state(&self) -> Option<&PayloadType> {
+        match self {
+            Self::Seq(node) => Some(&node.state),
+            Self::Choice(node) => Some(&node.state),
+            Self::Par(node) => Some(&node.state),
+            Self::Loop(node) => Some(&node.state),
+            Self::Map(node) => Some(&node.state),
+            Self::Step(_) | Self::Verifier(_) | Self::Succeed(_) | Self::Fail(_) => None,
+        }
+    }
 }

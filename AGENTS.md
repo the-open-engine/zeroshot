@@ -39,6 +39,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
+- Initial input remains caller-owned and is validated unchanged. A root group may add required
+  state fields only when their payload types have deterministic implicit empty values; verification
+  proves this and reduction materializes missing null, string, and recursively empty record values.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.

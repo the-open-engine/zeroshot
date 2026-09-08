@@ -85,7 +85,7 @@ impl<'a> Analyzer<'a> {
         node: &GraphNode,
         context: &LocatedNodeValidationContext<'_>,
     ) {
-        if node_state(node).is_some_and(|state| {
+        if node.state().is_some_and(|state| {
             !is_subtype_with_definitions(context.node.state, state, &context.node.incoming.defined)
         }) {
             emit_diagnostic!(
