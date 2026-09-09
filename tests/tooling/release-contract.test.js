@@ -139,6 +139,13 @@ describe('Versioned documentation publication contract', () => {
     assertPagesPublisherPermissions(docs.permissions);
     assert.equal(docs.concurrency['cancel-in-progress'], false);
     assert.equal(docs.concurrency.queue, 'max');
+    const rustSetup = docs.jobs.publish.steps.find(
+      (step) => step.name === 'Setup Rust 1.97.0'
+    );
+    assert.deepEqual(rustSetup.with, {
+      toolchain: '1.97.0',
+      components: 'clippy,rustfmt',
+    });
   });
 
   it('runs from the release chain after Python revision 1', () => {

@@ -123,6 +123,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.97.0
+          components: clippy,rustfmt
 
       - name: Install documentation tools
         run: python -m pip install --disable-pip-version-check -r docs/requirements.lock
