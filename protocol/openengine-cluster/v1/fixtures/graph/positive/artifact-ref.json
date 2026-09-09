@@ -9,7 +9,7 @@
   "mediaType": "application/json",
   "producer": {
     "node": "work",
-    "worker": "legacy.zeroshot.ship@1"
+    "worker": "worker.main@1"
   },
   "redaction": "internal",
   "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

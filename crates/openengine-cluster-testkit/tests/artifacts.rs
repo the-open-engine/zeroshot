@@ -33,12 +33,10 @@ async fn generated_artifacts_are_complete_and_committed_without_drift() {
         "protocol/openengine-cluster/v1/compiled-ir.schema.json",
         "protocol/openengine-cluster/v1/openrpc.json",
         "protocol/openengine-cluster/v1/worker.schema.json",
-        "protocol/openengine-cluster/v1/fixtures/workers/positive/acp-v1.json",
-        "protocol/openengine-cluster/v1/fixtures/workers/positive/a2a-1.0.json",
-        "protocol/openengine-cluster/v1/fixtures/workers/positive/legacy-zeroshot-ship-v1.json",
+        "docs/reference/cluster/api.md",
+        "protocol/openengine-cluster/v1/fixtures/workers/positive/portable-binding.json",
         "protocol/openengine-cluster/v1/fixtures/workers/positive/artifact-receipt.json",
         "protocol/openengine-cluster/v1/fixtures/workers/negative/bearer-token.json",
-        "protocol/openengine-cluster/v1/fixtures/workers/mock/a2a-auth-required.json",
         "protocol/openengine-cluster/v1/fixtures/graph/positive/full-all-nodes.json",
         "protocol/openengine-cluster/v1/fixtures/graph/positive/single-worker.json",
         "protocol/openengine-cluster/v1/fixtures/graph/canonical/base.canonical.json",
@@ -146,8 +144,6 @@ async fn openrpc_exposes_only_the_implemented_protocol_methods() {
         "ArtifactRef",
         "WorkerDescriptor",
         "WorkerOutcome",
-        "LegacyShipRequest",
-        "LegacyShipResult",
     ] {
         assert!(
             openrpc

@@ -15,6 +15,8 @@ One successful release produces the same version across:
 - target image source tag: `sha-<full-commit>`
 - Python revision 1 GitHub wheel release: `zeroshot-python-vX.Y.Z_1`
 - Python package when PyPI publication is enabled: `the-open-engine-zeroshot==X.Y.Z.post1`
+- immutable documentation snapshot: `vX.Y.Z/` relative to the docs base, with Python revision `1`
+- moving documentation alias: `stable/` when the release receives the image `latest` tag
 
 The checked-in Cargo and npm versions are development placeholders. The release workspace stages the
 explicit version and never commits it back to `main`.
@@ -61,9 +63,17 @@ not a blanket ignored failure. The workflow:
 7. packs, installs, smokes, and publishes `@the-open-engine-company/zeroshot`;
 8. invokes the Python SDK workflow for revision `1`, always creating or verifying its immutable
    GitHub wheel release and publishing the same wheels to PyPI when `publish_pypi` is enabled.
+9. publishes the generated CLI, Cluster API, and Python API documentation from that exact source
+   commit, then advances `stable` when this is the newest release.
 
 Later Python-only revisions may dispatch `Release Python SDK` with the same Zeroshot version, a
 higher positive SDK revision, and an exact `main` commit containing the SDK changes.
+
+The documentation workflow also publishes current `main` to `dev/`. It will not overwrite an exact
+version whose manifest records a different source commit. Select **GitHub Actions** as the GitHub
+Pages source once after the workflow lands, then dispatch **Publish versioned documentation** if the
+initial push ran before setup completed. `gh-pages` remains Mike's version store. See
+`docs/project/versioning.md` for the URL and manifest contract.
 
 ## Deferred PyPI publication
 

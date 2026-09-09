@@ -1,4 +1,4 @@
-//! Lean native-v2 command contract.
+//! Command contract for the shipped CLI.
 //!
 //! Parsing and local file validation happen before a local controller or named target is
 //! contacted. The named-target connector resolves a mutable branch selector before sending the

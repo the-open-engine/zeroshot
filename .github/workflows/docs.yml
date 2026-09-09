@@ -1,0 +1,409 @@
+name: Publish versioned documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Immutable documentation version in vX.Y.Z form.
+        required: true
+        type: string
+      release_commit:
+        description: Exact full lowercase source commit for this documentation version.
+        required: true
+        type: string
+      stable:
+        description: Point the stable alias and site root at this version.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  pages: write
+
+concurrency:
+  group: publish-versioned-documentation
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      DOCS_VERSION: ${{ inputs.version || 'dev' }}
+      REQUESTED_VERSION: ${{ inputs.version }}
+      SOURCE_COMMIT: ${{ inputs.release_commit || github.sha }}
+      UPDATE_STABLE: ${{ inputs.stable || false }}
+      GH_TOKEN: ${{ github.token }}
+      ZEROSHOT_DOCS_VERSION: ${{ inputs.version || 'dev' }}
+      ZEROSHOT_DOCS_COMMIT: ${{ inputs.release_commit || github.sha }}
+    steps:
+      - name: Validate documentation identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::release_commit must be a full lowercase Git commit"
+            exit 1
+          }
+          if [[ -z "$REQUESTED_VERSION" ]]; then
+            [[ "$DOCS_VERSION" == "dev" && "$UPDATE_STABLE" == "false" ]] || {
+              echo "::error::development publications may publish only mutable dev documentation"
+              exit 1
+            }
+          else
+            [[ "$DOCS_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo "::error::version must match vX.Y.Z"
+              exit 1
+            }
+            major="${DOCS_VERSION#v}"
+            major="${major%%.*}"
+            [[ "$major" -ge 8 ]] || {
+              echo "::error::Zeroshot documentation versions must use major version 8 or newer"
+              exit 1
+            }
+          fi
+
+      - name: Checkout exact documentation source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ env.SOURCE_COMMIT }}
+
+      - name: Verify source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force \
+            +refs/heads/main:refs/remotes/origin/main
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]] || {
+            echo "::error::checkout did not resolve to $SOURCE_COMMIT"
+            exit 1
+          }
+          git merge-base --is-ancestor "$SOURCE_COMMIT" origin/main || {
+            echo "::error::documentation source $SOURCE_COMMIT is not on main"
+            exit 1
+          }
+          if [[ "$DOCS_VERSION" == "dev" ]]; then
+            main_commit="$(git rev-parse origin/main)"
+            [[ "$SOURCE_COMMIT" == "$main_commit" ]] || {
+              echo "::error::development documentation must use current main $main_commit"
+              exit 1
+            }
+          else
+            tag_commit="$(git rev-parse -q --verify "refs/tags/${DOCS_VERSION}^{commit}")"
+            [[ "$tag_commit" == "$SOURCE_COMMIT" ]] || {
+              echo "::error::$DOCS_VERSION does not resolve to $SOURCE_COMMIT"
+              exit 1
+            }
+          fi
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            docs/requirements.txt
+            docs/requirements.lock
+
+      - name: Setup Rust 1.97.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install documentation tools
+        run: python -m pip install --disable-pip-version-check -r docs/requirements.lock
+
+      - name: Verify generated CLI reference
+        run: cargo run --locked -p zeroshot --example generate_cli_docs -- --check
+
+      - name: Verify generated cluster protocol reference
+        run: cargo run --locked -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check
+
+      - name: Build strict documentation snapshot
+        run: python -m mkdocs build --strict
+
+      - name: Verify rendered snapshot and release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          docs_version = os.environ["DOCS_VERSION"]
+          source_commit = os.environ["SOURCE_COMMIT"]
+          manifest = json.loads(Path("site/manifest.json").read_text(encoding="utf-8"))
+          expected_python = None if docs_version == "dev" else f"{docs_version[1:]}.post1"
+          expected_routes = {
+              "cli",
+              "clusterApi",
+              "openrpc",
+              "portableBindings",
+              "pythonApi",
+              "pythonSdk",
+          }
+
+          if manifest.get("docsVersion") != docs_version:
+              raise SystemExit("site/manifest.json has the wrong documentation version")
+          if manifest.get("sourceCommit") != source_commit:
+              raise SystemExit("site/manifest.json has the wrong source commit")
+          if manifest.get("pythonSdkVersion") != expected_python:
+              raise SystemExit("site/manifest.json has the wrong Python SDK version")
+          if not expected_routes.issubset(manifest.get("routes", {})):
+              raise SystemExit("site/manifest.json is missing required logical routes")
+
+          python_anchors = {
+              "site/reference/python/client/index.html": 'id="zeroshot.Client"',
+              "site/reference/python/results/index.html": 'id="zeroshot.RunResult"',
+              "site/reference/python/errors/index.html": 'id="zeroshot.InvalidRequestError"',
+          }
+          for relative, anchor in python_anchors.items():
+              python_api = Path(relative).read_text(encoding="utf-8")
+              if anchor not in python_api or "::: zeroshot" in python_api:
+                  raise SystemExit(f"Python API directives did not render in {relative}")
+
+          for relative in (
+              "site/reference/python/index.html",
+              "site/zeroshot-cli/index.html",
+              "site/reference/cluster/api/index.html",
+              "site/reference/cluster/openrpc.json",
+          ):
+              if not Path(relative).is_file():
+                  raise SystemExit(f"generated documentation output is missing {relative}")
+          PY
+
+      - name: Inspect published documentation state
+        id: published
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local credential.helper \
+            "!f() { echo username=x-access-token; echo \"password=\$GH_TOKEN\"; }; f"
+
+          set +e
+          git ls-remote --exit-code --heads origin refs/heads/gh-pages >/dev/null 2>&1
+          remote_status="$?"
+          set -e
+          if [[ "$remote_status" -eq 0 ]]; then
+            git fetch --no-tags origin \
+              refs/heads/gh-pages:refs/remotes/origin/gh-pages
+            pages_exists=true
+          elif [[ "$remote_status" -eq 2 ]]; then
+            pages_exists=false
+          else
+            echo "::error::could not inspect the remote gh-pages branch"
+            exit 1
+          fi
+
+          default_exists=false
+          exact_exists=false
+          if [[ "$pages_exists" == "true" ]]; then
+            if git cat-file -e refs/remotes/origin/gh-pages:index.html 2>/dev/null; then
+              default_exists=true
+            fi
+            if [[ "$DOCS_VERSION" != "dev" ]] && \
+              git cat-file -e "refs/remotes/origin/gh-pages:${DOCS_VERSION}" 2>/dev/null; then
+              remote_manifest="$(mktemp)"
+              remote_page="$(mktemp)"
+              trap 'rm -f "$remote_manifest" "$remote_page"' EXIT
+              git show \
+                "refs/remotes/origin/gh-pages:${DOCS_VERSION}/manifest.json" \
+                > "$remote_manifest" || {
+                  echo "::error::$DOCS_VERSION exists without a readable manifest.json"
+                  exit 1
+                }
+              existing_version="$(jq -er '.docsVersion | select(type == "string")' "$remote_manifest")"
+              existing_commit="$(jq -er '.sourceCommit | select(type == "string")' "$remote_manifest")"
+              [[ "$existing_version" == "$DOCS_VERSION" ]] || {
+                echo "::error::$DOCS_VERSION has a manifest for $existing_version"
+                exit 1
+              }
+              [[ "$existing_commit" == "$SOURCE_COMMIT" ]] || {
+                echo "::error::$DOCS_VERSION is immutable and already belongs to $existing_commit"
+                exit 1
+              }
+              cmp -s "$remote_manifest" site/manifest.json || {
+                echo "::error::$DOCS_VERSION manifest does not match the exact source build"
+                exit 1
+              }
+              required_snapshot_paths=(
+                index.html
+                getting-started/install/index.html
+                getting-started/first-run/index.html
+                concepts/execution/index.html
+                concepts/runtimes-and-connections/index.html
+                concepts/targets/index.html
+                guides/observe-and-control/index.html
+                guides/python-sdk/index.html
+                zeroshot-cli/index.html
+                reference/python/index.html
+                reference/python/client/index.html
+                reference/python/configuration/index.html
+                reference/python/results/index.html
+                reference/python/errors/index.html
+                reference/cluster/api/index.html
+                reference/cluster/graph/index.html
+                reference/cluster/portable-bindings/index.html
+                reference/cluster/openrpc.json
+                reference/cluster/run-observation.schema.json
+                reference/cluster/schema.json
+              )
+              for relative in "${required_snapshot_paths[@]}"; do
+                git cat-file -e \
+                  "refs/remotes/origin/gh-pages:${DOCS_VERSION}/${relative}" 2>/dev/null || {
+                    echo "::error::$DOCS_VERSION is missing $relative"
+                    exit 1
+                  }
+              done
+              required_python_anchors=(
+                'reference/python/client/index.html|id="zeroshot.Client"'
+                'reference/python/results/index.html|id="zeroshot.RunResult"'
+                'reference/python/errors/index.html|id="zeroshot.InvalidRequestError"'
+              )
+              for requirement in "${required_python_anchors[@]}"; do
+                relative="${requirement%%|*}"
+                anchor="${requirement#*|}"
+                git show \
+                  "refs/remotes/origin/gh-pages:${DOCS_VERSION}/${relative}" \
+                  > "$remote_page" || {
+                    echo "::error::$DOCS_VERSION cannot read $relative"
+                    exit 1
+                  }
+                grep -Fq "$anchor" "$remote_page" || {
+                    echo "::error::$DOCS_VERSION has an invalid rendered Python API at $relative"
+                    exit 1
+                  }
+              done
+              exact_exists=true
+            fi
+          fi
+
+          {
+            echo "default-exists=$default_exists"
+            echo "exact-exists=$exact_exists"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish development documentation
+        if: env.DOCS_VERSION == 'dev'
+        shell: bash
+        env:
+          DEFAULT_EXISTS: ${{ steps.published.outputs['default-exists'] }}
+        run: |
+          set -euo pipefail
+          mike deploy \
+            --config-file mkdocs.yml \
+            --message "docs: publish dev from $SOURCE_COMMIT" \
+            --push \
+            --title Development \
+            dev
+          if [[ "$DEFAULT_EXISTS" == "false" ]]; then
+            mike set-default \
+              --config-file mkdocs.yml \
+              --message "docs: set initial default to dev" \
+              --push \
+              dev
+          fi
+
+      - name: Publish immutable release documentation
+        if: env.DOCS_VERSION != 'dev' && steps.published.outputs['exact-exists'] == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$UPDATE_STABLE" == "true" ]]; then
+            mike deploy \
+              --config-file mkdocs.yml \
+              --message "docs: publish $DOCS_VERSION and stable" \
+              --alias-type redirect \
+              --push \
+              --title "$DOCS_VERSION" \
+              --update-aliases \
+              "$DOCS_VERSION" stable
+          else
+            mike deploy \
+              --config-file mkdocs.yml \
+              --message "docs: publish $DOCS_VERSION" \
+              --push \
+              --title "$DOCS_VERSION" \
+              "$DOCS_VERSION"
+          fi
+
+      - name: Repair stable alias during release recovery
+        if: >-
+          env.DOCS_VERSION != 'dev' &&
+          env.UPDATE_STABLE == 'true' &&
+          steps.published.outputs['exact-exists'] == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mike alias \
+            --config-file mkdocs.yml \
+            --message "docs: point stable at $DOCS_VERSION" \
+            --alias-type redirect \
+            --push \
+            --update-aliases \
+            "$DOCS_VERSION" stable
+
+      - name: Point the site root at stable
+        if: env.DOCS_VERSION != 'dev' && env.UPDATE_STABLE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mike set-default \
+            --config-file mkdocs.yml \
+            --message "docs: set default to stable" \
+            --push \
+            stable
+
+      - name: Stage the complete versioned site
+        shell: bash
+        run: |
+          set -euo pipefail
+          pages_ref=refs/heads/gh-pages
+          if ! git rev-parse --verify "$pages_ref" >/dev/null 2>&1; then
+            pages_ref=refs/remotes/origin/gh-pages
+          fi
+          git rev-parse --verify "$pages_ref" >/dev/null
+
+          pages_dir="$RUNNER_TEMP/zeroshot-pages"
+          [[ ! -e "$pages_dir" ]] || {
+            echo "::error::Pages staging directory already exists"
+            exit 1
+          }
+          mkdir "$pages_dir"
+          git archive "$pages_ref" | tar -x -C "$pages_dir"
+          test -f "$pages_dir/.nojekyll"
+          test -f "$pages_dir/index.html"
+          test -f "$pages_dir/versions.json"
+          test -f "$pages_dir/$DOCS_VERSION/manifest.json"
+          if [[ "$UPDATE_STABLE" == "true" ]]; then
+            test -f "$pages_dir/stable/index.html"
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Upload the complete versioned site
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: ${{ runner.temp }}/zeroshot-pages
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

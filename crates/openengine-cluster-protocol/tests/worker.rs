@@ -12,18 +12,17 @@ mod json_read;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    legacy_ship_request_payload_type, legacy_ship_result_payload_type, GraphProfile,
-    LegacyShipRequest, WorkerDescriptor, WorkerFailureReason, WorkerOutcome, WorkerProtocolBinding,
-    ACP_PROFILE, ACP_VERSION, BUILTIN_PROFILE, BUILTIN_VERSION, LEGACY_ZEROSHOT_WORKER,
-    RUNTIME_WORKER_ERRORS,
+    WorkerDescriptor, WorkerFailureReason, WorkerOutcome, WorkerProtocolBinding, BUILTIN_PROFILE,
+    BUILTIN_VERSION, MAX_WORKER_BINDING_VERSION_LENGTH, MAX_WORKER_PROFILE_LENGTH,
+    MAX_WORKER_PROTOCOL_LENGTH, RUNTIME_WORKER_ERRORS,
 };
 use serde_json::json;
 
 fn descriptor() -> serde_json::Value {
     json!({
-        "worker": "mock.acp@1",
+        "worker": "mock.worker@1",
         "graphProfiles": ["openengine.graph.full/v1"],
-        "binding": { "protocol": "acp", "version": ACP_VERSION, "profile": ACP_PROFILE },
+        "binding": { "protocol": "fixture", "version": "1", "profile": "fixture.worker/v1" },
         "contract": {
             "input": { "kind": "string" },
             "output": { "kind": "string" },
@@ -70,22 +69,8 @@ fn assert_descriptor_mutations_rejected(
     }
 }
 
-fn legacy_descriptor() -> serde_json::Value {
-    let mut legacy = descriptor();
-    *json_mut::json_at_mut(&mut legacy, "/worker") = json!(LEGACY_ZEROSHOT_WORKER);
-    *json_mut::json_at_mut(&mut legacy, "/graphProfiles") =
-        json!([GraphProfile::SingleWorker.as_str()]);
-    *json_mut::json_at_mut(&mut legacy, "/binding") =
-        serde_json::to_value(WorkerProtocolBinding::legacy_zeroshot_ship_v1()).assert_value();
-    *json_mut::json_at_mut(&mut legacy, "/contract/input") =
-        serde_json::to_value(legacy_ship_request_payload_type().assert_value()).assert_value();
-    *json_mut::json_at_mut(&mut legacy, "/contract/output") =
-        serde_json::to_value(legacy_ship_result_payload_type().assert_value()).assert_value();
-    legacy
-}
-
 #[test]
-fn bindings_are_exact_and_descriptor_fields_are_closed() {
+fn bindings_are_bounded_and_descriptor_fields_are_closed() {
     let validator = descriptor_validator();
     assert_valid_descriptor(&descriptor(), &validator);
 
@@ -102,10 +87,31 @@ fn bindings_are_exact_and_descriptor_fields_are_closed() {
         assert_invalid_descriptor(&rejected, &validator);
     }
 
-    let mut unsupported = descriptor();
-    *json_mut::json_at_mut(&mut unsupported, "/binding/version") = json!("2");
-    assert_invalid_descriptor(&unsupported, &validator);
-    assert_eq!(WorkerProtocolBinding::acp_v1().version, ACP_VERSION);
+    for (pointer, value) in [
+        ("/binding/protocol", json!("")),
+        (
+            "/binding/protocol",
+            json!("x".repeat(MAX_WORKER_PROTOCOL_LENGTH + 1)),
+        ),
+        ("/binding/version", json!("bad version")),
+        (
+            "/binding/version",
+            json!("x".repeat(MAX_WORKER_BINDING_VERSION_LENGTH + 1)),
+        ),
+        ("/binding/profile", json!("bad profile")),
+        (
+            "/binding/profile",
+            json!("x".repeat(MAX_WORKER_PROFILE_LENGTH + 1)),
+        ),
+    ] {
+        let mut invalid = descriptor();
+        *json_mut::json_at_mut(&mut invalid, pointer) = value;
+        assert_invalid_descriptor(&invalid, &validator);
+    }
+
+    let mut next_version = descriptor();
+    *json_mut::json_at_mut(&mut next_version, "/binding/version") = json!("2");
+    assert_valid_descriptor(&next_version, &validator);
 }
 
 #[test]
@@ -140,32 +146,6 @@ fn descriptor_rejects_empty_duplicate_sets_and_nonopaque_handles() {
         *json_mut::json_at_mut(&mut rejected, "/credentialRequirements") = json!([handle]);
         assert_invalid_descriptor(&rejected, &validator);
     }
-}
-
-#[test]
-fn descriptor_schema_matches_legacy_cross_field_validation() {
-    let validator = descriptor_validator();
-    let legacy = legacy_descriptor();
-    assert_valid_descriptor(&legacy, &validator);
-
-    assert_descriptor_mutations_rejected(
-        &legacy,
-        &validator,
-        [
-            ("/worker", json!("wrong.legacy@1")),
-            ("/graphProfiles", json!([GraphProfile::Full.as_str()])),
-            ("/contract/input", json!({ "kind": "string" })),
-            ("/contract/output", json!({ "kind": "string" })),
-            (
-                "/contract/errors",
-                json!(["crash", "timeout", "malformed", "refusal"]),
-            ),
-        ],
-    );
-
-    let mut mismatched_identity = descriptor();
-    *json_mut::json_at_mut(&mut mismatched_identity, "/worker") = json!(LEGACY_ZEROSHOT_WORKER);
-    assert_invalid_descriptor(&mismatched_identity, &validator);
 }
 
 #[test]
@@ -261,45 +241,12 @@ fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
 }
 
 #[test]
-fn legacy_ship_contract_is_single_worker_and_source_consistent() {
-    let legacy = legacy_descriptor();
-    let validator = descriptor_validator();
-    assert_valid_descriptor(&legacy, &validator);
-    assert_descriptor_mutations_rejected(
-        &legacy,
-        &validator,
-        [
-            ("/contract/input", json!({ "kind": "string" })),
-            ("/contract/output", json!({ "kind": "string" })),
-            (
-                "/contract/errors",
-                json!(["crash", "timeout", "malformed", "refusal"]),
-            ),
-            ("/graphProfiles", json!([GraphProfile::Full.as_str()])),
-        ],
-    );
-
-    let base = json!({
-        "source": "issue",
-        "issue": "649",
-        "prompt": null,
-        "artifacts": [],
-        "isolationProfile": "isolation.worktree@1",
-        "providerProfile": "provider.default@1",
-        "repository": "the-open-engine/zeroshot",
-        "provider": "codex",
-        "modelLevel": "level2"
-    });
-    assert!(serde_json::from_value::<LegacyShipRequest>(base.clone()).is_ok());
-    let mut inconsistent = base;
-    *json_mut::json_at_mut(&mut inconsistent, "/prompt") = json!("also prompt");
-    assert!(serde_json::from_value::<LegacyShipRequest>(inconsistent.clone()).is_err());
-    let schema = serde_json::to_value(schemars::schema_for!(LegacyShipRequest)).assert_value();
-    assert!(
-        !jsonschema::validator_for(&schema)
-            .assert_value()
-            .is_valid(&inconsistent)
-    );
+fn external_binding_identity_is_provider_owned() {
+    let binding = WorkerProtocolBinding::new("future-protocol", "2026.1", "vendor.worker/v2026")
+        .assert_value();
+    assert_eq!(binding.protocol, "future-protocol");
+    assert_eq!(binding.version, "2026.1");
+    assert_eq!(binding.profile, "vendor.worker/v2026");
 
     let errors = serde_json::from_value::<WorkerDescriptor>(descriptor())
         .assert_value()

@@ -22,7 +22,7 @@ use crate::native_v2_cli::{
 mod profile_commands;
 use profile_commands::profile_name;
 
-/// Parse the public native-v2 command surface from arguments after the executable name.
+/// Parse public command-line arguments after the executable name.
 ///
 /// Help and version requests are returned as static commands so callers can select their output
 /// stream without letting Clap terminate the process. Unknown options are rejected by the same

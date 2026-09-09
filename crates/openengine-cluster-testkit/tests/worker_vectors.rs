@@ -2,17 +2,14 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    legacy_ship_request_payload_type, legacy_ship_result_payload_type, ArtifactRef, GraphSpec,
-    WorkerDescriptor, WorkerOutcome, WorkerProtocolBinding, WorkerRef, BUILTIN_PROFILE,
-    BUILTIN_VERSION, LEGACY_ZEROSHOT_WORKER, RUNTIME_WORKER_ERRORS,
+    ArtifactRef, GraphSpec, WorkerDescriptor, WorkerOutcome, WorkerRef, BUILTIN_PROFILE,
+    BUILTIN_VERSION, MAX_WORKER_BINDING_VERSION_LENGTH, MAX_WORKER_PROFILE_LENGTH,
+    MAX_WORKER_PROTOCOL_LENGTH, RUNTIME_WORKER_ERRORS,
 };
 use openengine_cluster_server::worker_registry::{
     check_graph_workers, WorkerCompatibilityCode, WorkerRegistry, WorkerRegistryError,
 };
 use openengine_cluster_testkit::worker_artifacts::{worker_fixture_artifacts, worker_schema};
-use openengine_cluster_testkit::worker_profiles::{
-    normalize_mock_a2a_1_0, normalize_mock_acp_v1, MockA2a1_0Result, MockAcpV1Result,
-};
 use serde_json::{json, Map, Value};
 
 struct MemoryRegistry(BTreeMap<String, Value>);
@@ -46,36 +43,6 @@ fn component_schema(root: &Value, name: &str) -> Value {
     })
 }
 
-fn mock_descriptor(protocol: &str) -> WorkerDescriptor {
-    let binding = match protocol {
-        "acp" => WorkerProtocolBinding::acp_v1(),
-        "a2a" => WorkerProtocolBinding::a2a_1_0(),
-        other => {
-            assert!(matches!(other, "acp" | "a2a"), "unknown protocol {other}");
-            WorkerProtocolBinding::acp_v1()
-        }
-    };
-    serde_json::from_value(json!({
-        "worker": format!("mock.{protocol}@1"),
-        "graphProfiles": ["openengine.graph.full/v1"],
-        "binding": binding,
-        "contract": {
-            "input": { "kind": "string" },
-            "output": { "kind": "string" },
-            "verifier": null,
-            "errors": ["timeout", "crash", "malformed", "refusal"]
-        },
-        "capabilityPolicy": { "autonomy": "strict", "permissionPolicy": "policy.strict@1" },
-        "artifactProfile": {
-            "allowedTypeIds": ["openengine.result@1"],
-            "allowedMediaTypes": ["application/json"],
-            "minimumRedaction": "internal"
-        },
-        "credentialRequirements": []
-    }))
-    .assert_value()
-}
-
 fn forbidden_durable_key(value: &Value) -> Option<&str> {
     const FORBIDDEN: &[&str] = &[
         "command",
@@ -107,9 +74,7 @@ fn positive_vectors_round_trip_through_their_committed_contracts() {
     let schema = worker_schema();
     let descriptor_validator = jsonschema::validator_for(&schema).assert_value();
     for suffix in [
-        "/positive/acp-v1.json",
-        "/positive/a2a-1.0.json",
-        "/positive/legacy-zeroshot-ship-v1.json",
+        "/positive/portable-binding.json",
         "/positive/builtin-v1.json",
     ] {
         let value = fixture_value(suffix);
@@ -145,38 +110,6 @@ fn positive_vectors_round_trip_through_their_committed_contracts() {
             .is_valid(&receipt)
     );
     assert_eq!(forbidden_durable_key(&receipt), None);
-
-    for (suffix, expected_profile, expected_version, normalized) in [
-        (
-            "/mock/acp-input-request.json",
-            "openengine.worker.acp/v1",
-            "1",
-            normalize_mock_acp_v1(&mock_descriptor("acp"), MockAcpV1Result::InputRequest),
-        ),
-        (
-            "/mock/a2a-auth-required.json",
-            "openengine.worker.a2a/1.0",
-            "1.0",
-            normalize_mock_a2a_1_0(&mock_descriptor("a2a"), MockA2a1_0Result::AuthRequired),
-        ),
-    ] {
-        let value = fixture_value(suffix);
-        assert_eq!(value.assert_key("profile"), expected_profile);
-        assert_eq!(value.assert_key("version"), expected_version);
-        let committed: WorkerOutcome =
-            serde_json::from_value(value.assert_key("normalized").clone()).assert_value();
-        assert_eq!(committed, normalized, "normalization drift in {suffix}");
-        assert_eq!(
-            &serde_json::to_value(committed).assert_value(),
-            value.assert_key("normalized")
-        );
-        assert!(outcome_validator.is_valid(value.assert_key("normalized")));
-        assert_eq!(
-            forbidden_durable_key(&value),
-            None,
-            "secret field in {suffix}"
-        );
-    }
 }
 
 const RUST_REJECTION_MARKERS: &[(&str, &str)] = &[
@@ -184,6 +117,7 @@ const RUST_REJECTION_MARKERS: &[(&str, &str)] = &[
         "unsupported worker protocol version/profile binding",
         "UNSUPPORTED_WORKER_BINDING",
     ),
+    ("invalid worker binding", "INVALID_WORKER_BINDING"),
     ("graph profiles must not be empty", "EMPTY_GRAPH_PROFILES"),
     (
         "graph profiles must not contain duplicates",
@@ -201,10 +135,6 @@ const RUST_REJECTION_MARKERS: &[(&str, &str)] = &[
     (
         "credential handles must not contain duplicates",
         "DUPLICATE_CREDENTIAL_REQUIREMENTS",
-    ),
-    (
-        "legacy.zeroshot.ship@1 must use its pinned binding",
-        "INVALID_LEGACY_BINDING",
     ),
     (
         "must not declare credential requirements",
@@ -253,7 +183,6 @@ fn classify_schema_descriptor_rejection(document: &Value) -> Option<&'static str
         classify_error_set_rejection(document),
         classify_artifact_profile_rejection(document),
         classify_credential_rejection(document),
-        classify_legacy_rejection(document),
         classify_builtin_rejection(document),
     ]
     .into_iter()
@@ -263,19 +192,35 @@ fn classify_schema_descriptor_rejection(document: &Value) -> Option<&'static str
 
 fn classify_binding_rejection(document: &Value) -> Option<&'static str> {
     let binding = &document.assert_key("binding");
-    let expected_binding = match binding.assert_key("protocol").as_str()? {
-        "acp" => ("1", "openengine.worker.acp/v1"),
-        "a2a" => ("1.0", "openengine.worker.a2a/1.0"),
-        "legacy_zeroshot" => ("1", "legacy.zeroshot.ship/v1"),
-        "builtin" => (BUILTIN_VERSION, BUILTIN_PROFILE),
-        _ => return Some("UNSUPPORTED_WORKER_BINDING"),
-    };
-    if binding.assert_key("version") != expected_binding.0
-        || binding.assert_key("profile") != expected_binding.1
+    let protocol = binding.assert_key("protocol").as_str()?;
+    let version = binding.assert_key("version").as_str()?;
+    let profile = binding.assert_key("profile").as_str()?;
+    if !valid_binding_component(protocol, MAX_WORKER_PROTOCOL_LENGTH, false)
+        || !valid_binding_component(version, MAX_WORKER_BINDING_VERSION_LENGTH, false)
+        || !valid_binding_component(profile, MAX_WORKER_PROFILE_LENGTH, true)
+    {
+        return Some("INVALID_WORKER_BINDING");
+    }
+    if (protocol == "builtin" || profile.starts_with("openengine.worker.builtin/"))
+        && (protocol, version, profile) != ("builtin", BUILTIN_VERSION, BUILTIN_PROFILE)
     {
         return Some("UNSUPPORTED_WORKER_BINDING");
     }
     None
+}
+
+fn valid_binding_component(value: &str, maximum: usize, allow_slash: bool) -> bool {
+    let bytes = value.as_bytes();
+    let edge_is_valid = |byte: u8| byte.is_ascii_alphanumeric();
+    !bytes.is_empty()
+        && bytes.len() <= maximum
+        && bytes.first().copied().is_some_and(edge_is_valid)
+        && bytes.last().copied().is_some_and(edge_is_valid)
+        && bytes.iter().copied().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'.' | b'_' | b'-')
+                || (allow_slash && byte == b'/')
+        })
 }
 
 fn classify_graph_profile_rejection(document: &Value) -> Option<&'static str> {
@@ -326,37 +271,6 @@ fn classify_credential_rejection(document: &Value) -> Option<&'static str> {
         .is_some_and(|values| duplicate(values))
     {
         return Some("DUPLICATE_CREDENTIAL_REQUIREMENTS");
-    }
-    None
-}
-
-fn classify_legacy_rejection(document: &Value) -> Option<&'static str> {
-    let binding = &document.assert_key("binding");
-    let legacy_identity = document.assert_key("worker") == LEGACY_ZEROSHOT_WORKER;
-    let legacy_protocol = binding.assert_key("protocol") == "legacy_zeroshot";
-    if legacy_identity || legacy_protocol {
-        let expected_input =
-            serde_json::to_value(legacy_ship_request_payload_type().assert_value()).assert_value();
-        let expected_output =
-            serde_json::to_value(legacy_ship_result_payload_type().assert_value()).assert_value();
-        let expected_errors = serde_json::to_value(RUNTIME_WORKER_ERRORS).assert_value();
-        let valid = [
-            legacy_identity,
-            legacy_protocol,
-            document.assert_key("graphProfiles") == &json!(["openengine.graph.single-worker/v1"]),
-            document.assert_key("contract").assert_key("input") == &expected_input,
-            document.assert_key("contract").assert_key("output") == &expected_output,
-            document
-                .assert_key("contract")
-                .assert_key("verifier")
-                .is_null(),
-            document.assert_key("contract").assert_key("errors") == &expected_errors,
-        ]
-        .into_iter()
-        .all(std::convert::identity);
-        if !valid {
-            return Some("INVALID_LEGACY_BINDING");
-        }
     }
     None
 }
@@ -425,7 +339,7 @@ fn descriptor_and_outcome_negative_vectors_have_exact_rejection_codes() {
             kind => None::<()>.assert_value_with(&format!("unknown worker fixture kind {kind}")),
         }
     }
-    assert_eq!(descriptor_count, 22);
+    assert_eq!(descriptor_count, 21);
     assert_eq!(outcome_count, 3);
 }
 

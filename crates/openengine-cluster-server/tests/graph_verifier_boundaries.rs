@@ -33,14 +33,14 @@ impl WorkerRegistry for PermissiveRegistry {
             _ => Value::Null,
         };
         serde_json::from_value(json!({
+            "binding": { "protocol": "fixture", "version": "1", "profile": "fixture.worker/v1" },
             "worker": worker.as_str(),
-            "graphProfiles": ["openengine.graph.full/v1"],
-            "binding": { "protocol": "acp", "version": "1", "profile": "openengine.worker.acp/v1" },
             "contract": {
                 "input": {"kind":"null"}, "output": {"kind":"null"},
                 "verifier": verifier_contract,
                 "errors": ["timeout", "crash", "malformed", "refusal"]
             },
+            "graphProfiles": ["openengine.graph.full/v1"],
             "capabilityPolicy": { "autonomy": "strict", "permissionPolicy": "policy.strict@1" },
             "artifactProfile": {
                 "allowedTypeIds": ["openengine.result@1"],

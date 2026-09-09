@@ -2,7 +2,12 @@
 
 const fs = require('node:fs');
 
-const SHARED_PATHS = new Set(['.github/ci-path-classifier.js', '.github/workflows/ci.yml']);
+const SHARED_PATHS = new Set([
+  '.github/ci-path-classifier.js',
+  '.github/workflows/ci.yml',
+  '.github/workflows/docs.yml',
+  'scripts/docs_hook.py',
+]);
 
 const NATIVE_PREFIXES = [
   'crates/',

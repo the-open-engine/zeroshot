@@ -451,7 +451,7 @@ fn validate_graph_profile(graph: &GraphSpec) -> Result<(), NativeV2CliError> {
         return Ok(());
     }
     Err(NativeV2CliError::Usage(
-        "native-v2 requires graph profile openengine.graph.full/v1".to_owned(),
+        "Zeroshot requires graph profile openengine.graph.full/v1".to_owned(),
     ))
 }
 

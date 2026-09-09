@@ -28,7 +28,7 @@ class LocalTarget:
 
 @dataclass(frozen=True, slots=True)
 class DirectTarget:
-    """Connect to an auth-less Zeroshot target, including the Docker image.
+    """Connect to an unauthenticated Zeroshot target, including the Docker image.
 
     Args:
         origin: Target HTTP(S) origin. Native validation permits plain HTTP only on loopback.
@@ -70,7 +70,7 @@ class _OpaqueDocument:
 
 @dataclass(frozen=True, slots=True)
 class GraphSpec(_OpaqueDocument):
-    """Lossless custom GraphSpec passed unchanged to Zeroshot.
+    """Opaque custom GraphSpec passed unchanged to Zeroshot.
 
     Args:
         document: JSON-compatible GraphSpec mapping. Python performs no semantic validation.
@@ -88,26 +88,28 @@ class GraphSpec(_OpaqueDocument):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class UniformRuntime:
-    """Ask Zeroshot to bind one agent runtime across every executable graph node.
+    """Apply one agent runtime to every executable graph node.
 
     Args:
+        harness: Native codex or claude harness name.
         provider: Native provider name.
         model: Native model identifier.
-        harness: Optional codex or claude override. Zeroshot infers it only when unambiguous.
         effort: Optional native reasoning effort.
-        size: Native run size.
-        session_scope: Native execution or node_instance session scope.
-        env: Environment variable names available to agent nodes. Zeroshot owns provider
-            defaults when this tuple is empty; values are read only from Client.environment.
+        size: Native small, medium, or large run size.
+        session_scope: execution opens a fresh session for each execution; node_instance reuses a
+            live session when that graph node instance runs again.
+        connections: Connection keys mapped to the exact environment field names their agent nodes
+            need. None selects the executable-owned provider defaults; an empty mapping declares no
+            connections. Values are read only from Client.environment.
     """
 
+    harness: str
     provider: str
     model: str
-    harness: str | None = None
     effort: str | None = None
-    size: str = "standard"
+    size: str = "medium"
     session_scope: str = "execution"
-    env: tuple[str, ...] = ()
+    connections: Mapping[str, tuple[str, ...]] | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         """Encode the declarative uniform runtime consumed and validated by Zeroshot."""
@@ -117,18 +119,19 @@ class UniformRuntime:
             "size": self.size,
             "sessionScope": self.session_scope,
         }
-        if self.harness is not None:
-            value["harness"] = self.harness
+        value["harness"] = self.harness
         if self.effort is not None:
             value["effort"] = self.effort
-        if self.env:
-            value["env"] = list(self.env)
+        if self.connections is not None:
+            value["connections"] = {
+                key: list(environment) for key, environment in self.connections.items()
+            }
         return value
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimePlan(_OpaqueDocument):
-    """Lossless exact native runtime plan passed unchanged to Zeroshot.
+    """Opaque native RuntimePlan passed unchanged to Zeroshot.
 
     Args:
         document: JSON-compatible RuntimePlan mapping. Python performs no semantic validation.

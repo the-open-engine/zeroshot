@@ -757,3 +757,20 @@ jobs:
       release_commit: ${{ needs.plan.outputs.commit }}
       publish_pypi: ${{ inputs.publish_pypi }}
     secrets: inherit
+
+  docs:
+    needs: [plan, python-sdk-release]
+    if: |
+      always() &&
+      inputs.action == 'release' &&
+      needs.plan.result == 'success' &&
+      needs.python-sdk-release.result == 'success'
+    permissions:
+      contents: write
+      id-token: write
+      pages: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      version: ${{ needs.plan.outputs.tag }}
+      release_commit: ${{ needs.plan.outputs.commit }}
+      stable: ${{ needs.plan.outputs.publish-latest == 'true' }}

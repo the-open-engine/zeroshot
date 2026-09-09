@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
-/// Run multi-agent graph workloads locally or on named Zeroshot targets.
+/// Run multi-agent graphs locally or on named Zeroshot targets.
 ///
 /// Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attach` stream
 /// newline-delimited JSON (NDJSON).
@@ -103,7 +103,7 @@ enum TargetCommand {
     /// This changes only the local named-target registry; it does not configure the remote target.
     Setup(TargetSetupArgs),
 
-    /// Serve a native-v2 target.
+    /// Serve an unauthenticated direct target.
     ///
     /// Direct mode is unauthenticated. Bind or publish it only on trusted networks.
     Serve(TargetServeArgs),

@@ -13,22 +13,18 @@ use crate::value::deserialize_validated_wire;
 
 use crate::{
     FieldName, GraphProfile, MediaType, NonEmptyEnumSet, PayloadType, RedactionClass, TypeId,
-    WorkerErrorCode, WorkerRef, LEGACY_ZEROSHOT_WORKER, SINGLE_WORKER_GRAPH_PROFILE,
+    WorkerErrorCode, WorkerRef,
 };
 
 mod error;
-mod legacy;
 mod outcome;
 pub use error::*;
-pub use legacy::*;
 pub use outcome::*;
 
-pub const ACP_VERSION: &str = "1";
-pub const ACP_PROFILE: &str = "openengine.worker.acp/v1";
-pub const A2A_VERSION: &str = "1.0";
-pub const A2A_PROFILE: &str = "openengine.worker.a2a/1.0";
-pub const LEGACY_ZEROSHOT_VERSION: &str = "1";
-pub const LEGACY_ZEROSHOT_PROFILE: &str = "legacy.zeroshot.ship/v1";
+pub const MAX_WORKER_PROTOCOL_LENGTH: usize = 64;
+pub const MAX_WORKER_BINDING_VERSION_LENGTH: usize = 64;
+pub const MAX_WORKER_PROFILE_LENGTH: usize = 256;
+pub const BUILTIN_PROTOCOL: &str = "builtin";
 pub const BUILTIN_VERSION: &str = "1";
 pub const BUILTIN_PROFILE: &str = "openengine.worker.builtin/v1";
 pub const RUNTIME_WORKER_ERRORS: [WorkerErrorCode; 4] = [
@@ -38,19 +34,10 @@ pub const RUNTIME_WORKER_ERRORS: [WorkerErrorCode; 4] = [
     WorkerErrorCode::Refusal,
 ];
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerProtocol {
-    Acp,
-    A2a,
-    LegacyZeroshot,
-    Builtin,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkerProtocolBinding {
-    pub protocol: WorkerProtocol,
+    pub protocol: String,
     pub version: String,
     pub profile: String,
 }
@@ -58,19 +45,19 @@ pub struct WorkerProtocolBinding {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WorkerProtocolBindingWire {
-    protocol: WorkerProtocol,
+    protocol: String,
     version: String,
     profile: String,
 }
 
 impl WorkerProtocolBinding {
     pub fn new(
-        protocol: WorkerProtocol,
+        protocol: impl Into<String>,
         version: impl Into<String>,
         profile: impl Into<String>,
     ) -> Result<Self, WorkerContractError> {
         let binding = Self {
-            protocol,
+            protocol: protocol.into(),
             version: version.into(),
             profile: profile.into(),
         };
@@ -78,50 +65,66 @@ impl WorkerProtocolBinding {
         Ok(binding)
     }
 
-    pub fn acp_v1() -> Self {
-        Self::known(WorkerProtocol::Acp, ACP_VERSION, ACP_PROFILE)
-    }
-
-    pub fn a2a_1_0() -> Self {
-        Self::known(WorkerProtocol::A2a, A2A_VERSION, A2A_PROFILE)
-    }
-
-    pub fn legacy_zeroshot_ship_v1() -> Self {
-        Self::known(
-            WorkerProtocol::LegacyZeroshot,
-            LEGACY_ZEROSHOT_VERSION,
-            LEGACY_ZEROSHOT_PROFILE,
-        )
-    }
-
     pub fn builtin_v1() -> Self {
-        Self::known(WorkerProtocol::Builtin, BUILTIN_VERSION, BUILTIN_PROFILE)
-    }
-
-    fn known(protocol: WorkerProtocol, version: &str, profile: &str) -> Self {
         Self {
-            protocol,
-            version: version.to_owned(),
-            profile: profile.to_owned(),
+            protocol: BUILTIN_PROTOCOL.to_owned(),
+            version: BUILTIN_VERSION.to_owned(),
+            profile: BUILTIN_PROFILE.to_owned(),
         }
     }
 
     pub fn validate(&self) -> Result<(), WorkerContractError> {
-        let expected = expected_binding(self.protocol);
-        if (self.version.as_str(), self.profile.as_str()) == expected {
-            Ok(())
-        } else {
-            Err(WorkerContractError::UnsupportedProtocolBinding)
+        validate_binding_component(
+            &self.protocol,
+            MAX_WORKER_PROTOCOL_LENGTH,
+            false,
+            "protocol",
+        )?;
+        validate_binding_component(
+            &self.version,
+            MAX_WORKER_BINDING_VERSION_LENGTH,
+            false,
+            "version",
+        )?;
+        validate_binding_component(&self.profile, MAX_WORKER_PROFILE_LENGTH, true, "profile")?;
+
+        let uses_reserved_builtin = self.protocol == BUILTIN_PROTOCOL
+            || self.profile.starts_with("openengine.worker.builtin/");
+        if uses_reserved_builtin
+            && (
+                self.protocol.as_str(),
+                self.version.as_str(),
+                self.profile.as_str(),
+            ) != (BUILTIN_PROTOCOL, BUILTIN_VERSION, BUILTIN_PROFILE)
+        {
+            return Err(WorkerContractError::UnsupportedProtocolBinding);
         }
+        Ok(())
     }
 }
 
-const fn expected_binding(protocol: WorkerProtocol) -> (&'static str, &'static str) {
-    match protocol {
-        WorkerProtocol::Acp => (ACP_VERSION, ACP_PROFILE),
-        WorkerProtocol::A2a => (A2A_VERSION, A2A_PROFILE),
-        WorkerProtocol::LegacyZeroshot => (LEGACY_ZEROSHOT_VERSION, LEGACY_ZEROSHOT_PROFILE),
-        WorkerProtocol::Builtin => (BUILTIN_VERSION, BUILTIN_PROFILE),
+fn validate_binding_component(
+    value: &str,
+    maximum: usize,
+    allow_slash: bool,
+    kind: &'static str,
+) -> Result<(), WorkerContractError> {
+    let valid_edge = |byte: u8| byte.is_ascii_alphanumeric();
+    let valid_body = |byte: u8| {
+        byte.is_ascii_alphanumeric()
+            || matches!(byte, b'.' | b'_' | b'-')
+            || (allow_slash && byte == b'/')
+    };
+    let bytes = value.as_bytes();
+    if bytes.is_empty()
+        || bytes.len() > maximum
+        || !bytes.first().copied().is_some_and(valid_edge)
+        || !bytes.last().copied().is_some_and(valid_edge)
+        || !bytes.iter().copied().all(valid_body)
+    {
+        Err(WorkerContractError::InvalidProtocolBindingComponent(kind))
+    } else {
+        Ok(())
     }
 }
 
@@ -143,48 +146,49 @@ impl JsonSchema for WorkerProtocolBinding {
 
     fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "oneOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["protocol", "version", "profile"],
-                    "properties": {
-                        "protocol": { "const": "acp" },
-                        "version": { "const": ACP_VERSION },
-                        "profile": { "const": ACP_PROFILE }
-                    }
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["protocol", "version", "profile"],
+            "properties": {
+                "protocol": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_WORKER_PROTOCOL_LENGTH,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                 },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["protocol", "version", "profile"],
-                    "properties": {
-                        "protocol": { "const": "a2a" },
-                        "version": { "const": A2A_VERSION },
-                        "profile": { "const": A2A_PROFILE }
-                    }
+                "version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_WORKER_BINDING_VERSION_LENGTH,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                 },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["protocol", "version", "profile"],
-                    "properties": {
-                        "protocol": { "const": "legacy_zeroshot" },
-                        "version": { "const": LEGACY_ZEROSHOT_VERSION },
-                        "profile": { "const": LEGACY_ZEROSHOT_PROFILE }
-                    }
+                "profile": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_WORKER_PROFILE_LENGTH,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$"
+                }
+            },
+            "allOf": [{
+                "if": {
+                    "anyOf": [
+                        { "required": ["protocol"], "properties": { "protocol": { "const": BUILTIN_PROTOCOL } } },
+                        {
+                            "required": ["profile"],
+                            "properties": {
+                                "profile": { "pattern": "^openengine\\.worker\\.builtin/" }
+                            }
+                        }
+                    ]
                 },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["protocol", "version", "profile"],
+                "then": {
                     "properties": {
-                        "protocol": { "const": "builtin" },
+                        "protocol": { "const": BUILTIN_PROTOCOL },
                         "version": { "const": BUILTIN_VERSION },
                         "profile": { "const": BUILTIN_PROFILE }
                     }
                 }
-            ]
+            }]
         })
     }
 }
@@ -209,9 +213,6 @@ impl CredentialHandle {
         self.0.as_str()
     }
 }
-
-/// Opaque registry-owned provider or isolation profile identity.
-pub type RegistryProfileRef = CredentialHandle;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -291,7 +292,6 @@ impl WorkerDescriptor {
     pub fn validate(&self) -> Result<(), WorkerContractError> {
         self.binding.validate()?;
         self.validate_collections()?;
-        self.validate_legacy_binding()?;
         self.validate_builtin_binding()
     }
 
@@ -313,30 +313,8 @@ impl WorkerDescriptor {
         require_unique(&self.credential_requirements, "credential handles")
     }
 
-    fn validate_legacy_binding(&self) -> Result<(), WorkerContractError> {
-        let protocol_is_legacy = self.binding.protocol == WorkerProtocol::LegacyZeroshot;
-        let identity_is_legacy = self.worker.as_str() == LEGACY_ZEROSHOT_WORKER;
-        let input_is_legacy = legacy_ship_request_payload_type()
-            .is_ok_and(|expected| self.contract.input == expected);
-        let output_is_legacy = legacy_ship_result_payload_type()
-            .is_ok_and(|expected| self.contract.output == expected);
-        let valid_legacy = identity_is_legacy
-            && self.graph_profiles == [GraphProfile::SingleWorker]
-            && input_is_legacy
-            && output_is_legacy
-            && self.contract.verifier.is_none()
-            && self.contract.errors == RUNTIME_WORKER_ERRORS;
-        if (protocol_is_legacy && !valid_legacy) || (identity_is_legacy && !protocol_is_legacy) {
-            Err(WorkerContractError::InvalidLegacyBinding)
-        } else {
-            Ok(())
-        }
-    }
-
     fn validate_builtin_binding(&self) -> Result<(), WorkerContractError> {
-        if self.binding.protocol == WorkerProtocol::Builtin
-            && !self.credential_requirements.is_empty()
-        {
+        if self.binding.protocol == BUILTIN_PROTOCOL && !self.credential_requirements.is_empty() {
             Err(WorkerContractError::InvalidBuiltinBinding)
         } else {
             Ok(())
@@ -369,59 +347,23 @@ impl JsonSchema for WorkerDescriptor {
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let base = generator.subschema_for::<WorkerDescriptorWire>();
-        let legacy_binding = schema_constant(WorkerProtocolBinding::legacy_zeroshot_ship_v1());
-        let legacy_input = schema_constant_result(legacy_ship_request_payload_type());
-        let legacy_output = schema_constant_result(legacy_ship_result_payload_type());
-        let runtime_errors = schema_constant(RUNTIME_WORKER_ERRORS);
-
         json_schema!({
             "allOf": [
                 base,
                 {
-                    "oneOf": [
-                        {
-                            "required": ["worker", "graphProfiles", "binding", "contract"],
-                            "properties": {
-                                "worker": { "const": LEGACY_ZEROSHOT_WORKER },
-                                "graphProfiles": { "const": [SINGLE_WORKER_GRAPH_PROFILE] },
-                                "binding": { "const": legacy_binding },
-                                "contract": {
-                                    "required": ["input", "output", "verifier", "errors"],
-                                    "properties": {
-                                        "input": { "const": legacy_input },
-                                        "output": { "const": legacy_output },
-                                        "verifier": { "type": "null" },
-                                        "errors": { "const": runtime_errors }
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "required": ["worker", "binding"],
-                            "properties": {
-                                "worker": { "not": { "const": LEGACY_ZEROSHOT_WORKER } },
-                                "binding": {
-                                    "required": ["protocol"],
-                                    "properties": {
-                                        "protocol": { "enum": ["acp", "a2a"] }
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            "required": ["worker", "binding", "credentialRequirements"],
-                            "properties": {
-                                "worker": { "not": { "const": LEGACY_ZEROSHOT_WORKER } },
-                                "binding": {
-                                    "required": ["protocol"],
-                                    "properties": {
-                                        "protocol": { "const": "builtin" }
-                                    }
-                                },
-                                "credentialRequirements": { "maxItems": 0 }
+                    "if": {
+                        "required": ["binding"],
+                        "properties": {
+                            "binding": {
+                                "required": ["protocol"],
+                                "properties": { "protocol": { "const": BUILTIN_PROTOCOL } }
                             }
                         }
-                    ]
+                    },
+                    "then": {
+                        "required": ["credentialRequirements"],
+                        "properties": { "credentialRequirements": { "maxItems": 0 } }
+                    }
                 }
             ]
         })
@@ -451,17 +393,6 @@ where
     } else {
         Err(WorkerContractError::Duplicate(kind))
     }
-}
-
-fn schema_constant(value: impl Serialize) -> serde_json::Value {
-    serde_json::to_value(value).unwrap_or(serde_json::Value::Bool(false))
-}
-
-fn schema_constant_result<T, E>(value: Result<T, E>) -> serde_json::Value
-where
-    T: Serialize,
-{
-    value.map_or(serde_json::Value::Bool(false), schema_constant)
 }
 
 fn nonempty_unique_array_schema<T>(generator: &mut SchemaGenerator) -> Schema

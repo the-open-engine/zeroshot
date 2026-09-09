@@ -23,8 +23,6 @@ pub use crate::graph_profile::{
     SINGLE_WORKER_GRAPH_PROFILE,
 };
 
-pub const LEGACY_ZEROSHOT_WORKER: &str = "legacy.zeroshot.ship@1";
-
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum StableRefError {
     #[error("stable reference must have the form name@positiveVersion")]

@@ -25,7 +25,7 @@ fn graph() -> serde_json::Value {
         },
         "policy": { "policy": "policy.default@1", "default": "deny" },
         "root": {
-            "kind": "step", "name": "worker", "worker": "legacy.zeroshot.ship@1",
+            "kind": "step", "name": "worker", "worker": "worker.main@1",
             "input": { "kind": "null" }, "output": { "kind": "null" },
             "inputBindings": [], "writeBindings": [], "timeoutMs": 1000, "attempts": 1
         }

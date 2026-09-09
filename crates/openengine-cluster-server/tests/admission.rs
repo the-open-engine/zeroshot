@@ -65,9 +65,9 @@ fn graph() -> serde_json::Value {
         "initialInput":{"kind":"null"},
         "policy":{"policy":"policy.default@1","default":"deny"},
         "root":{
-            "kind":"step","name":"worker","worker":"legacy.zeroshot.ship@1",
-            "input":{"kind":"null"},"output":{"kind":"null"},
-            "inputBindings":[],"writeBindings":[],"timeoutMs":1,"attempts":1
+            "name":"worker","worker":"worker.main@1","kind":"step",
+            "output":{"kind":"null"},"input":{"kind":"null"},
+            "attempts":1,"timeoutMs":1,"writeBindings":[],"inputBindings":[]
         }
     })
 }

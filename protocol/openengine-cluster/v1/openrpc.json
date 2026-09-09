@@ -13,12 +13,6 @@
       "GraphSpec": {
         "$ref": "graph.schema.json"
       },
-      "LegacyShipRequest": {
-        "$ref": "worker.schema.json#/$defs/LegacyShipRequest"
-      },
-      "LegacyShipResult": {
-        "$ref": "worker.schema.json#/$defs/LegacyShipResult"
-      },
       "StructuralBounds": {
         "$ref": "graph.schema.json#/$defs/StructuralBounds"
       },
@@ -767,7 +761,7 @@
   ],
   "openrpc": "1.3.2",
   "x-generic-subscription-framing": {
-    "description": "watch, logs, and agent/attach each establish a subscription via one normal JSON-RPC result; native-v2 run/watch, run/logs, and run/attach use the same framing. Subsequent delivery uses the generic notification methods below, shared by every subscription-based method. All six subscription methods are established through the connection layer and are not answerable by Dispatcher::dispatch alone. There is no watch/event, watch/cancel, watch/closed, logs/event, logs/cancel, logs/closed, agent/attach/event, agent/attach/cancel, or agent/attach/closed method on the wire. `$/cancelRequest` is a transport-level best-effort cancellation of any in-flight unary request by its RequestId; it is silently a no-op for an unknown or already-completed id and carries no rollback claim after backend commit.",
+    "description": "`watch`, `logs`, and `agent/attach` each establish a subscription through one JSON-RPC result. `run/watch`, `run/logs`, and `run/attach` use the same framing. The connection layer establishes all six subscriptions; `Dispatcher::dispatch` alone cannot answer them. After establishment, every subscription uses the generic notification methods below. No method-specific event, cancel, or closed names exist on the wire: `watch/event`, `watch/cancel`, `watch/closed`, `logs/event`, `logs/cancel`, `logs/closed`, `agent/attach/event`, `agent/attach/cancel`, and `agent/attach/closed` are not methods. `$/cancelRequest` asks the transport to cancel an in-flight unary request by its RequestId. An unknown or already-completed ID is ignored, and cancellation makes no rollback claim after backend state commits.",
     "notifications": {
       "$/cancelRequest": {
         "$ref": "schema.json#/$defs/CancelRequestParams"

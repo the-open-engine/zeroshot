@@ -49,6 +49,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   maintain model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.
 - Runtime selection requires caller-authored `harness`, `provider`, and `model` values.
+- Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
+  protocol, version, and profile values are bounded opaque strings; the protocol crate must not
+  keep an external binding catalog. `openengine.worker.builtin/v1` is reserved for native
+  in-process workers. No portable external binding currently ships; do not reintroduce retired
+  worker profiles.
 - Structured-output recovery is provider-owned and fail-closed. A recovery turn must disable reused
   provider sessions, MCP, approval bypass, write/network tools, and user-defined agents/config.
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
@@ -82,6 +87,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
+- The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
+  curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.
+- Keep `docs/reference/python/*.md` out of Prettier; its Markdown formatter removes the indentation
+  required by mkdocstrings directives. Rendered-symbol CI checks are the contract.
+- `docs/reference/cluster/api.md` is generated from the final OpenRPC value
+  through the Rust testkit. Do not hand-edit it or add a parallel method registry.
+- Published documentation uses immutable `vX.Y.Z/` snapshots relative to the docs base, moving
+  `stable` and `dev` aliases, and a per-snapshot `manifest.json` with exact source identity and
+  logical routes.
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
 - Secret-bearing target setup inputs never enter run ledgers, target configuration, or observation
@@ -112,7 +126,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | Cluster server                | `crates/openengine-cluster-server/`                                                            |
 | Cluster client                | `crates/openengine-cluster-client/`                                                            |
 | Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                           |
+| Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs` |
 | Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                              |
+| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `.github/workflows/docs.yml`                    |
 | npm package                   | `npm/zeroshot/`                                                                                |
 | Target image                  | `docker/zeroshot-target/`                                                                      |
 | Target declarations           | `distribution/zeroshot-targets.json`                                                           |
@@ -134,8 +150,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   raising or bypassing the limit.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
-- Add focused tests beside the owning crate/module. Do not delete Rust-owned legacy protocol
-  fixtures merely because their names describe older wire participants.
+- Add focused tests beside the owning crate/module.
 - Update this file whenever architecture, ownership, release identity, or conventions change.
 
 ## Validation
@@ -156,8 +171,12 @@ npm run protocol:check
 cd sdks/python
 python -m ruff check src tests examples
 python -m ruff format --check src tests examples
+pydoclint src/zeroshot
 python -m mypy src examples
 python -m pytest
+
+cd ../..
+python -m mkdocs build --strict
 ```
 
 ## Release convention
@@ -169,5 +188,7 @@ python -m pytest
 - Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by
   default and may be explicitly deferred with `publish_pypi: false`.
 - `.github/workflows/release-python.yml` may publish later SDK-only revisions.
+- `.github/workflows/docs.yml` publishes `main` as `dev` and canonical releases as immutable
+  snapshots after Python revision `1`; later SDK-only releases do not rebuild product snapshots.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.

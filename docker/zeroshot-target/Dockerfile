@@ -42,7 +42,7 @@ COPY docker/zeroshot-target/entrypoint.sh /usr/local/bin/zeroshot-target-entrypo
 RUN install -d -m 0711 /var/lib/zeroshot/native-v2 \
     && chmod 0755 /usr/local/bin/zeroshot-target-entrypoint
 
-VOLUME ["/var/lib/zeroshot/native-v2"]
+VOLUME ["/var/lib/zeroshot"]
 EXPOSE 8080
 
 ENTRYPOINT ["zeroshot-target-entrypoint"]

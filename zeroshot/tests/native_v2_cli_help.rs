@@ -202,13 +202,16 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
     );
 
     let target_serve_short = successful_stdout(&["target", "serve", "-h"]);
-    assert_prose(&target_serve_short, &["serve a native-v2 target"]);
+    assert_prose(
+        &target_serve_short,
+        &["serve an unauthenticated direct target"],
+    );
 
     let target_serve_long = successful_stdout(&["target", "serve", "--help"]);
     assert_prose(
         &target_serve_long,
         &[
-            "serve a native-v2 target",
+            "serve an unauthenticated direct target",
             "direct mode is unauthenticated",
             "only on trusted networks",
         ],

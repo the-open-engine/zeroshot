@@ -1,4 +1,4 @@
-"""Async single-run client over the bundled Zeroshot sidecar."""
+"""Async client for the Zeroshot executable and direct targets."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ class _RunOptions(_SubmitOptions, total=False):
 
 
 class Client:
-    """Submit and observe one-turn graph agents through Zeroshot.
+    """Submit and observe Zeroshot graph runs.
 
     Args:
         target: Local target by default, or an unauthenticated direct target such as Docker.
@@ -89,8 +89,8 @@ class Client:
         environment: Source for runtime-declared environment values. None reads the ambient
             environment at submission time. An explicit mapping is the complete value source.
 
-    The SDK never guesses a provider or model. Closing the client detaches observation and never
-    stops runs.
+    The SDK never guesses a harness, provider, or model. Closing the client detaches observation
+    and never stops runs.
     """
 
     def __init__(
@@ -172,7 +172,7 @@ class Client:
         """Submit one graph run and wait for its terminal result.
 
         Args:
-            task: Task text for a built-in preset, or a complete exact RunRequest.
+            task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options. title, preset, runtime, branch, and submission_key
                 apply to string submissions. wait_timeout is a non-negative observation deadline
                 in seconds; omit it to wait indefinitely.
@@ -210,7 +210,7 @@ class Client:
         """Preflight in Zeroshot, submit one durable run, and return its handle.
 
         Args:
-            task: Task text for a built-in preset, or a complete exact RunRequest.
+            task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options for string submissions: title, preset, runtime, branch,
                 and submission_key.
 
@@ -256,7 +256,7 @@ class Client:
         return Run(self, run_id)
 
     async def list_runs(self) -> tuple[RunSummary, ...]:
-        """Return durable inventory summaries retained by this client's target."""
+        """Return summaries for runs retained by this client's target."""
         await self._ready()
         value = await self._native().json(["list", *self._route_arguments()])
         if not isinstance(value, dict) or not isinstance(value.get("runs"), list):
@@ -271,14 +271,14 @@ class Client:
         return tuple(value)
 
     async def get_preset(self, name: str, *, delivery: str = "none") -> GraphSpec:
-        """Materialize one built-in preset through the bundled executable.
+        """Read one built-in preset from the bundled executable.
 
         Args:
             name: Exact native preset name.
             delivery: Native delivery selector, such as none, pull_request, or merge.
 
         Returns:
-            The lossless Zeroshot-emitted GraphSpec.
+            The GraphSpec emitted by Zeroshot, copied without changes.
 
         Raises:
             InvalidRequestError: If Zeroshot rejects the name or delivery combination.

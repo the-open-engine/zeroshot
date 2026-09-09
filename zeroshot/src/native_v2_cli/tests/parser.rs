@@ -459,7 +459,7 @@ async fn invalid_graph_and_input_fail_before_target_contact() {
 async fn unsupported_graph_profile_fails_before_target_contact() {
     let mut unsupported = graph();
     *unsupported.get_mut("profile").assert_value() = json!("openengine.graph.single-worker/v1");
-    let files = FixtureFiles::new(unsupported, json!({"task":"no legacy profile"}));
+    let files = FixtureFiles::new(unsupported, json!({"task":"unsupported profile"}));
     let command = parse_native_v2_args(run_args(
         &files.graph,
         &files.input,

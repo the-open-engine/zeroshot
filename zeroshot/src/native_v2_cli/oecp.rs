@@ -1,4 +1,4 @@
-//! OECP client adapter for the native-v2 CLI.
+//! OECP client adapter for the CLI.
 
 use std::sync::Arc;
 

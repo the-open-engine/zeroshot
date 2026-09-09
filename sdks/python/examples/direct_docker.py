@@ -12,7 +12,12 @@ async def main() -> None:
         repository="the-open-engine/zeroshot",
         default_branch="main",
     )
-    runtime = UniformRuntime(provider="openai", model="gpt-5.6-luna", effort="max")
+    runtime = UniformRuntime(
+        harness="codex",
+        provider="openai",
+        model="gpt-5.6-luna",
+        effort="max",
+    )
     async with Client(target=target, runtime=runtime) as client:
         result = await client.run(
             "Inspect the repository and report success.",

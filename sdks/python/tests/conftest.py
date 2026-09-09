@@ -31,7 +31,7 @@ def projection(run_id, status, cursor):
             "branch": "main",
             "revision": "0" * 40,
         },
-        "size": "standard",
+        "size": "medium",
         "atCursor": cursor,
         "status": status,
     }

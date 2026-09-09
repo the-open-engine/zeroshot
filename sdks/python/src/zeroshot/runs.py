@@ -11,13 +11,13 @@ from .values import JsonValue
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunRequest:
-    """Exact input for one custom Zeroshot graph run.
+    """Inputs for one custom Zeroshot graph run.
 
     Args:
         title: Human-readable persisted run title.
-        graph: Exact opaque GraphSpec.
-        initial_input: Exact closed JSON input validated by Zeroshot against the graph.
-        runtime: Exact opaque RuntimePlan.
+        graph: Opaque GraphSpec passed to Zeroshot without changes.
+        initial_input: Closed JSON input that Zeroshot validates against the graph.
+        runtime: Opaque RuntimePlan passed to Zeroshot without changes.
         branch: Direct-target source branch override.
         submission_key: Stable idempotency key; None generates one before native preflight.
     """
@@ -100,7 +100,7 @@ class RunStatus:
     run_id: str
     title: str
     source: ResolvedSource
-    size: Literal["tiny", "small", "standard", "large"]
+    size: Literal["small", "medium", "large"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
@@ -124,7 +124,7 @@ class RunSummary:
     run_id: str
     title: str
     source: ResolvedSource
-    size: Literal["tiny", "small", "standard", "large"]
+    size: Literal["small", "medium", "large"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     force_stop_requested: bool

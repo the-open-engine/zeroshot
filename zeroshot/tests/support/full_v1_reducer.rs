@@ -49,7 +49,7 @@ impl WorkerRegistry for TestWorkers {
         serde_json::from_value(json!({
             "worker":worker.as_str(),
             "graphProfiles":["openengine.graph.full/v1"],
-            "binding":{"protocol":"acp","version":"1","profile":"openengine.worker.acp/v1"},
+            "binding":{"protocol":"fixture","version":"1","profile":"fixture.worker/v1"},
             "contract":{
                 "input":{"kind":"null"},"output":output,"verifier":verifier,
                 "errors":["timeout","crash","malformed","refusal"]

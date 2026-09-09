@@ -25,7 +25,17 @@ from zeroshot import (
 
 
 def runtime() -> UniformRuntime:
-    return UniformRuntime(provider="openrouter", model="gpt-5.6-luna", effort="max")
+    return UniformRuntime(
+        harness="codex",
+        provider="openrouter",
+        model="gpt-5.6-luna",
+        effort="max",
+    )
+
+
+def test_uniform_runtime_requires_an_explicit_harness() -> None:
+    with pytest.raises(TypeError, match="harness"):
+        UniformRuntime(provider="openrouter", model="gpt-5.6-luna")  # type: ignore[call-arg]
 
 
 def direct_client(fake_native: Path) -> Client:
@@ -60,10 +70,11 @@ def test_run_waits_for_terminal_result(fake_native: Path, tmp_path: Path) -> Non
     assert all(
         item["--uniform-runtime-config"]
         == {
+            "harness": "codex",
             "provider": "openrouter",
             "model": "gpt-5.6-luna",
             "effort": "max",
-            "size": "standard",
+            "size": "medium",
             "sessionScope": "execution",
         }
         for item in runs
@@ -104,6 +115,24 @@ def test_direct_target_uses_the_same_client_and_durable_run_surface(fake_native:
     logs = next(args for args in arguments if args[0] == "logs")
     assert logs[logs.index("--after") + 1] == "v2:2"
     assert logs[logs.index("--execution") + 1] == "worker-1"
+
+
+def test_uniform_runtime_encodes_exact_connection_requirements() -> None:
+    selected = UniformRuntime(
+        harness="codex",
+        provider="openai",
+        model="gpt-5.6-luna",
+        connections={"subscription": ("SESSION_MARKER",)},
+    )
+
+    assert selected.to_dict() == {
+        "harness": "codex",
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "size": "medium",
+        "sessionScope": "execution",
+        "connections": {"subscription": ["SESSION_MARKER"]},
+    }
 
 
 def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> None:

@@ -86,7 +86,7 @@ fn descriptor(worker: &str, verifier: bool) -> WorkerDescriptor {
     serde_json::from_value(json!({
         "worker": worker,
         "graphProfiles": ["openengine.graph.full/v1"],
-        "binding": { "protocol": "acp", "version": "1", "profile": "openengine.worker.acp/v1" },
+        "binding": { "protocol": "fixture", "version": "1", "profile": "fixture.worker/v1" },
         "contract": {
             "input": if verifier { json!({"kind":"null"}) } else { record() },
             "output": {"kind":"record","fields":{"result":{"type":{"kind":"integer"},"required":true}}},

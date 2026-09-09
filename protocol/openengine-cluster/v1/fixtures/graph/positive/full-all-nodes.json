@@ -146,7 +146,7 @@
           "kind": "string"
         },
         "timeoutMs": 1000,
-        "worker": "legacy.zeroshot.ship@1",
+        "worker": "worker.main@1",
         "writeBindings": [
           {
             "target": [

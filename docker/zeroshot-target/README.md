@@ -10,7 +10,7 @@ The image runs an unauthenticated direct target:
 ```bash
 docker run --rm --detach --name zeroshot-target \
   -p 127.0.0.1:8080:8080 \
-  -v zeroshot-data:/var/lib/zeroshot/native-v2 \
+  -v zeroshot-data:/var/lib/zeroshot \
   ghcr.io/the-open-engine/zeroshot-target:latest
 ```
 

@@ -6,31 +6,39 @@ Install the `the-open-engine-zeroshot` distribution from PyPI and import it as `
 pip install the-open-engine-zeroshot
 ```
 
-`zeroshot` is a fully typed async client for the Zeroshot run engine. Each platform wheel contains
-the matching `zeroshot` executable. Python owns ergonomic orchestration and typed projections; the
-executable remains the sole source of truth for templates, runtime materialization, provider
-capabilities, graph validation, execution, and durable run state.
+`zeroshot` is a typed async client for the Zeroshot run engine. Each platform wheel contains the
+matching `zeroshot` executable. Python supplies async calls and typed result objects; the executable
+remains authoritative for graph validation, run state, template expansion, and runtime/provider
+rules.
 
 ```python
+import asyncio
+
 from zeroshot import Client, UniformRuntime
 
-runtime = UniformRuntime(
-    provider="openrouter",
-    model="gpt-5.6-luna",
-    effort="max",
-)
-
-async with Client(runtime=runtime) as client:
-    result = await client.run(
-        "Implement the requested change and run the relevant tests.",
-        wait_timeout=21_600,
+async def main() -> None:
+    runtime = UniformRuntime(
+        harness="codex",
+        provider="openrouter",
+        model="PROVIDER_MODEL_ID",
+        effort="max",
     )
 
-result.raise_for_failure()
+    async with Client(runtime=runtime) as client:
+        result = await client.run(
+            "Implement the requested change and run the relevant tests.",
+            wait_timeout=21_600,
+        )
+
+    result.raise_for_failure()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 `Client()` defaults to `LocalTarget()` and `Preset("software-change")`, but it never guesses a
-provider or model. `run()` submits one durable graph run and waits for its terminal result.
+harness, provider, or model. `run()` submits one durable graph run and waits for its terminal result.
 `submit()` returns a `Run` immediately for status, resumable watch/log streams, waiting, or durable
 force-stop control.
 
@@ -41,9 +49,14 @@ Local execution uses the current Git workspace by default. Agents mutate that wo
 ```python
 from zeroshot import Client, LocalTarget, UniformRuntime
 
-runtime = UniformRuntime(provider="openai", model="gpt-5.6-luna", effort="max")
-async with Client(target=LocalTarget("/path/to/repository"), runtime=runtime) as client:
-    result = await client.run("Update the parser.")
+
+async def run_local(runtime: UniformRuntime) -> None:
+    async with Client(
+        target=LocalTarget("/path/to/repository"), runtime=runtime
+    ) as client:
+        result = await client.run("Update the parser.")
+
+    result.raise_for_failure()
 ```
 
 The same client reaches an unauthenticated Docker deployment or another direct target by changing
@@ -52,15 +65,18 @@ only the target:
 ```python
 from zeroshot import Client, DirectTarget, UniformRuntime
 
-target = DirectTarget(
-    "http://127.0.0.1:8080",
-    repository="the-open-engine/zeroshot",
-    default_branch="main",
-)
-runtime = UniformRuntime(provider="openai", model="gpt-5.6-luna", effort="max")
 
-async with Client(target=target, runtime=runtime) as client:
-    result = await client.run("Inspect the repository and report success.")
+async def run_direct(runtime: UniformRuntime) -> None:
+    target = DirectTarget(
+        "http://127.0.0.1:8080",
+        repository="the-open-engine/zeroshot",
+        default_branch="main",
+    )
+
+    async with Client(target=target, runtime=runtime) as client:
+        result = await client.run("Inspect the repository and report success.")
+
+    result.raise_for_failure()
 ```
 
 Docker is a deployment of `DirectTarget`, not a separate client or target type. Authentication and
@@ -72,21 +88,28 @@ Use `GraphSpec` and `RuntimePlan` to pass exact JSON values unchanged. Python do
 validate either document:
 
 ```python
+from collections.abc import Mapping
+from typing import Any
+
 from zeroshot import GraphSpec, RunRequest, RuntimePlan
 
-request = RunRequest(
-    title="Repair checkout",
-    graph=GraphSpec.from_dict(graph_document),
-    initial_input={"ticket": "OE-123"},
-    runtime=RuntimePlan.from_dict(runtime_document),
-    submission_key="oe-123-attempt-1",
-)
-result = await client.run(request)
+
+def exact_request(
+    graph_document: Mapping[str, Any],
+    runtime_document: Mapping[str, Any],
+) -> RunRequest:
+    return RunRequest(
+        title="Repair checkout",
+        graph=GraphSpec.from_dict(graph_document),
+        initial_input={"ticket": "OE-123"},
+        runtime=RuntimePlan.from_dict(runtime_document),
+        submission_key="oe-123-attempt-1",
+    )
 ```
 
 `await client.list_presets()` and `await client.get_preset(...)` query the bundled Rust catalog.
 The Python package contains no copied preset registry, provider/model registry, graph schema, or
-semantic validator. Every submission runs a source-neutral Rust preflight before a local controller
+semantic validator. Every submission runs the executable's preflight before a local controller
 starts or a direct target is contacted.
 
 ## Durable observation

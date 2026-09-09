@@ -5,10 +5,7 @@ use compatibility::compatibility_artifacts;
 
 use crate::fixture::*;
 
-use openengine_cluster_protocol::{
-    legacy_ship_request_payload_type, legacy_ship_result_payload_type, LegacyShipRequest,
-    LegacyShipResult, WorkerDescriptor, WorkerOutcome, BUILTIN_PROFILE, BUILTIN_VERSION,
-};
+use openengine_cluster_protocol::{WorkerDescriptor, WorkerOutcome, BUILTIN_PROFILE, BUILTIN_VERSION};
 use schemars::schema_for;
 use serde_json::{json, Value};
 
@@ -20,22 +17,11 @@ const ROOT: &str = "protocol/openengine-cluster/v1";
 #[must_use]
 pub fn worker_schema() -> Value {
     let mut root = serde_json::to_value(schema_for!(WorkerDescriptor)).assert_value();
-    for (name, component) in [
-        (
-            "WorkerOutcome",
-            serde_json::to_value(schema_for!(WorkerOutcome)).assert_value(),
-        ),
-        (
-            "LegacyShipRequest",
-            serde_json::to_value(schema_for!(LegacyShipRequest)).assert_value(),
-        ),
-        (
-            "LegacyShipResult",
-            serde_json::to_value(schema_for!(LegacyShipResult)).assert_value(),
-        ),
-    ] {
-        merge_schema(&mut root, name, component);
-    }
+    merge_schema(
+        &mut root,
+        "WorkerOutcome",
+        serde_json::to_value(schema_for!(WorkerOutcome)).assert_value(),
+    );
     root
 }
 
@@ -52,14 +38,6 @@ pub fn with_worker_components(mut document: Value) -> Value {
             "WorkerOutcome",
             json!({ "$ref": "worker.schema.json#/$defs/WorkerOutcome" }),
         ),
-        (
-            "LegacyShipRequest",
-            json!({ "$ref": "worker.schema.json#/$defs/LegacyShipRequest" }),
-        ),
-        (
-            "LegacyShipResult",
-            json!({ "$ref": "worker.schema.json#/$defs/LegacyShipResult" }),
-        ),
     ] {
         schemas.insert(name.to_owned(), schema);
     }
@@ -68,19 +46,7 @@ pub fn with_worker_components(mut document: Value) -> Value {
 
 #[must_use]
 pub fn worker_fixture_artifacts() -> Vec<Artifact> {
-    let acp = descriptor("mock.acp@1", "acp", "1", "openengine.worker.acp/v1");
-    let a2a = descriptor("mock.a2a@1", "a2a", "1.0", "openengine.worker.a2a/1.0");
-    let mut legacy = descriptor(
-        "legacy.zeroshot.ship@1",
-        "legacy_zeroshot",
-        "1",
-        "legacy.zeroshot.ship/v1",
-    );
-    *legacy.assert_key_mut("graphProfiles") = json!(["openengine.graph.single-worker/v1"]);
-    *legacy.assert_key_mut("contract").assert_key_mut("input") =
-        serde_json::to_value(legacy_ship_request_payload_type().assert_value()).assert_value();
-    *legacy.assert_key_mut("contract").assert_key_mut("output") =
-        serde_json::to_value(legacy_ship_result_payload_type().assert_value()).assert_value();
+    let portable = descriptor("mock.worker@1", "fixture", "1", "fixture.worker/v1");
     let mut builtin = descriptor(
         "mock.builtin@1",
         "builtin",
@@ -89,25 +55,17 @@ pub fn worker_fixture_artifacts() -> Vec<Artifact> {
     );
     *builtin.assert_key_mut("credentialRequirements") = json!([]);
 
-    let mut artifacts =
-        positive_worker_artifacts(acp.clone(), a2a, legacy.clone(), builtin.clone());
-    artifacts.extend(negative_contract_artifacts(&acp, &legacy, &builtin));
-    artifacts.extend(negative_secret_artifacts(&acp));
+    let mut artifacts = positive_worker_artifacts(portable.clone(), builtin.clone());
+    artifacts.extend(negative_contract_artifacts(&portable, &builtin));
+    artifacts.extend(negative_secret_artifacts(&portable));
     artifacts.extend(negative_outcome_artifacts());
-    artifacts.extend(compatibility_artifacts(&acp));
+    artifacts.extend(compatibility_artifacts(&portable));
     artifacts
 }
 
-fn positive_worker_artifacts(
-    acp: Value,
-    a2a: Value,
-    legacy: Value,
-    builtin: Value,
-) -> Vec<Artifact> {
+fn positive_worker_artifacts(portable: Value, builtin: Value) -> Vec<Artifact> {
     vec![
-        json_artifact("positive/acp-v1.json", acp.clone()),
-        json_artifact("positive/a2a-1.0.json", a2a),
-        json_artifact("positive/legacy-zeroshot-ship-v1.json", legacy),
+        json_artifact("positive/portable-binding.json", portable),
         json_artifact("positive/builtin-v1.json", builtin.clone()),
         json_artifact(
             "positive/policy-refusal.json",
@@ -120,37 +78,35 @@ fn positive_worker_artifacts(
             json!({
                 "artifactId": "worker-result", "sha256": "a".repeat(64), "byteLength": 42,
                 "mediaType": "application/json", "typeId": "openengine.result@1",
-                "producer": { "node": "worker", "worker": "mock.acp@1" },
+                "producer": { "node": "worker", "worker": "mock.worker@1" },
                 "lineage": { "generation": 1, "runId": "run-1", "attempt": 1 },
                 "redaction": "internal"
-            }),
-        ),
-        json_artifact(
-            "mock/acp-input-request.json",
-            json!({
-                "profile": "openengine.worker.acp/v1", "version": "1",
-                "normalized": { "status": "error", "code": "refusal", "reason": "interactive_input_required" }
-            }),
-        ),
-        json_artifact(
-            "mock/a2a-auth-required.json",
-            json!({
-                "profile": "openengine.worker.a2a/1.0", "version": "1.0",
-                "normalized": { "status": "error", "code": "refusal", "reason": "authentication_required" }
             }),
         ),
     ]
 }
 
-fn negative_contract_artifacts(acp: &Value, legacy: &Value, builtin: &Value) -> Vec<Artifact> {
+fn negative_contract_artifacts(portable: &Value, builtin: &Value) -> Vec<Artifact> {
     let mut artifacts = negative_descriptor_artifacts(
-        acp,
+        portable,
         vec![
             (
-                "unsupported-version",
-                "UNSUPPORTED_WORKER_BINDING",
+                "invalid-binding-protocol",
+                "INVALID_WORKER_BINDING",
+                "/binding/protocol",
+                json!("bad protocol"),
+            ),
+            (
+                "invalid-binding-version",
+                "INVALID_WORKER_BINDING",
                 "/binding/version",
-                json!("2"),
+                json!(""),
+            ),
+            (
+                "invalid-binding-profile",
+                "INVALID_WORKER_BINDING",
+                "/binding/profile",
+                json!("bad profile"),
             ),
             (
                 "empty-profiles",
@@ -191,29 +147,6 @@ fn negative_contract_artifacts(acp: &Value, legacy: &Value, builtin: &Value) -> 
         ],
     );
     artifacts.extend(negative_descriptor_artifacts(
-        legacy,
-        vec![
-            (
-                "legacy-wrong-worker",
-                "INVALID_LEGACY_BINDING",
-                "/worker",
-                json!("mock.legacy@1"),
-            ),
-            (
-                "legacy-wrong-profile",
-                "INVALID_LEGACY_BINDING",
-                "/graphProfiles",
-                json!(["openengine.graph.full/v1"]),
-            ),
-            (
-                "legacy-wrong-contract",
-                "INVALID_LEGACY_BINDING",
-                "/contract/output",
-                json!({ "kind": "string" }),
-            ),
-        ],
-    ));
-    artifacts.extend(negative_descriptor_artifacts(
         builtin,
         vec![
             (
@@ -239,9 +172,9 @@ fn negative_contract_artifacts(acp: &Value, legacy: &Value, builtin: &Value) -> 
     artifacts
 }
 
-fn negative_secret_artifacts(acp: &Value) -> Vec<Artifact> {
+fn negative_secret_artifacts(portable: &Value) -> Vec<Artifact> {
     negative_descriptor_artifacts(
-        acp,
+        portable,
         vec![
             ("command", "FORBIDDEN_FIELD", "/command", json!("execute")),
             (
@@ -347,10 +280,10 @@ fn mutate(base: &Value, pointer: &str, replacement: Value) -> Value {
 fn descriptor(worker: &str, protocol: &str, version: &str, profile: &str) -> Value {
     json!({
         "worker": worker,
-        "graphProfiles": ["openengine.graph.full/v1"],
-        "binding": { "protocol": protocol, "version": version, "profile": profile },
         "contract": { "input": { "kind": "string" }, "output": { "kind": "string" },
             "verifier": null, "errors": ["timeout", "crash", "malformed", "refusal"] },
+        "binding": { "protocol": protocol, "version": version, "profile": profile },
+        "graphProfiles": ["openengine.graph.full/v1"],
         "capabilityPolicy": { "autonomy": "strict", "permissionPolicy": "policy.strict@1" },
         "artifactProfile": { "allowedTypeIds": ["openengine.result@1"],
             "allowedMediaTypes": ["application/json"], "minimumRedaction": "internal" },

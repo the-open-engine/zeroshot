@@ -1,4 +1,4 @@
-//! Shipped native-v2 CLI entrypoint.
+//! Shipped CLI entrypoint.
 
 mod native_v2_target;
 

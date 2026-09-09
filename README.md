@@ -10,7 +10,7 @@
 <a href="https://theopenengine.com"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="Website" src="docs/brand/social/website-light.png" height="30"></picture></a>
 <a href="https://x.com/OpenEngineHQ"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineHQ" src="docs/brand/social/x-light.png" height="30"></picture></a>
 <a href="https://www.linkedin.com/company/the-open-engine-company"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/linkedin-dark.png"><img alt="LinkedIn" src="docs/brand/social/linkedin-light.png" height="30"></picture></a>
-<a href="https://discord.gg/fZyzf2Cut9"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-dark.png"><img alt="Discord" src="docs/brand/social/discord-light.png" height="30"></picture></a>
+<a href="https://discord.gg/9Tnxd7XWa"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-dark.png"><img alt="Discord" src="docs/brand/social/discord-light.png" height="30"></picture></a>
 
 [![npm](https://img.shields.io/npm/v/%40the-open-engine-company%2Fzeroshot?style=flat&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine-company/zeroshot)
 [![CI](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?style=flat&labelColor=171411&label=CI)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml)
@@ -73,7 +73,7 @@ zeroshot template show software-change
 
 The graph and runtime plan stay the same. Only the target changes.
 
-### Local — use your subscriptions
+### Local: use your subscriptions
 
 Run directly in your Git workspace. Local mode reuses an existing Codex or Claude Code login,
 including subscription-backed sessions; explicit provider credentials can be bound instead.
@@ -87,7 +87,7 @@ zeroshot run \
   --runtime-config ./runtime.json
 ```
 
-### Self-hosted — run the Docker target
+### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
 engine plus pinned Codex and Claude harness CLIs.
@@ -95,7 +95,7 @@ engine plus pinned Codex and Claude harness CLIs.
 ```bash
 docker run --rm --detach --name zeroshot-target \
   -p 127.0.0.1:8080:8080 \
-  -v zeroshot-data:/var/lib/zeroshot/native-v2 \
+  -v zeroshot-data:/var/lib/zeroshot \
   ghcr.io/the-open-engine/zeroshot-target:latest
 
 zeroshot target add local --url http://127.0.0.1:8080 --direct
@@ -104,18 +104,21 @@ zeroshot target add local --url http://127.0.0.1:8080 --direct
 See the [target image guide](docker/zeroshot-target/README.md) for persistent storage, network
 isolation, builds, and HTTPS.
 
-### Zeroshot Cloud — close the laptop
+### Zeroshot Cloud: close the laptop
 
 Use the same CLI against a managed target with a shared team queue and durable run history.
 
 ## Reference
 
+- [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
+- [Get started](docs/getting-started/first-run.md)
 - [CLI reference](docs/zeroshot-cli.md)
 - [Standalone HTML CLI reference](docs/zeroshot-cli.html)
 - [Distribution contract](docs/zeroshot-distribution.md)
 - [Target image guide](docker/zeroshot-target/README.md)
 - [Python SDK](sdks/python/README.md)
-- [OpenEngine graph contract](docs/openengine-cluster-protocol/v1/graph-contract.md)
+- [Cluster API reference](https://the-open-engine.github.io/zeroshot/dev/reference/cluster/api/)
+- [OpenEngine graph contract](docs/reference/cluster/graph.md)
 
 ## Development
 

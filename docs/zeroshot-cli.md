@@ -7,7 +7,7 @@ Regenerate it with `cargo run -p zeroshot --example generate_cli_docs -- --write
 ## `zeroshot`
 
 ```text
-Run multi-agent graph workloads locally or on named Zeroshot targets.
+Run multi-agent graphs locally or on named Zeroshot targets.
 
 Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attach` stream newline-delimited JSON (NDJSON).
 
@@ -47,7 +47,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target
+  serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -122,7 +122,7 @@ Options:
 #### `zeroshot target serve`
 
 ```text
-Serve a native-v2 target.
+Serve an unauthenticated direct target.
 
 Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
@@ -153,7 +153,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target
+  serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 ```
 

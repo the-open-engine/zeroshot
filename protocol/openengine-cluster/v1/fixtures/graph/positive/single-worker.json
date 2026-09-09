@@ -19,7 +19,7 @@
       "kind": "null"
     },
     "timeoutMs": 60000,
-    "worker": "legacy.zeroshot.ship@1",
+    "worker": "worker.main@1",
     "writeBindings": []
   }
 }

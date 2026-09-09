@@ -57,7 +57,12 @@ describe('CI path classifier', () => {
   });
 
   it('runs every lane for repository-wide or unknown changes', () => {
-    for (const pathname of ['.github/workflows/ci.yml', 'new-surface/file']) {
+    for (const pathname of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/docs.yml',
+      'scripts/docs_hook.py',
+      'new-surface/file',
+    ]) {
       const result = classifyPaths([pathname]);
       assert.deepEqual(
         { native: result.native, python: result.python, tooling: result.tooling },

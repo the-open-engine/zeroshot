@@ -12,7 +12,7 @@ use openengine_cluster_testkit::assertions::AssertError;
 use openengine_cluster_protocol::{
     FieldName, FieldPath, GraphDiagnostic, GraphProfile, GraphSpec, Join, NodeInstructions,
     NodeName, PolicyRef, PositiveInteger, WorkerErrorCode, WorkerRef, FULL_GRAPH_PROFILE,
-    LEGACY_ZEROSHOT_WORKER, MAX_NODE_INSTRUCTIONS_BYTES, SINGLE_WORKER_GRAPH_PROFILE,
+    MAX_NODE_INSTRUCTIONS_BYTES, SINGLE_WORKER_GRAPH_PROFILE,
 };
 use serde_json::{json, Value};
 
@@ -68,7 +68,7 @@ fn full_graph() -> Value {
     let step = json!({
         "kind": "step",
         "name": "work",
-        "worker": LEGACY_ZEROSHOT_WORKER,
+        "worker": "worker.main@1",
         "instructions": "Implement the requested change.\nRun focused checks.",
         "input": record_type(),
         "output": { "kind": "string" },
@@ -224,7 +224,7 @@ fn identifiers_references_paths_and_positive_counts_validate_on_construction_and
     assert!(NodeName::new("bad name").is_err());
     assert!(FieldName::new("").is_err());
     assert!(FieldPath::new(vec![]).is_err());
-    assert!(WorkerRef::new(LEGACY_ZEROSHOT_WORKER).is_ok());
+    assert!(WorkerRef::new("worker.main@1").is_ok());
     assert!(WorkerRef::new("worker").is_err());
     assert!(WorkerRef::new("worker@").is_err());
     assert!(PolicyRef::new("policy@0").is_err());

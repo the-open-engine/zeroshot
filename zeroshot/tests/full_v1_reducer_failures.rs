@@ -17,13 +17,13 @@ struct TestWorker;
 impl WorkerRegistry for TestWorker {
     async fn resolve(&self, worker: &WorkerRef) -> Result<WorkerDescriptor, WorkerRegistryError> {
         serde_json::from_value(json!({
-            "worker": worker.as_str(),
-            "graphProfiles": ["openengine.graph.full/v1"],
             "binding": {
-                "protocol": "acp",
+                "protocol": "fixture",
                 "version": "1",
-                "profile": "openengine.worker.acp/v1"
+                "profile": "fixture.worker/v1"
             },
+            "graphProfiles": ["openengine.graph.full/v1"],
+            "worker": worker.as_str(),
             "contract": {
                 "input": {"kind":"null"},
                 "output": {

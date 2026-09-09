@@ -1,7 +1,7 @@
 use super::*;
 
-pub(super) fn compatibility_artifacts(acp: &Value) -> Vec<Artifact> {
-    let mut step = acp.clone();
+pub(super) fn compatibility_artifacts(portable: &Value) -> Vec<Artifact> {
+    let mut step = portable.clone();
     *step.assert_key_mut("contract").assert_key_mut("input") = json!({ "kind": "number" });
     *step.assert_key_mut("contract").assert_key_mut("output") = json!({ "kind": "integer" });
     let mut verifier = step.clone();
@@ -102,7 +102,7 @@ fn compatibility_graph(verifier: bool) -> Value {
     let worker = if verifier {
         "mock.verifier@1"
     } else {
-        "mock.acp@1"
+        "mock.worker@1"
     };
     let mut root = json!({
         "kind": if verifier { "verifier" } else { "step" },

@@ -1,4 +1,5 @@
 node_modules
+.mypy_cache
 target
 **/target
 sdks/python/.venv
@@ -12,3 +13,5 @@ protocol/openengine-cluster/v1
 docs/brand/*.html
 docs/zeroshot-cli.md
 docs/zeroshot-cli.html
+docs/reference/python/*.md
+docs/reference/cluster/api.md

@@ -17,7 +17,7 @@ pub fn graph_fixture(name: &str, initial_input: Value) -> GraphSpec {
         "initialInput": initial_input,
         "policy": { "policy": "policy.default@1", "default": "deny" },
         "root": {
-            "kind": "step", "name": name, "worker": "legacy.zeroshot.ship@1",
+            "kind": "step", "name": name, "worker": "worker.main@1",
             "input": { "kind": "null" }, "output": { "kind": "null" },
             "inputBindings": [], "writeBindings": [], "timeoutMs": 1000, "attempts": 1
         }

@@ -42,7 +42,7 @@ fn descriptor(worker: &str, verifier: bool) -> serde_json::Value {
         "worker": worker,
         "graphProfiles": ["openengine.graph.full/v1"],
         "binding": {
-            "protocol": "acp", "version": "1", "profile": "openengine.worker.acp/v1"
+            "protocol": "fixture", "version": "1", "profile": "fixture.worker/v1"
         },
         "contract": {
             "input": { "kind": "number" },

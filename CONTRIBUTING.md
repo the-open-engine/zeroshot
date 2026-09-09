@@ -16,7 +16,7 @@ There is no legacy Node runtime in this repository.
 npm ci
 cargo test --workspace
 python -m venv sdks/python/.venv
-sdks/python/.venv/bin/python -m pip install -e 'sdks/python[dev]'
+sdks/python/.venv/bin/python -m pip install -e 'sdks/python[dev]' -r docs/requirements.lock
 ```
 
 ## Repository map
@@ -30,6 +30,7 @@ sdks/python/.venv/bin/python -m pip install -e 'sdks/python[dev]'
 | npm installer/launcher            | `npm/zeroshot/`                              |
 | Target image                      | `docker/zeroshot-target/`                    |
 | Python SDK                        | `sdks/python/`                               |
+| Documentation site                | `mkdocs.yml`, `docs/`                        |
 | Release tooling                   | `scripts/distribution.js`                    |
 | Repository tooling tests          | `tests/tooling/`                             |
 
@@ -51,8 +52,12 @@ npm run protocol:check
 cd sdks/python
 python -m ruff check src tests examples
 python -m ruff format --check src tests examples
+pydoclint src/zeroshot
 python -m mypy src examples
 python -m pytest
+
+cd ../..
+python -m mkdocs build --strict
 ```
 
 Use `npm run check` for the complete repository-tooling gate. Docker changes should also build and
@@ -61,7 +66,8 @@ smoke `docker/zeroshot-target/Dockerfile`.
 ## Generated files
 
 Rust protocol types and fixtures are authoritative. Do not hand-edit generated artifacts under
-`protocol/openengine-cluster/v1/`. Regenerate/check them through the testkit generator.
+`protocol/openengine-cluster/v1/` or the generated Cluster API Markdown. Regenerate/check them
+through the testkit generator.
 
 CLI Markdown and HTML are generated from the Clap model:
 
@@ -69,6 +75,16 @@ CLI Markdown and HTML are generated from the Clap model:
 cargo run -p zeroshot --example generate_cli_docs -- --write
 cargo run -p zeroshot --example generate_cli_docs -- --check
 ```
+
+Serve the unified site from the repository root:
+
+```bash
+python -m mkdocs serve
+```
+
+The Python API is read from `sdks/python/src` by mkdocstrings. Update public docstrings with an API
+change. `docs/requirements.txt` owns the direct documentation dependencies;
+`docs/requirements.lock` pins the complete build environment.
 
 ## Pull requests
 

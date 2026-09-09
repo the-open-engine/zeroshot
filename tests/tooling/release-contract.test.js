@@ -8,6 +8,13 @@ const yaml = require('js-yaml');
 
 const root = path.resolve(__dirname, '..', '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
+const assertPagesPublisherPermissions = (permissions) => {
+  assert.deepEqual(permissions, {
+    contents: 'write',
+    'id-token': 'write',
+    pages: 'write',
+  });
+};
 
 describe('v8 hard cutover contract', () => {
   it('keeps Node private and tooling-only at the repository root', () => {
@@ -116,6 +123,65 @@ describe('Python release publication contract', () => {
   });
 });
 
+describe('Versioned documentation publication contract', () => {
+  it('publishes development docs and accepts exact release snapshots', () => {
+    const docs = yaml.load(read('.github/workflows/docs.yml'));
+
+    assert.equal(docs.name, 'Publish versioned documentation');
+    assert.deepEqual(docs.on.push.branches, ['main']);
+    assert.equal(Object.hasOwn(docs.on, 'workflow_dispatch'), true);
+    assert.equal(docs.on.workflow_call.inputs.version.type, 'string');
+    assert.equal(docs.on.workflow_call.inputs.version.required, true);
+    assert.equal(docs.on.workflow_call.inputs.release_commit.type, 'string');
+    assert.equal(docs.on.workflow_call.inputs.release_commit.required, true);
+    assert.equal(docs.on.workflow_call.inputs.stable.type, 'boolean');
+    assert.equal(docs.on.workflow_call.inputs.stable.default, false);
+    assertPagesPublisherPermissions(docs.permissions);
+    assert.equal(docs.concurrency['cancel-in-progress'], false);
+    assert.equal(docs.concurrency.queue, 'max');
+  });
+
+  it('runs from the release chain after Python revision 1', () => {
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const docs = release.jobs.docs;
+
+    assert.deepEqual(docs.needs, ['plan', 'python-sdk-release']);
+    assertPagesPublisherPermissions(docs.permissions);
+    assert.equal(docs.uses, './.github/workflows/docs.yml');
+    assert.deepEqual(docs.with, {
+      version: '${{ needs.plan.outputs.tag }}',
+      release_commit: '${{ needs.plan.outputs.commit }}',
+      stable: "${{ needs.plan.outputs.publish-latest == 'true' }}",
+    });
+  });
+
+  it('checks generated references and refuses a mismatched immutable snapshot', () => {
+    const docs = read('.github/workflows/docs.yml');
+
+    assert.match(docs, /generate_cli_docs -- --check/);
+    assert.match(docs, /generate-cluster-protocol -- --check/);
+    assert.match(docs, /pip install.*docs\/requirements\.lock/);
+    assert.match(docs, /python -m mkdocs build --strict/);
+    assert.match(docs, /development documentation must use current main \$main_commit/);
+    assert.match(docs, /id="zeroshot\.Client"/);
+    assert.match(docs, /id="zeroshot\.RunResult"/);
+    assert.match(docs, /id="zeroshot\.InvalidRequestError"/);
+    assert.match(docs, /is immutable and already belongs to/);
+    assert.match(docs, /cmp -s "\$remote_manifest" site\/manifest\.json/);
+    assert.match(docs, /required_snapshot_paths=\(/);
+    assert.match(docs, /is missing \$relative/);
+    assert.match(docs, /required_python_anchors=\(/);
+    assert.match(docs, /has an invalid rendered Python API at \$relative/);
+    assert.match(docs, /exact-exists.*== 'false'/);
+    assert.match(docs, /--alias-type redirect/);
+    assert.match(docs, /mike alias/);
+    assert.match(docs, /mike set-default/);
+    assert.match(docs, /actions\/upload-pages-artifact@[0-9a-f]{40}/);
+    assert.match(docs, /actions\/deploy-pages@[0-9a-f]{40}/);
+    assert.doesNotMatch(docs, /python -m mike/);
+  });
+});
+
 describe('v8 hard cutover contract', () => {
   it('keeps every workflow syntactically valid YAML', () => {
     const workflows = fs.readdirSync(path.join(root, '.github', 'workflows'));
@@ -134,6 +200,17 @@ describe('v8 hard cutover contract', () => {
   it('announces the breaking v8 interface at the top level', () => {
     const readme = read('README.md');
     assert.match(readme, /Zeroshot v8 is a hard interface cutover/);
+  });
+
+  it('keeps the target data volume independent of internal protocol names', () => {
+    const dockerfile = read('docker/zeroshot-target/Dockerfile');
+    const targetReadme = read('docker/zeroshot-target/README.md');
+    const readme = read('README.md');
+
+    assert.match(dockerfile, /VOLUME \["\/var\/lib\/zeroshot"\]/);
+    assert.doesNotMatch(dockerfile, /VOLUME \["\/var\/lib\/zeroshot\//);
+    assert.match(targetReadme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
+    assert.match(readme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
   });
 
   it('keeps repository-owned agent guidance aligned with v8', () => {

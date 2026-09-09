@@ -21,7 +21,6 @@ mod schema_helpers;
 pub mod watch;
 mod watch_artifacts;
 pub mod worker_artifacts;
-pub mod worker_profiles;
 
 pub use conformance::{run_backend_conformance, BackendFactory};
 pub use fixture::TemporaryDirectory;

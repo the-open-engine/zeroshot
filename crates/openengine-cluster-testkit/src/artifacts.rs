@@ -29,9 +29,11 @@ use fixture_values::artifact_ref_fixture;
 use crate::schema_helpers::merge_schema;
 use crate::worker_artifacts::{with_worker_components, worker_fixture_artifacts, worker_schema};
 
+mod api_reference;
 mod openrpc;
 
 const ROOT: &str = "protocol/openengine-cluster/v1";
+const API_REFERENCE_PATH: &str = "docs/reference/cluster/api.md";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Artifact {
@@ -112,7 +114,8 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     let graph_schema = graph_schema();
     let compiled_ir_schema = serde_json::to_value(schema_for!(CompiledGraphIr))
         .assert_value_with("compiled IR JSON Schema serialization must succeed");
-    let openrpc = openrpc::document();
+    let openrpc = with_worker_components(openrpc::document());
+    let api_reference = api_reference::render(&openrpc);
     let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
 
     let cases = [
@@ -150,11 +153,12 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
             format!("{ROOT}/compiled-ir.schema.json"),
             compiled_ir_schema,
         ),
-        json_artifact(
-            format!("{ROOT}/openrpc.json"),
-            with_worker_components(openrpc),
-        ),
+        json_artifact(format!("{ROOT}/openrpc.json"), openrpc),
         json_artifact(format!("{ROOT}/worker.schema.json"), worker_schema),
+        Artifact {
+            relative_path: API_REFERENCE_PATH.to_owned(),
+            bytes: api_reference.into_bytes(),
+        },
     ];
     artifacts.extend(worker_fixture_artifacts());
     artifacts.extend(graph_fixture_artifacts());
@@ -404,7 +408,7 @@ fn full_graph_fixture() -> Value {
             "kind": "seq", "name": "root", "state": all_payload_type(),
             "children": [
                 {
-                    "kind": "step", "name": "work", "worker": "legacy.zeroshot.ship@1",
+                    "kind": "step", "name": "work", "worker": "worker.main@1",
                     "input": all_payload_type(), "output": { "kind": "string" },
                     "inputBindings": [
                         { "target": ["text"], "value": { "source": "state", "path": ["text"] } },
@@ -456,9 +460,9 @@ fn single_worker_fixture() -> Value {
         "initialInput": { "kind": "null" },
         "policy": { "policy": "policy.default@1", "default": "deny" },
         "root": {
-            "kind": "step", "name": "worker", "worker": "legacy.zeroshot.ship@1",
-            "input": { "kind": "null" }, "output": { "kind": "null" },
-            "inputBindings": [], "writeBindings": [], "timeoutMs": 60000, "attempts": 1
+            "worker": "worker.main@1", "kind": "step", "name": "worker",
+            "writeBindings": [], "inputBindings": [], "attempts": 1,
+            "output": { "kind": "null" }, "timeoutMs": 60000, "input": { "kind": "null" }
         }
     })
 }

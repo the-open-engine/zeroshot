@@ -126,7 +126,7 @@ fn descriptor_value(worker: &str, input: Value, output: Value, verifier: Option<
     json!({
         "worker": worker,
         "graphProfiles": ["openengine.graph.full/v1"],
-        "binding": { "protocol": "acp", "version": "1", "profile": "openengine.worker.acp/v1" },
+        "binding": { "protocol": "fixture", "version": "1", "profile": "fixture.worker/v1" },
         "contract": {
             "input": input,
             "output": output,

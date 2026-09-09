@@ -55,7 +55,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-help"><code>zeroshot help</code></a></li>
 </ul></nav>
 <section id="zeroshot"><h2><code>zeroshot</code></h2>
-<pre><code>Run multi-agent graph workloads locally or on named Zeroshot targets.
+<pre><code>Run multi-agent graphs locally or on named Zeroshot targets.
 
 Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attach` stream newline-delimited JSON (NDJSON).
 
@@ -91,7 +91,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target
+  serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 
 Options:
@@ -150,7 +150,7 @@ Options:
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-target-serve"><h4><code>zeroshot target serve</code></h4>
-<pre><code>Serve a native-v2 target.
+<pre><code>Serve an unauthenticated direct target.
 
 Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
@@ -177,7 +177,7 @@ Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
   setup  Configure the local profile for a named target
-  serve  Serve a native-v2 target
+  serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-connection"><h3><code>zeroshot connection</code></h3>
 <pre><code>Inspect and manage named runtime connections

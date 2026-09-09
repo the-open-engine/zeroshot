@@ -1,0 +1,136 @@
+site_name: Zeroshot
+site_description: Versioned documentation for the Zeroshot CLI, protocol, and Python SDK
+site_url: https://the-open-engine.github.io/zeroshot/
+repo_url: https://github.com/the-open-engine/zeroshot
+repo_name: the-open-engine/zeroshot
+copyright: Copyright &copy; The Open Engine
+
+docs_dir: docs
+site_dir: site
+strict: true
+exclude_docs: |
+  brand/README.md
+  requirements.lock
+  requirements.txt
+
+theme:
+  name: material
+  logo: brand/oec-crow.png
+  favicon: brand/oec-favicon.svg
+  font:
+    text: Spline Sans
+    code: Roboto Mono
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Use dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Use light mode
+
+nav:
+  - Overview: index.md
+  - Get started:
+      - Install: getting-started/install.md
+      - Run a first task: getting-started/first-run.md
+  - Concepts:
+      - How execution works: concepts/execution.md
+      - Runtimes and connections: concepts/runtimes-and-connections.md
+      - Targets: concepts/targets.md
+  - Guides:
+      - Observe and control runs: guides/observe-and-control.md
+      - Python SDK: guides/python-sdk.md
+  - Reference:
+      - CLI: zeroshot-cli.md
+      - Python API:
+          - API overview: reference/python.md
+          - Client and run handle: reference/python/client.md
+          - Configuration: reference/python/configuration.md
+          - Result models: reference/python/results.md
+          - Exceptions: reference/python/errors.md
+      - Cluster protocol:
+          - API: reference/cluster/api.md
+          - Graph contract: reference/cluster/graph.md
+          - Admission: reference/cluster/admission.md
+          - Lifecycle: reference/cluster/lifecycle.md
+          - Watch and replay: reference/cluster/watch.md
+          - WebSocket data plane: reference/cluster/data-plane.md
+          - Portable bindings: reference/cluster/portable-bindings.md
+  - Project:
+      - Documentation versions: project/versioning.md
+      - Distribution contract: zeroshot-distribution.md
+
+plugins:
+  - search
+  - mike:
+      alias_type: redirect
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [sdks/python/src]
+          options:
+            docstring_section_style: list
+            docstring_style: google
+            heading_level: 2
+            members_order: source
+            merge_init_into_class: true
+            show_root_heading: false
+            show_source: false
+            show_signature_annotations: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            signature_crossrefs: true
+
+hooks:
+  - scripts/docs_hook.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - toc:
+      permalink: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  version:
+    provider: mike
+    default: stable
+    alias: true
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/the-open-engine/zeroshot
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/9Tnxd7XWa
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/the-open-engine-company
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/OpenEngineHQ
