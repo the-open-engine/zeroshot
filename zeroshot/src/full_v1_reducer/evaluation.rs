@@ -215,7 +215,10 @@ impl Engine<'_> {
         };
         let visit = *visit;
         let input = bind_payload(spec.input_bindings, &context.state, traversal.item)?;
-        if let Some(execution) = &visit.existing {
+        for execution in &visit.executions {
+            if execution.input != input {
+                return Err(ReducerError::InconsistentHistory);
+            }
             self.consumed_executions.insert(execution.execution);
         }
         mark_visit(
@@ -255,14 +258,22 @@ impl Engine<'_> {
         if execution.dispatch_position > traversal.cutoff {
             return Ok(Status::Pending);
         }
-        if execution.input != input {
-            return Err(ReducerError::InconsistentHistory);
-        }
         let DurableExecutionState::Settled { position, outcome } = &execution.state else {
             return Ok(Status::Pending);
         };
         if *position > traversal.cutoff {
             return Ok(Status::Pending);
+        }
+        if self.execution_mode == ExecutionMode::NativeV2
+            && matches!(outcome, WorkerOutcome::Error { .. })
+            && execution.attempt < spec.attempt_ceiling
+        {
+            return self.dispatch_retry(RetryDispatchRequest {
+                spec,
+                traversal,
+                execution,
+                input,
+            });
         }
         let writes_applied = self.apply_outcome(OutcomeApplication {
             spec: &spec,
@@ -294,7 +305,7 @@ impl Engine<'_> {
             .cloned()
             .collect::<Vec<_>>();
         let number = next_visit(spec.name, map_indices, &context.controls);
-        let (attempt, existing) = match self.execution_mode {
+        let (attempt, existing, executions) = match self.execution_mode {
             ExecutionMode::LegacyAttempts => {
                 matching.sort_by_key(|execution| execution.attempt);
                 let attempt =
@@ -306,20 +317,30 @@ impl Engine<'_> {
                     .iter()
                     .find(|execution| execution.attempt == attempt)
                     .cloned();
-                (attempt, existing)
+                let executions = existing.iter().cloned().collect();
+                (attempt, existing, executions)
             }
-            ExecutionMode::NativeV2NoRetry => {
+            ExecutionMode::NativeV2 => {
                 matching.sort_by_key(|execution| execution.dispatch_position);
-                let attempt =
-                    PositiveInteger::new(1).map_err(|_| ReducerError::InconsistentHistory)?;
-                let index =
-                    usize::try_from(number - 1).map_err(|_| ReducerError::IdentityOutOfRange)?;
-                (attempt, matching.get(index).cloned())
+                let executions = native_visit_executions(&matching, number);
+                let existing = executions.last().cloned();
+                let attempt = existing.as_ref().map_or_else(
+                    || {
+                        PositiveInteger::new(INITIAL_ATTEMPT)
+                            .expect("the initial attempt is positive")
+                    },
+                    |execution| execution.attempt,
+                );
+                if attempt > spec.attempt_ceiling {
+                    return Err(ReducerError::InconsistentHistory);
+                }
+                (attempt, existing, executions)
             }
         };
         Ok(VisitResolution::Ready(Box::new(ExecutableVisit {
             occurrence,
             matching,
+            executions,
             number,
             attempt,
             existing,
@@ -362,6 +383,44 @@ impl Engine<'_> {
             execution,
             occurrence: visit.occurrence,
             attempt: visit.attempt,
+            worker: spec.worker.clone(),
+            input,
+        });
+        Ok(Status::Pending)
+    }
+
+    fn dispatch_retry(
+        &mut self,
+        request: RetryDispatchRequest<'_, '_>,
+    ) -> Result<Status, ReducerError> {
+        let RetryDispatchRequest {
+            spec,
+            traversal,
+            execution: previous,
+            input,
+        } = request;
+        if traversal.mode == EvalMode::Probe || traversal.cutoff != HistoryPosition::MAX {
+            return Ok(Status::Pending);
+        }
+        let attempt = previous
+            .attempt
+            .get()
+            .checked_add(1)
+            .ok_or(ReducerError::IdentityOutOfRange)
+            .and_then(|value| {
+                PositiveInteger::new(value).map_err(|_| ReducerError::IdentityOutOfRange)
+            })?;
+        let execution =
+            ExecutionId::new(self.next_execution).map_err(|_| ReducerError::IdentityOutOfRange)?;
+        self.next_execution = self
+            .next_execution
+            .checked_add(1)
+            .ok_or(ReducerError::IdentityOutOfRange)?;
+        self.decisions.push(Decision::Dispatch {
+            node_instance: previous.node_instance,
+            execution,
+            occurrence: previous.occurrence,
+            attempt,
             worker: spec.worker.clone(),
             input,
         });
@@ -467,4 +526,20 @@ impl Engine<'_> {
         Ok(())
     }
     // Choice, parallel, and map evaluation live in the groups companion module.
+}
+
+fn native_visit_executions(
+    executions: &[DurableExecution],
+    requested_visit: u64,
+) -> Vec<DurableExecution> {
+    let mut visit = 0;
+    executions
+        .iter()
+        .filter_map(|execution| {
+            if execution.attempt.get() == 1 {
+                visit += 1;
+            }
+            (visit == requested_visit).then(|| execution.clone())
+        })
+        .collect()
 }

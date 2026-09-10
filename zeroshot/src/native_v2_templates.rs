@@ -10,6 +10,7 @@ use openengine_cluster_protocol::{
 };
 
 use crate::native_v2_contract::{GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF};
+use crate::native_v2_admission::MAX_AGENT_VERIFIER_ATTEMPTS;
 use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
 };
@@ -186,7 +187,7 @@ fn review_verifier(
         ],
         write_bindings: vec![diagnostic_write(name, feedback_target)?],
         timeout_ms: positive(NODE_TIMEOUT_MS)?,
-        attempts: positive(1)?,
+        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
         signals,
         diagnostic: diagnostic_type()?,
         instructions: Some(instructions(authored_instructions)?),

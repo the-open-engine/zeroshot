@@ -207,14 +207,34 @@ async fn rejects_non_full_profile_and_invalid_actual_input() {
 }
 
 #[tokio::test]
-async fn rejects_non_single_attempts_and_runtime_coverage_errors() {
+async fn bounds_attempts_and_rejects_runtime_coverage_errors() {
+    let mut verifier = null_verifier("verify", "verify.work@1");
+    *verifier.get_mut("attempts").assert_value() = json!(MAX_AGENT_VERIFIER_ATTEMPTS);
+    let verifier_graph = graph(vec![verifier, succeed("done")]);
+    let verifier_nodes = BTreeMap::from([(named("verify"), binding("claude-sonnet-5", None))]);
+    NativeV2Admission
+        .admit(submission(verifier_graph, verifier_nodes))
+        .await
+        .assert_value();
+
     let mut value = null_step("work", "agent.work@1");
-    *value.get_mut("attempts").assert_value() = json!(2);
+    *value.get_mut("attempts").assert_value() = json!(MAX_AGENT_VERIFIER_ATTEMPTS);
     let attempts_graph = graph(vec![value, succeed("done")]);
     let nodes = BTreeMap::from([(named("work"), binding("claude-sonnet-5", None))]);
     assert!(matches!(
         NativeV2Admission
             .admit(submission(attempts_graph, nodes))
+            .await,
+        Err(NativeV2AdmissionError::Attempts { .. })
+    ));
+
+    let mut delivery = delivery_verifier("deliver", DeliveryMode::PullRequest);
+    *delivery.get_mut("attempts").assert_value() = json!(MAX_AGENT_VERIFIER_ATTEMPTS);
+    let delivery_graph = graph(vec![delivery, succeed("done")]);
+    let delivery_nodes = BTreeMap::from([(named("deliver"), delivery_binding())]);
+    assert!(matches!(
+        NativeV2Admission
+            .admit(submission(delivery_graph, delivery_nodes))
             .await,
         Err(NativeV2AdmissionError::Attempts { .. })
     ));

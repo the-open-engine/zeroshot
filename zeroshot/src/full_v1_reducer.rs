@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
+const INITIAL_ATTEMPT: u64 = 1;
+
 #[derive(Clone, Debug)]
 pub struct ReductionInput<'a> {
     pub initial_input: &'a Value,
@@ -105,7 +107,7 @@ pub struct FullV1Reducer<'a> {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ExecutionMode {
     LegacyAttempts,
-    NativeV2NoRetry,
+    NativeV2,
 }
 
 impl<'a> FullV1Reducer<'a> {
@@ -117,12 +119,12 @@ impl<'a> FullV1Reducer<'a> {
         }
     }
 
-    /// Native-v2 execution: every structural revisit is a fresh execution with attempt one.
+    /// Native-v2 execution: retries stay within a structural visit, while a revisit starts at one.
     #[must_use]
     pub const fn native_v2(graph: &'a VerifiedGraph) -> Self {
         Self {
             graph,
-            execution_mode: ExecutionMode::NativeV2NoRetry,
+            execution_mode: ExecutionMode::NativeV2,
         }
     }
 

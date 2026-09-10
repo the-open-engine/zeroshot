@@ -1,5 +1,45 @@
 use super::*;
 
+#[tokio::test]
+async fn crashed_node_instance_verifier_retries_with_a_fresh_provider_session() {
+    const VERIFIER_ATTEMPTS: u64 = 2;
+
+    let mut verifier = verifier("review", 1_000);
+    verifier["attempts"] = json!(VERIFIER_ATTEMPTS);
+    let graph = graph(
+        sequence(vec![verifier, succeed("done")], null_type()),
+        null_type(),
+    );
+    let harness = harness_with_session_scope(
+        graph,
+        Value::Null,
+        FakeDriver::scripted([(
+            "review",
+            vec![
+                Behavior::Fail(NodeRunnerError::Driver),
+                Behavior::Complete {
+                    delay: Duration::ZERO,
+                    outcome: verifier_outcome("accepted"),
+                },
+            ],
+        )]),
+        SessionScope::NodeInstance,
+    )
+    .await;
+
+    assert_eq!(
+        harness.supervisor.drive().await.assert_value_with("drive"),
+        TerminalResult::Succeeded {
+            output: Value::Null
+        }
+    );
+    assert_eq!(harness.driver.starts("review"), VERIFIER_ATTEMPTS as usize);
+    assert_eq!(
+        harness.sessions.opened.load(Ordering::SeqCst),
+        VERIFIER_ATTEMPTS as usize
+    );
+}
+
 async fn seed_active_execution(ledger: &FakeRunLedger, run_id: &RunId) -> ExecutionRef {
     let reference = ExecutionRef {
         run_id: run_id.clone(),

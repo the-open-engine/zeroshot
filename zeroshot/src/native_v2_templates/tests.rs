@@ -151,6 +151,92 @@ async fn rejected_parallel_reviews_dispatch_repair_with_both_diagnostics() {
 }
 
 #[tokio::test]
+async fn crashed_parallel_review_retries_only_the_failed_verifier() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let history = [
+        settled_worker(),
+        settled_review(
+            2,
+            "acceptance",
+            REJECTED_LABEL,
+            "missing requested behavior",
+        ),
+        settled_failure(
+            SettledExecutionSpec {
+                execution: 3,
+                node_instance: 3,
+                node: "code",
+                settled_at: 3,
+                input: review_input,
+            },
+            WorkerErrorCode::Crash,
+        ),
+    ];
+    let reduction = reduce(&verified, &initial_input, &history);
+
+    assert_eq!(
+        reduction
+            .decisions
+            .iter()
+            .filter(|decision| matches!(decision, Decision::Dispatch { .. }))
+            .count(),
+        1
+    );
+    assert!(reduction.decisions.iter().any(|decision| matches!(
+        decision,
+        Decision::Dispatch { occurrence, attempt, input, .. }
+            if occurrence.node.as_str() == "code"
+                && attempt.get() == MAX_AGENT_VERIFIER_ATTEMPTS
+                && input == &json!({"task":"repair checkout","deliveryFeedback":""})
+    )));
+    assert!(reduction.terminal.is_none());
+}
+
+#[tokio::test]
+async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let history = [
+        settled_worker(),
+        settled_review(
+            2,
+            "acceptance",
+            REJECTED_LABEL,
+            "missing requested behavior",
+        ),
+        settled_failure(
+            SettledExecutionSpec {
+                execution: 3,
+                node_instance: 3,
+                node: "code",
+                settled_at: 3,
+                input: review_input.clone(),
+            },
+            WorkerErrorCode::Crash,
+        ),
+        settled_failure_attempt(
+            SettledExecutionSpec {
+                execution: 4,
+                node_instance: 3,
+                node: "code",
+                settled_at: 5,
+                input: review_input,
+            },
+            WorkerErrorCode::Crash,
+            MAX_AGENT_VERIFIER_ATTEMPTS,
+        ),
+    ];
+
+    assert_eq!(
+        reduce(&verified, &initial_input, &history).terminal,
+        Some(TerminalProjection::Failed {
+            reason: "review_failed".parse().assert_value()
+        })
+    );
+}
+
+#[tokio::test]
 async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
     let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
     let review_input = json!({"task":"repair checkout","deliveryFeedback":""});

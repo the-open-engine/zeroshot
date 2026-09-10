@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{
     WorkerContract, WorkerRef, MAX_DECLARED_ENVIRONMENT_NAMES, RUNTIME_WORKER_ERRORS,
 };
 
-use super::{DeliveryPolicy, NativeV2AdmissionError};
+use super::{DeliveryPolicy, NativeV2AdmissionError, MAX_AGENT_VERIFIER_ATTEMPTS};
 use crate::native_v2_contract::{
     AdmittedRun, NodeRuntimeBinding, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
 };
@@ -125,7 +125,12 @@ fn collect_declarations(node: &GraphNode, declarations: &mut Vec<ExecutableDecla
 }
 
 fn validate_attempts(declarations: &[ExecutableDeclaration]) -> Result<(), NativeV2AdmissionError> {
-    if let Some(declaration) = declarations.iter().find(|item| item.attempts != 1) {
+    if let Some(declaration) = declarations.iter().find(|item| {
+        item.attempts != 1
+            && !(item.kind == LeafKind::Verifier
+                && !is_git_delivery_worker(&item.worker)
+                && item.attempts <= MAX_AGENT_VERIFIER_ATTEMPTS)
+    }) {
         return Err(NativeV2AdmissionError::Attempts {
             node: declaration.name.clone(),
             attempts: declaration.attempts,

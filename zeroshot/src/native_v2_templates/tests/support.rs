@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use openengine_cluster_protocol::{
     EnumLabel, FieldName, NodeName, NodeRuntimeBinding, PositiveInteger, ReasoningEffort, RunSize,
     RuntimePlan, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    ResolvedSource, WorkerOutcome,
+    ResolvedSource, WorkerErrorCode, WorkerOutcome,
 };
 use openengine_cluster_server::graph_verifier::graph_node_children;
 use openengine_cluster_testkit::assertions::AssertValue;
@@ -109,6 +109,23 @@ pub(super) fn settled_agent(spec: SettledExecutionSpec<'_>) -> DurableExecution 
             artifacts: Vec::new(),
         },
     )
+}
+
+pub(super) fn settled_failure(
+    spec: SettledExecutionSpec<'_>,
+    code: WorkerErrorCode,
+) -> DurableExecution {
+    settled_execution(spec, WorkerOutcome::declared_failure(code))
+}
+
+pub(super) fn settled_failure_attempt(
+    spec: SettledExecutionSpec<'_>,
+    code: WorkerErrorCode,
+    attempt: u64,
+) -> DurableExecution {
+    let mut execution = settled_failure(spec, code);
+    execution.attempt = PositiveInteger::new(attempt).assert_value();
+    execution
 }
 
 pub(super) fn settled_review(

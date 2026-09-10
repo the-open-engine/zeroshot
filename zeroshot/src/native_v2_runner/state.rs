@@ -206,6 +206,12 @@ impl SessionPool {
         let mut entries = self.entries.lock().await;
         match entries.get(key) {
             Some(SessionEntry::Lost) => Err(NodeRunnerError::SessionLost),
+            Some(SessionEntry::Replaceable) => {
+                let (ready, _) = watch::channel(false);
+                let ready = Arc::new(ready);
+                entries.insert(key.clone(), SessionEntry::Opening(ready.clone()));
+                Ok(CheckoutAction::Open(ready))
+            }
             Some(SessionEntry::Live(session)) => Ok(CheckoutAction::Reuse(session.clone())),
             Some(SessionEntry::Opening(ready)) => Ok(CheckoutAction::Wait(ready.subscribe())),
             None => {
@@ -327,6 +333,16 @@ impl SessionPool {
         session.close().await;
     }
 
+    async fn replace_after_failure(&self, key: SessionKey, session: ManagedSession) {
+        let mut entries = self.entries.lock().await;
+        if matches!(entries.get(&key), Some(SessionEntry::Live(current)) if current.same(&session))
+        {
+            entries.insert(key, SessionEntry::Replaceable);
+        }
+        drop(entries);
+        session.close().await;
+    }
+
     pub(super) async fn close_run(&self, run_id: &RunId) {
         let mut entries = self.entries.lock().await;
         let keys = entries
@@ -339,7 +355,7 @@ impl SessionPool {
             .filter_map(|key| match entries.insert(key, SessionEntry::Lost) {
                 Some(SessionEntry::Live(session)) => Some(EntryToClose::Session(session)),
                 Some(SessionEntry::Opening(ready)) => Some(EntryToClose::Opening(ready)),
-                Some(SessionEntry::Lost) | None => None,
+                Some(SessionEntry::Replaceable | SessionEntry::Lost) | None => None,
             })
             .collect::<Vec<_>>();
         drop(entries);
@@ -393,6 +409,9 @@ struct SessionKey {
 enum SessionEntry {
     Opening(Arc<watch::Sender<bool>>),
     Live(ManagedSession),
+    /// The previous execution invalidated its session, so a reducer-authorized dispatch may
+    /// establish a replacement. Passive session loss remains permanently fail-closed.
+    Replaceable,
     Lost,
 }
 
@@ -407,7 +426,9 @@ impl SessionLease {
         match self.kind {
             SessionLeaseKind::Execution => self.session.close().await,
             SessionLeaseKind::NodeInstance(_) if clean => {}
-            SessionLeaseKind::NodeInstance(key) => self.pool.invalidate(key, self.session).await,
+            SessionLeaseKind::NodeInstance(key) => {
+                self.pool.replace_after_failure(key, self.session).await;
+            }
         }
     }
 }
