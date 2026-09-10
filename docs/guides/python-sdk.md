@@ -80,7 +80,7 @@ async def run_direct(runtime: UniformRuntime) -> None:
 
 Log in with the CLI first, then pass that target's local name to `HostedTarget`. A plan uses one
 explicit repository and branch plus one hosted profile. The profile must contain exactly one
-merge-delivery node.
+`builtin.git-delivery.merge@2` node.
 
 ```python
 from datetime import UTC, datetime, timedelta
@@ -99,7 +99,7 @@ async def submit_release_plan() -> None:
             "backend": MergePlanRun(input={"task": "Update the API."}),
             "frontend": MergePlanRun(input={"task": "Update the client."}),
             "integrate": MergePlanRun(
-                input={"task": "Resolve conflicts and run the release tests."},
+                input={"task": "Verify the combined changes and run the release tests."},
                 needs=("backend", "frontend"),
             ),
         },
@@ -115,9 +115,12 @@ async def submit_release_plan() -> None:
 ```
 
 Submission is atomic, and every node receives a stable run ID. `needs` gates readiness only; plan
-nodes have no output interpolation or shared mutable input. Cloud resolves a node's exact source
-revision after its dependencies merge, then starts that node's 24-hour queue deadline. The v1 API
-has no aggregate event stream, so `MergePlan.watch()` polls and yields changed snapshots.
+nodes have no output interpolation or shared mutable input. After dependencies merge, Cloud
+materializes the node against an exact source revision. When materialization completes, `readyAt`
+is set and the node gets a queue window of up to 24 hours, bounded by plan expiry. A merge conflict
+is repaired by the conflicting run itself in the same checkout and delivery loop. A descendant
+cannot repair a failed predecessor; it ends as `dependency_failed`. The v1 API has no aggregate
+event stream, so `MergePlan.watch()` polls and yields changed snapshots.
 
 ## Pass exact protocol documents
 

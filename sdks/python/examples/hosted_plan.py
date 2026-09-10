@@ -17,8 +17,9 @@ async def main() -> None:
         runs={
             "backend": MergePlanRun(input={"task": "Update the API."}),
             "frontend": MergePlanRun(input={"task": "Update the client."}),
+            # Predecessors repair their own delivery conflicts before this node can start.
             "integrate": MergePlanRun(
-                input={"task": "Resolve conflicts and run the release tests."},
+                input={"task": "Verify the combined changes and run the release tests."},
                 needs=("backend", "frontend"),
             ),
         },

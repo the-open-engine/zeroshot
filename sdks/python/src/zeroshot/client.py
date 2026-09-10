@@ -253,7 +253,9 @@ class Client:
             ProtocolError: If native output is malformed.
         """
         self._require_hosted_target()
-        submission_key = request.submission_key or _submission_key()
+        submission_key = (
+            request.submission_key if request.submission_key is not None else _submission_key()
+        )
         with tempfile.TemporaryDirectory(prefix="zeroshot-python-plan-") as directory:
             manifest = _write_json(Path(directory) / "plan.json", request.to_dict())
             await self._native(static=True).json(["plan", "validate", str(manifest)])

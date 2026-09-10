@@ -287,7 +287,11 @@ def test_failed_result_has_opt_in_exception_projection() -> None:
     assert caught.value.result is result
 
 
-def test_hosted_plan_submission_uses_one_strict_manifest(fake_native: Path) -> None:
+@pytest.mark.parametrize("submission_key", ["release-1", ""])
+def test_hosted_plan_submission_uses_one_strict_manifest(
+    fake_native: Path,
+    submission_key: str,
+) -> None:
     request = MergePlanRequest(
         title="Release",
         repository="owner/repo",
@@ -298,7 +302,7 @@ def test_hosted_plan_submission_uses_one_strict_manifest(fake_native: Path) -> N
             "build": MergePlanRun(input={"task": "build"}),
             "integrate": MergePlanRun(input={"task": "integrate"}, needs=("build",)),
         },
-        submission_key="release-1",
+        submission_key=submission_key,
     )
 
     async def exercise() -> None:
@@ -326,7 +330,7 @@ def test_hosted_plan_submission_uses_one_strict_manifest(fake_native: Path) -> N
     assert all(item["plan"] == expected for item in invocations)
     submitted = invocations[1]["args"]
     assert submitted[submitted.index("--target") + 1] == "cloud"
-    assert submitted[submitted.index("--submission-key") + 1] == "release-1"
+    assert submitted[submitted.index("--submission-key") + 1] == submission_key
     assert "--detach" in submitted
 
 

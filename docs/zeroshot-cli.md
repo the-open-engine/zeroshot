@@ -560,10 +560,12 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one merge-delivery node;
+Every run uses the same source and profile. The profile must contain exactly one `builtin.git-delivery.merge@2` node;
 pull-request delivery is rejected. `needs` gates readiness but does not pass output between runs.
-Cloud assigns all run IDs atomically, resolves each exact source revision only when that run becomes
-ready, and starts its 24-hour queue deadline then. `expiresAt` must be in the future and no more than
+Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
+materializes it against an exact source revision. Completion starts a queue window of up to 24
+hours, bounded by `expiresAt`.
+`expiresAt` must be in the future and no more than
 seven days away. Plans cannot be edited or retried in place.
 ```
 

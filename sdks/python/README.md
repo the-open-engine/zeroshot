@@ -78,8 +78,8 @@ async def run_direct(runtime: UniformRuntime) -> None:
 Docker is a deployment of `DirectTarget`, not a separate client or target type.
 
 `HostedTarget` reuses a named target and login from the CLI. Merge plans are immutable DAGs over one
-repository, branch, and hosted profile. That profile must contain exactly one merge-delivery node;
-pull-request delivery isn't accepted for plans.
+repository, branch, and hosted profile. That profile must contain exactly one
+`builtin.git-delivery.merge@2` node; pull-request delivery isn't accepted for plans.
 
 ```python
 from datetime import UTC, datetime, timedelta
@@ -98,7 +98,7 @@ async def run_plan() -> None:
             "backend": MergePlanRun(input={"task": "Update the API."}),
             "frontend": MergePlanRun(input={"task": "Update the client."}),
             "integrate": MergePlanRun(
-                input={"task": "Resolve conflicts and run the release tests."},
+                input={"task": "Verify the combined changes and run the release tests."},
                 needs=("backend", "frontend"),
             ),
         },
@@ -114,10 +114,12 @@ async def run_plan() -> None:
 ```
 
 Plan input is static JSON. A dependency controls when a node may start; it doesn't copy output into
-another node. Run IDs are assigned once during atomic submission, and each ready node resolves its
-source revision after its dependencies merge. Each node gets its own 24-hour queue deadline when it
-becomes ready. `MergePlan.watch()` polls the aggregate Cloud status and emits changed snapshots
-because the v1 plan API has no streaming endpoint.
+another node. Run IDs are assigned once during atomic submission. After dependencies merge, Cloud
+materializes a node against an exact source revision. When materialization completes, `readyAt` is
+set and the node gets a queue window of up to 24 hours, bounded by plan expiry. A merge conflict is
+repaired by the conflicting run itself in the same checkout and delivery loop. A descendant cannot
+repair a failed predecessor; it ends as `dependency_failed`. `MergePlan.watch()` polls the aggregate
+Cloud status and emits changed snapshots because the v1 plan API has no streaming endpoint.
 
 ## Exact graph and runtime control
 
