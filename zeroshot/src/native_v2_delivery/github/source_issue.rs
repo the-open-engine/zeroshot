@@ -1,6 +1,6 @@
-use super::wire::{IssueCommentWire, IssueWire, require_review_identity};
 use super::*;
-use super::metadata::generated_body;
+use super::metadata::{generated_body, generated_body_range, refresh_generated_body};
+use super::wire::{IssueCommentWire, IssueWire, require_review_identity};
 
 pub(super) async fn connect_source_issue(
     authority: &GhCliDeliveryAuthority,
@@ -15,7 +15,7 @@ pub(super) async fn connect_source_issue(
     require_review_identity(&wire, review)?;
     let closing_reference = closing_reference(issue.number);
     if !body_has_closing_reference(wire.body.as_deref(), &closing_reference) {
-        let body = append_closing_reference(wire.body.as_deref(), &closing_reference);
+        let body = refresh_pull_request_body(wire.body.as_deref(), request)?;
         let updated = authority
             .patch_review(review, &[format!("body={body}")], credential)
             .await?;
@@ -99,13 +99,52 @@ fn closing_reference(issue_number: u64) -> String {
     format!("Closes #{issue_number}")
 }
 
+fn generated_review_content(request: &GitHubReviewRequest) -> String {
+    request.source_issue.as_ref().map_or_else(
+        || request.description.clone(),
+        |issue| {
+            format!(
+                "{}\n\n{}",
+                request.description,
+                closing_reference(issue.number)
+            )
+        },
+    )
+}
+
 pub(super) fn pull_request_body(
     request: &GitHubReviewRequest,
 ) -> Result<String, GitHubAuthorityError> {
-    let body = generated_body(&request.description)?;
-    Ok(request.source_issue.as_ref().map_or(body.clone(), |issue| {
-        format!("{body}\n\n{}", closing_reference(issue.number))
-    }))
+    generated_body(&generated_review_content(request))
+}
+
+pub(super) fn refresh_pull_request_body(
+    current: Option<&str>,
+    request: &GitHubReviewRequest,
+) -> Result<String, GitHubAuthorityError> {
+    let current = current.map(remove_legacy_closing_reference).transpose()?;
+    refresh_generated_body(current.as_deref(), &generated_review_content(request))
+}
+
+fn remove_legacy_closing_reference(body: &str) -> Result<String, GitHubAuthorityError> {
+    let Some(range) = generated_body_range(body)? else {
+        return Ok(body.to_owned());
+    };
+    let suffix = &body[range.end..];
+    let Some(reference_len) = legacy_closing_reference_len(suffix) else {
+        return Ok(body.to_owned());
+    };
+    let mut migrated = String::with_capacity(body.len() - reference_len);
+    migrated.push_str(&body[..range.end]);
+    migrated.push_str(&suffix[reference_len..]);
+    Ok(migrated)
+}
+
+fn legacy_closing_reference_len(suffix: &str) -> Option<usize> {
+    let line = suffix.strip_prefix("\n\n")?;
+    let line_len = line.find('\n').unwrap_or(line.len());
+    let number = line[..line_len].strip_prefix("Closes #")?;
+    (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then_some(2 + line_len)
 }
 
 fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bool {
@@ -113,15 +152,6 @@ fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bo
         body.lines()
             .any(|line| line.trim().eq_ignore_ascii_case(closing_reference))
     })
-}
-
-fn append_closing_reference(body: Option<&str>, closing_reference: &str) -> String {
-    let body = body.unwrap_or_default().trim_end();
-    if body.is_empty() {
-        closing_reference.to_owned()
-    } else {
-        format!("{body}\n\n{closing_reference}")
-    }
 }
 
 fn delivery_comment_marker(head_branch: &str) -> String {
@@ -143,7 +173,7 @@ mod tests {
     use crate::native_v2_delivery::GitHubSourceIssue;
 
     #[test]
-    fn reference_is_created_and_repaired_without_replacing_body() {
+    fn reference_is_created_inside_generated_metadata() {
         let request = GitHubReviewRequest {
             source_issue: Some(GitHubSourceIssue { number: 208 }),
             ..test_review_request()
@@ -152,20 +182,51 @@ mod tests {
             pull_request_body(&request).unwrap(),
             concat!(
                 "<!-- zeroshot-delivery:generated:v1:start -->\n",
-                "Repair the checkout flow.\n",
-                "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
-                "Closes #208"
+                "Repair the checkout flow.\n\n",
+                "Closes #208\n",
+                "<!-- zeroshot-delivery:generated:v1:end -->"
             )
         );
-        assert_eq!(
-            append_closing_reference(Some("Human context"), "Closes #208"),
-            "Human context\n\nCloses #208"
-        );
-        assert_eq!(append_closing_reference(None, "Closes #208"), "Closes #208");
         assert!(body_has_closing_reference(
             Some("Human context\n\ncloses #208"),
             "Closes #208"
         ));
+    }
+
+    #[test]
+    fn refresh_replaces_or_removes_legacy_generated_issue_reference() {
+        let legacy = concat!(
+            "Human preface.\n\n",
+            "<!-- zeroshot-delivery:generated:v1:start -->\n",
+            "Old description.\n",
+            "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
+            "Closes #208\n\n",
+            "Human notes."
+        );
+        let changed = GitHubReviewRequest {
+            source_issue: Some(GitHubSourceIssue { number: 209 }),
+            ..test_review_request()
+        };
+        assert_eq!(
+            refresh_pull_request_body(Some(legacy), &changed).unwrap(),
+            concat!(
+                "Human preface.\n\n",
+                "<!-- zeroshot-delivery:generated:v1:start -->\n",
+                "Repair the checkout flow.\n\n",
+                "Closes #209\n",
+                "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
+                "Human notes."
+            )
+        );
+
+        let removed = GitHubReviewRequest {
+            source_issue: None,
+            ..test_review_request()
+        };
+        let body = refresh_pull_request_body(Some(legacy), &removed).unwrap();
+        assert!(!body.contains("Closes #208"));
+        assert!(body.contains("Human preface."));
+        assert!(body.contains("Human notes."));
     }
 
     #[test]

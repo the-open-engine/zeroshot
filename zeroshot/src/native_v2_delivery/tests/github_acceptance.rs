@@ -98,9 +98,9 @@ fn assert_production_github_capture(gh_capture: &str, home: &Path) {
     assert!(gh_capture.contains("arg=title=fix: repair checkout"));
     assert!(gh_capture.contains(concat!(
         "arg=body=<!-- zeroshot-delivery:generated:v1:start -->\n",
-        "Repair the checkout flow.\n",
-        "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
-        "Closes #208"
+        "Repair the checkout flow.\n\n",
+        "Closes #208\n",
+        "<!-- zeroshot-delivery:generated:v1:end -->"
     )));
     assert!(gh_capture.contains("arg=repos/acme/project/issues/208"));
     assert!(gh_capture.contains("arg=repos/acme/project/issues/208/comments"));

@@ -86,7 +86,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - GitHub review creation and rediscovery are shared by pull-request and merge delivery. They verify
   the exact pushed ref and head, retry bounded transient visibility or API failures, refresh a
   dynamic credential once on HTTP 401/403 within the synchronization deadline and cancellation
-  boundary, and fail closed on identity mismatch or static-token rejection.
+  boundary, and fail closed on identity mismatch or static-token rejection. Verifier-authored pull
+  request descriptions and source-issue closing references stay inside the generated body markers
+  so refreshing metadata cannot retain a stale issue reference.
 
 ## CLI and target contracts
 

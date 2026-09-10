@@ -414,8 +414,8 @@ print_review() {
   /usr/bin/printf '%s%s%s%s%s%s%s%s\n' \
     '{"number":17,"title":"fix: repair checkout",' \
     '"body":"<!-- zeroshot-delivery:generated:v1:start -->\n' \
-    'Repair the checkout flow.\n' \
-    '<!-- zeroshot-delivery:generated:v1:end -->\n\nCloses #208",' \
+    'Repair the checkout flow.\n\nCloses #208\n' \
+    '<!-- zeroshot-delivery:generated:v1:end -->",' \
     '"state":"open","merged":false,"merge_commit_sha":null,"base":' \
     '{"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
     '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \

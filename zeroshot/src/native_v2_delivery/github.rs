@@ -135,7 +135,7 @@ impl GhCliDeliveryAuthority {
     ) -> Result<(), GitHubAuthorityError> {
         let mut wire = self.pull_request(review, credential).await?;
         require_review_identity(&wire, review)?;
-        let body = refresh_generated_body(wire.body.as_deref(), &request.description)?;
+        let body = refresh_pull_request_body(wire.body.as_deref(), request)?;
         if wire.title.as_deref() == Some(request.title.as_str())
             && wire.body.as_deref() == Some(body.as_str())
         {
@@ -406,10 +406,9 @@ mod head;
 mod policy;
 mod source_issue;
 mod wire;
-use metadata::refresh_generated_body;
 pub(super) use metadata::valid_generated_description;
 use policy::{PolicySnapshot, classify_policy, include_check_logs, query_arguments};
-use source_issue::{connect_source_issue, pull_request_body};
+use source_issue::{connect_source_issue, pull_request_body, refresh_pull_request_body};
 use api::check_log_tail;
 use wire::{PullRequestWire, require_review_identity, review_receipt};
 
