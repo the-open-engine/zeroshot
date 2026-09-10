@@ -8,8 +8,8 @@ use openengine_cluster_testkit::TemporaryDirectory;
 use openengine_cluster_testkit::assertions::{AssertValue, JsonAt};
 use serde_json::{Value, json};
 use tokio::process::{Child, Command};
-use tokio::io::AsyncWriteExt as _;
-use tokio::time::{Instant, sleep, timeout};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
 const DECLARED_KEY: &str = "local-declared-key";
@@ -191,12 +191,12 @@ impl LocalFixture {
         serde_json::from_slice(&output.stdout).assert_value_with("local CLI JSON output")
     }
 
-    pub(super) async fn interrupted(&self, args: &[&str], mode: &str) -> Output {
+    pub(super) async fn interrupted(&self, args: &[&str], mode: &str, expected: &str) -> Output {
         let mut command = self.command(args, mode);
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
         let child = command.spawn().assert_value_with("spawn observer CLI");
-        interrupt_after_observation(child).await
+        interrupt_after_observation(child, expected).await
     }
 
     pub(super) async fn assert_replay(&self, command: &str, run_id: &str, expected: &str) {
@@ -316,14 +316,70 @@ impl Drop for LocalFixture {
     }
 }
 
-async fn interrupt_after_observation(child: Child) -> Output {
+async fn interrupt_after_observation(mut child: Child, expected: &str) -> Output {
     let pid = child.id().assert_value_with("observer CLI PID");
-    sleep(Duration::from_millis(350)).await;
+    let stdout = child.stdout.take().assert_value_with("observer stdout");
+    let mut stdout = BufReader::new(stdout);
+    let mut stderr = child.stderr.take().assert_value_with("observer stderr");
+    let stderr = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        stderr
+            .read_to_end(&mut bytes)
+            .await
+            .assert_value_with("read observer stderr");
+        bytes
+    });
+    let mut bytes = Vec::new();
+    let observed = timeout(CLI_TIMEOUT, async {
+        loop {
+            let read = stdout
+                .read_until(b'\n', &mut bytes)
+                .await
+                .assert_value_with("read observer stdout");
+            if read == 0 {
+                return false;
+            }
+            if bytes
+                .windows(expected.len())
+                .any(|window| window == expected.as_bytes())
+            {
+                return true;
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    let stdout = tokio::spawn(async move {
+        stdout
+            .read_to_end(&mut bytes)
+            .await
+            .assert_value_with("finish observer stdout");
+        bytes
+    });
+    let deadline = Instant::now() + CLI_TIMEOUT;
     signal(pid, libc::SIGINT).assert_value_with("interrupt observer CLI");
-    timeout(CLI_TIMEOUT, child.wait_with_output())
+    let status = timeout_at(deadline, child.wait())
         .await
         .assert_value_with("observer CLI exit deadline")
-        .assert_value_with("wait for observer CLI")
+        .assert_value_with("wait for observer CLI");
+    let (bytes, stderr) = timeout_at(deadline, async {
+        let stdout = stdout.await.assert_value_with("join observer stdout");
+        let stderr = stderr.await.assert_value_with("join observer stderr");
+        (stdout, stderr)
+    })
+    .await
+    .assert_value_with("observer CLI output drain deadline");
+    assert!(
+        observed,
+        "observer CLI exited before emitting {expected:?}\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&bytes),
+        String::from_utf8_lossy(&stderr)
+    );
+    Output {
+        status,
+        stdout: bytes,
+        stderr,
+    }
 }
 
 pub(super) async fn wait_for_exit(pid: u32) {

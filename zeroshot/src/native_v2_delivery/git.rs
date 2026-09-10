@@ -5,8 +5,6 @@ use tokio::process::Command;
 
 use super::valid_revision;
 
-const COMMIT_MESSAGE: &str = "feat: complete Zeroshot task";
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum GitError {
     NoMutation,
@@ -27,6 +25,7 @@ impl SystemGit {
         &self,
         workspace: &Path,
         base_revision: &str,
+        commit_message: &str,
     ) -> Result<String, GitError> {
         self.require_success(workspace, &["add", "--all"]).await?;
         let staged = self
@@ -45,7 +44,7 @@ impl SystemGit {
                         "commit",
                         "--no-verify",
                         "--message",
-                        COMMIT_MESSAGE,
+                        commit_message,
                     ],
                 )
                 .await?;
@@ -122,5 +121,36 @@ impl SystemGit {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         command
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use openengine_cluster_testkit::assertions::AssertValue;
+
+    use super::*;
+    use crate::native_v2_candidate::test_support::{TestGitRepository, git_output};
+
+    #[tokio::test]
+    async fn uses_manifest_title_as_the_commit_message() {
+        let repository = TestGitRepository::delivery();
+        let git = SystemGit::new(PathBuf::from("/usr/bin/git"));
+
+        let revision = git
+            .prepare_revision(
+                &repository.workspace,
+                &repository.base,
+                "fix: repair checkout",
+            )
+            .await
+            .assert_value();
+
+        assert_eq!(
+            git_output(
+                &repository.workspace,
+                &["show", "--no-patch", "--format=%s", &revision]
+            ),
+            "fix: repair checkout"
+        );
     }
 }

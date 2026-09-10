@@ -4,7 +4,7 @@ mod head;
 mod input;
 mod review;
 mod sync;
-use input::source_issue;
+use input::delivery_input;
 use review::{crash_outcome, review_completion, ReviewProgress, ReviewStep};
 
 #[derive(Clone)]
@@ -214,15 +214,17 @@ impl NativeV2DeliveryAdapter {
         &self,
         preparation: DeliveryPreparation<'_, '_>,
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
-        let source_issue = source_issue(&preparation.invocation.node.input)?;
+        let input = delivery_input(&preparation.invocation.node.input)?;
         let head_revision = self
-            .prepare_head(preparation.session, preparation.control)
+            .prepare_head(preparation.session, preparation.control, &input.title)
             .await?;
         let review_request = GitHubReviewRequest {
             target: self.config.target.clone(),
             head_branch: delivery_branch(preparation.invocation.node.reference.run_id.as_str()),
             head_revision,
-            source_issue,
+            title: input.title,
+            description: input.description,
+            source_issue: input.source_issue,
         };
         self.push_review_head(&preparation, &review_request).await?;
         let review = self
@@ -247,11 +249,16 @@ impl NativeV2DeliveryAdapter {
         &self,
         session: &DeliverySession,
         control: &DriverControl,
+        commit_message: &str,
     ) -> Result<String, DeliveryStop> {
         emit(control, "delivery: preparing workspace revision").await?;
         match self
             .git
-            .prepare_revision(&session.workspace, &self.config.target.base_revision)
+            .prepare_revision(
+                &session.workspace,
+                &self.config.target.base_revision,
+                commit_message,
+            )
             .await
         {
             Ok(revision) => Ok(revision),

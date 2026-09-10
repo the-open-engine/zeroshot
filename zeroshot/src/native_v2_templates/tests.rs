@@ -58,6 +58,23 @@ fn catalog_and_template_inputs_are_closed() {
             .validate_value(&json!({"task":"repair checkout","acceptanceFeedback":""}))
             .is_err()
     );
+    assert!(
+        software
+            .initial_input
+            .validate_value(&json!({"task":"repair checkout","issueNumber":"208"}))
+            .is_err()
+    );
+    let delivered = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::PullRequest)
+        .assert_value();
+    delivered
+        .initial_input
+        .validate_value(&authored)
+        .assert_value();
+    delivered
+        .initial_input
+        .validate_value(&json!({"task":"repair checkout","issueNumber":"208"}))
+        .assert_value();
 }
 
 #[tokio::test]
@@ -213,7 +230,7 @@ async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
 async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
     for delivery in [TemplateDelivery::None, TemplateDelivery::PullRequest] {
         let (verified, initial_input) = verified_software_template(delivery).await;
-        let reviews = accepted_review_history();
+        let reviews = accepted_review_history(delivery);
         let worker_history = [settled_worker()];
         let after_worker = reduce(&verified, &initial_input, &worker_history);
         assert_dispatched_together(&after_worker, &["acceptance", "code"]);
@@ -237,7 +254,7 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
                 node_instance: 4,
                 node: DELIVERY_NODE,
                 settled_at: 4,
-                input: serde_json::Value::Null,
+                input: delivery_input(),
             },
             DeliveryMode::PullRequest,
             DELIVERY_OPENED_LABEL,
@@ -259,7 +276,7 @@ async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() 
 async fn assert_recoverable_delivery(recoverable: &str) {
     let delivery_feedback = format!("trusted delivery reported {recoverable}");
     let (verified, initial_input) = verified_software_template(TemplateDelivery::Merge).await;
-    let mut history = accepted_review_history();
+    let mut history = accepted_review_history(TemplateDelivery::Merge);
     let repair_input = json!({
         "task":"repair checkout",
         "outcome":recoverable,
@@ -271,7 +288,7 @@ async fn assert_recoverable_delivery(recoverable: &str) {
             node_instance: 4,
             node: DELIVERY_NODE,
             settled_at: 4,
-            input: Value::Null,
+            input: delivery_input(),
         },
         DeliveryMode::Merge,
         recoverable,
@@ -306,26 +323,33 @@ fn assert_repaired_reviews_then_merge(
     });
     assert_dispatch(&repaired, "acceptance", &review_input);
     assert_dispatch(&repaired, "code", &review_input);
-    for (execution, node, diagnostic) in [
-        (6, "acceptance", "CI repair meets the request"),
-        (7, "code", "CI repair is sound"),
-    ] {
-        history.push(settled_review_execution(
-            SettledExecutionSpec {
-                execution,
-                node_instance: execution - 4,
-                node,
-                settled_at: execution,
-                input: review_input.clone(),
-            },
-            ACCEPTED_LABEL,
-            diagnostic,
-        ));
-    }
+    history.push(settled_review_execution_with_output(
+        SettledExecutionSpec {
+            execution: 6,
+            node_instance: 2,
+            node: "acceptance",
+            settled_at: 6,
+            input: review_input.clone(),
+        },
+        ACCEPTED_LABEL,
+        "CI repair meets the request",
+        repaired_change_manifest(),
+    ));
+    history.push(settled_review_execution(
+        SettledExecutionSpec {
+            execution: 7,
+            node_instance: 3,
+            node: "code",
+            settled_at: 7,
+            input: review_input,
+        },
+        ACCEPTED_LABEL,
+        "CI repair is sound",
+    ));
     assert_dispatch(
         &reduce(verified, initial_input, history),
         DELIVERY_NODE,
-        &Value::Null,
+        &repaired_delivery_input(),
     );
     history.push(settled_delivery(
         SettledExecutionSpec {
@@ -333,7 +357,7 @@ fn assert_repaired_reviews_then_merge(
             node_instance: 4,
             node: DELIVERY_NODE,
             settled_at: 8,
-            input: Value::Null,
+            input: repaired_delivery_input(),
         },
         DeliveryMode::Merge,
         DELIVERY_MERGED_LABEL,
@@ -396,7 +420,11 @@ async fn verified_software_template(
     let template = BuiltinGraphTemplate::SoftwareChange;
     let graph = template.materialize(delivery).assert_value();
     let runtime = runtime_for(template, delivery, &executable_leaves(&graph.root));
-    let initial_input = json!({"task":"repair checkout"});
+    let initial_input = if delivery == TemplateDelivery::None {
+        json!({"task":"repair checkout"})
+    } else {
+        json!({"task":"repair checkout","issueNumber":"208"})
+    };
     let admitted = NativeV2Admission
         .admit(RunSubmission {
             title: RunTitle::new("Template behavior").assert_value(),

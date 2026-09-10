@@ -2,20 +2,9 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
-use crate::native_v2_delivery::DeliveryTarget;
 
 fn request() -> GitHubReviewRequest {
-    GitHubReviewRequest {
-        target: DeliveryTarget::new(
-            "acme/project",
-            "main",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        )
-        .assert_value(),
-        head_branch: "zeroshot/v2-run".to_owned(),
-        head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
-        source_issue: None,
-    }
+    super::super::test_review_request()
 }
 
 #[test]
