@@ -7,7 +7,8 @@ use openengine_cluster_protocol::{
 
 use super::{DeliveryPolicy, NativeV2AdmissionError};
 use crate::native_v2_contract::{
-    AdmittedRun, NodeRuntimeBinding, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    AdmittedRun, NodeRuntimeBinding, GIT_DELIVERY_MERGE_V2_WORKER_REF,
+    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
 };
 use crate::native_v2_delivery::{validate_delivery_contract, DeliveryMode};
 use crate::native_v2_runner::NodeResponseContract;
@@ -235,7 +236,9 @@ fn validate_delivery_policy(
 fn is_git_delivery_worker(worker: &WorkerRef) -> bool {
     matches!(
         worker.as_str(),
-        GIT_DELIVERY_PR_WORKER_REF | GIT_DELIVERY_MERGE_WORKER_REF
+        GIT_DELIVERY_PR_WORKER_REF
+            | GIT_DELIVERY_MERGE_WORKER_REF
+            | GIT_DELIVERY_MERGE_V2_WORKER_REF
     )
 }
 

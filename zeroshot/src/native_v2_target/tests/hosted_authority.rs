@@ -17,6 +17,8 @@ pub(super) use connections::test_authority;
 #[path = "hosted_authority/direct.rs"]
 mod direct;
 pub(super) use direct::{spawn_direct_target_authority, spawn_rejecting_direct_target_authority};
+#[path = "hosted_authority/merge_plans.rs"]
+mod merge_plans;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
 
@@ -44,12 +46,17 @@ pub(super) struct CapturedHttpRequest {
     pub(super) body: String,
 }
 
-pub(super) async fn spawn_target_authority(
-    request_count: usize,
-) -> (String, tokio::task::JoinHandle<Vec<CapturedHttpRequest>>) {
+pub(super) async fn bind_target_authority() -> (TcpListener, std::net::SocketAddr, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
     let address = listener.local_addr().assert_value();
     let origin = format!("http://{address}");
+    (listener, address, origin)
+}
+
+pub(super) async fn spawn_target_authority(
+    request_count: usize,
+) -> (String, tokio::task::JoinHandle<Vec<CapturedHttpRequest>>) {
+    let (listener, address, origin) = bind_target_authority().await;
     let server_origin = origin.clone();
     let server = tokio::spawn(serve_target_authority(
         listener,
@@ -240,6 +247,15 @@ fn hosted_discovery(origin: &str) -> String {
                 "kind": "zeroshot.hosted-runs/v1",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
+            },
+            "merge_plans": {
+                "kind": "zeroshot.merge-plans/v1",
+                "baseUrl": origin,
+                "routeTemplates": {
+                    "create": "/native-v2/merge-plans",
+                    "status": "/native-v2/merge-plans/{plan_id}",
+                    "force": "/native-v2/merge-plans/{plan_id}/force"
+                }
             },
             "connections": {
                 "kind": "zeroshot.connections/v1",

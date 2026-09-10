@@ -111,7 +111,7 @@ fn pr_delivery_graph(timeout_ms: u64, worker_errors_are_terminal: bool) -> serde
         "kind":"succeed",
         "name":"done",
         "output":delivery_result_schema("pr"),
-        "bindings":delivery_terminal_bindings()
+        "bindings":delivery_terminal_bindings("pr")
     });
     let children = if worker_errors_are_terminal {
         vec![
@@ -157,12 +157,12 @@ fn pr_delivery_graph(timeout_ms: u64, worker_errors_are_terminal: bool) -> serde
 
 fn merge_delivery_graph() -> serde_json::Value {
     let state = delivery_state_schema("merge");
-    let promoted = delivery_field_paths();
+    let promoted = delivery_field_paths("merge");
     let root = json!({"kind":"seq","name":"root","state":state,"children":[
             {"kind":"loop","name":"delivery_loop","state":state,
              "body":{"kind":"seq","name":"delivery_attempt","state":state,"children":[
                 delivery_node(
-                    "builtin.git-delivery.merge@1",
+                    "builtin.git-delivery.merge@2",
                     json!(["merged","conflict","ci_failed"]),
                     10_000,
                     "merge"
@@ -178,7 +178,7 @@ fn merge_delivery_graph() -> serde_json::Value {
                 }],
                 "otherwise":{"kind":"succeed","name":"merged",
                     "output":delivery_result_schema("merge"),
-                    "bindings":delivery_terminal_bindings()},
+                    "bindings":delivery_terminal_bindings("merge")},
                 "promotedStatePaths":[]}
              ],"promotedStatePaths":promoted},
              "until":{"kind":"in","value":{
@@ -186,7 +186,7 @@ fn merge_delivery_graph() -> serde_json::Value {
              },"labels":["merged"]},
              "maxIterations":3,"promotedStatePaths":promoted},
             {"kind":"succeed","name":"done","output":delivery_result_schema("merge"),
-                "bindings":delivery_terminal_bindings()}
+                "bindings":delivery_terminal_bindings("merge")}
         ],"promotedStatePaths":[]});
     native_v2_graph(state, root)
 }
@@ -212,7 +212,7 @@ pub(crate) fn delivery_node(
     json!({
         "kind":"verifier","name":"deliver","worker":worker,
         "input":{"kind":"null"},"output":delivery_result_schema(mode),
-        "inputBindings":[],"writeBindings":delivery_write_bindings(),
+        "inputBindings":[],"writeBindings":delivery_write_bindings(mode),
         "timeoutMs":timeout_ms,"attempts":1,
         "signals":{"delivery":labels},"diagnostic":{
             "kind":"record","fields":{
@@ -223,16 +223,16 @@ pub(crate) fn delivery_node(
 }
 
 pub(crate) fn delivery_result_schema(mode: &str) -> serde_json::Value {
-    let outcomes = match mode {
-        "pr" => Some(json!(["opened"])),
-        "merge" => Some(json!(["merged", "conflict", "ci_failed"])),
+    let (version, outcomes) = match mode {
+        "pr" => Some(("v1", json!(["opened"]))),
+        "merge" => Some(("v2", json!(["merged", "conflict", "ci_failed"]))),
         _ => None,
     }
     .assert_value_with("fixture delivery mode is closed");
-    json!({
+    let mut schema = json!({
         "kind":"record",
         "fields":{
-            "version":{"type":{"kind":"enum","values":["v1"]},"required":true},
+            "version":{"type":{"kind":"enum","values":[version]},"required":true},
             "mode":{"type":{"kind":"enum","values":[mode]},"required":true},
             "outcome":{"type":{"kind":"enum","values":outcomes},"required":true},
             "repository":{"type":{"kind":"string"},"required":true},
@@ -240,7 +240,18 @@ pub(crate) fn delivery_result_schema(mode: &str) -> serde_json::Value {
             "headRevision":{"type":{"kind":"string"},"required":true},
             "pullRequestId":{"type":{"kind":"string"},"required":true}
         }
-    })
+    });
+    if mode == "merge" {
+        schema
+            .assert_key_mut("fields")
+            .as_object_mut()
+            .assert_value_with("delivery schema fields")
+            .insert(
+                "mergeRevision".to_owned(),
+                json!({"type":{"kind":"string"},"required":true}),
+            );
+    }
+    schema
 }
 
 pub(crate) fn delivery_state_schema(mode: &str) -> serde_json::Value {
@@ -257,46 +268,63 @@ pub(crate) fn delivery_state_schema(mode: &str) -> serde_json::Value {
 }
 
 pub(crate) fn delivery_initial_input(instruction: &str, mode: &str) -> serde_json::Value {
-    let outcome = match mode {
-        "pr" => Some("opened"),
-        "merge" => Some("conflict"),
+    let (version, outcome) = match mode {
+        "pr" => Some(("v1", "opened")),
+        "merge" => Some(("v2", "conflict")),
         _ => None,
     }
     .assert_value_with("fixture delivery mode is closed");
-    json!({
+    let mut input = json!({
         "instruction":instruction,
-        "version":"v1",
+        "version":version,
         "mode":mode,
         "outcome":outcome,
         "repository":"placeholder/repository",
         "targetBranch":"main",
         "headRevision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "pullRequestId":"pending"
-    })
+    });
+    if mode == "merge" {
+        input["mergeRevision"] = json!("");
+    }
+    input
 }
 
-fn delivery_fields() -> [&'static str; 7] {
-    [
-        "version",
-        "mode",
-        "outcome",
-        "repository",
-        "targetBranch",
-        "headRevision",
-        "pullRequestId",
-    ]
+fn delivery_fields(mode: &str) -> &'static [&'static str] {
+    match mode {
+        "pr" => &[
+            "version",
+            "mode",
+            "outcome",
+            "repository",
+            "targetBranch",
+            "headRevision",
+            "pullRequestId",
+        ],
+        "merge" => &[
+            "version",
+            "mode",
+            "outcome",
+            "repository",
+            "targetBranch",
+            "headRevision",
+            "mergeRevision",
+            "pullRequestId",
+        ],
+        _ => panic!("fixture delivery mode is closed"),
+    }
 }
 
-pub(crate) fn delivery_field_paths() -> Vec<serde_json::Value> {
-    delivery_fields()
-        .into_iter()
+pub(crate) fn delivery_field_paths(mode: &str) -> Vec<serde_json::Value> {
+    delivery_fields(mode)
+        .iter()
         .map(|field| json!([field]))
         .collect()
 }
 
-fn delivery_write_bindings() -> Vec<serde_json::Value> {
-    delivery_fields()
-        .into_iter()
+fn delivery_write_bindings(mode: &str) -> Vec<serde_json::Value> {
+    delivery_fields(mode)
+        .iter()
         .map(|field| {
             json!({
                 "value":{"node":"deliver","channel":"out","path":[field]},
@@ -306,9 +334,9 @@ fn delivery_write_bindings() -> Vec<serde_json::Value> {
         .collect()
 }
 
-pub(crate) fn delivery_terminal_bindings() -> Vec<serde_json::Value> {
-    delivery_fields()
-        .into_iter()
+pub(crate) fn delivery_terminal_bindings(mode: &str) -> Vec<serde_json::Value> {
+    delivery_fields(mode)
+        .iter()
         .map(|field| {
             json!({
                 "target":[field],

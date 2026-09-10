@@ -80,6 +80,9 @@ pub fn try_execute_native_v2_static(
         return Ok(Some(CliOutcome::Completed));
     }
     let outcome = match command {
+        NativeV2CliCommand::PlanValidate { file } => {
+            return super::merge_plans::validate_file(file, output).map(Some);
+        }
         NativeV2CliCommand::TemplateList => execute_template_list(output)?,
         NativeV2CliCommand::TemplateShow { template, delivery } => {
             execute_template_show(*template, *delivery, output)?
@@ -201,7 +204,7 @@ fn named_source_record(run: &RunCommand, params: &PreparedRunRequest) -> Option<
     }))
 }
 
-fn validate_github_token(value: String) -> Result<String, NativeV2CliError> {
+pub(super) fn validate_github_token(value: String) -> Result<String, NativeV2CliError> {
     if value.is_empty() || value.len() > 4_096 || value.contains('\0') {
         Err(NativeV2CliError::GitHubToken)
     } else {
@@ -234,7 +237,7 @@ fn prepare_intent(
     })
 }
 
-fn select_connections<F>(
+pub(super) fn select_connections<F>(
     runtime: &RuntimePlan,
     available: F,
 ) -> Result<RunConnectionValues, NativeV2CliError>
@@ -482,7 +485,7 @@ fn validate_graph_profile(graph: &GraphSpec) -> Result<(), NativeV2CliError> {
     ))
 }
 
-fn read_json<T>(kind: &'static str, path: &Path) -> Result<T, NativeV2CliError>
+pub(super) fn read_json<T>(kind: &'static str, path: &Path) -> Result<T, NativeV2CliError>
 where
     T: serde::de::DeserializeOwned,
 {

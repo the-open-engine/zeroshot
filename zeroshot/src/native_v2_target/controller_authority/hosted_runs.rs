@@ -7,7 +7,10 @@ use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
 use reqwest::{RequestBuilder, Response, Url};
 use serde::de::DeserializeOwned;
 
-use super::contract::{HostedRunsDescriptor, http_error, read_success_json, require_response_route};
+use super::contract::{
+    HostedRunsDescriptor, MergePlansDescriptor, authority_error, http_error, read_success_json,
+    read_success_json_with_limit, require_response_route,
+};
 use super::TargetHttpControlAuthority;
 use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
 use zeroshot_engine::native_v2_cli::{
@@ -18,6 +21,9 @@ use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
 const NDJSON_MEDIA_TYPE: &str = "application/x-ndjson";
 const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
+
+#[path = "hosted_runs/merge_plans_http.rs"]
+mod merge_plans_http;
 
 struct HostedRunSubscription<E> {
     response: Response,
@@ -127,13 +133,34 @@ impl TargetHttpControlAuthority {
     pub(super) async fn hosted_json<T: DeserializeOwned>(
         &self,
         request: RequestBuilder,
-        url: &Url,
         operation: &'static str,
+        maximum_bytes: Option<usize>,
     ) -> Result<T, TargetAuthorityError> {
-        let response = request.send().await.map_err(|_| {
+        let request = request.build().map_err(|_| {
             TargetAuthorityError::disconnected(format!("{operation} request failed"))
         })?;
-        read_success_json(response, url, operation).await
+        let expected = request.url().clone();
+        let response = self.client.execute(request).await.map_err(|_| {
+            TargetAuthorityError::disconnected(format!("{operation} request failed"))
+        })?;
+        if let Some(maximum_bytes) = maximum_bytes {
+            read_success_json_with_limit(response, &expected, operation, maximum_bytes).await
+        } else {
+            read_success_json(response, &expected, operation).await
+        }
+    }
+
+    pub(super) async fn hosted_get_json<T: DeserializeOwned>(
+        &self,
+        url: Url,
+        access: &str,
+        operation: &'static str,
+    ) -> Result<T, TargetAuthorityError> {
+        let request = self
+            .authorized(self.client.get(url.clone()), access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store");
+        self.hosted_json(request, operation, None).await
     }
 
     async fn hosted_stream<E>(
@@ -170,11 +197,7 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunListResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.list_url()?;
-        let request = self
-            .authorized(self.client.get(url.clone()), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store");
-        self.hosted_json(request, &url, "hosted run list").await
+        self.hosted_get_json(url, &access, "hosted run list").await
     }
 
     pub(super) async fn hosted_run_status(
@@ -184,11 +207,8 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunStatusResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.status_url(&params.run_id)?;
-        let request = self
-            .authorized(self.client.get(url.clone()), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store");
-        self.hosted_json(request, &url, "hosted run status").await
+        self.hosted_get_json(url, &access, "hosted run status")
+            .await
     }
 
     pub(super) async fn hosted_run_watch(
@@ -227,7 +247,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
             .body("{}");
-        self.hosted_json(request, &url, "hosted run force").await
+        self.hosted_json(request, "hosted run force", None).await
     }
 }
 

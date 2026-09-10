@@ -2,6 +2,7 @@
 
 from ._version import __version__ as __version__
 from .client import Client as Client
+from .client import MergePlan as MergePlan
 from .client import Run as Run
 from .errors import (
     ClientClosedError as ClientClosedError,
@@ -17,6 +18,21 @@ from .errors import (
 )
 from .errors import (
     ZeroshotError as ZeroshotError,
+)
+from .plan_errors import (
+    MergePlanWaitTimeout as MergePlanWaitTimeout,
+)
+from .plans import (
+    MergePlanRequest as MergePlanRequest,
+)
+from .plans import (
+    MergePlanRun as MergePlanRun,
+)
+from .plans import (
+    MergePlanRunStatus as MergePlanRunStatus,
+)
+from .plans import (
+    MergePlanStatus as MergePlanStatus,
 )
 from .run_errors import (
     RunFailedError as RunFailedError,
@@ -56,6 +72,9 @@ from .runtime import (
 )
 from .runtime import (
     GraphSpec as GraphSpec,
+)
+from .runtime import (
+    HostedTarget as HostedTarget,
 )
 from .runtime import (
     LocalTarget as LocalTarget,

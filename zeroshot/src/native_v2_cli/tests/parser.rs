@@ -14,6 +14,44 @@ fn parser_exposes_static_help_and_version_commands() {
 }
 
 #[test]
+fn parser_exposes_the_closed_hosted_plan_surface() {
+    let submit = parse_native_v2_args(args(&[
+        "plan",
+        "submit",
+        "plan.json",
+        "--target",
+        "prod",
+        "--submission-key",
+        "plan-retry-1",
+        "--detach",
+    ]))
+    .assert_value();
+    let NativeV2CliCommand::PlanSubmit(submit) = submit else {
+        panic!("expected plan submit command");
+    };
+    assert_eq!(submit.file, PathBuf::from("plan.json"));
+    assert_eq!(submit.target, "prod");
+    assert_eq!(submit.submission_key.as_str(), "plan-retry-1");
+    assert!(submit.detach);
+
+    let status = parse_native_v2_args(args(&["plan", "status", "plan-7", "--target", "prod"]))
+        .assert_value();
+    assert!(matches!(
+        status,
+        NativeV2CliCommand::PlanStatus(MergePlanSelector { target, plan_id })
+            if target == "prod" && plan_id.as_str() == "plan-7"
+    ));
+
+    for invalid in [
+        &["plan", "submit", "plan.json", "--target", "prod"][..],
+        &["plan", "submit", "plan.json", "--submission-key", "key"][..],
+        &["plan", "watch", "plan-7"][..],
+    ] {
+        assert!(parse_native_v2_args(args(invalid)).is_err());
+    }
+}
+
+#[test]
 fn durable_observation_accepts_native_resume_and_execution_filters() {
     let watch = parse_native_v2_args(args(&[
         "watch", "run-7", "--target", "prod", "--after", "cloud:12",

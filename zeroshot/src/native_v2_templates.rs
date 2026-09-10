@@ -9,7 +9,7 @@ use openengine_cluster_protocol::{
     WorkerErrorCode, WorkerRef, WriteBinding,
 };
 
-use crate::native_v2_contract::{GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF};
+use crate::native_v2_contract::{GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF};
 use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
 };
@@ -509,7 +509,8 @@ fn delivery_mode(delivery: TemplateDelivery) -> Option<DeliveryMode> {
 fn delivery_worker(mode: DeliveryMode) -> &'static str {
     match mode {
         DeliveryMode::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
-        DeliveryMode::Merge => GIT_DELIVERY_MERGE_WORKER_REF,
+        DeliveryMode::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
+        DeliveryMode::MergeV1 => unreachable!("built-in templates never author merge@1"),
     }
 }
 

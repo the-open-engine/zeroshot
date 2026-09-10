@@ -18,12 +18,14 @@ use crate::full_v1_reducer::{
     ReductionInput, StructuralOccurrence,
 };
 use crate::native_v2_admission::NativeV2Admission;
-use crate::native_v2_candidate::test_support::{TestGitRepository, full_graph, git, success_node};
+use crate::native_v2_candidate::test_support::{
+    TestGitRepository, full_graph, git, git_output, success_node,
+};
 use crate::native_v2_contract::{
     self, CodexProvider, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
     NodeRuntimeBinding, RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId,
-    SourceRepositoryId, SourceRevisionId, ResolvedSource, GIT_DELIVERY_MERGE_WORKER_REF,
-    GIT_DELIVERY_PR_WORKER_REF,
+    SourceRepositoryId, SourceRevisionId, ResolvedSource, GIT_DELIVERY_MERGE_V2_WORKER_REF,
+    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NativeNodeRunner, NodeDriver, NodeRunRequest, NodeRunner,
@@ -63,6 +65,12 @@ async fn no_ci_can_merge_but_only_after_authoritative_confirmation() {
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test]
+async fn legacy_merge_worker_retains_the_v1_receipt_contract() {
+    let authority = successful_delivery(DeliveryMode::MergeV1, DELIVERY_MERGED_LABEL, 3).await;
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
+}
+
 async fn successful_delivery(
     mode: DeliveryMode,
     expected_label: &str,
@@ -73,6 +81,23 @@ async fn successful_delivery(
     let outcome = run_delivery(&repo, authority.clone(), attempts, mode).await;
     let output = assert_delivery_signal(&outcome, expected_label);
     assert_receipt_match(output, mode, &repo, true);
+    match mode {
+        DeliveryMode::PullRequest => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v1")));
+            assert!(output.pointer("/mergeRevision").is_none());
+        }
+        DeliveryMode::MergeV1 => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v1")));
+            assert!(output.pointer("/mergeRevision").is_none());
+        }
+        DeliveryMode::Merge => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v2")));
+            assert_eq!(
+                output.pointer("/mergeRevision"),
+                Some(&json!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+            );
+        }
+    }
     authority
 }
 
@@ -95,6 +120,20 @@ async fn observed_conflict_is_a_routable_non_receipt_result() {
     let output = assert_delivery_signal(&outcome, DELIVERY_CONFLICT_LABEL);
     assert_receipt_match(output, DeliveryMode::Merge, &repo, false);
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        authority.conflict_materializations.load(Ordering::SeqCst),
+        1
+    );
+    assert_eq!(output.pointer("/version"), Some(&json!("v2")));
+    assert_eq!(output.pointer("/mergeRevision"), Some(&json!("")));
+    let target_revision = git_output(&repo.remote, &["rev-parse", "refs/heads/main"]);
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "MERGE_HEAD"]),
+        target_revision
+    );
+    assert!(outcome_diagnostic(&outcome).contains(&format!(
+        "targetRevision={target_revision}; conflictedPaths=[\"result.txt\"]"
+    )));
 }
 
 #[tokio::test]
@@ -107,6 +146,78 @@ async fn merge_api_conflict_is_not_collapsed_into_infrastructure_failure() {
     let outcome = run_delivery(&repo, authority.clone(), 2, DeliveryMode::Merge).await;
     assert_delivery_signal(&outcome, DELIVERY_CONFLICT_LABEL);
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        authority.conflict_materializations.load(Ordering::SeqCst),
+        1
+    );
+}
+
+#[tokio::test]
+async fn stale_conflict_observation_is_reobserved_without_repair_or_failure() {
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(
+        repo.remote.clone(),
+        Script::StaleConflictThenMerges,
+    ));
+
+    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+
+    let output = assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
+    assert_receipt_match(output, DeliveryMode::Merge, &repo, true);
+    assert_eq!(authority.inspections.load(Ordering::SeqCst), 3);
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        authority.conflict_materializations.load(Ordering::SeqCst),
+        1
+    );
+    assert_eq!(
+        git_output(
+            &repo.workspace,
+            &["status", "--porcelain=v1", "--untracked-files=all"]
+        ),
+        ""
+    );
+}
+
+#[test]
+fn merge_success_receipts_require_the_exact_authoritative_revision() {
+    let target = DeliveryTarget::new(
+        "acme/project",
+        "main",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .assert_value();
+    let mut receipt = json!({
+        "version":"v2",
+        "mode":"merge",
+        "outcome":"merged",
+        "repository":"acme/project",
+        "targetBranch":"main",
+        "headRevision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "mergeRevision":"cccccccccccccccccccccccccccccccccccccccc",
+        "pullRequestId":"17"
+    });
+    assert!(is_matching_success_receipt(
+        &receipt,
+        DeliveryMode::Merge,
+        &target
+    ));
+
+    receipt["mergeRevision"] = json!("");
+    assert!(!is_matching_success_receipt(
+        &receipt,
+        DeliveryMode::Merge,
+        &target
+    ));
+    receipt
+        .as_object_mut()
+        .assert_value()
+        .remove("mergeRevision");
+    assert!(!is_matching_success_receipt(
+        &receipt,
+        DeliveryMode::Merge,
+        &target
+    ));
 }
 
 #[tokio::test]
@@ -269,10 +380,7 @@ async fn exact_merge_retry_rediscovers_the_same_review_and_receipt() {
 
     assert_eq!(first, second);
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
-    let reviews = authority
-        .reviews
-        .lock()
-        .assert_value_with("review request lock");
+    let reviews = authority.review_requests();
     assert_eq!(reviews.len(), 2);
     assert_eq!(reviews.assert_at(0), reviews.assert_at(1));
 }
@@ -292,13 +400,7 @@ async fn rewritten_history_is_rejected_before_push() {
         WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
     );
     assert!(!authority.pushed.load(Ordering::SeqCst));
-    assert!(
-        authority
-            .reviews
-            .lock()
-            .assert_value_with("review request lock")
-            .is_empty()
-    );
+    assert!(authority.review_requests().is_empty());
 }
 
 #[tokio::test]
@@ -486,14 +588,15 @@ fn target(repo: &TempRepo) -> DeliveryTarget {
 fn worker_ref(mode: DeliveryMode) -> &'static str {
     match mode {
         DeliveryMode::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
-        DeliveryMode::Merge => GIT_DELIVERY_MERGE_WORKER_REF,
+        DeliveryMode::MergeV1 => GIT_DELIVERY_MERGE_WORKER_REF,
+        DeliveryMode::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
     }
 }
 
 fn delivery_node(mode: DeliveryMode) -> Value {
     let labels: &[&str] = match mode {
         DeliveryMode::PullRequest => &[DELIVERY_OPENED_LABEL],
-        DeliveryMode::Merge => &[
+        DeliveryMode::MergeV1 | DeliveryMode::Merge => &[
             DELIVERY_MERGED_LABEL,
             DELIVERY_CONFLICT_LABEL,
             DELIVERY_CI_FAILED_LABEL,
@@ -529,6 +632,16 @@ fn assert_delivery_signal<'a>(outcome: &'a WorkerOutcome, expected: &str) -> &'a
     assert!(diagnostic.pointer("/message").is_some_and(Value::is_string));
     assert!(artifacts.is_empty());
     output
+}
+
+fn outcome_diagnostic(outcome: &WorkerOutcome) -> &str {
+    match outcome {
+        WorkerOutcome::Verifier { diagnostic, .. } => diagnostic
+            .pointer("/message")
+            .and_then(Value::as_str)
+            .assert_value_with("delivery diagnostic message"),
+        _ => panic!("delivery must return a verifier result"),
+    }
 }
 
 fn assert_receipt_match(output: &Value, mode: DeliveryMode, repo: &TempRepo, expected: bool) {

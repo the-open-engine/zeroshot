@@ -330,8 +330,10 @@ fn enforce_delivery_terminal(
     snapshot: &RunSnapshot,
     terminal: TerminalResult,
 ) -> Result<TerminalResult, NativeV2SupervisorError> {
+    let requires_delivery_receipt =
+        policy == DeliveryPolicy::Required || sole_delivery_node(admitted).is_some();
     let accepted = match &terminal {
-        TerminalResult::Succeeded { output } if policy == DeliveryPolicy::Required => {
+        TerminalResult::Succeeded { output } if requires_delivery_receipt => {
             has_required_delivery_receipt(admitted, snapshot, output)
         }
         TerminalResult::Succeeded { .. } | TerminalResult::Failed { .. } => true,

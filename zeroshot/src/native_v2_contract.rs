@@ -27,6 +27,8 @@ use thiserror::Error;
 pub const GIT_DELIVERY_PR_WORKER_REF: &str = "builtin.git-delivery.pr@1";
 /// Graph-visible merge delivery worker backed by the shared Git delivery implementation.
 pub const GIT_DELIVERY_MERGE_WORKER_REF: &str = "builtin.git-delivery.merge@1";
+/// Merge delivery with an authoritative merge revision in its v2 receipt.
+pub const GIT_DELIVERY_MERGE_V2_WORKER_REF: &str = "builtin.git-delivery.merge@2";
 /// Conventional connection key used by built-in GitHub checkout and delivery behavior.
 pub const GITHUB_CONNECTION_KEY: &str = "github";
 

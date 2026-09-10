@@ -42,7 +42,7 @@ harness, provider, or model. `run()` submits one durable graph run and waits for
 `submit()` returns a `Run` immediately for status, resumable watch/log streams, waiting, or durable
 force-stop control.
 
-## Local and direct targets
+## Local, direct, and hosted targets
 
 Local execution uses the current Git workspace by default. Agents mutate that workspace in place:
 
@@ -75,8 +75,49 @@ async def run_direct(runtime: UniformRuntime) -> None:
     result.raise_for_failure()
 ```
 
-Docker is a deployment of `DirectTarget`, not a separate client or target type. Authentication and
-hosted targets are intentionally outside this contract.
+Docker is a deployment of `DirectTarget`, not a separate client or target type.
+
+`HostedTarget` reuses a named target and login from the CLI. Merge plans are immutable DAGs over one
+repository, branch, and hosted profile. That profile must contain exactly one merge-delivery node;
+pull-request delivery isn't accepted for plans.
+
+```python
+from datetime import UTC, datetime, timedelta
+
+from zeroshot import Client, HostedTarget, MergePlanRequest, MergePlanRun
+
+
+async def run_plan() -> None:
+    request = MergePlanRequest(
+        title="Release checkout update",
+        repository="the-open-engine/zeroshot",
+        branch="main",
+        profile="org:software-change",
+        expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        runs={
+            "backend": MergePlanRun(input={"task": "Update the API."}),
+            "frontend": MergePlanRun(input={"task": "Update the client."}),
+            "integrate": MergePlanRun(
+                input={"task": "Resolve conflicts and run the release tests."},
+                needs=("backend", "frontend"),
+            ),
+        },
+        submission_key="checkout-release-1",
+    )
+
+    async with Client(target=HostedTarget("cloud")) as client:
+        plan = await client.submit_plan(request)
+        status = await plan.wait(wait_timeout=21_600)
+
+    if not status.succeeded:
+        raise RuntimeError(f"merge plan ended as {status.state}")
+```
+
+Plan input is static JSON. A dependency controls when a node may start; it doesn't copy output into
+another node. Run IDs are assigned once during atomic submission, and each ready node resolves its
+source revision after its dependencies merge. Each node gets its own 24-hour queue deadline when it
+becomes ready. `MergePlan.watch()` polls the aggregate Cloud status and emits changed snapshots
+because the v1 plan API has no streaming endpoint.
 
 ## Exact graph and runtime control
 

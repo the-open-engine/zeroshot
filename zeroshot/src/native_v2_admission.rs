@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::native_v2_contract::{
-    AdmittedRun, NodeRuntimeBinding, RunSubmission, RunSubmissionIntent, RuntimePlan,
+    AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF, NodeRuntimeBinding, RunSubmission,
+    RunSubmissionIntent, RuntimePlan,
 };
 use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
@@ -65,6 +66,8 @@ pub enum NativeV2AdmissionError {
         policy: DeliveryPolicy,
         found: usize,
     },
+    #[error("merge plans require exactly one graph-visible Git merge delivery node")]
+    MergeDeliveryRequired,
     #[error(
         "run declares {found} unique environment names; maximum is {MAX_DECLARED_ENVIRONMENT_NAMES}"
     )]
@@ -113,6 +116,23 @@ impl NativeV2Admission {
             .await
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    /// Validates a reusable profile for merge-plan use, requiring merge rather than PR delivery.
+    pub(crate) async fn validate_merge_profile(
+        &self,
+        graph: &GraphSpec,
+        runtime: &RuntimePlan,
+    ) -> Result<(), NativeV2AdmissionError> {
+        self.validate_profile(graph, runtime, DeliveryPolicy::Required)
+            .await?;
+        let has_merge = executable_declarations(&graph.root)
+            .iter()
+            .any(|declaration| declaration.worker.as_str() == GIT_DELIVERY_MERGE_V2_WORKER_REF);
+        if !has_merge {
+            return Err(NativeV2AdmissionError::MergeDeliveryRequired);
+        }
+        Ok(())
     }
 
     /// Admits with the local policy, where graph-visible delivery is optional.

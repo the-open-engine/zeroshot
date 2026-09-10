@@ -12,9 +12,10 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionKey, ConnectionListRequest,
     ConnectionListResult, ConnectionMutationResult, ConnectionScope, ConnectionSetRequest, Cursor,
-    EnvironmentVariableName, ExecutionRef, IdempotencyKey, RunAttachEventNotification,
-    RunAttachParams, RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams, RunId,
-    RunConnectionValues, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
+    EnvironmentVariableName, ExecutionRef, IdempotencyKey, MergePlan, MergePlanId,
+    MergePlanRunRequest, MergePlanSource, RunAttachEventNotification, RunAttachParams,
+    RunConnectionValues, RunForceParams, RunId, RunListParams, RunLogEventNotification,
+    RunLogsParams, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
     RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult, RunProfileMutationResult,
     RunProfileName, RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunTitle,
     RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId, SourceRevisionId,
@@ -160,6 +161,33 @@ impl fmt::Debug for PreparedRunRequest {
     }
 }
 
+/// CLI-materialized hosted merge plan with an explicit unresolved source selector.
+#[derive(Clone, PartialEq)]
+pub struct PreparedMergePlanRequest {
+    pub submission_key: IdempotencyKey,
+    pub title: RunTitle,
+    pub expires_at: String,
+    pub source: MergePlanSource,
+    pub profile: RunProfileSelector,
+    pub runs: Vec<MergePlanRunRequest>,
+    pub connections: RunConnectionValues,
+    pub github_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MergePlanSubmitCommand {
+    pub target: String,
+    pub file: PathBuf,
+    pub detach: bool,
+    pub submission_key: IdempotencyKey,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MergePlanSelector {
+    pub target: String,
+    pub plan_id: MergePlanId,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NamedRunSource {
     pub resolved: ResolvedSource,
@@ -228,6 +256,13 @@ pub enum NativeV2CliCommand {
         template: BuiltinGraphTemplate,
         delivery: TemplateDelivery,
     },
+    PlanValidate {
+        file: PathBuf,
+    },
+    PlanSubmit(MergePlanSubmitCommand),
+    PlanStatus(MergePlanSelector),
+    PlanWatch(MergePlanSelector),
+    PlanForceStop(MergePlanSelector),
     Run(RunCommand),
     List {
         target: Option<String>,
@@ -249,6 +284,13 @@ impl NativeV2CliCommand {
             Self::Version => Some(VERSION),
             _ => None,
         }
+    }
+
+    fn is_plan_operation(&self) -> bool {
+        matches!(
+            self,
+            Self::PlanSubmit(_) | Self::PlanStatus(_) | Self::PlanWatch(_) | Self::PlanForceStop(_)
+        )
     }
 
     fn is_connection_operation(&self) -> bool {
@@ -338,6 +380,8 @@ pub enum NativeV2CliError {
     Disconnected,
     #[error("run finished unsuccessfully")]
     RunFailed,
+    #[error("merge plan finished unsuccessfully")]
+    MergePlanFailed,
     #[error("could not write CLI output: {0}")]
     Output(#[from] std::io::Error),
     #[error("could not encode CLI output: {0}")]
@@ -458,6 +502,36 @@ pub trait NativeV2CliBackend: Send + Sync {
     ) -> Result<RunProfileDefaultResult, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not advertise profile management".to_owned(),
+        ))
+    }
+
+    async fn merge_plan_submit(
+        &self,
+        _target: &str,
+        _request: PreparedMergePlanRequest,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise merge plans".to_owned(),
+        ))
+    }
+
+    async fn merge_plan_status(
+        &self,
+        _target: &str,
+        _plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise merge plans".to_owned(),
+        ))
+    }
+
+    async fn merge_plan_force(
+        &self,
+        _target: &str,
+        _plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise merge plans".to_owned(),
         ))
     }
 

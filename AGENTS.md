@@ -77,7 +77,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ceiling while still observing cancellation and cleanup.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
   merge queues/deferrals, and succeeds only after observing the exact merged result. Outside merge
-  queues, branch freshness advances only through an authorized compare-and-swap response.
+  queues, branch freshness advances only through an authorized compare-and-swap response. A
+  reported conflict is routable only after the trusted lane fetches the exact current target and
+  leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
+  credential. Merge receipts preserve GitHub's authoritative merged revision.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
@@ -112,6 +115,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded
   from public run status and logs.
+- Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
+  and profile. The target resolves each node's exact revision only after its dependencies succeed;
+  plans have static inputs, no cross-node dataflow, and no retry-in-place.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
@@ -125,6 +131,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                    |
 | Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                             |
 | Hosted/cloud composition      | `zeroshot/src/native_v2_cloud.rs`, `zeroshot/src/native_v2_hosting.rs`                                        |
+| Hosted merge plans            | `crates/openengine-cluster-protocol/src/native_v2_hosted/merge_plan.rs`, `zeroshot/src/native_v2_cli/execution/merge_plans.rs`, `zeroshot/src/native_v2_target/controller_authority/hosted_runs/` |
 | Portable controller           | `zeroshot/src/native_v2_portable_controller.rs`, `zeroshot/src/native_v2_portable_controller/`                |
 | Provider/delivery composition | `zeroshot/src/native_v2_candidate.rs`, `zeroshot/src/native_v2_candidate/`                                    |
 | Target server                 | `zeroshot/src/native_v2_target.rs`, `zeroshot/src/native_v2_target/`                                          |

@@ -8,18 +8,19 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, Cursor, RunAttachEventNotification,
-    RunAttachParams, RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams,
-    RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
-    RunProfileSetRequest, RunStatus, RunStatusParams, RunSubmitResult, RunWatchParams,
+    ConnectionMutationResult, ConnectionSetRequest, Cursor, MergePlan, MergePlanId,
+    RunAttachEventNotification, RunAttachParams, RunForceParams, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatus, RunStatusParams,
+    RunSubmitResult, RunWatchParams,
 };
 use tokio::sync::mpsc;
 
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatus, CliRunStatusResult,
     CliRunWatchEventNotification, CliSubscription, CliSubscriptionItem, NativeV2CliBackend,
-    NativeV2CliError, PreparedRunRequest, TargetAdd,
+    NativeV2CliError, PreparedMergePlanRequest, PreparedRunRequest, TargetAdd,
 };
 
 #[path = "oecp/errors.rs"]
@@ -213,6 +214,30 @@ where
         self.connector
             .profile_default(require_named_target(target)?, request)
             .await
+    }
+
+    async fn merge_plan_submit(
+        &self,
+        target: &str,
+        request: PreparedMergePlanRequest,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        self.connector.merge_plan_submit(target, request).await
+    }
+
+    async fn merge_plan_status(
+        &self,
+        target: &str,
+        plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        self.connector.merge_plan_status(target, plan_id).await
+    }
+
+    async fn merge_plan_force(
+        &self,
+        target: &str,
+        plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        self.connector.merge_plan_force(target, plan_id).await
     }
 
     async fn run_submit(

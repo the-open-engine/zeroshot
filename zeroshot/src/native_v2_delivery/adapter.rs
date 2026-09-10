@@ -1,5 +1,6 @@
 use super::*;
 
+mod conflict;
 mod head;
 mod input;
 mod review;
@@ -344,7 +345,9 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<ReviewStep, DeliveryStop> {
         match drive.mode {
             DeliveryMode::PullRequest => self.advance_pull_request(drive, progress).await,
-            DeliveryMode::Merge => self.advance_merge(drive, progress).await,
+            DeliveryMode::MergeV1 | DeliveryMode::Merge => {
+                self.advance_merge(drive, progress).await
+            }
         }
     }
 
@@ -362,10 +365,11 @@ impl NativeV2DeliveryAdapter {
                     drive,
                     DELIVERY_OPENED_LABEL,
                     "GitHub authoritatively confirmed the pull request is open",
+                    None,
                 )
                 .await
             }
-            ReviewProgress::Merged | ReviewProgress::Closed => Err(crash_outcome()),
+            ReviewProgress::Merged(_) | ReviewProgress::Closed => Err(crash_outcome()),
         }
     }
 
@@ -375,24 +379,21 @@ impl NativeV2DeliveryAdapter {
         progress: ReviewProgress,
     ) -> Result<ReviewStep, DeliveryStop> {
         match progress {
-            ReviewProgress::Merged => {
+            ReviewProgress::Merged(merge_revision) => {
                 review_completion(
                     drive,
                     DELIVERY_MERGED_LABEL,
                     "GitHub authoritatively confirmed merge",
+                    Some(&merge_revision),
                 )
                 .await
             }
             ReviewProgress::Conflict => {
-                review_completion(
-                    drive,
-                    DELIVERY_CONFLICT_LABEL,
-                    "GitHub authoritatively reported a merge conflict",
-                )
-                .await
+                self.complete_conflict(drive, "GitHub authoritatively reported a merge conflict")
+                    .await
             }
             ReviewProgress::CiFailed(diagnostic) => {
-                review_completion(drive, DELIVERY_CI_FAILED_LABEL, &diagnostic).await
+                review_completion(drive, DELIVERY_CI_FAILED_LABEL, &diagnostic, None).await
             }
             ReviewProgress::Mergeable => self.advance_mergeable(drive).await,
             ReviewProgress::Pending => {
@@ -422,12 +423,12 @@ impl NativeV2DeliveryAdapter {
                 return self.advance_review_head(drive).await;
             }
             GitHubMergeRequestOutcome::Conflict => {
-                return review_completion(
-                    drive,
-                    DELIVERY_CONFLICT_LABEL,
-                    "GitHub authoritatively rejected merge due to conflict",
-                )
-                .await;
+                return self
+                    .complete_conflict(
+                        drive,
+                        "GitHub authoritatively rejected merge due to conflict",
+                    )
+                    .await;
             }
         }
         Ok(ReviewStep::Continue)

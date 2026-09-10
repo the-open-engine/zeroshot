@@ -1,4 +1,4 @@
-"""Async client for the Zeroshot executable and direct targets."""
+"""Async client for local, direct, and named hosted Zeroshot targets."""
 
 from __future__ import annotations
 
@@ -15,13 +15,16 @@ from typing import TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
 from ._process import NativeProcess
-from ._projection import _log_event, _status, _summary
-from .errors import ClientClosedError, InvalidRequestError, ProtocolError
+from ._projection import _log_event, _plan_status, _status, _summary
+from .errors import ClientClosedError, InvalidRequestError, ProtocolError, TargetError
+from .plan_errors import MergePlanWaitTimeout
+from .plans import MergePlanRequest, MergePlanStatus
 from .run_errors import RunWaitTimeout
 from .runs import LogEvent, RunRequest, RunResult, RunStatus, RunSummary
 from .runtime import (
     DirectTarget,
     GraphSpec,
+    HostedTarget,
     LocalTarget,
     Preset,
     RuntimePlan,
@@ -86,10 +89,10 @@ class _RunOptions(_SubmitOptions, total=False):
 
 
 class Client:
-    """Submit and observe Zeroshot graph runs.
+    """Submit and observe Zeroshot graph runs and hosted merge plans.
 
     Args:
-        target: Local target by default, or an unauthenticated direct target such as Docker.
+        target: Local target by default, an unauthenticated direct target, or a named hosted target.
         preset: Default executable-owned graph preset. None selects software-change.
         runtime: Default runtime. None requires a runtime on each string submission.
         environment: Source for runtime-declared environment values. None reads the ambient
@@ -234,6 +237,56 @@ class Client:
         completes before local controller startup or direct-target contact.
         """
         return await self._submit(task, _overrides(options))
+
+    async def submit_plan(self, request: MergePlanRequest) -> MergePlan:
+        """Validate and atomically submit one merge-only DAG to a hosted target.
+
+        Args:
+            request: Immutable plan metadata, profile selector, and static run DAG.
+
+        Returns:
+            A durable merge-plan handle bound to this client's hosted target.
+
+        Raises:
+            InvalidRequestError: If this client does not use HostedTarget or validation fails.
+            TargetError: If the named target is unavailable or submission fails.
+            ProtocolError: If native output is malformed.
+        """
+        self._require_hosted_target()
+        submission_key = request.submission_key or _submission_key()
+        with tempfile.TemporaryDirectory(prefix="zeroshot-python-plan-") as directory:
+            manifest = _write_json(Path(directory) / "plan.json", request.to_dict())
+            await self._native(static=True).json(["plan", "validate", str(manifest)])
+            await self._ready()
+            value = await self._native().json(
+                [
+                    "plan",
+                    "submit",
+                    str(manifest),
+                    *self._route_arguments(),
+                    "--submission-key",
+                    submission_key,
+                    "--detach",
+                ]
+            )
+        status = _plan_status(value)
+        return MergePlan(self, status.plan_id)
+
+    def get_plan(self, plan_id: str) -> MergePlan:
+        """Reconstruct a durable hosted merge-plan handle without target I/O.
+
+        Args:
+            plan_id: Opaque server-assigned plan identity.
+
+        Returns:
+            A handle resolved lazily against this client's named hosted target.
+
+        Raises:
+            ClientClosedError: If this client is closed.
+            InvalidRequestError: If this client does not use HostedTarget.
+        """
+        self._require_hosted_target()
+        return MergePlan(self, plan_id)
 
     async def _submit(self, request: str | RunRequest, overrides: _Overrides) -> Run:
         self._ensure_open()
@@ -432,7 +485,49 @@ class Client:
         return environment, secrets
 
     def _route_arguments(self) -> list[str]:
-        return ["--target", "python-sdk"] if isinstance(self.target, DirectTarget) else []
+        if isinstance(self.target, DirectTarget):
+            return ["--target", "python-sdk"]
+        if isinstance(self.target, HostedTarget):
+            return ["--target", self.target.name]
+        return []
+
+    def _require_hosted_target(self) -> HostedTarget:
+        self._ensure_open()
+        if not isinstance(self.target, HostedTarget):
+            raise InvalidRequestError(
+                "merge plans require a named hosted target",
+                code="target.hosted_required",
+            )
+        return self.target
+
+    async def _plan_status(self, plan_id: str) -> MergePlanStatus:
+        self._require_hosted_target()
+        await self._ready()
+        value = await self._native().json(["plan", "status", plan_id, *self._route_arguments()])
+        return _plan_status(value)
+
+    async def _plan_watch(self, plan_id: str) -> AsyncGenerator[MergePlanStatus, None]:
+        self._require_hosted_target()
+        await self._ready()
+        stream = self._native().json_lines(["plan", "watch", plan_id, *self._route_arguments()])
+        unsuccessful_terminal_yielded = False
+        try:
+            async with aclosing(stream) as values:
+                async for value in values:
+                    status = _plan_status(value)
+                    unsuccessful_terminal_yielded = unsuccessful_terminal_yielded or (
+                        status.terminal and not status.succeeded
+                    )
+                    yield status
+        except TargetError:
+            if not unsuccessful_terminal_yielded:
+                raise
+
+    async def _plan_force_stop(self, plan_id: str) -> MergePlanStatus:
+        self._require_hosted_target()
+        await self._ready()
+        value = await self._native().json(["plan", "force-stop", plan_id, *self._route_arguments()])
+        return _plan_status(value)
 
     async def _status(self, run_id: str) -> RunStatus:
         await self._ready()
@@ -470,6 +565,76 @@ class Client:
         await self._ready()
         value = await self._native().json(["force-stop", run_id, *self._route_arguments()])
         return _status(value)
+
+
+class MergePlan:
+    """Durable hosted merge-plan handle bound to one Client target."""
+
+    __slots__ = ("_client", "_id")
+
+    def __init__(self, client: Client, plan_id: str) -> None:
+        self._client = client
+        self._id = plan_id
+
+    @property
+    def id(self) -> str:
+        """Return the opaque server-assigned merge-plan identity."""
+        return self._id
+
+    async def status(self) -> MergePlanStatus:
+        """Read the plan's current aggregate status."""
+        return await self._client._plan_status(self.id)
+
+    def watch(self) -> AsyncIterator[MergePlanStatus]:
+        """Poll and yield changed aggregate snapshots until the plan is terminal.
+
+        Cancelling or closing the iterator detaches observation and leaves runs active.
+        """
+        return self._client._plan_watch(self.id)
+
+    async def wait(self, *, wait_timeout: float | None = None) -> MergePlanStatus:
+        """Wait for a terminal aggregate status without controlling plan lifetime.
+
+        Args:
+            wait_timeout: Non-negative observation deadline in seconds. None waits indefinitely.
+
+        Raises:
+            ValueError: If wait_timeout is negative.
+            MergePlanWaitTimeout: If observation expires; it carries this durable handle.
+            TargetError: If the selected target is unavailable.
+            ProtocolError: If native output is malformed.
+        """
+        if wait_timeout is not None and wait_timeout < 0:
+            raise ValueError("wait_timeout must be non-negative")
+
+        async def observe() -> MergePlanStatus:
+            current = await self.status()
+            if current.terminal:
+                return current
+            stream = self._client._plan_watch(self.id)
+            async with aclosing(stream) as statuses:
+                async for status in statuses:
+                    if status.terminal:
+                        return status
+            current = await self.status()
+            if current.terminal:
+                return current
+            raise ProtocolError("Zeroshot plan watch closed before a terminal status")
+
+        if wait_timeout is None:
+            return await observe()
+        try:
+            async with asyncio.timeout(wait_timeout):
+                return await observe()
+        except TimeoutError as error:
+            raise MergePlanWaitTimeout(self, wait_timeout) from error
+
+    async def force_stop(self) -> MergePlanStatus:
+        """Force every nonterminal run to stop and wait for aggregate termination."""
+        status = await self._client._plan_force_stop(self.id)
+        if status.terminal:
+            return status
+        return await self.wait()
 
 
 class Run:

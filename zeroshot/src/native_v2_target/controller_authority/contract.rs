@@ -10,9 +10,9 @@ mod hosted_runs;
 mod http_error;
 mod profiles;
 
-use hosted_runs::build_hosted_runs_descriptor;
-pub(super) use hosted_runs::HostedRunsDescriptor;
-pub(super) use http_error::{http_error, read_success_json};
+use hosted_runs::{build_hosted_runs_descriptor, build_merge_plans_descriptor};
+pub(super) use hosted_runs::{HostedRunsDescriptor, MergePlansDescriptor};
+pub(super) use http_error::{http_error, read_success_json, read_success_json_with_limit};
 use connections::build_connections_descriptor;
 pub(super) use connections::ConnectionsDescriptor;
 use profiles::build_profiles_descriptor;
@@ -40,6 +40,7 @@ pub(super) struct HostedAuthDescriptor {
     pub(super) device_grant_type: String,
     pub(super) session_endpoint: Url,
     pub(super) hosted_runs: HostedRunsDescriptor,
+    pub(super) merge_plans: Option<MergePlansDescriptor>,
     pub(super) connections: Option<ConnectionsDescriptor>,
     pub(super) run_profiles: Option<RunProfilesDescriptor>,
 }
@@ -217,12 +218,20 @@ pub(super) fn require_response_route(
 }
 
 pub(super) async fn read_json<T: DeserializeOwned>(
+    response: reqwest::Response,
+    operation: &'static str,
+) -> Result<T, TargetAuthorityError> {
+    read_json_with_limit(response, operation, MAX_RESPONSE_BYTES).await
+}
+
+pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
     mut response: reqwest::Response,
     operation: &'static str,
+    maximum_bytes: usize,
 ) -> Result<T, TargetAuthorityError> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+        .is_some_and(|length| length > maximum_bytes as u64)
     {
         return Err(authority_error(format!(
             "{operation} response is too large"
@@ -232,7 +241,7 @@ pub(super) async fn read_json<T: DeserializeOwned>(
     while let Some(chunk) = response.chunk().await.map_err(|_| {
         TargetAuthorityError::disconnected(format!("{operation} response read failed"))
     })? {
-        if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+        if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(authority_error(format!(
                 "{operation} response is too large"
             )));
@@ -276,8 +285,7 @@ pub(super) fn build_auth_descriptor(
         .as_ref()
         .ok_or_else(|| authority_error("hosted target discovery is incompatible"))?;
     let hosted_runs = build_hosted_runs_descriptor(origin, &wire.extensions)?;
-    let connections = build_connections_descriptor(origin, &wire.extensions)?;
-    let run_profiles = build_profiles_descriptor(origin, &wire.extensions)?;
+    let capabilities = build_optional_capabilities(origin, &wire.extensions)?;
     let (metadata_url, device_authorization_endpoint, token_endpoint, revocation_endpoint) =
         oauth_routes(origin, oauth)?;
     Ok(HostedAuthDescriptor {
@@ -289,8 +297,26 @@ pub(super) fn build_auth_descriptor(
         device_grant_type: oauth.device_grant_type.clone(),
         session_endpoint: same_origin_path(origin, &session.route_template)?,
         hosted_runs,
-        connections,
-        run_profiles,
+        merge_plans: capabilities.merge_plans,
+        connections: capabilities.connections,
+        run_profiles: capabilities.run_profiles,
+    })
+}
+
+struct OptionalCapabilities {
+    merge_plans: Option<MergePlansDescriptor>,
+    connections: Option<ConnectionsDescriptor>,
+    run_profiles: Option<RunProfilesDescriptor>,
+}
+
+fn build_optional_capabilities(
+    origin: &Url,
+    extensions: &openengine_cluster_protocol::TargetDiscoveryExtensions,
+) -> Result<OptionalCapabilities, TargetAuthorityError> {
+    Ok(OptionalCapabilities {
+        merge_plans: build_merge_plans_descriptor(origin, extensions)?,
+        connections: build_connections_descriptor(origin, extensions)?,
+        run_profiles: build_profiles_descriptor(origin, extensions)?,
     })
 }
 

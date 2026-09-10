@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) enum ReviewProgress {
-    Merged,
+    Merged(String),
     CiFailed(String),
     Mergeable,
     Pending,
@@ -18,7 +18,7 @@ impl ReviewProgress {
     pub(super) fn from_state(state: GitHubReviewState) -> Result<Self, DeliveryStop> {
         match state {
             GitHubReviewState::Merged { merge_revision } if valid_revision(&merge_revision) => {
-                Ok(Self::Merged)
+                Ok(Self::Merged(merge_revision))
             }
             GitHubReviewState::Merged { .. } => {
                 Err(DeliveryStop::Outcome(WorkerOutcome::malformed()))
@@ -46,10 +46,19 @@ pub(super) async fn review_completion(
     drive: &ReviewDrive<'_>,
     label: &'static str,
     diagnostic: &str,
+    merge_revision: Option<&str>,
 ) -> Result<ReviewStep, DeliveryStop> {
     emit(drive.control, diagnostic).await?;
     validate_delivery_contract(drive.mode, drive.response).map_err(DeliveryStop::Runner)?;
-    delivery_outcome(drive.mode, label, &drive.review, diagnostic)
-        .map(ReviewStep::Complete)
-        .map_err(DeliveryStop::Runner)
+    delivery_outcome(
+        DeliveryResult {
+            mode: drive.mode,
+            outcome: label,
+            review: &drive.review,
+            merge_revision,
+        },
+        diagnostic,
+    )
+    .map(ReviewStep::Complete)
+    .map_err(DeliveryStop::Runner)
 }

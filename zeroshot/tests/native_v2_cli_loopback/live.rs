@@ -197,13 +197,13 @@ fn verifier_node(name: &str) -> serde_json::Value {
 fn terminal_node(name: &str, mode: &str) -> serde_json::Value {
     json!({
         "kind":"succeed","name":name,"output":delivery_result_schema(mode),
-        "bindings":delivery_terminal_bindings()
+        "bindings":delivery_terminal_bindings(mode)
     })
 }
 
 fn merge_delivery_node() -> serde_json::Value {
     delivery_node(
-        "builtin.git-delivery.merge@1",
+        "builtin.git-delivery.merge@2",
         json!(["merged", "conflict", "ci_failed"]),
         LIVE_TIMEOUT_MS,
         "merge",
@@ -238,7 +238,7 @@ fn complex_merge_graph() -> serde_json::Value {
 
 fn ci_repair_graph() -> serde_json::Value {
     let state = ci_repair_state_schema();
-    let promoted = delivery_field_paths();
+    let promoted = delivery_field_paths("merge");
     let route = json!({
         "kind":"choice","name":"delivery_route","state":state,"branches":[{
             "when":delivery_guard(json!(["ci_failed","conflict"])),

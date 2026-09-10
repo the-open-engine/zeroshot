@@ -22,9 +22,8 @@ impl NativeV2DeliveryAdapter {
                 Ok(ReviewStep::Continue)
             }
             GitHubHeadUpdateOutcome::Conflict => {
-                review_completion(
+                self.complete_conflict(
                     drive,
-                    DELIVERY_CONFLICT_LABEL,
                     "GitHub authoritatively rejected branch update due to conflict",
                 )
                 .await

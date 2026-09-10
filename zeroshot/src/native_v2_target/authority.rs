@@ -3,6 +3,7 @@ use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
     ConnectionMutationResult, ConnectionSetRequest,
 };
+use openengine_cluster_protocol::{MergePlan, MergePlanId, MergePlanSubmitRequest};
 use openengine_cluster_protocol::{
     RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams, RunStatusParams,
     RunSubmitResult, RunWatchParams, TargetOecpSessionRequest, TargetRunRequest,
@@ -91,6 +92,27 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<RunSubmitResult, TargetAuthorityError> {
         Err(TargetAuthorityError::new("profile runs are unavailable"))
     }
+    async fn merge_plan_submit(
+        &self,
+        _target: &TargetRecord,
+        _request: &MergePlanSubmitRequest,
+    ) -> Result<MergePlan, TargetAuthorityError> {
+        merge_plan_unavailable()
+    }
+    async fn merge_plan_status(
+        &self,
+        _target: &TargetRecord,
+        _plan_id: &MergePlanId,
+    ) -> Result<MergePlan, TargetAuthorityError> {
+        merge_plan_unavailable()
+    }
+    async fn merge_plan_force(
+        &self,
+        _target: &TargetRecord,
+        _plan_id: &MergePlanId,
+    ) -> Result<MergePlan, TargetAuthorityError> {
+        merge_plan_unavailable()
+    }
     async fn hosted_run_list(
         &self,
         target: &TargetRecord,
@@ -116,6 +138,12 @@ pub trait TargetControlAuthority: Send + Sync {
         target: &TargetRecord,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, TargetAuthorityError>;
+}
+
+fn merge_plan_unavailable<T>() -> Result<T, TargetAuthorityError> {
+    Err(TargetAuthorityError::new(
+        "hosted merge plans are unavailable",
+    ))
 }
 
 fn profile_unavailable<T>() -> Result<T, TargetAuthorityError> {

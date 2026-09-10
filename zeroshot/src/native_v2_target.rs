@@ -13,11 +13,11 @@ use thiserror::Error;
 use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, TargetConnector};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
-    NativeV2CliError, PreparedRunRequest, TargetAdd,
+    NativeV2CliError, PreparedMergePlanRequest, PreparedRunRequest, TargetAdd,
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest,
+    ConnectionMutationResult, ConnectionSetRequest, MergePlan, MergePlanId, MergePlanSubmitRequest,
 };
 use openengine_cluster_protocol::{
     RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams, RunStatusParams,
@@ -259,6 +259,59 @@ where
         let target = self.target(name)?;
         self.authority
             .profile_default(&target, request)
+            .await
+            .map_err(cli_authority_error)
+    }
+
+    async fn merge_plan_submit(
+        &self,
+        name: &str,
+        request: PreparedMergePlanRequest,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        let target = self.target(name)?;
+        if matches!(target.access, TargetAccess::Direct) {
+            return Err(NativeV2CliError::Target(
+                "direct target does not support hosted merge plans".to_owned(),
+            ));
+        }
+        self.authority
+            .merge_plan_submit(
+                &target,
+                &MergePlanSubmitRequest {
+                    submission_key: request.submission_key,
+                    title: request.title,
+                    expires_at: request.expires_at,
+                    source: request.source,
+                    profile: request.profile,
+                    runs: request.runs,
+                    connections: request.connections,
+                    github_token: request.github_token,
+                },
+            )
+            .await
+            .map_err(cli_authority_error)
+    }
+
+    async fn merge_plan_status(
+        &self,
+        name: &str,
+        plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .merge_plan_status(&target, &plan_id)
+            .await
+            .map_err(cli_authority_error)
+    }
+
+    async fn merge_plan_force(
+        &self,
+        name: &str,
+        plan_id: MergePlanId,
+    ) -> Result<MergePlan, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .merge_plan_force(&target, &plan_id)
             .await
             .map_err(cli_authority_error)
     }

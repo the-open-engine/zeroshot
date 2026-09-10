@@ -36,12 +36,40 @@ def projection(run_id, status, cursor):
         "status": status,
     }
 
+def plan_projection(state):
+    terminal = state in ("succeeded", "failed", "cancelled", "expired")
+    node_state = state if state != "running" else "running"
+    return {
+        "planId": "01900000-0000-7000-8000-000000000010",
+        "title": "Fake plan",
+        "state": state,
+        "repository": "owner/repo",
+        "branch": "main",
+        "submittedAt": "2026-09-10T00:00:00Z",
+        "expiresAt": "2026-09-11T00:00:00Z",
+        "runs": [{
+            "name": "build",
+            "runId": "01900000-0000-7000-8000-000000000011",
+            "state": node_state,
+            "needs": [],
+            "sourceRevision": None if state == "queued" else "0" * 40,
+            "readyAt": None if state == "queued" else "2026-09-10T00:01:00Z",
+            "queueExpiresAt": "2026-09-11T00:01:00Z",
+            "terminalAt": "2026-09-10T00:02:00Z" if terminal else None,
+            "waitingReason": "queue_capacity" if state == "queued" else None,
+            "errorCode": None,
+        }],
+    }
+
 entry = {"args": args}
 for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config"):
     path = option(name)
     if path:
         with open(path, encoding="utf-8") as stream:
             entry[name] = json.load(stream)
+if args[:2] in (["plan", "validate"], ["plan", "submit"]):
+    with open(args[2], encoding="utf-8") as stream:
+        entry["plan"] = json.load(stream)
 if log_path:
     with open(log_path, "a", encoding="utf-8") as stream:
         stream.write(json.dumps(entry) + "\n")
@@ -58,6 +86,24 @@ elif args[:2] == ["template", "show"]:
     }))
 elif args[:2] == ["target", "add"] or args[:2] == ["target", "setup"]:
     pass
+elif args[:2] == ["plan", "validate"]:
+    print(json.dumps({"valid": True}))
+elif args[:2] == ["plan", "submit"]:
+    print(json.dumps(plan_projection("queued")))
+elif args[:2] == ["plan", "status"]:
+    print(json.dumps(plan_projection("queued")))
+elif args[:2] == ["plan", "watch"]:
+    print(json.dumps(plan_projection("running")), flush=True)
+    if os.environ.get("FAKE_PLAN_WATCH_FAIL_BEFORE_TERMINAL") == "1":
+        print("zeroshot: plan watch failed before terminal status", file=sys.stderr)
+        raise SystemExit(1)
+    terminal = os.environ.get("FAKE_PLAN_WATCH_TERMINAL", "succeeded")
+    print(json.dumps(plan_projection(terminal)), flush=True)
+    if terminal != "succeeded" or os.environ.get("FAKE_PLAN_WATCH_EXIT_NONZERO") == "1":
+        print("zeroshot: merge plan finished unsuccessfully", file=sys.stderr)
+        raise SystemExit(1)
+elif args[:2] == ["plan", "force-stop"]:
+    print(json.dumps(plan_projection("cancelled")))
 elif args and args[0] == "run":
     task = entry.get("--input", {}).get("task")
     if task == "invalid":

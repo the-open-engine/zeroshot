@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
@@ -27,6 +27,8 @@ pub(super) enum Script {
     ProtectedBranch,
     ReviewSyncRace,
     CiFailsThenMerges,
+    ConflictThenMerges,
+    StaleConflictThenMerges,
     NeverConfirmsMerge,
     CredentialExpires,
     ReviewSyncCredentialExpires,
@@ -43,6 +45,7 @@ pub(super) struct FakeGitHub {
     pub(super) inspections: AtomicUsize,
     pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
+    pub(super) conflict_materializations: AtomicUsize,
 }
 
 impl FakeGitHub {
@@ -58,6 +61,7 @@ impl FakeGitHub {
             inspections: AtomicUsize::new(0),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
+            conflict_materializations: AtomicUsize::new(0),
         }
     }
 
@@ -68,6 +72,9 @@ impl FakeGitHub {
             Script::RegistrationRace => self.registration_race_state(inspection),
             Script::MultipleRegistrationWaves => self.multiple_registration_waves_state(inspection),
             Script::CiFailsThenMerges => self.ci_repair_state(inspection),
+            Script::ConflictThenMerges | Script::StaleConflictThenMerges => {
+                self.conflict_repair_state()
+            }
             _ => self.static_review_state(),
         }
     }
@@ -109,6 +116,14 @@ impl FakeGitHub {
         }
     }
 
+    fn conflict_repair_state(&self) -> GitHubReviewState {
+        if self.conflict_materializations.load(Ordering::SeqCst) == 0 {
+            GitHubReviewState::Conflict
+        } else {
+            self.no_ci_state()
+        }
+    }
+
     fn registration_race_state(&self, inspection: usize) -> GitHubReviewState {
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
@@ -146,12 +161,45 @@ impl FakeGitHub {
             Script::CredentialExpires | Script::ReviewSyncCredentialExpires
         )
     }
+
+    pub(super) fn review_requests(&self) -> MutexGuard<'_, Vec<GitHubReviewRequest>> {
+        self.reviews.lock().assert_value_with("review request lock")
+    }
 }
 
 pub(super) fn delivery_harness(script: Script) -> (TempRepo, Arc<FakeGitHub>) {
     let repo = TempRepo::delivery();
     let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
     (repo, authority)
+}
+
+fn advance_conflicting_target(remote: &Path) {
+    let root = remote.parent().assert_value();
+    let target = root.join("conflicting-target");
+    git(
+        root,
+        &[
+            "clone",
+            remote.to_str().assert_value(),
+            target.to_str().assert_value(),
+        ],
+    );
+    fs::write(target.join("result.txt"), "target\n").assert_value();
+    git(&target, &["add", "result.txt"]);
+    git(
+        &target,
+        &[
+            "-c",
+            "user.name=Target",
+            "-c",
+            "user.email=target@example.invalid",
+            "commit",
+            "--no-verify",
+            "--message",
+            "advance target",
+        ],
+    );
+    git(&target, &["push", "origin", "main"]);
 }
 
 fn merged_review() -> GitHubReviewState {
@@ -367,6 +415,76 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             return Err(GitHubAuthorityError::Unavailable);
         }
         Ok(())
+    }
+
+    async fn materialize_merge_conflict(
+        &self,
+        request: &GitHubConflictRequest,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
+        assert_eq!(credential.expose(), "test-token");
+        self.conflict_materializations
+            .fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::StaleConflictThenMerges) {
+            return Ok(GitHubConflictOutcome::ObservationChanged);
+        }
+        advance_conflicting_target(&self.remote);
+        let target_revision = git_output(&self.remote, &["rev-parse", "refs/heads/main"]);
+        let fetch = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&request.workspace)
+            .args(["fetch", "--no-tags", "--quiet"])
+            .arg(&self.remote)
+            .arg(&target_revision)
+            .status()
+            .assert_value();
+        if !fetch.success() {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        let merge = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&request.workspace)
+            .args([
+                "-c",
+                "rerere.enabled=false",
+                "-c",
+                "user.name=Zeroshot",
+                "-c",
+                "user.email=delivery@zeroshot.invalid",
+                "merge",
+                "--no-commit",
+                "--no-ff",
+                "--no-edit",
+                &target_revision,
+            ])
+            .status()
+            .assert_value();
+        if merge.code() != Some(1) {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        let paths = std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&request.workspace)
+            .args(["diff", "--name-only", "--diff-filter=U", "-z"])
+            .output()
+            .assert_value();
+        if !paths.status.success() {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        let conflicted_paths = String::from_utf8(paths.stdout)
+            .assert_value()
+            .split_terminator('\0')
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if conflicted_paths.is_empty() {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        Ok(GitHubConflictOutcome::Materialized(
+            GitHubConflictMaterialization {
+                target_revision,
+                conflicted_paths,
+            },
+        ))
     }
 }
 

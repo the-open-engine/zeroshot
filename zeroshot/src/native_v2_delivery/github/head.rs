@@ -251,15 +251,7 @@ async fn git_output(
     command: &mut Command,
     deadline: Duration,
 ) -> Result<String, GitHubAuthorityError> {
-    command.stdout(Stdio::piped());
-    let output = timeout(deadline, command.output())
-        .await
-        .map_err(|_| GitHubAuthorityError::Unavailable)?
-        .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    if !output.status.success() || output.stdout.len() > MAX_GIT_OUTPUT_BYTES {
-        return Err(GitHubAuthorityError::Rejected);
-    }
-    String::from_utf8(output.stdout).map_err(|_| GitHubAuthorityError::Rejected)
+    bounded_git_output(command, deadline, MAX_GIT_OUTPUT_BYTES).await
 }
 
 #[cfg(test)]

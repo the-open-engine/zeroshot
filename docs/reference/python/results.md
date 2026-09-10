@@ -5,6 +5,8 @@
       members:
         - ActiveExecution
         - LogEvent
+        - MergePlanRunStatus
+        - MergePlanStatus
         - ResolvedSource
         - RunResult
         - RunStatus

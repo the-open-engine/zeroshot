@@ -16,9 +16,9 @@ use zeroshot_engine::native_v2_target_authority::{DISCOVERY_PATH, TargetDiscover
 
 use self::contract::{
     build_auth_descriptor, build_controller_descriptor, validate_metadata_routes,
-    ControllerDescriptor, DeviceCodeWire, DevicePoll, HostedAuthDescriptor, OAuthErrorWire,
-    OAuthMetadataWire, TargetSessionWire, TokenWire, authority_error, parse_origin, read_json,
-    read_success_json, require_response_route, validate_device_code, validate_secret,
+    ControllerDescriptor, DeviceCodeWire, DevicePoll, HostedAuthDescriptor, MergePlansDescriptor,
+    OAuthErrorWire, OAuthMetadataWire, TargetSessionWire, TokenWire, authority_error, parse_origin,
+    read_json, read_success_json, require_response_route, validate_device_code, validate_secret,
     validate_token,
 };
 use self::credentials::{
@@ -31,12 +31,25 @@ use super::{TargetAccess, TargetAuthorityError, TargetRecord};
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const SESSION_KIND: &str = "openengine.target-session/v1";
 const DEVICE_LABEL: &str = "zeroshot-cli";
+const ACCESS_TOKEN_EXPIRY_SKEW: Duration = Duration::from_secs(30);
 
 struct HostedLogin<'a> {
     target_id: &'a str,
     device_token: &'a str,
     auth: &'a HostedAuthDescriptor,
     audience: &'a str,
+}
+
+struct IssuedAccessToken {
+    value: String,
+    reusable_until: Instant,
+}
+
+struct CachedMergePlanAccess {
+    target: TargetRecord,
+    routes: MergePlansDescriptor,
+    access_token: String,
+    reusable_until: Instant,
 }
 
 /// One named-target HTTP authority. Hosted access retains the existing OAuth refresh-family flow;
@@ -48,6 +61,7 @@ pub struct TargetHttpControlAuthority {
     credentials: Arc<dyn TargetCredentialStore>,
     notifier: Arc<dyn DeviceCodeNotifier>,
     refresh_lock_directory: PathBuf,
+    merge_plan_access: Arc<tokio::sync::Mutex<Option<CachedMergePlanAccess>>>,
 }
 
 impl TargetHttpControlAuthority {
@@ -79,6 +93,7 @@ impl TargetHttpControlAuthority {
             credentials,
             notifier: Arc::new(StderrDeviceCodeNotifier),
             refresh_lock_directory,
+            merge_plan_access: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -100,6 +115,7 @@ impl TargetHttpControlAuthority {
             credentials,
             notifier,
             refresh_lock_directory,
+            merge_plan_access: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -257,6 +273,15 @@ impl TargetHttpControlAuthority {
         auth: &HostedAuthDescriptor,
         audience: &str,
     ) -> Result<String, TargetAuthorityError> {
+        Ok(self.issue_access_token(target, auth, audience).await?.value)
+    }
+
+    async fn issue_access_token(
+        &self,
+        target: &TargetRecord,
+        auth: &HostedAuthDescriptor,
+        audience: &str,
+    ) -> Result<IssuedAccessToken, TargetAuthorityError> {
         let _refresh_guard = self.lock_refresh_family(&target.id).await?;
         let refresh_token = self
             .credentials
@@ -264,6 +289,7 @@ impl TargetHttpControlAuthority {
             .await?
             .ok_or_else(|| authority_error("target login required"))?;
         validate_secret(&refresh_token, "stored refresh token")?;
+        let issued_at = Instant::now();
         let token: TokenWire = self
             .post_form_json(
                 &auth.token_endpoint,
@@ -281,7 +307,12 @@ impl TargetHttpControlAuthority {
         self.credentials
             .set(&target.id, &token.refresh_token)
             .await?;
-        Ok(token.access_token)
+        let reusable_for =
+            Duration::from_secs(token.expires_in).saturating_sub(ACCESS_TOKEN_EXPIRY_SKEW);
+        Ok(IssuedAccessToken {
+            value: token.access_token,
+            reusable_until: issued_at + reusable_for,
+        })
     }
 
     async fn verify_session(

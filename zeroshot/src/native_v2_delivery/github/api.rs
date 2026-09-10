@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::wire::{GitReferenceWire, require_review_head};
+use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
 
 const MAX_API_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -45,6 +45,25 @@ impl GhCliDeliveryAuthority {
         let reference: GitReferenceWire =
             serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
         require_review_head(reference, request)
+    }
+
+    pub(super) async fn target_revision(
+        &self,
+        review: &GitHubReviewReceipt,
+        credential: GitHubCredential<'_>,
+    ) -> Result<String, GitHubAuthorityError> {
+        let value = self
+            .api(
+                &[format!(
+                    "repos/{}/git/ref/heads/{}",
+                    review.repository, review.target_branch
+                )],
+                credential,
+            )
+            .await?;
+        let reference: GitReferenceWire =
+            serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+        reference_revision(reference, &review.target_branch)
     }
 }
 

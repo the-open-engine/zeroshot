@@ -1,8 +1,8 @@
 use super::*;
 use crate::native_v2_contract::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    EnvironmentVariableName, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
-    ResolvedSource, RunSize, RunTitle, SessionScope,
+    EnvironmentVariableName, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF,
+    GIT_DELIVERY_PR_WORKER_REF, ResolvedSource, RunSize, RunTitle, SessionScope,
 };
 use crate::native_v2_delivery::DeliveryMode;
 use crate::native_v2_delivery::contract::{delivery_result_schema, delivery_signal_labels};
@@ -44,7 +44,8 @@ fn authored_instructions(worker: &str) -> Value {
 fn delivery_verifier(name: &str, mode: DeliveryMode) -> Value {
     let worker = match mode {
         DeliveryMode::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
-        DeliveryMode::Merge => GIT_DELIVERY_MERGE_WORKER_REF,
+        DeliveryMode::MergeV1 => GIT_DELIVERY_MERGE_WORKER_REF,
+        DeliveryMode::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
     };
     let output = delivery_result_schema(mode).assert_value();
     let labels = delivery_signal_labels(mode).assert_value();

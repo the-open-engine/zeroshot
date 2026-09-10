@@ -173,6 +173,30 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         TargetHttpControlAuthority::profile_run(self, target, request).await
     }
 
+    async fn merge_plan_submit(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::MergePlanSubmitRequest,
+    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
+        TargetHttpControlAuthority::merge_plan_submit(self, target, request).await
+    }
+
+    async fn merge_plan_status(
+        &self,
+        target: &TargetRecord,
+        plan_id: &openengine_cluster_protocol::MergePlanId,
+    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
+        TargetHttpControlAuthority::merge_plan_status(self, target, plan_id).await
+    }
+
+    async fn merge_plan_force(
+        &self,
+        target: &TargetRecord,
+        plan_id: &openengine_cluster_protocol::MergePlanId,
+    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
+        TargetHttpControlAuthority::merge_plan_force(self, target, plan_id).await
+    }
+
     async fn hosted_run_list(
         &self,
         target: &TargetRecord,

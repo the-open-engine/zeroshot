@@ -40,7 +40,19 @@ class DirectTarget:
     workspace: str | PathLike[str] | None = field(default=None, kw_only=True)
 
 
-Target: TypeAlias = LocalTarget | DirectTarget
+@dataclass(frozen=True, slots=True)
+class HostedTarget:
+    """Use a named hosted target already configured and logged in through the CLI.
+
+    Args:
+        name: Exact local target name from ``zeroshot target list``. The SDK reuses that
+            target's stored origin and login.
+    """
+
+    name: str
+
+
+Target: TypeAlias = LocalTarget | DirectTarget | HostedTarget
 
 
 @dataclass(frozen=True, slots=True)

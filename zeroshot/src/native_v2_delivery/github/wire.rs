@@ -101,6 +101,18 @@ pub(super) fn require_review_head(
     Ok(())
 }
 
+pub(super) fn reference_revision(
+    wire: GitReferenceWire,
+    branch: &str,
+) -> Result<String, GitHubAuthorityError> {
+    let valid_identity = wire.reference == format!("refs/heads/{branch}")
+        && wire.object.kind == "commit"
+        && valid_revision(&wire.object.sha);
+    valid_identity
+        .then_some(wire.object.sha)
+        .ok_or(GitHubAuthorityError::Rejected)
+}
+
 #[cfg(test)]
 #[path = "wire/tests.rs"]
 mod tests;

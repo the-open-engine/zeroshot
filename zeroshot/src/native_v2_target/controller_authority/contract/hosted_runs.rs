@@ -2,6 +2,10 @@ use openengine_cluster_protocol::{Cursor, ExecutionRef, RunId};
 use reqwest::Url;
 use openengine_cluster_protocol::TargetDiscoveryExtensions;
 
+#[path = "hosted_runs/merge_plans.rs"]
+mod merge_plans;
+pub(crate) use merge_plans::{MergePlansDescriptor, build_merge_plans_descriptor};
+
 use super::{authority_error, same_origin_url, valid_literal_route_segment};
 use crate::native_v2_target::TargetAuthorityError;
 

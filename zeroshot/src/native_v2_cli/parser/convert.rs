@@ -8,14 +8,15 @@ use openengine_cluster_protocol::{
 };
 
 use super::{
-    AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, RunArgs, RunLogsArgs,
-    RunSelectorArgs, RunWatchArgs, TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
+    AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, PlanCommand,
+    PlanSelectorArgs, PlanSubmitArgs, RunArgs, RunLogsArgs, RunSelectorArgs, RunWatchArgs,
+    TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
 };
 use crate::native_v2_cli::{
     BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand,
-    NativeV2CliCommand, NativeV2CliError, ProfileQualifier, ProfileReference, RunCommand, RunGraph,
-    RunLogsCommand, RunRuntime, RunSelection, RunSelector, RunWatchCommand, TargetAdd, TargetServe,
-    TemplateDelivery,
+    MergePlanSelector, MergePlanSubmitCommand, NativeV2CliCommand, NativeV2CliError,
+    ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRuntime,
+    RunSelection, RunSelector, RunWatchCommand, TargetAdd, TargetServe, TemplateDelivery,
 };
 
 #[path = "convert/profile_commands.rs"]
@@ -63,6 +64,7 @@ impl CliCommand {
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),
             Self::Template { command } => command.into_command(),
+            Self::Plan { command } => command.into_command(),
             Self::Run(args) => args.into_command(),
             Self::Utility(command) => command.into_command(),
         }
@@ -189,6 +191,40 @@ impl TemplateCommand {
             }
         }
     }
+}
+
+impl PlanCommand {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        match self {
+            Self::Validate(args) => Ok(NativeV2CliCommand::PlanValidate { file: args.file }),
+            Self::Submit(args) => args.into_command(),
+            Self::Status(args) => plan_selector(args).map(NativeV2CliCommand::PlanStatus),
+            Self::Watch(args) => plan_selector(args).map(NativeV2CliCommand::PlanWatch),
+            Self::ForceStop(args) => plan_selector(args).map(NativeV2CliCommand::PlanForceStop),
+        }
+    }
+}
+
+impl PlanSubmitArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let target = required_target(self.target)?;
+        let submission_key = IdempotencyKey::new(self.submission_key)
+            .map_err(|error| usage(format!("invalid --submission-key: {error}")))?;
+        Ok(NativeV2CliCommand::PlanSubmit(MergePlanSubmitCommand {
+            target,
+            file: self.file,
+            detach: self.detach,
+            submission_key,
+        }))
+    }
+}
+
+fn plan_selector(args: PlanSelectorArgs) -> Result<MergePlanSelector, NativeV2CliError> {
+    validate_public_id(&args.plan_id, "plan ID")?;
+    Ok(MergePlanSelector {
+        target: required_target(args.target)?,
+        plan_id: openengine_cluster_protocol::MergePlanId::new(args.plan_id),
+    })
 }
 
 impl TemplateName {
@@ -448,6 +484,11 @@ fn template_delivery(
         ));
     }
     Ok(delivery)
+}
+
+fn required_target(target: String) -> Result<String, NativeV2CliError> {
+    validate_public_id(&target, "target name")?;
+    Ok(target)
 }
 
 fn validated_target(target: Option<String>) -> Result<Option<String>, NativeV2CliError> {

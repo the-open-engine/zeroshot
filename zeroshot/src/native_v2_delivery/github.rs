@@ -12,13 +12,14 @@ use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
 use super::{
-    GitHubAuthorityError, GitHubChecks, GitHubCredential, GitHubDeliveryAuthority,
-    GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
-    GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest,
-    GitHubReviewState, valid_head_update, valid_revision,
+    GitHubAuthorityError, GitHubChecks, GitHubConflictMaterialization, GitHubConflictOutcome,
+    GitHubConflictRequest, GitHubCredential, GitHubDeliveryAuthority, GitHubHeadSynchronization,
+    GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation,
+    GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState, valid_head_update, valid_revision,
 };
 
 mod api;
+mod conflict;
 mod metadata;
 mod push;
 
@@ -376,6 +377,14 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
     ) -> Result<(), GitHubAuthorityError> {
         head::synchronize_review_head(self, request, credential).await
     }
+
+    async fn materialize_merge_conflict(
+        &self,
+        request: &GitHubConflictRequest,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
+        conflict::materialize(self, request, credential).await
+    }
 }
 
 enum MergeAction {
@@ -466,8 +475,20 @@ fn git_command(
     workspace: &std::path::Path,
     credential: GitHubCredential<'_>,
 ) -> Command {
-    let mut command = clean_command(config, &config.git_program, credential);
+    let mut command = local_git_command(config, workspace);
     command
+        .env("GH_HOST", "github.com")
+        .env("GH_TOKEN", credential.expose());
+    command
+}
+
+fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path) -> Command {
+    let mut command = Command::new(&config.git_program);
+    command
+        .kill_on_drop(true)
+        .env_clear()
+        .env("HOME", &config.home_directory)
+        .env("LANG", "C")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -476,7 +497,10 @@ fn git_command(
         .arg("-c")
         .arg(format!("safe.directory={}", workspace.display()))
         .arg("-C")
-        .arg(workspace);
+        .arg(workspace)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     command
 }
 
@@ -511,6 +535,22 @@ async fn bounded_status(
         .success()
         .then_some(())
         .ok_or(GitHubAuthorityError::Rejected)
+}
+
+async fn bounded_git_output(
+    command: &mut Command,
+    deadline: Duration,
+    maximum_bytes: usize,
+) -> Result<String, GitHubAuthorityError> {
+    command.stdout(Stdio::piped());
+    let output = timeout(deadline, command.output())
+        .await
+        .map_err(|_| GitHubAuthorityError::Unavailable)?
+        .map_err(|_| GitHubAuthorityError::Unavailable)?;
+    if !output.status.success() || output.stdout.len() > maximum_bytes {
+        return Err(GitHubAuthorityError::Rejected);
+    }
+    String::from_utf8(output.stdout).map_err(|_| GitHubAuthorityError::Rejected)
 }
 
 #[cfg(test)]

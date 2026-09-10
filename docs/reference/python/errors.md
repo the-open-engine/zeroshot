@@ -11,5 +11,6 @@
         - RunFailedError
         - RunNotFoundError
         - RunWaitTimeout
+        - MergePlanWaitTimeout
         - SubmissionConflictError
       show_if_no_docstring: false

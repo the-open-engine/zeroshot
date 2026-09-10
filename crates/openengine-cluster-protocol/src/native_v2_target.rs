@@ -388,6 +388,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_runs: Option<TargetHostedRunsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge_plans: Option<crate::TargetMergePlansDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub connections: Option<TargetConnectionsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_profiles: Option<TargetRunProfilesDiscovery>,
@@ -416,7 +418,10 @@ pub struct TargetDiscoveryDocument {
 impl TargetDiscoveryExtensions {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.hosted_runs.is_none() && self.connections.is_none() && self.run_profiles.is_none()
+        self.hosted_runs.is_none()
+            && self.merge_plans.is_none()
+            && self.connections.is_none()
+            && self.run_profiles.is_none()
     }
 }
 

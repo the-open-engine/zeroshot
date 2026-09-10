@@ -49,6 +49,12 @@ enum CliCommand {
         command: TemplateCommand,
     },
 
+    /// Validate, submit, and observe hosted merge plans.
+    Plan {
+        #[command(subcommand)]
+        command: PlanCommand,
+    },
+
     /// Submit a graph run locally or to a named target.
     ///
     /// When --target is omitted, the run uses the current local repository. A foreground run
@@ -84,6 +90,44 @@ enum UtilityCommand {
 
     /// Print the Zeroshot version.
     Version,
+}
+
+#[derive(Debug, Subcommand)]
+#[command(after_long_help = r#"MANIFEST
+The JSON manifest is strict and self-contained:
+
+  {
+    "schema": "zeroshot.merge-plan/v1",
+    "title": "Release checkout update",
+    "source": {"repository": "owner/repo", "branch": "main"},
+    "profile": "org:software-change",
+    "expiresAt": "<RFC3339 timestamp within 7 days>",
+    "runs": {
+      "backend": {"input": {"task": "Update the API."}},
+      "integrate": {"needs": ["backend"], "input": {"task": "Run release tests."}}
+    }
+  }
+
+Every run uses the same source and profile. The profile must contain exactly one merge-delivery node;
+pull-request delivery is rejected. `needs` gates readiness but does not pass output between runs.
+Cloud assigns all run IDs atomically, resolves each exact source revision only when that run becomes
+ready, and starts its 24-hour queue deadline then. `expiresAt` must be in the future and no more than
+seven days away. Plans cannot be edited or retried in place."#)]
+enum PlanCommand {
+    /// Validate a merge-plan manifest without contacting a target.
+    Validate(PlanFileArgs),
+
+    /// Atomically submit every node in a merge-plan manifest.
+    Submit(PlanSubmitArgs),
+
+    /// Read a merge plan's aggregate status as JSON.
+    Status(PlanSelectorArgs),
+
+    /// Poll a merge plan and stream changed snapshots as NDJSON.
+    Watch(PlanSelectorArgs),
+
+    /// Force every nonterminal run in a merge plan to stop.
+    ForceStop(PlanSelectorArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -381,6 +425,43 @@ struct RunArgs {
 
     #[command(flatten)]
     delivery: DeliveryArgs,
+}
+
+#[derive(Debug, Args)]
+struct PlanFileArgs {
+    /// Merge-plan manifest JSON file.
+    #[arg(value_name = "FILE")]
+    file: PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct PlanSubmitArgs {
+    /// Merge-plan manifest JSON file.
+    #[arg(value_name = "FILE")]
+    file: PathBuf,
+
+    /// Submit to this named hosted target.
+    #[arg(long, value_name = "NAME")]
+    target: String,
+
+    /// Stable idempotency key for safely retrying the atomic submission.
+    #[arg(long, value_name = "KEY")]
+    submission_key: String,
+
+    /// Return after atomic submission instead of polling plan status.
+    #[arg(short = 'd', long)]
+    detach: bool,
+}
+
+#[derive(Debug, Args)]
+struct PlanSelectorArgs {
+    /// Immutable merge-plan ID.
+    #[arg(value_name = "PLAN_ID")]
+    plan_id: String,
+
+    /// Use this named hosted target.
+    #[arg(long, value_name = "NAME")]
+    target: String,
 }
 
 #[derive(Debug, Args)]

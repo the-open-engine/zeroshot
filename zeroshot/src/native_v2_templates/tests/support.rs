@@ -239,19 +239,34 @@ pub(super) fn settled_delivery_with_diagnostic(
 }
 
 pub(super) fn delivery_receipt(mode: DeliveryMode, outcome: &str) -> serde_json::Value {
-    let mode = match mode {
-        DeliveryMode::PullRequest => "pr",
-        DeliveryMode::Merge => "merge",
+    let (version, mode, merge_revision) = match mode {
+        DeliveryMode::PullRequest => ("v1", "pr", None),
+        DeliveryMode::MergeV1 => ("v1", "merge", None),
+        DeliveryMode::Merge => (
+            "v2",
+            "merge",
+            Some(
+                if outcome == crate::native_v2_delivery::DELIVERY_MERGED_LABEL {
+                    "c".repeat(40)
+                } else {
+                    String::new()
+                },
+            ),
+        ),
     };
-    json!({
-        "version":"v1",
+    let mut receipt = json!({
+        "version":version,
         "mode":mode,
         "outcome":outcome,
         "repository":"acme/project",
         "targetBranch":"main",
         "headRevision":"b".repeat(40),
         "pullRequestId":"17"
-    })
+    });
+    if let Some(merge_revision) = merge_revision {
+        receipt["mergeRevision"] = json!(merge_revision);
+    }
+    receipt
 }
 
 pub(super) struct SettledExecutionSpec<'a> {

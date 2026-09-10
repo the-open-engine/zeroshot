@@ -104,12 +104,13 @@ async fn admitted_without_delivery() -> AdmittedRun {
 
 fn delivery_receipt() -> Value {
     json!({
-        "version": "v1",
+        "version": "v2",
         "mode": "merge",
         "outcome": "merged",
         "repository": "acme/project",
         "targetBranch": "main",
         "headRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "mergeRevision": "cccccccccccccccccccccccccccccccccccccccc",
         "pullRequestId": "17"
     })
 }
@@ -254,6 +255,46 @@ async fn required_success_needs_exact_terminal_receipt_from_last_completed_write
             &admitted,
             &no_durable_delivery,
             TerminalResult::Succeeded { output: receipt },
+        )
+        .assert_value(),
+        delivery_unconfirmed()
+    );
+}
+
+#[tokio::test]
+async fn optional_policy_still_requires_a_receipt_when_delivery_is_present() {
+    let admitted = admitted_with_delivery().await;
+    let receipt = delivery_receipt();
+    let snapshot = snapshot(
+        &admitted,
+        [
+            ("worker", worker_outcome()),
+            ("deliver", delivery_outcome(receipt.clone())),
+            ("verify", verifier_outcome()),
+        ],
+    );
+    let accepted = TerminalResult::Succeeded {
+        output: json!({"delivery": receipt}),
+    };
+
+    assert_eq!(
+        enforce_delivery_terminal(
+            DeliveryPolicy::Optional,
+            &admitted,
+            &snapshot,
+            accepted.clone(),
+        )
+        .assert_value(),
+        accepted
+    );
+    assert_eq!(
+        enforce_delivery_terminal(
+            DeliveryPolicy::Optional,
+            &admitted,
+            &snapshot,
+            TerminalResult::Succeeded {
+                output: Value::Null,
+            },
         )
         .assert_value(),
         delivery_unconfirmed()

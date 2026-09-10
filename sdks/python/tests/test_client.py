@@ -13,13 +13,17 @@ from zeroshot import (
     ClientClosedError,
     DirectTarget,
     GraphSpec,
+    HostedTarget,
     InvalidRequestError,
     LocalTarget,
+    MergePlanRequest,
+    MergePlanRun,
     RunFailedError,
     RunRequest,
     RunResult,
     RuntimePlan,
     RunWaitTimeout,
+    TargetError,
     UniformRuntime,
 )
 
@@ -281,3 +285,142 @@ def test_failed_result_has_opt_in_exception_projection() -> None:
     with pytest.raises(RunFailedError) as caught:
         result.raise_for_failure()
     assert caught.value.result is result
+
+
+def test_hosted_plan_submission_uses_one_strict_manifest(fake_native: Path) -> None:
+    request = MergePlanRequest(
+        title="Release",
+        repository="owner/repo",
+        branch="main",
+        profile="org:software-change",
+        expires_at="2026-09-11T00:00:00Z",
+        runs={
+            "build": MergePlanRun(input={"task": "build"}),
+            "integrate": MergePlanRun(input={"task": "integrate"}, needs=("build",)),
+        },
+        submission_key="release-1",
+    )
+
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("cloud")) as client:
+            plan = await client.submit_plan(request)
+            assert plan.id == "01900000-0000-7000-8000-000000000010"
+
+    asyncio.run(exercise())
+    invocations = read_invocations(fake_native)
+    assert [item["args"][:2] for item in invocations] == [
+        ["plan", "validate"],
+        ["plan", "submit"],
+    ]
+    expected = {
+        "schema": "zeroshot.merge-plan/v1",
+        "title": "Release",
+        "source": {"repository": "owner/repo", "branch": "main"},
+        "profile": "org:software-change",
+        "expiresAt": "2026-09-11T00:00:00Z",
+        "runs": {
+            "build": {"input": {"task": "build"}},
+            "integrate": {"input": {"task": "integrate"}, "needs": ["build"]},
+        },
+    }
+    assert all(item["plan"] == expected for item in invocations)
+    submitted = invocations[1]["args"]
+    assert submitted[submitted.index("--target") + 1] == "cloud"
+    assert submitted[submitted.index("--submission-key") + 1] == "release-1"
+    assert "--detach" in submitted
+
+
+def test_hosted_plan_handle_observes_waits_and_force_stops(fake_native: Path) -> None:
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("cloud")) as client:
+            plan = client.get_plan("01900000-0000-7000-8000-000000000010")
+            status = await plan.status()
+            assert status.state == "queued"
+            assert status.runs[0].waiting_reason == "queue_capacity"
+            snapshots = [item async for item in plan.watch()]
+            assert [item.state for item in snapshots] == ["running", "succeeded"]
+            terminal = await plan.wait(wait_timeout=2)
+            assert terminal.succeeded
+            stopped = await plan.force_stop()
+            assert stopped.state == "cancelled"
+
+    asyncio.run(exercise())
+    arguments = [item["args"] for item in read_invocations(fake_native)]
+    assert all(args[args.index("--target") + 1] == "cloud" for args in arguments)
+    assert any(args[:2] == ["plan", "status"] for args in arguments)
+    assert any(args[:2] == ["plan", "watch"] for args in arguments)
+    assert any(args[:2] == ["plan", "force-stop"] for args in arguments)
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled", "expired"])
+def test_hosted_plan_watch_accepts_terminal_status_before_cli_failure(
+    fake_native: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+) -> None:
+    monkeypatch.setenv("FAKE_PLAN_WATCH_TERMINAL", state)
+
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("cloud")) as client:
+            plan = client.get_plan("01900000-0000-7000-8000-000000000010")
+            statuses = [status.state async for status in plan.watch()]
+            assert statuses == ["running", state]
+
+    asyncio.run(exercise())
+
+
+def test_hosted_plan_watch_propagates_preterminal_cli_failure(
+    fake_native: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKE_PLAN_WATCH_FAIL_BEFORE_TERMINAL", "1")
+
+    async def exercise() -> None:
+        observed = []
+        async with Client(target=HostedTarget("cloud")) as client:
+            plan = client.get_plan("01900000-0000-7000-8000-000000000010")
+            with pytest.raises(TargetError, match="failed before terminal") as caught:
+                async for status in plan.watch():
+                    observed.append(status.state)
+        assert caught.value.exit_code == 1
+        assert observed == ["running"]
+
+    asyncio.run(exercise())
+
+
+def test_hosted_plan_watch_propagates_unexpected_failure_after_success(
+    fake_native: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKE_PLAN_WATCH_EXIT_NONZERO", "1")
+
+    async def exercise() -> None:
+        observed = []
+        async with Client(target=HostedTarget("cloud")) as client:
+            plan = client.get_plan("01900000-0000-7000-8000-000000000010")
+            with pytest.raises(TargetError, match="finished unsuccessfully"):
+                async for status in plan.watch():
+                    observed.append(status.state)
+        assert observed == ["running", "succeeded"]
+
+    asyncio.run(exercise())
+
+
+def test_merge_plan_requires_a_hosted_target(fake_native: Path) -> None:
+    request = MergePlanRequest(
+        title="Release",
+        repository="owner/repo",
+        branch="main",
+        profile="org:software-change",
+        expires_at="2026-09-11T00:00:00Z",
+        runs={"build": MergePlanRun(input={"task": "build"})},
+    )
+
+    async def exercise() -> None:
+        async with Client() as client:
+            with pytest.raises(InvalidRequestError) as caught:
+                await client.submit_plan(request)
+            assert caught.value.code == "target.hosted_required"
+
+    asyncio.run(exercise())
+    assert read_invocations(fake_native) == []

@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use openengine_cluster_protocol::TargetHttpProblem;
 
-use super::{read_json, require_response_route};
+use super::{read_json, read_json_with_limit, require_response_route};
 use crate::native_v2_target::TargetAuthorityError;
 
 pub(in crate::native_v2_target::controller_authority) async fn read_success_json<
@@ -13,11 +13,22 @@ pub(in crate::native_v2_target::controller_authority) async fn read_success_json
     expected: &Url,
     operation: &'static str,
 ) -> Result<T, TargetAuthorityError> {
+    read_success_json_with_limit(response, expected, operation, super::MAX_RESPONSE_BYTES).await
+}
+
+pub(in crate::native_v2_target::controller_authority) async fn read_success_json_with_limit<
+    T: DeserializeOwned,
+>(
+    response: reqwest::Response,
+    expected: &Url,
+    operation: &'static str,
+    maximum_bytes: usize,
+) -> Result<T, TargetAuthorityError> {
     require_response_route(&response, expected)?;
     if !response.status().is_success() {
         return Err(http_error(response, operation).await);
     }
-    read_json(response, operation).await
+    read_json_with_limit(response, operation, maximum_bytes).await
 }
 
 pub(in crate::native_v2_target::controller_authority) async fn http_error(

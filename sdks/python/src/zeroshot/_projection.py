@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Literal, TypeAlias, cast
 
 from .errors import ProtocolError
+from .plans import MergePlanRunStatus, MergePlanStatus
 from .runs import ActiveExecution, LogEvent, ResolvedSource, RunResult, RunStatus, RunSummary
 from .values import JsonValue
 
@@ -175,4 +176,91 @@ def _enum_string(
     selected = _string(value, name, kind)
     if selected not in allowed:
         raise ProtocolError(f"Zeroshot emitted unsupported {kind}.{name} {selected!r}")
+    return selected
+
+
+def _plan_status(value: object) -> MergePlanStatus:
+    root = _mapping(value, "merge plan status")
+    runs = tuple(
+        _plan_run_status(item) for item in _mapping_list(root.get("runs"), "merge plan status.runs")
+    )
+    return MergePlanStatus(
+        plan_id=_string(root, "planId", "merge plan status"),
+        title=_string(root, "title", "merge plan status"),
+        state=cast(
+            Literal["queued", "running", "succeeded", "failed", "cancelled", "expired"],
+            _enum_string(
+                root,
+                "state",
+                {"queued", "running", "succeeded", "failed", "cancelled", "expired"},
+                "merge plan status",
+            ),
+        ),
+        repository=_string(root, "repository", "merge plan status"),
+        branch=_string(root, "branch", "merge plan status"),
+        submitted_at=_string(root, "submittedAt", "merge plan status"),
+        expires_at=_string(root, "expiresAt", "merge plan status"),
+        runs=runs,
+    )
+
+
+def _plan_run_status(value: Mapping[str, object]) -> MergePlanRunStatus:
+    kind = "merge plan status.runs"
+    return MergePlanRunStatus(
+        name=_string(value, "name", kind),
+        run_id=_string(value, "runId", kind),
+        state=cast(
+            Literal[
+                "blocked",
+                "materializing",
+                "queued",
+                "provisioning",
+                "running",
+                "cancelling",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "expired",
+            ],
+            _enum_string(
+                value,
+                "state",
+                {
+                    "blocked",
+                    "materializing",
+                    "queued",
+                    "provisioning",
+                    "running",
+                    "cancelling",
+                    "succeeded",
+                    "failed",
+                    "cancelled",
+                    "expired",
+                },
+                kind,
+            ),
+        ),
+        needs=_string_list(value, "needs", kind),
+        source_revision=_nullable_string(value, "sourceRevision", kind),
+        ready_at=_nullable_string(value, "readyAt", kind),
+        queue_expires_at=_nullable_string(value, "queueExpiresAt", kind),
+        terminal_at=_nullable_string(value, "terminalAt", kind),
+        waiting_reason=_nullable_string(value, "waitingReason", kind),
+        error_code=_nullable_string(value, "errorCode", kind),
+    )
+
+
+def _string_list(value: Mapping[str, object], name: str, kind: str) -> tuple[str, ...]:
+    selected = value.get(name)
+    if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
+    return tuple(selected)
+
+
+def _nullable_string(value: Mapping[str, object], name: str, kind: str) -> str | None:
+    if name not in value:
+        raise ProtocolError(f"Zeroshot omitted {kind}.{name}")
+    selected = value[name]
+    if selected is not None and not isinstance(selected, str):
+        raise ProtocolError(f"Zeroshot emitted malformed {kind}.{name}")
     return selected

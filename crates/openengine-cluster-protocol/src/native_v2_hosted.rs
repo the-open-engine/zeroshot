@@ -5,6 +5,10 @@
 
 use serde::{Deserialize, Serialize};
 
+#[path = "native_v2_hosted/merge_plan.rs"]
+mod merge_plan;
+pub use merge_plan::*;
+
 use crate::{
     Cursor, ResolvedSource, RunForceResult, RunId, RunListResult, RunLogEventNotification, RunSize,
     RunStatus, RunStatusResult, RunTitle, RunWatchEventNotification, SubscriptionCloseReason,

@@ -39,8 +39,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, &routes.list, "connection list")
-            .await
+        self.hosted_json(builder, "connection list", None).await
     }
 
     pub(super) async fn connection_set(
@@ -54,8 +53,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, &routes.set, "connection set")
-            .await
+        self.hosted_json(builder, "connection set", None).await
     }
 
     pub(super) async fn connection_delete(
@@ -69,7 +67,6 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, &routes.delete, "connection delete")
-            .await
+        self.hosted_json(builder, "connection delete", None).await
     }
 }

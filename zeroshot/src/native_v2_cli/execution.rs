@@ -21,6 +21,8 @@ mod attach;
 mod connections;
 #[path = "execution/context.rs"]
 mod context;
+#[path = "execution/merge_plans.rs"]
+mod merge_plans;
 #[path = "execution/profiles.rs"]
 mod profiles;
 #[path = "execution/status.rs"]
@@ -62,6 +64,9 @@ where
 {
     if let Some(outcome) = try_execute_native_v2_static(&command, output)? {
         return Ok(outcome);
+    }
+    if command.is_plan_operation() {
+        return merge_plans::execute(command, context, signal, output).await;
     }
     if command.is_connection_operation() {
         return connections::execute_connection(command, context.backend, output).await;

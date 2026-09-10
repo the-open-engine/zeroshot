@@ -48,6 +48,15 @@ impl TargetAuthorityError {
         }
     }
 
+    pub(super) fn is_http_auth_rejection(&self) -> bool {
+        self.remote
+            .as_ref()
+            .and_then(|remote| remote.details.as_ref())
+            .and_then(|details| details.get("httpStatus"))
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|status| matches!(status, 401 | 403))
+    }
+
     pub(super) fn into_cli(self) -> NativeV2CliError {
         if self.disconnected {
             NativeV2CliError::Disconnected

@@ -94,6 +94,15 @@ fn classify(page: Value) -> PolicySnapshot {
     classify_policy(json!([page]), &review()).assert_value()
 }
 
+fn policy_page_with_merge_capabilities(merge: bool, squash: bool, rebase: bool) -> Value {
+    let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    let repository = page.pointer_mut("/data/repository").assert_value();
+    repository["mergeCommitAllowed"] = json!(merge);
+    repository["squashMergeAllowed"] = json!(squash);
+    repository["rebaseMergeAllowed"] = json!(rebase);
+    page
+}
+
 fn classify_conclusion(conclusion: &str, merge_state: &str) -> PolicySnapshot {
     classify(policy_page(
         "MERGEABLE",
@@ -341,12 +350,31 @@ fn repository_merge_capabilities_select_an_allowed_method() {
         ((false, false, true), MergeMethod::Rebase),
     ];
     for ((merge, squash, rebase), expected) in cases {
-        let mut page = policy_page("MERGEABLE", "CLEAN", None, (false, None));
-        let repository = page.pointer_mut("/data/repository").assert_value();
-        repository["mergeCommitAllowed"] = json!(merge);
-        repository["squashMergeAllowed"] = json!(squash);
-        repository["rebaseMergeAllowed"] = json!(rebase);
+        let page = policy_page_with_merge_capabilities(merge, squash, rebase);
         assert_eq!(classify(page).merge_method, Some(expected));
+    }
+}
+
+#[test]
+fn authoritative_merge_revision_is_preserved_for_every_merge_method() {
+    for (merge, squash, rebase) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        let mut page = policy_page_with_merge_capabilities(merge, squash, rebase);
+        let repository = page.pointer_mut("/data/repository").assert_value();
+        let pull_request = repository.pointer_mut("/pullRequest").assert_value();
+        pull_request["state"] = json!("MERGED");
+        pull_request["merged"] = json!(true);
+        pull_request["mergeCommit"] = json!({"oid":"cccccccccccccccccccccccccccccccccccccccc"});
+
+        assert_eq!(
+            classify(page).state,
+            GitHubReviewState::Merged {
+                merge_revision: "cccccccccccccccccccccccccccccccccccccccc".to_owned()
+            }
+        );
     }
 }
 

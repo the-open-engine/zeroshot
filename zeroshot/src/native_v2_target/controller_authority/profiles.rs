@@ -79,7 +79,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(input);
-        self.hosted_json(builder, &url, operation.label()).await
+        self.hosted_json(builder, operation.label(), None).await
     }
 
     pub(super) async fn profile_list(

@@ -36,8 +36,8 @@ use openengine_cluster_protocol::{EnumLabel, FieldName, WorkerErrorCode, WorkerO
 use serde_json::{Map, Value, json};
 
 use crate::native_v2_contract::{
-    EnvironmentVariableName, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
-    NodeInvocation, NodeRuntimeBinding,
+    EnvironmentVariableName, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF,
+    GIT_DELIVERY_PR_WORKER_REF, NodeInvocation, NodeRuntimeBinding,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
@@ -55,13 +55,15 @@ pub const DELIVERY_MERGED_LABEL: &str = "merged";
 pub const DELIVERY_CONFLICT_LABEL: &str = "conflict";
 pub const DELIVERY_CI_FAILED_LABEL: &str = "ci_failed";
 
-const DELIVERY_RESULT_VERSION: &str = "v1";
+const DELIVERY_PR_RESULT_VERSION: &str = "v1";
+const DELIVERY_MERGE_RESULT_VERSION: &str = "v2";
 const DELIVERY_VERSION_FIELD: &str = "version";
 const DELIVERY_MODE_FIELD: &str = "mode";
 const DELIVERY_OUTCOME_FIELD: &str = "outcome";
 const DELIVERY_REPOSITORY_FIELD: &str = "repository";
 const DELIVERY_TARGET_BRANCH_FIELD: &str = "targetBranch";
 const DELIVERY_HEAD_REVISION_FIELD: &str = "headRevision";
+const DELIVERY_MERGE_REVISION_FIELD: &str = "mergeRevision";
 const DELIVERY_PULL_REQUEST_ID_FIELD: &str = "pullRequestId";
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(20);
@@ -71,10 +73,14 @@ const REVIEW_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 const REVIEW_SYNC_MAX_INTERVAL: Duration = Duration::from_secs(8);
 const MAX_TOKEN_BYTES: usize = 4_096;
 const MAX_REVIEW_ID_BYTES: usize = 32;
+const MAX_CONFLICT_DIAGNOSTIC_BYTES: usize = 8 * 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeliveryMode {
     PullRequest,
+    /// The shipped merge@1 receipt contract, retained for stored and in-flight graphs.
+    MergeV1,
+    /// The merge@2 receipt contract with an authoritative merge revision.
     Merge,
 }
 
@@ -83,7 +89,8 @@ impl DeliveryMode {
     pub fn from_worker(worker: &WorkerRef) -> Option<Self> {
         match worker.as_str() {
             GIT_DELIVERY_PR_WORKER_REF => Some(Self::PullRequest),
-            GIT_DELIVERY_MERGE_WORKER_REF => Some(Self::Merge),
+            GIT_DELIVERY_MERGE_WORKER_REF => Some(Self::MergeV1),
+            GIT_DELIVERY_MERGE_V2_WORKER_REF => Some(Self::Merge),
             _ => None,
         }
     }
@@ -91,15 +98,26 @@ impl DeliveryMode {
     const fn label(self) -> &'static str {
         match self {
             Self::PullRequest => "pr",
-            Self::Merge => "merge",
+            Self::MergeV1 | Self::Merge => "merge",
         }
     }
 
     const fn success_outcome(self) -> &'static str {
         match self {
             Self::PullRequest => DELIVERY_OPENED_LABEL,
-            Self::Merge => DELIVERY_MERGED_LABEL,
+            Self::MergeV1 | Self::Merge => DELIVERY_MERGED_LABEL,
         }
+    }
+
+    const fn result_version(self) -> &'static str {
+        match self {
+            Self::PullRequest | Self::MergeV1 => DELIVERY_PR_RESULT_VERSION,
+            Self::Merge => DELIVERY_MERGE_RESULT_VERSION,
+        }
+    }
+
+    const fn includes_merge_revision(self) -> bool {
+        matches!(self, Self::Merge)
     }
 }
 
@@ -279,6 +297,24 @@ pub struct GitHubReviewObservation {
     pub state: GitHubReviewState,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubConflictRequest {
+    pub workspace: PathBuf,
+    pub review: GitHubReviewReceipt,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubConflictMaterialization {
+    pub target_revision: String,
+    pub conflicted_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GitHubConflictOutcome {
+    Materialized(GitHubConflictMaterialization),
+    ObservationChanged,
+}
+
 /// Target-owned, bounded GitHub effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait GitHubDeliveryAuthority: Send + Sync {
@@ -328,6 +364,17 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
     ) -> Result<(), GitHubAuthorityError> {
         Ok(())
     }
+
+    /// Fetches and integrates the exact current target revision without exposing credentials to
+    /// an agent. A materialized conflict must remain in the workspace; a changed observation must
+    /// leave the original review head clean so delivery can re-observe GitHub.
+    async fn materialize_merge_conflict(
+        &self,
+        _request: &GitHubConflictRequest,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
+        Err(GitHubAuthorityError::Rejected)
+    }
 }
 
 pub use adapter::NativeV2DeliveryAdapter;
@@ -338,66 +385,123 @@ fn github_credential(environment: &ResolvedEnvironment) -> Option<GitHubCredenti
     (!token.trim().is_empty() && token.len() <= MAX_TOKEN_BYTES).then_some(GitHubCredential(token))
 }
 
-fn delivery_outcome(
+struct DeliveryResult<'a> {
     mode: DeliveryMode,
-    outcome: &str,
-    review: &GitHubReviewReceipt,
+    outcome: &'a str,
+    review: &'a GitHubReviewReceipt,
+    merge_revision: Option<&'a str>,
+}
+
+fn delivery_outcome(
+    result: DeliveryResult<'_>,
     diagnostic: &str,
 ) -> Result<WorkerOutcome, NodeRunnerError> {
-    if !valid_mode_outcome(mode, outcome) {
+    if !valid_delivery_result(&result) {
         return Err(NodeRunnerError::Driver);
     }
     let field = FieldName::new(DELIVERY_SIGNAL_FIELD).map_err(|_| NodeRunnerError::Driver)?;
-    let label = EnumLabel::new(outcome).map_err(|_| NodeRunnerError::Driver)?;
+    let label = EnumLabel::new(result.outcome).map_err(|_| NodeRunnerError::Driver)?;
     Ok(WorkerOutcome::Verifier {
-        output: delivery_result(mode, outcome, review),
+        output: delivery_result(&result),
         signals: BTreeMap::from([(field, label)]),
         diagnostic: json!({"message":diagnostic}),
         artifacts: Vec::new(),
     })
 }
 
+fn valid_delivery_result(result: &DeliveryResult<'_>) -> bool {
+    valid_mode_outcome(result.mode, result.outcome)
+        && match (result.mode, result.outcome, result.merge_revision) {
+            (
+                DeliveryMode::MergeV1 | DeliveryMode::Merge,
+                DELIVERY_MERGED_LABEL,
+                Some(revision),
+            ) => valid_revision(revision),
+            (DeliveryMode::MergeV1 | DeliveryMode::Merge, _, None)
+            | (DeliveryMode::PullRequest, _, None) => true,
+            _ => false,
+        }
+}
+
 fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
     match mode {
         DeliveryMode::PullRequest => outcome == DELIVERY_OPENED_LABEL,
-        DeliveryMode::Merge => matches!(
+        DeliveryMode::MergeV1 | DeliveryMode::Merge => matches!(
             outcome,
             DELIVERY_MERGED_LABEL | DELIVERY_CONFLICT_LABEL | DELIVERY_CI_FAILED_LABEL
         ),
     }
 }
 
-fn delivery_result(mode: DeliveryMode, outcome: &str, review: &GitHubReviewReceipt) -> Value {
-    Value::Object(Map::from_iter([
+fn conflict_diagnostic(
+    authority_diagnostic: &str,
+    materialization: &GitHubConflictMaterialization,
+) -> Option<String> {
+    if !valid_revision(&materialization.target_revision)
+        || materialization.conflicted_paths.is_empty()
+        || !materialization
+            .conflicted_paths
+            .iter()
+            .all(|path| valid_conflicted_path(path))
+    {
+        return None;
+    }
+    let paths = serde_json::to_string(&materialization.conflicted_paths).ok()?;
+    let diagnostic = format!(
+        "{authority_diagnostic}; targetRevision={}; conflictedPaths={paths}",
+        materialization.target_revision
+    );
+    (diagnostic.len() <= MAX_CONFLICT_DIAGNOSTIC_BYTES).then_some(diagnostic)
+}
+
+fn valid_conflicted_path(value: &str) -> bool {
+    use std::path::Component;
+
+    !value.is_empty()
+        && !std::path::Path::new(value).is_absolute()
+        && std::path::Path::new(value)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn delivery_result(result: &DeliveryResult<'_>) -> Value {
+    let mut fields = Map::from_iter([
         (
             DELIVERY_VERSION_FIELD.to_owned(),
-            Value::String(DELIVERY_RESULT_VERSION.to_owned()),
+            Value::String(result.mode.result_version().to_owned()),
         ),
         (
             DELIVERY_MODE_FIELD.to_owned(),
-            Value::String(mode.label().to_owned()),
+            Value::String(result.mode.label().to_owned()),
         ),
         (
             DELIVERY_OUTCOME_FIELD.to_owned(),
-            Value::String(outcome.to_owned()),
+            Value::String(result.outcome.to_owned()),
         ),
         (
             DELIVERY_REPOSITORY_FIELD.to_owned(),
-            Value::String(review.repository.clone()),
+            Value::String(result.review.repository.clone()),
         ),
         (
             DELIVERY_TARGET_BRANCH_FIELD.to_owned(),
-            Value::String(review.target_branch.clone()),
+            Value::String(result.review.target_branch.clone()),
         ),
         (
             DELIVERY_HEAD_REVISION_FIELD.to_owned(),
-            Value::String(review.head_revision.clone()),
+            Value::String(result.review.head_revision.clone()),
         ),
         (
             DELIVERY_PULL_REQUEST_ID_FIELD.to_owned(),
-            Value::String(review.review_id.clone()),
+            Value::String(result.review.review_id.clone()),
         ),
-    ]))
+    ]);
+    if result.mode.includes_merge_revision() {
+        fields.insert(
+            DELIVERY_MERGE_REVISION_FIELD.to_owned(),
+            Value::String(result.merge_revision.unwrap_or_default().to_owned()),
+        );
+    }
+    Value::Object(fields)
 }
 
 fn valid_review(request: &GitHubReviewRequest, review: &GitHubReviewReceipt) -> bool {
