@@ -8,7 +8,7 @@ use super::super::{
     NativeV2CliError,
 };
 
-use super::write_json;
+use super::{SubscriptionStep, next_or_detach, write_json};
 
 pub(super) struct RoutedAttach<'a> {
     pub(super) target: Option<&'a str>,
@@ -27,9 +27,12 @@ where
     W: Write,
 {
     let RoutedAttach { target, params } = route;
+    let detach = signal.wait();
+    tokio::pin!(detach);
     loop {
         let mut subscription = tokio::select! {
-            () = signal.wait() => return Ok(CliOutcome::Detached),
+            biased;
+            () = &mut detach => return Ok(CliOutcome::Detached),
             result = backend.run_attach(target, params.clone()) => match result {
                 Ok(subscription) => subscription,
                 Err(NativeV2CliError::Disconnected) => {
@@ -40,25 +43,25 @@ where
             },
         };
         loop {
-            let item = tokio::select! {
-                () = signal.wait() => return Ok(CliOutcome::Detached),
-                item = subscription.next() => item,
-            };
-            match item {
-                Ok(Some(CliSubscriptionItem::Event(event))) => write_json(output, &event)?,
-                Ok(Some(CliSubscriptionItem::Closed {
+            let step = next_or_detach(subscription.next(), detach.as_mut()).await?;
+            match step {
+                SubscriptionStep::Detached => return Ok(CliOutcome::Detached),
+                SubscriptionStep::Item(Some(CliSubscriptionItem::Event(event))) => {
+                    write_json(output, &event)?;
+                }
+                SubscriptionStep::Item(Some(CliSubscriptionItem::Closed {
                     reason: SubscriptionCloseReason::Done,
                 })) => return Ok(CliOutcome::Completed),
-                Ok(Some(CliSubscriptionItem::Closed {
+                SubscriptionStep::Item(Some(CliSubscriptionItem::Closed {
                     reason: SubscriptionCloseReason::SlowConsumer,
                 }))
-                | Ok(None)
-                | Err(NativeV2CliError::Disconnected) => break,
-                Err(error) => return Err(error),
+                | SubscriptionStep::Item(None)
+                | SubscriptionStep::Reconnect => break,
             }
         }
         tokio::select! {
-            () = signal.wait() => return Ok(CliOutcome::Detached),
+            biased;
+            () = &mut detach => return Ok(CliOutcome::Detached),
             () = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
     }

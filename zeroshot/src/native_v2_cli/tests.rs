@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{RunTitle, RuntimePlan};
@@ -28,6 +29,37 @@ use support::*;
 
 fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
+}
+
+struct EdgeDetachSignal {
+    notification: tokio::sync::watch::Sender<()>,
+}
+
+#[async_trait::async_trait]
+impl DetachSignal for EdgeDetachSignal {
+    async fn wait(&mut self) {
+        let mut receiver = self.notification.subscribe();
+        let _ = receiver.changed().await;
+    }
+}
+
+struct NotifyingOutput {
+    notification: Option<tokio::sync::watch::Sender<()>>,
+    bytes: Vec<u8>,
+}
+
+impl Write for NotifyingOutput {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        if let Some(notification) = self.notification.take() {
+            let _ = notification.send(());
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn assert_cursor_calls(calls: &[Call], kind: CursorCallKind, expected: &[Option<&str>]) {
@@ -336,6 +368,37 @@ async fn ctrl_c_detaches_observation_without_force_stop() {
             .iter()
             .any(|call| matches!(call, Call::Force { .. }))
     );
+}
+
+#[tokio::test]
+async fn detach_notification_survives_a_completed_subscription_branch() {
+    let backend = FakeBackend::with_reconnecting_watch();
+    let (notification, _receiver) = tokio::sync::watch::channel(());
+    let mut signal = EdgeDetachSignal {
+        notification: notification.clone(),
+    };
+    let mut output = NotifyingOutput {
+        notification: Some(notification),
+        bytes: Vec::new(),
+    };
+    let command =
+        parse_native_v2_args(args(&["watch", "run-public", "--target", "prod"])).assert_value();
+
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        execute_native_v2_cli(command, &backend, &mut signal, &mut output),
+    )
+    .await
+    .expect("detach notification remains observable")
+    .assert_value();
+
+    assert_eq!(outcome, CliOutcome::Detached);
+    assert!(
+        String::from_utf8(output.bytes)
+            .assert_value()
+            .contains("\"cursor\":\"v2:1\"")
+    );
+    assert_cursor_calls(&backend.calls(), CursorCallKind::Watch, &[None]);
 }
 
 #[tokio::test]

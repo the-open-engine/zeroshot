@@ -9,7 +9,7 @@ use openengine_cluster_testkit::assertions::{AssertValue, JsonAt};
 use serde_json::{Value, json};
 use tokio::process::{Child, Command};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::time::{Instant, sleep, timeout};
+use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
 const DECLARED_KEY: &str = "local-declared-key";
@@ -349,21 +349,26 @@ async fn interrupt_after_observation(mut child: Child, expected: &str) -> Output
     })
     .await
     .unwrap_or(false);
-    signal(pid, libc::SIGINT).assert_value_with("interrupt observer CLI");
-    let (status, stderr) = timeout(CLI_TIMEOUT, async {
+    let stdout = tokio::spawn(async move {
         stdout
             .read_to_end(&mut bytes)
             .await
             .assert_value_with("finish observer stdout");
-        let status = child
-            .wait()
-            .await
-            .assert_value_with("wait for observer CLI");
+        bytes
+    });
+    let deadline = Instant::now() + CLI_TIMEOUT;
+    signal(pid, libc::SIGINT).assert_value_with("interrupt observer CLI");
+    let status = timeout_at(deadline, child.wait())
+        .await
+        .assert_value_with("observer CLI exit deadline")
+        .assert_value_with("wait for observer CLI");
+    let (bytes, stderr) = timeout_at(deadline, async {
+        let stdout = stdout.await.assert_value_with("join observer stdout");
         let stderr = stderr.await.assert_value_with("join observer stderr");
-        (status, stderr)
+        (stdout, stderr)
     })
     .await
-    .assert_value_with("observer CLI shutdown deadline");
+    .assert_value_with("observer CLI output drain deadline");
     assert!(
         observed,
         "observer CLI exited before emitting {expected:?}\nstdout:\n{}\nstderr:\n{}",
