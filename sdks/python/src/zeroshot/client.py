@@ -219,8 +219,8 @@ class Client:
 
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
-            options: Typed keyword options for string submissions: title, preset, runtime, branch,
-                and submission_key.
+            options: Typed keyword options for string submissions: title, preset, runtime,
+                repository, branch, revision, and submission_key.
 
         Returns:
             A durable run handle bound to this client's target.
@@ -626,9 +626,9 @@ def _exact_submission(request: RunRequest, overrides: _Overrides) -> _Submission
         graph=request.graph,
         initial_input=request.initial_input,
         runtime=request.runtime,
-        repository=None,
+        repository=request.repository,
         branch=request.branch,
-        revision=None,
+        revision=request.revision,
         submission_key=(
             request.submission_key if request.submission_key is not None else _submission_key()
         ),

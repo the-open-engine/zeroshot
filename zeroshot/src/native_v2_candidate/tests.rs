@@ -412,7 +412,16 @@ async fn submit_through_cli(
     .await
     .assert_value_with("CLI run");
     assert_eq!(outcome, CliOutcome::Detached);
-    serde_json::from_slice(&output).assert_value_with("CLI receipt")
+    let mut records = serde_json::Deserializer::from_slice(&output)
+        .into_iter::<Value>()
+        .collect::<Result<Vec<_>, _>>()
+        .assert_value_with("CLI output records");
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[0]["source"],
+        "acme/project@main#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    serde_json::from_value(records.pop().assert_value()).assert_value_with("CLI receipt")
 }
 
 #[tokio::test]

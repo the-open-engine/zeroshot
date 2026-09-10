@@ -22,7 +22,6 @@ const HELP_PATHS: &[&[&str]] = &[
     &["target"],
     &["target", "add"],
     &["target", "login"],
-    &["target", "setup"],
     &["target", "serve"],
     &["connection"],
     &["connection", "list"],

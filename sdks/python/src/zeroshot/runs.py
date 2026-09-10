@@ -18,7 +18,9 @@ class RunRequest:
         graph: Opaque GraphSpec passed to Zeroshot without changes.
         initial_input: Closed JSON input that Zeroshot validates against the graph.
         runtime: Opaque RuntimePlan passed to Zeroshot without changes.
-        branch: Direct-target source branch override.
+        repository: Named-target GitHub repository override in owner/name form.
+        branch: Named-target source branch override.
+        revision: Named-target exact source commit override.
         submission_key: Stable idempotency key; None generates one before native preflight.
     """
 
@@ -26,13 +28,15 @@ class RunRequest:
     graph: GraphSpec
     initial_input: JsonValue
     runtime: RuntimePlan
+    repository: str | None = None
     branch: str | None = None
+    revision: str | None = None
     submission_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResolvedSource:
-    """Immutable source snapshot selected by the target.
+    """Immutable source snapshot selected for a named run.
 
     Args:
         repository: Native repository identity.

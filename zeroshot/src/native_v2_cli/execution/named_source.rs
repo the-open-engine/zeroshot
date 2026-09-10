@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use openengine_cluster_protocol::{
@@ -12,6 +12,20 @@ use crate::native_v2_delivery::git_auth::encode_basic_credential;
 const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 const MAX_OUTPUT: usize = 1024 * 1024;
 
+struct WorktreeSourceContext {
+    root: PathBuf,
+    local_branch: Option<String>,
+    upstream: Option<(String, SourceBranchId)>,
+}
+
+struct RevisionSelection<'a> {
+    root: &'a Path,
+    repository: &'a SourceRepositoryId,
+    branch: &'a SourceBranchId,
+    remote: Option<&'a str>,
+    token: Option<&'a str>,
+}
+
 pub(super) async fn resolve(
     run: &RunCommand,
     token: Option<&str>,
@@ -19,13 +33,39 @@ pub(super) async fn resolve(
     if run.target.is_none() || run.validate_only {
         return Ok(None);
     }
+    let worktree = inspect_worktree(run).await?;
+    let (repository, remote) = select_run_repository(run, &worktree).await?;
+    let branch = select_run_branch(run, &worktree)?;
+    let revision = select_run_revision(
+        run,
+        RevisionSelection {
+            root: &worktree.root,
+            repository: &repository,
+            branch: &branch,
+            remote: remote.as_deref(),
+            token,
+        },
+    )
+    .await?;
+    let dirty = worktree_is_dirty(&worktree.root).await?;
+    Ok(Some(NamedRunSource {
+        resolved: ResolvedSource {
+            repository,
+            branch,
+            revision,
+        },
+        dirty,
+    }))
+}
+
+async fn inspect_worktree(run: &RunCommand) -> Result<WorktreeSourceContext, NativeV2CliError> {
     let root = git(&["rev-parse", "--show-toplevel"]).await.map_err(|_| {
         source_error(
             "run from a Git worktree, or supply --repository and --branch from a Git worktree",
         )
     })?;
-    let root = Path::new(root.trim());
-    let local_branch = git_at(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+    let root = PathBuf::from(root.trim());
+    let local_branch = git_at(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
         .await
         .ok()
         .map(|value| value.trim().to_owned());
@@ -36,41 +76,58 @@ pub(super) async fn resolve(
     }
     let upstream = if run.repository.is_none() || run.branch.is_none() {
         match &local_branch {
-            Some(branch) => upstream(root, branch).await?,
+            Some(branch) => upstream(&root, branch).await?,
             None => None,
         }
     } else {
         None
     };
+    Ok(WorktreeSourceContext {
+        root,
+        local_branch,
+        upstream,
+    })
+}
+
+async fn select_run_repository(
+    run: &RunCommand,
+    worktree: &WorktreeSourceContext,
+) -> Result<(SourceRepositoryId, Option<String>), NativeV2CliError> {
+    let upstream_remote = worktree.upstream.as_ref().map(|value| value.0.as_str());
     let (repository, remote) = match &run.repository {
         Some(repository) => (
             repository.clone(),
-            matching_remote(root, repository, upstream.as_ref().map(|value| value.0.as_str()))
-                .await,
+            matching_remote(&worktree.root, repository, upstream_remote).await,
         ),
-        None => select_repository(root, upstream.as_ref().map(|value| value.0.as_str())).await?,
+        None => select_repository(&worktree.root, upstream_remote).await?,
     };
-    let branch = match &run.branch {
-        Some(branch) => branch.clone(),
-        None => upstream
-            .as_ref()
-            .map(|value| value.1.clone())
-            .or_else(|| local_branch.and_then(|value| SourceBranchId::new(value).ok()))
-            .ok_or_else(|| source_error("could not select a branch; supply --branch BRANCH"))?,
-    };
-    let revision = match &run.revision {
-        Some(revision) => revision.clone(),
-        None => remote_tip(root, &repository, &branch, remote.as_deref(), token).await?,
-    };
-    let dirty = worktree_is_dirty(root).await?;
-    Ok(Some(NamedRunSource {
-        resolved: ResolvedSource {
-            repository,
-            branch,
-            revision,
-        },
-        dirty,
-    }))
+    Ok((repository, remote))
+}
+
+fn select_run_branch(
+    run: &RunCommand,
+    worktree: &WorktreeSourceContext,
+) -> Result<SourceBranchId, NativeV2CliError> {
+    run.branch
+        .clone()
+        .or_else(|| worktree.upstream.as_ref().map(|value| value.1.clone()))
+        .or_else(|| {
+            worktree
+                .local_branch
+                .as_ref()
+                .and_then(|value| SourceBranchId::new(value.clone()).ok())
+        })
+        .ok_or_else(|| source_error("could not select a branch; supply --branch BRANCH"))
+}
+
+async fn select_run_revision(
+    run: &RunCommand,
+    selection: RevisionSelection<'_>,
+) -> Result<SourceRevisionId, NativeV2CliError> {
+    match &run.revision {
+        Some(revision) => Ok(revision.clone()),
+        None => remote_tip(selection).await,
+    }
 }
 
 async fn upstream(
@@ -136,10 +193,12 @@ async fn select_repository(
 }
 
 async fn worktree_is_dirty(root: &Path) -> Result<bool, NativeV2CliError> {
-    Ok(!git_at(root, &["status", "--porcelain", "--untracked-files=normal"])
-        .await
-        .map_err(|_| source_error("could not inspect worktree status"))?
-        .is_empty())
+    Ok(
+        !git_at(root, &["status", "--porcelain", "--untracked-files=normal"])
+            .await
+            .map_err(|_| source_error("could not inspect worktree status"))?
+            .is_empty(),
+    )
 }
 
 async fn matching_remote(
@@ -187,24 +246,20 @@ fn parse_github_repository(url: &str) -> Option<SourceRepositoryId> {
 }
 
 async fn remote_tip(
-    root: &Path,
-    repository: &SourceRepositoryId,
-    branch: &SourceBranchId,
-    remote: Option<&str>,
-    token: Option<&str>,
+    selection: RevisionSelection<'_>,
 ) -> Result<SourceRevisionId, NativeV2CliError> {
-    let reference = format!("refs/heads/{}", branch.as_str());
+    let reference = format!("refs/heads/{}", selection.branch.as_str());
     let fallback_url;
-    let location = match remote {
+    let location = match selection.remote {
         Some(remote) => remote,
         None => {
-            fallback_url = format!("https://github.com/{}.git", repository.as_str());
+            fallback_url = format!("https://github.com/{}.git", selection.repository.as_str());
             &fallback_url
         }
     };
-    let mut command = git_command(Some(root));
+    let mut command = git_command(Some(selection.root));
     command.arg("ls-remote").arg(location).arg(&reference);
-    add_token(&mut command, token);
+    add_token(&mut command, selection.token);
     let output = run(&mut command).await.map_err(|_| {
         source_error(
             "could not resolve the selected remote branch tip; check repository access and --branch",
@@ -321,17 +376,15 @@ mod tests {
     #[tokio::test]
     async fn explicit_repository_reuses_authenticated_ssh_remote() {
         let root = TestDirectory::new("ssh");
-        run(
-            std::process::Command::new("git")
-                .arg("init")
-                .arg(&root.0),
-        )
-        .unwrap();
-        run(
-            std::process::Command::new("git")
-                .current_dir(&root.0)
-                .args(["remote", "add", "private", "git@github.com:owner/private.git"]),
-        )
+        run(std::process::Command::new("git").arg("init").arg(&root.0)).unwrap();
+        run(std::process::Command::new("git")
+            .current_dir(&root.0)
+            .args([
+                "remote",
+                "add",
+                "private",
+                "git@github.com:owner/private.git",
+            ]))
         .unwrap();
 
         let repository = SourceRepositoryId::new("owner/private").unwrap();
@@ -372,25 +425,21 @@ mod tests {
         let root = initialized_repository("dirty");
         let tracked = root.0.join("tracked.txt");
         std::fs::write(&tracked, "clean\n").unwrap();
-        run(
-            std::process::Command::new("git")
-                .current_dir(&root.0)
-                .args(["add", "tracked.txt"]),
-        )
+        run(std::process::Command::new("git")
+            .current_dir(&root.0)
+            .args(["add", "tracked.txt"]))
         .unwrap();
-        run(
-            std::process::Command::new("git")
-                .current_dir(&root.0)
-                .args([
-                    "-c",
-                    "user.name=Zeroshot Test",
-                    "-c",
-                    "user.email=test@example.com",
-                    "commit",
-                    "-m",
-                    "initial",
-                ]),
-        )
+        run(std::process::Command::new("git")
+            .current_dir(&root.0)
+            .args([
+                "-c",
+                "user.name=Zeroshot Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "initial",
+            ]))
         .unwrap();
         assert!(!worktree_is_dirty(&root.0).await.unwrap());
 
@@ -401,11 +450,9 @@ mod tests {
         std::fs::write(&tracked, "changed\n").unwrap();
         assert!(worktree_is_dirty(&root.0).await.unwrap());
 
-        run(
-            std::process::Command::new("git")
-                .current_dir(&root.0)
-                .args(["add", "tracked.txt"]),
-        )
+        run(std::process::Command::new("git")
+            .current_dir(&root.0)
+            .args(["add", "tracked.txt"]))
         .unwrap();
         assert!(worktree_is_dirty(&root.0).await.unwrap());
     }
@@ -436,11 +483,9 @@ mod tests {
     }
 
     fn add_remote(root: &Path, name: &str, url: &str) {
-        run(
-            std::process::Command::new("git")
-                .current_dir(root)
-                .args(["remote", "add", name, url]),
-        )
+        run(std::process::Command::new("git")
+            .current_dir(root)
+            .args(["remote", "add", name, url]))
         .unwrap();
     }
 

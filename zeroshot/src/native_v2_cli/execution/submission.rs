@@ -174,21 +174,31 @@ where
     if run.validate_only {
         return Ok(None);
     }
-    if let (Some(target), Some(source)) = (&run.target, &params.source) {
-        write_json(
-            output,
-            &serde_json::json!({
-                "target": target,
-                "source": format!("{}@{}#{}", source.resolved.repository.as_str(), source.resolved.branch.as_str(), source.resolved.revision.as_str()),
-                "dirty": source.dirty,
-            }),
-        )?;
-    }
-    context
+    let source_record = named_source_record(run, &params);
+    let receipt = context
         .backend
         .run_submit(run.target.as_deref(), params)
-        .await
-        .map(Some)
+        .await?;
+    if let Some(record) = source_record {
+        write_json(output, &record)?;
+    }
+    Ok(Some(receipt))
+}
+
+fn named_source_record(run: &RunCommand, params: &PreparedRunRequest) -> Option<serde_json::Value> {
+    let target = run.target.as_ref()?;
+    let source = params.source.as_ref()?;
+    let resolved = &source.resolved;
+    Some(serde_json::json!({
+        "target": target,
+        "source": format!(
+            "{}@{}#{}",
+            resolved.repository.as_str(),
+            resolved.branch.as_str(),
+            resolved.revision.as_str()
+        ),
+        "dirty": source.dirty,
+    }))
 }
 
 fn validate_github_token(value: String) -> Result<String, NativeV2CliError> {

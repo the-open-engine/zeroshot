@@ -130,6 +130,7 @@ where
 #[derive(Clone, Default)]
 pub(super) struct FakeBackend {
     calls: Arc<Mutex<Vec<Call>>>,
+    failed_submit: bool,
     pending_watch: bool,
     reconnect_watch: bool,
     permanent_reopen_watch: bool,
@@ -146,6 +147,13 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(super) fn with_failed_submit() -> Self {
+        Self {
+            failed_submit: true,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn with_pending_watch() -> Self {
         Self {
             pending_watch: true,
@@ -259,6 +267,9 @@ impl NativeV2CliBackend for FakeBackend {
             branch: intent.branch.map(|branch| branch.as_str().to_owned()),
             submission_key: intent.submission_key.as_str().to_owned(),
         });
+        if self.failed_submit {
+            return Err(NativeV2CliError::Protocol("submission rejected".to_owned()));
+        }
         Ok(RunSubmitResult {
             run_id: RunId::new("run-public"),
         })

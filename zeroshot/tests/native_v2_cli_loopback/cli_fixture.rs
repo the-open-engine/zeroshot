@@ -82,7 +82,8 @@ pub(crate) fn live_shell_script() -> String {
         r#"
 live_output=$(
   "$1" run --target prod --repository "$ZEROSHOT_NATIVE_V2_LIVE_REPOSITORY" \
-    --branch "$ZEROSHOT_NATIVE_V2_LIVE_BASE" --title "Live provider acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
+    --branch "$ZEROSHOT_NATIVE_V2_LIVE_BASE" --title "Live provider acceptance" \
+    --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key "$7"
 ) || exit $?
 run_id=$(printf '%s' "$live_output" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p' | head -1)
@@ -182,7 +183,16 @@ fn install_source_git(config: &Path, revision: &str) -> PathBuf {
     std::fs::write(
         &path,
         format!(
-            "#!/bin/sh\ncase \" $* \" in\n  *\" ls-remote \"*) last=HEAD; for argument do last=$argument; done; printf '{revision}\\t%s\\n' \"$last\" ;;\n  *) exec /usr/bin/git \"$@\" ;;\nesac\n"
+            r#"#!/bin/sh
+case " $* " in
+  *" ls-remote "*)
+    last=HEAD
+    for argument do last=$argument; done
+    printf '{revision}\t%s\n' "$last"
+    ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+"#
         ),
     )
     .assert_value();

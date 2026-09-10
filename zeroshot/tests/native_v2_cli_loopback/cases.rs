@@ -32,9 +32,8 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
         .lines()
         .find_map(|line| line.strip_prefix("RUN_ID="))
         .assert_value_with("run ID marker");
-    assert!(
-        stdout.contains("DETACHED={\"target\":\"prod\",\"source\":\"open-engine/zeroshot@main#")
-    );
+    assert!(stdout.contains("\"source\":\"open-engine/zeroshot@main#"));
+    assert!(stdout.contains("\"target\":\"prod\""));
     assert!(stdout.contains("\"dirty\":"));
     assert!(stdout.contains("\"runId\":"));
     assert!(stdout.contains("LIST={\"runs\":"));
@@ -107,7 +106,8 @@ async fn shipped_cli_drives_direct_and_ci_feedback_delivery_to_confirmed_merge()
         )
         .await;
         assert!(stderr.contains("ABCD-EFGH"));
-        assert!(stdout.contains("DELIVERY={\"target\":\"prod\",\"source\":\"acme/project@main#"));
+        assert!(stdout.contains("\"source\":\"acme/project@main#"));
+        assert!(stdout.contains("\"target\":\"prod\""));
         assert!(stdout.contains("\"dirty\":"));
         assert!(stdout.contains("\"runId\":"));
         assert!(

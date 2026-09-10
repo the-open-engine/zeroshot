@@ -58,6 +58,7 @@ should link to the version of these core docs that matches the deployed target, 
 ## Source and delivery credentials
 
 For named-target runs, the CLI can send `GH_TOKEN` for source checkout and generated GitHub delivery.
-A provider receives that value only if its runtime binding declares `GH_TOKEN`. Before submission,
-the CLI reports the target, exact `owner/repository@branch#revision`, and whether the invoking
-worktree is dirty. Uncommitted files remain local and are never committed or pushed automatically.
+A provider receives that value only if its runtime binding declares `GH_TOKEN`. After the target
+accepts a submission, the CLI reports the target, exact `owner/repository@branch#revision`, and
+whether the invoking worktree is dirty before emitting the run receipt. Uncommitted files remain
+local and are never committed or pushed automatically.

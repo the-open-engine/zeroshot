@@ -308,6 +308,31 @@ async fn run_follows_by_default_and_forwards_per_run_intent_unchanged() {
 }
 
 #[tokio::test]
+async fn rejected_named_submission_does_not_emit_source_metadata() {
+    let files = FixtureFiles::new(graph(), json!({"task":"reject it"}));
+    let command = parse_native_v2_args(run_args(
+        &files.graph,
+        &files.input,
+        &files.runtime,
+        &["--detach"],
+    ))
+    .assert_value();
+    let backend = FakeBackend::with_failed_submit();
+    let mut output = std::io::Cursor::new(Vec::new());
+
+    let result = execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut output)
+        .await
+        .map_err(|error| error.to_string());
+
+    assert_eq!(
+        result,
+        Err("Zeroshot OECP request failed: submission rejected".to_owned())
+    );
+    assert_eq!(output.position(), 0);
+    assert!(matches!(backend.calls().as_slice(), [Call::Submit { .. }]));
+}
+
+#[tokio::test]
 async fn detach_flag_returns_after_submit_without_opening_watch() {
     let files = FixtureFiles::new(graph(), json!({"task":"detach"}));
     let command = parse_native_v2_args(run_args(

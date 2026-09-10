@@ -152,6 +152,9 @@ def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> 
         graph=GraphSpec.from_dict(graph),
         initial_input={"ticket": "OE-123"},
         runtime=RuntimePlan.from_dict(runtime_plan),
+        repository="owner/repository",
+        branch="release",
+        revision="0123456789abcdef0123456789abcdef01234567",
         submission_key="oe-123",
     )
 
@@ -164,10 +167,18 @@ def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> 
         item for item in read_invocations(fake_native) if item["args"] and item["args"][0] == "run"
     ]
     assert len(runs) == 2
-    assert all(item["--input"] == {"ticket": "OE-123"} for item in runs)
-    assert all(item["--graph"] == graph for item in runs)
-    assert all(item["--runtime-config"] == runtime_plan for item in runs)
-    assert all("--uniform-runtime-config" not in item["args"] for item in runs)
+    for item in runs:
+        assert item["--input"] == {"ticket": "OE-123"}
+        assert item["--graph"] == graph
+        assert item["--runtime-config"] == runtime_plan
+        assert "--uniform-runtime-config" not in item["args"]
+        arguments = item["args"]
+        assert arguments[arguments.index("--repository") + 1] == "owner/repository"
+        assert arguments[arguments.index("--branch") + 1] == "release"
+        assert (
+            arguments[arguments.index("--revision") + 1]
+            == "0123456789abcdef0123456789abcdef01234567"
+        )
 
 
 def test_presets_are_read_from_executable(fake_native: Path) -> None:
