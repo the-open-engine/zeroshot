@@ -2073,7 +2073,7 @@
               (<code><span title="str">str</span> | None</code>)
           –
           <div class="doc-md-description">
-            <p>RFC 3339 time at which all dependencies had succeeded.</p>
+            <p>RFC 3339 time when source materialization completed and the node became ready.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -2081,7 +2081,8 @@
               (<code><span title="str">str</span> | None</code>)
           –
           <div class="doc-md-description">
-            <p>RFC 3339 per-node queue deadline, set 24 hours after readiness.</p>
+            <p>RFC 3339 per-node queue deadline, up to 24 hours after readiness and
+bounded by the plan deadline.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
