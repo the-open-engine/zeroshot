@@ -1112,6 +1112,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanWaitTimeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanWaitTimeout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.SubmissionConflictError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1662,6 +1673,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanWaitTimeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanWaitTimeout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.SubmissionConflictError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2124,6 +2146,74 @@
           –
           <div class="doc-md-description">
             <p>Durable run handle that can resume observation while its client remains open.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>wait_timeout</code></b>
+              (<code><span title="float">float</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Caller-supplied non-negative deadline in seconds.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.MergePlanWaitTimeout" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlanWaitTimeout</span><span class="p">(</span><span class="n">plan</span><span class="p">:</span> <span class="n">_MergePlanHandle</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span></code>
+
+<a href="#zeroshot.MergePlanWaitTimeout" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="            ZeroshotError (zeroshot.errors.ZeroshotError)" href="#zeroshot.ZeroshotError">ZeroshotError</a></code></p>
+
+
+
+        <p>Raised when observation times out while a durable merge plan remains active.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>plan</code></b>
+              (<code><span title="zeroshot.plan_errors._MergePlanHandle">_MergePlanHandle</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Durable plan handle that can resume observation while its client remains open.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">

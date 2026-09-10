@@ -1012,6 +1012,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.HostedTarget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HostedTarget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.Preset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1136,6 +1147,62 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRequest
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRequest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRequest.to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRun
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRun">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRun.to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1691,6 +1758,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.HostedTarget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HostedTarget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.Preset" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1818,6 +1896,62 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRequest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRequest
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRequest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRequest.to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRun
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRun">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRun.to_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;to_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1872,7 +2006,7 @@
 
 
 <h2 id="zeroshot.Target" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">Target</span><span class="p">:</span> <span class="n">TypeAlias</span> <span class="o">=</span> <span class="n">LocalTarget</span> <span class="o">|</span> <span class="n">DirectTarget</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">Target</span><span class="p">:</span> <span class="n">TypeAlias</span> <span class="o">=</span> <span class="n">LocalTarget</span> <span class="o">|</span> <span class="n">DirectTarget</span> <span class="o">|</span> <span class="n">HostedTarget</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-module-attribute"><code>module-attribute</code></small>
@@ -2025,6 +2159,69 @@ later client instances; None uses the native package-owned default.</p>
           <div class="doc-md-description">
             <p>Git worktree used to select source and report dirty state. None captures the
 current directory when the client opens.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.HostedTarget" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">HostedTarget</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.HostedTarget" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Use a named hosted target already configured and logged in through the CLI.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>name</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Exact local target name from <code>zeroshot target list</code>. The SDK reuses that
+target's stored origin and login.</p>
           </div>
         </li>
     </ul>
@@ -2614,6 +2811,234 @@ connections. Values are read only from Client.environment.</p>
 
 
 
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.MergePlanRequest" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlanRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">runs</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">MergePlanRun</span><span class="p">],</span> <span class="n">submission_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanRequest" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A complete merge-only DAG submitted atomically to one hosted target.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>title</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Human-readable immutable plan title.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>repository</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Source repository in owner/name form, shared by every node.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>branch</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Source branch shared by every node.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>profile</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Hosted profile selector in user:name or org:name form.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>expires_at</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 deadline for the whole plan, at most seven days in the future.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>runs</code></b>
+              (<code><span title="collections.abc.Mapping">Mapping</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="              MergePlanRun(*, input: JsonValue, needs: tuple[str, ...] = ())
+
+  
+      dataclass
+   (zeroshot.plans.MergePlanRun)" href="#zeroshot.MergePlanRun">MergePlanRun</a>]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Node names mapped to static inputs and symbolic dependencies.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>submission_key</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Stable idempotency key; None generates one before native validation.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.MergePlanRequest.to_dict" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">to_dict</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JsonValue</span><span class="p">]</span></code>
+
+<a href="#zeroshot.MergePlanRequest.to_dict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the strict public merge-plan manifest consumed by Zeroshot.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.MergePlanRun" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlanRun</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">needs</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">())</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanRun" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One statically defined node in a hosted merge plan.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>input</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = None | bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue']
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="#zeroshot.JsonValue">JsonValue</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Closed JSON input validated against the selected profile graph.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>needs</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Symbolic node names that must merge successfully before this node becomes ready.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.MergePlanRun.to_dict" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">to_dict</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JsonValue</span><span class="p">]</span></code>
+
+<a href="#zeroshot.MergePlanRun.to_dict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return this node's exact manifest representation.</p>
+
+
+    </div>
+
+</div>
 
 
 

@@ -1018,6 +1018,73 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRunStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRunStatus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRunStatus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRunStatus.terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanStatus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanStatus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus.terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus.succeeded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;succeeded
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.ResolvedSource" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1580,6 +1647,73 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRunStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanRunStatus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanRunStatus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanRunStatus.terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlanStatus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" MergePlanStatus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus.terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.MergePlanStatus.succeeded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;succeeded
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.ResolvedSource" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1859,6 +1993,328 @@
 
 
 
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.MergePlanRunStatus" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlanRunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'blocked'</span><span class="p">,</span> <span class="s1">'materializing'</span><span class="p">,</span> <span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'provisioning'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'cancelling'</span><span class="p">,</span> <span class="s1">'succeeded'</span><span class="p">,</span> <span class="s1">'failed'</span><span class="p">,</span> <span class="s1">'cancelled'</span><span class="p">,</span> <span class="s1">'expired'</span><span class="p">],</span> <span class="n">needs</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n">source_revision</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ready_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">queue_expires_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">terminal_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">waiting_reason</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">error_code</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanRunStatus" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Current lifecycle projection for one hosted merge-plan node.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>name</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Stable symbolic node name from the manifest.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>run_id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Server-assigned public run identity.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>state</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;blocked&#39;, &#39;materializing&#39;, &#39;queued&#39;, &#39;provisioning&#39;, &#39;running&#39;, &#39;cancelling&#39;, &#39;succeeded&#39;, &#39;failed&#39;, &#39;cancelled&#39;, &#39;expired&#39;]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Current materialization or run state.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>needs</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Stable symbolic dependency names.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>source_revision</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>Exact source revision once the node materializes.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>ready_at</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 time at which all dependencies had succeeded.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>queue_expires_at</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 per-node queue deadline, set 24 hours after readiness.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>terminal_at</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 terminal time.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>waiting_reason</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>Stable explanation while queued or blocked, when supplied.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>error_code</code></b>
+              (<code><span title="str">str</span> | None</code>)
+          –
+          <div class="doc-md-description">
+            <p>Stable terminal error category, including dependency_failed.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.MergePlanRunStatus.terminal" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">terminal</span><span class="p">:</span> <span class="nb">bool</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanRunStatus.terminal" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether this node can no longer change state.</p>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.MergePlanStatus" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlanStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">plan_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'succeeded'</span><span class="p">,</span> <span class="s1">'failed'</span><span class="p">,</span> <span class="s1">'cancelled'</span><span class="p">,</span> <span class="s1">'expired'</span><span class="p">],</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">submitted_at</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">runs</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">MergePlanRunStatus</span><span class="p">,</span> <span class="o">...</span><span class="p">])</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanStatus" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Current aggregate projection for an immutable hosted merge plan.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>plan_id</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Server-assigned immutable plan identity.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>title</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Human-readable immutable plan title.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>state</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;queued&#39;, &#39;running&#39;, &#39;succeeded&#39;, &#39;failed&#39;, &#39;cancelled&#39;, &#39;expired&#39;]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Aggregate plan state.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>repository</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Source repository from the submitted manifest, shared by every node.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>branch</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Source branch shared by every node.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>submitted_at</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 admission time.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>expires_at</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>RFC 3339 whole-plan deadline.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>runs</code></b>
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              MergePlanRunStatus(*, name: str, run_id: str, state: Literal['blocked', 'materializing', 'queued', 'provisioning', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled', 'expired'], needs: tuple[str, ...], source_revision: str | None, ready_at: str | None, queue_expires_at: str | None, terminal_at: str | None, waiting_reason: str | None, error_code: str | None)
+
+  
+      dataclass
+   (zeroshot.plans.MergePlanRunStatus)" href="#zeroshot.MergePlanRunStatus">MergePlanRunStatus</a>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>Stable server-assigned node receipts and their current states.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.MergePlanStatus.terminal" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">terminal</span><span class="p">:</span> <span class="nb">bool</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanStatus.terminal" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether every possible transition for this plan has completed.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.MergePlanStatus.succeeded" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">succeeded</span><span class="p">:</span> <span class="nb">bool</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.MergePlanStatus.succeeded" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether the complete plan merged successfully.</p>
+
+    </div>
+
+</div>
 
 
 
