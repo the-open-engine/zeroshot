@@ -1645,7 +1645,8 @@ source is selected from the invoking Git worktree or per-run overrides:</p>
 <h2 id="submit-a-hosted-merge-plan">Submit a hosted merge plan<a class="headerlink" href="#submit-a-hosted-merge-plan" title="Permanent link">&para;</a></h2>
 <p>Log in with the CLI first, then pass that target's local name to <code>HostedTarget</code>. A plan uses one
 explicit repository and branch plus one hosted profile. The profile must contain exactly one
-<code>builtin.git-delivery.merge@2</code> node.</p>
+<code>builtin.git-delivery.merge@2</code> node. Agent bindings must not declare <code>GH_TOKEN</code>; only the Git
+delivery binding may declare it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">HostedTarget</span><span class="p">,</span> <span class="n">MergePlanRequest</span><span class="p">,</span> <span class="n">MergePlanRun</span>
