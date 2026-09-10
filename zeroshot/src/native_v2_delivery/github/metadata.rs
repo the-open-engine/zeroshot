@@ -33,9 +33,7 @@ pub(super) fn refresh_generated_body(
     Ok(refreshed)
 }
 
-pub(super) fn generated_body_range(
-    body: &str,
-) -> Result<Option<Range<usize>>, GitHubAuthorityError> {
+fn generated_body_range(body: &str) -> Result<Option<Range<usize>>, GitHubAuthorityError> {
     let starts = body.match_indices(GENERATED_BODY_START).collect::<Vec<_>>();
     let ends = body.match_indices(GENERATED_BODY_END).collect::<Vec<_>>();
     match (starts.as_slice(), ends.as_slice()) {

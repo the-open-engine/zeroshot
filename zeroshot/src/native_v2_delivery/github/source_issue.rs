@@ -1,5 +1,5 @@
 use super::*;
-use super::metadata::{generated_body, generated_body_range, refresh_generated_body};
+use super::metadata::{generated_body, refresh_generated_body};
 use super::wire::{IssueCommentWire, IssueWire, require_review_identity};
 
 pub(super) async fn connect_source_issue(
@@ -122,29 +122,7 @@ pub(super) fn refresh_pull_request_body(
     current: Option<&str>,
     request: &GitHubReviewRequest,
 ) -> Result<String, GitHubAuthorityError> {
-    let current = current.map(remove_legacy_closing_reference).transpose()?;
-    refresh_generated_body(current.as_deref(), &generated_review_content(request))
-}
-
-fn remove_legacy_closing_reference(body: &str) -> Result<String, GitHubAuthorityError> {
-    let Some(range) = generated_body_range(body)? else {
-        return Ok(body.to_owned());
-    };
-    let suffix = &body[range.end..];
-    let Some(reference_len) = legacy_closing_reference_len(suffix) else {
-        return Ok(body.to_owned());
-    };
-    let mut migrated = String::with_capacity(body.len() - reference_len);
-    migrated.push_str(&body[..range.end]);
-    migrated.push_str(&suffix[reference_len..]);
-    Ok(migrated)
-}
-
-fn legacy_closing_reference_len(suffix: &str) -> Option<usize> {
-    let line = suffix.strip_prefix("\n\n")?;
-    let line_len = line.find('\n').unwrap_or(line.len());
-    let number = line[..line_len].strip_prefix("Closes #")?;
-    (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then_some(2 + line_len)
+    refresh_generated_body(current, &generated_review_content(request))
 }
 
 fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bool {
@@ -194,28 +172,30 @@ mod tests {
     }
 
     #[test]
-    fn refresh_replaces_or_removes_legacy_generated_issue_reference() {
-        let legacy = concat!(
-            "Human preface.\n\n",
-            "<!-- zeroshot-delivery:generated:v1:start -->\n",
-            "Old description.\n",
-            "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
-            "Closes #208\n\n",
-            "Human notes."
+    fn refresh_replaces_managed_issue_reference_and_preserves_human_text() {
+        let original = GitHubReviewRequest {
+            description: "Old description.".to_owned(),
+            source_issue: Some(GitHubSourceIssue { number: 208 }),
+            ..test_review_request()
+        };
+        let current = format!(
+            "Human preface.\n\n{}\n\nHuman notes.\n\nCloses #999",
+            pull_request_body(&original).unwrap()
         );
         let changed = GitHubReviewRequest {
             source_issue: Some(GitHubSourceIssue { number: 209 }),
             ..test_review_request()
         };
         assert_eq!(
-            refresh_pull_request_body(Some(legacy), &changed).unwrap(),
+            refresh_pull_request_body(Some(&current), &changed).unwrap(),
             concat!(
                 "Human preface.\n\n",
                 "<!-- zeroshot-delivery:generated:v1:start -->\n",
                 "Repair the checkout flow.\n\n",
                 "Closes #209\n",
                 "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
-                "Human notes."
+                "Human notes.\n\n",
+                "Closes #999"
             )
         );
 
@@ -223,10 +203,11 @@ mod tests {
             source_issue: None,
             ..test_review_request()
         };
-        let body = refresh_pull_request_body(Some(legacy), &removed).unwrap();
+        let body = refresh_pull_request_body(Some(&current), &removed).unwrap();
         assert!(!body.contains("Closes #208"));
         assert!(body.contains("Human preface."));
         assert!(body.contains("Human notes."));
+        assert!(body.contains("Closes #999"));
     }
 
     #[test]
