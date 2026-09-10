@@ -1,4 +1,4 @@
-FROM rust:1.97.0-bookworm AS builder
+FROM rust:1.97.0-trixie AS builder
 
 WORKDIR /src
 
@@ -8,7 +8,7 @@ COPY zeroshot ./zeroshot
 
 RUN cargo build --locked --release --package zeroshot --bin zeroshot
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-trixie-slim AS runtime
 
 ARG CODEX_VERSION=0.148.0
 ARG CLAUDE_CODE_VERSION=2.1.237
@@ -27,6 +27,8 @@ RUN apt-get update \
         gh \
         git \
         ripgrep \
+    && git_version="$(git --version)" \
+    && dpkg --compare-versions "${git_version#git version }" ge 2.47 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global --no-audit --no-fund \
