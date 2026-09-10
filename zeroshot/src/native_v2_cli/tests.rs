@@ -226,6 +226,10 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
         shown.pointer("/initialInput/fields/task/required"),
         Some(&json!(true))
     );
+    assert_eq!(
+        shown.pointer("/initialInput/fields/issueNumber/required"),
+        Some(&json!(false))
+    );
     assert!(
         shown
             .pointer("/initialInput/fields/acceptanceFeedback")
@@ -243,6 +247,12 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
         shown.pointer("/root/state/fields/deliveryFeedback/required"),
         Some(&json!(true))
     );
+    for field in ["title", "description", "issueNumber"] {
+        assert_eq!(
+            shown.pointer(&format!("/root/state/fields/{field}/required")),
+            Some(&json!(true))
+        );
+    }
     assert!(shown.to_string().contains("builtin.git-delivery.pr@1"));
     assert!(backend.calls().is_empty());
 }

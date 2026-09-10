@@ -80,7 +80,7 @@ async fn assert_declared_environment_rejected(
 async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
     let files = FixtureFiles::with_runtime(
         graph(),
-        json!({"task":"ship it"}),
+        json!({"task":"ship it","issueNumber":"208"}),
         software_change_runtime(),
     );
     let command = parse_native_v2_args(args(&[
@@ -120,13 +120,14 @@ async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
     }
     .assert_value();
     assert_eq!(submitted.1.pointer("/task"), Some(&json!("ship it")));
+    assert_eq!(submitted.1.pointer("/issueNumber"), Some(&json!("208")));
     assert!(submitted.1.pointer("/acceptanceFeedback").is_none());
     assert!(submitted.1.pointer("/codeFeedback").is_none());
     assert!(submitted.1.pointer("/deliveryFeedback").is_none());
     let authored_input = std::fs::read(&files.input).assert_value();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&authored_input).assert_value(),
-        json!({"task":"ship it"})
+        json!({"task":"ship it","issueNumber":"208"})
     );
 
     let runtime = serde_json::to_value(submitted.0).assert_value();

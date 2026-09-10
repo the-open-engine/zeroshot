@@ -1,5 +1,6 @@
 use super::wire::{IssueCommentWire, IssueWire, require_review_identity};
 use super::*;
+use super::metadata::generated_body;
 
 pub(super) async fn connect_source_issue(
     authority: &GhCliDeliveryAuthority,
@@ -10,25 +11,17 @@ pub(super) async fn connect_source_issue(
     let Some(issue) = request.source_issue.as_ref() else {
         return Ok(());
     };
-    let mut wire = authority.pull_request(review, credential).await?;
+    let wire = authority.pull_request(review, credential).await?;
     require_review_identity(&wire, review)?;
     let closing_reference = closing_reference(issue.number);
     if !body_has_closing_reference(wire.body.as_deref(), &closing_reference) {
         let body = append_closing_reference(wire.body.as_deref(), &closing_reference);
-        let value = authority
-            .api(
-                &[
-                    format!("repos/{}/pulls/{}", review.repository, review.review_id),
-                    "--method".to_owned(),
-                    "PATCH".to_owned(),
-                    "-f".to_owned(),
-                    format!("body={body}"),
-                ],
-                credential,
-            )
+        let updated = authority
+            .patch_review(review, &[format!("body={body}")], credential)
             .await?;
-        wire = serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
-        require_review_identity(&wire, review)?;
+        if updated.body.as_deref() != Some(body.as_str()) {
+            return Err(GitHubAuthorityError::Rejected);
+        }
     }
     comment_on_source_issue(authority, request, review, credential).await
 }
@@ -106,11 +99,13 @@ fn closing_reference(issue_number: u64) -> String {
     format!("Closes #{issue_number}")
 }
 
-pub(super) fn pull_request_body(request: &GitHubReviewRequest) -> String {
-    request.source_issue.as_ref().map_or_else(
-        || PULL_REQUEST_BODY.to_owned(),
-        |issue| format!("{PULL_REQUEST_BODY}\n\n{}", closing_reference(issue.number)),
-    )
+pub(super) fn pull_request_body(
+    request: &GitHubReviewRequest,
+) -> Result<String, GitHubAuthorityError> {
+    let body = generated_body(&request.description)?;
+    Ok(request.source_issue.as_ref().map_or(body.clone(), |issue| {
+        format!("{body}\n\n{}", closing_reference(issue.number))
+    }))
 }
 
 fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bool {
@@ -123,7 +118,7 @@ fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bo
 fn append_closing_reference(body: Option<&str>, closing_reference: &str) -> String {
     let body = body.unwrap_or_default().trim_end();
     if body.is_empty() {
-        format!("{PULL_REQUEST_BODY}\n\n{closing_reference}")
+        closing_reference.to_owned()
     } else {
         format!("{body}\n\n{closing_reference}")
     }
@@ -144,32 +139,29 @@ fn comments_have_marker(comments: &[IssueCommentWire], marker: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use openengine_cluster_testkit::assertions::AssertValue;
-
     use super::*;
-    use crate::native_v2_delivery::{DeliveryTarget, GitHubSourceIssue};
+    use crate::native_v2_delivery::GitHubSourceIssue;
 
     #[test]
     fn reference_is_created_and_repaired_without_replacing_body() {
         let request = GitHubReviewRequest {
-            target: DeliveryTarget::new(
-                "acme/project",
-                "main",
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-            .assert_value(),
-            head_branch: "zeroshot/v2-run".to_owned(),
-            head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
             source_issue: Some(GitHubSourceIssue { number: 208 }),
+            ..test_review_request()
         };
         assert_eq!(
-            pull_request_body(&request),
-            "Created by Zeroshot v2.\n\nCloses #208"
+            pull_request_body(&request).unwrap(),
+            concat!(
+                "<!-- zeroshot-delivery:generated:v1:start -->\n",
+                "Repair the checkout flow.\n",
+                "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
+                "Closes #208"
+            )
         );
         assert_eq!(
             append_closing_reference(Some("Human context"), "Closes #208"),
             "Human context\n\nCloses #208"
         );
+        assert_eq!(append_closing_reference(None, "Closes #208"), "Closes #208");
         assert!(body_has_closing_reference(
             Some("Human context\n\ncloses #208"),
             "Closes #208"

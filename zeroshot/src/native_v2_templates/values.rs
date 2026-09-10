@@ -14,7 +14,8 @@ use crate::native_v2_delivery::DeliveryMode;
 use super::{
     delivery_mode, enum_label, field_name, field_path, node_name, non_empty, static_value,
     BuiltinTemplateError, TemplateDelivery, ACCEPTANCE_FEEDBACK_FIELD, CODE_FEEDBACK_FIELD,
-    DELIVERY_FEEDBACK_FIELD, DIAGNOSTIC_MESSAGE_FIELD, TASK_FIELD,
+    DELIVERY_FEEDBACK_FIELD, DESCRIPTION_FIELD, DIAGNOSTIC_MESSAGE_FIELD, ISSUE_NUMBER_FIELD,
+    TASK_FIELD, TITLE_FIELD,
 };
 
 pub(super) fn graph(
@@ -94,8 +95,29 @@ pub(super) fn review_repair_input_type() -> Result<PayloadType, BuiltinTemplateE
     ])
 }
 
-pub(super) fn software_input_type() -> Result<PayloadType, BuiltinTemplateError> {
-    task_type()
+pub(super) fn software_input_type(
+    delivery: TemplateDelivery,
+) -> Result<PayloadType, BuiltinTemplateError> {
+    let mut fields = vec![(TASK_FIELD, PayloadType::String, true)];
+    if delivery_mode(delivery).is_some() {
+        fields.push((ISSUE_NUMBER_FIELD, PayloadType::String, false));
+    }
+    record_type(fields)
+}
+
+pub(super) fn change_manifest_type() -> Result<PayloadType, BuiltinTemplateError> {
+    record_type(vec![
+        (TITLE_FIELD, PayloadType::String, true),
+        (DESCRIPTION_FIELD, PayloadType::String, true),
+    ])
+}
+
+pub(super) fn delivery_input_type() -> Result<PayloadType, BuiltinTemplateError> {
+    record_type(vec![
+        (TITLE_FIELD, PayloadType::String, true),
+        (DESCRIPTION_FIELD, PayloadType::String, true),
+        (ISSUE_NUMBER_FIELD, PayloadType::String, false),
+    ])
 }
 
 pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {
@@ -138,12 +160,29 @@ pub(super) fn software_state(
         ),
     ]);
     if let Some(mode) = delivery_mode(delivery) {
-        let output = static_value(delivery_result_schema(mode))?;
-        for (name, field) in record_fields(output)? {
-            fields.insert(name, optional(field.value_type));
-        }
+        add_delivery_state_fields(&mut fields, mode)?;
     }
     Ok(PayloadType::Record { fields })
+}
+
+fn add_delivery_state_fields(
+    fields: &mut BTreeMap<FieldName, RecordField>,
+    mode: DeliveryMode,
+) -> Result<(), BuiltinTemplateError> {
+    fields.insert(field_name(TITLE_FIELD)?, required(PayloadType::String));
+    fields.insert(
+        field_name(DESCRIPTION_FIELD)?,
+        required(PayloadType::String),
+    );
+    fields.insert(
+        field_name(ISSUE_NUMBER_FIELD)?,
+        required(PayloadType::String),
+    );
+    let output = static_value(delivery_result_schema(mode))?;
+    for (name, field) in record_fields(output)? {
+        fields.insert(name, optional(field.value_type));
+    }
+    Ok(())
 }
 
 fn record_type(

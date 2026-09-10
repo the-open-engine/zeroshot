@@ -35,6 +35,9 @@ const TASK_FIELD: &str = "task";
 const ACCEPTANCE_FEEDBACK_FIELD: &str = "acceptanceFeedback";
 const CODE_FEEDBACK_FIELD: &str = "codeFeedback";
 const DELIVERY_FEEDBACK_FIELD: &str = "deliveryFeedback";
+const TITLE_FIELD: &str = "title";
+const DESCRIPTION_FIELD: &str = "description";
+const ISSUE_NUMBER_FIELD: &str = "issueNumber";
 const DIAGNOSTIC_MESSAGE_FIELD: &str = "message";
 const VERDICT_FIELD: &str = "verdict";
 const ACCEPTED_LABEL: &str = "accepted";
@@ -72,7 +75,7 @@ fn software_change_graph(delivery: TemplateDelivery) -> Result<GraphSpec, Builti
     )?;
     let worker_route = initial_worker_route(state.clone(), delivery)?;
     graph(
-        software_input_type()?,
+        software_input_type(delivery)?,
         sequence("run", state, vec![worker, worker_route], Vec::new())?,
     )
 }
@@ -113,7 +116,7 @@ fn change_loop(
     state: PayloadType,
     delivery: TemplateDelivery,
 ) -> Result<GraphNode, BuiltinTemplateError> {
-    let parallel = parallel_reviewers(state.clone())?;
+    let parallel = parallel_reviewers(state.clone(), delivery)?;
     let route = review_route(state.clone(), delivery)?;
     let feedback_paths = feedback_paths()?;
     let body = sequence(
@@ -141,55 +144,92 @@ fn change_loop(
     )
 }
 
-fn parallel_reviewers(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    let acceptance = review_verifier(
-        "acceptance",
-        "builtin.agent.acceptance-verifier@1",
-        "Verify the change independently against the user's request and observable behavior. Do \
-         not edit files. When delivery feedback is present, verify that the repair addresses it. \
-         Accept only with concrete evidence; otherwise return actionable feedback.",
-        ACCEPTANCE_FEEDBACK_FIELD,
-    )?;
-    let code = review_verifier(
-        "code",
-        "builtin.agent.code-verifier@1",
-        "Review the change independently for correctness, safety, integration, and substantive \
-         maintainability. Do not edit files or reject for style-only preferences. When delivery \
-         feedback is present, verify that the repair addresses it. Return actionable feedback \
-         when rejecting.",
-        CODE_FEEDBACK_FIELD,
-    )?;
+fn parallel_reviewers(
+    state: PayloadType,
+    delivery: TemplateDelivery,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    let delivery_metadata = delivery_mode(delivery).is_some();
+    let acceptance = review_verifier(ReviewVerifierSpec {
+        name: "acceptance",
+        worker: "builtin.agent.acceptance-verifier@1",
+        authored_instructions: if delivery_metadata {
+            "Verify the change independently against the user's request and observable behavior. \
+             Do not edit files. When delivery feedback is present, verify that the repair addresses \
+             it. Accept only with concrete evidence; otherwise return actionable feedback. Provide \
+             an accurate, informative prospective pull request title and description for the \
+             complete change under review regardless of the verdict. Follow the repository's pull \
+             request conventions, keep the title concise, and keep the description focused on \
+             information useful to reviewers. If mentioning validation, use only results stated \
+             directly by command output and do not infer counts. Do not add issue-closing \
+             references because delivery owns them."
+        } else {
+            "Verify the change independently against the user's request and observable behavior. Do \
+             not edit files. When delivery feedback is present, verify that the repair addresses it. \
+             Accept only with concrete evidence; otherwise return actionable feedback."
+        },
+        feedback_target: ACCEPTANCE_FEEDBACK_FIELD,
+        output: if delivery_metadata {
+            change_manifest_type()?
+        } else {
+            PayloadType::Null
+        },
+        write_bindings: if delivery_metadata {
+            vec![
+                output_write("acceptance", TITLE_FIELD, TITLE_FIELD)?,
+                output_write("acceptance", DESCRIPTION_FIELD, DESCRIPTION_FIELD)?,
+            ]
+        } else {
+            Vec::new()
+        },
+    })?;
+    let code = review_verifier(ReviewVerifierSpec {
+        name: "code",
+        worker: "builtin.agent.code-verifier@1",
+        authored_instructions: "Review the change independently for correctness, safety, \
+             integration, and substantive maintainability. Do not edit files or reject for \
+             style-only preferences. When delivery feedback is present, verify that the repair \
+             addresses it. Return actionable feedback when rejecting.",
+        feedback_target: CODE_FEEDBACK_FIELD,
+        output: PayloadType::Null,
+        write_bindings: Vec::new(),
+    })?;
     Ok(GraphNode::Par(ParNode {
         name: node_name("parallel_reviews")?,
         state,
         branches: non_empty(vec![acceptance, code])?,
-        promoted_state_paths: review_feedback_paths()?,
+        promoted_state_paths: review_promoted_paths(delivery)?,
         join: Join::All {},
     }))
 }
 
-fn review_verifier(
-    name: &str,
-    worker: &str,
-    authored_instructions: &str,
-    feedback_target: &str,
-) -> Result<GraphNode, BuiltinTemplateError> {
-    let signals = BTreeMap::from([(field_name(VERDICT_FIELD)?, verdict_labels()?)]);
+struct ReviewVerifierSpec<'a> {
+    name: &'a str,
+    worker: &'a str,
+    authored_instructions: &'a str,
+    feedback_target: &'a str,
+    output: PayloadType,
+    write_bindings: Vec<WriteBinding>,
+}
+
+fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTemplateError> {
+    let signals = review_signals()?;
+    let mut write_bindings = spec.write_bindings;
+    write_bindings.push(diagnostic_write(spec.name, spec.feedback_target)?);
     Ok(GraphNode::Verifier(VerifierNode {
-        name: node_name(name)?,
-        worker: worker_ref(worker)?,
+        name: node_name(spec.name)?,
+        worker: worker_ref(spec.worker)?,
         input: review_input_type()?,
-        output: PayloadType::Null,
+        output: spec.output,
         input_bindings: vec![
             state_input(TASK_FIELD, TASK_FIELD)?,
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
         ],
-        write_bindings: vec![diagnostic_write(name, feedback_target)?],
+        write_bindings,
         timeout_ms: positive(NODE_TIMEOUT_MS)?,
         attempts: positive(1)?,
         signals,
         diagnostic: diagnostic_type()?,
-        instructions: Some(instructions(authored_instructions)?),
+        instructions: Some(instructions(spec.authored_instructions)?),
     }))
 }
 
@@ -322,9 +362,13 @@ fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> 
     Ok(GraphNode::Verifier(VerifierNode {
         name: node_name(DELIVERY_NODE)?,
         worker: worker_ref(delivery_worker(mode))?,
-        input: PayloadType::Null,
+        input: delivery_input_type()?,
         output,
-        input_bindings: Vec::new(),
+        input_bindings: vec![
+            state_input(TITLE_FIELD, TITLE_FIELD)?,
+            state_input(DESCRIPTION_FIELD, DESCRIPTION_FIELD)?,
+            state_input(ISSUE_NUMBER_FIELD, ISSUE_NUMBER_FIELD)?,
+        ],
         write_bindings,
         timeout_ms: positive(NODE_TIMEOUT_MS)?,
         attempts: positive(1)?,
@@ -430,6 +474,24 @@ fn review_feedback_paths() -> Result<Vec<FieldPath>, BuiltinTemplateError> {
         field_path(ACCEPTANCE_FEEDBACK_FIELD)?,
         field_path(CODE_FEEDBACK_FIELD)?,
     ])
+}
+
+fn review_promoted_paths(
+    delivery: TemplateDelivery,
+) -> Result<Vec<FieldPath>, BuiltinTemplateError> {
+    let mut paths = review_feedback_paths()?;
+    if delivery_mode(delivery).is_some() {
+        paths.push(field_path(TITLE_FIELD)?);
+        paths.push(field_path(DESCRIPTION_FIELD)?);
+    }
+    Ok(paths)
+}
+
+fn review_signals() -> Result<BTreeMap<FieldName, NonEmptyEnumSet>, BuiltinTemplateError> {
+    Ok(BTreeMap::from([(
+        field_name(VERDICT_FIELD)?,
+        verdict_labels()?,
+    )]))
 }
 
 fn verdict_labels() -> Result<NonEmptyEnumSet, BuiltinTemplateError> {

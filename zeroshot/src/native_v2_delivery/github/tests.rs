@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use super::policy::MergeMethod;
-use crate::native_v2_delivery::{DeliveryTarget, GitHubChecks};
+use crate::native_v2_delivery::GitHubChecks;
 
 fn review() -> GitHubReviewReceipt {
     GitHubReviewReceipt {
@@ -444,17 +444,7 @@ fn terminal_state_and_exact_identity_are_authoritative() {
 
 #[test]
 fn receipt_rejects_changed_authority() {
-    let request = GitHubReviewRequest {
-        target: DeliveryTarget::new(
-            "acme/project",
-            "main",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        )
-        .assert_value(),
-        head_branch: "zeroshot/v2-run".to_owned(),
-        head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
-        source_issue: None,
-    };
+    let request = test_review_request();
     let wire = serde_json::from_value(json!({
         "number": 17,
         "body": null,

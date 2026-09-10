@@ -410,6 +410,17 @@ for argument in "$@"; do
   if [ "$previous" = "--method" ]; then method=$argument; fi
   previous=$argument
 done
+print_review() {
+  /usr/bin/printf '%s%s%s%s%s%s%s%s\n' \
+    '{"number":17,"title":"fix: repair checkout",' \
+    '"body":"<!-- zeroshot-delivery:generated:v1:start -->\n' \
+    'Repair the checkout flow.\n' \
+    '<!-- zeroshot-delivery:generated:v1:end -->\n\nCloses #208",' \
+    '"state":"open","merged":false,"merge_commit_sha":null,"base":' \
+    '{"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
+    '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
+    '"repo":{"full_name":"acme/project"}}}'
+}
 case "$endpoint:$method" in
   repos/acme/project/git/ref/heads/zeroshot/v2-test:GET)
     /usr/bin/printf '%s%s\n' \
@@ -420,26 +431,13 @@ case "$endpoint:$method" in
     /usr/bin/printf '%s\n' '[]'
     ;;
   repos/acme/project/pulls:POST)
-    /usr/bin/printf '%s%s%s%s\n' \
-      '{"number":17,"state":"open","merged":false,"merge_commit_sha":null,"base":' \
-      '{"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
-      '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
-      '"repo":{"full_name":"acme/project"}}}'
+    print_review
     ;;
   repos/acme/project/pulls/17:GET)
-    /usr/bin/printf '%s%s%s%s\n' \
-      '{"number":17,"state":"open","merged":false,"merge_commit_sha":null,"base":' \
-      '{"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
-      '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
-      '"repo":{"full_name":"acme/project"}}}'
+    print_review
     ;;
   repos/acme/project/pulls/17:PATCH)
-    /usr/bin/printf '%s%s%s%s%s\n' \
-      '{"number":17,"body":"Created by Zeroshot v2.\\n\\nCloses #208","state":"open",' \
-      '"merged":false,"merge_commit_sha":null,"base":' \
-      '{"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
-      '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
-      '"repo":{"full_name":"acme/project"}}}'
+    print_review
     ;;
   repos/acme/project/issues/208:GET)
     /usr/bin/printf '%s\n' '{"comments":0}'

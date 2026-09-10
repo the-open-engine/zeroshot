@@ -25,6 +25,8 @@ fn review_request(source_issue: Option<u64>) -> GitHubReviewRequest {
         .assert_value(),
         head_branch: "zeroshot/v2-test".to_owned(),
         head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
+        title: "fix: repair checkout".to_owned(),
+        description: "Repair the checkout flow.".to_owned(),
         source_issue: source_issue.map(|number| GitHubSourceIssue { number }),
     }
 }
@@ -93,7 +95,13 @@ fn assert_production_github_capture(gh_capture: &str, home: &Path) {
     assert!(gh_capture.contains("arg=repos/acme/project/git/ref/heads/zeroshot/v2-test"));
     assert!(gh_capture.contains("arg=state=all"));
     assert!(gh_capture.contains("arg=head=acme:zeroshot/v2-test"));
-    assert!(gh_capture.contains("arg=body=Created by Zeroshot v2.\n\nCloses #208"));
+    assert!(gh_capture.contains("arg=title=fix: repair checkout"));
+    assert!(gh_capture.contains(concat!(
+        "arg=body=<!-- zeroshot-delivery:generated:v1:start -->\n",
+        "Repair the checkout flow.\n",
+        "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
+        "Closes #208"
+    )));
     assert!(gh_capture.contains("arg=repos/acme/project/issues/208"));
     assert!(gh_capture.contains("arg=repos/acme/project/issues/208/comments"));
     assert!(gh_capture.contains("arg=page=1"));

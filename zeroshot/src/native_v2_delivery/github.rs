@@ -16,11 +16,10 @@ use super::{
 };
 
 mod api;
+mod metadata;
 
 const DEFAULT_API_DEADLINE: Duration = Duration::from_secs(2 * 60);
 const DEFAULT_PUSH_DEADLINE: Duration = Duration::from_secs(10 * 60);
-const PULL_REQUEST_TITLE: &str = "feat: complete Zeroshot task";
-const PULL_REQUEST_BODY: &str = "Created by Zeroshot v2.";
 
 #[derive(Clone, Debug)]
 pub struct GhCliAuthorityConfig {
@@ -99,6 +98,7 @@ impl GhCliDeliveryAuthority {
         request: &GitHubReviewRequest,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
+        let body = pull_request_body(request)?;
         let value = self
             .api(
                 &[
@@ -106,9 +106,9 @@ impl GhCliDeliveryAuthority {
                     "--method".to_owned(),
                     "POST".to_owned(),
                     "-f".to_owned(),
-                    format!("title={PULL_REQUEST_TITLE}"),
+                    format!("title={}", request.title),
                     "-f".to_owned(),
-                    format!("body={}", pull_request_body(request)),
+                    format!("body={body}"),
                     "-f".to_owned(),
                     format!("head={}", request.head_branch),
                     "-f".to_owned(),
@@ -117,8 +117,63 @@ impl GhCliDeliveryAuthority {
                 credential,
             )
             .await?;
-        let review = serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+        let review: PullRequestWire =
+            serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+        if review.title.as_deref() != Some(request.title.as_str())
+            || review.body.as_deref() != Some(body.as_str())
+        {
+            return Err(GitHubAuthorityError::Rejected);
+        }
         review_receipt(review, request)
+    }
+
+    async fn refresh_review_metadata(
+        &self,
+        request: &GitHubReviewRequest,
+        review: &GitHubReviewReceipt,
+        credential: GitHubCredential<'_>,
+    ) -> Result<(), GitHubAuthorityError> {
+        let mut wire = self.pull_request(review, credential).await?;
+        require_review_identity(&wire, review)?;
+        let body = refresh_generated_body(wire.body.as_deref(), &request.description)?;
+        if wire.title.as_deref() == Some(request.title.as_str())
+            && wire.body.as_deref() == Some(body.as_str())
+        {
+            return Ok(());
+        }
+        wire = self
+            .patch_review(
+                review,
+                &[format!("title={}", request.title), format!("body={body}")],
+                credential,
+            )
+            .await?;
+        if wire.title.as_deref() != Some(request.title.as_str())
+            || wire.body.as_deref() != Some(body.as_str())
+        {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        Ok(())
+    }
+
+    async fn patch_review(
+        &self,
+        review: &GitHubReviewReceipt,
+        fields: &[String],
+        credential: GitHubCredential<'_>,
+    ) -> Result<PullRequestWire, GitHubAuthorityError> {
+        let mut arguments = vec![
+            format!("repos/{}/pulls/{}", review.repository, review.review_id),
+            "--method".to_owned(),
+            "PATCH".to_owned(),
+        ];
+        for field in fields {
+            arguments.extend(["-f".to_owned(), field.clone()]);
+        }
+        let value = self.api(&arguments, credential).await?;
+        let wire = serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+        require_review_identity(&wire, review)?;
+        Ok(wire)
     }
 
     async fn policy_snapshot(
@@ -218,7 +273,11 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
         let review = match self.find_review(request, credential).await? {
-            Some(review) => Ok(review),
+            Some(review) => {
+                self.refresh_review_metadata(request, &review, credential)
+                    .await?;
+                Ok(review)
+            }
             None => {
                 self.confirm_review_head(request, credential).await?;
                 self.create_review(request, credential).await
@@ -347,10 +406,29 @@ mod head;
 mod policy;
 mod source_issue;
 mod wire;
+use metadata::refresh_generated_body;
+pub(super) use metadata::valid_generated_description;
 use policy::{PolicySnapshot, classify_policy, include_check_logs, query_arguments};
 use source_issue::{connect_source_issue, pull_request_body};
 use api::check_log_tail;
-use wire::{PullRequestWire, review_receipt};
+use wire::{PullRequestWire, require_review_identity, review_receipt};
+
+#[cfg(test)]
+pub(super) fn test_review_request() -> GitHubReviewRequest {
+    GitHubReviewRequest {
+        target: super::DeliveryTarget::new(
+            "acme/project",
+            "main",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .expect("valid test delivery target"),
+        head_branch: "zeroshot/v2-run".to_owned(),
+        head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
+        title: "fix: repair checkout".to_owned(),
+        description: "Repair the checkout flow.".to_owned(),
+        source_issue: None,
+    }
+}
 
 fn clean_command(
     config: &GhCliAuthorityConfig,

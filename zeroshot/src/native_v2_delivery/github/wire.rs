@@ -5,6 +5,7 @@ use super::*;
 #[derive(Deserialize)]
 pub(super) struct PullRequestWire {
     number: u64,
+    pub(super) title: Option<String>,
     pub(super) body: Option<String>,
     base: ReviewBranchWire,
     head: ReviewBranchWire,

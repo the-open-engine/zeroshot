@@ -17,6 +17,12 @@ use crate::native_v2_contract::{CodexProvider, DeclaredConnections, ModelId};
 
 use super::super::*;
 
+pub(super) const CHANGE_TITLE: &str = "fix: repair checkout";
+pub(super) const CHANGE_DESCRIPTION: &str = "Repair the checkout flow.";
+pub(super) const REPAIRED_CHANGE_TITLE: &str = "fix: stabilize checkout";
+pub(super) const REPAIRED_CHANGE_DESCRIPTION: &str =
+    "Repair the checkout flow and stabilize its delivery checks.";
+
 pub(super) fn executable_leaves(root: &GraphNode) -> Vec<&GraphNode> {
     let mut leaves = Vec::new();
     let mut pending = vec![root];
@@ -83,12 +89,58 @@ pub(super) fn resolved_source() -> ResolvedSource {
     }
 }
 
-pub(super) fn accepted_review_history() -> Vec<DurableExecution> {
+pub(super) fn accepted_review_history(delivery: TemplateDelivery) -> Vec<DurableExecution> {
+    let acceptance_output = if delivery == TemplateDelivery::None {
+        serde_json::Value::Null
+    } else {
+        change_manifest()
+    };
     vec![
         settled_worker(),
-        settled_review(2, "acceptance", ACCEPTED_LABEL, "requirements met"),
+        settled_review_execution_with_output(
+            SettledExecutionSpec {
+                execution: 2,
+                node_instance: 2,
+                node: "acceptance",
+                settled_at: 2,
+                input: json!({"task":"repair checkout","deliveryFeedback":""}),
+            },
+            ACCEPTED_LABEL,
+            "requirements met",
+            acceptance_output,
+        ),
         settled_review(3, "code", ACCEPTED_LABEL, "implementation sound"),
     ]
+}
+
+pub(super) fn change_manifest() -> serde_json::Value {
+    json!({
+        "title": CHANGE_TITLE,
+        "description": CHANGE_DESCRIPTION
+    })
+}
+
+pub(super) fn repaired_change_manifest() -> serde_json::Value {
+    json!({
+        "title": REPAIRED_CHANGE_TITLE,
+        "description": REPAIRED_CHANGE_DESCRIPTION
+    })
+}
+
+pub(super) fn delivery_input() -> serde_json::Value {
+    json!({
+        "title": CHANGE_TITLE,
+        "description": CHANGE_DESCRIPTION,
+        "issueNumber": "208"
+    })
+}
+
+pub(super) fn repaired_delivery_input() -> serde_json::Value {
+    json!({
+        "title": REPAIRED_CHANGE_TITLE,
+        "description": REPAIRED_CHANGE_DESCRIPTION,
+        "issueNumber": "208"
+    })
 }
 
 pub(super) fn settled_worker() -> DurableExecution {
@@ -135,10 +187,19 @@ pub(super) fn settled_review_execution(
     verdict: &str,
     diagnostic: &str,
 ) -> DurableExecution {
+    settled_review_execution_with_output(spec, verdict, diagnostic, serde_json::Value::Null)
+}
+
+pub(super) fn settled_review_execution_with_output(
+    spec: SettledExecutionSpec<'_>,
+    verdict: &str,
+    diagnostic: &str,
+    output: serde_json::Value,
+) -> DurableExecution {
     settled_execution(
         spec,
         WorkerOutcome::Verifier {
-            output: serde_json::Value::Null,
+            output,
             signals: BTreeMap::from([(
                 FieldName::new(VERDICT_FIELD).assert_value(),
                 EnumLabel::new(verdict).assert_value(),

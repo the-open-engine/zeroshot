@@ -77,6 +77,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
   merge queues/deferrals, and succeeds only after observing the exact merged result. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response.
+- Delivery-enabled software-change templates make the acceptance verifier the sole author of the
+  current change title and description after every review pass. Git delivery uses that manifest for
+  commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
+  text. Verifier guidance reserves closing references for delivery, which appends them only from
+  caller-owned issue input.
 - GitHub review creation and rediscovery are shared by pull-request and merge delivery. They verify
   the exact pushed ref and head, retry bounded transient visibility or API failures, refresh a
   dynamic credential once on HTTP 401/403 within the synchronization deadline and cancellation

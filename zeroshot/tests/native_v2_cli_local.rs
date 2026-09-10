@@ -142,7 +142,9 @@ async fn detached_local_run_reconnects_without_observer_ownership_and_force_stop
         run_id.as_str()
     );
 
-    let watch = fixture.interrupted(&["watch", &run_id], "block").await;
+    let watch = fixture
+        .interrupted(&["watch", &run_id], "block", &run_id)
+        .await;
     assert_success(&watch, "interrupted local watch");
     assert!(String::from_utf8_lossy(&watch.stdout).contains(&run_id));
     assert_eq!(
@@ -159,12 +161,18 @@ async fn detached_local_run_reconnects_without_observer_ownership_and_force_stop
         "active controller retired early"
     );
 
-    let logs = fixture.interrupted(&["logs", &run_id], "block").await;
+    let logs = fixture
+        .interrupted(&["logs", &run_id], "block", "Codex turn started")
+        .await;
     assert_success(&logs, "interrupted local logs");
     assert!(String::from_utf8_lossy(&logs.stdout).contains("Codex turn started"));
 
     let attach = fixture
-        .interrupted(&["attach", &run_id, &execution], "block")
+        .interrupted(
+            &["attach", &run_id, &execution],
+            "block",
+            "Codex turn started",
+        )
         .await;
     assert_success(&attach, "interrupted read-only local attach");
     let attached = String::from_utf8_lossy(&attach.stdout);

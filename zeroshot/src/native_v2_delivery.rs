@@ -234,6 +234,8 @@ pub struct GitHubReviewRequest {
     pub target: DeliveryTarget,
     pub head_branch: String,
     pub head_revision: String,
+    pub title: String,
+    pub description: String,
     pub source_issue: Option<GitHubSourceIssue>,
 }
 
