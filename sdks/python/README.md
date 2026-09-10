@@ -67,11 +67,7 @@ from zeroshot import Client, DirectTarget, UniformRuntime
 
 
 async def run_direct(runtime: UniformRuntime) -> None:
-    target = DirectTarget(
-        "http://127.0.0.1:8080",
-        repository="the-open-engine/zeroshot",
-        default_branch="main",
-    )
+    target = DirectTarget("http://127.0.0.1:8080")
 
     async with Client(target=target, runtime=runtime) as client:
         result = await client.run("Inspect the repository and report success.")

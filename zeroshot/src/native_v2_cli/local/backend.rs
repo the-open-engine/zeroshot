@@ -18,12 +18,6 @@ impl NativeV2CliBackend for LocalCliBackend {
         ))
     }
 
-    async fn target_setup(&self, _request: TargetSetup) -> Result<(), NativeV2CliError> {
-        Err(local_message(
-            "target commands are not local run operations",
-        ))
-    }
-
     async fn connection_list(
         &self,
         target: Option<&str>,

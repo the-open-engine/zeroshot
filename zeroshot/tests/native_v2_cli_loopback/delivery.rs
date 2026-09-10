@@ -291,9 +291,9 @@ impl CapsuleAllocator for DeliveryAllocator {
                     admitted.source.branch.as_str(),
                     admitted.source.revision.as_str(),
                 )
-                .map_err(|_| CapsuleAllocationUnavailable)?,
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
                 poll: DeliveryPollPolicy::new(3, Duration::ZERO)
-                    .map_err(|_| CapsuleAllocationUnavailable)?,
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             },
             self.authority.clone(),
         );
@@ -303,7 +303,7 @@ impl CapsuleAllocator for DeliveryAllocator {
             repairs: self.repairs.clone(),
         });
         let runner = NativeNodeRunner::new(admitted, lane.clone(), lane)
-            .map_err(|_| CapsuleAllocationUnavailable)?;
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let (sender, loss) = watch::channel(false);
         self.lifecycle.losses.lock().assert_value().push(sender);
         Ok(AllocatedCapsule {

@@ -311,7 +311,7 @@ impl SingleRunAllocator {
     fn require_run(&self, run_id: &RunId) -> Result<(), CapsuleAllocationUnavailable> {
         (run_id == &self.run_id)
             .then_some(())
-            .ok_or(CapsuleAllocationUnavailable)
+            .ok_or(CapsuleAllocationUnavailable::Runtime)
     }
 }
 
@@ -339,7 +339,7 @@ impl CapsuleAllocator for SingleRunAllocator {
             .lock()
             .await
             .take()
-            .ok_or(CapsuleAllocationUnavailable)?;
+            .ok_or(CapsuleAllocationUnavailable::Runtime)?;
         Ok(AllocatedCapsule {
             runner: runtime.runner,
             loss: self.loss_receiver.clone(),

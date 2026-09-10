@@ -14,7 +14,7 @@ use openengine_cluster_protocol::{
 use super::BoxedSubscription;
 use crate::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
-    NativeV2CliError, PreparedRunRequest, TargetAdd, TargetSetup,
+    NativeV2CliError, PreparedRunRequest, TargetAdd,
 };
 
 /// Named-target authority. The CLI does not interpret login credentials or runtime configuration.
@@ -24,7 +24,6 @@ pub trait TargetConnector: Send + Sync {
 
     async fn add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn login(&self, name: &str) -> Result<(), NativeV2CliError>;
-    async fn setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError>;
     async fn connection_list(
         &self,
         name: &str,

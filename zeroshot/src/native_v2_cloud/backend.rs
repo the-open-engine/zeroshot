@@ -151,6 +151,13 @@ fn cloud_backend_error(error: NativeV2CloudError) -> BackendError {
         NativeV2CloudError::Admission(error) => {
             BackendError::invalid_params(GRAPH_INVALID, error.to_string(), None)
         }
+        NativeV2CloudError::Allocation(CapsuleAllocationUnavailable::SourceCheckout) => {
+            BackendError::application(
+                "source_checkout_unavailable",
+                "source checkout failed: repository access, branch, or revision is unavailable",
+                None,
+            )
+        }
         NativeV2CloudError::Ledger(RunLedgerError::SubmissionConflict { existing_run_id }) => {
             BackendError::application(
                 IDEMPOTENCY_REUSE,
@@ -219,6 +226,20 @@ pub(super) async fn append_terminal_failure(
 #[cfg(test)]
 mod backend_error_tests {
     use super::*;
+
+    #[test]
+    fn source_checkout_failure_is_a_public_application_error() {
+        let error = cloud_backend_error(NativeV2CloudError::Allocation(
+            CapsuleAllocationUnavailable::SourceCheckout,
+        ));
+        assert_eq!(error.code, "source_checkout_unavailable");
+        assert!(
+            error
+                .message
+                .contains("repository access, branch, or revision")
+        );
+        assert!(error.details.is_none());
+    }
 
     #[test]
     fn attach_lookup_failures_are_public_application_errors() {

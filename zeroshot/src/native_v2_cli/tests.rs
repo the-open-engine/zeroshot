@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use openengine_cluster_protocol::{RunTitle, RuntimePlan};
+use openengine_cluster_protocol::{
+    RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{json, Value};
 
@@ -86,6 +88,10 @@ fn run_args(graph: &Path, input: &Path, runtime: &Path, extra: &[&str]) -> Vec<O
         OsString::from("run"),
         OsString::from("--target"),
         OsString::from("prod"),
+        OsString::from("--repository"),
+        OsString::from("open-engine/zeroshot"),
+        OsString::from("--revision"),
+        OsString::from("0123456789abcdef0123456789abcdef01234567"),
         OsString::from("--title"),
         OsString::from("Repair checkout"),
         OsString::from("--graph"),
@@ -95,6 +101,9 @@ fn run_args(graph: &Path, input: &Path, runtime: &Path, extra: &[&str]) -> Vec<O
         OsString::from("--runtime-config"),
         runtime.as_os_str().to_owned(),
     ];
+    if !extra.contains(&"--branch") {
+        values.extend([OsString::from("--branch"), OsString::from("main")]);
+    }
     values.extend(extra.iter().map(OsString::from));
     values
 }
@@ -284,7 +293,17 @@ async fn run_follows_by_default_and_forwards_per_run_intent_unchanged() {
         ]
     );
     let lines = String::from_utf8(output).assert_value();
-    assert!(lines.contains("\"runId\":\"run-public\""));
+    let mut values = lines
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).assert_value());
+    let source = values.next().assert_value();
+    assert_eq!(
+        source["source"],
+        "open-engine/zeroshot@feature#0123456789abcdef0123456789abcdef01234567"
+    );
+    assert_eq!(source["target"], "prod");
+    assert!(source["dirty"].is_boolean());
+    assert_eq!(values.next().assert_value()["runId"], "run-public");
     assert!(lines.contains("\"phase\":\"finished\""));
 }
 

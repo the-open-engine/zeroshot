@@ -7,11 +7,7 @@ from zeroshot import Client, DirectTarget, UniformRuntime
 
 async def main() -> None:
     """Submit one direct-target run and wait for its terminal result."""
-    target = DirectTarget(
-        "http://127.0.0.1:8080",
-        repository="the-open-engine/zeroshot",
-        default_branch="main",
-    )
+    target = DirectTarget("http://127.0.0.1:8080")
     runtime = UniformRuntime(
         harness="codex",
         provider="openai",

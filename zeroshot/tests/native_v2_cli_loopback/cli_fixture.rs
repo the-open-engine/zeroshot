@@ -7,14 +7,11 @@ pub(crate) const LIVE_TARGET_PREAMBLE: &str = r#"
 : "${ZEROSHOT_NATIVE_V2_LIVE_BASE:?live test base branch is required}"
 "$1" target add prod --url "$2" || exit $?
 "$1" target login prod || exit $?
-"$1" target setup prod --repository "$ZEROSHOT_NATIVE_V2_LIVE_REPOSITORY" \
-  --branch "$ZEROSHOT_NATIVE_V2_LIVE_BASE" || exit $?
 "#;
 
 pub(crate) const LOOPBACK_TARGET_PREAMBLE: &str = r#"
 "$1" target add prod --url "$2" || exit $?
 "$1" target login prod || exit $?
-"$1" target setup prod --repository open-engine/zeroshot --branch main || exit $?
 "#;
 
 pub(crate) const WAIT_FOR_FINISHED_STATUS: &str = r#"
@@ -34,8 +31,8 @@ pub(crate) fn shell_script() -> String {
         LOOPBACK_TARGET_PREAMBLE,
         r#"
 detached=$(
-  "$1" run --target prod --title "Loopback acceptance" \
-    --runtime-config "$4" --graph "$5" --input "$6" \
+  "$1" run --target prod --repository open-engine/zeroshot --branch main \
+    --title "Loopback acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key acceptance-1 -d
 ) || exit $?
 run_id=$(printf '%s' "$detached" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p')
@@ -84,8 +81,8 @@ pub(crate) fn live_shell_script() -> String {
         LIVE_TARGET_PREAMBLE,
         r#"
 live_output=$(
-  "$1" run --target prod --title "Live provider acceptance" \
-    --runtime-config "$4" --graph "$5" --input "$6" \
+  "$1" run --target prod --repository "$ZEROSHOT_NATIVE_V2_LIVE_REPOSITORY" \
+    --branch "$ZEROSHOT_NATIVE_V2_LIVE_BASE" --title "Live provider acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key "$7"
 ) || exit $?
 run_id=$(printf '%s' "$live_output" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p' | head -1)
@@ -104,10 +101,9 @@ pub(crate) fn delivery_shell_script() -> String {
         r#"
 "$1" target add prod --url "$2" || exit $?
 "$1" target login prod || exit $?
-"$1" target setup prod --repository acme/project --branch main || exit $?
 result=$(
-  "$1" run --target prod --title "Delivery acceptance" \
-    --runtime-config "$4" --graph "$5" --input "$6" \
+  "$1" run --target prod --repository acme/project --branch main \
+    --title "Delivery acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key "$7"
 ) || exit $?
 printf 'DELIVERY=%s\n' "$result"
@@ -122,8 +118,8 @@ pub(crate) fn loss_shell_script() -> String {
         LOOPBACK_TARGET_PREAMBLE,
         r#"
 detached=$(
-  "$1" run --target prod --title "Capsule loss acceptance" \
-    --runtime-config "$4" --graph "$5" --input "$6" \
+  "$1" run --target prod --repository open-engine/zeroshot --branch main \
+    --title "Capsule loss acceptance" --runtime-config "$4" --graph "$5" --input "$6" \
     --submission-key loss-1 -d
 ) || exit $?
 run_id=$(printf '%s' "$detached" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p')
@@ -186,9 +182,7 @@ fn install_source_git(config: &Path, revision: &str) -> PathBuf {
     std::fs::write(
         &path,
         format!(
-            "#!/bin/sh\nlast=HEAD\nfor argument do last=$argument; done\n\
-             case \" $* \" in\n  *\" --symref \"*) printf 'ref: refs/heads/main\\tHEAD\\n{revision}\\tHEAD\\n' ;;\n\
-             *) printf '{revision}\\t%s\\n' \"$last\" ;;\nesac\n"
+            "#!/bin/sh\ncase \" $* \" in\n  *\" ls-remote \"*) last=HEAD; for argument do last=$argument; done; printf '{revision}\\t%s\\n' \"$last\" ;;\n  *) exec /usr/bin/git \"$@\" ;;\nesac\n"
         ),
     )
     .assert_value();

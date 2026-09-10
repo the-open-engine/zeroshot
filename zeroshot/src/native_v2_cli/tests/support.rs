@@ -31,11 +31,6 @@ pub(super) enum Call {
     TargetLogin {
         name: String,
     },
-    TargetSetup {
-        name: String,
-        repository: String,
-        default_branch: Option<String>,
-    },
     Submit {
         target: Option<String>,
         title: RunTitle,
@@ -241,17 +236,6 @@ impl NativeV2CliBackend for FakeBackend {
         Ok(())
     }
 
-    async fn target_setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError> {
-        self.calls.lock().assert_value().push(Call::TargetSetup {
-            name: request.name,
-            repository: request.repository,
-            default_branch: request
-                .default_branch
-                .map(|branch| branch.as_str().to_owned()),
-        });
-        Ok(())
-    }
-
     async fn run_submit(
         &self,
         target: Option<&str>,
@@ -262,6 +246,7 @@ impl NativeV2CliBackend for FakeBackend {
             connections,
             github_token,
             run_id: _,
+            source: _,
             profile: _,
         } = request;
         self.calls.lock().assert_value().push(Call::Submit {

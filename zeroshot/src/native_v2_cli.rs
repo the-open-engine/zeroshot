@@ -1,8 +1,8 @@
 //! Command contract for the shipped CLI.
 //!
 //! Parsing and local file validation happen before a local controller or named target is
-//! contacted. The named-target connector resolves a mutable branch selector before sending the
-//! immutable sourceful submission to the target.
+//! contacted. Named runs resolve an immutable source from the invoking Git worktree before the
+//! sourceful submission is sent to the target.
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -17,7 +17,8 @@ use openengine_cluster_protocol::{
     RunConnectionValues, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
     RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult, RunProfileMutationResult,
     RunProfileName, RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunTitle,
-    RunWatchParams, SourceBranchId, SubscriptionCloseReason,
+    RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    SubscriptionCloseReason,
 };
 use thiserror::Error;
 
@@ -80,13 +81,6 @@ pub struct TargetAdd {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TargetSetup {
-    pub name: String,
-    pub repository: String,
-    pub default_branch: Option<SourceBranchId>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetServe {
     pub listen: SocketAddr,
     pub public_origin: String,
@@ -119,7 +113,9 @@ pub struct RunCommand {
     pub title: RunTitle,
     pub selection: RunSelection,
     pub input: PathBuf,
+    pub repository: Option<SourceRepositoryId>,
     pub branch: Option<SourceBranchId>,
+    pub revision: Option<SourceRevisionId>,
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
@@ -141,6 +137,7 @@ pub struct PreparedRunRequest {
     pub intent: TargetRunIntent,
     pub connections: RunConnectionValues,
     pub github_token: Option<String>,
+    pub source: Option<NamedRunSource>,
     /// Remote selector retained so the hosted target can resolve the profile atomically.
     pub profile: Option<RunProfileSelector>,
 }
@@ -157,9 +154,16 @@ impl fmt::Debug for PreparedRunRequest {
                 "github_token",
                 &self.github_token.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("source", &self.source)
             .field("profile", &self.profile)
             .finish()
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NamedRunSource {
+    pub resolved: ResolvedSource,
+    pub dirty: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -198,7 +202,6 @@ pub enum NativeV2CliCommand {
     TargetLogin {
         name: String,
     },
-    TargetSetup(TargetSetup),
     TargetServe(TargetServe),
     ConnectionList(ConnectionRoute),
     ConnectionSet(ConnectionSetCommand),
@@ -267,10 +270,7 @@ impl NativeV2CliCommand {
     }
 
     fn is_target_operation(&self) -> bool {
-        matches!(
-            self,
-            Self::TargetAdd(_) | Self::TargetLogin { .. } | Self::TargetSetup(_)
-        )
+        matches!(self, Self::TargetAdd(_) | Self::TargetLogin { .. })
     }
 }
 
@@ -380,7 +380,6 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
-    async fn target_setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError>;
 
     async fn connection_list(
         &self,

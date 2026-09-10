@@ -233,40 +233,28 @@ fn branch_override_requires_a_named_target() {
     ]))
     .assert_error();
     assert!(
-        matches!(error, NativeV2CliError::Usage(message) if message == "--branch requires --target")
+        matches!(error, NativeV2CliError::Usage(message) if message.contains("require --target"))
     );
 }
 
 #[test]
 fn branch_selectors_are_validated_before_target_contact() {
-    for argv in [
-        vec![
-            "target",
-            "setup",
-            "prod",
-            "--repository",
-            "open/engine",
-            "--branch",
-            "release.lock",
-        ],
-        vec![
-            "run",
-            "--target",
-            "prod",
-            "--title",
-            "Repair checkout",
-            "--graph",
-            "graph.json",
-            "--input",
-            "input.json",
-            "--runtime-config",
-            "runtime.json",
-            "--branch",
-            "release.lock",
-        ],
-    ] {
-        assert!(parse_native_v2_args(args(&argv)).is_err());
-    }
+    let argv = [
+        "run",
+        "--target",
+        "prod",
+        "--title",
+        "Repair checkout",
+        "--graph",
+        "graph.json",
+        "--input",
+        "input.json",
+        "--runtime-config",
+        "runtime.json",
+        "--branch",
+        "release.lock",
+    ];
+    assert!(parse_native_v2_args(args(&argv)).is_err());
 }
 
 #[test]
@@ -284,26 +272,39 @@ fn parser_keeps_capsules_private_and_attach_read_only() {
 }
 
 #[test]
-fn parser_exposes_named_target_default_branch() {
+fn parser_exposes_named_run_source_overrides() {
     let command = parse_native_v2_args(args(&[
-        "target",
-        "setup",
+        "run",
+        "--target",
         "prod",
+        "--title",
+        "Repair checkout",
+        "--graph",
+        "graph.json",
+        "--input",
+        "input.json",
+        "--runtime-config",
+        "runtime.json",
         "--repository",
         "open/engine",
         "--branch",
         "main",
+        "--revision",
+        "0123456789abcdef0123456789abcdef01234567",
     ]))
     .assert_value();
-    let setup = match command {
-        NativeV2CliCommand::TargetSetup(setup) => Some(setup),
-        _ => None,
-    };
-    let setup = setup.assert_value_with("setup command");
-    assert_eq!(setup.repository, "open/engine");
+    let run = run_command(command);
     assert_eq!(
-        setup.default_branch.as_ref().map(SourceBranchId::as_str),
+        run.repository.as_ref().map(SourceRepositoryId::as_str),
+        Some("open/engine")
+    );
+    assert_eq!(
+        run.branch.as_ref().map(SourceBranchId::as_str),
         Some("main")
+    );
+    assert_eq!(
+        run.revision.as_ref().map(SourceRevisionId::as_str),
+        Some("0123456789abcdef0123456789abcdef01234567")
     );
 }
 
@@ -313,7 +314,6 @@ async fn named_target_commands_delegate_without_interpreting_runtime_configurati
     for argv in [
         args(&["target", "add", "prod", "--url", "https://target.example"]),
         args(&["target", "login", "prod"]),
-        args(&["target", "setup", "prod", "--repository", "open/engine"]),
     ] {
         let command = parse_native_v2_args(argv).assert_value();
         execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut Vec::new())
@@ -330,11 +330,6 @@ async fn named_target_commands_delegate_without_interpreting_runtime_configurati
             },
             Call::TargetLogin {
                 name: "prod".to_owned(),
-            },
-            Call::TargetSetup {
-                name: "prod".to_owned(),
-                repository: "open/engine".to_owned(),
-                default_branch: None,
             },
         ]
     );

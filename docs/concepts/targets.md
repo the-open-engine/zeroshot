@@ -26,10 +26,6 @@ docker run --rm --detach --name zeroshot-target \
 zeroshot target add local-target \
   --url http://127.0.0.1:8080 \
   --direct
-
-zeroshot target setup local-target \
-  --repository owner/repository \
-  --branch main
 ```
 
 !!! danger "Direct means unauthenticated"
@@ -37,7 +33,11 @@ zeroshot target setup local-target \
     Keep the published port on loopback or a trusted private network. Put an authenticated reverse
     proxy with WebSocket forwarding in front of it before broader exposure.
 
-Use `--target local-target` on run and observation commands to select it.
+Use `--target local-target` on run and observation commands to select it. Each named run selects
+its repository and branch from the invoking worktree's attached upstream. Without an upstream, the
+worktree must have exactly one GitHub remote. `--repository` and `--branch` override that selection,
+and `--revision` selects an exact commit instead of resolving the current remote branch tip.
+Detached worktrees require explicit repository and branch values.
 
 ## Hosted target
 
@@ -46,7 +46,6 @@ A hosted target adds discovery and user authentication around the same native co
 ```console
 zeroshot target add production --url https://TARGET_ORIGIN
 zeroshot target login production
-zeroshot target setup production --repository owner/repository --branch main
 ```
 
 The hosting service owns login, source authorization, organization-scoped connections, queue policy,
@@ -59,5 +58,6 @@ should link to the version of these core docs that matches the deployed target, 
 ## Source and delivery credentials
 
 For named-target runs, the CLI can send `GH_TOKEN` for source checkout and generated GitHub delivery.
-A provider receives that value only if its runtime binding declares `GH_TOKEN`; setup inputs that
-contain secrets stay out of the run ledger and target configuration.
+A provider receives that value only if its runtime binding declares `GH_TOKEN`. Before submission,
+the CLI reports the target, exact `owner/repository@branch#revision`, and whether the invoking
+worktree is dirty. Uncommitted files remain local and are never committed or pushed automatically.

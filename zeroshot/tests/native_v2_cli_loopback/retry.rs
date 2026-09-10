@@ -120,10 +120,10 @@ impl RetryAllocator {
             local_user: None,
             search_path: "/usr/bin:/bin".to_owned(),
             process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
-                .map_err(|_| CapsuleAllocationUnavailable)?,
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
         }));
         let runner = NativeNodeRunner::new(admitted, adapter.clone(), adapter)
-            .map_err(|_| CapsuleAllocationUnavailable)?;
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         Ok(Arc::new(runner))
     }
 
@@ -139,7 +139,7 @@ impl RetryAllocator {
             ),
             ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
         ]))
-        .map_err(|_| CapsuleAllocationUnavailable)?;
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let adapter = Arc::new(
             ClaudeAdapter::new_local(ClaudeAdapterConfig {
                 provider: ClaudeProvider::Anthropic,
@@ -151,15 +151,15 @@ impl RetryAllocator {
                 base_environment,
                 turn_timeout: Duration::from_secs(10),
                 process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
-                    .map_err(|_| CapsuleAllocationUnavailable)?,
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             })
-            .map_err(|_| CapsuleAllocationUnavailable)?,
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
         );
         NativeNodeRunner::new(admitted, adapter.clone(), adapter)
             .map(|runner| {
                 Arc::new(runner) as Arc<dyn zeroshot_engine::native_v2_runner::NodeRunner>
             })
-            .map_err(|_| CapsuleAllocationUnavailable)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)
     }
 }
 

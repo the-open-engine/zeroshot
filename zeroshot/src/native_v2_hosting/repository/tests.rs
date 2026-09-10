@@ -53,9 +53,26 @@ async fn fetch_waits_for_automatic_maintenance() {
     )
     .await
     .assert_value_with("clone source");
+    let branch = git
+        .capture(
+            &seed,
+            &["symbolic-ref".into(), "--short".into(), "HEAD".into()],
+        )
+        .await
+        .assert_value_with("resolve branch");
+    let source = ResolvedSource {
+        repository: openengine_cluster_protocol::SourceRepositoryId::new("owner/repository")
+            .assert_value(),
+        branch: openengine_cluster_protocol::SourceBranchId::new(branch.trim()).assert_value(),
+        revision: openengine_cluster_protocol::SourceRevisionId::new(revision.trim())
+            .assert_value(),
+    };
+    fetch_source(&git, &workspace, &source)
+        .await
+        .assert_value_with("fetch source branch and revision");
     checkout_revision(&git, &workspace, revision.trim())
         .await
-        .assert_value_with("fetch and checkout revision");
+        .assert_value_with("checkout revision");
     assert_eq!(
         git.capture(&workspace, &["rev-parse".into(), "HEAD".into()])
             .await

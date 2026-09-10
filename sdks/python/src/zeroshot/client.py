@@ -54,7 +54,9 @@ class _Submission:
     graph: _Graph
     initial_input: JsonValue
     runtime: _Runtime
+    repository: str | None
     branch: str | None
+    revision: str | None
     submission_key: str
 
 
@@ -63,7 +65,9 @@ class _Overrides:
     title: str | None
     preset: Preset | None
     runtime: _Runtime | None
+    repository: str | None
     branch: str | None
+    revision: str | None
     submission_key: str | None
 
 
@@ -71,7 +75,9 @@ class _SubmitOptions(TypedDict, total=False):
     title: str | None
     preset: Preset | None
     runtime: _Runtime | None
+    repository: str | None
     branch: str | None
+    revision: str | None
     submission_key: str | None
 
 
@@ -151,7 +157,9 @@ class Client:
         title: str | None = None,
         preset: Preset | None = None,
         runtime: _Runtime | None = None,
+        repository: str | None = None,
         branch: str | None = None,
+        revision: str | None = None,
         submission_key: str | None = None,
         wait_timeout: float | None = None,
     ) -> RunResult: ...
@@ -173,9 +181,9 @@ class Client:
 
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
-            options: Typed keyword options. title, preset, runtime, branch, and submission_key
-                apply to string submissions. wait_timeout is a non-negative observation deadline
-                in seconds; omit it to wait indefinitely.
+            options: Typed keyword options. title, preset, runtime, repository, branch, revision,
+                and submission_key apply to string submissions. wait_timeout is a non-negative
+                observation deadline in seconds; omit it to wait indefinitely.
 
         Returns:
             The terminal result. Graph failure remains data until raise_for_failure() is called.
@@ -234,7 +242,10 @@ class Client:
             arguments = self._submission_arguments(selected, Path(directory))
             await self._native(static=True).json([*arguments[:-1], "--validate-only"])
             await self._ready()
-            receipt = await self._native().json(arguments)
+            receipt = None
+            async for value in self._native().json_lines(arguments):
+                if isinstance(value.get("runId"), str):
+                    receipt = value
         if not isinstance(receipt, dict) or not isinstance(receipt.get("runId"), str):
             raise ProtocolError("Zeroshot returned a malformed submission receipt")
         return Run(self, receipt["runId"])
@@ -308,7 +319,9 @@ class Client:
             graph=selected_preset,
             initial_input={"task": request},
             runtime=selected_runtime,
+            repository=overrides.repository,
             branch=overrides.branch,
+            revision=overrides.revision,
             submission_key=(
                 overrides.submission_key
                 if overrides.submission_key is not None
@@ -321,11 +334,12 @@ class Client:
         arguments = ["run", "--title", submission.title, "--input", str(input_path)]
         self._append_graph(arguments, submission.graph, root)
         self._append_runtime(arguments, submission.runtime, root)
-        effective_branch = submission.branch
-        if effective_branch is None and isinstance(self.target, DirectTarget):
-            effective_branch = self.target.default_branch
-        if effective_branch is not None:
-            arguments.extend(["--branch", effective_branch])
+        if submission.repository is not None:
+            arguments.extend(["--repository", submission.repository])
+        if submission.branch is not None:
+            arguments.extend(["--branch", submission.branch])
+        if submission.revision is not None:
+            arguments.extend(["--revision", submission.revision])
         arguments.extend(["--submission-key", submission.submission_key])
         return [*arguments, *self._route_arguments(), "--detach"]
 
@@ -367,10 +381,6 @@ class Client:
                 )
             native = self._native(static=True)
             await native.check(["target", "add", "python-sdk", "--url", target.origin, "--direct"])
-            setup = ["target", "setup", "python-sdk", "--repository", target.repository]
-            if target.default_branch is not None:
-                setup.extend(["--branch", target.default_branch])
-            await native.check(setup)
             self._direct_ready = True
 
     def _ensure_open(self) -> None:
@@ -378,7 +388,7 @@ class Client:
             raise ClientClosedError("the Zeroshot client is closed")
         if self._opened:
             return
-        if isinstance(self.target, LocalTarget):
+        if isinstance(self.target, (LocalTarget, DirectTarget)):
             workspace = self.target.workspace
             self._workspace = (
                 Path.cwd().resolve()
@@ -590,7 +600,9 @@ def _overrides(options: _SubmitOptions) -> _Overrides:
         options.get("title"),
         options.get("preset"),
         options.get("runtime"),
+        options.get("repository"),
         options.get("branch"),
+        options.get("revision"),
         options.get("submission_key"),
     )
 
@@ -602,7 +614,9 @@ def _exact_submission(request: RunRequest, overrides: _Overrides) -> _Submission
             overrides.title,
             overrides.preset,
             overrides.runtime,
+            overrides.repository,
             overrides.branch,
+            overrides.revision,
             overrides.submission_key,
         )
     ):
@@ -612,7 +626,9 @@ def _exact_submission(request: RunRequest, overrides: _Overrides) -> _Submission
         graph=request.graph,
         initial_input=request.initial_input,
         runtime=request.runtime,
+        repository=None,
         branch=request.branch,
+        revision=None,
         submission_key=(
             request.submission_key if request.submission_key is not None else _submission_key()
         ),

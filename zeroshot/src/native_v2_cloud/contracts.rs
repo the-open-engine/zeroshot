@@ -7,8 +7,22 @@ pub struct CloudRunReceipt {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[error("capsule allocation is unavailable")]
-pub struct CapsuleAllocationUnavailable;
+pub enum CapsuleAllocationUnavailable {
+    #[error("capsule allocation is unavailable")]
+    Runtime,
+    #[error("source checkout failed: repository access, branch, or revision is unavailable")]
+    SourceCheckout,
+}
+
+impl CapsuleAllocationUnavailable {
+    #[must_use]
+    pub const fn failure_code(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime_unavailable",
+            Self::SourceCheckout => "source_checkout_unavailable",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[error("exclusive controller authority is unavailable")]

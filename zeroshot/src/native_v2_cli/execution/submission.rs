@@ -23,6 +23,9 @@ use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 
 #[path = "submission/profiles.rs"]
 mod profiles;
+
+#[path = "named_source.rs"]
+mod named_source;
 pub(super) use profiles::materialize_profile;
 use profiles::{ResolvedRunProfile, resolve_run_profile};
 
@@ -134,6 +137,7 @@ where
         intent,
         connections,
         github_token,
+        source: None,
         profile: resolved.remote_selector,
     })
 }
@@ -146,7 +150,8 @@ async fn prepare_validated_submission_with_environment<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
-    let params = prepare_submission_with_environment(run, resolved, available)?;
+    let mut params = prepare_submission_with_environment(run, resolved, available)?;
+    params.source = named_source::resolve(run, params.github_token.as_deref()).await?;
     NativeV2Admission
         .validate_intent(&params.intent, DeliveryPolicy::Optional)
         .await
@@ -154,18 +159,30 @@ where
     Ok(params)
 }
 
-pub(super) async fn submit_run<B>(
+pub(super) async fn submit_run<B, W>(
     run: &RunCommand,
     context: &CliExecutionContext<'_, B>,
+    output: &mut W,
 ) -> Result<Option<RunSubmitResult>, NativeV2CliError>
 where
     B: NativeV2CliBackend,
+    W: Write,
 {
     let resolved = resolve_run_profile(run, context.backend).await?;
     let params =
         prepare_validated_submission_with_environment(run, resolved, context.environment).await?;
     if run.validate_only {
         return Ok(None);
+    }
+    if let (Some(target), Some(source)) = (&run.target, &params.source) {
+        write_json(
+            output,
+            &serde_json::json!({
+                "target": target,
+                "source": format!("{}@{}#{}", source.resolved.repository.as_str(), source.resolved.branch.as_str(), source.resolved.revision.as_str()),
+                "dirty": source.dirty,
+            }),
+        )?;
     }
     context
         .backend

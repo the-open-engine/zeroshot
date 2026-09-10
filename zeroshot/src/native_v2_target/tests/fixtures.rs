@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use openengine_cluster_client::{
     JsonRpcTransport, PumpedSubscription, SubscriptionTransport, TransportError,
 };
+use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_protocol::{
     RequestId, RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams,
     ResolvedSource, RunStatusParams, RunSubmitResult, RunWatchParams, SourceBranchId,
@@ -75,21 +76,6 @@ impl TargetRegistry for MemoryRegistry {
             .get(name)
             .cloned()
             .ok_or_else(|| TargetConnectorError::NotFound(name.to_owned()))
-    }
-
-    fn setup(
-        &self,
-        name: &str,
-        repository: String,
-        default_branch: Option<String>,
-    ) -> Result<(), TargetConnectorError> {
-        let mut targets = self.targets.lock().assert_value();
-        let target = targets
-            .get_mut(name)
-            .ok_or_else(|| TargetConnectorError::NotFound(name.to_owned()))?;
-        target.repository = Some(repository);
-        target.default_branch = default_branch;
-        Ok(())
     }
 }
 
@@ -295,8 +281,6 @@ pub(super) fn hosted_target(name: &str, origin: impl Into<String>) -> TargetReco
         access: TargetAccess::Hosted {
             device_token: "22222222-2222-4222-8222-222222222222".to_owned(),
         },
-        repository: Some("open-engine/zeroshot".to_owned()),
-        default_branch: Some("main".to_owned()),
     }
 }
 
@@ -306,16 +290,6 @@ pub(super) fn direct_target(origin: impl Into<String>) -> TargetRecord {
         name: "vm".to_owned(),
         origin: origin.into(),
         access: TargetAccess::Direct,
-        repository: Some("open-engine/zeroshot".to_owned()),
-        default_branch: Some("main".to_owned()),
-    }
-}
-
-pub(super) fn setup_request() -> TargetSetup {
-    TargetSetup {
-        name: "prod".to_owned(),
-        repository: "open-engine/zeroshot".to_owned(),
-        default_branch: Some(SourceBranchId::new("main").assert_value()),
     }
 }
 
@@ -347,6 +321,15 @@ pub(super) fn run_request() -> PreparedRunRequest {
         intent: run_intent(),
         connections: BTreeMap::new(),
         github_token: None,
+        source: Some(zeroshot_engine::native_v2_cli::NamedRunSource {
+            resolved: ResolvedSource {
+                repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
+                branch: SourceBranchId::new("feature").assert_value(),
+                revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
+                    .assert_value(),
+            },
+            dirty: false,
+        }),
         profile: None,
     }
 }
@@ -373,27 +356,3 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
         github_token: request.github_token,
     }
 }
-
-#[derive(Clone, Copy)]
-pub(super) struct FakeSourceResolver;
-
-#[async_trait]
-impl TargetSourceResolver for FakeSourceResolver {
-    async fn resolve(
-        &self,
-        repository: &str,
-        branch: Option<&str>,
-        _github_token: Option<&str>,
-    ) -> Result<ResolvedSource, TargetConnectorError> {
-        Ok(ResolvedSource {
-            repository: SourceRepositoryId::new(repository)
-                .map_err(|_| TargetConnectorError::SourceResolution)?,
-            branch: SourceBranchId::new(branch.unwrap_or("remote-default"))
-                .map_err(|_| TargetConnectorError::SourceResolution)?,
-            revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
-                .map_err(|_| TargetConnectorError::SourceResolution)?,
-        })
-    }
-}
-
-use openengine_cluster_testkit::assertions::{AssertValue};

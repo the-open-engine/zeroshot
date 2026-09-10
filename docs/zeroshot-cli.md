@@ -46,7 +46,6 @@ Usage: zeroshot target <COMMAND>
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
-  setup  Configure the local profile for a named target
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 
@@ -95,30 +94,6 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-#### `zeroshot target setup`
-
-```text
-Configure the local profile for a named target.
-
-This changes only the local named-target registry; it does not configure the remote target.
-
-Usage: zeroshot target setup [OPTIONS] --repository <OWNER/NAME> <NAME>
-
-Arguments:
-  <NAME>
-          Local target name
-
-Options:
-      --repository <OWNER/NAME>
-          GitHub repository in owner/name form
-
-      --branch <BRANCH>
-          Default source branch used when a run does not specify --branch
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
 #### `zeroshot target serve`
 
 ```text
@@ -152,7 +127,6 @@ Usage: zeroshot target help [COMMAND]
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
-  setup  Configure the local profile for a named target
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 ```
@@ -593,8 +567,14 @@ Options:
 
           The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
 
+      --repository <OWNER/NAME>
+          GitHub repository in owner/name form. Requires --target
+
       --branch <BRANCH>
-          Source branch to resolve on the named target. Requires --target
+          Source branch to resolve for the named run. Requires --target
+
+      --revision <SHA>
+          Exact source commit SHA. Requires --target
 
       --submission-key <KEY>
           Stable idempotency key for safely retrying submission

@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatus, CliRunStatusResult,
     CliRunWatchEventNotification, CliSubscription, CliSubscriptionItem, NativeV2CliBackend,
-    NativeV2CliError, PreparedRunRequest, TargetAdd, TargetSetup,
+    NativeV2CliError, PreparedRunRequest, TargetAdd,
 };
 
 #[path = "oecp/errors.rs"]
@@ -133,10 +133,6 @@ where
 
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError> {
         self.connector.login(name).await
-    }
-
-    async fn target_setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError> {
-        self.connector.setup(request).await
     }
 
     async fn connection_list(

@@ -18,9 +18,8 @@ use zeroshot_engine::native_v2_cli::{
 use zeroshot_engine::native_v2_portable_controller::{PortableControllerError, run_controller_process};
 
 use native_v2_target::{
-    default_target_registry_path, serve_direct_target, FileTargetRegistry,
-    GitHubTargetSourceResolver, NativeV2TargetConnector, TargetConnectorError,
-    TargetHttpControlAuthority, TargetOecpWebSocketDialer, TargetServeError,
+    default_target_registry_path, serve_direct_target, FileTargetRegistry, NativeV2TargetConnector,
+    TargetConnectorError, TargetHttpControlAuthority, TargetOecpWebSocketDialer, TargetServeError,
 };
 
 #[derive(Debug, Error)]
@@ -93,7 +92,6 @@ async fn run_named_target_command(
         registry,
         TargetHttpControlAuthority::production().map_err(TargetConnectorError::Authority)?,
         TargetOecpWebSocketDialer,
-        GitHubTargetSourceResolver::production(),
     );
     let backend = NamedTargetCliBackend::new(connector);
     execute_native_v2_cli(command, &backend, detach, output).await?;

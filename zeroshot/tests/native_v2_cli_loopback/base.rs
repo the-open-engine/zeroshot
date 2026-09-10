@@ -124,7 +124,7 @@ impl CapsuleAllocator for ImmediateAllocator {
             Arc::new(BlockingDriver),
             Arc::new(ImmediateSessionFactory),
         )
-        .map_err(|_| CapsuleAllocationUnavailable)?;
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let (loss, receiver) = watch::channel(false);
         self.losses.lock().assert_value().push(loss);
         Ok(AllocatedCapsule {

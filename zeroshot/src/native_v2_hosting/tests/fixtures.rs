@@ -177,8 +177,10 @@ pub(super) fn portable_filesystem(
     writable_directory(workspace);
     writable_directory(runtime_home);
     Ok(CapsuleFilesystem {
-        workspace: fs::canonicalize(workspace).map_err(|_| CapsuleAllocationUnavailable)?,
-        runtime_home: fs::canonicalize(runtime_home).map_err(|_| CapsuleAllocationUnavailable)?,
+        workspace: fs::canonicalize(workspace)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+        runtime_home: fs::canonicalize(runtime_home)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
     })
 }
 

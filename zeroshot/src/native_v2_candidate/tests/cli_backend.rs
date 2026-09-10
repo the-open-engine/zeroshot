@@ -48,12 +48,6 @@ impl NativeV2CliBackend for InProcessCliBackend {
         ))
     }
 
-    async fn target_setup(&self, _request: TargetSetup) -> Result<(), NativeV2CliError> {
-        Err(NativeV2CliError::Target(
-            "test backend has no setup authority".to_owned(),
-        ))
-    }
-
     async fn run_submit(
         &self,
         target: Option<&str>,

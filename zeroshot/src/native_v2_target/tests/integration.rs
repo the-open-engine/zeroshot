@@ -45,14 +45,43 @@ fn file_registry_round_trips_direct_access_without_a_device_credential() {
         name: "vm".to_owned(),
         origin: "http://127.0.0.1:8080".to_owned(),
         access: TargetAccess::Direct,
-        repository: Some("open-engine/zeroshot".to_owned()),
-        default_branch: Some("main".to_owned()),
     };
     registry.insert(direct.clone()).assert_value();
     assert_eq!(registry.get("vm").assert_value(), direct);
     let stored = std::fs::read_to_string(path).assert_value();
     assert!(stored.contains(r#""mode": "direct""#));
     assert!(!stored.contains("deviceToken"));
+}
+
+#[test]
+fn file_registry_accepts_legacy_repository_fields_without_changing_target_identity() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    std::fs::create_dir_all(path.parent().assert_value()).assert_value();
+    let target = target();
+    let mut stored_target = serde_json::to_value(&target).assert_value();
+    stored_target["repository"] = serde_json::json!("old/wrong-repository");
+    stored_target["defaultBranch"] = serde_json::json!("stale");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({
+            "version": 4,
+            "targets": {"prod": stored_target}
+        }))
+        .assert_value(),
+    )
+    .assert_value();
+
+    assert_eq!(
+        FileTargetRegistry::new(path.clone())
+            .get("prod")
+            .assert_value(),
+        target
+    );
+    let migrated = std::fs::read_to_string(path).assert_value();
+    assert!(migrated.contains(r#""version": 5"#));
+    assert!(!migrated.contains("repository"));
+    assert!(!migrated.contains("defaultBranch"));
 }
 
 #[cfg(unix)]
@@ -72,16 +101,11 @@ fn file_registry_is_private_on_creation() {
 }
 
 #[tokio::test]
-async fn connector_preserves_add_login_setup_and_target_scoped_connect() {
+async fn connector_preserves_add_login_and_target_scoped_connect() {
     let registry = MemoryRegistry::default();
     let authority = FakeAuthority::new("wss://target.example/oecp");
     let dialer = FakeDialer::default();
-    let connector = NativeV2TargetConnector::new(
-        registry,
-        authority.clone(),
-        dialer.clone(),
-        FakeSourceResolver,
-    );
+    let connector = NativeV2TargetConnector::new(registry, authority.clone(), dialer.clone());
 
     connector
         .add(TargetAdd {
@@ -92,7 +116,6 @@ async fn connector_preserves_add_login_setup_and_target_scoped_connect() {
         .await
         .assert_value();
     connector.login("prod").await.assert_value();
-    connector.setup(setup_request()).await.assert_value();
     let receipt = connector.submit("prod", run_request()).await.assert_value();
     connector
         .connect("prod", Some(receipt.run_id.clone()))
@@ -119,8 +142,7 @@ async fn connector_preserves_add_login_setup_and_target_scoped_connect() {
         _ => None,
     };
     let (record, request) = submitted.assert_value_with("expected target submission");
-    assert_eq!(record.repository.as_deref(), Some("open-engine/zeroshot"));
-    assert_eq!(record.default_branch.as_deref(), Some("main"));
+    assert_eq!(record, added);
     assert_eq!(request.run_id, run_request().run_id);
     assert_eq!(
         request.submission.source.repository.as_str(),
@@ -130,15 +152,11 @@ async fn connector_preserves_add_login_setup_and_target_scoped_connect() {
     assert!(matches!(
         calls.assert_at(3),
         AuthorityCall::Session(record, session)
-            if record.repository.as_deref() == Some("open-engine/zeroshot")
-                && session.run_id == Some(run_request().run_id)
+            if record == added && session.run_id == Some(run_request().run_id)
     ));
-    let mut connected = added.clone();
-    connected.repository = Some("open-engine/zeroshot".to_owned());
-    connected.default_branch = Some("main".to_owned());
     assert_eq!(
         dialer.sessions.lock().assert_value().as_slice(),
-        &[(connected, "wss://target.example/oecp".to_owned())]
+        &[(added.clone(), "wss://target.example/oecp".to_owned())]
     );
 }
 

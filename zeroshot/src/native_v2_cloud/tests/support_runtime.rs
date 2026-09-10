@@ -26,7 +26,7 @@ impl AllocatorCore {
         admitted: &AdmittedRun,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let runner = NativeNodeRunner::new(admitted, self.driver.clone(), self.sessions.clone())
-            .map_err(|_| CapsuleAllocationUnavailable)?;
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let (loss, receiver) = watch::channel(false);
         self.loss
             .lock()
@@ -102,7 +102,7 @@ impl AllocationGate for GatedAllocation {
             released
                 .changed()
                 .await
-                .map_err(|_| CapsuleAllocationUnavailable)?;
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         }
         Ok(())
     }

@@ -60,19 +60,15 @@ the same way. Neither action stops native work; only `await run.force_stop()` ch
 
 ## Run on a direct target
 
-Local execution uses `LocalTarget`. A direct target, including the Docker image, needs its origin
-and source repository:
+Local execution uses `LocalTarget`. A direct target, including the Docker image, needs its origin;
+source is selected from the invoking Git worktree or per-run overrides:
 
 ```python
 from zeroshot import Client, DirectTarget, UniformRuntime
 
 
 async def run_direct(runtime: UniformRuntime) -> None:
-    target = DirectTarget(
-        "http://127.0.0.1:8080",
-        repository="owner/repository",
-        default_branch="main",
-    )
+    target = DirectTarget("http://127.0.0.1:8080")
 
     async with Client(target=target, runtime=runtime) as client:
         result = await client.run("Update the parser.")

@@ -267,7 +267,8 @@ impl NativeV2CloudController {
         let github_token = match source_github_token(&secrets).await {
             Ok(token) => token,
             Err(error) => {
-                self.append_unavailable(&run_id).await?;
+                self.append_unavailable(&run_id, "runtime_unavailable")
+                    .await?;
                 return Err(error.into());
             }
         };
@@ -278,7 +279,8 @@ impl NativeV2CloudController {
         {
             Ok(capsule) => capsule,
             Err(error) => {
-                self.append_unavailable(&run_id).await?;
+                self.append_unavailable(&run_id, error.failure_code())
+                    .await?;
                 return Err(error.into());
             }
         };
@@ -344,13 +346,17 @@ impl NativeV2CloudController {
         Ok(())
     }
 
-    async fn append_unavailable(&self, run_id: &RunId) -> Result<(), NativeV2CloudError> {
+    async fn append_unavailable(
+        &self,
+        run_id: &RunId,
+        code: &str,
+    ) -> Result<(), NativeV2CloudError> {
         let stored = self
             .ledger
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        append_terminal_failure(self.ledger.as_ref(), &stored, "runtime_unavailable").await?;
+        append_terminal_failure(self.ledger.as_ref(), &stored, code).await?;
         Ok(())
     }
 

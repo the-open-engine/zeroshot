@@ -54,7 +54,7 @@ impl CapsuleAllocator for NoAllocation {
         _admitted: &AdmittedRun,
         _github_token: Option<&str>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        Err(CapsuleAllocationUnavailable)
+        Err(CapsuleAllocationUnavailable::Runtime)
     }
 
     async fn destroy_or_confirm_absent(

@@ -1,6 +1,6 @@
 //! Native-v2 named-target connector.
 //!
-//! The CLI owns the local name/origin/repository profile. A target control authority owns
+//! The CLI owns the local name/origin/access profile. A target control authority owns
 //! discovery, explicit hosted/direct access, submission, and run-scoped OECP sessions. Runtime
 //! values cross only in the ephemeral per-run request and are never stored locally.
 
@@ -13,7 +13,7 @@ use thiserror::Error;
 use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, TargetConnector};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
-    NativeV2CliError, PreparedRunRequest, TargetAdd, TargetSetup,
+    NativeV2CliError, PreparedRunRequest, TargetAdd,
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
@@ -37,12 +37,10 @@ mod controller_authority;
 mod oecp;
 mod registry;
 mod serve;
-mod source;
 
-use contract::{prepare_setup, prepare_target, validate_bearer_token, validate_target_name};
+use contract::{prepare_target, validate_bearer_token, validate_target_name};
 pub use oecp::{TargetOecpDialer, TargetOecpWebSocketDialer};
 pub use registry::{FileTargetRegistry, TargetRegistry, default_target_registry_path};
-pub use source::{GitHubTargetSourceResolver, TargetSourceResolver};
 pub use controller_authority::TargetHttpControlAuthority;
 pub use serve::{TargetServeError, serve_direct_target};
 pub use access::{TargetAccess, TargetOecpAccess};
@@ -55,17 +53,41 @@ use contract::normalize_origin;
 #[path = "native_v2_target/tests.rs"]
 mod tests;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TargetRecord {
     pub id: String,
     pub name: String,
     pub origin: String,
     pub access: TargetAccess,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_branch: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for TargetRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct StoredTarget {
+            id: String,
+            name: String,
+            origin: String,
+            access: TargetAccess,
+            #[serde(default)]
+            repository: Option<String>,
+            #[serde(default)]
+            default_branch: Option<String>,
+        }
+        let stored = StoredTarget::deserialize(deserializer)?;
+        let _ = (stored.repository, stored.default_branch);
+        Ok(Self {
+            id: stored.id,
+            name: stored.name,
+            origin: stored.origin,
+            access: stored.access,
+        })
+    }
 }
 
 #[derive(Debug, Error)]
@@ -88,12 +110,6 @@ pub enum TargetConnectorError {
     RegistryTooLarge,
     #[error("secure randomness is unavailable")]
     Randomness,
-    #[error("repository must have the form owner/name")]
-    InvalidRepository,
-    #[error("target {0:?} has no repository setup")]
-    SetupRequired(String),
-    #[error("target source could not be resolved")]
-    SourceResolution,
     #[error("target control authority failed: {0}")]
     Authority(#[from] TargetAuthorityError),
     #[error("target OECP endpoint is invalid")]
@@ -104,32 +120,29 @@ pub enum TargetConnectorError {
     OecpConnection(String),
 }
 
-pub struct NativeV2TargetConnector<R, A, D, S> {
+pub struct NativeV2TargetConnector<R, A, D> {
     registry: R,
     authority: A,
     dialer: D,
-    source: S,
 }
 
-impl<R, A, D, S> NativeV2TargetConnector<R, A, D, S> {
+impl<R, A, D> NativeV2TargetConnector<R, A, D> {
     #[must_use]
-    pub const fn new(registry: R, authority: A, dialer: D, source: S) -> Self {
+    pub const fn new(registry: R, authority: A, dialer: D) -> Self {
         Self {
             registry,
             authority,
             dialer,
-            source,
         }
     }
 }
 
 #[async_trait]
-impl<R, A, D, S> TargetConnector for NativeV2TargetConnector<R, A, D, S>
+impl<R, A, D> TargetConnector for NativeV2TargetConnector<R, A, D>
 where
     R: TargetRegistry,
     A: TargetControlAuthority,
     D: TargetOecpDialer,
-    S: TargetSourceResolver,
 {
     type Transport = D::Transport;
 
@@ -149,14 +162,6 @@ where
             .login(&target)
             .await
             .map_err(cli_authority_error)
-    }
-
-    async fn setup(&self, request: TargetSetup) -> Result<(), NativeV2CliError> {
-        let setup = prepare_setup(&request).map_err(cli_target_error)?;
-        validate_target_name(&request.name).map_err(cli_target_error)?;
-        self.registry
-            .setup(&request.name, setup.repository, setup.default_branch)
-            .map_err(cli_target_error)
     }
 
     async fn connection_list(
@@ -265,23 +270,16 @@ where
     ) -> Result<RunSubmitResult, NativeV2CliError> {
         validate_target_name(name).map_err(cli_target_error)?;
         let target = self.registry.get(name).map_err(cli_target_error)?;
-        let repository = target.repository.as_deref().ok_or_else(|| {
-            cli_target_error(TargetConnectorError::SetupRequired(name.to_owned()))
-        })?;
-        let source = self
+        let source = request
             .source
-            .resolve(
-                repository,
-                request
-                    .intent
-                    .branch
-                    .as_ref()
-                    .map(openengine_cluster_protocol::SourceBranchId::as_str)
-                    .or(target.default_branch.as_deref()),
-                request.github_token.as_deref(),
-            )
-            .await
-            .map_err(cli_target_error)?;
+            .as_ref()
+            .ok_or_else(|| {
+                NativeV2CliError::Usage(
+                    "named target submission requires a resolved worktree source".to_owned(),
+                )
+            })?
+            .resolved
+            .clone();
         if let Some(profile) = request.profile {
             return self
                 .authority
@@ -422,7 +420,7 @@ where
     }
 }
 
-impl<R, A, D, S> NativeV2TargetConnector<R, A, D, S>
+impl<R, A, D> NativeV2TargetConnector<R, A, D>
 where
     R: TargetRegistry,
 {

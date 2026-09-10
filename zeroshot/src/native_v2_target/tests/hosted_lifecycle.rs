@@ -30,7 +30,6 @@ async fn hosted_lifecycle_stays_cloud_owned_from_queue_through_completion() {
         registry,
         authority,
         dialer.clone(),
-        FakeSourceResolver,
     ));
     let run_id = RunId::new("run-hosted");
 

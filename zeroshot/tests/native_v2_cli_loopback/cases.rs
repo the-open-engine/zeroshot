@@ -32,7 +32,11 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
         .lines()
         .find_map(|line| line.strip_prefix("RUN_ID="))
         .assert_value_with("run ID marker");
-    assert!(stdout.contains("DETACHED={\"runId\":"));
+    assert!(
+        stdout.contains("DETACHED={\"target\":\"prod\",\"source\":\"open-engine/zeroshot@main#")
+    );
+    assert!(stdout.contains("\"dirty\":"));
+    assert!(stdout.contains("\"runId\":"));
     assert!(stdout.contains("LIST={\"runs\":"));
     assert!(stdout.contains("ACTIVE={\"runId\":"));
     assert!(stdout.contains("WATCH={\"subscriptionId\":"));
@@ -103,7 +107,9 @@ async fn shipped_cli_drives_direct_and_ci_feedback_delivery_to_confirmed_merge()
         )
         .await;
         assert!(stderr.contains("ABCD-EFGH"));
-        assert!(stdout.contains("DELIVERY={\"runId\":"));
+        assert!(stdout.contains("DELIVERY={\"target\":\"prod\",\"source\":\"acme/project@main#"));
+        assert!(stdout.contains("\"dirty\":"));
+        assert!(stdout.contains("\"runId\":"));
         assert!(
             stdout.contains("\"terminalResult\":{\"status\":\"succeeded\""),
             "delivery run did not succeed\nstdout:\n{stdout}\nstderr:\n{stderr}"
@@ -202,7 +208,9 @@ async fn shipped_cli_runs_one_real_production_provider_lane() {
     let context = format!("shipped CLI live acceptance for {lane:?}/{scenario:?}");
     let (stdout, stderr) = run_cli_command(command, Duration::from_secs(15 * 60), &context).await;
     assert!(stderr.contains("ABCD-EFGH"), "device code was not surfaced");
-    assert!(stdout.contains("LIVE={\"runId\":"));
+    assert!(stdout.contains("LIVE={\"target\":\"prod\",\"source\":"));
+    assert!(stdout.contains("\"dirty\":"));
+    assert!(stdout.contains("\"runId\":"));
     assert!(stdout.contains("\"phase\":\"finished\""));
     assert!(
         stdout.contains("\"terminalResult\":{\"status\":\"succeeded\""),

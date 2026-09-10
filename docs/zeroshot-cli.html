@@ -25,7 +25,6 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-target"><code>zeroshot target</code></a></li>
 <li><a href="#zeroshot-target-add"><code>zeroshot target add</code></a></li>
 <li><a href="#zeroshot-target-login"><code>zeroshot target login</code></a></li>
-<li><a href="#zeroshot-target-setup"><code>zeroshot target setup</code></a></li>
 <li><a href="#zeroshot-target-serve"><code>zeroshot target serve</code></a></li>
 <li><a href="#zeroshot-target-help"><code>zeroshot target help</code></a></li>
 <li><a href="#zeroshot-connection"><code>zeroshot connection</code></a></li>
@@ -90,7 +89,6 @@ Usage: zeroshot target &lt;COMMAND&gt;
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
-  setup  Configure the local profile for a named target
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 
@@ -129,26 +127,6 @@ Arguments:
 Options:
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
-<section id="zeroshot-target-setup"><h4><code>zeroshot target setup</code></h4>
-<pre><code>Configure the local profile for a named target.
-
-This changes only the local named-target registry; it does not configure the remote target.
-
-Usage: zeroshot target setup [OPTIONS] --repository &lt;OWNER/NAME&gt; &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          Local target name
-
-Options:
-      --repository &lt;OWNER/NAME&gt;
-          GitHub repository in owner/name form
-
-      --branch &lt;BRANCH&gt;
-          Default source branch used when a run does not specify --branch
-
-  -h, --help
-          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-target-serve"><h4><code>zeroshot target serve</code></h4>
 <pre><code>Serve an unauthenticated direct target.
 
@@ -176,7 +154,6 @@ Usage: zeroshot target help [COMMAND]
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
-  setup  Configure the local profile for a named target
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-connection"><h3><code>zeroshot connection</code></h3>
@@ -549,8 +526,14 @@ Options:
 
           The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
 
+      --repository &lt;OWNER/NAME&gt;
+          GitHub repository in owner/name form. Requires --target
+
       --branch &lt;BRANCH&gt;
-          Source branch to resolve on the named target. Requires --target
+          Source branch to resolve for the named run. Requires --target
+
+      --revision &lt;SHA&gt;
+          Exact source commit SHA. Requires --target
 
       --submission-key &lt;KEY&gt;
           Stable idempotency key for safely retrying submission

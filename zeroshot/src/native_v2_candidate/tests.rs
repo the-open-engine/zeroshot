@@ -29,7 +29,7 @@ use crate::native_v2_cli::{
     CliOutcome, CliRunForceResult, CliRunListResult, CliRunStatusResult,
     CliRunWatchEventNotification, CliSubscription, CliSubscriptionItem, NativeV2CliBackend,
     NativeV2CliCommand, NativeV2CliError, NeverDetach, RunCommand, RunGraph, TargetAdd,
-    PreparedRunRequest, TargetSetup,
+    PreparedRunRequest,
 };
 use crate::native_v2_cloud::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
@@ -269,12 +269,12 @@ impl CapsuleAllocator for CandidateAllocator {
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: self.target.clone(),
                 poll: DeliveryPollPolicy::new(3, Duration::ZERO)
-                    .map_err(|_| CapsuleAllocationUnavailable)?,
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             },
             self.github.clone(),
         ));
         let local = assemble_runner(admitted, self.agent.clone(), self.agent.clone(), delivery)
-            .map_err(|_| CapsuleAllocationUnavailable)?;
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(local)));
         let remote = Arc::new(RemoteCapsuleNodeRunner::new(endpoint));
         Ok(AllocatedCapsule {
@@ -394,7 +394,11 @@ async fn submit_through_cli(
                 runtime: crate::native_v2_cli::RunRuntime::Exact(runtime_path),
             },
             input: input_path,
-            branch: None,
+            repository: Some(SourceRepositoryId::new("acme/project").assert_value()),
+            branch: Some(SourceBranchId::new("main").assert_value()),
+            revision: Some(
+                SourceRevisionId::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").assert_value(),
+            ),
             detach: true,
             validate_only: false,
             submission_key: Some(

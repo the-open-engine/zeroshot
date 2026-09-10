@@ -24,7 +24,6 @@ use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError, PreparedRunRequest, TargetAdd,
-    TargetSetup,
 };
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_cloud::submission_digest;

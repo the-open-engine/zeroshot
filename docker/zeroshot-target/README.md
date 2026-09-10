@@ -19,7 +19,6 @@ it at `http://127.0.0.1:8080`:
 
 ```bash
 zeroshot target add local --url http://127.0.0.1:8080 --direct
-zeroshot target setup local --repository owner/repository --branch main
 ```
 
 By default, the target performs no application-level authentication. Anyone who can reach the

@@ -191,16 +191,6 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
         ],
     );
 
-    let target_setup = successful_stdout(&["target", "setup", "--help"]);
-    assert_prose(
-        &target_setup,
-        &[
-            "local profile for a named target",
-            "only the local named-target registry",
-            "does not configure the remote target",
-        ],
-    );
-
     let target_serve_short = successful_stdout(&["target", "serve", "-h"]);
     assert_prose(
         &target_serve_short,

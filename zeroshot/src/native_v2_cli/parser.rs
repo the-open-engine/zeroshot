@@ -98,11 +98,6 @@ enum TargetCommand {
     /// automatic selection.
     Login(TargetNameArgs),
 
-    /// Configure the local profile for a named target.
-    ///
-    /// This changes only the local named-target registry; it does not configure the remote target.
-    Setup(TargetSetupArgs),
-
     /// Serve an unauthenticated direct target.
     ///
     /// Direct mode is unauthenticated. Bind or publish it only on trusted networks.
@@ -224,21 +219,6 @@ struct TargetNameArgs {
     /// Local target name.
     #[arg(value_name = "NAME")]
     name: String,
-}
-
-#[derive(Debug, Args)]
-struct TargetSetupArgs {
-    /// Local target name.
-    #[arg(value_name = "NAME")]
-    name: String,
-
-    /// GitHub repository in owner/name form.
-    #[arg(long, value_name = "OWNER/NAME")]
-    repository: String,
-
-    /// Default source branch used when a run does not specify --branch.
-    #[arg(long, value_name = "BRANCH")]
-    branch: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -375,9 +355,17 @@ struct RunArgs {
     #[arg(long, value_name = "NAME")]
     target: Option<String>,
 
-    /// Source branch to resolve on the named target. Requires --target.
+    /// GitHub repository in owner/name form. Requires --target.
+    #[arg(long, value_name = "OWNER/NAME")]
+    repository: Option<String>,
+
+    /// Source branch to resolve for the named run. Requires --target.
     #[arg(long, value_name = "BRANCH")]
     branch: Option<String>,
+
+    /// Exact source commit SHA. Requires --target.
+    #[arg(long, value_name = "SHA")]
+    revision: Option<String>,
 
     /// Stable idempotency key for safely retrying submission.
     #[arg(long, value_name = "KEY")]

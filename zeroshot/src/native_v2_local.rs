@@ -79,6 +79,7 @@ pub fn prepare_local_run(
         intent,
         connections,
         github_token,
+        source: _,
         profile: _,
     } = request;
     let environment = RunEnvironment::exact(&intent.runtime, connections)?;
