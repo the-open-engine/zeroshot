@@ -1578,22 +1578,21 @@ The released container includes Zeroshot plus pinned Codex and Claude harnesses.
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">zeroshot target add local-target \</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">  --direct</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="go">zeroshot target setup local-target \</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="go">  --repository owner/repository \</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="go">  --branch main</span>
 </code></pre></div>
 <div class="admonition danger">
 <p class="admonition-title">Direct means unauthenticated</p>
 <p>Keep the published port on loopback or a trusted private network. Put an authenticated reverse
 proxy with WebSocket forwarding in front of it before broader exposure.</p>
 </div>
-<p>Use <code>--target local-target</code> on run and observation commands to select it.</p>
+<p>Use <code>--target local-target</code> on run and observation commands to select it. Each named run selects
+its repository and branch from the invoking worktree's attached upstream. Without an upstream, the
+worktree must have exactly one GitHub remote. <code>--repository</code> and <code>--branch</code> override that selection,
+and <code>--revision</code> selects an exact commit instead of resolving the current remote branch tip.
+Detached worktrees require explicit repository and branch values.</p>
 <h2 id="hosted-target">Hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
 <p>A hosted target adds discovery and user authentication around the same native contracts:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target login production</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">zeroshot target setup production --repository owner/repository --branch main</span>
 </code></pre></div>
 <p>The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.</p>
@@ -1602,8 +1601,10 @@ should link to the version of these core docs that matches the deployed target, 
 <a href="../../project/versioning/">Documentation versions</a>.</p>
 <h2 id="source-and-delivery-credentials">Source and delivery credentials<a class="headerlink" href="#source-and-delivery-credentials" title="Permanent link">&para;</a></h2>
 <p>For named-target runs, the CLI can send <code>GH_TOKEN</code> for source checkout and generated GitHub delivery.
-A provider receives that value only if its runtime binding declares <code>GH_TOKEN</code>; setup inputs that
-contain secrets stay out of the run ledger and target configuration.</p>
+A provider receives that value only if its runtime binding declares <code>GH_TOKEN</code>. After the target
+accepts a submission, the CLI reports the target, exact <code>owner/repository@branch#revision</code>, and
+whether the invoking worktree is dirty before emitting the run receipt. Uncommitted files remain
+local and are never committed or pushed automatically.</p>
 
 
 

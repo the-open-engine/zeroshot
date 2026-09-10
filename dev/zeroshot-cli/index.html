@@ -856,17 +856,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot-target-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        zeroshot target setup
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#zeroshot-target-serve" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1879,17 +1868,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot-target-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        zeroshot target setup
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#zeroshot-target-serve" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2275,13 +2253,12 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>Commands:
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  add    Register a named target
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  login  Authenticate with a hosted named target
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  setup  Configure the local profile for a named target
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  serve  Serve an unauthenticated direct target
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  help   Print this message or the help of the given subcommand(s)
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>Options:
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>  -h, --help
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>          Print help
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  serve  Serve an unauthenticated direct target
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  help   Print this message or the help of the given subcommand(s)
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>Options:
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>  -h, --help
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-target-add"><code>zeroshot target add</code><a class="headerlink" href="#zeroshot-target-add" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Register a named target
@@ -2317,269 +2294,269 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>  -h, --help
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>          Print help (see a summary with '-h')
 </code></pre></div>
-<h4 id="zeroshot-target-setup"><code>zeroshot target setup</code><a class="headerlink" href="#zeroshot-target-setup" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Configure the local profile for a named target.
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>This changes only the local named-target registry; it does not configure the remote target.
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Usage: zeroshot target setup [OPTIONS] --repository &lt;OWNER/NAME&gt; &lt;NAME&gt;
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>Arguments:
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  &lt;NAME&gt;
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>          Local target name
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>Options:
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>      --repository &lt;OWNER/NAME&gt;
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>          GitHub repository in owner/name form
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>      --branch &lt;BRANCH&gt;
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>          Default source branch used when a run does not specify --branch
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>  -h, --help
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>          Print help (see a summary with '-h')
-</code></pre></div>
 <h4 id="zeroshot-target-serve"><code>zeroshot target serve</code><a class="headerlink" href="#zeroshot-target-serve" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Serve an unauthenticated direct target.
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Direct mode is unauthenticated. Bind or publish it only on trusted networks.
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>Usage: zeroshot target serve --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>Options:
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>      --listen &lt;ADDRESS&gt;
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>          IP socket address on which the target listens
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>      --public-origin &lt;ORIGIN&gt;
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>          Public HTTP(S) origin advertised to clients
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>      --storage &lt;DIRECTORY&gt;
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>          Directory that stores target state and run data
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>  -h, --help
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>          Print help (see a summary with '-h')
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Serve an unauthenticated direct target.
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Direct mode is unauthenticated. Bind or publish it only on trusted networks.
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Usage: zeroshot target serve --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>Options:
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>      --listen &lt;ADDRESS&gt;
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>          IP socket address on which the target listens
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>      --public-origin &lt;ORIGIN&gt;
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>          Public HTTP(S) origin advertised to clients
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>      --storage &lt;DIRECTORY&gt;
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>          Directory that stores target state and run data
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>  -h, --help
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h4 id="zeroshot-target-help"><code>zeroshot target help</code><a class="headerlink" href="#zeroshot-target-help" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Usage: zeroshot target help [COMMAND]
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Commands:
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>  add    Register a named target
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>  login  Authenticate with a hosted named target
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>  setup  Configure the local profile for a named target
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>  serve  Serve an unauthenticated direct target
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>  help   Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Usage: zeroshot target help [COMMAND]
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>Commands:
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  add    Register a named target
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  login  Authenticate with a hosted named target
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>  serve  Serve an unauthenticated direct target
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>  help   Print this message or the help of the given subcommand(s)
 </code></pre></div>
 <h3 id="zeroshot-connection"><code>zeroshot connection</code><a class="headerlink" href="#zeroshot-connection" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Inspect and manage named runtime connections
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Usage: zeroshot connection &lt;COMMAND&gt;
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Commands:
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>  list    List connection metadata without secret values
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>  set     Create or replace one static connection
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>  delete  Delete one connection
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>  help    Print this message or the help of the given subcommand(s)
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>Options:
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>  -h, --help
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>          Print help (see a summary with '-h')
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>CONNECTIONS
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>A runtime declares a connection key and the exact environment fields it needs. Zeroshot injects
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>only those fields; secret values never belong in runtime configuration.
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>
-<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>`list` returns each key, scope, kind, and field names, never secret values. `set` creates or replaces
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>a complete static connection, so include every required field. Omit --target for local storage; use
-<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>--target NAME for hosted storage. Organization scope requires a hosted target.
-<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>
-<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>Target-managed dynamic kinds are configured through the target rather than `connection set`; `list`
-<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>reports each connection's kind.
-<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>
-<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>When a run reports `connection_unavailable`, list connections for the same target and scope, then
-<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>set the named key with every required field.
-<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>
-<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a>EXAMPLES
-<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a>  zeroshot connection list
-<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a>  zeroshot connection list --target prod --scope org
-<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a>  zeroshot connection set openrouter --field OPENROUTER_API_KEY
-<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a>  zeroshot connection set openrouter --target prod --field OPENROUTER_API_KEY
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Inspect and manage named runtime connections
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Usage: zeroshot connection &lt;COMMAND&gt;
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Commands:
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>  list    List connection metadata without secret values
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>  set     Create or replace one static connection
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>  delete  Delete one connection
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>  help    Print this message or the help of the given subcommand(s)
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>Options:
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>  -h, --help
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>CONNECTIONS
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>A runtime declares a connection key and the exact environment fields it needs. Zeroshot injects
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>only those fields; secret values never belong in runtime configuration.
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>`list` returns each key, scope, kind, and field names, never secret values. `set` creates or replaces
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>a complete static connection, so include every required field. Omit --target for local storage; use
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>--target NAME for hosted storage. Organization scope requires a hosted target.
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>Target-managed dynamic kinds are configured through the target rather than `connection set`; `list`
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>reports each connection's kind.
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>When a run reports `connection_unavailable`, list connections for the same target and scope, then
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>set the named key with every required field.
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>EXAMPLES
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>  zeroshot connection list
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>  zeroshot connection list --target prod --scope org
+<a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>  zeroshot connection set openrouter --field OPENROUTER_API_KEY
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>  zeroshot connection set openrouter --target prod --field OPENROUTER_API_KEY
 </code></pre></div>
 <h4 id="zeroshot-connection-list"><code>zeroshot connection list</code><a class="headerlink" href="#zeroshot-connection-list" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>List connection metadata without secret values
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Usage: zeroshot connection list [OPTIONS]
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Options:
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>          Use this named hosted target. If omitted, use local connections
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>          Select user- or organization-scoped connections
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>          [default: user]
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>          [possible values: user, org]
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>  -h, --help
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>List connection metadata without secret values
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Usage: zeroshot connection list [OPTIONS]
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Options:
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>          Use this named hosted target. If omitted, use local connections
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>          Select user- or organization-scoped connections
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>          [default: user]
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>          [possible values: user, org]
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>  -h, --help
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-connection-set"><code>zeroshot connection set</code><a class="headerlink" href="#zeroshot-connection-set" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Create or replace one static connection
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Create or replace one static connection
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Usage: zeroshot connection set [OPTIONS] &lt;--field &lt;ENV&gt;|--json-stdin&gt; &lt;KEY&gt;
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Arguments:
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  &lt;KEY&gt;
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>          Unique connection key within the selected scope
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>Options:
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>      --field &lt;ENV&gt;
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>          Prompt without echo for this environment field. Repeat for multiple fields
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>      --json-stdin
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>          Read one JSON object of environment field names to secret values from standard input
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>          Use this named hosted target. If omitted, use local connections
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>          Select user- or organization-scoped connections
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>          [default: user]
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>          [possible values: user, org]
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>  -h, --help
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>INPUT
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>Use --field ENV to prompt without echo; repeat it for every required field. Use --json-stdin to read
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a>one non-empty JSON object mapping field names to secret values.
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a>
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>`set` replaces the complete stored static connection for KEY. Existing fields not supplied are
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a>removed. Do not put secret values in shell arguments or runtime configuration.
+</code></pre></div>
+<h4 id="zeroshot-connection-delete"><code>zeroshot connection delete</code><a class="headerlink" href="#zeroshot-connection-delete" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Delete one connection
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Usage: zeroshot connection set [OPTIONS] &lt;--field &lt;ENV&gt;|--json-stdin&gt; &lt;KEY&gt;
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>Usage: zeroshot connection delete [OPTIONS] &lt;KEY&gt;
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Arguments:
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  &lt;KEY&gt;
 <a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>          Unique connection key within the selected scope
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
 <a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>Options:
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>      --field &lt;ENV&gt;
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>          Prompt without echo for this environment field. Repeat for multiple fields
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>          Use this named hosted target. If omitted, use local connections
 <a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>      --json-stdin
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>          Read one JSON object of environment field names to secret values from standard input
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>          Select user- or organization-scoped connections
 <a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>          Use this named hosted target. If omitted, use local connections
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>          [default: user]
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>          [possible values: user, org]
 <a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>          Select user- or organization-scoped connections
-<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>
-<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>          [default: user]
-<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>          [possible values: user, org]
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>
-<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>  -h, --help
-<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>          Print help (see a summary with '-h')
-<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>
-<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a>INPUT
-<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>Use --field ENV to prompt without echo; repeat it for every required field. Use --json-stdin to read
-<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>one non-empty JSON object mapping field names to secret values.
-<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a>
-<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>`set` replaces the complete stored static connection for KEY. Existing fields not supplied are
-<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a>removed. Do not put secret values in shell arguments or runtime configuration.
-</code></pre></div>
-<h4 id="zeroshot-connection-delete"><code>zeroshot connection delete</code><a class="headerlink" href="#zeroshot-connection-delete" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Delete one connection
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Usage: zeroshot connection delete [OPTIONS] &lt;KEY&gt;
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Arguments:
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>  &lt;KEY&gt;
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>          Unique connection key within the selected scope
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>Options:
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>          Use this named hosted target. If omitted, use local connections
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>          Select user- or organization-scoped connections
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>          [default: user]
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>          [possible values: user, org]
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>  -h, --help
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>          Print help
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>  -h, --help
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-connection-help"><code>zeroshot connection help</code><a class="headerlink" href="#zeroshot-connection-help" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>Usage: zeroshot connection help [COMMAND]
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>Commands:
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  list    List connection metadata without secret values
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>  set     Create or replace one static connection
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>  delete  Delete one connection
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>  help    Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>Usage: zeroshot connection help [COMMAND]
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Commands:
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>  list    List connection metadata without secret values
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>  set     Create or replace one static connection
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>  delete  Delete one connection
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>  help    Print this message or the help of the given subcommand(s)
 </code></pre></div>
 <h3 id="zeroshot-profile"><code>zeroshot profile</code><a class="headerlink" href="#zeroshot-profile" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>Manage reusable graph/runtime profiles
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>Usage: zeroshot profile &lt;COMMAND&gt;
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>Commands:
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  list     List profile metadata
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  set      Create or replace a fully materialized profile
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  show     Show one profile with its graph and runtime
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>  remove   Remove one profile
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>  default  Set the scope's default profile, or clear it when NAME is omitted
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  help     Print this message or the help of the given subcommand(s)
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>Options:
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>  -h, --help
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>Manage reusable graph/runtime profiles
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>Usage: zeroshot profile &lt;COMMAND&gt;
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>Commands:
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  list     List profile metadata
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>  set      Create or replace a fully materialized profile
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>  show     Show one profile with its graph and runtime
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>  remove   Remove one profile
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>  default  Set the scope's default profile, or clear it when NAME is omitted
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>  help     Print this message or the help of the given subcommand(s)
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>Options:
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>  -h, --help
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-profile-list"><code>zeroshot profile list</code><a class="headerlink" href="#zeroshot-profile-list" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>List profile metadata
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>Usage: zeroshot profile list [OPTIONS]
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>Options:
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>          Use this named hosted target. If omitted, use local profiles
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>          Select user- or organization-scoped hosted profiles
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>          [default: user]
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>          [possible values: user, org]
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>  -h, --help
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>List profile metadata
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>Usage: zeroshot profile list [OPTIONS]
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>Options:
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>          Use this named hosted target. If omitted, use local profiles
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>          Select user- or organization-scoped hosted profiles
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>          [default: user]
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>          [possible values: user, org]
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a>  -h, --help
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-profile-set"><code>zeroshot profile set</code><a class="headerlink" href="#zeroshot-profile-set" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Create or replace a fully materialized profile
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>Create or replace a fully materialized profile
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>Usage: zeroshot profile set [OPTIONS] &lt;--graph &lt;FILE&gt;|--template &lt;TEMPLATE&gt;&gt; &lt;--runtime-config &lt;FILE&gt;|--uniform-runtime-config &lt;FILE&gt;&gt; &lt;NAME&gt;
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>Arguments:
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  &lt;NAME&gt;
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>Options:
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>      --graph &lt;FILE&gt;
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>      --template &lt;TEMPLATE&gt;
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>          Possible values:
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>          - single-worker:   A single general-purpose worker
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>      --runtime-config &lt;FILE&gt;
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>      --uniform-runtime-config &lt;FILE&gt;
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>      --default
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a>
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a>      --delivery &lt;MODE&gt;
+<a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a>          Materialize this template-owned delivery mode
+<a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>
+<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>      --pr
+<a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a>          Materialize pull-request delivery for the software-change template
+<a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a>
+<a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a>      --ship
+<a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a>          Materialize merge delivery for the software-change template.
+<a id="__codelineno-13-35" name="__codelineno-13-35" href="#__codelineno-13-35"></a>
+<a id="__codelineno-13-36" name="__codelineno-13-36" href="#__codelineno-13-36"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+<a id="__codelineno-13-37" name="__codelineno-13-37" href="#__codelineno-13-37"></a>
+<a id="__codelineno-13-38" name="__codelineno-13-38" href="#__codelineno-13-38"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-13-39" name="__codelineno-13-39" href="#__codelineno-13-39"></a>          Use this named hosted target. If omitted, use local profiles
+<a id="__codelineno-13-40" name="__codelineno-13-40" href="#__codelineno-13-40"></a>
+<a id="__codelineno-13-41" name="__codelineno-13-41" href="#__codelineno-13-41"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-13-42" name="__codelineno-13-42" href="#__codelineno-13-42"></a>          Select user- or organization-scoped hosted profiles
+<a id="__codelineno-13-43" name="__codelineno-13-43" href="#__codelineno-13-43"></a>
+<a id="__codelineno-13-44" name="__codelineno-13-44" href="#__codelineno-13-44"></a>          [default: user]
+<a id="__codelineno-13-45" name="__codelineno-13-45" href="#__codelineno-13-45"></a>          [possible values: user, org]
+<a id="__codelineno-13-46" name="__codelineno-13-46" href="#__codelineno-13-46"></a>
+<a id="__codelineno-13-47" name="__codelineno-13-47" href="#__codelineno-13-47"></a>  -h, --help
+<a id="__codelineno-13-48" name="__codelineno-13-48" href="#__codelineno-13-48"></a>          Print help (see a summary with '-h')
+</code></pre></div>
+<h4 id="zeroshot-profile-show"><code>zeroshot profile show</code><a class="headerlink" href="#zeroshot-profile-show" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>Show one profile with its graph and runtime
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>Usage: zeroshot profile set [OPTIONS] &lt;--graph &lt;FILE&gt;|--template &lt;TEMPLATE&gt;&gt; &lt;--runtime-config &lt;FILE&gt;|--uniform-runtime-config &lt;FILE&gt;&gt; &lt;NAME&gt;
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>Usage: zeroshot profile show [OPTIONS] &lt;NAME&gt;
 <a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
 <a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>Arguments:
 <a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>  &lt;NAME&gt;
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>          Profile name
 <a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>
 <a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>Options:
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>      --graph &lt;FILE&gt;
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>          Use this named hosted target. If omitted, use local profiles
 <a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>      --template &lt;TEMPLATE&gt;
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>          Possible values:
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>          - single-worker:   A single general-purpose worker
-<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
-<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>
-<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>      --runtime-config &lt;FILE&gt;
-<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>
-<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>
-<a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a>      --uniform-runtime-config &lt;FILE&gt;
-<a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a>
-<a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a>
-<a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a>      --default
-<a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a>
-<a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>
-<a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a>      --delivery &lt;MODE&gt;
-<a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a>          Materialize this template-owned delivery mode
-<a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>
-<a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a>      --pr
-<a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a>          Materialize pull-request delivery for the software-change template
-<a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a>
-<a id="__codelineno-14-33" name="__codelineno-14-33" href="#__codelineno-14-33"></a>      --ship
-<a id="__codelineno-14-34" name="__codelineno-14-34" href="#__codelineno-14-34"></a>          Materialize merge delivery for the software-change template.
-<a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a>
-<a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
-<a id="__codelineno-14-37" name="__codelineno-14-37" href="#__codelineno-14-37"></a>
-<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-14-39" name="__codelineno-14-39" href="#__codelineno-14-39"></a>          Use this named hosted target. If omitted, use local profiles
-<a id="__codelineno-14-40" name="__codelineno-14-40" href="#__codelineno-14-40"></a>
-<a id="__codelineno-14-41" name="__codelineno-14-41" href="#__codelineno-14-41"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-14-42" name="__codelineno-14-42" href="#__codelineno-14-42"></a>          Select user- or organization-scoped hosted profiles
-<a id="__codelineno-14-43" name="__codelineno-14-43" href="#__codelineno-14-43"></a>
-<a id="__codelineno-14-44" name="__codelineno-14-44" href="#__codelineno-14-44"></a>          [default: user]
-<a id="__codelineno-14-45" name="__codelineno-14-45" href="#__codelineno-14-45"></a>          [possible values: user, org]
-<a id="__codelineno-14-46" name="__codelineno-14-46" href="#__codelineno-14-46"></a>
-<a id="__codelineno-14-47" name="__codelineno-14-47" href="#__codelineno-14-47"></a>  -h, --help
-<a id="__codelineno-14-48" name="__codelineno-14-48" href="#__codelineno-14-48"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>      --scope &lt;SCOPE&gt;
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>          Select user- or organization-scoped hosted profiles
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>          [default: user]
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>          [possible values: user, org]
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a>  -h, --help
+<a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>          Print help
 </code></pre></div>
-<h4 id="zeroshot-profile-show"><code>zeroshot profile show</code><a class="headerlink" href="#zeroshot-profile-show" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>Show one profile with its graph and runtime
+<h4 id="zeroshot-profile-remove"><code>zeroshot profile remove</code><a class="headerlink" href="#zeroshot-profile-remove" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>Remove one profile
 <a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>Usage: zeroshot profile show [OPTIONS] &lt;NAME&gt;
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>Usage: zeroshot profile remove [OPTIONS] &lt;NAME&gt;
 <a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
 <a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>Arguments:
 <a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>  &lt;NAME&gt;
@@ -2598,14 +2575,14 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>  -h, --help
 <a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a>          Print help
 </code></pre></div>
-<h4 id="zeroshot-profile-remove"><code>zeroshot profile remove</code><a class="headerlink" href="#zeroshot-profile-remove" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Remove one profile
+<h4 id="zeroshot-profile-default"><code>zeroshot profile default</code><a class="headerlink" href="#zeroshot-profile-default" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Set the scope's default profile, or clear it when NAME is omitted
 <a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Usage: zeroshot profile remove [OPTIONS] &lt;NAME&gt;
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>Usage: zeroshot profile default [OPTIONS] [NAME]
 <a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
 <a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>Arguments:
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>  &lt;NAME&gt;
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>          Profile name
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>  [NAME]
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>          Profile name. Omit to clear the selected scope's default
 <a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
 <a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>Options:
 <a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>      --target &lt;NAME&gt;
@@ -2620,219 +2597,219 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>  -h, --help
 <a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>          Print help
 </code></pre></div>
-<h4 id="zeroshot-profile-default"><code>zeroshot profile default</code><a class="headerlink" href="#zeroshot-profile-default" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Set the scope's default profile, or clear it when NAME is omitted
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>Usage: zeroshot profile default [OPTIONS] [NAME]
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>Arguments:
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>  [NAME]
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>          Profile name. Omit to clear the selected scope's default
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
-<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>Options:
-<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>          Use this named hosted target. If omitted, use local profiles
-<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>
-<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>      --scope &lt;SCOPE&gt;
-<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>          Select user- or organization-scoped hosted profiles
-<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>
-<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>          [default: user]
-<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a>          [possible values: user, org]
-<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>
-<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>  -h, --help
-<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a>          Print help
-</code></pre></div>
 <h4 id="zeroshot-profile-help"><code>zeroshot profile help</code><a class="headerlink" href="#zeroshot-profile-help" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>Usage: zeroshot profile help [COMMAND]
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>Commands:
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>  list     List profile metadata
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>  set      Create or replace a fully materialized profile
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>  show     Show one profile with its graph and runtime
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>  remove   Remove one profile
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>  default  Set the scope's default profile, or clear it when NAME is omitted
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>  help     Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>Usage: zeroshot profile help [COMMAND]
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>Commands:
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>  list     List profile metadata
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>  set      Create or replace a fully materialized profile
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>  show     Show one profile with its graph and runtime
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>  remove   Remove one profile
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>  default  Set the scope's default profile, or clear it when NAME is omitted
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>  help     Print this message or the help of the given subcommand(s)
 </code></pre></div>
 <h3 id="zeroshot-template"><code>zeroshot template</code><a class="headerlink" href="#zeroshot-template" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>Inspect built-in graph templates
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>Usage: zeroshot template &lt;COMMAND&gt;
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>Commands:
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>  list  List built-in template names as JSON
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>  show  Write a built-in graph template as JSON
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>  help  Print this message or the help of the given subcommand(s)
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>Options:
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>  -h, --help
-<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>Inspect built-in graph templates
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>Usage: zeroshot template &lt;COMMAND&gt;
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>Commands:
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>  list  List built-in template names as JSON
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>  show  Write a built-in graph template as JSON
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>  help  Print this message or the help of the given subcommand(s)
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>Options:
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>  -h, --help
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-template-list"><code>zeroshot template list</code><a class="headerlink" href="#zeroshot-template-list" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>List built-in template names as JSON
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>Usage: zeroshot template list
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>Options:
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>  -h, --help
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>List built-in template names as JSON
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>Usage: zeroshot template list
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>Options:
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>  -h, --help
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-template-show"><code>zeroshot template show</code><a class="headerlink" href="#zeroshot-template-show" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Write a built-in graph template as JSON
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>Usage: zeroshot template show [OPTIONS] &lt;TEMPLATE&gt;
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>Arguments:
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>  &lt;TEMPLATE&gt;
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>          Built-in graph template to render
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>          Possible values:
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>          - single-worker:   A single general-purpose worker
-<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
-<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>
-<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a>Options:
-<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a>      --delivery &lt;MODE&gt;
-<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a>          Materialize this template-owned delivery mode
-<a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a>
-<a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a>      --pr
-<a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a>          Materialize pull-request delivery for the software-change template
-<a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a>
-<a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a>      --ship
-<a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a>          Materialize merge delivery for the software-change template.
-<a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a>
-<a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
-<a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a>
-<a id="__codelineno-21-25" name="__codelineno-21-25" href="#__codelineno-21-25"></a>  -h, --help
-<a id="__codelineno-21-26" name="__codelineno-21-26" href="#__codelineno-21-26"></a>          Print help (see a summary with '-h')
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>Write a built-in graph template as JSON
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>Usage: zeroshot template show [OPTIONS] &lt;TEMPLATE&gt;
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>Arguments:
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>  &lt;TEMPLATE&gt;
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>          Built-in graph template to render
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>          Possible values:
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>          - single-worker:   A single general-purpose worker
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>Options:
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>      --delivery &lt;MODE&gt;
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>          Materialize this template-owned delivery mode
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a>      --pr
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a>          Materialize pull-request delivery for the software-change template
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a>      --ship
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a>          Materialize merge delivery for the software-change template.
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a>
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+<a id="__codelineno-20-24" name="__codelineno-20-24" href="#__codelineno-20-24"></a>
+<a id="__codelineno-20-25" name="__codelineno-20-25" href="#__codelineno-20-25"></a>  -h, --help
+<a id="__codelineno-20-26" name="__codelineno-20-26" href="#__codelineno-20-26"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h4 id="zeroshot-template-help"><code>zeroshot template help</code><a class="headerlink" href="#zeroshot-template-help" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>Usage: zeroshot template help [COMMAND]
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>Commands:
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>  list  List built-in template names as JSON
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>  show  Write a built-in graph template as JSON
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>  help  Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>Usage: zeroshot template help [COMMAND]
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>Commands:
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>  list  List built-in template names as JSON
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>  show  Write a built-in graph template as JSON
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>  help  Print this message or the help of the given subcommand(s)
 </code></pre></div>
 <h3 id="zeroshot-run"><code>zeroshot run</code><a class="headerlink" href="#zeroshot-run" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>Submit a graph run locally or to a named target.
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>When --target is omitted, the run uses the current local repository. A foreground run follows NDJSON events until completion. --detach returns after submission; Ctrl-C also detaches from observation without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>Usage: zeroshot run [OPTIONS] --title &lt;TITLE&gt; --input &lt;FILE&gt;
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>Options:
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>      --title &lt;TITLE&gt;
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>          Human-readable title recorded with the run
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>      --graph &lt;FILE&gt;
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>          Load a custom graph specification from this JSON file
-<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>
-<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>      --template &lt;TEMPLATE&gt;
-<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>          Materialize and run this built-in graph template
-<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>
-<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>          Possible values:
-<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>          - single-worker:   A single general-purpose worker
-<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
-<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>
-<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>      --input &lt;FILE&gt;
-<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>          Load the graph's initial input from this JSON file
-<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>
-<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>      --runtime-config &lt;FILE&gt;
-<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>          Load an exact secret-free runtime plan from this JSON file
-<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>
-<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>      --uniform-runtime-config &lt;FILE&gt;
-<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>          Expand one secret-free agent runtime across every executable graph node
-<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>
-<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>      --profile &lt;[SCOPE:]NAME&gt;
-<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a>          Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
-<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a>
-<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>          When no profile or inline graph/runtime is supplied, scoped defaults are checked.
-<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a>
-<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a>          Run on this named target; if omitted, run locally. Named targets receive GH_TOKEN when set.
-<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>
-<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a>          The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
-<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a>
-<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a>      --branch &lt;BRANCH&gt;
-<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a>          Source branch to resolve on the named target. Requires --target
-<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a>
-<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a>      --submission-key &lt;KEY&gt;
-<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>          Stable idempotency key for safely retrying submission
-<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>
-<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>  -d, --detach
-<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>          Return after submission instead of following NDJSON run events
-<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>
-<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>      --validate-only
-<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>          Validate and materialize the run without submitting it or contacting a target
-<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>
-<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>      --delivery &lt;MODE&gt;
-<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>          Materialize this template-owned delivery mode
-<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>
-<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>      --pr
-<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>          Materialize pull-request delivery for the software-change template
-<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>
-<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>      --ship
-<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>          Materialize merge delivery for the software-change template.
-<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>
-<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
-<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>
-<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>  -h, --help
-<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>          Print help (see a summary with '-h')
-<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>
-<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>RUNTIME CONFIGURATION
-<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>    The file is secret-free JSON. For example:
-<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>
-<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>      {
-<a id="__codelineno-23-70" name="__codelineno-23-70" href="#__codelineno-23-70"></a>        "harness": "codex",
-<a id="__codelineno-23-71" name="__codelineno-23-71" href="#__codelineno-23-71"></a>        "provider": "openrouter",
-<a id="__codelineno-23-72" name="__codelineno-23-72" href="#__codelineno-23-72"></a>        "size": "medium",
-<a id="__codelineno-23-73" name="__codelineno-23-73" href="#__codelineno-23-73"></a>        "nodes": {
-<a id="__codelineno-23-74" name="__codelineno-23-74" href="#__codelineno-23-74"></a>          "worker": {
-<a id="__codelineno-23-75" name="__codelineno-23-75" href="#__codelineno-23-75"></a>            "kind": "agent",
-<a id="__codelineno-23-76" name="__codelineno-23-76" href="#__codelineno-23-76"></a>            "model": "provider-model-id",
-<a id="__codelineno-23-77" name="__codelineno-23-77" href="#__codelineno-23-77"></a>            "connections": {"openrouter": ["OPENROUTER_API_KEY"]}
-<a id="__codelineno-23-78" name="__codelineno-23-78" href="#__codelineno-23-78"></a>          }
-<a id="__codelineno-23-79" name="__codelineno-23-79" href="#__codelineno-23-79"></a>        }
-<a id="__codelineno-23-80" name="__codelineno-23-80" href="#__codelineno-23-80"></a>      }
-<a id="__codelineno-23-81" name="__codelineno-23-81" href="#__codelineno-23-81"></a>
-<a id="__codelineno-23-82" name="__codelineno-23-82" href="#__codelineno-23-82"></a>    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-<a id="__codelineno-23-83" name="__codelineno-23-83" href="#__codelineno-23-83"></a>    claude/openrouter, and claude/bedrock. Known-incompatible harness/provider pairs are
-<a id="__codelineno-23-84" name="__codelineno-23-84" href="#__codelineno-23-84"></a>    codex/anthropic and claude/openai. Model IDs are passed unchanged to the selected harness and
-<a id="__codelineno-23-85" name="__codelineno-23-85" href="#__codelineno-23-85"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
-<a id="__codelineno-23-86" name="__codelineno-23-86" href="#__codelineno-23-86"></a>
-<a id="__codelineno-23-87" name="__codelineno-23-87" href="#__codelineno-23-87"></a>    Sizes are small, medium, and large.
-<a id="__codelineno-23-88" name="__codelineno-23-88" href="#__codelineno-23-88"></a>
-<a id="__codelineno-23-89" name="__codelineno-23-89" href="#__codelineno-23-89"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
-<a id="__codelineno-23-90" name="__codelineno-23-90" href="#__codelineno-23-90"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
-<a id="__codelineno-23-91" name="__codelineno-23-91" href="#__codelineno-23-91"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
-<a id="__codelineno-23-92" name="__codelineno-23-92" href="#__codelineno-23-92"></a>    environment variable names required by that node; never put values in this file.
-<a id="__codelineno-23-93" name="__codelineno-23-93" href="#__codelineno-23-93"></a>
-<a id="__codelineno-23-94" name="__codelineno-23-94" href="#__codelineno-23-94"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --pr or --ship, omit the
-<a id="__codelineno-23-95" name="__codelineno-23-95" href="#__codelineno-23-95"></a>    template-owned delivery binding.
-<a id="__codelineno-23-96" name="__codelineno-23-96" href="#__codelineno-23-96"></a>
-<a id="__codelineno-23-97" name="__codelineno-23-97" href="#__codelineno-23-97"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
-<a id="__codelineno-23-98" name="__codelineno-23-98" href="#__codelineno-23-98"></a>    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
-<a id="__codelineno-23-99" name="__codelineno-23-99" href="#__codelineno-23-99"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>Submit a graph run locally or to a named target.
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>When --target is omitted, the run uses the current local repository. A foreground run follows NDJSON events until completion. --detach returns after submission; Ctrl-C also detaches from observation without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>Usage: zeroshot run [OPTIONS] --title &lt;TITLE&gt; --input &lt;FILE&gt;
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>Options:
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>      --title &lt;TITLE&gt;
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>          Human-readable title recorded with the run
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>      --graph &lt;FILE&gt;
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a>          Load a custom graph specification from this JSON file
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a>      --template &lt;TEMPLATE&gt;
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a>          Materialize and run this built-in graph template
+<a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a>
+<a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>          Possible values:
+<a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>          - single-worker:   A single general-purpose worker
+<a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>          - software-change: A review, validation, and optional delivery workflow for code changes
+<a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>
+<a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>      --input &lt;FILE&gt;
+<a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>          Load the graph's initial input from this JSON file
+<a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>
+<a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>      --runtime-config &lt;FILE&gt;
+<a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a>          Load an exact secret-free runtime plan from this JSON file
+<a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a>
+<a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a>      --uniform-runtime-config &lt;FILE&gt;
+<a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>          Expand one secret-free agent runtime across every executable graph node
+<a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a>
+<a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a>      --profile &lt;[SCOPE:]NAME&gt;
+<a id="__codelineno-22-31" name="__codelineno-22-31" href="#__codelineno-22-31"></a>          Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
+<a id="__codelineno-22-32" name="__codelineno-22-32" href="#__codelineno-22-32"></a>
+<a id="__codelineno-22-33" name="__codelineno-22-33" href="#__codelineno-22-33"></a>          When no profile or inline graph/runtime is supplied, scoped defaults are checked.
+<a id="__codelineno-22-34" name="__codelineno-22-34" href="#__codelineno-22-34"></a>
+<a id="__codelineno-22-35" name="__codelineno-22-35" href="#__codelineno-22-35"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a>          Run on this named target; if omitted, run locally. Named targets receive GH_TOKEN when set.
+<a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a>
+<a id="__codelineno-22-38" name="__codelineno-22-38" href="#__codelineno-22-38"></a>          The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
+<a id="__codelineno-22-39" name="__codelineno-22-39" href="#__codelineno-22-39"></a>
+<a id="__codelineno-22-40" name="__codelineno-22-40" href="#__codelineno-22-40"></a>      --repository &lt;OWNER/NAME&gt;
+<a id="__codelineno-22-41" name="__codelineno-22-41" href="#__codelineno-22-41"></a>          GitHub repository in owner/name form. Requires --target
+<a id="__codelineno-22-42" name="__codelineno-22-42" href="#__codelineno-22-42"></a>
+<a id="__codelineno-22-43" name="__codelineno-22-43" href="#__codelineno-22-43"></a>      --branch &lt;BRANCH&gt;
+<a id="__codelineno-22-44" name="__codelineno-22-44" href="#__codelineno-22-44"></a>          Source branch to resolve for the named run. Requires --target
+<a id="__codelineno-22-45" name="__codelineno-22-45" href="#__codelineno-22-45"></a>
+<a id="__codelineno-22-46" name="__codelineno-22-46" href="#__codelineno-22-46"></a>      --revision &lt;SHA&gt;
+<a id="__codelineno-22-47" name="__codelineno-22-47" href="#__codelineno-22-47"></a>          Exact source commit SHA. Requires --target
+<a id="__codelineno-22-48" name="__codelineno-22-48" href="#__codelineno-22-48"></a>
+<a id="__codelineno-22-49" name="__codelineno-22-49" href="#__codelineno-22-49"></a>      --submission-key &lt;KEY&gt;
+<a id="__codelineno-22-50" name="__codelineno-22-50" href="#__codelineno-22-50"></a>          Stable idempotency key for safely retrying submission
+<a id="__codelineno-22-51" name="__codelineno-22-51" href="#__codelineno-22-51"></a>
+<a id="__codelineno-22-52" name="__codelineno-22-52" href="#__codelineno-22-52"></a>  -d, --detach
+<a id="__codelineno-22-53" name="__codelineno-22-53" href="#__codelineno-22-53"></a>          Return after submission instead of following NDJSON run events
+<a id="__codelineno-22-54" name="__codelineno-22-54" href="#__codelineno-22-54"></a>
+<a id="__codelineno-22-55" name="__codelineno-22-55" href="#__codelineno-22-55"></a>      --validate-only
+<a id="__codelineno-22-56" name="__codelineno-22-56" href="#__codelineno-22-56"></a>          Validate and materialize the run without submitting it or contacting a target
+<a id="__codelineno-22-57" name="__codelineno-22-57" href="#__codelineno-22-57"></a>
+<a id="__codelineno-22-58" name="__codelineno-22-58" href="#__codelineno-22-58"></a>      --delivery &lt;MODE&gt;
+<a id="__codelineno-22-59" name="__codelineno-22-59" href="#__codelineno-22-59"></a>          Materialize this template-owned delivery mode
+<a id="__codelineno-22-60" name="__codelineno-22-60" href="#__codelineno-22-60"></a>
+<a id="__codelineno-22-61" name="__codelineno-22-61" href="#__codelineno-22-61"></a>      --pr
+<a id="__codelineno-22-62" name="__codelineno-22-62" href="#__codelineno-22-62"></a>          Materialize pull-request delivery for the software-change template
+<a id="__codelineno-22-63" name="__codelineno-22-63" href="#__codelineno-22-63"></a>
+<a id="__codelineno-22-64" name="__codelineno-22-64" href="#__codelineno-22-64"></a>      --ship
+<a id="__codelineno-22-65" name="__codelineno-22-65" href="#__codelineno-22-65"></a>          Materialize merge delivery for the software-change template.
+<a id="__codelineno-22-66" name="__codelineno-22-66" href="#__codelineno-22-66"></a>
+<a id="__codelineno-22-67" name="__codelineno-22-67" href="#__codelineno-22-67"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+<a id="__codelineno-22-68" name="__codelineno-22-68" href="#__codelineno-22-68"></a>
+<a id="__codelineno-22-69" name="__codelineno-22-69" href="#__codelineno-22-69"></a>  -h, --help
+<a id="__codelineno-22-70" name="__codelineno-22-70" href="#__codelineno-22-70"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-22-71" name="__codelineno-22-71" href="#__codelineno-22-71"></a>
+<a id="__codelineno-22-72" name="__codelineno-22-72" href="#__codelineno-22-72"></a>RUNTIME CONFIGURATION
+<a id="__codelineno-22-73" name="__codelineno-22-73" href="#__codelineno-22-73"></a>    The file is secret-free JSON. For example:
+<a id="__codelineno-22-74" name="__codelineno-22-74" href="#__codelineno-22-74"></a>
+<a id="__codelineno-22-75" name="__codelineno-22-75" href="#__codelineno-22-75"></a>      {
+<a id="__codelineno-22-76" name="__codelineno-22-76" href="#__codelineno-22-76"></a>        "harness": "codex",
+<a id="__codelineno-22-77" name="__codelineno-22-77" href="#__codelineno-22-77"></a>        "provider": "openrouter",
+<a id="__codelineno-22-78" name="__codelineno-22-78" href="#__codelineno-22-78"></a>        "size": "medium",
+<a id="__codelineno-22-79" name="__codelineno-22-79" href="#__codelineno-22-79"></a>        "nodes": {
+<a id="__codelineno-22-80" name="__codelineno-22-80" href="#__codelineno-22-80"></a>          "worker": {
+<a id="__codelineno-22-81" name="__codelineno-22-81" href="#__codelineno-22-81"></a>            "kind": "agent",
+<a id="__codelineno-22-82" name="__codelineno-22-82" href="#__codelineno-22-82"></a>            "model": "provider-model-id",
+<a id="__codelineno-22-83" name="__codelineno-22-83" href="#__codelineno-22-83"></a>            "connections": {"openrouter": ["OPENROUTER_API_KEY"]}
+<a id="__codelineno-22-84" name="__codelineno-22-84" href="#__codelineno-22-84"></a>          }
+<a id="__codelineno-22-85" name="__codelineno-22-85" href="#__codelineno-22-85"></a>        }
+<a id="__codelineno-22-86" name="__codelineno-22-86" href="#__codelineno-22-86"></a>      }
+<a id="__codelineno-22-87" name="__codelineno-22-87" href="#__codelineno-22-87"></a>
+<a id="__codelineno-22-88" name="__codelineno-22-88" href="#__codelineno-22-88"></a>    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
+<a id="__codelineno-22-89" name="__codelineno-22-89" href="#__codelineno-22-89"></a>    claude/openrouter, and claude/bedrock. Known-incompatible harness/provider pairs are
+<a id="__codelineno-22-90" name="__codelineno-22-90" href="#__codelineno-22-90"></a>    codex/anthropic and claude/openai. Model IDs are passed unchanged to the selected harness and
+<a id="__codelineno-22-91" name="__codelineno-22-91" href="#__codelineno-22-91"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
+<a id="__codelineno-22-92" name="__codelineno-22-92" href="#__codelineno-22-92"></a>
+<a id="__codelineno-22-93" name="__codelineno-22-93" href="#__codelineno-22-93"></a>    Sizes are small, medium, and large.
+<a id="__codelineno-22-94" name="__codelineno-22-94" href="#__codelineno-22-94"></a>
+<a id="__codelineno-22-95" name="__codelineno-22-95" href="#__codelineno-22-95"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
+<a id="__codelineno-22-96" name="__codelineno-22-96" href="#__codelineno-22-96"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
+<a id="__codelineno-22-97" name="__codelineno-22-97" href="#__codelineno-22-97"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
+<a id="__codelineno-22-98" name="__codelineno-22-98" href="#__codelineno-22-98"></a>    environment variable names required by that node; never put values in this file.
+<a id="__codelineno-22-99" name="__codelineno-22-99" href="#__codelineno-22-99"></a>
+<a id="__codelineno-22-100" name="__codelineno-22-100" href="#__codelineno-22-100"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --pr or --ship, omit the
+<a id="__codelineno-22-101" name="__codelineno-22-101" href="#__codelineno-22-101"></a>    template-owned delivery binding.
+<a id="__codelineno-22-102" name="__codelineno-22-102" href="#__codelineno-22-102"></a>
+<a id="__codelineno-22-103" name="__codelineno-22-103" href="#__codelineno-22-103"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
+<a id="__codelineno-22-104" name="__codelineno-22-104" href="#__codelineno-22-104"></a>    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
+<a id="__codelineno-22-105" name="__codelineno-22-105" href="#__codelineno-22-105"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
 </code></pre></div>
 <h3 id="zeroshot-list"><code>zeroshot list</code><a class="headerlink" href="#zeroshot-list" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>List runs as JSON
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>Usage: zeroshot list [OPTIONS]
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>Options:
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>  -h, --help
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>List runs as JSON
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>Usage: zeroshot list [OPTIONS]
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>Options:
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>  -h, --help
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-status"><code>zeroshot status</code><a class="headerlink" href="#zeroshot-status" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>Read a run's current status as JSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>Read a run's current status as JSON
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>Arguments:
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>          Public run ID
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>Options:
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>  -h, --help
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>          Print help
+</code></pre></div>
+<h3 id="zeroshot-watch"><code>zeroshot watch</code><a class="headerlink" href="#zeroshot-watch" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>Follow a run's durable event stream as NDJSON
 <a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>Usage: zeroshot watch [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>
 <a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>Arguments:
 <a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>  &lt;RUN_ID&gt;
@@ -2842,13 +2819,16 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>          Use this named target. If omitted, use the local controller
 <a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>
-<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>  -h, --help
-<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>          Print help
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>      --after &lt;CURSOR&gt;
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>          Resume strictly after this durable cursor
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a>  -h, --help
+<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a>          Print help
 </code></pre></div>
-<h3 id="zeroshot-watch"><code>zeroshot watch</code><a class="headerlink" href="#zeroshot-watch" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>Follow a run's durable event stream as NDJSON
+<h3 id="zeroshot-logs"><code>zeroshot logs</code><a class="headerlink" href="#zeroshot-logs" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>Follow a run's log stream as NDJSON
 <a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>Usage: zeroshot watch [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>Usage: zeroshot logs [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>
 <a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>Arguments:
 <a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>  &lt;RUN_ID&gt;
@@ -2861,94 +2841,75 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>      --after &lt;CURSOR&gt;
 <a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>          Resume strictly after this durable cursor
 <a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>
-<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>  -h, --help
-<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>          Print help
+<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>      --execution &lt;EXECUTION_REF&gt;
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>          Return records only for this opaque execution selector
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>  -h, --help
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>          Print help
 </code></pre></div>
-<h3 id="zeroshot-logs"><code>zeroshot logs</code><a class="headerlink" href="#zeroshot-logs" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>Follow a run's log stream as NDJSON
+<h3 id="zeroshot-attach"><code>zeroshot attach</code><a class="headerlink" href="#zeroshot-attach" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>Usage: zeroshot logs [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>Usage: zeroshot attach [OPTIONS] &lt;RUN_ID&gt; &lt;EXECUTION_REF&gt;
 <a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>
 <a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>Arguments:
 <a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>  &lt;RUN_ID&gt;
 <a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>          Public run ID
 <a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>
-<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a>Options:
-<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a>
-<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a>      --after &lt;CURSOR&gt;
-<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a>          Resume strictly after this durable cursor
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a>  &lt;EXECUTION_REF&gt;
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a>          Execution reference emitted by the run
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a>Options:
+<a id="__codelineno-27-13" name="__codelineno-27-13" href="#__codelineno-27-13"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-27-14" name="__codelineno-27-14" href="#__codelineno-27-14"></a>          Use this named target. If omitted, use the local controller
 <a id="__codelineno-27-15" name="__codelineno-27-15" href="#__codelineno-27-15"></a>
-<a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a>      --execution &lt;EXECUTION_REF&gt;
-<a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a>          Return records only for this opaque execution selector
-<a id="__codelineno-27-18" name="__codelineno-27-18" href="#__codelineno-27-18"></a>
-<a id="__codelineno-27-19" name="__codelineno-27-19" href="#__codelineno-27-19"></a>  -h, --help
-<a id="__codelineno-27-20" name="__codelineno-27-20" href="#__codelineno-27-20"></a>          Print help
+<a id="__codelineno-27-16" name="__codelineno-27-16" href="#__codelineno-27-16"></a>  -h, --help
+<a id="__codelineno-27-17" name="__codelineno-27-17" href="#__codelineno-27-17"></a>          Print help
 </code></pre></div>
-<h3 id="zeroshot-attach"><code>zeroshot attach</code><a class="headerlink" href="#zeroshot-attach" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>Attach to an execution's interactive event stream as NDJSON
+<h3 id="zeroshot-force-stop"><code>zeroshot force-stop</code><a class="headerlink" href="#zeroshot-force-stop" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>Force a run to stop and write the result as JSON
 <a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>Usage: zeroshot attach [OPTIONS] &lt;RUN_ID&gt; &lt;EXECUTION_REF&gt;
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>Usage: zeroshot force-stop [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>
 <a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>Arguments:
 <a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>  &lt;RUN_ID&gt;
 <a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>          Public run ID
 <a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>
-<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>  &lt;EXECUTION_REF&gt;
-<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>          Execution reference emitted by the run
-<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a>
-<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a>Options:
-<a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a>
-<a id="__codelineno-28-16" name="__codelineno-28-16" href="#__codelineno-28-16"></a>  -h, --help
-<a id="__codelineno-28-17" name="__codelineno-28-17" href="#__codelineno-28-17"></a>          Print help
-</code></pre></div>
-<h3 id="zeroshot-force-stop"><code>zeroshot force-stop</code><a class="headerlink" href="#zeroshot-force-stop" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>Force a run to stop and write the result as JSON
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>Usage: zeroshot force-stop [OPTIONS] &lt;RUN_ID&gt;
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>
-<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>Arguments:
-<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>          Public run ID
-<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>
-<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>Options:
-<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>
-<a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a>  -h, --help
-<a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a>          Print help
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a>Options:
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a>
+<a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a>  -h, --help
+<a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-version"><code>zeroshot version</code><a class="headerlink" href="#zeroshot-version" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>Print the Zeroshot version
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>Usage: zeroshot version
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>Options:
-<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>  -h, --help
-<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>          Print help
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>Print the Zeroshot version
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>Usage: zeroshot version
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>Options:
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>  -h, --help
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-help"><code>zeroshot help</code><a class="headerlink" href="#zeroshot-help" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>Print this message or the help of the given subcommand(s)
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>Usage: zeroshot help [COMMAND]
-<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>
-<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>Commands:
-<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>  target      Manage named targets or serve a direct target
-<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>  connection  Inspect and manage named runtime connections
-<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>  profile     Manage reusable graph/runtime profiles
-<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>  template    Inspect built-in graph templates
-<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>  run         Submit a graph run locally or to a named target
-<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>  list        List runs as JSON
-<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a>  status      Read a run's current status as JSON
-<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a>  watch       Follow a run's durable event stream as NDJSON
-<a id="__codelineno-31-14" name="__codelineno-31-14" href="#__codelineno-31-14"></a>  logs        Follow a run's log stream as NDJSON
-<a id="__codelineno-31-15" name="__codelineno-31-15" href="#__codelineno-31-15"></a>  attach      Attach to an execution's interactive event stream as NDJSON
-<a id="__codelineno-31-16" name="__codelineno-31-16" href="#__codelineno-31-16"></a>  force-stop  Force a run to stop and write the result as JSON
-<a id="__codelineno-31-17" name="__codelineno-31-17" href="#__codelineno-31-17"></a>  version     Print the Zeroshot version
-<a id="__codelineno-31-18" name="__codelineno-31-18" href="#__codelineno-31-18"></a>  help        Print this message or the help of the given subcommand(s)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>Print this message or the help of the given subcommand(s)
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>Usage: zeroshot help [COMMAND]
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>Commands:
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>  target      Manage named targets or serve a direct target
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>  connection  Inspect and manage named runtime connections
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>  profile     Manage reusable graph/runtime profiles
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>  template    Inspect built-in graph templates
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>  run         Submit a graph run locally or to a named target
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>  list        List runs as JSON
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>  status      Read a run's current status as JSON
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>  watch       Follow a run's durable event stream as NDJSON
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>  logs        Follow a run's log stream as NDJSON
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>  attach      Attach to an execution's interactive event stream as NDJSON
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>  force-stop  Force a run to stop and write the result as JSON
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>  version     Print the Zeroshot version
+<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a>  help        Print this message or the help of the given subcommand(s)
 </code></pre></div>
 
 

@@ -1990,7 +1990,7 @@ later client instances; None uses the native package-owned default.</p>
 
 
 <h2 id="zeroshot.DirectTarget" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">DirectTarget</span><span class="p">(</span><span class="n">origin</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">default_branch</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">DirectTarget</span><span class="p">(</span><span class="n">origin</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">workspace</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">PathLike</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2017,21 +2017,14 @@ later client instances; None uses the native package-owned default.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
-            <b><code>repository</code></b>
-              (<code><span title="str">str</span></code>)
-          –
-          <div class="doc-md-description">
-            <p>GitHub repository in owner/name form used for source resolution.</p>
-          </div>
-        </li>
-        <li class="doc-section-item field-body">
-            <b><code>default_branch</code></b>
-              (<code><span title="str">str</span> | None</code>, default:
+            <b><code>workspace</code></b>
+              (<code><span title="str">str</span> | <span title="os.PathLike">PathLike</span>[<span title="str">str</span>] | None</code>, default:
                   <code>None</code>
 )
           –
           <div class="doc-md-description">
-            <p>Default source branch. A request-level branch overrides this value.</p>
+            <p>Git worktree used to select source and report dirty state. None captures the
+current directory when the client opens.</p>
           </div>
         </li>
     </ul>
@@ -2497,7 +2490,7 @@ connections. Values are read only from Client.environment.</p>
 
 
 <h2 id="zeroshot.RunRequest" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">initial_input</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">RuntimePlan</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">submission_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">initial_input</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">RuntimePlan</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">revision</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">submission_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2560,13 +2553,33 @@ connections. Values are read only from Client.environment.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
+            <b><code>repository</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named-target GitHub repository override in owner/name form.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
             <b><code>branch</code></b>
               (<code><span title="str">str</span> | None</code>, default:
                   <code>None</code>
 )
           –
           <div class="doc-md-description">
-            <p>Direct-target source branch override.</p>
+            <p>Named-target source branch override.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>revision</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named-target exact source commit override.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
