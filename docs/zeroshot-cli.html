@@ -527,7 +527,8 @@ The JSON manifest is strict and self-contained:
   }
 
 Every run uses the same source and profile. The profile must contain exactly one `builtin.git-delivery.merge@2` node;
-pull-request delivery is rejected. `needs` gates readiness but does not pass output between runs.
+pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
+binding may declare it. `needs` gates readiness but does not pass output between runs.
 Cloud assigns every run ID atomically at submission. After a node&#39;s dependencies succeed, Cloud
 materializes it against an exact source revision. Completion starts a queue window of up to 24
 hours, bounded by `expiresAt`.

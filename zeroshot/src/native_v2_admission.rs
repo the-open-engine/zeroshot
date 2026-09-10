@@ -24,6 +24,7 @@ use crate::native_v2_contract::{
     AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF, NodeRuntimeBinding, RunSubmission,
     RunSubmissionIntent, RuntimePlan,
 };
+use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
 /// Host policy for graph-visible Git delivery.
@@ -68,6 +69,8 @@ pub enum NativeV2AdmissionError {
     },
     #[error("merge plans require exactly one graph-visible Git merge delivery node")]
     MergeDeliveryRequired,
+    #[error("merge-plan agent node {node} must not declare GH_TOKEN")]
+    MergePlanAgentGitHubToken { node: NodeName },
     #[error(
         "run declares {found} unique environment names; maximum is {MAX_DECLARED_ENVIRONMENT_NAMES}"
     )]
@@ -131,6 +134,17 @@ impl NativeV2Admission {
             .any(|declaration| declaration.worker.as_str() == GIT_DELIVERY_MERGE_V2_WORKER_REF);
         if !has_merge {
             return Err(NativeV2AdmissionError::MergeDeliveryRequired);
+        }
+        if let Some(node) = runtime.nodes().iter().find_map(|(node, binding)| {
+            let NodeRuntimeBinding::Agent { connections, .. } = binding else {
+                return None;
+            };
+            connections
+                .environment_names()
+                .any(|name| name.as_str() == GITHUB_TOKEN_ENV)
+                .then_some(node.clone())
+        }) {
+            return Err(NativeV2AdmissionError::MergePlanAgentGitHubToken { node });
         }
         Ok(())
     }

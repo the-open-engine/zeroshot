@@ -80,7 +80,8 @@ async def run_direct(runtime: UniformRuntime) -> None:
 
 Log in with the CLI first, then pass that target's local name to `HostedTarget`. A plan uses one
 explicit repository and branch plus one hosted profile. The profile must contain exactly one
-`builtin.git-delivery.merge@2` node.
+`builtin.git-delivery.merge@2` node. Agent bindings must not declare `GH_TOKEN`; only the Git
+delivery binding may declare it.
 
 ```python
 from datetime import UTC, datetime, timedelta

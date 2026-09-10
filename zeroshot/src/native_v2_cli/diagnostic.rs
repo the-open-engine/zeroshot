@@ -5,6 +5,7 @@ use serde_json::{Map, Value, json};
 
 use super::NativeV2CliError;
 use crate::native_v2_admission::NativeV2AdmissionError;
+use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 use crate::native_v2_supervisor::RunEnvironmentError;
 
 pub const ERROR_FORMAT_ENV: &str = "ZEROSHOT_ERROR_FORMAT";
@@ -182,6 +183,7 @@ fn admission_code(source: &NativeV2AdmissionError) -> &'static str {
         NativeV2AdmissionError::InitialInput(_) => "input.type_mismatch",
         NativeV2AdmissionError::MissingRuntimeBinding { .. } => "runtime.missing_binding",
         NativeV2AdmissionError::UnexpectedRuntimeBinding { .. } => "runtime.unexpected_binding",
+        NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => "runtime.invalid_environment",
         NativeV2AdmissionError::UnsupportedGraphProfile => "graph.unsupported_profile",
         _ => "request.invalid",
     }
@@ -197,7 +199,8 @@ fn admission_node(source: &NativeV2AdmissionError) -> Option<String> {
         | NativeV2AdmissionError::DeliveryMustBeVerifier { node }
         | NativeV2AdmissionError::UnsupportedDeliveryWorker { node, .. }
         | NativeV2AdmissionError::DeliveryWorkerRequiresBinding { node, .. }
-        | NativeV2AdmissionError::InvalidDeliveryContract { node, .. } => Some(node.to_string()),
+        | NativeV2AdmissionError::InvalidDeliveryContract { node, .. }
+        | NativeV2AdmissionError::MergePlanAgentGitHubToken { node } => Some(node.to_string()),
         _ => None,
     }
 }
@@ -206,6 +209,9 @@ fn admission_details(source: &NativeV2AdmissionError) -> Value {
     match source {
         NativeV2AdmissionError::DeliveryNodeCount { found, .. } => json!({"found": found}),
         NativeV2AdmissionError::DeclaredEnvironmentTooLarge { found } => json!({"found": found}),
+        NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => {
+            json!({"environment": GITHUB_TOKEN_ENV})
+        }
         _ => json!({}),
     }
 }
@@ -321,6 +327,21 @@ mod tests {
         assert_eq!(value.assert_key("code"), "runtime.missing_binding");
         assert_eq!(value.assert_key("node"), "worker");
         assert_eq!(value.assert_key("details"), &json!({}));
+    }
+
+    #[test]
+    fn merge_plan_agent_token_diagnostic_names_the_credential_boundary() {
+        let error =
+            NativeV2CliError::InvalidRun(NativeV2AdmissionError::MergePlanAgentGitHubToken {
+                node: NodeName::new("worker").assert_value(),
+            });
+        let value = serde_json::to_value(error.diagnostic()).assert_value();
+        assert_eq!(value.assert_key("code"), "runtime.invalid_environment");
+        assert_eq!(value.assert_key("node"), "worker");
+        assert_eq!(
+            value.assert_key("details"),
+            &json!({"environment": GITHUB_TOKEN_ENV})
+        );
     }
 
     #[test]

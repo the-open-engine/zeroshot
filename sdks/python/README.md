@@ -79,7 +79,8 @@ Docker is a deployment of `DirectTarget`, not a separate client or target type.
 
 `HostedTarget` reuses a named target and login from the CLI. Merge plans are immutable DAGs over one
 repository, branch, and hosted profile. That profile must contain exactly one
-`builtin.git-delivery.merge@2` node; pull-request delivery isn't accepted for plans.
+`builtin.git-delivery.merge@2` node; pull-request delivery isn't accepted for plans. Agent bindings
+must not declare `GH_TOKEN`; only the Git delivery binding may declare it.
 
 ```python
 from datetime import UTC, datetime, timedelta

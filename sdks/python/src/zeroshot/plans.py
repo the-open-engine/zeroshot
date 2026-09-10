@@ -45,7 +45,8 @@ class MergePlanRequest:
         title: Human-readable immutable plan title.
         repository: Source repository in owner/name form, shared by every node.
         branch: Source branch shared by every node.
-        profile: Hosted profile selector in user:name or org:name form.
+        profile: Hosted profile selector in user:name or org:name form. Agent bindings cannot
+            declare GH_TOKEN; only the Git delivery binding can declare it.
         expires_at: RFC 3339 deadline for the whole plan, at most seven days in the future.
         runs: Node names mapped to static inputs and symbolic dependencies.
         submission_key: Stable idempotency key; None generates one before native validation.

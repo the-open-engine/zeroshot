@@ -4,7 +4,7 @@ use crate::native_v2_contract::{
     EnvironmentVariableName, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF,
     GIT_DELIVERY_PR_WORKER_REF, ResolvedSource, RunSize, RunTitle, SessionScope,
 };
-use crate::native_v2_delivery::DeliveryMode;
+use crate::native_v2_delivery::{DeliveryMode, GITHUB_TOKEN_ENV};
 use crate::native_v2_delivery::contract::{delivery_result_schema, delivery_signal_labels};
 use openengine_cluster_protocol::{IdempotencyKey, ReasoningEffort};
 use serde_json::{json, Value};

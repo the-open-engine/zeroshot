@@ -138,6 +138,66 @@ async fn merge_profile_validation_rejects_pull_request_delivery() {
 }
 
 #[tokio::test]
+async fn merge_profile_keeps_github_credentials_on_delivery_nodes() {
+    let merge_graph = graph(vec![
+        null_step("worker", "worker.change@1"),
+        delivery_verifier("deliver", DeliveryMode::Merge),
+        succeed("done"),
+    ]);
+    let agent_token = submission(
+        merge_graph.clone(),
+        BTreeMap::from([
+            (
+                named("worker"),
+                binding_with_environment([GITHUB_TOKEN_ENV.to_owned()]),
+            ),
+            (named("deliver"), delivery_binding()),
+        ]),
+    );
+
+    NativeV2Admission
+        .validate_profile(
+            &agent_token.graph,
+            &agent_token.runtime,
+            DeliveryPolicy::Required,
+        )
+        .await
+        .assert_value_with("ordinary hosted runs may explicitly bind GitHub to an agent");
+    assert_eq!(
+        NativeV2Admission
+            .validate_merge_profile(&agent_token.graph, &agent_token.runtime)
+            .await,
+        Err(NativeV2AdmissionError::MergePlanAgentGitHubToken {
+            node: named("worker"),
+        })
+    );
+
+    let delivery_token = submission(
+        merge_graph,
+        BTreeMap::from([
+            (named("worker"), binding("claude-sonnet-5", None)),
+            (
+                named("deliver"),
+                NodeRuntimeBinding::GitDelivery {
+                    connections: DeclaredConnections::single(
+                        "github-alias",
+                        DeclaredEnvironment::new([
+                            EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value()
+                        ])
+                        .assert_value(),
+                    )
+                    .assert_value(),
+                },
+            ),
+        ]),
+    );
+    NativeV2Admission
+        .validate_merge_profile(&delivery_token.graph, &delivery_token.runtime)
+        .await
+        .assert_value_with("merge plans keep GitHub credentials on Git delivery");
+}
+
+#[tokio::test]
 async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile() {
     let legacy_graph = graph(vec![
         delivery_verifier("deliver", DeliveryMode::MergeV1),
