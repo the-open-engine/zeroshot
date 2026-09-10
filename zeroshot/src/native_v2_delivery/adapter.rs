@@ -287,10 +287,15 @@ impl NativeV2DeliveryAdapter {
             head_revision: review.head_revision.clone(),
         };
         emit(preparation.control, "delivery: pushing run branch").await?;
-        self.authority
+        if self
+            .authority
             .push_branch(&push, preparation.credentials.current())
             .await
-            .map_err(|_| crash_outcome())?;
+            .is_err()
+        {
+            emit(preparation.control, "delivery: Git push failed").await?;
+            return Err(crash_outcome());
+        }
         Ok(())
     }
 

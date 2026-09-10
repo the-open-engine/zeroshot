@@ -301,6 +301,35 @@ async fn rewritten_history_is_rejected_before_push() {
     );
 }
 
+#[tokio::test]
+async fn push_rejection_emits_a_short_safe_public_failure_line() {
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::PushRejected));
+
+    let execution = run_delivery_execution(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 2,
+            mode: DeliveryMode::Merge,
+            run_id: "push-rejected",
+            refresh: None,
+        },
+        authority,
+    )
+    .await;
+
+    assert_eq!(
+        execution.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    assert!(
+        execution
+            .output
+            .iter()
+            .any(|output| output.text == "delivery: Git push failed")
+    );
+}
+
 #[test]
 fn delivery_contract_rejects_the_other_modes_schema() {
     let response = NodeResponseContract::Verifier {
@@ -349,6 +378,18 @@ async fn run_delivery_with_id(
     request: DeliveryRunRequest<'_>,
     authority: Arc<FakeGitHub>,
 ) -> WorkerOutcome {
+    run_delivery_execution(request, authority).await.outcome
+}
+
+struct DeliveryExecution {
+    outcome: WorkerOutcome,
+    output: Vec<LiveOutput>,
+}
+
+async fn run_delivery_execution(
+    request: DeliveryRunRequest<'_>,
+    authority: Arc<FakeGitHub>,
+) -> DeliveryExecution {
     let admitted = admitted(request.repo, request.mode).await;
     let config = NativeV2DeliveryConfig {
         workspace: request.repo.workspace.clone(),
@@ -393,7 +434,15 @@ async fn run_delivery_with_id(
         })
         .await
         .assert_value();
-    handle.completion().await.assert_value().outcome
+    let mut durable = handle.take_initial_output().assert_value();
+    let outcome = handle.completion().await.assert_value().outcome;
+    let mut output = Vec::new();
+    while let Ok(event) = durable.recv().await {
+        if let crate::native_v2_runner::DurableNodeEvent::Output { output: event, .. } = event {
+            output.push(event);
+        }
+    }
+    DeliveryExecution { outcome, output }
 }
 
 async fn admitted(repo: &TempRepo, mode: DeliveryMode) -> crate::native_v2_contract::AdmittedRun {

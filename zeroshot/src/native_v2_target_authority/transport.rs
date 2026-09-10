@@ -22,9 +22,9 @@ use tokio_tungstenite::accept_async_with_config;
 use url::Url;
 
 use super::{
-    DISCOVERY_PATH, NativeV2TargetAuthority, OECP_PATH, RUN_PATH, SESSION_PATH,
-    TargetAuthorityError, TargetDiscoveryDocument, TargetOecpSession, TargetRunRequest,
-    TargetAuthentication, TargetSessionAuthority,
+    DISCOVERY_PATH, NativeV2TargetAuthority, OECP_PATH, OPERATOR_DIAGNOSTICS_PATH_PREFIX, RUN_PATH,
+    SESSION_PATH, TargetAuthentication, TargetAuthorityError, TargetDiscoveryDocument,
+    TargetOecpSession, TargetRunRequest, TargetSessionAuthority,
 };
 use crate::native_v2_cloud::NativeV2CloudController;
 use super::private_access::{PrivateTargetAccess, TargetBootstrapKey};
@@ -182,10 +182,29 @@ impl NativeV2TargetServer {
                 &TargetDiscoveryDocument::direct(self.access.authentication()),
             ),
             ("POST", TARGET_PRIVATE_BOOTSTRAP_PATH) => self.handle_private_bootstrap(request).await,
+            ("GET", path) if is_operator_diagnostics_path(path) => {
+                self.handle_operator_diagnostics(request).await
+            }
             ("POST", RUN_PATH) => self.handle_run(request).await,
             ("POST", SESSION_PATH) => self.handle_session(request).await,
             _ => not_found_response(),
         }
+    }
+
+    async fn handle_operator_diagnostics(&self, request: HttpRequest) -> HttpResponse {
+        if !matches!(self.access, TargetServerAccess::Private { .. }) {
+            return not_found_response();
+        }
+        if let Err(error) = self.authenticate_control(&request.head).await {
+            return authority_error_response(error);
+        }
+        if !request.body.is_empty() {
+            return invalid_request_response("operator diagnostic request is malformed");
+        }
+        let Some(run_id) = operator_diagnostics_run_id(&request.path) else {
+            return invalid_request_response("operator diagnostic request is malformed");
+        };
+        HttpResponse::private_json(200, &self.target.operator_diagnostics(&run_id))
     }
 
     async fn handle_private_bootstrap(&self, request: HttpRequest) -> HttpResponse {
@@ -318,6 +337,16 @@ impl NativeV2TargetServer {
             TargetServerAccess::Direct(identity) => Ok(identity.clone()),
         }
     }
+}
+
+fn is_operator_diagnostics_path(path: &str) -> bool {
+    path.starts_with(OPERATOR_DIAGNOSTICS_PATH_PREFIX)
+}
+
+fn operator_diagnostics_run_id(path: &str) -> Option<openengine_cluster_protocol::RunId> {
+    let value = path.strip_prefix(OPERATOR_DIAGNOSTICS_PATH_PREFIX)?;
+    let run_id = openengine_cluster_protocol::RunId::new(value);
+    is_canonical_uuid_v7(&run_id).then_some(run_id)
 }
 
 async fn read_request_head(stream: &TcpStream) -> io::Result<RequestHead> {

@@ -98,6 +98,9 @@ pub(super) fn capsule_config(storage_root: PathBuf) -> ProductionCapsuleConfig {
         gh_program: config.gh_program,
         process_pool: allocator_process_pool(),
         claude_turn_timeout: config.claude_turn_timeout,
+        operator_diagnostics: std::sync::Arc::new(
+            crate::native_v2_target_authority::OperatorDiagnosticStore::default(),
+        ),
     }
 }
 

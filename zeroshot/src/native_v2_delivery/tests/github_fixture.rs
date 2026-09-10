@@ -12,6 +12,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(super) enum Script {
     NoCi,
+    PushRejected,
     CiFailed,
     Conflict,
     ConflictAtMerge,
@@ -177,16 +178,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         credential: GitHubCredential<'_>,
     ) -> Result<(), GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
-        let status = tokio::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&request.workspace)
-            .arg("push")
-            .arg(&self.remote)
-            .arg(format!("HEAD:refs/heads/{}", request.head_branch))
-            .status()
-            .await
-            .assert_value();
-        if !status.success() {
+        if matches!(self.script, Script::PushRejected) {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+        if !push_succeeded(request, &self.remote).await {
             return Err(GitHubAuthorityError::Rejected);
         }
         self.pushed.store(true, Ordering::SeqCst);
@@ -373,6 +368,17 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         }
         Ok(())
     }
+}
+
+async fn push_succeeded(request: &GitHubPushRequest, remote: &Path) -> bool {
+    let mut command = tokio::process::Command::new("/usr/bin/git");
+    command
+        .arg("-C")
+        .arg(&request.workspace)
+        .arg("push")
+        .arg(remote)
+        .arg(format!("HEAD:refs/heads/{}", request.head_branch));
+    command.status().await.assert_value().success()
 }
 
 pub(super) fn write_executable(directory: &Path, name: &str, contents: &str) -> PathBuf {

@@ -3,6 +3,7 @@
 //! Source selection is immutable before this boundary. HTTP submission is the only creation seam;
 //! OECP observes and controls runs already admitted to the target's ledger namespace.
 
+mod operator_diagnostics;
 mod private_access;
 mod transport;
 
@@ -10,12 +11,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use openengine_cluster_protocol::{
-    TargetAuthentication, TargetDiscoveryDocument, TargetOecpSession, TargetOecpSessionRequest,
-    TARGET_RUN_REJECTED_CODE, TargetHttpProblem, TargetRunReceipt, TargetRunRequest,
+    TargetAuthentication, TargetDiscoveryDocument, TargetHttpProblem, TargetOecpSession,
+    TargetOecpSessionRequest, TargetOperatorDiagnostics, TargetRunReceipt, TargetRunRequest,
+    TARGET_RUN_REJECTED_CODE,
 };
 pub use openengine_cluster_protocol::{
     TARGET_CONTROLLER_AUDIENCE as CONTROLLER_AUDIENCE, TARGET_DISCOVERY_KIND as DISCOVERY_KIND,
     TARGET_DISCOVERY_PATH as DISCOVERY_PATH, TARGET_OECP_PATH as OECP_PATH,
+    TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX as OPERATOR_DIAGNOSTICS_PATH_PREFIX,
     TARGET_PRIVATE_BOOTSTRAP_PATH, TARGET_RUN_PATH as RUN_PATH,
     TARGET_SESSION_PATH as SESSION_PATH,
 };
@@ -24,6 +27,9 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use crate::native_v2_cloud::NativeV2CloudController;
+pub(crate) use operator_diagnostics::{
+    MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES, NewOperatorDiagnostic, OperatorDiagnosticStore,
+};
 pub use transport::NativeV2TargetServer;
 pub use private_access::TargetBootstrapKey;
 
@@ -125,16 +131,32 @@ pub struct NativeV2TargetAuthority {
     factory: Arc<dyn TargetControllerFactory>,
     state: Mutex<AuthorityState>,
     submission_turn: Mutex<()>,
+    operator_diagnostics: Arc<OperatorDiagnosticStore>,
 }
 
 impl NativeV2TargetAuthority {
     #[must_use]
     pub fn new(factory: Arc<dyn TargetControllerFactory>) -> Self {
+        Self::new_with_operator_diagnostics(factory, Arc::new(OperatorDiagnosticStore::default()))
+    }
+
+    pub(crate) fn new_with_operator_diagnostics(
+        factory: Arc<dyn TargetControllerFactory>,
+        operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    ) -> Self {
         Self {
             factory,
             state: Mutex::new(AuthorityState { controller: None }),
             submission_turn: Mutex::new(()),
+            operator_diagnostics,
         }
+    }
+
+    fn operator_diagnostics(
+        &self,
+        run_id: &openengine_cluster_protocol::RunId,
+    ) -> TargetOperatorDiagnostics {
+        self.operator_diagnostics.snapshot(run_id)
     }
 
     /// Activates exactly one controller and returns the same authority for every target session.

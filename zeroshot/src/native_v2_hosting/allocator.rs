@@ -31,6 +31,7 @@ use crate::native_v2_contract::{AdmittedRun, RuntimePlan};
 use crate::native_v2_delivery::{GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
+use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
 use super::{ProductionHostingError, set_traversable_directory};
 use super::repository::{RepositoryInstall, install_repository, production_source};
@@ -47,6 +48,7 @@ pub(super) struct ProductionCapsuleConfig {
     pub gh_program: PathBuf,
     pub process_pool: HostedProcessPool,
     pub claude_turn_timeout: Duration,
+    pub operator_diagnostics: Arc<OperatorDiagnosticStore>,
 }
 
 type FilesystemPreparer =
@@ -142,7 +144,12 @@ impl ProductionCapsuleAllocator {
                     filesystem.workspace.clone(),
                     target,
                 ),
-                github: Arc::new(GhCliDeliveryAuthority::new(github_config)),
+                github: Arc::new(
+                    GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
+                        run_id.clone(),
+                        self.config.operator_diagnostics.clone(),
+                    ),
+                ),
             },
         )
         .map_err(|_| CapsuleAllocationUnavailable)?;

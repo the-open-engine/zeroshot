@@ -174,6 +174,10 @@ fn run_id() -> RunId {
     RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991")
 }
 
+fn other_run_id() -> RunId {
+    RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992")
+}
+
 async fn direct_test_server(
     factory: Arc<dyn TargetControllerFactory>,
 ) -> (
@@ -263,6 +267,19 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     let document: TargetDiscoveryDocument = serde_json::from_slice(&discovery.body).assert_value();
     assert_eq!(document.authentication, TargetAuthentication::HostedOauth);
     assert_eq!(document.kind, DISCOVERY_KIND);
+    assert_eq!(
+        http(
+            address,
+            TestHttpRequest::empty(
+                "GET",
+                &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
+                Some("control-token"),
+            ),
+        )
+        .await
+        .status,
+        404
+    );
 
     let encoded = serde_json::to_vec(&request()).assert_value();
     http(
@@ -337,6 +354,19 @@ async fn run_rejection_returns_a_bounded_public_diagnostic() {
 #[tokio::test]
 async fn direct_target_remains_auth_free_without_private_bootstrap() {
     let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
+    assert_eq!(
+        http(
+            address,
+            TestHttpRequest::empty(
+                "GET",
+                &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
+                None,
+            ),
+        )
+        .await
+        .status,
+        404
+    );
     let session = http(
         address,
         TestHttpRequest::body("POST", SESSION_PATH, None, b"{}"),
@@ -381,6 +411,70 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
     assert_eq!(session.status, 200);
     connect_and_list(&endpoint, Some(&token)).await;
 
+    assert_eq!(
+        http(
+            address,
+            TestHttpRequest::empty(
+                "GET",
+                &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
+                Some("wrong-token"),
+            ),
+        )
+        .await
+        .status,
+        401
+    );
+
+    http(
+        address,
+        TestHttpRequest::empty("GET", OPERATOR_DIAGNOSTICS_PATH_PREFIX, Some(&token)),
+    )
+    .await
+    .assert_problem(
+        400,
+        "request.invalid",
+        "operator diagnostic request is malformed",
+    );
+    http(
+        address,
+        TestHttpRequest::empty(
+            "GET",
+            &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}not-a-run"),
+            Some(&token),
+        ),
+    )
+    .await
+    .assert_problem(
+        400,
+        "request.invalid",
+        "operator diagnostic request is malformed",
+    );
+    let response = http(
+        address,
+        TestHttpRequest::empty(
+            "GET",
+            &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
+            Some(&token),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    let diagnostics: TargetOperatorDiagnostics =
+        serde_json::from_slice(&response.body).assert_value();
+    assert_eq!(diagnostics.diagnostics.len(), 1);
+    let diagnostic = diagnostics.diagnostics.first().assert_value();
+    assert_eq!(diagnostic.id, "2");
+    assert_eq!(diagnostic.run_id, run_id());
+    assert_eq!(diagnostic.code, "git_push_failed");
+    assert_eq!(diagnostic.operation, "delivery.git_push");
+    assert_eq!(diagnostic.exit_status, Some(128));
+    assert_eq!(diagnostic.stderr, "remote rejected the update");
+    assert!(
+        !String::from_utf8(response.body)
+            .assert_value()
+            .contains("other run")
+    );
+
     task.abort();
     let _ = std::fs::remove_dir(&root);
 }
@@ -405,11 +499,33 @@ async fn private_test_server() -> (
     let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
     let address = listener.local_addr().assert_value();
     let endpoint = format!("ws://{address}{OECP_PATH}");
+    let diagnostics = Arc::new(OperatorDiagnosticStore::default());
+    diagnostics.record(NewOperatorDiagnostic {
+        run_id: other_run_id(),
+        code: "git_push_failed",
+        operation: "delivery.git_push",
+        exit_status: Some(1),
+        stdout: String::new(),
+        stderr: "other run".to_owned(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+    });
+    diagnostics.record(NewOperatorDiagnostic {
+        run_id: run_id(),
+        code: "git_push_failed",
+        operation: "delivery.git_push",
+        exit_status: Some(128),
+        stdout: "error refs/heads/zeroshot/run rejected".to_owned(),
+        stderr: "remote rejected the update".to_owned(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+    });
     let server = Arc::new(
         NativeV2TargetServer::new_private(
-            Arc::new(NativeV2TargetAuthority::new(Arc::new(
-                FakeFactory::default(),
-            ))),
+            Arc::new(NativeV2TargetAuthority::new_with_operator_diagnostics(
+                Arc::new(FakeFactory::default()),
+                diagnostics,
+            )),
             identity(),
             endpoint.clone(),
             bootstrap_key,
@@ -426,6 +542,19 @@ async fn assert_private_routes_require_capability(address: std::net::SocketAddr,
         http(
             address,
             TestHttpRequest::body("POST", RUN_PATH, None, &encoded)
+        )
+        .await
+        .status,
+        401
+    );
+    assert_eq!(
+        http(
+            address,
+            TestHttpRequest::empty(
+                "GET",
+                &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
+                None,
+            )
         )
         .await
         .status,

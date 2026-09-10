@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use openengine_cluster_protocol::RunId;
 use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
+use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
 use super::{
     GitHubAuthorityError, GitHubChecks, GitHubCredential, GitHubDeliveryAuthority,
@@ -17,6 +20,7 @@ use super::{
 
 mod api;
 mod metadata;
+mod push;
 
 const DEFAULT_API_DEADLINE: Duration = Duration::from_secs(2 * 60);
 const DEFAULT_PUSH_DEADLINE: Duration = Duration::from_secs(10 * 60);
@@ -46,12 +50,31 @@ impl GhCliAuthorityConfig {
 #[derive(Clone, Debug)]
 pub struct GhCliDeliveryAuthority {
     config: GhCliAuthorityConfig,
+    operator_diagnostics: Option<OperatorDiagnosticReporter>,
+}
+
+#[derive(Clone, Debug)]
+struct OperatorDiagnosticReporter {
+    run_id: RunId,
+    store: Arc<OperatorDiagnosticStore>,
 }
 
 impl GhCliDeliveryAuthority {
     #[must_use]
     pub fn new(config: GhCliAuthorityConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            operator_diagnostics: None,
+        }
+    }
+
+    pub(crate) fn with_operator_diagnostics(
+        mut self,
+        run_id: RunId,
+        store: Arc<OperatorDiagnosticStore>,
+    ) -> Self {
+        self.operator_diagnostics = Some(OperatorDiagnosticReporter { run_id, store });
+        self
     }
 
     async fn find_review(
@@ -254,17 +277,7 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         request: &GitHubPushRequest,
         credential: GitHubCredential<'_>,
     ) -> Result<(), GitHubAuthorityError> {
-        let mut command = authenticated_git_command(&self.config, &request.workspace, credential);
-        command
-            .arg("push")
-            .arg("--porcelain")
-            .arg("--no-verify")
-            .arg(format!(
-                "https://github.com/{}.git",
-                request.target.repository
-            ))
-            .arg(format!("HEAD:refs/heads/{}", request.head_branch));
-        bounded_status(command, self.config.push_deadline).await
+        push::push_branch(self, request, credential).await
     }
 
     async fn open_or_update_review(

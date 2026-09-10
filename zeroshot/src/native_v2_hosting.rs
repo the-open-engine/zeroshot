@@ -27,8 +27,8 @@ use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_cloud::{NativeV2CloudController, NativeV2CloudError};
 use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_target_authority::{
-    NativeV2TargetAuthority, TargetAuthorityError, TargetControllerFactory, TargetRunReceipt,
-    TargetRunRequest,
+    NativeV2TargetAuthority, OperatorDiagnosticStore, TargetAuthorityError,
+    TargetControllerFactory, TargetRunReceipt, TargetRunRequest,
 };
 use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::RunLedgerError;
@@ -45,9 +45,11 @@ pub async fn build_production_target_authority(
     config: ProductionHostingConfig,
 ) -> Result<NativeV2TargetAuthority, ProductionHostingError> {
     prepare_storage_root(&config.storage_root)?;
-    Ok(NativeV2TargetAuthority::new(Arc::new(
-        ProductionTargetControllerFactory::new(config),
-    )))
+    let factory = Arc::new(ProductionTargetControllerFactory::new(config));
+    Ok(NativeV2TargetAuthority::new_with_operator_diagnostics(
+        factory.clone(),
+        factory.operator_diagnostics.clone(),
+    ))
 }
 
 /// Host-owned non-secret capabilities used to compose one installed target.
@@ -82,6 +84,7 @@ impl fmt::Debug for ProductionHostingConfig {
 #[derive(Clone, Debug)]
 pub struct ProductionTargetControllerFactory {
     config: Arc<ProductionHostingConfig>,
+    operator_diagnostics: Arc<OperatorDiagnosticStore>,
 }
 
 impl ProductionTargetControllerFactory {
@@ -89,6 +92,7 @@ impl ProductionTargetControllerFactory {
     pub fn new(config: ProductionHostingConfig) -> Self {
         Self {
             config: Arc::new(config),
+            operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
         }
     }
 
@@ -111,6 +115,7 @@ impl ProductionTargetControllerFactory {
             gh_program: self.config.gh_program.clone(),
             process_pool: self.config.process_pool,
             claude_turn_timeout: self.config.claude_turn_timeout,
+            operator_diagnostics: self.operator_diagnostics.clone(),
         })?);
         let controller = NativeV2CloudController::new_with_delivery_policy(
             ledger,
