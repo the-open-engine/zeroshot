@@ -172,6 +172,32 @@ async fn native_v2_rejects_a_retry_that_does_not_follow_an_error() {
 }
 
 #[tokio::test]
+async fn native_v2_does_not_retry_a_non_crash_error() {
+    let graph = verified(
+        sequence("root", vec![verifier("check", 2), succeed("done")]),
+        json!({"check":2}),
+    )
+    .await;
+    let timed_out = settled(
+        SettledSpec::new(1, 1, "check").position(3),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Timeout),
+    );
+    let reduction = FullV1Reducer::native_v2(&graph)
+        .reduce(ReductionInput {
+            initial_input: &json!({}),
+            executions: std::slice::from_ref(&timed_out),
+            next_node_instance: 2,
+            next_execution: 2,
+        })
+        .assert_value();
+
+    assert!(!reduction.decisions.iter().any(|decision| matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "check"
+    )));
+}
+
+#[tokio::test]
 async fn native_v2_rejects_a_retry_visit_with_mismatched_prior_input() {
     let graph = verified(
         sequence("root", vec![verifier("check", 2), succeed("done")]),

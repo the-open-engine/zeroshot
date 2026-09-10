@@ -18,7 +18,7 @@ pub use history::{
 use openengine_cluster_protocol::{
     ChoiceNode, ControlSelector, ControlSource, DataSelector, FieldPath, GraphNode, Guard, Join,
     EnumLabel, MapNode, NodeName, NodeOutputChannel, ParNode, PositiveInteger, TerminalResult,
-    WorkerOutcome, WorkerRef,
+    WorkerErrorCode, WorkerOutcome, WorkerRef,
 };
 use openengine_cluster_server::admission::VerifiedGraph;
 use serde::{Deserialize, Serialize};

@@ -265,7 +265,13 @@ impl Engine<'_> {
             return Ok(Status::Pending);
         }
         if self.execution_mode == ExecutionMode::NativeV2
-            && matches!(outcome, WorkerOutcome::Error { .. })
+            && matches!(
+                outcome,
+                WorkerOutcome::Error {
+                    code: WorkerErrorCode::Crash,
+                    ..
+                }
+            )
             && execution.attempt < spec.attempt_ceiling
         {
             return self.dispatch_retry(RetryDispatchRequest {

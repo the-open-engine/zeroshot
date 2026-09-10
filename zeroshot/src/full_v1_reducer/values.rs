@@ -111,7 +111,10 @@ fn validate_native_attempt_lineage(executions: &[DurableExecution]) -> Result<()
                 &previous.state,
                 DurableExecutionState::Settled {
                     position,
-                    outcome: WorkerOutcome::Error { .. },
+                    outcome: WorkerOutcome::Error {
+                        code: WorkerErrorCode::Crash,
+                        ..
+                    },
                 } if *position < current.dispatch_position
             ) && previous
                 .attempt
@@ -461,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn native_history_still_accepts_retry_after_settled_error() {
+    fn native_history_accepts_retry_after_settled_crash() {
         let failed = execution(
             1,
             INITIAL_ATTEMPT,
@@ -473,5 +476,23 @@ mod tests {
         );
         let retry = execution(2, INITIAL_ATTEMPT + 1, 3, DurableExecutionState::Active);
         assert_eq!(validate_native_attempt_lineage(&[failed, retry]), Ok(()));
+    }
+
+    #[test]
+    fn native_history_rejects_retry_after_non_crash_error() {
+        let timed_out = execution(
+            1,
+            INITIAL_ATTEMPT,
+            1,
+            DurableExecutionState::Settled {
+                position: HistoryPosition::new(2).expect("valid position"),
+                outcome: WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+            },
+        );
+        let retry = execution(2, INITIAL_ATTEMPT + 1, 3, DurableExecutionState::Active);
+        assert_eq!(
+            validate_native_attempt_lineage(&[timed_out, retry]),
+            Err(ReducerError::InconsistentHistory)
+        );
     }
 }
