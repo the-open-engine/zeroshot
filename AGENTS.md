@@ -88,7 +88,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   dynamic credential once on HTTP 401/403 within the synchronization deadline and cancellation
   boundary, and fail closed on identity mismatch or static-token rejection. Verifier-authored pull
   request descriptions and source-issue closing references stay inside the generated body markers
-  so refreshing metadata cannot retain a stale issue reference.
+  so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
+  reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
 
 ## CLI and target contracts
 

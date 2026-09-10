@@ -1,6 +1,8 @@
 use super::*;
-use super::metadata::{generated_body, refresh_generated_body};
+use super::metadata::{generated_body, generated_body_range, refresh_generated_body};
 use super::wire::{IssueCommentWire, IssueWire, require_review_identity};
+
+const LEGACY_UNMANAGED_BODY: &str = "Created by Zeroshot v2.";
 
 pub(super) async fn connect_source_issue(
     authority: &GhCliDeliveryAuthority,
@@ -122,7 +124,30 @@ pub(super) fn refresh_pull_request_body(
     current: Option<&str>,
     request: &GitHubReviewRequest,
 ) -> Result<String, GitHubAuthorityError> {
+    if let Some(body) = current {
+        if has_unowned_legacy_closing_reference(body)? {
+            return Err(GitHubAuthorityError::Rejected);
+        }
+    }
     refresh_generated_body(current, &generated_review_content(request))
+}
+
+fn has_unowned_legacy_closing_reference(body: &str) -> Result<bool, GitHubAuthorityError> {
+    let suffix = match generated_body_range(body)? {
+        Some(range) => &body[range.end..],
+        None => body.strip_prefix(LEGACY_UNMANAGED_BODY).unwrap_or_default(),
+    };
+    Ok(is_canonical_closing_reference_suffix(suffix))
+}
+
+fn is_canonical_closing_reference_suffix(suffix: &str) -> bool {
+    let Some(line) = suffix.strip_prefix("\n\n") else {
+        return false;
+    };
+    let line = line.split_once('\n').map_or(line, |(line, _)| line);
+    line.strip_prefix("Closes #").is_some_and(|number| {
+        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn body_has_closing_reference(body: Option<&str>, closing_reference: &str) -> bool {
@@ -208,6 +233,28 @@ mod tests {
         assert!(body.contains("Human preface."));
         assert!(body.contains("Human notes."));
         assert!(body.contains("Closes #999"));
+    }
+
+    #[test]
+    fn refresh_rejects_unowned_legacy_reference_without_rewriting_body() {
+        let marked = concat!(
+            "<!-- zeroshot-delivery:generated:v1:start -->\n",
+            "Old description.\n",
+            "<!-- zeroshot-delivery:generated:v1:end -->\n\n",
+            "Closes #208"
+        );
+        let unmanaged = "Created by Zeroshot v2.\n\nCloses #208";
+        let request = GitHubReviewRequest {
+            source_issue: Some(GitHubSourceIssue { number: 209 }),
+            ..test_review_request()
+        };
+
+        for body in [marked, unmanaged] {
+            assert_eq!(
+                refresh_pull_request_body(Some(body), &request),
+                Err(GitHubAuthorityError::Rejected)
+            );
+        }
     }
 
     #[test]
