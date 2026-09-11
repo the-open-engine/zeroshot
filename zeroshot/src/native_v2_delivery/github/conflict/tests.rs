@@ -113,6 +113,62 @@ async fn authenticated_target_fetch_leaves_exact_conflict_for_repair() {
 }
 
 #[tokio::test]
+async fn conflict_handoff_pins_repair_commit_to_delivery_identity() {
+    let fixture = ConflictFixture::new("result.txt");
+    git(
+        &fixture.repository.workspace,
+        &["config", "--local", "user.name", "Codex"],
+    );
+    git(
+        &fixture.repository.workspace,
+        &["config", "--local", "user.email", "codex@openai.com"],
+    );
+
+    let outcome = fixture
+        .authority
+        .materialize_merge_conflict(&fixture.request, GitHubCredential("test-token"))
+        .await
+        .assert_value();
+    assert!(matches!(outcome, GitHubConflictOutcome::Materialized(_)));
+
+    fs::write(
+        fixture.repository.workspace.join("result.txt"),
+        "resolved\n",
+    )
+    .assert_value();
+    git(&fixture.repository.workspace, &["add", "--all"]);
+    git(
+        &fixture.repository.workspace,
+        &["commit", "--no-verify", "--message", "repair conflict"],
+    );
+
+    assert_eq!(
+        git_output(
+            &fixture.repository.workspace,
+            &["show", "--no-patch", "--format=%an <%ae>"]
+        ),
+        "Zeroshot <delivery@zeroshot.invalid>"
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository.workspace,
+            &["show", "--no-patch", "--format=%cn <%ce>"]
+        ),
+        "Zeroshot <delivery@zeroshot.invalid>"
+    );
+    assert_eq!(
+        git_output(
+            &fixture.repository.workspace,
+            &["show", "--no-patch", "--format=%P"]
+        ),
+        format!(
+            "{} {}",
+            fixture.request.review.head_revision, fixture.target_revision
+        )
+    );
+}
+
+#[tokio::test]
 async fn stale_conflict_observation_restores_the_review_head_for_reobservation() {
     let fixture = ConflictFixture::new("target.txt");
 
