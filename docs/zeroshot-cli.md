@@ -564,8 +564,8 @@ Every run uses the same source and profile. The profile must contain exactly one
 pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 binding may declare it. `needs` gates readiness but does not pass output between runs.
 Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
-materializes it against an exact source revision. Completion starts a queue window of up to 24
-hours, bounded by `expiresAt`.
+materializes it against an exact source revision. Once materialization completes, `readyAt` is set
+and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
 `expiresAt` must be in the future and no more than
 seven days away. Plans cannot be edited or retried in place.
 ```

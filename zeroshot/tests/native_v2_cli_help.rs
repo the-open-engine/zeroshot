@@ -214,6 +214,19 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
 }
 
 #[test]
+fn help_explains_the_seven_day_plan_queue_deadline() {
+    let plan = successful_stdout(&["plan", "--help"]);
+    assert_prose(
+        &plan,
+        &[
+            "queue deadline is the earlier of `expiresat` and seven days after `readyat`",
+            "`expiresat` must be in the future and no more than seven days away",
+        ],
+    );
+    assert!(!normalized(&plan).contains("24 hours"));
+}
+
+#[test]
 fn help_and_version_aliases_remain_available() {
     for arguments in [
         [].as_slice(),

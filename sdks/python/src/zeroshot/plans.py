@@ -87,8 +87,8 @@ class MergePlanRunStatus:
         needs: Stable symbolic dependency names.
         source_revision: Exact source revision once the node materializes.
         ready_at: RFC 3339 time when source materialization completed and the node became ready.
-        queue_expires_at: RFC 3339 per-node queue deadline, up to 24 hours after readiness and
-            bounded by the plan deadline.
+        queue_expires_at: RFC 3339 per-node queue deadline, set to the earlier of the plan deadline
+            and seven days after readiness.
         terminal_at: RFC 3339 terminal time.
         waiting_reason: Stable explanation while queued or blocked, when supplied.
         error_code: Stable terminal error category, including dependency_failed.
