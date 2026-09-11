@@ -4,6 +4,20 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable version in vX.Y.Z form; omit to publish dev documentation.
+        required: false
+        type: string
+      release_commit:
+        description: Exact source commit from main; omit to use current main.
+        required: false
+        type: string
+      stable:
+        description: Point the stable alias and site root at the supplied release version.
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       version:

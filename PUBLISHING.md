@@ -97,3 +97,7 @@ interactive publish; do not create a second package name or temporary compatibil
 Release jobs are designed to verify already-published immutable artifacts before completing missing
 steps. Recovery must use the same version, tag, and source commit. Never overwrite a different npm
 tarball, GitHub asset, Python wheel, image source label, or tag target.
+
+To recover documentation independently, dispatch **Publish versioned documentation** with
+`version: vX.Y.Z`, the release's exact `release_commit`, and `stable: true` only when it is the
+newest canonical release. Omitting the version and commit publishes current `main` to `dev/`.
