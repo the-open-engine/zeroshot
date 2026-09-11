@@ -1,0 +1,780 @@
+{
+  "components": {
+    "schemas": {
+      "ArtifactRef": {
+        "$ref": "graph.schema.json#/$defs/ArtifactRef"
+      },
+      "CompiledGraphIr": {
+        "$ref": "compiled-ir.schema.json"
+      },
+      "GraphDiagnostic": {
+        "$ref": "graph.schema.json#/$defs/GraphDiagnostic"
+      },
+      "GraphSpec": {
+        "$ref": "graph.schema.json"
+      },
+      "StructuralBounds": {
+        "$ref": "graph.schema.json#/$defs/StructuralBounds"
+      },
+      "WorkerDescriptor": {
+        "$ref": "worker.schema.json"
+      },
+      "WorkerOutcome": {
+        "$ref": "worker.schema.json#/$defs/WorkerOutcome"
+      }
+    }
+  },
+  "info": {
+    "title": "Open Engine Cluster Protocol",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "initialize",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "protocolVersion",
+          "required": true,
+          "schema": {
+            "const": "openengine.cluster/v1",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "initializeResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/InitializeResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "plan",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "graph",
+          "required": true,
+          "schema": {
+            "$ref": "schema.json#/$defs/GraphSpec"
+          }
+        }
+      ],
+      "result": {
+        "name": "planResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/PlanResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "apply",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "graph",
+          "required": true,
+          "schema": {
+            "$ref": "schema.json#/$defs/GraphSpec"
+          }
+        },
+        {
+          "name": "input",
+          "required": false,
+          "schema": true
+        },
+        {
+          "name": "dryRun",
+          "required": false,
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "ifGeneration",
+          "required": false,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": false,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "applyResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/ApplyResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "update",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "labels",
+          "required": false,
+          "schema": {
+            "$ref": "schema.json#/$defs/Labels"
+          }
+        },
+        {
+          "name": "logLevel",
+          "required": false,
+          "schema": {
+            "$ref": "schema.json#/$defs/LogLevel"
+          }
+        },
+        {
+          "name": "suspended",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "ifGeneration",
+          "required": true,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": true,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "updateResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/UpdateResult"
+        }
+      },
+      "x-params-schema": {
+        "$defs": {
+          "Labels": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "propertyNames": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "LogLevel": {
+            "enum": [
+              "trace",
+              "debug",
+              "info",
+              "warn",
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "labels"
+            ]
+          },
+          {
+            "required": [
+              "logLevel"
+            ]
+          },
+          {
+            "required": [
+              "suspended"
+            ]
+          }
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          },
+          "ifGeneration": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "labels": {
+            "$ref": "#/$defs/Labels"
+          },
+          "logLevel": {
+            "$ref": "#/$defs/LogLevel"
+          },
+          "suspended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ifGeneration",
+          "idempotencyKey"
+        ],
+        "title": "UpdateParams",
+        "type": "object"
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "stop",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "mode",
+          "required": true,
+          "schema": {
+            "$ref": "schema.json#/$defs/StopMode"
+          }
+        },
+        {
+          "name": "ifGeneration",
+          "required": true,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": true,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "stopResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/StopResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "retry",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ifGeneration",
+          "required": true,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": true,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "retryResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RetryResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "resubmit",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ifGeneration",
+          "required": true,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "ifRunId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": true,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        },
+        {
+          "name": "replacementInput",
+          "required": false,
+          "schema": true
+        }
+      ],
+      "result": {
+        "name": "resubmitResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/ResubmitResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "delete",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ifGeneration",
+          "required": true,
+          "schema": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "ifRunId",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "required": true,
+          "schema": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "deleteResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/DeleteResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "get",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "atCursor",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "getResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/GetResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "watch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "name": "fromCursor",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "watchResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/WatchResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "logs",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "logsResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/LogsResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "agent/attach",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "execution",
+          "required": true,
+          "schema": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "agentAttachResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/AgentAttachResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "run/submit",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "submission",
+          "required": true,
+          "schema": {
+            "$ref": "schema.json#/$defs/RunSubmission"
+          }
+        }
+      ],
+      "result": {
+        "name": "runSubmitResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunSubmitResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/list",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "runListResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunListResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/status",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "runStatusResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunStatusResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/watch",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "fromCursor",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "runWatchResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunWatchResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "run/logs",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "fromCursor",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "name": "execution",
+          "required": false,
+          "schema": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "runLogsResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunLogsResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "run/attach",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "execution",
+          "required": true,
+          "schema": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "runAttachResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunAttachResult"
+        }
+      },
+      "x-subscription": true,
+      "x-transport-requirements": {
+        "inboundNotifications": true,
+        "serverPush": true
+      }
+    },
+    {
+      "name": "run/force",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "runForceResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunForceResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    }
+  ],
+  "openrpc": "1.3.2",
+  "x-generic-subscription-framing": {
+    "description": "`watch`, `logs`, and `agent/attach` each establish a subscription through one JSON-RPC result. `run/watch`, `run/logs`, and `run/attach` use the same framing. The connection layer establishes all six subscriptions; `Dispatcher::dispatch` alone cannot answer them. After establishment, every subscription uses the generic notification methods below. No method-specific event, cancel, or closed names exist on the wire: `watch/event`, `watch/cancel`, `watch/closed`, `logs/event`, `logs/cancel`, `logs/closed`, `agent/attach/event`, `agent/attach/cancel`, and `agent/attach/closed` are not methods. `$/cancelRequest` asks the transport to cancel an in-flight unary request by its RequestId. An unknown or already-completed ID is ignored, and cancellation makes no rollback claim after backend state commits.",
+    "notifications": {
+      "$/cancelRequest": {
+        "$ref": "schema.json#/$defs/CancelRequestParams"
+      },
+      "event": {
+        "$ref": "schema.json#/$defs/EventNotification"
+      },
+      "subscription/cancel": {
+        "$ref": "schema.json#/$defs/SubscriptionCancelParams"
+      },
+      "subscription/closed": {
+        "$ref": "schema.json#/$defs/SubscriptionClosedNotification"
+      }
+    }
+  }
+}
