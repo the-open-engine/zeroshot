@@ -122,6 +122,13 @@ jobs:
               echo "::error::$DOCS_VERSION does not resolve to $SOURCE_COMMIT"
               exit 1
             }
+            if [[ "$UPDATE_STABLE" == "true" ]]; then
+              latest_tag="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+              [[ "$DOCS_VERSION" == "$latest_tag" ]] || {
+                echo "::error::stable documentation must use the newest release $latest_tag"
+                exit 1
+              }
+            fi
           fi
 
       - name: Setup Python 3.12
