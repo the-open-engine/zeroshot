@@ -1680,10 +1680,10 @@ delivery binding may declare it.</p>
 <p>Submission is atomic, and every node receives a stable run ID. <code>needs</code> gates readiness only; plan
 nodes have no output interpolation or shared mutable input. After dependencies merge, Cloud
 materializes the node against an exact source revision. When materialization completes, <code>readyAt</code>
-is set and the node gets a queue window of up to 24 hours, bounded by plan expiry. A merge conflict
-is repaired by the conflicting run itself in the same checkout and delivery loop. A descendant
-cannot repair a failed predecessor; it ends as <code>dependency_failed</code>. The v1 API has no aggregate
-event stream, so <code>MergePlan.watch()</code> polls and yields changed snapshots.</p>
+is set and the node's queue deadline is the earlier of plan expiry and seven days after <code>readyAt</code>.
+A merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop.
+A descendant cannot repair a failed predecessor; it ends as <code>dependency_failed</code>. The v1 API has no
+aggregate event stream, so <code>MergePlan.watch()</code> polls and yields changed snapshots.</p>
 <h2 id="pass-exact-protocol-documents">Pass exact protocol documents<a class="headerlink" href="#pass-exact-protocol-documents" title="Permanent link">&para;</a></h2>
 <p><code>GraphSpec</code> and <code>RuntimePlan</code> wrap exact JSON mappings without loss. Python neither copies the Rust
 schemas nor applies its own semantic checks:</p>

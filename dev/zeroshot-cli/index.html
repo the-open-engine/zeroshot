@@ -2874,8 +2874,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-22-33" name="__codelineno-22-33" href="#__codelineno-22-33"></a>pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 <a id="__codelineno-22-34" name="__codelineno-22-34" href="#__codelineno-22-34"></a>binding may declare it. `needs` gates readiness but does not pass output between runs.
 <a id="__codelineno-22-35" name="__codelineno-22-35" href="#__codelineno-22-35"></a>Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
-<a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a>materializes it against an exact source revision. Completion starts a queue window of up to 24
-<a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a>hours, bounded by `expiresAt`.
+<a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a>materializes it against an exact source revision. Once materialization completes, `readyAt` is set
+<a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a>and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
 <a id="__codelineno-22-38" name="__codelineno-22-38" href="#__codelineno-22-38"></a>`expiresAt` must be in the future and no more than
 <a id="__codelineno-22-39" name="__codelineno-22-39" href="#__codelineno-22-39"></a>seven days away. Plans cannot be edited or retried in place.
 </code></pre></div>
