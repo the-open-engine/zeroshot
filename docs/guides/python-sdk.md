@@ -118,10 +118,10 @@ async def submit_release_plan() -> None:
 Submission is atomic, and every node receives a stable run ID. `needs` gates readiness only; plan
 nodes have no output interpolation or shared mutable input. After dependencies merge, Cloud
 materializes the node against an exact source revision. When materialization completes, `readyAt`
-is set and the node gets a queue window of up to 24 hours, bounded by plan expiry. A merge conflict
-is repaired by the conflicting run itself in the same checkout and delivery loop. A descendant
-cannot repair a failed predecessor; it ends as `dependency_failed`. The v1 API has no aggregate
-event stream, so `MergePlan.watch()` polls and yields changed snapshots.
+is set and the node's queue deadline is the earlier of plan expiry and seven days after `readyAt`.
+A merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop.
+A descendant cannot repair a failed predecessor; it ends as `dependency_failed`. The v1 API has no
+aggregate event stream, so `MergePlan.watch()` polls and yields changed snapshots.
 
 ## Pass exact protocol documents
 

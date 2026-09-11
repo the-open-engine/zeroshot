@@ -117,10 +117,11 @@ async def run_plan() -> None:
 Plan input is static JSON. A dependency controls when a node may start; it doesn't copy output into
 another node. Run IDs are assigned once during atomic submission. After dependencies merge, Cloud
 materializes a node against an exact source revision. When materialization completes, `readyAt` is
-set and the node gets a queue window of up to 24 hours, bounded by plan expiry. A merge conflict is
-repaired by the conflicting run itself in the same checkout and delivery loop. A descendant cannot
-repair a failed predecessor; it ends as `dependency_failed`. `MergePlan.watch()` polls the aggregate
-Cloud status and emits changed snapshots because the v1 plan API has no streaming endpoint.
+set and the node's queue deadline is the earlier of plan expiry and seven days after `readyAt`. A
+merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop. A
+descendant cannot repair a failed predecessor; it ends as `dependency_failed`. `MergePlan.watch()`
+polls the aggregate Cloud status and emits changed snapshots because the v1 plan API has no
+streaming endpoint.
 
 ## Exact graph and runtime control
 

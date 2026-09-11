@@ -118,7 +118,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
   and profile. The target resolves each node's exact revision only after its dependencies succeed;
   plans have static inputs, no cross-node dataflow, and no retry-in-place. Agent runtime bindings
-  cannot declare `GH_TOKEN`; the sole merge-delivery binding owns the GitHub write credential.
+  cannot declare `GH_TOKEN`; the sole merge-delivery binding owns the GitHub write credential. A
+  node's queue deadline is the earlier of plan expiry and seven days after readiness.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
