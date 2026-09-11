@@ -19,6 +19,26 @@ type ServerRequest = tokio_tungstenite::tungstenite::handshake::server::Request;
 type ServerResponse = tokio_tungstenite::tungstenite::handshake::server::Response;
 
 #[test]
+fn file_registry_initializes_cloud_with_a_stable_hosted_identity() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    let cloud = FileTargetRegistry::new(path.clone())
+        .get("cloud")
+        .assert_value();
+    assert_eq!(cloud.name, "cloud");
+    assert_eq!(cloud.origin, "https://api.cloud.zeroshot.sh");
+    assert!(matches!(cloud.access, TargetAccess::Hosted { .. }));
+    assert_eq!(
+        FileTargetRegistry::new(path).get("cloud").assert_value(),
+        cloud
+    );
+    assert!(matches!(
+        FileTargetRegistry::new(root.path("other/targets.json")).get("unknown"),
+        Err(TargetConnectorError::NotFound(_))
+    ));
+}
+
+#[test]
 fn file_registry_round_trips_named_targets_without_credentials() {
     let root = temp_root();
     let path = root.path("config/targets.json");
@@ -48,9 +68,12 @@ fn file_registry_round_trips_direct_access_without_a_device_credential() {
     };
     registry.insert(direct.clone()).assert_value();
     assert_eq!(registry.get("vm").assert_value(), direct);
-    let stored = std::fs::read_to_string(path).assert_value();
-    assert!(stored.contains(r#""mode": "direct""#));
-    assert!(!stored.contains("deviceToken"));
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).assert_value()).assert_value();
+    assert_eq!(
+        stored["targets"]["vm"]["access"],
+        serde_json::json!({"mode": "direct"})
+    );
 }
 
 #[test]

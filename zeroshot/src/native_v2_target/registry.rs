@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
-use super::contract::{normalize_origin, validate_target_name};
+use super::contract::{normalize_origin, prepare_target, validate_target_name};
+use super::TargetAdd;
 use super::{TargetAccess, TargetConnectorError, TargetRecord};
 
 const REGISTRY_VERSION: u32 = 5;
@@ -41,10 +42,9 @@ impl FileTargetRegistry {
         create_private_directory(parent)?;
         let lock = open_lock(&self.path.with_extension("lock"))?;
         lock_registry(&lock, true)?;
-        let mut state = read_registry(&self.path)?;
-        let migrate = state.version == LEGACY_REGISTRY_VERSION;
+        let (mut state, initialized) = initialize_registry(&self.path)?;
         let result = operation(&mut state)?;
-        if mutate || migrate {
+        if mutate || initialized {
             state.version = REGISTRY_VERSION;
             write_registry(&self.path, &state)?;
         }
@@ -111,6 +111,21 @@ pub(super) fn lock_registry(lock: &File, exclusive: bool) -> Result<(), TargetCo
     } else {
         FileExt::lock_shared(lock).map_err(TargetConnectorError::RegistryIo)
     }
+}
+
+fn initialize_registry(path: &Path) -> Result<(RegistryState, bool), TargetConnectorError> {
+    let mut state = read_registry(path)?;
+    let missing_cloud = !state.targets.contains_key("cloud");
+    let initialized = state.version == LEGACY_REGISTRY_VERSION || missing_cloud;
+    if missing_cloud {
+        let cloud = prepare_target(TargetAdd {
+            name: "cloud".to_owned(),
+            url: "https://api.cloud.zeroshot.sh".to_owned(),
+            direct: false,
+        })?;
+        state.targets.insert(cloud.name.clone(), cloud);
+    }
+    Ok((state, initialized))
 }
 
 fn read_registry(path: &Path) -> Result<RegistryState, TargetConnectorError> {

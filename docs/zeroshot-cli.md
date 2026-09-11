@@ -40,7 +40,9 @@ Options:
 ### `zeroshot target`
 
 ```text
-Manage named targets or serve a direct target
+Manage named targets or serve a direct target.
+
+The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in.
 
 Usage: zeroshot target <COMMAND>
 
@@ -52,7 +54,7 @@ Commands:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 #### `zeroshot target add`

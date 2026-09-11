@@ -190,7 +190,12 @@ impl TargetHttpControlAuthority {
             )
             .await?;
         validate_device_code(&code)?;
-        self.notifier.show(&code.verification_uri, &code.user_code);
+        self.notifier.show(
+            code.verification_uri_complete
+                .as_deref()
+                .unwrap_or(&code.verification_uri),
+            &code.user_code,
+        );
         let token = self
             .poll_for_token(DevicePoll {
                 device_token: request.device_token,
