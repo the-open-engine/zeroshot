@@ -4,11 +4,54 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::super::controller_authority::credentials::{
     refresh_lock_is_held,
-    test_support::{MemoryDeviceCodeNotifier, UnavailableCredentialStore},
+    test_support::{MemoryCredentialStore, MemoryDeviceCodeNotifier, UnavailableCredentialStore},
 };
 use super::super::*;
 use super::fixtures::{hosted_target, temp_root};
-use super::hosted_authority::{LoginBlockingCredentialStore, spawn_target_authority};
+use super::hosted_authority::{
+    LoginBlockingCredentialStore, spawn_target_authority, spawn_target_authority_with_complete_uri,
+};
+
+#[tokio::test]
+async fn login_displays_the_validated_complete_uri_or_plain_fallback() {
+    for (complete_uri, expected_path) in [
+        (None, Some("/activate")),
+        (
+            Some("{origin}/activate?user_code=ABCD-EFGH"),
+            Some("/activate?user_code=ABCD-EFGH"),
+        ),
+        (
+            Some("https://other.example/activate?user_code=ABCD-EFGH"),
+            None,
+        ),
+        (Some("{origin}/activate?user_code=ABCD-EFGH#fragment"), None),
+    ] {
+        let root = temp_root();
+        let request_count = if expected_path.is_some() { 5 } else { 3 };
+        let (origin, server) =
+            spawn_target_authority_with_complete_uri(request_count, complete_uri).await;
+        let notifier = Arc::new(MemoryDeviceCodeNotifier::default());
+        let authority = TargetHttpControlAuthority::with_dependencies(
+            Arc::new(MemoryCredentialStore::default()),
+            notifier.clone(),
+            root.path("refresh-locks"),
+        );
+        let result = authority
+            .login(&hosted_target("local", origin.clone()))
+            .await;
+        if let Some(path) = expected_path {
+            result.assert_value();
+            assert_eq!(
+                notifier.values(),
+                vec![(format!("{origin}{path}"), "ABCD-EFGH".to_owned())]
+            );
+        } else {
+            assert!(result.is_err());
+            assert!(notifier.values().is_empty());
+        }
+        assert_eq!(server.await.assert_value().len(), request_count);
+    }
+}
 
 #[tokio::test]
 async fn login_preflights_credential_persistence_before_requesting_a_device_code() {

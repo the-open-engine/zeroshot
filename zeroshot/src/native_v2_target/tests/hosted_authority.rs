@@ -56,13 +56,20 @@ pub(super) async fn bind_target_authority() -> (TcpListener, std::net::SocketAdd
 pub(super) async fn spawn_target_authority(
     request_count: usize,
 ) -> (String, tokio::task::JoinHandle<Vec<CapturedHttpRequest>>) {
+    spawn_target_authority_with_complete_uri(request_count, None).await
+}
+
+pub(super) async fn spawn_target_authority_with_complete_uri(
+    request_count: usize,
+    complete_uri: Option<&str>,
+) -> (String, tokio::task::JoinHandle<Vec<CapturedHttpRequest>>) {
     let (listener, address, origin) = bind_target_authority().await;
-    let server_origin = origin.clone();
+    let complete_uri = complete_uri.map(|uri| uri.replace("{origin}", &origin));
     let server = tokio::spawn(serve_target_authority(
         listener,
         request_count,
-        server_origin,
         address,
+        complete_uri,
     ));
     (origin, server)
 }
@@ -70,19 +77,36 @@ pub(super) async fn spawn_target_authority(
 async fn serve_target_authority(
     listener: TcpListener,
     request_count: usize,
-    origin: String,
     address: std::net::SocketAddr,
+    complete_uri: Option<String>,
 ) -> Vec<CapturedHttpRequest> {
+    let origin = format!("http://{address}");
     let mut captured = Vec::new();
     let mut token_index = 0_u8;
     for _ in 0..request_count {
         let (mut stream, _) = listener.accept().await.assert_value();
         let request = read_http_request(&mut stream).await;
         let body = authority_response(&request, &origin, address, &mut token_index);
+        let body = device_complete_uri(&request, body, complete_uri.as_deref());
         write_http_response(&mut stream, &body).await;
         captured.push(request);
     }
     captured
+}
+
+fn device_complete_uri(
+    request: &CapturedHttpRequest,
+    body: String,
+    complete_uri: Option<&str>,
+) -> String {
+    if request.path == "/oauth/device" {
+        if let Some(uri) = complete_uri {
+            let mut value: serde_json::Value = serde_json::from_str(&body).assert_value();
+            value["verification_uri_complete"] = json!(uri);
+            return value.to_string();
+        }
+    }
+    body
 }
 
 fn authority_response(

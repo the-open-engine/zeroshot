@@ -26,6 +26,9 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum CliCommand {
     /// Manage named targets or serve a direct target.
+    ///
+    /// The built-in `cloud` target points to https://api.cloud.zeroshot.sh.
+    /// Run `zeroshot target login cloud` to sign in.
     Target {
         #[command(subcommand)]
         command: TargetCommand,

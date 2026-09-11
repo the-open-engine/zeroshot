@@ -106,7 +106,15 @@ isolation, builds, and HTTPS.
 
 ### Zeroshot Cloud: close the laptop
 
-Use the same CLI against a managed target with a shared team queue and durable run history.
+Use the built-in `cloud` target at `https://api.cloud.zeroshot.sh` for a shared team queue and
+durable run history:
+
+```bash
+zeroshot target login cloud
+```
+
+Open the printed link to sign in with the device code already filled in. Use `--target cloud` when
+submitting runs.
 
 ## Reference
 
