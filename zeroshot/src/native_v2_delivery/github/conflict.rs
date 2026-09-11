@@ -99,10 +99,25 @@ async fn require_commit(
     bounded_status(command, context.authority.config.api_deadline).await
 }
 
+async fn configure_delivery_identity(
+    context: ConflictContext<'_>,
+) -> Result<(), GitHubAuthorityError> {
+    for (key, value) in [
+        ("user.name", "Zeroshot"),
+        ("user.email", "delivery@zeroshot.invalid"),
+    ] {
+        let mut command = local_git_command(&context.authority.config, &context.request.workspace);
+        command.args(["config", "--local", "--replace-all", key, value]);
+        bounded_status(command, context.authority.config.api_deadline).await?;
+    }
+    Ok(())
+}
+
 async fn merge_target(
     context: ConflictContext<'_>,
     target_revision: &str,
 ) -> Result<i32, GitHubAuthorityError> {
+    configure_delivery_identity(context).await?;
     let mut command = local_git_command(&context.authority.config, &context.request.workspace);
     command.args([
         "-c",

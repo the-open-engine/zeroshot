@@ -80,7 +80,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
-  credential. Merge receipts preserve GitHub's authoritative merged revision.
+  credential, and the trusted lane pins their repository-local commit identity to
+  `Zeroshot <delivery@zeroshot.invalid>` before handoff. Merge receipts preserve GitHub's
+  authoritative merged revision.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
