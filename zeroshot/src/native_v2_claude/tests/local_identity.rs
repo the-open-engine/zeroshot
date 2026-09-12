@@ -18,7 +18,6 @@ fn local_claude_user_reuses_home_without_moving_session_state() {
             ("TMPDIR".to_owned(), "/shared/tmp".to_owned()),
         ]))
         .assert_value(),
-        turn_timeout: Duration::from_secs(1),
         process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
     })
     .assert_value();

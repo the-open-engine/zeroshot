@@ -3,7 +3,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 use openengine_cluster_protocol::{
     DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey, NodeName, RunSize,
@@ -81,7 +80,6 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
         git_program: PathBuf::from("/usr/bin/git"),
         gh_program: PathBuf::from("/usr/bin/false"),
         process_pool: test_process_pool(),
-        claude_turn_timeout: Duration::from_secs(1),
     }
 }
 
@@ -97,7 +95,6 @@ pub(super) fn capsule_config(storage_root: PathBuf) -> ProductionCapsuleConfig {
         git_program: config.git_program,
         gh_program: config.gh_program,
         process_pool: allocator_process_pool(),
-        claude_turn_timeout: config.claude_turn_timeout,
         operator_diagnostics: std::sync::Arc::new(
             crate::native_v2_target_authority::OperatorDiagnosticStore::default(),
         ),

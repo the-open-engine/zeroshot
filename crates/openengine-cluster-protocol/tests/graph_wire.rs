@@ -401,3 +401,24 @@ fn diagnostic_indices_have_matching_u32_bounds_in_rust_and_schema() {
         );
     }
 }
+
+#[test]
+fn omitted_node_deadlines_round_trip_and_match_the_schema() {
+    let mut graph = full_graph();
+    for index in [0, 1] {
+        graph
+            .pointer_mut(&format!("/root/children/{index}"))
+            .assert_value()
+            .as_object_mut()
+            .assert_value()
+            .remove("timeoutMs");
+    }
+    let parsed: GraphSpec = serde_json::from_value(graph.clone()).assert_value();
+    assert_eq!(serde_json::to_value(parsed).assert_value(), graph);
+    let schema = serde_json::to_value(schemars::schema_for!(GraphSpec)).assert_value();
+    assert!(
+        jsonschema::validator_for(&schema)
+            .assert_value()
+            .is_valid(&graph)
+    );
+}

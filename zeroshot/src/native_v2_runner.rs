@@ -421,3 +421,5 @@ pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "native_v2_runner/tests.rs"]
 mod tests;
+
+pub(crate) use output::current_timestamp;

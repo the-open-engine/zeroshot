@@ -378,7 +378,7 @@ fn process_command_with_deadline(
             current_dir: std::env::current_dir().assert_value(),
             mode: WorkspaceAccessMode::ReadOnly,
         },
-        deadline,
+        deadline: Some(deadline),
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::process::Child;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, Instant, sleep_until, timeout, timeout_at};
+use tokio::time::{Duration, Instant, timeout, timeout_at};
 
 use crate::execution::driver::DriverCancellation;
 use super::platform::{ProcessTreeHandle, process_tree_has_live_members, terminate_process_tree};
@@ -21,7 +21,7 @@ pub(super) struct SupervisorRequest {
     pub child: Child,
     pub process_tree: ProcessTreeHandle,
     pub cancellation: DriverCancellation,
-    pub deadline: Instant,
+    pub deadline: Option<Instant>,
     pub release: watch::Receiver<bool>,
     pub writer_stop: watch::Sender<bool>,
     pub io_failures: mpsc::UnboundedReceiver<IoFailure>,
@@ -79,7 +79,7 @@ impl SessionState {
 
 pub(super) async fn supervise_session(mut request: SupervisorRequest) {
     let mut state = SessionState::default();
-    let deadline = sleep_until(request.deadline);
+    let deadline = super::wait_for_deadline(request.deadline);
     tokio::pin!(deadline);
     loop {
         tokio::select! {
@@ -242,8 +242,10 @@ async fn drain_io_tasks(request: &mut SupervisorRequest, state: &mut SessionStat
     }
 
     let io_cap = Instant::now() + PROCESS_IO_DRAIN_TIMEOUT;
-    let command_deadline_wins = request.deadline <= io_cap;
-    let drain_deadline = std::cmp::min(request.deadline, io_cap);
+    let command_deadline_wins = request.deadline.is_some_and(|deadline| deadline <= io_cap);
+    let drain_deadline = request
+        .deadline
+        .map_or(io_cap, |deadline| deadline.min(io_cap));
     let mut cancellation = request.cancellation.clone();
     let mut release = request.release.clone();
     enum DrainResult {

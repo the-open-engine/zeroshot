@@ -16,9 +16,6 @@ mod turn_process;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use tokio::time::Instant;
 
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, ProcessStdout};
 use crate::native_v2_capsule::provider_process::{
@@ -112,7 +109,6 @@ pub struct ClaudeAdapter {
     runtime_home: PathBuf,
     local_user_home: Option<PathBuf>,
     base_environment: ClaudeProcessEnvironment,
-    turn_timeout: Duration,
     runners: ProviderProcessRunners,
 }
 
@@ -125,7 +121,6 @@ pub struct ClaudeAdapterConfig {
     /// Current-user home is available only to the built-in local target.
     pub local_user_home: Option<PathBuf>,
     pub base_environment: ClaudeProcessEnvironment,
-    pub turn_timeout: Duration,
     pub process_pool: HostedProcessPool,
 }
 
@@ -155,7 +150,6 @@ impl ClaudeAdapter {
             runtime_home: configuration.runtime_home,
             local_user_home: configuration.local_user_home,
             base_environment: configuration.base_environment,
-            turn_timeout: configuration.turn_timeout,
             runners,
         })
     }
@@ -213,7 +207,7 @@ impl ClaudeAdapter {
                     with_driver_detail(error, "Claude workspace policy rejected the node role")
                 })?,
             },
-            deadline: turn.deadline,
+            deadline: None,
         })
     }
 
@@ -376,7 +370,6 @@ struct ClaudeTurn<'a> {
     invocation: &'a DriverInvocation,
     session: &'a ClaudeSession,
     control: &'a DriverControl,
-    deadline: Instant,
 }
 
 enum ClaudeTurnAdvance {

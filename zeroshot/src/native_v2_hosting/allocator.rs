@@ -47,7 +47,6 @@ pub(super) struct ProductionCapsuleConfig {
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
     pub process_pool: HostedProcessPool,
-    pub claude_turn_timeout: Duration,
     pub operator_diagnostics: Arc<OperatorDiagnosticStore>,
 }
 
@@ -224,7 +223,6 @@ impl ProductionCapsuleAllocator {
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user_home: None,
                     base_environment,
-                    turn_timeout: self.config.claude_turn_timeout,
                     process_pool,
                 }))
             }

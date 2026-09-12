@@ -5,7 +5,6 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::Mutex;
-use tokio::time::Instant;
 
 use crate::execution::SessionScope;
 use crate::execution::process::{
@@ -334,7 +333,6 @@ pub(crate) struct ProviderFailure<'a> {
     pub(crate) detail: Option<&'a str>,
     pub(crate) retryable: bool,
     pub(crate) has_session: bool,
-    pub(crate) deadline: Instant,
 }
 
 impl ProviderFailureRetry {
@@ -361,7 +359,7 @@ impl ProviderFailureRetry {
         control
             .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
             .await?;
-        if !failure.retryable || self.used || Instant::now() >= failure.deadline {
+        if !failure.retryable || self.used {
             return Err(NodeRunnerError::Driver);
         }
         self.used = true;

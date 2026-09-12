@@ -99,7 +99,6 @@ fn bedrock_environment(
             "/usr/bin:/bin".to_owned(),
         )]))
         .assert_value(),
-        turn_timeout: Duration::from_secs(1),
         process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
     })
     .assert_value();

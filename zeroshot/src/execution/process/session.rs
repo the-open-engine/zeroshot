@@ -30,7 +30,7 @@ pub struct ProcessSessionCommand {
     pub argv: Vec<String>,
     pub environment: BTreeMap<String, String>,
     pub workspace: WorkspaceCapability,
-    pub deadline: Instant,
+    pub deadline: Option<Instant>,
 }
 
 impl fmt::Debug for ProcessSessionCommand {

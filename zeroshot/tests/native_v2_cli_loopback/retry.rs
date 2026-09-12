@@ -149,7 +149,6 @@ impl RetryAllocator {
                 runtime_home: self.runtime_home.clone(),
                 local_user_home: None,
                 base_environment,
-                turn_timeout: Duration::from_secs(10),
                 process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
                     .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             })

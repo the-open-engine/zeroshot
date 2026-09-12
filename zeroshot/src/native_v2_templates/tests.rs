@@ -118,6 +118,14 @@ async fn every_supported_materialization_is_admissible() {
 
     for (template, delivery, expected) in cases {
         assert_admissible(template, delivery, &expected).await;
+        let graph = template.materialize(delivery).assert_value();
+        for node in all_nodes(&graph.root) {
+            match node {
+                GraphNode::Step(node) => assert!(node.timeout_ms.is_none()),
+                GraphNode::Verifier(node) => assert!(node.timeout_ms.is_none()),
+                _ => {}
+            }
+        }
     }
 }
 

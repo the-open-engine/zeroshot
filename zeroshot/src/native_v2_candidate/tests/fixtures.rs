@@ -185,7 +185,6 @@ pub(super) fn candidate_config(
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
             ]))
             .assert_value_with("Claude environment"),
-            turn_timeout: Duration::from_secs(1),
             process_pool: pool,
         }),
     };

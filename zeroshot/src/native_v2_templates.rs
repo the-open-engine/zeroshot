@@ -31,7 +31,6 @@ use values::*;
 #[path = "native_v2_templates/tests.rs"]
 mod tests;
 
-const NODE_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 const CHANGE_ITERATIONS: u64 = 10;
 const TASK_FIELD: &str = "task";
 const ACCEPTANCE_FEEDBACK_FIELD: &str = "acceptanceFeedback";
@@ -111,7 +110,7 @@ fn task_worker(
         output: PayloadType::Null,
         input_bindings: vec![state_input(TASK_FIELD, TASK_FIELD)?],
         write_bindings: Vec::new(),
-        timeout_ms: positive(NODE_TIMEOUT_MS)?,
+        timeout_ms: None,
         attempts: positive(1)?,
     }))
 }
@@ -229,7 +228,7 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
         ],
         write_bindings,
-        timeout_ms: positive(NODE_TIMEOUT_MS)?,
+        timeout_ms: None,
         attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
         signals,
         diagnostic: diagnostic_type()?,
@@ -278,7 +277,7 @@ fn review_repair() -> Result<GraphNode, BuiltinTemplateError> {
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
         ],
         write_bindings: Vec::new(),
-        timeout_ms: positive(NODE_TIMEOUT_MS)?,
+        timeout_ms: None,
         attempts: positive(1)?,
     }))
 }
@@ -357,7 +356,7 @@ fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError
             state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
         ],
         write_bindings: Vec::new(),
-        timeout_ms: positive(NODE_TIMEOUT_MS)?,
+        timeout_ms: None,
         attempts: positive(1)?,
     }))
 }
@@ -377,7 +376,7 @@ fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> 
             state_input(ISSUE_NUMBER_FIELD, ISSUE_NUMBER_FIELD)?,
         ],
         write_bindings,
-        timeout_ms: positive(NODE_TIMEOUT_MS)?,
+        timeout_ms: None,
         attempts: positive(1)?,
         signals,
         diagnostic: static_value(delivery_diagnostic_schema())?,

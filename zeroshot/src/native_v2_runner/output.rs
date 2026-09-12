@@ -302,7 +302,7 @@ pub(super) fn durable_output_event(output: LiveOutput) -> DurableNodeEvent {
     }
 }
 
-pub(super) fn current_timestamp() -> UnixTimestampMillis {
+pub(crate) fn current_timestamp() -> UnixTimestampMillis {
     let milliseconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()

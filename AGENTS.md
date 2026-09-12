@@ -74,13 +74,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   milliseconds and remain unchanged across durable replay.
 - Run close reserves and tombstones execution activity atomically. No late start, handle, or stream
   may surface after close returns.
+- Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
+  Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
+  The supervisor records node error codes and elapsed time in durable logs before settlement.
 - Native-v2 retries only a settled `crash` outcome when the executable has another authored
   attempt. A provider session invalidated by that active execution becomes replaceable for the
   authorized retry; passive session loss and run closure remain permanent, fail-closed loss.
 - Hosted source checkout retries only its fresh platform-owned staging workspace, within one
   allocation and one total deadline. Preserve the exact admitted revision before starting any
   graph node; terminal Git details remain redacted and private operator diagnostics.
-- Contained provider sessions bound post-exit I/O draining by the command deadline and a ten-minute
+- Contained provider sessions bound post-exit I/O draining by any explicit command deadline and a ten-minute
   ceiling while still observing cancellation and cleanup.
 - Git delivery captures bounded, credential-redacted command/status/stdout/stderr diagnostics and
   routes unfamiliar failures to the existing delivery repair worker through `repair_required`.
