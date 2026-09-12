@@ -2,94 +2,94 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/zeroshot-cli/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/zeroshot-distribution/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/concepts/execution/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/concepts/runtimes-and-connections/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/concepts/targets/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/getting-started/first-run/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/getting-started/install/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/guides/observe-and-control/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/guides/python-sdk/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/project/versioning/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/python/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/admission/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/api/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/data-plane/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/graph/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/lifecycle/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/portable-bindings/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/cluster/watch/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/python/client/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/python/configuration/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/python/errors/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
     <url>
          <loc>https://the-open-engine.github.io/zeroshot/dev/reference/python/results/</loc>
-         <lastmod>2026-09-11</lastmod>
+         <lastmod>2026-09-12</lastmod>
     </url>
 </urlset>
