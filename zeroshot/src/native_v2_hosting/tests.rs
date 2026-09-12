@@ -25,6 +25,7 @@ use crate::native_v2_target_authority::TargetAuthorityErrorKind;
 use super::allocator::{ProductionCapsuleAllocator, monitor_workspace_identity};
 use super::repository::{RepositoryInstall, install_repository, path_source};
 
+mod checkout;
 mod fixtures;
 
 use fixtures::*;

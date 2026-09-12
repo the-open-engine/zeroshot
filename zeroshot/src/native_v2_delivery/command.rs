@@ -50,6 +50,22 @@ impl fmt::Display for GitCommandFailure {
 impl std::error::Error for GitCommandFailure {}
 
 impl GitCommandFailure {
+    pub(crate) fn operator_stderr(&self) -> String {
+        format!(
+            "stderr{}:\n{}\ncommand: {}\nworkingDirectory: {}\nexitStatus: {:?}\n{}",
+            if self.stderr_truncated {
+                " (truncated)"
+            } else {
+                ""
+            },
+            self.stderr,
+            self.command,
+            self.working_directory,
+            self.exit_status,
+            self.context,
+        )
+    }
+
     pub(crate) fn require_success(self) -> Result<Self, Self> {
         if self.exit_status == Some(0) {
             Ok(self)
