@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_contract::RunSubmission;
+use crate::execution::SessionScope;
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NativeNodeRunner, NodeDriver,
     NodeRole, NodeSession, SessionFactory,
@@ -20,7 +22,9 @@ use crate::native_v2_runner::{
 use crate::v2_run_ledger::CreateRun;
 use crate::v2_run_ledger::fake::FakeRunLedger;
 
-struct FakeSession;
+struct FakeSession {
+    closed: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl NodeSession for FakeSession {
@@ -32,11 +36,16 @@ impl NodeSession for FakeSession {
         true
     }
 
-    async fn close(&self) {}
+    async fn close(&self) {
+        self.closed.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
-#[derive(Clone, Default)]
-struct FakeSessionFactory;
+#[derive(Default)]
+struct FakeSessionFactory {
+    opened: AtomicUsize,
+    closed: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl SessionFactory for FakeSessionFactory {
@@ -45,7 +54,10 @@ impl SessionFactory for FakeSessionFactory {
         _invocation: &NodeInvocation,
         _environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
-        Ok(Arc::new(FakeSession))
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(FakeSession {
+            closed: self.closed.clone(),
+        }))
     }
 }
 
@@ -55,6 +67,7 @@ enum Behavior {
         delay: Duration,
         outcome: WorkerOutcome,
     },
+    Fail(NodeRunnerError),
     Hang,
 }
 
@@ -163,6 +176,7 @@ impl NodeDriver for FakeDriver {
                 self.state().cancellations.push(node.clone());
                 Err(NodeRunnerError::Cancelled)
             }
+            Behavior::Fail(error) => Err(error),
         };
         self.state().active -= 1;
         result
@@ -195,6 +209,7 @@ struct Harness {
     supervisor: NativeV2Supervisor,
     ledger: Arc<FakeRunLedger>,
     driver: Arc<FakeDriver>,
+    sessions: Arc<FakeSessionFactory>,
 }
 
 #[derive(Clone, Default)]
@@ -254,6 +269,15 @@ impl LiveOutputRegistrar for RejectLiveRegistrar {
 }
 
 async fn harness(graph: GraphSpec, initial_input: Value, driver: FakeDriver) -> Harness {
+    harness_with_session_scope(graph, initial_input, driver, SessionScope::Execution).await
+}
+
+async fn harness_with_session_scope(
+    graph: GraphSpec,
+    initial_input: Value,
+    driver: FakeDriver,
+    session_scope: SessionScope,
+) -> Harness {
     let runtime_nodes = executable_names(&graph.root)
         .into_iter()
         .map(|name| {
@@ -263,6 +287,7 @@ async fn harness(graph: GraphSpec, initial_input: Value, driver: FakeDriver) -> 
                     "kind": "agent",
                     "model": "gpt-5.6",
                     "effort": "max",
+                    "sessionScope": session_scope,
                     "connections": {}
                 }),
             )
@@ -303,8 +328,9 @@ async fn harness(graph: GraphSpec, initial_input: Value, driver: FakeDriver) -> 
         .await
         .assert_value_with("create run");
     let driver = Arc::new(driver);
+    let sessions = Arc::new(FakeSessionFactory::default());
     let runner = Arc::new(
-        NativeNodeRunner::new(&admitted, driver.clone(), Arc::new(FakeSessionFactory))
+        NativeNodeRunner::new(&admitted, driver.clone(), sessions.clone())
             .assert_value_with("runner"),
     );
     let environment = RunEnvironment::exact(&admitted.runtime, BTreeMap::new())
@@ -313,6 +339,7 @@ async fn harness(graph: GraphSpec, initial_input: Value, driver: FakeDriver) -> 
         supervisor: NativeV2Supervisor::new(run_id, ledger.clone(), runner, Arc::new(environment)),
         ledger,
         driver,
+        sessions,
     }
 }
 

@@ -13,6 +13,8 @@ use super::*;
 pub(super) enum Script {
     NoCi,
     PushRejected,
+    InspectFailed,
+    MergeFailed,
     CiFailed,
     Conflict,
     ConflictAtMerge,
@@ -21,6 +23,7 @@ pub(super) enum Script {
     DeferredMerge,
     StrictBehind,
     HeadAdoptionRace,
+    HeadAdoptionAfterRepair,
     HeadAdoptionRejected,
     HeadAdoptionUnavailable,
     RepeatedBehind,
@@ -67,7 +70,11 @@ impl FakeGitHub {
 
     fn review_state(&self, inspection: usize) -> GitHubReviewState {
         match self.script {
-            Script::NoCi | Script::CredentialExpires | Script::ReviewSyncRace => self.no_ci_state(),
+            Script::NoCi
+            | Script::CredentialExpires
+            | Script::ReviewSyncRace
+            | Script::InspectFailed
+            | Script::MergeFailed => self.no_ci_state(),
             Script::ReviewSyncCredentialExpires => self.no_ci_state(),
             Script::RegistrationRace => self.registration_race_state(inspection),
             Script::MultipleRegistrationWaves => self.multiple_registration_waves_state(inspection),
@@ -87,6 +94,7 @@ impl FakeGitHub {
             Script::DeferredMerge => self.no_ci_state(),
             Script::StrictBehind
             | Script::HeadAdoptionRace
+            | Script::HeadAdoptionAfterRepair
             | Script::HeadAdoptionRejected
             | Script::HeadAdoptionUnavailable
             | Script::RepeatedBehind => self.no_ci_state(),
@@ -227,7 +235,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
     ) -> Result<(), GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
         if matches!(self.script, Script::PushRejected) {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(GitHubAuthorityError::api(
+                None,
+                "unfamiliar remote refusal: uploaded pack rejected",
+            ));
         }
         if !push_succeeded(request, &self.remote).await {
             return Err(GitHubAuthorityError::Rejected);
@@ -284,9 +295,15 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
+        if matches!(self.script, Script::InspectFailed) {
+            return Err(GitHubAuthorityError::api(
+                Some(503),
+                "remote inspection service returned an unfamiliar error",
+            ));
+        }
         let inspection = self.inspections.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::CredentialExpires) && credential.expose() == "test-token" {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(GitHubAuthorityError::api(Some(401), "Bad credentials"));
         }
         let expected = if self.uses_refreshed_credential() {
             "refreshed-token"
@@ -303,6 +320,12 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         _review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
+        if matches!(self.script, Script::MergeFailed) {
+            return Err(GitHubAuthorityError::api(
+                None,
+                "remote merge service connection reset",
+            ));
+        }
         let expected = if self.uses_refreshed_credential() {
             "refreshed-token"
         } else {
@@ -318,6 +341,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             self.script,
             Script::StrictBehind
                 | Script::HeadAdoptionRace
+                | Script::HeadAdoptionAfterRepair
                 | Script::HeadAdoptionRejected
                 | Script::HeadAdoptionUnavailable
         ) && updates == 0)
@@ -343,6 +367,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             self.script,
             Script::StrictBehind
                 | Script::HeadAdoptionRace
+                | Script::HeadAdoptionAfterRepair
                 | Script::HeadAdoptionRejected
                 | Script::HeadAdoptionUnavailable
                 | Script::RepeatedBehind
@@ -395,16 +420,31 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         self.head_updates.fetch_add(1, Ordering::SeqCst);
         let mut updated = review.clone();
         updated.head_revision = head_revision;
+        if matches!(self.script, Script::HeadAdoptionAfterRepair) {
+            git(workspace, &["reset", "--hard", &review.head_revision]);
+        }
         Ok(GitHubHeadUpdateOutcome::Updated(updated))
     }
 
     async fn synchronize_review_head(
         &self,
-        _request: GitHubHeadSynchronization<'_>,
+        request: GitHubHeadSynchronization<'_>,
         credential: GitHubCredential<'_>,
     ) -> Result<(), GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
         let attempt = self.head_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if matches!(self.script, Script::HeadAdoptionAfterRepair) {
+            if attempt == 1 {
+                return Err(GitHubAuthorityError::api(
+                    None,
+                    "local fetch failed before adoption",
+                ));
+            }
+            git(
+                request.workspace,
+                &["merge", "--ff-only", &request.updated.head_revision],
+            );
+        }
         if matches!(self.script, Script::HeadAdoptionRace) && attempt == 1 {
             return Err(GitHubAuthorityError::Unavailable);
         }

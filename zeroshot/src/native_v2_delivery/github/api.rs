@@ -1,5 +1,6 @@
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::time::timeout;
 
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
@@ -25,7 +26,15 @@ impl GhCliDeliveryAuthority {
     ) -> Result<Vec<u8>, GitHubAuthorityError> {
         let mut command = clean_command(&self.config, &self.config.gh_program, credential);
         command.arg("api").args(arguments).stdout(Stdio::piped());
-        bounded_output(command, self.config.api_deadline).await
+        let context = format!("command: {:?} api {arguments:?}", self.config.gh_program);
+        bounded_output(command, self.config.api_deadline, credential)
+            .await
+            .map_err(|error| {
+                let diagnostic = format!("{context}\n{error}")
+                    .replace(credential.expose(), "[REDACTED]")
+                    .replace(&encode_basic_credential(credential.expose()), "[REDACTED]");
+                GitHubAuthorityError::api(error.api_status(), diagnostic)
+            })
     }
 
     pub(super) async fn confirm_review_head(
@@ -33,18 +42,24 @@ impl GhCliDeliveryAuthority {
         request: &GitHubReviewRequest,
         credential: GitHubCredential<'_>,
     ) -> Result<(), GitHubAuthorityError> {
-        let value = self
-            .api(
-                &[format!(
-                    "repos/{}/git/ref/heads/{}",
-                    request.target.repository, request.head_branch
-                )],
-                credential,
-            )
+        let reference = self
+            .read_reference(&request.target.repository, &request.head_branch, credential)
             .await?;
-        let reference: GitReferenceWire =
-            serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
         require_review_head(reference, request)
+    }
+
+    pub(super) async fn confirm_pushed_head(
+        &self,
+        request: &GitHubPushRequest,
+        credential: GitHubCredential<'_>,
+    ) -> Result<(), GitHubAuthorityError> {
+        let reference = self
+            .read_reference(&request.target.repository, &request.head_branch, credential)
+            .await?;
+        let revision = reference_revision(reference, &request.head_branch)?;
+        (revision == request.head_revision)
+            .then_some(())
+            .ok_or(GitHubAuthorityError::Rejected)
     }
 
     pub(super) async fn target_revision(
@@ -52,24 +67,31 @@ impl GhCliDeliveryAuthority {
         review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<String, GitHubAuthorityError> {
+        let reference = self
+            .read_reference(&review.repository, &review.target_branch, credential)
+            .await?;
+        reference_revision(reference, &review.target_branch)
+    }
+    async fn read_reference(
+        &self,
+        repository: &str,
+        branch: &str,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitReferenceWire, GitHubAuthorityError> {
         let value = self
             .api(
-                &[format!(
-                    "repos/{}/git/ref/heads/{}",
-                    review.repository, review.target_branch
-                )],
+                &[format!("repos/{repository}/git/ref/heads/{branch}")],
                 credential,
             )
             .await?;
-        let reference: GitReferenceWire =
-            serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
-        reference_revision(reference, &review.target_branch)
+        serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)
     }
 }
 
 async fn bounded_output(
     mut command: Command,
     deadline: Duration,
+    credential: GitHubCredential<'_>,
 ) -> Result<Vec<u8>, GitHubAuthorityError> {
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -97,7 +119,22 @@ async fn bounded_output(
     .map_err(|_| GitHubAuthorityError::Unavailable)?
     .map_err(|_| GitHubAuthorityError::Unavailable)?;
     if !status.success() {
-        return Err(github_api_error(&error_output));
+        let error = github_api_error(&error_output);
+        let stdout_truncated = output.len() > MAX_API_OUTPUT_BYTES;
+        let stderr_truncated = error_output.len() > MAX_API_ERROR_BYTES;
+        let (stdout, stdout_truncated) =
+            super::super::command::diagnostic_text(output, stdout_truncated, credential.expose());
+        let (stderr, stderr_truncated) = super::super::command::diagnostic_text(
+            error_output,
+            stderr_truncated,
+            credential.expose(),
+        );
+        let diagnostic = format!(
+            "exitStatus: {:?}\nstdout (truncated={stdout_truncated}):\n{stdout}\n\
+            stderr (truncated={stderr_truncated}):\n{stderr}",
+            status.code()
+        );
+        return Err(GitHubAuthorityError::api(error.api_status(), diagnostic));
     }
     validate_api_output(output)
 }
@@ -129,30 +166,7 @@ fn github_api_error(output: &[u8]) -> GitHubAuthorityError {
         .as_ref()
         .and_then(github_api_status)
         .or_else(|| github_api_status_from_text(&text));
-    let mut parts = Vec::new();
-    if let Some(message) = value
-        .as_ref()
-        .and_then(|value| value.get("message"))
-        .and_then(Value::as_str)
-        .and_then(github_api_message)
-    {
-        parts.push(message);
-    }
-    if let Some(errors) = value
-        .as_ref()
-        .and_then(|value| value.get("errors"))
-        .and_then(Value::as_array)
-    {
-        parts.extend(errors.iter().take(3).filter_map(github_api_error_detail));
-    }
-    if parts.is_empty() {
-        parts.push("GitHub CLI returned a non-structured API error".to_owned());
-    }
-    let diagnostic = status.map_or_else(
-        || parts.join("; "),
-        |status| format!("HTTP {status}: {}", parts.join("; ")),
-    );
-    GitHubAuthorityError::api(status, diagnostic)
+    GitHubAuthorityError::api(status, text.into_owned())
 }
 
 fn github_api_error_value(text: &str) -> Option<Value> {
@@ -183,75 +197,6 @@ fn github_api_status_from_text(text: &str) -> Option<u16> {
     let start = text.rfind(marker)? + marker.len();
     let digits = text.get(start..)?.split(')').next()?;
     digits.parse().ok()
-}
-
-fn github_api_error_detail(value: &Value) -> Option<String> {
-    if let Some(message) = value.as_str() {
-        return github_api_message(message);
-    }
-    let mut fields = ["resource", "field", "code"]
-        .into_iter()
-        .filter_map(|field| value.get(field).and_then(Value::as_str))
-        .filter_map(safe_api_identifier)
-        .collect::<Vec<_>>();
-    if let Some(message) = value
-        .get("message")
-        .and_then(Value::as_str)
-        .and_then(github_api_message)
-    {
-        fields.push(message);
-    }
-    (!fields.is_empty()).then(|| fields.join(" "))
-}
-
-fn safe_api_identifier(value: &str) -> Option<String> {
-    (!value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')))
-    .then(|| value.to_owned())
-}
-
-fn github_api_message(value: &str) -> Option<String> {
-    let normalized = value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_lowercase();
-    exact_github_api_message(&normalized)
-        .or_else(|| classified_github_api_message(&normalized))
-        .map(str::to_owned)
-}
-
-fn exact_github_api_message(value: &str) -> Option<&'static str> {
-    Some(match value {
-        "validation failed" => "validation failed",
-        "not found" => "not found",
-        "bad credentials" => "bad credentials",
-        "server error" => "server error",
-        "service unavailable" => "service unavailable",
-        _ => return None,
-    })
-}
-
-fn classified_github_api_message(value: &str) -> Option<&'static str> {
-    if value.contains("head sha can't be blank") || value.contains("head is invalid") {
-        return Some("pull request head revision is not visible");
-    }
-    if value.contains("no commits between") {
-        return Some("no commits are visible between base and head");
-    }
-    if value.contains("pull request already exists") {
-        return Some("pull request already exists");
-    }
-    if value.contains("rate limit") {
-        return Some("rate limited");
-    }
-    if value.contains("resource not accessible by integration") {
-        return Some("resource not accessible by integration");
-    }
-    None
 }
 
 fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, GitHubAuthorityError> {

@@ -43,6 +43,13 @@ pub(super) struct MissingDispatchRequest<'graph, 'traversal> {
     pub(super) traversal: Traversal<'traversal>,
 }
 
+pub(super) struct RetryDispatchRequest<'graph, 'traversal> {
+    pub(super) spec: ExecutableSpec<'graph>,
+    pub(super) traversal: Traversal<'traversal>,
+    pub(super) execution: DurableExecution,
+    pub(super) input: Value,
+}
+
 pub(super) struct OutcomeApplication<'request, 'graph> {
     pub(super) spec: &'request ExecutableSpec<'graph>,
     pub(super) context: &'request mut Context,
@@ -53,6 +60,7 @@ pub(super) struct OutcomeApplication<'request, 'graph> {
 pub(super) struct ExecutableVisit {
     pub(super) occurrence: StructuralOccurrence,
     pub(super) matching: Vec<DurableExecution>,
+    pub(super) executions: Vec<DurableExecution>,
     pub(super) number: u64,
     pub(super) attempt: PositiveInteger,
     pub(super) existing: Option<DurableExecution>,

@@ -1,28 +1,16 @@
-use std::process::{ExitStatus, Stdio};
-use std::time::Duration;
-
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
-use tokio::time::timeout;
-
-use crate::native_v2_delivery::git_auth::encode_basic_credential;
-use crate::native_v2_target_authority::{MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES, NewOperatorDiagnostic};
+use crate::native_v2_delivery::command::{capture, GitCommandFailure};
+use crate::native_v2_target_authority::NewOperatorDiagnostic;
 
 use super::{
     GhCliDeliveryAuthority, GitHubAuthorityError, GitHubCredential, GitHubPushRequest,
     authenticated_git_command,
 };
 
-const REDACTED: &str = "[REDACTED]";
-const READ_BUFFER_BYTES: usize = 8 * 1024;
-
 pub(super) async fn push_branch(
     authority: &GhCliDeliveryAuthority,
     request: &GitHubPushRequest,
     credential: GitHubCredential<'_>,
 ) -> Result<(), GitHubAuthorityError> {
-    let basic_credential = encode_basic_credential(credential.expose());
-    let secrets = [credential.expose().as_bytes(), basic_credential.as_bytes()];
     let mut command = authenticated_git_command(&authority.config, &request.workspace, credential);
     command
         .arg("push")
@@ -32,252 +20,29 @@ pub(super) async fn push_branch(
             "https://github.com/{}.git",
             request.target.repository
         ))
-        .arg(format!("HEAD:refs/heads/{}", request.head_branch))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    match capture(command, authority.config.push_deadline, &secrets).await {
-        Ok(()) => Ok(()),
+        .arg(format!("HEAD:refs/heads/{}", request.head_branch));
+    match capture(&mut command, authority.config.push_deadline)
+        .await
+        .and_then(GitCommandFailure::require_success)
+    {
+        Ok(_) => Ok(()),
         Err(failure) => {
-            authority.record_push_failure(failure.diagnostic);
-            Err(failure.error)
-        }
-    }
-}
-
-struct PushFailure {
-    error: GitHubAuthorityError,
-    diagnostic: CommandDiagnostic,
-}
-
-impl PushFailure {
-    fn unavailable(message: &str) -> Self {
-        Self {
-            error: GitHubAuthorityError::Unavailable,
-            diagnostic: CommandDiagnostic::message(message),
-        }
-    }
-}
-
-struct CommandDiagnostic {
-    exit_status: Option<i32>,
-    stdout: CapturedText,
-    stderr: CapturedText,
-}
-
-impl CommandDiagnostic {
-    fn message(message: &str) -> Self {
-        Self {
-            exit_status: None,
-            stdout: CapturedText::default(),
-            stderr: CapturedText {
-                text: message.to_owned(),
-                truncated: false,
-            },
-        }
-    }
-}
-
-#[derive(Default)]
-struct CapturedText {
-    text: String,
-    truncated: bool,
-}
-
-struct CapturedBytes {
-    bytes: Vec<u8>,
-    retain_bytes: usize,
-    truncated: bool,
-    read_failed: bool,
-}
-
-impl CapturedBytes {
-    fn new(retain_bytes: usize) -> Self {
-        Self {
-            bytes: Vec::with_capacity(retain_bytes),
-            retain_bytes,
-            truncated: false,
-            read_failed: false,
-        }
-    }
-}
-
-struct ChildOutputs {
-    stdout: ChildStdout,
-    stderr: ChildStderr,
-}
-
-struct CapturedStreams {
-    stdout: CapturedBytes,
-    stderr: CapturedBytes,
-}
-
-enum Termination {
-    Exited(ExitStatus),
-    TimedOut,
-    Unavailable,
-}
-
-async fn capture(
-    mut command: Command,
-    deadline: Duration,
-    secrets: &[&[u8]],
-) -> Result<(), PushFailure> {
-    let retain_bytes = MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES
-        .saturating_add(secrets.iter().map(|secret| secret.len()).max().unwrap_or(0));
-    let mut child = command
-        .spawn()
-        .map_err(|_| PushFailure::unavailable("git push could not be started"))?;
-    let outputs = match (child.stdout.take(), child.stderr.take()) {
-        (Some(stdout), Some(stderr)) => ChildOutputs { stdout, stderr },
-        _ => {
-            stop_child(&mut child);
-            return Err(PushFailure::unavailable(
-                "git push output capture was unavailable",
-            ));
-        }
-    };
-    let mut captured = CapturedStreams {
-        stdout: CapturedBytes::new(retain_bytes),
-        stderr: CapturedBytes::new(retain_bytes),
-    };
-    let termination = wait_for_capture(&mut child, outputs, &mut captured, deadline).await;
-    capture_result(termination, captured, secrets)
-}
-
-fn capture_result(
-    termination: Termination,
-    captured: CapturedStreams,
-    secrets: &[&[u8]],
-) -> Result<(), PushFailure> {
-    let diagnostic = CommandDiagnostic {
-        exit_status: match &termination {
-            Termination::Exited(status) => status.code(),
-            Termination::TimedOut | Termination::Unavailable => None,
-        },
-        stdout: sanitize_output(captured.stdout, secrets),
-        stderr: sanitize_output(captured.stderr, secrets),
-    };
-    match termination {
-        Termination::Exited(status) if status.success() => Ok(()),
-        Termination::Exited(_) => Err(PushFailure {
-            error: GitHubAuthorityError::Rejected,
-            diagnostic,
-        }),
-        Termination::TimedOut => Err(PushFailure {
-            error: GitHubAuthorityError::Unavailable,
-            diagnostic: with_context(diagnostic, "git push timed out"),
-        }),
-        Termination::Unavailable => Err(PushFailure {
-            error: GitHubAuthorityError::Unavailable,
-            diagnostic: with_context(diagnostic, "git push status was unavailable"),
-        }),
-    }
-}
-
-async fn wait_for_capture(
-    child: &mut Child,
-    mut outputs: ChildOutputs,
-    captured: &mut CapturedStreams,
-    deadline: Duration,
-) -> Termination {
-    let operation = async {
-        let (status, (), ()) = tokio::join!(
-            child.wait(),
-            drain_bounded(&mut outputs.stdout, &mut captured.stdout),
-            drain_bounded(&mut outputs.stderr, &mut captured.stderr),
-        );
-        status
-    };
-    match timeout(deadline, operation).await {
-        Ok(Ok(status)) => Termination::Exited(status),
-        Ok(Err(_)) => {
-            stop_child(child);
-            Termination::Unavailable
-        }
-        Err(_) => {
-            captured.stdout.truncated = true;
-            captured.stderr.truncated = true;
-            stop_child(child);
-            Termination::TimedOut
-        }
-    }
-}
-
-fn stop_child(child: &mut Child) {
-    let _ = child.start_kill();
-}
-
-async fn drain_bounded(reader: &mut (impl AsyncRead + Unpin), captured: &mut CapturedBytes) {
-    let mut buffer = [0_u8; READ_BUFFER_BYTES];
-    loop {
-        let read = match reader.read(&mut buffer).await {
-            Ok(0) => break,
-            Ok(read) => read,
-            Err(_) => {
-                captured.read_failed = true;
-                break;
+            authority.record_push_failure(&failure);
+            // A transport failure may follow an accepted push. Observe the exact remote ref before repair.
+            if authority
+                .confirm_pushed_head(request, credential)
+                .await
+                .is_ok()
+            {
+                return Ok(());
             }
-        };
-        let retained = captured
-            .retain_bytes
-            .saturating_sub(captured.bytes.len())
-            .min(read);
-        captured.bytes.extend_from_slice(&buffer[..retained]);
-        captured.truncated |= retained < read;
-    }
-}
-
-fn sanitize_output(mut captured: CapturedBytes, secrets: &[&[u8]]) -> CapturedText {
-    if captured.truncated || captured.read_failed {
-        trim_trailing_secret_prefix(&mut captured.bytes, secrets);
-    }
-    let mut text = String::from_utf8_lossy(&captured.bytes).into_owned();
-    for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
-        if let Ok(secret) = std::str::from_utf8(secret) {
-            text = text.replace(secret, REDACTED);
+            Err(failure.into())
         }
     }
-    let truncated = captured.truncated || captured.read_failed;
-    let (text, text_truncated) = truncate_text(text);
-    CapturedText {
-        text,
-        truncated: truncated || text_truncated,
-    }
-}
-
-fn trim_trailing_secret_prefix(bytes: &mut Vec<u8>, secrets: &[&[u8]]) {
-    let trim = secrets
-        .iter()
-        .filter(|secret| !secret.is_empty() && !bytes.ends_with(secret))
-        .flat_map(|secret| (1..secret.len()).map(move |length| &secret[..length]))
-        .filter(|prefix| bytes.ends_with(prefix))
-        .map(<[u8]>::len)
-        .max()
-        .unwrap_or(0);
-    bytes.truncate(bytes.len().saturating_sub(trim));
-}
-
-fn truncate_text(mut text: String) -> (String, bool) {
-    if text.len() <= MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES {
-        return (text, false);
-    }
-    let mut boundary = MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES;
-    while !text.is_char_boundary(boundary) {
-        boundary = boundary.saturating_sub(1);
-    }
-    text.truncate(boundary);
-    (text, true)
-}
-
-fn with_context(mut diagnostic: CommandDiagnostic, context: &str) -> CommandDiagnostic {
-    if diagnostic.stderr.text.is_empty() {
-        diagnostic.stderr.text = context.to_owned();
-    }
-    diagnostic
 }
 
 impl GhCliDeliveryAuthority {
-    fn record_push_failure(&self, diagnostic: CommandDiagnostic) {
+    fn record_push_failure(&self, diagnostic: &GitCommandFailure) {
         let Some(reporter) = &self.operator_diagnostics else {
             return;
         };
@@ -286,10 +51,10 @@ impl GhCliDeliveryAuthority {
             code: "git_push_failed",
             operation: "delivery.git_push",
             exit_status: diagnostic.exit_status,
-            stdout: diagnostic.stdout.text,
-            stderr: diagnostic.stderr.text,
-            stdout_truncated: diagnostic.stdout.truncated,
-            stderr_truncated: diagnostic.stderr.truncated,
+            stdout: diagnostic.stdout.clone(),
+            stderr: diagnostic.stderr.clone(),
+            stdout_truncated: diagnostic.stdout_truncated,
+            stderr_truncated: diagnostic.stderr_truncated,
         });
     }
 }
@@ -297,6 +62,9 @@ impl GhCliDeliveryAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    use crate::native_v2_target_authority::MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES;
+    const REDACTED: &str = "[REDACTED]";
 
     #[cfg(unix)]
     use std::fs;
@@ -305,7 +73,7 @@ mod tests {
     #[cfg(unix)]
     use std::sync::Arc;
     #[cfg(unix)]
-    use std::time::Instant;
+    use crate::native_v2_delivery::git_auth::encode_basic_credential;
 
     #[cfg(unix)]
     use openengine_cluster_protocol::RunId;
@@ -318,22 +86,6 @@ mod tests {
     use crate::native_v2_delivery::GhCliAuthorityConfig;
     #[cfg(unix)]
     use crate::native_v2_target_authority::OperatorDiagnosticStore;
-
-    #[test]
-    fn truncation_never_retains_a_partial_registered_secret() {
-        let secret = b"credential-value".as_slice();
-        let captured = CapturedBytes {
-            bytes: b"safe output\ncredential-val".to_vec(),
-            retain_bytes: MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES,
-            truncated: true,
-            read_failed: false,
-        };
-
-        let sanitized = sanitize_output(captured, &[secret]);
-
-        assert_eq!(sanitized.text, "safe output\n");
-        assert!(sanitized.truncated);
-    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -363,10 +115,10 @@ exit 17
         let token = "raw-github-token";
         let basic = encode_basic_credential(token);
 
-        assert_eq!(
+        assert!(matches!(
             push_branch(&authority, &request, GitHubCredential(token)).await,
-            Err(GitHubAuthorityError::Rejected)
-        );
+            Err(GitHubAuthorityError::Command(_))
+        ));
 
         let snapshot = store.snapshot(&run_id);
         assert_eq!(snapshot.diagnostics.len(), 1);
@@ -427,28 +179,36 @@ exit 17
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn capture_deadline_includes_drain_completion() {
+    async fn ambiguous_push_requires_an_exact_remote_head_observation() {
         let repository = TestGitRepository::delivery();
-        let program = executable(
-            repository.root.path(),
-            "inherited-pipe-git",
-            "#!/bin/sh\n(/usr/bin/sleep 2) &\nexit 17\n",
-        );
-        let mut command = Command::new(program);
-        command
-            .kill_on_drop(true)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let started = Instant::now();
-
-        let failure = capture(command, Duration::from_millis(20), &[])
-            .await
-            .expect_err("inherited output pipes exceed the deadline");
-
-        assert_eq!(failure.error, GitHubAuthorityError::Unavailable);
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(failure.diagnostic.stdout.truncated);
-        assert!(failure.diagnostic.stderr.truncated);
+        let request = push_request(&repository);
+        for revision in [
+            &request.head_revision,
+            &"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+        ] {
+            let body = serde_json::json!({
+                "ref": format!("refs/heads/{}", request.head_branch),
+                "object": { "type": "commit", "sha": revision }
+            });
+            let program = executable(
+                repository.root.path(),
+                "observed-head",
+                &format!("#!/bin/sh\nprintf '%s' '{}'\n", body),
+            );
+            let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+                git_program: "/usr/bin/false".into(),
+                gh_program: program,
+                home_directory: repository.root.path().to_owned(),
+                api_deadline: Duration::from_secs(1),
+                push_deadline: Duration::from_secs(1),
+            });
+            assert_eq!(
+                push_branch(&authority, &request, GitHubCredential("test-token"))
+                    .await
+                    .is_ok(),
+                revision == &request.head_revision
+            );
+        }
     }
 
     #[cfg(unix)]

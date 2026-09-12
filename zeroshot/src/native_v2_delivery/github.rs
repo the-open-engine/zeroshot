@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use tokio::process::Command;
-use tokio::time::timeout;
+use super::command::capture;
 
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
@@ -265,6 +265,9 @@ impl GhCliDeliveryAuthority {
             GitHubReviewState::Open { .. } if snapshot.head_update.is_some() => {
                 Ok(GitHubMergeRequestOutcome::HeadUpdateRequired)
             }
+            GitHubReviewState::Open {
+                checks: GitHubChecks::Passed | GitHubChecks::NotRequired,
+            } => Err(GitHubAuthorityError::Rejected),
             GitHubReviewState::Open { .. } => Ok(GitHubMergeRequestOutcome::Pending),
             GitHubReviewState::Closed => Err(GitHubAuthorityError::Rejected),
         }
@@ -335,10 +338,10 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         }
         match bounded_status(command, self.config.api_deadline).await {
             Ok(()) => Ok(GitHubMergeRequestOutcome::Accepted),
-            Err(GitHubAuthorityError::Rejected) => {
-                self.classify_rejected_merge(review, credential).await
-            }
-            Err(error) => Err(error),
+            Err(error) => match self.classify_rejected_merge(review, credential).await {
+                Ok(outcome) => Ok(outcome),
+                Err(_) => Err(error),
+            },
         }
     }
 
@@ -483,24 +486,8 @@ fn git_command(
 }
 
 fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path) -> Command {
-    let mut command = Command::new(&config.git_program);
-    command
-        .kill_on_drop(true)
-        .env_clear()
-        .env("HOME", &config.home_directory)
-        .env("LANG", "C")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .arg("-c")
-        .arg("core.hooksPath=/dev/null")
-        .arg("-c")
-        .arg(format!("safe.directory={}", workspace.display()))
-        .arg("-C")
-        .arg(workspace)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    let mut command = super::command::local_git_command(&config.git_program, workspace);
+    command.env("HOME", &config.home_directory);
     command
 }
 
@@ -527,14 +514,8 @@ async fn bounded_status(
     mut command: Command,
     deadline: Duration,
 ) -> Result<(), GitHubAuthorityError> {
-    let status = timeout(deadline, command.status())
-        .await
-        .map_err(|_| GitHubAuthorityError::Unavailable)?
-        .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    status
-        .success()
-        .then_some(())
-        .ok_or(GitHubAuthorityError::Rejected)
+    capture(&mut command, deadline).await?.require_success()?;
+    Ok(())
 }
 
 async fn bounded_git_output(
@@ -542,15 +523,14 @@ async fn bounded_git_output(
     deadline: Duration,
     maximum_bytes: usize,
 ) -> Result<String, GitHubAuthorityError> {
-    command.stdout(Stdio::piped());
-    let output = timeout(deadline, command.output())
-        .await
-        .map_err(|_| GitHubAuthorityError::Unavailable)?
-        .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    if !output.status.success() || output.stdout.len() > maximum_bytes {
-        return Err(GitHubAuthorityError::Rejected);
+    let output = capture(command, deadline).await?.require_success()?;
+    if output.stdout_truncated || output.stdout.len() > maximum_bytes {
+        return Err(GitHubAuthorityError::api(
+            None,
+            format!("Git output exceeded {maximum_bytes} bytes\n{output}"),
+        ));
     }
-    String::from_utf8(output.stdout).map_err(|_| GitHubAuthorityError::Rejected)
+    Ok(output.stdout)
 }
 
 #[cfg(test)]

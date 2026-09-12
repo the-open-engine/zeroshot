@@ -130,7 +130,10 @@ impl ProductionCapsuleAllocator {
             github_token,
         })
         .await
-        .map_err(|_| CapsuleAllocationUnavailable::SourceCheckout)?;
+        .map_err(|error| {
+            error.record_diagnostic(run_id, &self.config.operator_diagnostics);
+            CapsuleAllocationUnavailable::SourceCheckout
+        })?;
         let github_config = GhCliAuthorityConfig {
             git_program: self.config.git_program.clone(),
             gh_program: self.config.gh_program.clone(),

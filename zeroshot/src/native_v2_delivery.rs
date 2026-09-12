@@ -7,6 +7,7 @@
 
 mod adapter;
 mod authority_error;
+pub(crate) mod command;
 pub(crate) mod contract;
 mod git;
 #[doc(hidden)]
@@ -16,6 +17,7 @@ mod review_head;
 #[cfg(test)]
 mod tests;
 
+pub use command::GitCommandFailure;
 pub use authority_error::{GitHubApiFailure, GitHubAuthorityError};
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 pub use review_head::{GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome};
@@ -45,7 +47,7 @@ use crate::native_v2_runner::{
     SessionFactory,
 };
 
-use self::git::{GitError, SystemGit};
+use self::git::SystemGit;
 use self::review_head::valid_head_update;
 
 pub const GITHUB_TOKEN_ENV: &str = "GH_TOKEN";
@@ -54,6 +56,7 @@ pub const DELIVERY_OPENED_LABEL: &str = "opened";
 pub const DELIVERY_MERGED_LABEL: &str = "merged";
 pub const DELIVERY_CONFLICT_LABEL: &str = "conflict";
 pub const DELIVERY_CI_FAILED_LABEL: &str = "ci_failed";
+pub const DELIVERY_REPAIR_REQUIRED_LABEL: &str = "repair_required";
 
 const DELIVERY_PR_RESULT_VERSION: &str = "v1";
 const DELIVERY_MERGE_RESULT_VERSION: &str = "v2";
@@ -424,6 +427,9 @@ fn valid_delivery_result(result: &DeliveryResult<'_>) -> bool {
 }
 
 fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
+    if outcome == DELIVERY_REPAIR_REQUIRED_LABEL {
+        return true;
+    }
     match mode {
         DeliveryMode::PullRequest => outcome == DELIVERY_OPENED_LABEL,
         DeliveryMode::MergeV1 | DeliveryMode::Merge => matches!(
@@ -533,12 +539,10 @@ fn delivery_branch(run_id: &str) -> String {
     format!("zeroshot/v2-{suffix}")
 }
 
-async fn wait_for_poll(
-    control: &mut DriverControl,
-    interval: Duration,
-) -> Result<(), NodeRunnerError> {
+async fn wait_for_poll(control: &DriverControl, interval: Duration) -> Result<(), NodeRunnerError> {
+    let mut cancellation = control.cancellation();
     tokio::select! {
-        _ = control.cancelled() => Err(NodeRunnerError::Cancelled),
+        _ = cancellation.cancelled() => Err(NodeRunnerError::Cancelled),
         () = tokio::time::sleep(interval) => Ok(()),
     }
 }

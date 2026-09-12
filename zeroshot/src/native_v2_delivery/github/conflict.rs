@@ -1,6 +1,5 @@
 use std::path::{Component, Path};
 use tokio::process::Command;
-use tokio::time::timeout;
 
 use super::*;
 
@@ -253,12 +252,11 @@ async fn bounded_exit_code(
     mut command: Command,
     deadline: Duration,
 ) -> Result<i32, GitHubAuthorityError> {
-    timeout(deadline, command.status())
-        .await
-        .map_err(|_| GitHubAuthorityError::Unavailable)?
-        .map_err(|_| GitHubAuthorityError::Unavailable)?
-        .code()
-        .ok_or(GitHubAuthorityError::Rejected)
+    let output = capture(&mut command, deadline).await?;
+    match output.exit_status {
+        Some(code @ (0 | 1)) => Ok(code),
+        _ => Err(output.into()),
+    }
 }
 
 #[cfg(test)]

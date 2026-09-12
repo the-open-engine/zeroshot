@@ -3,6 +3,15 @@
 `ghcr.io/the-open-engine/zeroshot-target` is the canonical self-hosted target server image. It
 contains the native `zeroshot` executable plus pinned Codex and Claude harness CLIs.
 
+Coding tools include Node.js 24 and npm, Python 3.12 with pip, venv and extension headers,
+Rust 1.97 with Cargo, rustfmt and Clippy, and C/C++ compilers, make, pkgconf, OpenSSL and
+libffi development files. CI compiles and executes native fixtures with these tools as an
+isolated user, with a read-only root filesystem, fresh home and no network.
+
+The image's Rust installation is read-only. Explicit `RUSTUP_HOME` settings and existing
+`~/.rustup` installations take precedence; Cargo caches stay in the agent's private home unless
+it specifies `CARGO_HOME`. Other compiler versions and project dependencies remain caller-owned.
+
 ## Run
 
 The image runs an unauthenticated direct target:

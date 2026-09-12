@@ -208,7 +208,7 @@ impl SessionPool {
             Some(SessionEntry::Lost) => Err(NodeRunnerError::SessionLost),
             Some(SessionEntry::Live(session)) => Ok(CheckoutAction::Reuse(session.clone())),
             Some(SessionEntry::Opening(ready)) => Ok(CheckoutAction::Wait(ready.subscribe())),
-            None => {
+            None | Some(SessionEntry::Replaceable) => {
                 let (ready, _) = watch::channel(false);
                 let ready = Arc::new(ready);
                 entries.insert(key.clone(), SessionEntry::Opening(ready.clone()));
@@ -229,7 +229,7 @@ impl SessionPool {
             live = session.is_live() => live,
         };
         if !live {
-            self.invalidate(key, session).await;
+            self.invalidate(key, session, SessionEntry::Lost).await;
             return Err(NodeRunnerError::SessionLost);
         }
         Ok(SessionLease {
@@ -317,11 +317,11 @@ impl SessionPool {
         result
     }
 
-    async fn invalidate(&self, key: SessionKey, session: ManagedSession) {
+    async fn invalidate(&self, key: SessionKey, session: ManagedSession, next: SessionEntry) {
         let mut entries = self.entries.lock().await;
         if matches!(entries.get(&key), Some(SessionEntry::Live(current)) if current.same(&session))
         {
-            entries.insert(key, SessionEntry::Lost);
+            entries.insert(key, next);
         }
         drop(entries);
         session.close().await;
@@ -339,7 +339,7 @@ impl SessionPool {
             .filter_map(|key| match entries.insert(key, SessionEntry::Lost) {
                 Some(SessionEntry::Live(session)) => Some(EntryToClose::Session(session)),
                 Some(SessionEntry::Opening(ready)) => Some(EntryToClose::Opening(ready)),
-                Some(SessionEntry::Lost) | None => None,
+                Some(SessionEntry::Replaceable | SessionEntry::Lost) | None => None,
             })
             .collect::<Vec<_>>();
         drop(entries);
@@ -393,6 +393,9 @@ struct SessionKey {
 enum SessionEntry {
     Opening(Arc<watch::Sender<bool>>),
     Live(ManagedSession),
+    /// The previous execution invalidated its session, so a reducer-authorized dispatch may
+    /// establish a replacement. Passive session loss remains permanently fail-closed.
+    Replaceable,
     Lost,
 }
 
@@ -407,7 +410,11 @@ impl SessionLease {
         match self.kind {
             SessionLeaseKind::Execution => self.session.close().await,
             SessionLeaseKind::NodeInstance(_) if clean => {}
-            SessionLeaseKind::NodeInstance(key) => self.pool.invalidate(key, self.session).await,
+            SessionLeaseKind::NodeInstance(key) => {
+                self.pool
+                    .invalidate(key, self.session, SessionEntry::Replaceable)
+                    .await;
+            }
         }
     }
 }

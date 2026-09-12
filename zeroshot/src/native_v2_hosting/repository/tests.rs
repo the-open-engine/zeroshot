@@ -1,4 +1,4 @@
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::Value;
 
 use super::*;
@@ -16,6 +16,7 @@ async fn fetch_waits_for_automatic_maintenance() {
         token: None,
         uid: unsafe { libc::geteuid() },
         gid: unsafe { libc::getegid() },
+        deadline: Instant::now() + GIT_TIMEOUT,
     };
     let seed = root.child("seed");
     let workspace = root.child("workspace");
@@ -102,4 +103,134 @@ async fn fetch_waits_for_automatic_maintenance() {
         assert!(args.iter().any(|arg| arg == "--no-detach"), "{event}");
         assert!(!args.iter().any(|arg| arg == "--detach"), "{event}");
     }
+}
+
+#[test]
+fn checkout_cleanup_rejects_nonempty_or_replaced_staging() {
+    let root = TestDirectory::new("checkout-staging-identity");
+    let workspace = root.child("workspace");
+    let external = root.child("external");
+    std::fs::create_dir(&workspace).assert_value();
+    std::fs::create_dir(&external).assert_value();
+    std::fs::write(external.join("keep"), "user-owned").assert_value();
+    let identity = pristine_workspace(&workspace).assert_value();
+    std::fs::write(workspace.join("existing"), "installed files").assert_value();
+    assert!(pristine_workspace(&workspace).is_err());
+    assert_eq!(root.read("workspace/existing"), "installed files");
+
+    std::fs::rename(&workspace, root.child("original")).assert_value();
+    std::os::unix::fs::symlink(&external, &workspace).assert_value();
+    assert!(reset_workspace(&workspace, &identity, Instant::now() + GIT_TIMEOUT).is_err());
+    assert_eq!(root.read("external/keep"), "user-owned");
+}
+
+#[tokio::test]
+async fn checkout_commands_share_one_deadline_and_retain_timeout_output() {
+    let root = TestDirectory::new("checkout-total-deadline");
+    let program = root.write_executable(
+        "git-slow",
+        "#!/bin/sh\n/usr/bin/printf 'checkout progress\n' >&2\n/usr/bin/sleep 0.2\n",
+    );
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let git = GitProcess {
+        program: &program,
+        token: None,
+        uid: unsafe { libc::geteuid() },
+        gid: unsafe { libc::getegid() },
+        deadline,
+    };
+    git.run(None, &[]).await.assert_value();
+    tokio::time::sleep_until(deadline - Duration::from_millis(100)).await;
+    let error = git.run(None, &[]).await.assert_error();
+    let RepositoryInstallError::Git(failure) = error else {
+        panic!("expected captured Git timeout");
+    };
+    assert!(failure.stderr.contains("checkout progress"));
+    assert!(failure.to_string().contains("timed out"));
+    assert!(failure.stderr_truncated);
+    let error = RepositoryInstallError::Recovery {
+        failure: Box::new(RepositoryInstallError::Git(failure)),
+        message: "staging directory was replaced".to_owned(),
+    };
+    let run_id = RunId::new("checkout-timeout-cleanup");
+    let diagnostics = OperatorDiagnosticStore::default();
+    error.record_diagnostic(&run_id, &diagnostics);
+    let snapshot = diagnostics.snapshot(&run_id);
+    assert!(snapshot.diagnostics[0].stderr.contains("checkout progress"));
+    assert!(
+        snapshot.diagnostics[0]
+            .stderr
+            .contains("staging directory was replaced")
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn cancelling_checkout_kills_git_and_its_helper_processes() {
+    let root = TestDirectory::new("checkout-cancellation");
+    let program = root.write_executable(
+        "git-hanging",
+        "#!/bin/sh\n/usr/bin/sleep 30 &\nchild=$!\n/usr/bin/printf '%s' \"$child\" > \"$0.pid\"\nwait\n",
+    );
+    let pid_path = root.child("git-hanging.pid");
+    let capture = tokio::spawn(async move {
+        GitProcess {
+            program: &program,
+            token: None,
+            uid: unsafe { libc::geteuid() },
+            gid: unsafe { libc::getegid() },
+            deadline: Instant::now() + GIT_TIMEOUT,
+        }
+        .run(None, &[])
+        .await
+    });
+    let pid: u32 = poll_until(|| std::fs::read_to_string(&pid_path).ok()?.parse().ok()).await;
+    capture.abort();
+    assert!(capture.await.assert_error().is_cancelled());
+    poll_until(|| {
+        let running = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(") ")
+                    .map(|(_, fields)| fields.starts_with('Z'))
+            })
+            .is_some_and(|zombie| !zombie);
+        (!running).then_some(())
+    })
+    .await;
+}
+
+#[cfg(target_os = "linux")]
+async fn poll_until<T>(mut read: impl FnMut() -> Option<T>) -> T {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Some(value) = read() {
+                return value;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .assert_value_with("checkout process did not reach the expected state")
+}
+
+#[test]
+fn cleanup_stops_at_the_original_deadline() {
+    let root = TestDirectory::new("checkout-cleanup-deadline");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let identity = pristine_workspace(&workspace).assert_value();
+    for index in 0..5000 {
+        std::fs::write(workspace.join(index.to_string()), "partial checkout").assert_value();
+    }
+    let deadline = Instant::now() + Duration::from_millis(1);
+    let error = reset_workspace(&workspace, &identity, deadline).assert_error();
+    assert!(matches!(error, RepositoryInstallError::Deadline));
+    assert!(
+        std::fs::read_dir(&workspace)
+            .assert_value()
+            .next()
+            .is_some()
+    );
+    assert!(identity.is_current(&workspace));
 }

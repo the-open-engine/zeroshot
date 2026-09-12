@@ -27,6 +27,8 @@ use crate::native_v2_contract::{
 use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
+pub(crate) const MAX_AGENT_VERIFIER_ATTEMPTS: u64 = 2;
+
 /// Host policy for graph-visible Git delivery.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,7 +46,7 @@ pub enum NativeV2AdmissionError {
     UnsupportedGraphProfile,
     #[error("initial input does not match GraphSpec.initialInput: {0}")]
     InitialInput(#[from] PayloadValueError),
-    #[error("executable node {node} must use exactly one attempt, found {attempts}")]
+    #[error("executable node {node} uses unsupported native-v2 attempt count {attempts}")]
     Attempts { node: NodeName, attempts: u64 },
     #[error("runtime plan has no binding for executable node {node}")]
     MissingRuntimeBinding { node: NodeName },

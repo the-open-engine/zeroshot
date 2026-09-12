@@ -74,8 +74,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   milliseconds and remain unchanged across durable replay.
 - Run close reserves and tombstones execution activity atomically. No late start, handle, or stream
   may surface after close returns.
+- Native-v2 retries only a settled `crash` outcome when the executable has another authored
+  attempt. A provider session invalidated by that active execution becomes replaceable for the
+  authorized retry; passive session loss and run closure remain permanent, fail-closed loss.
+- Hosted source checkout retries only its fresh platform-owned staging workspace, within one
+  allocation and one total deadline. Preserve the exact admitted revision before starting any
+  graph node; terminal Git details remain redacted and private operator diagnostics.
 - Contained provider sessions bound post-exit I/O draining by the command deadline and a ten-minute
   ceiling while still observing cancellation and cleanup.
+- Git delivery captures bounded, credential-redacted command/status/stdout/stderr diagnostics and
+  routes unfamiliar failures to the existing delivery repair worker through `repair_required`.
+  Graphs opt in with that signal; stored older contracts still validate without it. Repair may run
+  before a PR exists, so only successful receipts require complete remote identity. Cancellation,
+  exhausted graph budgets, confirmed authentication refusal, and authority mismatches remain terminal.
+  Pending authorized head adoption survives repair and completes before staging or pushing resumes.
+  Delivery stages with `git add --all`; writing agents keep tooling outside the checkout.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
   merge queues/deferrals, and succeeds only after observing the exact merged result. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response. A
@@ -91,11 +104,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   caller-owned issue input.
 - GitHub review creation and rediscovery are shared by pull-request and merge delivery. They verify
   the exact pushed ref and head, retry bounded transient visibility or API failures, refresh a
-  dynamic credential once on HTTP 401/403 within the synchronization deadline and cancellation
+  dynamic credential once on HTTP 401 within the synchronization deadline and cancellation
   boundary, and fail closed on identity mismatch or static-token rejection. Verifier-authored pull
   request descriptions and source-issue closing references stay inside the generated body markers
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
   reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
+
+- Target images ship one Rust toolchain baseline plus Node.js, Python and shared native build
+  tools. They expose Rust through the fixed runtime PATH without a shared writable Cargo cache;
+  explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
+  tests compile native fixtures as an isolated user with a read-only root and fresh home.
 
 ## CLI and target contracts
 

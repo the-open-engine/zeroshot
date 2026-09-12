@@ -93,7 +93,14 @@ async fn every_supported_materialization_is_admissible() {
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::PullRequest,
-            vec!["acceptance", "code", "deliver", "review_repair", "worker"],
+            vec![
+                "acceptance",
+                "code",
+                "deliver",
+                "delivery_repair",
+                "review_repair",
+                "worker",
+            ],
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
@@ -165,6 +172,116 @@ async fn rejected_parallel_reviews_dispatch_repair_with_both_diagnostics() {
                     "deliveryFeedback":""
                 })
     )));
+}
+
+fn crashed_parallel_review_history() -> Vec<DurableExecution> {
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    vec![
+        settled_worker(),
+        settled_review(
+            2,
+            "acceptance",
+            REJECTED_LABEL,
+            "missing requested behavior",
+        ),
+        settled_failure(
+            SettledExecutionSpec {
+                execution: 3,
+                node_instance: 3,
+                node: "code",
+                settled_at: 3,
+                input: review_input,
+            },
+            WorkerErrorCode::Crash,
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn crashed_parallel_review_retries_only_the_failed_verifier() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
+    let mut history = crashed_parallel_review_history();
+    let reduction = reduce(&verified, &initial_input, &history);
+
+    assert_eq!(
+        reduction
+            .decisions
+            .iter()
+            .filter(|decision| matches!(decision, Decision::Dispatch { .. }))
+            .count(),
+        1
+    );
+    assert!(reduction.decisions.iter().any(|decision| matches!(
+        decision,
+        Decision::Dispatch { occurrence, attempt, input, .. }
+            if occurrence.node.as_str() == "code"
+                && attempt.get() == MAX_AGENT_VERIFIER_ATTEMPTS
+                && input == &json!({"task":"repair checkout","deliveryFeedback":""})
+    )));
+    assert!(reduction.terminal.is_none());
+
+    let mut recovered = settled_review_execution(
+        SettledExecutionSpec {
+            execution: 4,
+            node_instance: 3,
+            node: "code",
+            settled_at: 5,
+            input: json!({"task":"repair checkout","deliveryFeedback":""}),
+        },
+        ACCEPTED_LABEL,
+        "implementation sound",
+    );
+    recovered.attempt = PositiveInteger::new(MAX_AGENT_VERIFIER_ATTEMPTS).assert_value();
+    history.push(recovered);
+    let reviewed = reduce(&verified, &initial_input, &history);
+    assert_dispatched_together(&reviewed, &["review_repair"]);
+    let repair_input = json!({
+        "task":"repair checkout",
+        "acceptanceFeedback":"missing requested behavior",
+        "codeFeedback":"implementation sound",
+        "deliveryFeedback":""
+    });
+    assert!(reviewed.decisions.iter().any(|decision| matches!(
+        decision, Decision::Dispatch { input, .. } if input == &repair_input
+    )));
+    history.push(settled_agent(SettledExecutionSpec {
+        execution: 5,
+        node_instance: 4,
+        node: "review_repair",
+        settled_at: 6,
+        input: repair_input,
+    }));
+    let next_round = reduce(&verified, &initial_input, &history);
+    assert_dispatched_together(&next_round, &["acceptance", "code"]);
+    assert!(next_round.decisions.iter().all(|decision| match decision {
+        Decision::Dispatch { attempt, .. } => attempt.get() == 1,
+        _ => true,
+    }));
+}
+
+#[tokio::test]
+async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::None).await;
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":""});
+    let mut history = crashed_parallel_review_history();
+    history.push(settled_failure_attempt(
+        SettledExecutionSpec {
+            execution: 4,
+            node_instance: 3,
+            node: "code",
+            settled_at: 5,
+            input: review_input,
+        },
+        WorkerErrorCode::Crash,
+        MAX_AGENT_VERIFIER_ATTEMPTS,
+    ));
+
+    assert_eq!(
+        reduce(&verified, &initial_input, &history).terminal,
+        Some(TerminalProjection::Failed {
+            reason: "review_failed".parse().assert_value()
+        })
+    );
 }
 
 #[tokio::test]
@@ -268,7 +385,11 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
 
 #[tokio::test]
 async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() {
-    for recoverable in [DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL] {
+    for recoverable in [
+        DELIVERY_CI_FAILED_LABEL,
+        DELIVERY_CONFLICT_LABEL,
+        DELIVERY_REPAIR_REQUIRED_LABEL,
+    ] {
         assert_recoverable_delivery(recoverable).await;
     }
 }
@@ -505,4 +626,30 @@ fn all_nodes(root: &GraphNode) -> Vec<&GraphNode> {
         pending.extend(openengine_cluster_server::graph_verifier::graph_node_children(node));
     }
     nodes
+}
+
+#[tokio::test]
+async fn pull_request_delivery_routes_a_pre_review_git_failure_to_repair() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::PullRequest).await;
+    let mut history = accepted_review_history(TemplateDelivery::PullRequest);
+    history.push(settled_delivery_with_diagnostic(
+        SettledExecutionSpec {
+            execution: 4,
+            node_instance: 4,
+            node: DELIVERY_NODE,
+            settled_at: 4,
+            input: delivery_input(),
+        },
+        DeliveryMode::PullRequest,
+        DELIVERY_REPAIR_REQUIRED_LABEL,
+        "git push: unfamiliar failure",
+    ));
+    assert_dispatch(
+        &reduce(&verified, &initial_input, &history),
+        "delivery_repair",
+        &json!({
+            "task":"repair checkout", "outcome":"repair_required",
+            "deliveryFeedback":"git push: unfamiliar failure"
+        }),
+    );
 }

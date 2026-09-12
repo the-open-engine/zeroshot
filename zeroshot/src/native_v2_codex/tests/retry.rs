@@ -220,3 +220,25 @@ async fn clean_exit_incomplete_stream_preserves_stderr_and_retries() {
     assert!(!rendered.contains("execution failed without provider detail"));
     assert!(!rendered.contains("sentinel-secret"));
 }
+
+#[tokio::test]
+async fn exhausted_provider_failure_reopens_a_node_instance_session_for_retry() {
+    let directory = TestDirectory::new("codex-verifier-session-replacement");
+    let (admitted, runtime, state) =
+        codex_retry_runtime(&directory, SessionScope::NodeInstance).await;
+    let mut failed = start(&runtime, &admitted, 1, &retry_values(&state, true, false)).await;
+    assert_eq!(failed.completion().await, Err(NodeRunnerError::Driver));
+    assert!(
+        fs::read_to_string(state.with_extension("args.2"))
+            .assert_value()
+            .contains("arg=resume")
+    );
+
+    let retry = start(&runtime, &admitted, 2, &retry_values(&state, false, false)).await;
+    complete_verified_with_logs(retry).await;
+    assert!(
+        !fs::read_to_string(state.with_extension("args.2"))
+            .assert_value()
+            .contains("arg=resume")
+    );
+}
