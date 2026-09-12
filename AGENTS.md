@@ -100,6 +100,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
   reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
 
+- Target images ship one Rust toolchain baseline plus Node.js, Python and shared native build
+  tools. They expose Rust through the fixed runtime PATH without a shared writable Cargo cache;
+  explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
+  tests compile native fixtures as an isolated user with a read-only root and fresh home.
+
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.

@@ -225,6 +225,18 @@ jobs:
           docker run --rm --platform linux/amd64 --entrypoint codex zeroshot-target:ci --version
           docker run --rm --platform linux/amd64 --entrypoint claude zeroshot-target:ci --version
 
+      - name: Compile with the isolated runtime toolchains
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --tmpfs /work:rw,nosuid,nodev,exec,size=256m,mode=0700,uid=10001,gid=10001 \
+            --user 10001:10001 \
+            --mount "type=bind,src=${PWD}/docker/zeroshot-target/smoke-toolchains.sh,dst=/smoke.sh,readonly" \
+            --mount "type=bind,src=${PWD}/rust-toolchain.toml,dst=/rust-toolchain.toml,readonly" \
+            --entrypoint /usr/bin/env \
+            zeroshot-target:ci -i HOME=/work/home PATH=/usr/local/bin:/usr/bin:/bin \
+            /bin/sh /smoke.sh
+
   required:
     name: required
     if: always()
