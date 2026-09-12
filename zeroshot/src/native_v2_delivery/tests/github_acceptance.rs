@@ -151,16 +151,10 @@ exit 1
         .await
         .assert_error_with("GitHub API rejection should be preserved");
 
-    assert_eq!(
-        error,
-        GitHubAuthorityError::api(
-            Some(422),
-            concat!(
-                "HTTP 422: validation failed; PullRequest head invalid ",
-                "pull request head revision is not visible"
-            ),
-        )
-    );
+    assert_eq!(error.api_status(), Some(422));
+    assert!(error.to_string().contains("Head sha can't be blank"));
+    assert!(error.to_string().contains("Validation Failed (HTTP 422)"));
+    assert!(error.to_string().contains("exitStatus: Some(1)"));
     assert!(error.retryable_review_sync());
     assert!(!error.to_string().contains("test-token"));
 }

@@ -22,31 +22,20 @@ async fn provider_receipt_survives_a_transient_local_adoption_failure() {
 }
 
 #[tokio::test]
-async fn permanent_local_adoption_rejection_fails_closed_without_retrying_cas() {
-    let (repo, authority) = delivery_harness(Script::HeadAdoptionRejected);
-
-    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
-
-    assert_eq!(
-        outcome,
-        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
-    );
-    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
-    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn repeated_local_adoption_unavailability_is_bounded_without_retrying_cas() {
-    let (repo, authority) = delivery_harness(Script::HeadAdoptionUnavailable);
-
-    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
-
-    assert_eq!(
-        outcome,
-        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
-    );
-    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
-    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 5);
+async fn failed_head_adoption_routes_repair_without_repeating_the_remote_mutation() {
+    for (script, expected_attempts) in [
+        (Script::HeadAdoptionRejected, 1),
+        (Script::HeadAdoptionUnavailable, 5),
+    ] {
+        let (repo, authority) = delivery_harness(script);
+        let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+        assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            authority.head_sync_attempts.load(Ordering::SeqCst),
+            expected_attempts
+        );
+    }
 }
 
 async fn assert_head_updates(

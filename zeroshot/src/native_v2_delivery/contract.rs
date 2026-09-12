@@ -11,7 +11,8 @@ use super::{
     DELIVERY_MERGED_LABEL, DELIVERY_MERGE_REVISION_FIELD, DELIVERY_MODE_FIELD,
     DELIVERY_OPENED_LABEL, DELIVERY_OUTCOME_FIELD, DELIVERY_PULL_REQUEST_ID_FIELD,
     DELIVERY_REPOSITORY_FIELD, DELIVERY_SIGNAL_FIELD, DELIVERY_TARGET_BRANCH_FIELD,
-    DELIVERY_VERSION_FIELD, DeliveryMode, DeliveryTarget, valid_review_id, valid_revision,
+    DELIVERY_VERSION_FIELD, DELIVERY_REPAIR_REQUIRED_LABEL, DeliveryMode, DeliveryTarget,
+    valid_review_id, valid_revision,
 };
 
 pub fn validate_delivery_contract(
@@ -40,14 +41,17 @@ fn delivery_contract_matches(
     signals: &std::collections::BTreeMap<FieldName, NonEmptyEnumSet>,
     diagnostic: &PayloadType,
 ) -> Result<bool, ContractValueError> {
-    let expected_output = delivery_result_schema(mode)?;
-    let expected_diagnostic = delivery_diagnostic_schema()?;
     let field = FieldName::new(DELIVERY_SIGNAL_FIELD)?;
-    let expected_labels = delivery_signal_labels(mode)?;
-    Ok(output == &expected_output
-        && diagnostic == &expected_diagnostic
-        && signals.len() == 1
-        && signals.get(&field) == Some(&expected_labels))
+    let matching = [true, false]
+        .into_iter()
+        .map(|repair| {
+            Ok(output == &result_schema(mode, repair)?
+                && signals.get(&field) == Some(&signal_labels(mode, repair)?))
+        })
+        .collect::<Result<Vec<_>, ContractValueError>>()?
+        .into_iter()
+        .any(|matches| matches);
+    Ok(matching && diagnostic == &delivery_diagnostic_schema()? && signals.len() == 1)
 }
 
 pub(crate) fn delivery_diagnostic_schema() -> Result<PayloadType, ContractValueError> {
@@ -106,8 +110,12 @@ struct DeliveryResultWire {
 pub(crate) fn delivery_result_schema(
     mode: DeliveryMode,
 ) -> Result<PayloadType, ContractValueError> {
+    result_schema(mode, true)
+}
+
+fn result_schema(mode: DeliveryMode, repair: bool) -> Result<PayloadType, ContractValueError> {
     let mut fields = delivery_identity_fields(mode)?;
-    fields.extend(delivery_mode_fields(mode)?);
+    fields.extend(delivery_mode_fields(mode, repair)?);
     Ok(PayloadType::Record {
         fields: fields.into_iter().collect(),
     })
@@ -137,13 +145,14 @@ fn delivery_identity_fields(
 
 fn delivery_mode_fields(
     mode: DeliveryMode,
+    repair: bool,
 ) -> Result<Vec<(FieldName, RecordField)>, ContractValueError> {
     Ok(vec![
         contract_field(DELIVERY_MODE_FIELD, contract_enum(&[mode.label()])?)?,
         contract_field(
             DELIVERY_OUTCOME_FIELD,
             PayloadType::Enum {
-                values: delivery_signal_labels(mode)?,
+                values: signal_labels(mode, repair)?,
             },
         )?,
     ])
@@ -152,14 +161,34 @@ fn delivery_mode_fields(
 pub(crate) fn delivery_signal_labels(
     mode: DeliveryMode,
 ) -> Result<NonEmptyEnumSet, ContractValueError> {
-    match mode {
-        DeliveryMode::PullRequest => contract_labels(&[DELIVERY_OPENED_LABEL]),
-        DeliveryMode::MergeV1 | DeliveryMode::Merge => contract_labels(&[
+    signal_labels(mode, true)
+}
+
+fn signal_labels(mode: DeliveryMode, repair: bool) -> Result<NonEmptyEnumSet, ContractValueError> {
+    let mut labels = match mode {
+        DeliveryMode::PullRequest => vec![DELIVERY_OPENED_LABEL],
+        DeliveryMode::MergeV1 | DeliveryMode::Merge => vec![
             DELIVERY_MERGED_LABEL,
             DELIVERY_CONFLICT_LABEL,
             DELIVERY_CI_FAILED_LABEL,
-        ]),
+        ],
+    };
+    if repair {
+        labels.push(DELIVERY_REPAIR_REQUIRED_LABEL);
     }
+    contract_labels(&labels)
+}
+
+pub(super) fn supports_repair(response: &NodeResponseContract) -> bool {
+    let NodeResponseContract::Verifier { signals, .. } = response else {
+        return false;
+    };
+    signals.values().any(|labels| {
+        labels
+            .values()
+            .iter()
+            .any(|label| label.as_str() == DELIVERY_REPAIR_REQUIRED_LABEL)
+    })
 }
 
 fn contract_field(

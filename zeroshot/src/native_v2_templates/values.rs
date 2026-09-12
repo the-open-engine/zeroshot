@@ -127,13 +127,15 @@ pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {
     ])
 }
 
-pub(super) fn delivery_repair_input_type() -> Result<PayloadType, BuiltinTemplateError> {
+pub(super) fn delivery_repair_input_type(
+    mode: DeliveryMode,
+) -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![
         (TASK_FIELD, PayloadType::String, true),
         (
             "outcome",
             PayloadType::Enum {
-                values: static_value(delivery_signal_labels(DeliveryMode::Merge))?,
+                values: static_value(delivery_signal_labels(mode))?,
             },
             true,
         ),

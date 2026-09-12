@@ -395,16 +395,14 @@ async fn rewritten_history_is_rejected_before_push() {
 
     let outcome = run_delivery(&repo, authority.clone(), 2, DeliveryMode::Merge).await;
 
-    assert_eq!(
-        outcome,
-        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
-    );
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(outcome_diagnostic(&outcome).contains("merge-base"));
     assert!(!authority.pushed.load(Ordering::SeqCst));
     assert!(authority.review_requests().is_empty());
 }
 
 #[tokio::test]
-async fn push_rejection_emits_a_short_safe_public_failure_line() {
+async fn unfamiliar_push_rejection_reaches_repair_before_a_pr_exists() {
     let repo = TempRepo::delivery();
     let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::PushRejected));
 
@@ -420,15 +418,13 @@ async fn push_rejection_emits_a_short_safe_public_failure_line() {
     )
     .await;
 
-    assert_eq!(
-        execution.outcome,
-        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
-    );
+    assert_delivery_signal(&execution.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(outcome_diagnostic(&execution.outcome).contains("unfamiliar remote refusal"));
     assert!(
         execution
             .output
             .iter()
-            .any(|output| output.text == "delivery: Git push failed")
+            .all(|output| !output.text.contains("test-token"))
     );
 }
 
@@ -448,6 +444,8 @@ fn delivery_contract_rejects_the_other_modes_schema() {
 
 #[path = "tests/github_acceptance.rs"]
 mod github_acceptance;
+#[path = "tests/recovery.rs"]
+mod recovery;
 
 async fn run_delivery(
     repo: &TempRepo,
@@ -492,7 +490,6 @@ async fn run_delivery_execution(
     request: DeliveryRunRequest<'_>,
     authority: Arc<FakeGitHub>,
 ) -> DeliveryExecution {
-    let admitted = admitted(request.repo, request.mode).await;
     let config = NativeV2DeliveryConfig {
         workspace: request.repo.workspace.clone(),
         git_program: PathBuf::from("/usr/bin/git"),
@@ -500,6 +497,14 @@ async fn run_delivery_execution(
         poll: DeliveryPollPolicy::new(request.attempts, Duration::ZERO).assert_value(),
     };
     let adapter = Arc::new(NativeV2DeliveryAdapter::new(config, authority));
+    run_with_adapter(request, adapter).await
+}
+
+async fn run_with_adapter(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+) -> DeliveryExecution {
+    let admitted = admitted(request.repo, request.mode).await;
     let runner = NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value();
     let binding = admitted
         .runtime
@@ -594,14 +599,7 @@ fn worker_ref(mode: DeliveryMode) -> &'static str {
 }
 
 fn delivery_node(mode: DeliveryMode) -> Value {
-    let labels: &[&str] = match mode {
-        DeliveryMode::PullRequest => &[DELIVERY_OPENED_LABEL],
-        DeliveryMode::MergeV1 | DeliveryMode::Merge => &[
-            DELIVERY_MERGED_LABEL,
-            DELIVERY_CONFLICT_LABEL,
-            DELIVERY_CI_FAILED_LABEL,
-        ],
-    };
+    let labels = delivery_signal_labels(mode).assert_value();
     json!({
         "kind":"verifier","name":"deliver","worker":worker_ref(mode),
         "input":{"kind":"null"},"output":delivery_result_schema(mode).assert_value(),

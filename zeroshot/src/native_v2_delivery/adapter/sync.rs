@@ -91,6 +91,7 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
         let deadline = tokio::time::Instant::now() + REVIEW_SYNC_DEADLINE;
         let mut retry_interval = REVIEW_SYNC_INTERVAL;
+        let mut last_failure = None;
         let mut state = ReviewSyncState {
             request,
             credentials,
@@ -102,27 +103,41 @@ impl NativeV2DeliveryAdapter {
             let progress = self.review_sync_progress(&mut state).await?;
             let error = match progress {
                 ReviewSyncProgress::Complete(review) => return Ok(review),
-                ReviewSyncProgress::Failed(error) => error,
-                ReviewSyncProgress::TimedOut => return review_sync_timeout(control).await,
+                ReviewSyncProgress::Failed(error) => {
+                    last_failure = Some(error.clone());
+                    error
+                }
+                ReviewSyncProgress::TimedOut => {
+                    return Err(last_failure.map_or_else(
+                        || recovery::repair("GitHub review synchronization timed out"),
+                        DeliveryStop::from,
+                    ));
+                }
             };
             match handle_review_sync_failure(ReviewSyncFailure {
                 control,
                 attempt,
-                error,
+                error: error.clone(),
                 deadline,
                 retry_interval,
             })
             .await?
             {
                 ReviewSyncDisposition::Retry => {}
-                ReviewSyncDisposition::Stop => return Err(crash_outcome()),
-                ReviewSyncDisposition::TimedOut => return review_sync_timeout(control).await,
+                ReviewSyncDisposition::Stop => return Err(error.into()),
+                ReviewSyncDisposition::TimedOut => {
+                    return Err(recovery::repair(format!(
+                        "GitHub review synchronization timed out\n{error}"
+                    )));
+                }
             }
             retry_interval = retry_interval
                 .saturating_mul(2)
                 .min(REVIEW_SYNC_MAX_INTERVAL);
         }
-        Err(crash_outcome())
+        Err(recovery::repair(
+            "GitHub review synchronization exhausted its attempts",
+        ))
     }
 
     async fn review_sync_progress(
@@ -232,11 +247,6 @@ async fn handle_review_sync_failure(
     } else {
         Ok(ReviewSyncDisposition::TimedOut)
     }
-}
-
-async fn review_sync_timeout(control: &DriverControl) -> Result<GitHubReviewReceipt, DeliveryStop> {
-    emit(control, "delivery: GitHub review synchronization timed out").await?;
-    Err(crash_outcome())
 }
 
 #[cfg(test)]

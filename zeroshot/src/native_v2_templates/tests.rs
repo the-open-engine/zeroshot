@@ -93,7 +93,14 @@ async fn every_supported_materialization_is_admissible() {
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::PullRequest,
-            vec!["acceptance", "code", "deliver", "review_repair", "worker"],
+            vec![
+                "acceptance",
+                "code",
+                "deliver",
+                "delivery_repair",
+                "review_repair",
+                "worker",
+            ],
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
@@ -378,7 +385,11 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
 
 #[tokio::test]
 async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() {
-    for recoverable in [DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL] {
+    for recoverable in [
+        DELIVERY_CI_FAILED_LABEL,
+        DELIVERY_CONFLICT_LABEL,
+        DELIVERY_REPAIR_REQUIRED_LABEL,
+    ] {
         assert_recoverable_delivery(recoverable).await;
     }
 }
@@ -615,4 +626,30 @@ fn all_nodes(root: &GraphNode) -> Vec<&GraphNode> {
         pending.extend(openengine_cluster_server::graph_verifier::graph_node_children(node));
     }
     nodes
+}
+
+#[tokio::test]
+async fn pull_request_delivery_routes_a_pre_review_git_failure_to_repair() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::PullRequest).await;
+    let mut history = accepted_review_history(TemplateDelivery::PullRequest);
+    history.push(settled_delivery_with_diagnostic(
+        SettledExecutionSpec {
+            execution: 4,
+            node_instance: 4,
+            node: DELIVERY_NODE,
+            settled_at: 4,
+            input: delivery_input(),
+        },
+        DeliveryMode::PullRequest,
+        DELIVERY_REPAIR_REQUIRED_LABEL,
+        "git push: unfamiliar failure",
+    ));
+    assert_dispatch(
+        &reduce(&verified, &initial_input, &history),
+        "delivery_repair",
+        &json!({
+            "task":"repair checkout", "outcome":"repair_required",
+            "deliveryFeedback":"git push: unfamiliar failure"
+        }),
+    );
 }

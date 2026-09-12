@@ -39,19 +39,20 @@ fn api_error_parser_preserves_bounded_provider_status_and_reason() {
 }
 "#,
     );
-    assert_eq!(
-        error,
-        GitHubAuthorityError::api(
-            Some(422),
-            concat!(
-                "HTTP 422: validation failed; PullRequest head invalid ",
-                "pull request head revision is not visible"
-            ),
-        )
-    );
+    assert!(error.to_string().contains("Head sha can't be blank"));
+    assert!(error.to_string().contains("Validation Failed (HTTP 422)"));
     assert!(error.retryable_review_sync());
 
     let unauthorized = GitHubAuthorityError::api(Some(401), "HTTP 401: Bad credentials");
     assert!(!unauthorized.retryable_review_sync());
     assert!(unauthorized.authentication_failed());
+}
+
+#[test]
+fn unfamiliar_errors_and_rate_limits_remain_repairable() {
+    let error = github_api_error(b"gh: unusual remote refusal (HTTP 403)\nPlease try again later.");
+    assert!(!error.authentication_failed());
+    assert!(error.retryable_review_sync());
+    assert!(error.to_string().contains("unusual remote refusal"));
+    assert!(error.to_string().contains("Please try again later."));
 }

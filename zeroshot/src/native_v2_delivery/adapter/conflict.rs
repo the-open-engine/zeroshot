@@ -45,9 +45,9 @@ impl NativeV2DeliveryAdapter {
                 self.authority
                     .materialize_merge_conflict(request, credentials.current())
                     .await
-                    .map_err(|_| crash_outcome())
+                    .map_err(DeliveryStop::from)
             }
-            Err(_) => Err(crash_outcome()),
+            Err(error) => Err(error.into()),
         }
     }
 }

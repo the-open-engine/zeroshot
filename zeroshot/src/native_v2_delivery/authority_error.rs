@@ -1,6 +1,6 @@
 use std::fmt;
 
-const MAX_GITHUB_API_DIAGNOSTIC_BYTES: usize = 1024;
+const MAX_GITHUB_API_DIAGNOSTIC_BYTES: usize = 32 * 1024;
 
 /// Bounded provider-owned GitHub API failure detail.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,11 +16,12 @@ impl GitHubApiFailure {
             diagnostic = "GitHub API diagnostic redacted".to_owned();
         }
         if diagnostic.len() > MAX_GITHUB_API_DIAGNOSTIC_BYTES {
-            let mut boundary = MAX_GITHUB_API_DIAGNOSTIC_BYTES;
+            let mut boundary = MAX_GITHUB_API_DIAGNOSTIC_BYTES - "\n[diagnostic truncated]".len();
             while !diagnostic.is_char_boundary(boundary) {
                 boundary = boundary.saturating_sub(1);
             }
             diagnostic.truncate(boundary);
+            diagnostic.push_str("\n[diagnostic truncated]");
         }
         Self {
             status,
@@ -30,11 +31,11 @@ impl GitHubApiFailure {
 
     fn retryable_review_sync(&self) -> bool {
         self.status
-            .is_none_or(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599))
+            .is_none_or(|status| matches!(status, 403 | 404 | 409 | 422 | 429 | 500..=599))
     }
 
     fn authentication_failed(&self) -> bool {
-        matches!(self.status, Some(401 | 403))
+        matches!(self.status, Some(401))
     }
 }
 
@@ -52,9 +53,18 @@ pub enum GitHubAuthorityError {
     Rejected,
     #[error("GitHub API request failed: {0}")]
     Api(GitHubApiFailure),
+    #[error("{0}")]
+    Command(Box<super::GitCommandFailure>),
 }
 
 impl GitHubAuthorityError {
+    pub(super) fn api_status(&self) -> Option<u16> {
+        match self {
+            Self::Api(failure) => failure.status,
+            _ => None,
+        }
+    }
+
     pub(super) fn api(status: Option<u16>, diagnostic: impl Into<String>) -> Self {
         Self::Api(GitHubApiFailure::new(status, diagnostic))
     }
@@ -62,7 +72,7 @@ impl GitHubAuthorityError {
     pub(super) fn retryable_review_sync(&self) -> bool {
         match self {
             Self::Unavailable => true,
-            Self::Rejected => false,
+            Self::Rejected | Self::Command(_) => false,
             Self::Api(failure) => failure.retryable_review_sync(),
         }
     }
@@ -73,5 +83,11 @@ impl GitHubAuthorityError {
 
     pub(super) fn review_head_not_visible() -> Self {
         Self::api(None, "GitHub review head revision is not visible")
+    }
+}
+
+impl From<super::GitCommandFailure> for GitHubAuthorityError {
+    fn from(failure: super::GitCommandFailure) -> Self {
+        Self::Command(Box::new(failure))
     }
 }

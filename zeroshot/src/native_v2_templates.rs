@@ -15,7 +15,8 @@ use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
 };
 use crate::native_v2_delivery::{
-    DeliveryMode, DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL, DELIVERY_SIGNAL_FIELD,
+    DeliveryMode, DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL,
+    DELIVERY_REPAIR_REQUIRED_LABEL, DELIVERY_SIGNAL_FIELD,
 };
 
 #[path = "native_v2_templates/catalog.rs"]
@@ -72,7 +73,9 @@ fn software_change_graph(delivery: TemplateDelivery) -> Result<GraphSpec, Builti
     let worker = task_worker(
         "builtin.agent.software-worker@1",
         "Implement the requested software change fully in the shared workspace. Follow the \
-         repository's guidance, keep the change focused, and run relevant checks.",
+         repository's guidance, keep the change focused, and run relevant checks. Delivery runs \
+         `git add --all`; put downloaded tools and other files you do not want committed outside \
+         the repository checkout.",
     )?;
     let worker_route = initial_worker_route(state.clone(), delivery)?;
     graph(
@@ -263,7 +266,8 @@ fn review_repair() -> Result<GraphNode, BuiltinTemplateError> {
         instructions: Some(instructions(
             "Address both verifier diagnostics in the shared workspace without weakening the \
              requested behavior. Account for any delivery feedback and run the relevant checks \
-             before returning.",
+             before returning. Delivery runs `git add --all`; put downloaded tools and other files \
+             you do not want committed outside the repository checkout.",
         )?),
         input: review_repair_input_type()?,
         output: PayloadType::Null,
@@ -291,26 +295,26 @@ fn accepted_change(
 }
 
 fn pull_request_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    let mode = DeliveryMode::PullRequest;
-    let route = choice(
-        "delivery_result",
-        state.clone(),
-        vec![ChoiceBranch {
-            when: executable_error_guard(DELIVERY_NODE)?,
-            node: fail("delivery_failed", "delivery_failed")?,
-        }],
-        Some(delivery_success("done", mode)?),
-    )?;
-    sequence(
-        "pull_request_delivery",
-        state,
-        vec![delivery_node(mode)?, route],
-        Vec::new(),
-    )
+    delivery_with_repair(state, DeliveryMode::PullRequest, "pull_request_delivery")
 }
 
 fn merge_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    let mode = DeliveryMode::Merge;
+    delivery_with_repair(state, DeliveryMode::Merge, "merge_delivery")
+}
+
+fn delivery_with_repair(
+    state: PayloadType,
+    mode: DeliveryMode,
+    name: &str,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    let labels = match mode {
+        DeliveryMode::PullRequest => vec![DELIVERY_REPAIR_REQUIRED_LABEL],
+        DeliveryMode::MergeV1 | DeliveryMode::Merge => vec![
+            DELIVERY_CI_FAILED_LABEL,
+            DELIVERY_CONFLICT_LABEL,
+            DELIVERY_REPAIR_REQUIRED_LABEL,
+        ],
+    };
     let route = choice(
         "delivery_result",
         state.clone(),
@@ -320,30 +324,32 @@ fn merge_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError>
                 node: fail("delivery_failed", "delivery_failed")?,
             },
             ChoiceBranch {
-                when: delivery_signal_guard(&[DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL])?,
-                node: delivery_repair()?,
+                when: delivery_signal_guard(&labels)?,
+                node: delivery_repair(mode)?,
             },
         ],
         Some(delivery_success("done", mode)?),
     )?;
     sequence(
-        "merge_delivery",
+        name,
         state,
         vec![delivery_node(mode)?, route],
         vec![field_path(DELIVERY_FEEDBACK_FIELD)?],
     )
 }
 
-fn delivery_repair() -> Result<GraphNode, BuiltinTemplateError> {
+fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Step(StepNode {
         name: node_name("delivery_repair")?,
         worker: worker_ref("builtin.agent.delivery-repair@1")?,
         instructions: Some(instructions(
-            "Resolve the reported CI failure or merge conflict in the shared workspace. Preserve \
-             the requested behavior and verifier-approved change. Use the delivery feedback as \
-             authoritative failure context, then run the relevant checks.",
+            "Diagnose the reported Git, delivery, CI failure, or merge conflict using the original \
+             diagnostics. Repair the shared workspace when needed and run relevant checks, \
+             preserving the requested behavior and verifier-approved change. Delivery will retry \
+             with the updated workspace. Delivery runs `git add --all`; put downloaded tools and \
+             other files you do not want committed outside the repository checkout.",
         )?),
-        input: delivery_repair_input_type()?,
+        input: delivery_repair_input_type(mode)?,
         output: PayloadType::Null,
         input_bindings: vec![
             state_input(TASK_FIELD, TASK_FIELD)?,

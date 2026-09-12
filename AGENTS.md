@@ -79,6 +79,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   authorized retry; passive session loss and run closure remain permanent, fail-closed loss.
 - Contained provider sessions bound post-exit I/O draining by the command deadline and a ten-minute
   ceiling while still observing cancellation and cleanup.
+- Git delivery captures bounded, credential-redacted command/status/stdout/stderr diagnostics and
+  routes unfamiliar failures to the existing delivery repair worker through `repair_required`.
+  Graphs opt in with that signal; stored older contracts still validate without it. Repair may run
+  before a PR exists, so only successful receipts require complete remote identity. Cancellation,
+  exhausted graph budgets, confirmed authentication refusal, and authority mismatches remain terminal.
+  Pending authorized head adoption survives repair and completes before staging or pushing resumes.
+  Delivery stages with `git add --all`; writing agents keep tooling outside the checkout.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
   merge queues/deferrals, and succeeds only after observing the exact merged result. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response. A
@@ -94,7 +101,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   caller-owned issue input.
 - GitHub review creation and rediscovery are shared by pull-request and merge delivery. They verify
   the exact pushed ref and head, retry bounded transient visibility or API failures, refresh a
-  dynamic credential once on HTTP 401/403 within the synchronization deadline and cancellation
+  dynamic credential once on HTTP 401 within the synchronization deadline and cancellation
   boundary, and fail closed on identity mismatch or static-token rejection. Verifier-authored pull
   request descriptions and source-issue closing references stay inside the generated body markers
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing

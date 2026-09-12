@@ -1,14 +1,24 @@
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::time::Duration;
 
 use tokio::process::Command;
 
-use super::valid_revision;
+use super::{command, valid_revision, GitCommandFailure};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub(super) enum GitError {
+    #[error("workspace has no deliverable mutation relative to the requested base revision")]
     NoMutation,
-    Command,
+    #[error("Git returned an invalid HEAD revision")]
+    InvalidRevision,
+    #[error("{0}")]
+    Command(Box<GitCommandFailure>),
+}
+
+impl From<GitCommandFailure> for GitError {
+    fn from(failure: GitCommandFailure) -> Self {
+        Self::Command(Box::new(failure))
+    }
 }
 
 #[derive(Clone)]
@@ -29,11 +39,11 @@ impl SystemGit {
     ) -> Result<String, GitError> {
         self.require_success(workspace, &["add", "--all"]).await?;
         let staged = self
-            .exit_code(workspace, &["diff", "--cached", "--quiet", "--exit-code"])
+            .execute(workspace, &["diff", "--cached", "--quiet", "--exit-code"])
             .await?;
-        match staged {
-            0 => {}
-            1 => {
+        match staged.exit_status {
+            Some(0) => {}
+            Some(1) => {
                 self.require_success(
                     workspace,
                     &[
@@ -49,7 +59,7 @@ impl SystemGit {
                 )
                 .await?;
             }
-            _ => return Err(GitError::Command),
+            _ => return Err(staged.into()),
         }
         self.deliverable_revision(workspace, base_revision).await
     }
@@ -59,10 +69,12 @@ impl SystemGit {
         workspace: &Path,
         base_revision: &str,
     ) -> Result<String, GitError> {
-        let revision = self.capture(workspace, &["rev-parse", "HEAD"]).await?;
-        let revision = revision.trim().to_owned();
+        let output = self
+            .require_success(workspace, &["rev-parse", "HEAD"])
+            .await?;
+        let revision = output.stdout.trim().to_owned();
         if !valid_revision(&revision) {
-            return Err(GitError::Command);
+            return Err(GitError::InvalidRevision);
         }
         if revision == base_revision {
             return Err(GitError::NoMutation);
@@ -75,51 +87,33 @@ impl SystemGit {
         Ok(revision)
     }
 
-    async fn require_success(&self, workspace: &Path, arguments: &[&str]) -> Result<(), GitError> {
-        (self.exit_code(workspace, arguments).await? == 0)
-            .then_some(())
-            .ok_or(GitError::Command)
+    async fn require_success(
+        &self,
+        workspace: &Path,
+        arguments: &[&str],
+    ) -> Result<GitCommandFailure, GitError> {
+        self.execute(workspace, arguments)
+            .await?
+            .require_success()
+            .map_err(Into::into)
     }
 
-    async fn exit_code(&self, workspace: &Path, arguments: &[&str]) -> Result<i32, GitError> {
-        self.command(workspace, arguments)
-            .status()
-            .await
-            .map_err(|_| GitError::Command)?
-            .code()
-            .ok_or(GitError::Command)
-    }
-
-    async fn capture(&self, workspace: &Path, arguments: &[&str]) -> Result<String, GitError> {
-        let output = self
-            .command(workspace, arguments)
-            .stdout(Stdio::piped())
-            .output()
-            .await
-            .map_err(|_| GitError::Command)?;
-        if !output.status.success() || output.stdout.len() > 4_096 {
-            return Err(GitError::Command);
-        }
-        String::from_utf8(output.stdout).map_err(|_| GitError::Command)
+    async fn execute(
+        &self,
+        workspace: &Path,
+        arguments: &[&str],
+    ) -> Result<GitCommandFailure, GitError> {
+        command::capture(
+            &mut self.command(workspace, arguments),
+            Duration::from_secs(10 * 60),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     fn command(&self, workspace: &Path, arguments: &[&str]) -> Command {
-        let mut command = Command::new(&self.program);
-        command
-            .env_clear()
-            .env("LANG", "C")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .arg("-c")
-            .arg("core.hooksPath=/dev/null")
-            .arg("-c")
-            .arg(format!("safe.directory={}", workspace.display()))
-            .arg("-C")
-            .arg(workspace)
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        let mut command = command::local_git_command(&self.program, workspace);
+        command.args(arguments);
         command
     }
 }

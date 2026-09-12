@@ -2,6 +2,12 @@ use super::*;
 
 const HEAD_SYNC_ATTEMPTS: usize = 5;
 
+#[derive(Clone)]
+pub(super) struct PendingHead {
+    previous: GitHubReviewReceipt,
+    updated: GitHubReviewReceipt,
+}
+
 impl NativeV2DeliveryAdapter {
     pub(super) async fn advance_review_head(
         &self,
@@ -45,46 +51,85 @@ impl NativeV2DeliveryAdapter {
             "delivery: GitHub authorized updated pull request head",
         )
         .await?;
-        self.synchronize_updated_head(drive, &previous).await?;
+        *self
+            .pending_head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(PendingHead {
+            previous,
+            updated: drive.review.clone(),
+        });
+        self.resume_pending_head(
+            &mut drive.credentials,
+            drive.control,
+            &drive.review.head_branch,
+        )
+        .await?;
         emit(drive.control, "delivery: adopted updated pull request head").await?;
         Ok(ReviewStep::Continue)
     }
 
-    async fn synchronize_updated_head(
+    pub(super) async fn resume_pending_head(
         &self,
-        drive: &mut ReviewDrive<'_>,
-        previous: &GitHubReviewReceipt,
+        credentials: &mut DeliveryCredentials<'_>,
+        control: &DriverControl,
+        head_branch: &str,
+    ) -> Result<(), DeliveryStop> {
+        let pending = self
+            .pending_head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+        if pending.updated.head_branch != head_branch {
+            return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
+        }
+        self.synchronize_pending_head(&pending, credentials, control)
+            .await
+            .map_err(|stop| stop.with_review(&pending.updated))?;
+        *self
+            .pending_head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        Ok(())
+    }
+
+    async fn synchronize_pending_head(
+        &self,
+        pending: &PendingHead,
+        credentials: &DeliveryCredentials<'_>,
+        control: &DriverControl,
     ) -> Result<(), DeliveryStop> {
         for attempt in 0..HEAD_SYNC_ATTEMPTS {
-            ensure_active(drive.control)?;
+            ensure_active(control)?;
             match self
                 .authority
                 .synchronize_review_head(
                     GitHubHeadSynchronization {
                         workspace: &self.config.workspace,
-                        previous,
-                        updated: &drive.review,
+                        previous: &pending.previous,
+                        updated: &pending.updated,
                     },
-                    drive.credentials.current(),
+                    credentials.current(),
                 )
                 .await
             {
                 Ok(()) => return Ok(()),
                 Err(GitHubAuthorityError::Unavailable) if attempt + 1 < HEAD_SYNC_ATTEMPTS => {
                     emit(
-                        drive.control,
+                        control,
                         "delivery: waiting to adopt GitHub pull request head",
                     )
                     .await?;
-                    drive.credentials.refresh().await?;
-                    wait_for_poll(drive.control, self.config.poll.interval).await?;
+                    wait_for_poll(control, self.config.poll.interval).await?;
                 }
-                Err(_) => {
-                    return Err(crash_outcome());
-                }
+                Err(error) => return Err(error.into()),
             }
         }
-        Err(crash_outcome())
+        Err(recovery::repair(
+            "authorized GitHub head could not be adopted",
+        ))
     }
 
     async fn request_head_update(
@@ -101,9 +146,11 @@ impl NativeV2DeliveryAdapter {
             .await
         {
             Ok(outcome) => outcome,
-            Err(_) => {
-                emit(drive.control, "delivery: refreshing GitHub credential").await?;
-                drive.credentials.refresh().await?;
+            Err(error) => {
+                drive
+                    .credentials
+                    .refresh_after(error, drive.control)
+                    .await?;
                 self.authority
                     .update_review_head(
                         &self.config.workspace,
@@ -111,7 +158,7 @@ impl NativeV2DeliveryAdapter {
                         drive.credentials.current(),
                     )
                     .await
-                    .map_err(|_| crash_outcome())?
+                    .map_err(DeliveryStop::from)?
             }
         };
         Ok(outcome)
