@@ -74,6 +74,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   milliseconds and remain unchanged across durable replay.
 - Run close reserves and tombstones execution activity atomically. No late start, handle, or stream
   may surface after close returns.
+- Native-v2 retries only a settled `crash` outcome when the executable has another authored
+  attempt. A provider session invalidated by that active execution becomes replaceable for the
+  authorized retry; passive session loss and run closure remain permanent, fail-closed loss.
 - Contained provider sessions bound post-exit I/O draining by the command deadline and a ten-minute
   ceiling while still observing cancellation and cleanup.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through

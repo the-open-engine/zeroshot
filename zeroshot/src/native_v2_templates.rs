@@ -9,6 +9,7 @@ use openengine_cluster_protocol::{
     WorkerErrorCode, WorkerRef, WriteBinding,
 };
 
+use crate::native_v2_admission::MAX_AGENT_VERIFIER_ATTEMPTS;
 use crate::native_v2_contract::{GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF};
 use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
@@ -226,7 +227,7 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
         ],
         write_bindings,
         timeout_ms: positive(NODE_TIMEOUT_MS)?,
-        attempts: positive(1)?,
+        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
         signals,
         diagnostic: diagnostic_type()?,
         instructions: Some(instructions(spec.authored_instructions)?),

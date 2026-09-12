@@ -66,14 +66,7 @@ async fn native_v2_loop_reuses_node_instance_with_fresh_attempt_one_executions()
         SettledSpec::new(1, 1, "check").position(3),
         verdict("rejected"),
     );
-    let reduction = FullV1Reducer::native_v2(&graph)
-        .reduce(ReductionInput {
-            initial_input: &json!({}),
-            executions: std::slice::from_ref(&first),
-            next_node_instance: 2,
-            next_execution: 2,
-        })
-        .assert_value();
+    let reduction = reduce_native(&graph, std::slice::from_ref(&first)).assert_value();
     assert!(reduction.decisions.iter().any(|decision| matches!(
         decision,
         Decision::Dispatch { node_instance, execution, attempt, .. }
@@ -85,17 +78,167 @@ async fn native_v2_loop_reuses_node_instance_with_fresh_attempt_one_executions()
         verdict("accepted"),
     );
     assert!(
-        FullV1Reducer::native_v2(&graph)
-            .reduce(ReductionInput {
-                initial_input: &json!({}),
-                executions: &[first, second],
-                next_node_instance: 2,
-                next_execution: 3,
-            })
+        reduce_native(&graph, &[first, second])
             .assert_value()
             .terminal
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn native_v2_retries_a_failed_execution_before_continuing() {
+    let graph = retryable_verifier_graph(2).await;
+    let failed = settled(
+        SettledSpec::new(1, 1, "check").position(3),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+    );
+    let retry = reduce_native(&graph, std::slice::from_ref(&failed)).assert_value();
+    let dispatches = retry
+        .decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            Decision::Dispatch {
+                node_instance,
+                execution,
+                attempt,
+                ..
+            } => Some((node_instance.get(), execution.get(), attempt.get())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(dispatches, vec![(1, 2, 2)]);
+    assert!(retry.terminal.is_none());
+
+    let succeeded = successful_native_retry();
+    assert!(matches!(
+        reduce_native(&graph, &[failed, succeeded])
+            .assert_value()
+            .terminal,
+        Some(TerminalProjection::Succeeded { .. })
+    ));
+}
+
+#[tokio::test]
+async fn native_v2_rejects_a_retry_that_does_not_follow_an_error() {
+    let graph = retryable_verifier_graph(2).await;
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "check").position(3),
+            verdict("accepted"),
+        ),
+        settled(
+            SettledSpec::new(2, 1, "check").attempt(2).position(6),
+            verdict("accepted"),
+        ),
+    ];
+
+    assert!(matches!(
+        reduce_native(&graph, &history),
+        Err(ReducerError::InconsistentHistory)
+    ));
+}
+
+#[tokio::test]
+async fn native_v2_does_not_retry_a_non_crash_error() {
+    let graph = retryable_verifier_graph(2).await;
+    let timed_out = settled(
+        SettledSpec::new(1, 1, "check").position(3),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Timeout),
+    );
+    let reduction = reduce_native(&graph, std::slice::from_ref(&timed_out)).assert_value();
+
+    assert!(!reduction.decisions.iter().any(|decision| matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "check"
+    )));
+}
+
+#[tokio::test]
+async fn native_v2_rejects_a_retry_visit_with_mismatched_prior_input() {
+    let graph = retryable_verifier_graph(2).await;
+    let mut failed = settled(
+        SettledSpec::new(1, 1, "check").position(3),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+    );
+    failed.input = json!({"unexpected":true});
+    let succeeded = successful_native_retry();
+
+    assert!(matches!(
+        reduce_native(&graph, &[failed, succeeded]),
+        Err(ReducerError::InconsistentHistory)
+    ));
+}
+
+#[tokio::test]
+async fn native_v2_rejects_a_retry_dispatched_before_the_failure_settled() {
+    let graph = retryable_verifier_graph(2).await;
+    let mut failed = settled(
+        SettledSpec::new(1, 1, "check").position(5),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+    );
+    failed.dispatch_position = HistoryPosition::new(1).assert_value();
+    let retry = settled(
+        SettledSpec::new(2, 1, "check").attempt(2).position(4),
+        verdict("accepted"),
+    );
+
+    assert!(matches!(
+        reduce_native(&graph, &[failed, retry]),
+        Err(ReducerError::InconsistentHistory)
+    ));
+}
+
+#[tokio::test]
+async fn native_v2_rejects_invalid_initial_and_excess_attempts() {
+    let graph = retryable_verifier_graph(1).await;
+    let invalid_initial = settled(
+        SettledSpec::new(1, 1, "check").attempt(2).position(3),
+        verdict("accepted"),
+    );
+    assert!(matches!(
+        reduce_native(&graph, &[invalid_initial]),
+        Err(ReducerError::InconsistentHistory)
+    ));
+
+    let failed = settled(
+        SettledSpec::new(1, 1, "check").position(3),
+        WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+    );
+    let excess_attempt = settled(
+        SettledSpec::new(2, 1, "check").attempt(2).position(6),
+        verdict("accepted"),
+    );
+    assert!(matches!(
+        reduce_native(&graph, &[failed, excess_attempt]),
+        Err(ReducerError::InconsistentHistory)
+    ));
+}
+
+fn successful_native_retry() -> DurableExecution {
+    settled(
+        SettledSpec::new(2, 1, "check").attempt(2).position(6),
+        verdict("accepted"),
+    )
+}
+
+async fn retryable_verifier_graph(attempts: u64) -> VerifiedGraph {
+    verified(
+        sequence("root", vec![verifier("check", attempts), succeed("done")]),
+        json!({"check":attempts}),
+    )
+    .await
+}
+
+fn reduce_native(
+    graph: &VerifiedGraph,
+    executions: &[DurableExecution],
+) -> Result<Reduction, ReducerError> {
+    FullV1Reducer::native_v2(graph).reduce(ReductionInput {
+        initial_input: &json!({}),
+        executions,
+        next_node_instance: 2,
+        next_execution: executions.len() as u64 + 1,
+    })
 }
 
 #[tokio::test]

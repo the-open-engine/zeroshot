@@ -117,6 +117,30 @@ async fn a_lost_reused_session_fails_without_replacement() {
 }
 
 #[tokio::test]
+async fn closing_a_run_permanently_loses_a_replaceable_session() {
+    const RUN_NAME: &str = "run";
+
+    let factory = Arc::new(FakeFactory::default());
+    let pool = SessionPool::new(factory.clone());
+    let (_cancel, mut cancellation) = watch::channel(false);
+    let first = request(RUN_NAME, "looped", (1, 1));
+    pool.checkout(&first.invocation, &first.environment, &mut cancellation)
+        .await
+        .assert_value()
+        .finish(false)
+        .await;
+
+    pool.close_run(&RunId::new(RUN_NAME)).await;
+    let retry = request(RUN_NAME, "looped", (1, 2));
+    assert!(matches!(
+        pool.checkout(&retry.invocation, &retry.environment, &mut cancellation,)
+            .await,
+        Err(NodeRunnerError::SessionLost)
+    ));
+    assert_eq!(factory.opened.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn closing_a_run_closes_and_permanently_loses_its_reused_sessions() {
     let (runner, _, factory) = runner();
     runner
