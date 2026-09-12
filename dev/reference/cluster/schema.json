@@ -1014,9 +1014,13 @@
               "$ref": "#/$defs/PayloadType"
             },
             "timeoutMs": {
+              "description": "Omit to run until completion or cancellation.",
               "maximum": 9007199254740991,
               "minimum": 1,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "worker": {
               "maxLength": 256,
@@ -1038,7 +1042,6 @@
             "output",
             "inputBindings",
             "writeBindings",
-            "timeoutMs",
             "attempts"
           ],
           "type": "object"
@@ -1108,9 +1111,13 @@
               "type": "object"
             },
             "timeoutMs": {
+              "description": "Omit to run until completion or cancellation.",
               "maximum": 9007199254740991,
               "minimum": 1,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "worker": {
               "maxLength": 256,
@@ -1132,7 +1139,6 @@
             "output",
             "inputBindings",
             "writeBindings",
-            "timeoutMs",
             "attempts",
             "signals",
             "diagnostic"

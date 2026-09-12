@@ -1730,8 +1730,10 @@ Every graph node is tagged by <code>kind</code>. Node payloads reject unknown fi
 <p>Parallel joins are <code>all</code>, <code>any</code>, <code>quorum { count }</code>, or <code>first { when }</code>. The closed worker error
 channel is <code>timeout</code>, <code>crash</code>, <code>malformed</code>, and <code>refusal</code>. Choice reachability/exhaustiveness, loop
 exit satisfiability, selector typing, dominance, promotion safety, and structural folds are
-production-verifier responsibilities, not parser claims. <code>timeoutMs</code> accepts exactly the
-<code>PositiveInteger</code> wire range; the verifier imposes no superseded 24-hour product ceiling.
+production-verifier responsibilities, not parser claims. Omitting <code>timeoutMs</code> lets a node run until
+completion or cancellation. An explicit <code>timeoutMs</code> accepts the <code>PositiveInteger</code> wire range.
+Built-in graphs omit deadlines for every node; provider processes have no separate execution
+deadline. Custom graphs may still declare a node deadline.
 Normal-success continuation requires every branch for <code>all</code>, one branch for <code>any</code>/<code>first</code>, and
 <code>count</code> branches for <code>quorum</code>. Quorum flow and promotion guarantees range over every valid
 size-<code>count</code> completing branch set. A set is valid only when its branch-completion predicates are
