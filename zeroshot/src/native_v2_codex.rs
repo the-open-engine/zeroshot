@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::WorkerOutcome;
-use tokio::time::{Duration, Instant};
 
 use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::{
@@ -43,8 +42,6 @@ use process::{ProcessOpen, exchange_turn, open_process};
 use schema_file::CodexSchemaFile;
 use session::CodexSession;
 use turn::{CodexCommandInput, CodexTurnProcess, CodexTurnProcessOpen};
-
-const PROCESS_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Runtime capabilities required to launch Codex. None of these paths are durable run data.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -168,7 +165,7 @@ impl NativeV2CodexAdapter {
                 current_dir: workspace,
                 mode: access,
             },
-            deadline: turn.deadline,
+            deadline: None,
         })
     }
 
@@ -240,7 +237,6 @@ impl NativeV2CodexAdapter {
             invocation,
             session,
             control: &control,
-            deadline: Instant::now() + PROCESS_TIMEOUT,
         };
         let prompt = render_agent_prompt(
             invocation.agent_instructions()?,
@@ -366,7 +362,6 @@ struct CodexTurn<'a> {
     invocation: &'a DriverInvocation,
     session: &'a CodexSession,
     control: &'a DriverControl,
-    deadline: Instant,
 }
 
 struct CodexRunState {
@@ -405,7 +400,6 @@ impl CodexRunState {
                     detail,
                     retryable: true,
                     has_session,
-                    deadline: turn.deadline,
                 },
             )
             .await?;

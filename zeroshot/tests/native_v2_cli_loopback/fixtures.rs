@@ -391,7 +391,6 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
         gh_program: PathBuf::from("/usr/bin/gh"),
         process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
             .assert_value_with("production process pool"),
-        claude_turn_timeout: Duration::from_secs(10 * 60),
     }
 }
 

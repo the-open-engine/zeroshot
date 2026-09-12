@@ -15,7 +15,6 @@ mod tests;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunSubmitParams;
@@ -38,7 +37,6 @@ use openengine_cluster_server::admission::VerificationError;
 
 use allocator::{ProductionCapsuleAllocator, ProductionCapsuleConfig};
 use connections::build_connection_resolver;
-const DEFAULT_CLAUDE_TURN_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Composes the production target around exact sourceful run requests.
 pub async fn build_production_target_authority(
@@ -64,7 +62,6 @@ pub struct ProductionHostingConfig {
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
     pub process_pool: HostedProcessPool,
-    pub claude_turn_timeout: Duration,
 }
 
 impl fmt::Debug for ProductionHostingConfig {
@@ -114,7 +111,6 @@ impl ProductionTargetControllerFactory {
             git_program: self.config.git_program.clone(),
             gh_program: self.config.gh_program.clone(),
             process_pool: self.config.process_pool,
-            claude_turn_timeout: self.config.claude_turn_timeout,
             operator_diagnostics: self.operator_diagnostics.clone(),
         })?);
         let controller = NativeV2CloudController::new_with_delivery_policy(
@@ -280,7 +276,6 @@ impl Default for ProductionHostingConfig {
             git_program: PathBuf::from("/usr/bin/git"),
             gh_program: PathBuf::from("/usr/bin/gh"),
             process_pool: HostedProcessPool::hosted_default(),
-            claude_turn_timeout: DEFAULT_CLAUDE_TURN_TIMEOUT,
         }
     }
 }

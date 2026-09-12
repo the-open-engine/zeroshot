@@ -163,14 +163,36 @@ impl NativeV2Supervisor {
         reference: ExecutionRef,
         outcome: WorkerOutcome,
     ) -> Result<(), NativeV2SupervisorError> {
-        self.ledger
-            .append(
-                &self.run_id,
-                vec![RunEvent::NodeCompleted {
-                    completion: NodeCompletion { reference, outcome },
-                }],
-            )
-            .await?;
+        self.append_completion(reference, outcome, None).await
+    }
+
+    async fn append_completion(
+        &self,
+        reference: ExecutionRef,
+        outcome: WorkerOutcome,
+        elapsed: Option<Duration>,
+    ) -> Result<(), NativeV2SupervisorError> {
+        let mut events = Vec::new();
+        if let Some(code) = outcome.error_code() {
+            let timing = elapsed.map_or_else(String::new, |duration| {
+                format!(" after {:.1}s", duration.as_secs_f64())
+            });
+            events.push(RunEvent::SafeLog {
+                execution: Some(reference.execution),
+                timestamp: crate::native_v2_runner::current_timestamp(),
+                stream: SafeLogStream::Error,
+                line: SafeLogLine::new(format!(
+                    "Node {} failed: {}{}",
+                    reference.node.as_str(),
+                    code.as_str(),
+                    timing,
+                ))?,
+            });
+        }
+        events.push(RunEvent::NodeCompleted {
+            completion: NodeCompletion { reference, outcome },
+        });
+        self.ledger.append(&self.run_id, events).await?;
         Ok(())
     }
 
@@ -220,18 +242,8 @@ impl NativeV2Supervisor {
         }
         let force = self.snapshot().await?.force_stop_requested;
         let outcome = settled_outcome(&finished.reference, finished.result, force)?;
-        self.ledger
-            .append(
-                &self.run_id,
-                vec![RunEvent::NodeCompleted {
-                    completion: NodeCompletion {
-                        reference: finished.reference,
-                        outcome,
-                    },
-                }],
-            )
-            .await?;
-        Ok(())
+        self.append_completion(finished.reference, outcome, Some(finished.elapsed))
+            .await
     }
 
     pub(super) async fn append_terminal(

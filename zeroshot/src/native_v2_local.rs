@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
 
 use openengine_cluster_protocol::{
     RunId, RunSubmission, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
@@ -35,7 +34,6 @@ use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 
 const DEFAULT_SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const MAX_GIT_OUTPUT_BYTES: usize = 16 * 1024;
-const LOCAL_TURN_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Error)]
 pub enum LocalCompositionError {
@@ -235,7 +233,6 @@ pub fn build_local_process_candidate(
                 runtime_home: runtime_home.clone(),
                 local_user_home: local_home,
                 base_environment: local_claude_environment(&search_path)?,
-                turn_timeout: LOCAL_TURN_TIMEOUT,
                 process_pool,
             })
         }

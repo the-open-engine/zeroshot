@@ -34,7 +34,7 @@ fn command(program: &str, argv: Vec<&str>) -> ProcessSessionCommand {
             current_dir: std::env::temp_dir(),
             mode: WorkspaceAccessMode::Exclusive,
         },
-        deadline: Instant::now() + Duration::from_secs(10),
+        deadline: Some(Instant::now() + Duration::from_secs(10)),
     }
 }
 
@@ -169,7 +169,7 @@ async fn cancellation_and_child_exit_races_settle_once() {
 async fn deadline_force_kills_and_reaps_the_session() {
     let (_cancel, cancellation) = cancellation_pair();
     let mut timed = command("/bin/sleep", vec!["30"]);
-    timed.deadline = Instant::now() + Duration::from_millis(50);
+    timed.deadline = Some(Instant::now() + Duration::from_millis(50));
     let mut session = LocalProcessRunner::new()
         .open(timed, cancellation)
         .await
@@ -387,4 +387,29 @@ async fn windows_job_release_reaps_a_descendant() {
     assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
     wait_for_process_exit(child_pid).await;
     let _ = fs::remove_file(pid_file);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unbounded_process_remains_cancellable_and_reaped() {
+    let (cancel, cancellation) = cancellation_pair();
+    let mut request = command("/bin/sleep", vec!["30"]);
+    request.deadline = None;
+    let mut session = LocalProcessRunner::new()
+        .open(request, cancellation)
+        .await
+        .assert_value();
+    assert!(
+        timeout(Duration::from_millis(30), session.wait())
+            .await
+            .is_err()
+    );
+    cancel.send(true).assert_value();
+    let completion = timeout(Duration::from_secs(2), session.wait())
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(completion.cancelled);
+    assert!(!completion.timed_out);
+    assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
 }

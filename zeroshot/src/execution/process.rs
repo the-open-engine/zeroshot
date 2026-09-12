@@ -27,6 +27,14 @@ pub use session::{
 };
 pub(crate) use session::ProcessStdout;
 
+/// An absent deadline waits only for the caller's completion or cancellation branch.
+pub(crate) async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 pub const MAX_PROCESS_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 /// Last-resort allocation guards for already-constructed provider commands.
 ///

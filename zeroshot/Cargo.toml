@@ -59,4 +59,5 @@ windows-sys = { workspace = true, features = [
 dbus.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 openengine-cluster-testkit.workspace = true

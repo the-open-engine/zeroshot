@@ -3,7 +3,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::WorkerOutcome;
 use tokio::sync::Mutex;
-use tokio::time::Instant;
 
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::{
@@ -68,7 +67,6 @@ impl NodeDriver for ClaudeAdapter {
             invocation: &invocation,
             session,
             control: &control,
-            deadline: Instant::now() + self.turn_timeout,
         };
         let mut state = ClaudeRunState::new(&invocation, session).await?;
         loop {
@@ -162,7 +160,6 @@ impl ClaudeRunState {
                     detail: Some(detail),
                     retryable,
                     has_session: self.resume_id.is_some(),
-                    deadline: turn.deadline,
                 },
             )
             .await?;

@@ -28,7 +28,7 @@ pub(super) enum Initialization {
 
 pub(super) struct RunProgram {
     pub(super) admitted: AdmittedRun,
-    pub(super) timeouts: BTreeMap<NodeName, Duration>,
+    pub(super) timeouts: BTreeMap<NodeName, Option<Duration>>,
     pub(super) instructions: BTreeMap<NodeName, Option<NodeInstructions>>,
 }
 
@@ -105,11 +105,12 @@ pub(super) struct FinishedDispatch {
     pub(super) execution: ExecutionId,
     pub(super) reference: ExecutionRef,
     pub(super) result: DispatchResult,
+    pub(super) elapsed: Duration,
 }
 
 pub(super) struct DispatchTask {
     pub(super) handle: NodeHandle,
-    pub(super) timeout: Duration,
+    pub(super) timeout: Option<Duration>,
     pub(super) cancel: oneshot::Receiver<ExecutionInterrupt>,
     pub(super) ledger: Arc<dyn RunLedger>,
     pub(super) run_id: RunId,
@@ -127,12 +128,15 @@ pub(super) async fn run_dispatch(task: DispatchTask) -> FinishedDispatch {
         registration,
         output,
     } = task;
+    let started = tokio::time::Instant::now();
     let reference = handle.reference().clone();
     let execution = reference.execution;
     let events = tokio::spawn(bridge_durable_events(ledger, run_id, execution, output));
     let interrupt = async {
         tokio::select! {
-            _ = tokio::time::sleep(timeout) => DispatchResult::TimedOut,
+            _ = crate::execution::process::wait_for_deadline(
+                timeout.map(|duration| tokio::time::Instant::now() + duration),
+            ) => DispatchResult::TimedOut,
             _ = cancel => DispatchResult::Interrupted,
         }
     };
@@ -154,6 +158,7 @@ pub(super) async fn run_dispatch(task: DispatchTask) -> FinishedDispatch {
         registration.close().await;
     }
     FinishedDispatch {
+        elapsed: started.elapsed(),
         execution,
         reference,
         result,
@@ -287,7 +292,7 @@ pub(super) fn next_execution(
 }
 
 pub(super) struct ExecutionCatalog {
-    pub(super) timeouts: BTreeMap<NodeName, Duration>,
+    pub(super) timeouts: BTreeMap<NodeName, Option<Duration>>,
     pub(super) instructions: BTreeMap<NodeName, Option<NodeInstructions>>,
 }
 
@@ -305,13 +310,13 @@ fn collect_execution_metadata(node: &GraphNode, catalog: &mut ExecutionCatalog) 
         GraphNode::Step(node) => record_execution_metadata(
             catalog,
             &node.name,
-            node.timeout_ms.get(),
+            node.timeout_ms.map(|value| value.get()),
             &node.instructions,
         ),
         GraphNode::Verifier(node) => record_execution_metadata(
             catalog,
             &node.name,
-            node.timeout_ms.get(),
+            node.timeout_ms.map(|value| value.get()),
             &node.instructions,
         ),
         GraphNode::Seq(node) => node
@@ -342,12 +347,12 @@ fn collect_execution_metadata(node: &GraphNode, catalog: &mut ExecutionCatalog) 
 fn record_execution_metadata(
     catalog: &mut ExecutionCatalog,
     name: &NodeName,
-    timeout_ms: u64,
+    timeout_ms: Option<u64>,
     instructions: &Option<NodeInstructions>,
 ) {
     catalog
         .timeouts
-        .insert(name.clone(), Duration::from_millis(timeout_ms));
+        .insert(name.clone(), timeout_ms.map(Duration::from_millis));
     catalog
         .instructions
         .insert(name.clone(), instructions.clone());

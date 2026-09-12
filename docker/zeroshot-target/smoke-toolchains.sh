@@ -65,6 +65,7 @@ fn main() {
 }
 RUST
 rustc --version | grep '^rustc 1\.97\.0 '
+rustc -vV | grep '^host: .*unknown-linux-gnu$'
 cargo fmt --all
 cargo fmt --all -- --check
 cargo clippy --offline -- -D warnings
