@@ -163,10 +163,10 @@ fn linux_entry_process_group(entry: std::fs::DirEntry) -> Result<Option<i32>, io
     let Some(pid) = linux_entry_pid(&entry) else {
         return Ok(None);
     };
-    let stat = match std::fs::read_to_string(entry.path().join("stat")) {
-        Ok(stat) => stat,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(stat) =
+        resolve_linux_process_read(std::fs::read_to_string(entry.path().join("stat")))?
+    else {
+        return Ok(None);
     };
     linux_process_group(&stat).map(Some).ok_or_else(|| {
         io::Error::new(
@@ -373,10 +373,10 @@ fn linux_uid_processes(worker_uid: u32) -> Result<Vec<i32>, io::Error> {
         let Some(pid) = linux_entry_pid(&entry) else {
             continue;
         };
-        let status = match std::fs::read_to_string(entry.path().join("status")) {
-            Ok(status) => status,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
+        let Some(status) =
+            resolve_linux_process_read(std::fs::read_to_string(entry.path().join("status")))?
+        else {
+            continue;
         };
         let effective_uid = linux_effective_uid(&status).ok_or_else(|| {
             io::Error::new(
@@ -389,6 +389,21 @@ fn linux_uid_processes(worker_uid: u32) -> Result<Vec<i32>, io::Error> {
         }
     }
     Ok(pids)
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_linux_process_read(read: io::Result<String>) -> io::Result<Option<String>> {
+    match read {
+        Ok(contents) => Ok(Some(contents)),
+        // A process may disappear before open (ENOENT) or after open but before read (ESRCH).
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(libc::ESRCH) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -429,3 +444,7 @@ pub(super) fn process_group_has_live_members(process_group_id: i32) -> Result<bo
         .map(str::trim)
         .any(|state| !state.is_empty()))
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "platform_unix/tests.rs"]
+mod tests;

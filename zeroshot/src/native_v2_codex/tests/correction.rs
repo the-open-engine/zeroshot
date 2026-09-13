@@ -3,7 +3,7 @@ use super::*;
 async fn corrected_output(
     directory: &TestDirectory,
     provider: CodexProvider,
-) -> (WorkerOutcome, String) {
+) -> (WorkerOutcome, String, String) {
     let capture = directory.child("capture");
     let configuration = match provider {
         CodexProvider::OpenAi => Some(("OPENAI_API_KEY", "fake-openai-key", "gpt-5.6-sol")),
@@ -27,7 +27,7 @@ async fn corrected_output(
     )
     .await;
     let runtime = runner(&admitted, adapter);
-    let mut handle = start(
+    let handle = start(
         &runtime,
         &admitted,
         1,
@@ -38,14 +38,18 @@ async fn corrected_output(
         ],
     )
     .await;
-    let outcome = handle.completion().await.assert_value().outcome;
-    (outcome, fs::read_to_string(capture).assert_value())
+    let (logs, outcome) = complete_with_logs(handle).await;
+    (
+        outcome.assert_value(),
+        fs::read_to_string(capture).assert_value(),
+        logs,
+    )
 }
 
 #[tokio::test]
 async fn invalid_output_is_corrected_in_the_same_codex_session() {
     let directory = TestDirectory::new("codex-correction");
-    let (outcome, capture) = corrected_output(&directory, CodexProvider::OpenAi).await;
+    let (outcome, capture, logs) = corrected_output(&directory, CodexProvider::OpenAi).await;
 
     assert!(matches!(
         outcome,
@@ -53,14 +57,17 @@ async fn invalid_output_is_corrected_in_the_same_codex_session() {
     ));
     assert_eq!(capture.matches("arg=resume").count(), 1);
     assert_eq!(capture.matches("arg=thread-123").count(), 1);
-    assert!(capture.contains("Your previous final response was rejected mechanically"));
+    assert!(
+        capture.contains("Your previous final response was rejected mechanically"),
+        "missing correction prompt; fixture capture:\n{capture}\nprovider logs:\n{logs}"
+    );
     assert!(capture.contains("output $.answer must be a integer"));
 }
 
 #[tokio::test]
 async fn openrouter_correction_scopes_configuration_to_the_resume_command() {
     let directory = TestDirectory::new("codex-openrouter-correction");
-    let (outcome, capture) = corrected_output(&directory, CodexProvider::OpenRouter).await;
+    let (outcome, capture, _logs) = corrected_output(&directory, CodexProvider::OpenRouter).await;
 
     assert!(matches!(
         outcome,
