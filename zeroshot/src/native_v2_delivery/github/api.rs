@@ -7,6 +7,7 @@ use super::*;
 
 const MAX_API_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_API_ERROR_BYTES: usize = 64 * 1024;
+const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
 const MAX_CHECK_LOG_TAIL_BYTES: usize = 64 * 1024;
 
 impl GhCliDeliveryAuthority {
@@ -30,10 +31,11 @@ impl GhCliDeliveryAuthority {
         bounded_output(command, self.config.api_deadline, credential)
             .await
             .map_err(|error| {
-                let diagnostic = format!("{context}\n{error}")
-                    .replace(credential.expose(), "[REDACTED]")
-                    .replace(&encode_basic_credential(credential.expose()), "[REDACTED]");
-                GitHubAuthorityError::api(error.api_status(), diagnostic)
+                redacted_api_error(
+                    error.api_status(),
+                    format!("{context}\n{error}"),
+                    credential,
+                )
             })
     }
 
@@ -93,63 +95,142 @@ async fn bounded_output(
     deadline: Duration,
     credential: GitHubCredential<'_>,
 ) -> Result<Vec<u8>, GitHubAuthorityError> {
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or(GitHubAuthorityError::Unavailable)?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or(GitHubAuthorityError::Unavailable)?;
-    let mut output = Vec::new();
-    let mut error_output = Vec::new();
-    let (status, (), ()) = timeout(deadline, async {
+    command
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| {
+        redacted_api_error(
+            None,
+            format!("could not start command: {error}"),
+            credential,
+        )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        redacted_api_error(None, "command stdout pipe is unavailable", credential)
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        redacted_api_error(None, "command stderr pipe is unavailable", credential)
+    })?;
+    let mut output = ApiOutput::default();
+    let result = timeout(deadline, async {
         tokio::try_join!(
-            child.wait(),
-            collect_bounded(stdout, &mut output, MAX_API_OUTPUT_BYTES),
-            collect_bounded(stderr, &mut error_output, MAX_API_ERROR_BYTES),
+            async {
+                child
+                    .wait()
+                    .await
+                    .map_err(|error| format!("could not wait for command: {error}"))
+            },
+            collect_bounded(stdout, &mut output.stdout, MAX_API_OUTPUT_BYTES, "stdout"),
+            collect_bounded(stderr, &mut output.stderr, MAX_API_ERROR_BYTES, "stderr"),
         )
     })
-    .await
-    .map_err(|_| GitHubAuthorityError::Unavailable)?
-    .map_err(|_| GitHubAuthorityError::Unavailable)?;
-    if !status.success() {
-        let error = github_api_error(&error_output);
-        let stdout_truncated = output.len() > MAX_API_OUTPUT_BYTES;
-        let stderr_truncated = error_output.len() > MAX_API_ERROR_BYTES;
-        let (stdout, stdout_truncated) =
-            super::super::command::diagnostic_text(output, stdout_truncated, credential.expose());
-        let (stderr, stderr_truncated) = super::super::command::diagnostic_text(
-            error_output,
-            stderr_truncated,
-            credential.expose(),
-        );
-        let diagnostic = format!(
-            "exitStatus: {:?}\nstdout (truncated={stdout_truncated}):\n{stdout}\n\
-            stderr (truncated={stderr_truncated}):\n{stderr}",
-            status.code()
-        );
-        return Err(GitHubAuthorityError::api(error.api_status(), diagnostic));
+    .await;
+    match result {
+        Ok(Ok((status, (), ()))) if status.success() => validate_api_output(output.stdout),
+        Ok(Ok((status, (), ()))) => Err(output.failure(
+            Some(status),
+            &format!("command exited unsuccessfully: {status}"),
+            credential,
+        )),
+        Ok(Err(error)) => Err(output.failure(None, &error, credential)),
+        Err(_) => Err(output.failure(
+            None,
+            &format!(
+                "command timed out after {} milliseconds",
+                deadline.as_millis()
+            ),
+            credential,
+        )),
     }
-    validate_api_output(output)
+}
+
+#[derive(Default)]
+struct ApiOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl ApiOutput {
+    fn failure(
+        self,
+        status: Option<std::process::ExitStatus>,
+        context: &str,
+        credential: GitHubCredential<'_>,
+    ) -> GitHubAuthorityError {
+        // Incomplete stderr is not an authoritative HTTP response.
+        let api_status = status.and_then(|_| github_api_error(&self.stderr).api_status());
+        let (stdout, stdout_truncated) = api_diagnostic_text(
+            self.stdout,
+            status.is_none(),
+            MAX_API_OUTPUT_BYTES,
+            credential,
+        );
+        let (stderr, stderr_truncated) = api_diagnostic_text(
+            self.stderr,
+            status.is_none(),
+            MAX_API_ERROR_BYTES,
+            credential,
+        );
+        redacted_api_error(
+            api_status,
+            format!(
+                "exitStatus: {:?}\n{context}\nstderr (truncated={stderr_truncated}):\n{stderr}\n\
+                stdout (truncated={stdout_truncated}):\n{stdout}",
+                status.and_then(|status| status.code())
+            ),
+            credential,
+        )
+    }
+}
+
+fn redacted_api_error(
+    status: Option<u16>,
+    diagnostic: impl Into<String>,
+    credential: GitHubCredential<'_>,
+) -> GitHubAuthorityError {
+    let diagnostic = diagnostic
+        .into()
+        .replace(credential.expose(), "[REDACTED]")
+        .replace(&encode_basic_credential(credential.expose()), "[REDACTED]");
+    GitHubAuthorityError::api(status, diagnostic)
+}
+
+fn api_diagnostic_text(
+    bytes: Vec<u8>,
+    incomplete: bool,
+    capture_limit: usize,
+    credential: GitHubCredential<'_>,
+) -> (String, bool) {
+    let truncated = incomplete || bytes.len() > capture_limit;
+    let (mut text, truncated) =
+        super::super::command::diagnostic_text(bytes, truncated, credential.expose());
+    // Reserve space for both streams inside the combined API diagnostic budget.
+    // Redact before truncating so a credential cannot be exposed as a partial suffix.
+    let truncated = truncated || text.len() > MAX_API_DIAGNOSTIC_STREAM_BYTES;
+    let mut boundary = text.len().min(MAX_API_DIAGNOSTIC_STREAM_BYTES);
+    while !text.is_char_boundary(boundary) {
+        boundary = boundary.saturating_sub(1);
+    }
+    text.truncate(boundary);
+    (text, truncated)
 }
 
 async fn collect_bounded<R>(
     mut reader: R,
     output: &mut Vec<u8>,
     maximum_bytes: usize,
-) -> Result<(), std::io::Error>
+    stream: &str,
+) -> Result<(), String>
 where
     R: AsyncRead + Unpin,
 {
     let mut buffer = [0_u8; 8 * 1024];
     loop {
-        let read = reader.read(&mut buffer).await?;
+        let read = reader
+            .read(&mut buffer)
+            .await
+            .map_err(|error| format!("could not read command {stream}: {error}"))?;
         if read == 0 {
             return Ok(());
         }
