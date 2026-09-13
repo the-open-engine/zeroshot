@@ -89,6 +89,7 @@ pub struct NativeV2CloudController {
     submission_turn: Arc<Mutex<()>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
+    operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
 }
 
 #[derive(Clone)]
@@ -130,9 +131,18 @@ impl NativeV2CloudController {
             submission_turn: Arc::new(Mutex::new(())),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
+            operator_diagnostics: Arc::default(),
         };
         controller.reconcile_persisted_runs().await?;
         Ok(controller)
+    }
+
+    pub(crate) fn with_operator_diagnostics(
+        mut self,
+        diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
+    ) -> Self {
+        self.operator_diagnostics = diagnostics;
+        self
     }
 
     /// Reconciles durable nonterminal truth before this controller can serve any OECP method.
@@ -262,7 +272,7 @@ impl NativeV2CloudController {
         admitted: AdmittedRun,
         secrets: RunSecretEnvelope,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
-        let run_id = stored.snapshot.run_id;
+        let run_id = stored.snapshot.run_id.clone();
         let controller_claim = self.allocator.claim_controller(&run_id).await?;
         let github_token = match source_github_token(&secrets).await {
             Ok(token) => token,
@@ -284,6 +294,7 @@ impl NativeV2CloudController {
                 return Err(error.into());
             }
         };
+        self.observability.track_runtime(&stored.snapshot)?;
         let AllocatedCapsule {
             runner,
             loss,
@@ -297,7 +308,8 @@ impl NativeV2CloudController {
             loss,
             controller_claim,
             delivery_policy: self.delivery_policy,
-            live_output: Arc::new(self.observability.clone()),
+            observability: self.observability.clone(),
+            operator_diagnostics: self.operator_diagnostics.clone(),
         });
         self.runtimes
             .lock()
@@ -313,8 +325,9 @@ impl NativeV2CloudController {
     fn remove_finished_runtime(&self, run_id: RunId, engine: Arc<PortableRunEngine>) {
         let runtimes = self.runtimes.clone();
         tokio::spawn(async move {
-            engine.wait_removable().await;
-            runtimes.lock().await.remove(&run_id);
+            if engine.wait_removable().await {
+                runtimes.lock().await.remove(&run_id);
+            }
         });
     }
 

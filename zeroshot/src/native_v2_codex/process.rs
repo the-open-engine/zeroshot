@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use crate::execution::process::{
-    LocalProcessRunner, ProcessRunnerError, ProcessSession, ProcessSessionCommand,
-    ProcessSessionOutput, ProcessStdout,
+    ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput, ProcessStdout,
 };
 use crate::native_v2_capsule::provider_process::{
-    ProcessExchange, ProcessInputFailure, exchange_process_io, open_provider_process,
-    process_failure_detail, safe_provider_text,
+    ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
+    exchange_process_io, open_provider_process, process_failure_detail, safe_provider_text,
 };
 use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
@@ -12,7 +13,7 @@ use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeR
 use super::output::{CodexOutput, CodexOutputDecoder};
 
 pub(super) enum ProcessOpen {
-    Ready(ProcessSession),
+    Ready(ProviderProcess),
     ProviderFailure(String),
 }
 
@@ -23,11 +24,11 @@ struct CollectedOutput {
 }
 
 pub(super) async fn open_process(
-    runner: LocalProcessRunner,
+    files: Arc<ProviderExecutionFiles>,
     command: ProcessSessionCommand,
     control: &DriverControl,
 ) -> Result<ProcessOpen, NodeRunnerError> {
-    let process = match open_provider_process(runner, command, control).await? {
+    let process = match open_provider_process(files, command, control).await? {
         Ok(process) => process,
         Err(error) => {
             return Ok(ProcessOpen::ProviderFailure(format!(
@@ -60,7 +61,7 @@ async fn collect_output(
 }
 
 pub(super) async fn exchange_turn(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     prompt: &str,
     control: &DriverControl,
     redactions: &[String],
@@ -126,7 +127,7 @@ fn retain_delivery_evidence(
 }
 
 pub(super) async fn finish_process(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     output_complete: bool,
 ) -> Result<ProcessSessionOutput, ProcessRunnerError> {
     if output_complete {

@@ -376,7 +376,10 @@ pub struct FailReason(EnumLabel);
 
 impl FailReason {
     pub fn new(value: EnumLabel) -> Result<Self, FailReasonError> {
-        if value.as_str() == "unhandled" {
+        if matches!(
+            value.as_str(),
+            "unhandled" | "runtime_failed" | "runtime_lost"
+        ) {
             Err(FailReasonError)
         } else {
             Ok(Self(value))
@@ -390,7 +393,7 @@ impl FailReason {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-#[error("fail reason 'unhandled' is reserved for the compiler's implicit sink")]
+#[error("fail reason is reserved for the compiler or runtime")]
 pub struct FailReasonError;
 
 impl<'de> Deserialize<'de> for FailReason {
@@ -417,7 +420,7 @@ impl JsonSchema for FailReason {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "pattern": "^(?!unhandled$)[A-Za-z_][A-Za-z0-9_.-]*$"
+            "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost)$)[A-Za-z_][A-Za-z0-9_.-]*$"
         })
     }
 }

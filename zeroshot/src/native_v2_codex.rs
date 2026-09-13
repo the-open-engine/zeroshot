@@ -18,12 +18,10 @@ use std::path::{Path, PathBuf};
 use openengine_cluster_protocol::WorkerOutcome;
 
 use crate::execution::driver::WorkspaceCapability;
-use crate::execution::process::{
-    HostedProcessPool, LocalProcessRunner, ProcessRunnerError, ProcessSessionCommand,
-};
+use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
-    process_scope, redaction_values, with_driver_detail,
+    ProviderExecution, ProviderFilesystemConfig, redaction_values, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -110,16 +108,6 @@ impl NativeV2CodexAdapter {
         }
     }
 
-    fn turn_process(
-        &self,
-        invocation: &DriverInvocation,
-    ) -> Result<Result<(LocalProcessRunner, PathBuf), ProcessRunnerError>, NodeRunnerError> {
-        let scope = process_scope(invocation).map_err(|error| {
-            with_driver_detail(error, "Codex process scope requires an agent node role")
-        })?;
-        Ok(self.runners.turn_process(&self.config.runtime_home, scope))
-    }
-
     fn command(
         &self,
         turn: &CodexTurn<'_>,
@@ -135,7 +123,7 @@ impl NativeV2CodexAdapter {
         let executable = path_text(&self.config.executable).map_err(|error| {
             with_driver_detail(error, "Codex executable path is not valid on this platform")
         })?;
-        let workspace = self.config.workspace.clone();
+        let workspace = input.files.workspace.clone();
         let mut argv = vec!["exec".to_owned()];
         self.add_execution_policy(&mut argv, sandbox);
         add_resume_command(&mut argv, input.resume);
@@ -153,14 +141,19 @@ impl NativeV2CodexAdapter {
         ]);
         add_session_target(&mut argv, input.resume);
 
+        let mut environment = self
+            .provider_environment(&invocation.environment, input.files.home())
+            .map_err(|error| with_driver_detail(error, "Codex provider environment is invalid"))?;
+        environment.entry("TMPDIR".to_owned()).or_insert(
+            input
+                .files
+                .scratch_text()
+                .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
+        );
         Ok(ProcessSessionCommand {
             program: executable,
             argv,
-            environment: self
-                .provider_environment(&invocation.environment, input.runtime_home)
-                .map_err(|error| {
-                    with_driver_detail(error, "Codex provider environment is invalid")
-                })?,
+            environment,
             workspace: WorkspaceCapability {
                 current_dir: workspace,
                 mode: access,
@@ -233,10 +226,20 @@ impl NativeV2CodexAdapter {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let _turn = session.core.turn.lock().await;
+        let execution = ProviderExecution::new(
+            ProviderFilesystemConfig {
+                runners: self.runners,
+                root: &self.config.runtime_home,
+                workspace: &self.config.workspace,
+            },
+            invocation,
+            &session.core,
+        );
         let turn = CodexTurn {
             invocation,
             session,
             control: &control,
+            execution: &execution,
         };
         let prompt = render_agent_prompt(
             invocation.agent_instructions()?,
@@ -317,7 +320,7 @@ impl NativeV2CodexAdapter {
         turn: &CodexTurn<'_>,
         resume: Option<&str>,
     ) -> Result<CodexTurnProcessOpen, NodeRunnerError> {
-        let (runner, runtime_home) = match self.turn_process(turn.invocation)? {
+        let files = match turn.execution.prepare(turn.control).await {
             Ok(resources) => resources,
             Err(error) => {
                 return Ok(CodexTurnProcessOpen::ProviderFailure(format!(
@@ -326,7 +329,7 @@ impl NativeV2CodexAdapter {
             }
         };
         let schema = match CodexSchemaFile::create(
-            &runtime_home,
+            files.home(),
             &turn
                 .invocation
                 .response
@@ -341,11 +344,11 @@ impl NativeV2CodexAdapter {
             turn,
             CodexCommandInput {
                 resume,
-                runtime_home: &runtime_home,
+                files: &files,
                 schema_path: schema.path(),
             },
         )?;
-        let process = match open_process(runner, command, turn.control).await? {
+        let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,
             ProcessOpen::ProviderFailure(detail) => {
                 return Ok(CodexTurnProcessOpen::ProviderFailure(detail));
@@ -362,6 +365,7 @@ struct CodexTurn<'a> {
     invocation: &'a DriverInvocation,
     session: &'a CodexSession,
     control: &'a DriverControl,
+    execution: &'a ProviderExecution<'a>,
 }
 
 struct CodexRunState {

@@ -60,6 +60,7 @@ prompt=$(/usr/bin/cat)
   /usr/bin/printf 'aws_region=%s\n' "${AWS_REGION-unset}"
   /usr/bin/printf 'path=%s\n' "${PATH-unset}"
   /usr/bin/printf 'home=%s\n' "${HOME-unset}"
+  /usr/bin/printf 'scratch=%s\n' "$TMPDIR"
   /usr/bin/printf 'ambient=%s\n' "${AMBIENT_SENTINEL-unset}"
 } >> "$CAPTURE_PATH"
 
@@ -491,4 +492,14 @@ async fn openai_node_instance_session_resumes_the_exact_thread() {
             .iter()
             .all(|home| home.ends_with("writer-node-instance-1"))
     );
+    assert!(homes.iter().all(|home| Path::new(home).is_dir()));
+    let scratches = capture
+        .lines()
+        .filter_map(|line| line.strip_prefix("scratch="))
+        .collect::<Vec<_>>();
+    crate::native_v2_candidate::test_support::assert_removed_directories(&scratches, 2);
+    runtime
+        .close_run(&openengine_cluster_protocol::RunId::new("run-codex"))
+        .await;
+    assert!(homes.iter().all(|home| !Path::new(home).exists()));
 }

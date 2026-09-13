@@ -1,6 +1,7 @@
 //! Ledger-backed native-v2 status, watch, logs, and live read-only attach.
 //!
-//! Durable observation is reconstructed exclusively from the lean run ledger. Live attach is a
+//! Durable history is reconstructed from the lean run ledger. A stopped runtime retains a minimal
+//! in-memory failure status when persistence fails, without fabricating history. Live attach is a
 //! deliberately separate, active-execution-only stream: it has no cursor, stores no history, and
 //! cannot signal or cancel an execution when a viewer disconnects.
 
@@ -10,6 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::FutureExt;
 use openengine_cluster_protocol::{
     ActiveExecution, AgentAttachEvent, BoundedAssistantOutput, BoundedLogMessage, BoundedLogTarget,
     Cursor, ExecutionRef as PublicExecutionRef, LogLevel, LogRecord, RunAttachEventNotification,
@@ -32,6 +34,9 @@ use crate::v2_run_ledger::{
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const LOG_TARGET: &str = "agent";
 
+mod runtime;
+use runtime::RuntimeObservation;
+
 mod projection;
 use projection::{
     bounded_attach_output, changes_public_status, log_notification, opaque_execution,
@@ -46,6 +51,7 @@ mod tests;
 pub struct NativeV2Observability {
     ledger: Arc<dyn RunLedger>,
     live: LiveRegistry,
+    runtime: RuntimeObservation,
     next_subscription: Arc<AtomicU64>,
 }
 
@@ -55,6 +61,7 @@ impl NativeV2Observability {
         Self {
             ledger,
             live: LiveRegistry::default(),
+            runtime: RuntimeObservation::default(),
             next_subscription: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -63,12 +70,15 @@ impl NativeV2Observability {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2ObservationError> {
-        let stored = self
-            .ledger
-            .get(&params.run_id)
-            .await?
-            .ok_or(NativeV2ObservationError::RunNotFound)?;
-        status_result(&stored.snapshot)
+        if let Some(failure) = self.runtime.failure(&params.run_id) {
+            return Ok(failure);
+        }
+        let result = match self.ledger.get(&params.run_id).await {
+            Ok(Some(stored)) => self.runtime.observe(&stored.snapshot),
+            Ok(None) => Err(NativeV2ObservationError::RunNotFound),
+            Err(error) => Err(error.into()),
+        };
+        result.or_else(|error| self.runtime.failure(&params.run_id).ok_or(error))
     }
 
     pub async fn watch(
@@ -78,6 +88,7 @@ impl NativeV2Observability {
         let start = params.from_cursor.unwrap_or_else(initial_cursor);
         let subscription_id = self.subscription_id("watch");
         let complete = self.ledger.snapshot_and_tail(&params.run_id, None).await?;
+        self.runtime.observe(&complete.snapshot)?;
         let start_sequence = cursor_sequence(&start)?;
         if start_sequence > cursor_sequence(&complete.snapshot.cursor)? {
             return Err(RunLedgerError::CursorAhead.into());
@@ -98,6 +109,7 @@ impl NativeV2Observability {
         };
         let subscription = RunWatchSubscription {
             ledger: self.ledger.clone(),
+            runtime: self.runtime.clone(),
             subscription_id,
             run_id: params.run_id,
             scanned_through: complete.snapshot.cursor,
@@ -116,6 +128,7 @@ impl NativeV2Observability {
             .ledger
             .snapshot_and_tail(&params.run_id, Some(&start))
             .await?;
+        self.runtime.observe(&tail.snapshot)?;
         let execution = params
             .execution
             .as_ref()
@@ -136,6 +149,7 @@ impl NativeV2Observability {
             .collect::<Result<VecDeque<_>, _>>()?;
         let subscription = RunLogsSubscription {
             ledger: self.ledger.clone(),
+            runtime: self.runtime.clone(),
             subscription_id,
             run_id: params.run_id,
             execution,
@@ -159,6 +173,7 @@ impl NativeV2Observability {
             .get(&reference.run_id)
             .await?
             .ok_or(NativeV2ObservationError::RunNotFound)?;
+        self.runtime.observe(&stored.snapshot)?;
         require_active_reference(&stored.snapshot, reference)?;
         let public_execution = opaque_execution(reference)?;
         let key = self
@@ -210,6 +225,27 @@ impl NativeV2Observability {
             receiver,
         };
         Ok((result, subscription))
+    }
+
+    pub(crate) fn track_runtime(
+        &self,
+        snapshot: &RunSnapshot,
+    ) -> Result<(), NativeV2ObservationError> {
+        self.runtime.track(snapshot)
+    }
+
+    pub(crate) async fn runtime_failed(&self, run_id: &RunId) {
+        let refreshed = std::panic::AssertUnwindSafe(self.ledger.get(run_id))
+            .catch_unwind()
+            .await;
+        if let Ok(Ok(Some(stored))) = refreshed {
+            let _ = self.runtime.observe(&stored.snapshot);
+        }
+        self.runtime.fail(run_id);
+    }
+
+    pub(crate) fn runtime_finished(&self, run_id: &RunId) {
+        self.runtime.finish(run_id);
     }
 
     fn subscription_id(&self, kind: &str) -> SubscriptionId {

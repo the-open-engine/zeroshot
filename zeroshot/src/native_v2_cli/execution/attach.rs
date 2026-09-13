@@ -57,6 +57,13 @@ where
                 }))
                 | SubscriptionStep::Item(None)
                 | SubscriptionStep::Reconnect => break,
+                SubscriptionStep::Item(Some(CliSubscriptionItem::Closed {
+                    reason: SubscriptionCloseReason::SourceUnavailable,
+                })) => {
+                    return Err(NativeV2CliError::Protocol(
+                        "observation source is unavailable; the stream is incomplete".to_owned(),
+                    ));
+                }
             }
         }
         tokio::select! {

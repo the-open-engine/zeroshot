@@ -201,14 +201,21 @@ fn subscription_cancel_params_round_trip_and_are_closed() {
 
 #[test]
 fn subscription_close_reason_uses_mixed_case_wire_values() {
-    assert_eq!(
-        serde_json::to_value(SubscriptionCloseReason::Done).assert_value(),
-        json!("done")
-    );
-    assert_eq!(
-        serde_json::to_value(SubscriptionCloseReason::SlowConsumer).assert_value(),
-        json!("SLOW_CONSUMER")
-    );
+    for (reason, wire) in [
+        (SubscriptionCloseReason::Done, "done"),
+        (SubscriptionCloseReason::SlowConsumer, "SLOW_CONSUMER"),
+        (
+            SubscriptionCloseReason::SourceUnavailable,
+            "SOURCE_UNAVAILABLE",
+        ),
+    ] {
+        let encoded = serde_json::to_value(reason).assert_value();
+        assert_eq!(encoded, json!(wire));
+        assert_eq!(
+            serde_json::from_value::<SubscriptionCloseReason>(encoded).assert_value(),
+            reason
+        );
+    }
     assert!(serde_json::from_value::<SubscriptionCloseReason>(json!("SlowConsumer")).is_err());
 }
 

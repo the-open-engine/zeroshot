@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::FutureExt;
 use openengine_cluster_protocol::{
     EnumLabel, GraphNode, NodeInstructions, NodeName, RunId, TerminalResult, WorkerErrorCode,
     WorkerOutcome,
@@ -94,6 +95,8 @@ pub enum NativeV2SupervisorError {
     InvalidState,
     #[error("a supervisor task failed")]
     Task,
+    #[error("supervisor task panicked")]
+    TaskPanicked,
     #[error(transparent)]
     RuntimeCleanup(#[from] RuntimeCleanupUnavailable),
     #[error(transparent)]
@@ -205,6 +208,25 @@ impl NativeV2Supervisor {
         program: Box<RunProgram>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
         let mut active = ActiveDispatches::default();
+        // Retain task ownership across unwinding so peer output drains before failure is settled.
+        // No provider values or panic payloads are copied into diagnostics.
+        let result = std::panic::AssertUnwindSafe(self.drive_active_program(&program, &mut active))
+            .catch_unwind()
+            .await
+            .unwrap_or(Err(NativeV2SupervisorError::TaskPanicked));
+        if result.is_err() {
+            self.runner.close_run(&self.run_id).await;
+            // Keep ownership until every task has stopped, even when another output append failed.
+            while active.tasks.join_next().await.is_some() {}
+        }
+        result
+    }
+
+    async fn drive_active_program(
+        &self,
+        program: &RunProgram,
+        active: &mut ActiveDispatches,
+    ) -> Result<TerminalResult, NativeV2SupervisorError> {
         loop {
             let snapshot = self.snapshot().await?;
             if let Some(terminal) = snapshot.terminal {
@@ -217,7 +239,7 @@ impl NativeV2Supervisor {
             if snapshot.force_stop_requested {
                 return self.terminalize_force(&mut active.tasks).await;
             }
-            if let Some(terminal) = self.advance(&program, &snapshot, &mut active).await? {
+            if let Some(terminal) = self.advance(program, &snapshot, active).await? {
                 return Ok(terminal);
             }
         }
@@ -283,7 +305,7 @@ impl NativeV2Supervisor {
             .join_next()
             .await
             .ok_or(NativeV2SupervisorError::InvalidState)?
-            .map_err(|_| NativeV2SupervisorError::Task)?;
+            .map_err(supervisor_task_error)?;
         active.cancellations.remove(&finished.execution);
         Ok(finished)
     }
@@ -301,6 +323,17 @@ impl NativeV2Supervisor {
     pub async fn runtime_lost(&self) {
         self.runtime_lost.store(true, Ordering::Release);
         self.runner.close_run(&self.run_id).await;
+    }
+
+    /// Stops owned work without depending on a readable or writable ledger. Durable failure is
+    /// attempted only after runtime cleanup has been acknowledged; the engine retains status if it fails.
+    pub(crate) async fn fail_runtime(&self) -> Result<(), NativeV2SupervisorError> {
+        let _turn = self.drive_turn.lock().await;
+        self.runner.close_run(&self.run_id).await;
+        self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
+        self.append_runtime_failure("runtime_failed")
+            .await
+            .map(|_| ())
     }
 
     async fn cleanup_runtime(&self, exit: RunRuntimeExit) -> Result<(), RuntimeCleanupUnavailable> {
@@ -322,6 +355,14 @@ impl NativeV2Supervisor {
     }
 
     // Dispatch and terminalization are kept in the controller companion module.
+}
+
+fn supervisor_task_error(error: tokio::task::JoinError) -> NativeV2SupervisorError {
+    if error.is_panic() {
+        NativeV2SupervisorError::TaskPanicked
+    } else {
+        NativeV2SupervisorError::Task
+    }
 }
 
 fn enforce_delivery_terminal(

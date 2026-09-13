@@ -119,7 +119,8 @@ impl ProductionTargetControllerFactory {
             DeliveryPolicy::Optional,
         )
         .await
-        .map_err(|_| ProductionHostingError::Controller)?;
+        .map_err(|_| ProductionHostingError::Controller)?
+        .with_operator_diagnostics(self.operator_diagnostics.clone());
         Ok(Arc::new(controller))
     }
 }

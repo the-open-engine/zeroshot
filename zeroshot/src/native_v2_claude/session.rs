@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::{
-    ProviderFailure, ProviderFailureRetry, ProviderSessionCore, impl_provider_node_session,
-    redaction_values,
+    ProviderExecution, ProviderFilesystemConfig, ProviderFailure, ProviderFailureRetry,
+    ProviderSessionCore, impl_provider_node_session, redaction_values,
 };
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -63,10 +63,20 @@ impl NodeDriver for ClaudeAdapter {
             .downcast_ref::<ClaudeSession>()
             .ok_or(NodeRunnerError::Driver)?;
         let _turn = session.core.turn.lock().await;
+        let execution = ProviderExecution::new(
+            ProviderFilesystemConfig {
+                runners: self.runners,
+                root: &self.runtime_home,
+                workspace: &self.workspace,
+            },
+            &invocation,
+            &session.core,
+        );
         let turn = ClaudeTurn {
             invocation: &invocation,
             session,
             control: &control,
+            execution: &execution,
         };
         let mut state = ClaudeRunState::new(&invocation, session).await?;
         loop {

@@ -77,6 +77,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records node error codes and elapsed time in durable logs before settlement.
+- A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
+  errors and task panics close owned work and attempt runtime cleanup before durable failure.
+  If persistence is unavailable, the controller retains a minimal `runtime_failed` status at the
+  last observed durable cursor and records private operator diagnostics, including SQLite error codes.
+  This fallback creates no history events. Readable retained history drains normally; unavailable
+  history closes with `SOURCE_UNAVAILABLE`, never `done`. Compiler/runtime failure reasons
+  `unhandled`, `runtime_failed`, and `runtime_lost` are reserved against authored graph fail nodes.
 - Native-v2 retries only a settled `crash` outcome when the executable has another authored
   attempt. A provider session invalidated by that active execution becomes replaceable for the
   authorized retry; passive session loss and run closure remain permanent, fail-closed loss.
@@ -117,6 +124,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   tools. They expose Rust through the fixed runtime PATH without a shared writable Cargo cache;
   explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
   tests compile native fixtures as an isolated user with a read-only root and fresh home.
+- Hosted verifiers build in disposable writable copies of the current candidate. Copies include
+  dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies;
+  verifier writes are never promoted to the candidate or peers. Provider scratch permits execution.
+  Managed copies and execution-scoped homes are removed only after confirmed process-tree cleanup;
+  node-instance homes survive authorized continuation and loop revisits until session closure.
 
 ## CLI and target contracts
 

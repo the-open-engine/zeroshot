@@ -1447,7 +1447,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!unhandled$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },
@@ -4520,11 +4520,20 @@
       "type": "object"
     },
     "SubscriptionCloseReason": {
-      "enum": [
-        "done",
-        "SLOW_CONSUMER"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "done",
+            "SLOW_CONSUMER"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "SOURCE_UNAVAILABLE",
+          "description": "The source could not read the remaining history; delivered events are retained, but the\nstream is incomplete. This is not a successful end or a request to reconnect indefinitely.",
+          "type": "string"
+        }
+      ]
     },
     "SubscriptionClosedNotification": {
       "additionalProperties": false,

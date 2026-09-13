@@ -4,10 +4,9 @@ pub(super) async fn drain_terminalizing_tasks(
     tasks: &mut JoinSet<FinishedDispatch>,
 ) -> Result<(), NativeV2SupervisorError> {
     while let Some(finished) = tasks.join_next().await {
-        let finished = finished.map_err(|_| NativeV2SupervisorError::Task)?;
+        let finished = finished.map_err(supervisor_task_error)?;
         match finished.result {
             DispatchResult::DurableEventFailure(error) => return Err(error.into()),
-            DispatchResult::DurableEventTaskFailed => return Err(NativeV2SupervisorError::Task),
             DispatchResult::Completed(_)
             | DispatchResult::TimedOut
             | DispatchResult::Interrupted => {}
@@ -98,7 +97,6 @@ pub(super) enum DispatchResult {
     TimedOut,
     Interrupted,
     DurableEventFailure(RunLedgerError),
-    DurableEventTaskFailed,
 }
 
 pub(super) struct FinishedDispatch {
@@ -131,29 +129,8 @@ pub(super) async fn run_dispatch(task: DispatchTask) -> FinishedDispatch {
     let started = tokio::time::Instant::now();
     let reference = handle.reference().clone();
     let execution = reference.execution;
-    let events = tokio::spawn(bridge_durable_events(ledger, run_id, execution, output));
-    let interrupt = async {
-        tokio::select! {
-            _ = crate::execution::process::wait_for_deadline(
-                timeout.map(|duration| tokio::time::Instant::now() + duration),
-            ) => DispatchResult::TimedOut,
-            _ = cancel => DispatchResult::Interrupted,
-        }
-    };
-    tokio::pin!(interrupt);
-    let result = tokio::select! {
-        completion = handle.completion() => DispatchResult::Completed(completion),
-        interrupt = &mut interrupt => {
-            handle.cancel();
-            let _ = handle.completion().await;
-            interrupt
-        }
-    };
-    let result = match events.await {
-        Ok(Ok(())) => result,
-        Ok(Err(error)) => DispatchResult::DurableEventFailure(error),
-        Err(_) => DispatchResult::DurableEventTaskFailed,
-    };
+    let events = bridge_durable_events(ledger, run_id, execution, output);
+    let result = observe_dispatch(&mut handle, events, timeout, cancel).await;
     if let Some(registration) = registration {
         registration.close().await;
     }
@@ -162,6 +139,52 @@ pub(super) async fn run_dispatch(task: DispatchTask) -> FinishedDispatch {
         execution,
         reference,
         result,
+    }
+}
+
+async fn observe_dispatch(
+    handle: &mut NodeHandle,
+    events: impl std::future::Future<Output = Result<(), RunLedgerError>>,
+    timeout: Option<Duration>,
+    cancel: oneshot::Receiver<ExecutionInterrupt>,
+) -> DispatchResult {
+    let interrupt = async {
+        tokio::select! {
+            _ = crate::execution::process::wait_for_deadline(
+                timeout.map(|duration| tokio::time::Instant::now() + duration),
+            ) => DispatchResult::TimedOut,
+            _ = cancel => DispatchResult::Interrupted,
+        }
+    };
+    tokio::pin!(interrupt, events);
+    let mut interrupted = None;
+    let mut output_result = None;
+    let result = loop {
+        tokio::select! {
+            completion = handle.completion() => break DispatchResult::Completed(completion),
+            interrupt = &mut interrupt, if interrupted.is_none() => {
+                handle.cancel();
+                interrupted = Some(interrupt);
+            }
+            persisted = &mut events, if output_result.is_none() => {
+                let failed = persisted.is_err();
+                output_result = Some(persisted);
+                if failed {
+                    // Persistence owns failure now. A silent provider may never emit again, so
+                    // cancel immediately. Keep polling completion and output together so cancellation
+                    // cannot deadlock a provider that emits final usage through a bounded queue.
+                    handle.cancel();
+                }
+            }
+        }
+    };
+    let output_result = match output_result {
+        Some(result) => result,
+        None => events.await,
+    };
+    match output_result {
+        Ok(()) => interrupted.unwrap_or(result),
+        Err(error) => DispatchResult::DurableEventFailure(error),
     }
 }
 
@@ -392,7 +415,6 @@ pub(super) fn settled_outcome(
         DispatchResult::TimedOut => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)),
         DispatchResult::Interrupted => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash)),
         DispatchResult::DurableEventFailure(error) => Err(error.into()),
-        DispatchResult::DurableEventTaskFailed => Err(NativeV2SupervisorError::Task),
     }
 }
 

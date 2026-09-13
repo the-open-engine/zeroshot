@@ -2,10 +2,10 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
-#[test]
-fn closed_session_failure_maps_to_selected_runner_error() {
+#[tokio::test]
+async fn closed_session_failure_maps_to_selected_runner_error() {
     let session = ProviderSessionCore::new();
-    session.close();
+    session.close().await;
 
     assert_eq!(
         session.ensure_live(ClosedSessionFailure::Driver),

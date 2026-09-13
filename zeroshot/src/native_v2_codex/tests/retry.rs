@@ -3,6 +3,7 @@ use super::*;
 const RETRY_SCRIPT_PREFIX: &str = r#"#!/bin/sh
 set -eu
 prompt=$(/usr/bin/cat)
+/usr/bin/printf '%s\n' "$HOME" "$TMPDIR" "$PWD" >> "$STATE_PATH.files"
 if [ -e "$STATE_PATH" ]; then attempt=2; else attempt=1; : > "$STATE_PATH"; fi
 /usr/bin/printf '%s' "$prompt" > "$STATE_PATH.prompt.$attempt"
 {
@@ -142,6 +143,12 @@ async fn terminal_error_continues_once_in_the_same_session() {
     assert!(rendered.contains("Codex provider failed; continuing once"));
     assert!(rendered.contains("Codex file change completed: update src/lib.rs"));
     assert!(!rendered.contains("sentinel-secret"));
+    let paths = fs::read_to_string(state.with_extension("files")).assert_value();
+    let paths = paths.lines().collect::<Vec<_>>();
+    assert_eq!(&paths[..3], &paths[3..]);
+    assert!(!Path::new(paths[0]).exists());
+    assert!(!Path::new(paths[1]).exists());
+    assert!(Path::new(paths[2]).exists());
 }
 
 #[tokio::test]

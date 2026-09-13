@@ -246,3 +246,14 @@ impl TestGitRepository {
         }
     }
 }
+
+pub(crate) fn assert_removed_directories(paths: &[&str], expected_count: usize) {
+    let unique = paths.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(unique.len(), expected_count);
+    for path in unique {
+        assert!(
+            !Path::new(path).exists(),
+            "execution directory remains: {path}"
+        );
+    }
+}
