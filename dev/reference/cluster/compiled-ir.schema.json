@@ -582,7 +582,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!unhandled$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },
