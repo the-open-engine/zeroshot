@@ -318,8 +318,19 @@ async fn hosted_workspace_replacement_signals_runtime_loss() {
     .assert_value_with("workspace loss timeout");
 }
 
+const CLAUDE_HOME_SCRIPT: &str = r#"set -eu
+cat >/dev/null
+printf '%s' "$HOME" > observed-home
+: > "$HOME/created-by-provider"
+printf '%s%s\n' \
+  '{"type":"stream_event","event":{"type":"content_block_delta",' \
+  '"delta":{"type":"text_delta","text":"home-ready"}}}'
+while [ ! -e release-provider ]; do sleep 0.01; done
+exit 17
+"#;
+
 #[tokio::test]
-async fn default_claude_environment_prepares_capsule_session_home() {
+async fn default_claude_environment_owns_private_session_home_until_completion() {
     let repository = RepositoryFixture::new();
     let root = TestDirectory::new("hosting-claude-environment");
     prepare_storage_root(&root.path().to_owned()).assert_value_with("storage root");
@@ -332,6 +343,8 @@ async fn default_claude_environment_prepares_capsule_session_home() {
     .await;
     let mut config = capsule_config(root.path().to_owned());
     config.claude_process_environment = ClaudeProcessEnvironment::default();
+    config.claude_executable = "/bin/sh".to_owned();
+    config.claude_prefix_arguments = vec!["-c".to_owned(), CLAUDE_HOME_SCRIPT.to_owned()];
     let allocator = ProductionCapsuleAllocator::new(config)
         .assert_value_with("allocator")
         .with_test_filesystem_and_source(repository.remote, portable_filesystem);
@@ -373,13 +386,15 @@ async fn default_claude_environment_prepares_capsule_session_home() {
         })
         .await
         .assert_value_with("start Claude node");
+    let mut output = handle.take_initial_output().assert_value();
+    assert_running_claude_home_if_root(&mut output, &run_path).await;
+    let private_home = run_path.join("runtime/writer-execution-1");
     assert!(matches!(
         handle.completion().await,
         Err(crate::native_v2_runner::NodeRunnerError::Driver)
     ));
-
-    let private_home = run_path.join("runtime/writer-execution-1");
-    assert!(private_home.is_dir());
+    assert!(!private_home.exists());
+    assert!(!run_path.join("runtime/execution-1").exists());
 
     capsule
         .cleanup
@@ -389,3 +404,33 @@ async fn default_claude_environment_prepares_capsule_session_home() {
 }
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+
+async fn assert_running_claude_home_if_root(
+    output: &mut crate::native_v2_runner::DurableOutput,
+    run_path: &Path,
+) {
+    // Hosted process containment requires Linux and a root supervisor.
+    if !cfg!(target_os = "linux") || unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    let ready = tokio::time::timeout(Duration::from_secs(3), output.recv_output())
+        .await
+        .assert_value_with("provider prepared HOME")
+        .assert_value();
+    assert_eq!(ready.text, "home-ready");
+    let private_home = run_path.join("runtime/writer-execution-1");
+    assert!(private_home.join("created-by-provider").is_file());
+    assert_eq!(
+        fs::metadata(&private_home)
+            .assert_value()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::read_to_string(run_path.join("workspace/observed-home")).assert_value(),
+        private_home.to_string_lossy()
+    );
+    fs::write(run_path.join("workspace/release-provider"), "").assert_value();
+}

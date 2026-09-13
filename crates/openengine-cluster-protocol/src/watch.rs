@@ -133,6 +133,10 @@ pub enum SubscriptionCloseReason {
     Done,
     #[serde(rename = "SLOW_CONSUMER")]
     SlowConsumer,
+    /// The source could not read the remaining history; delivered events are retained, but the
+    /// stream is incomplete. This is not a successful end or a request to reconnect indefinitely.
+    #[serde(rename = "SOURCE_UNAVAILABLE")]
+    SourceUnavailable,
 }
 
 /// Wire body of the terminal `subscription/closed` server notification.

@@ -319,9 +319,23 @@ fn identifier_keyed_maps_enforce_wire_identifier_bounds_in_rust_and_schema() {
 }
 
 #[test]
-fn authored_fail_nodes_cannot_use_the_reserved_unhandled_reason() {
-    let value = json!({"kind":"fail", "name":"sink", "reason":"unhandled"});
-    assert!(serde_json::from_value::<openengine_cluster_protocol::GraphNode>(value).is_err());
+fn authored_fail_nodes_cannot_use_compiler_or_runtime_reasons() {
+    let schema = schemars::schema_for!(openengine_cluster_protocol::GraphNode);
+    let schema = serde_json::to_value(schema).assert_value();
+    let validator = jsonschema::validator_for(&schema).assert_value();
+    for reason in ["unhandled", "runtime_failed", "runtime_lost", "task_failed"] {
+        let value = json!({"kind":"fail", "name":"sink", "reason":reason});
+        let allowed = reason == "task_failed";
+        assert_eq!(
+            validator.is_valid(&value),
+            allowed,
+            "schema reason {reason}"
+        );
+        assert_eq!(
+            serde_json::from_value::<openengine_cluster_protocol::GraphNode>(value).is_ok(),
+            allowed
+        );
+    }
 }
 
 #[test]

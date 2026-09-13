@@ -474,23 +474,13 @@ fn write_durable_event(
     from_cursor: &mut Option<Cursor>,
     output: &mut impl Write,
 ) -> Result<Option<CliOutcome>, NativeV2CliError> {
-    if event.cursor() == from_cursor.as_ref() {
+    let cursor = event.cursor().cloned();
+    if cursor.is_some() && cursor == *from_cursor {
         return Ok(None);
     }
-    let cursor = event.cursor().cloned();
     let outcome = match event {
         DurableItem::Watch(event) => {
-            let outcome = match &event.status {
-                CliRunStatus::Target(RunStatus::Finished {
-                    terminal_result: TerminalResult::Succeeded { .. },
-                    ..
-                }) => Some(CliOutcome::Finished),
-                CliRunStatus::Target(RunStatus::Finished {
-                    terminal_result: TerminalResult::Failed { .. },
-                    ..
-                }) => Some(CliOutcome::Failed),
-                _ => None,
-            };
+            let outcome = watched_outcome(&event.status);
             write_json(output, &event)?;
             outcome
         }
@@ -498,10 +488,29 @@ fn write_durable_event(
             write_json(output, &event)?;
             None
         }
+        DurableItem::Closed(SubscriptionCloseReason::SourceUnavailable) => {
+            return Err(NativeV2CliError::Protocol(
+                "observation source is unavailable; the stream is incomplete".to_owned(),
+            ));
+        }
         DurableItem::Closed(_) => None,
     };
     *from_cursor = cursor;
     Ok(outcome)
+}
+
+fn watched_outcome(status: &CliRunStatus) -> Option<CliOutcome> {
+    match status {
+        CliRunStatus::Target(RunStatus::Finished {
+            terminal_result: TerminalResult::Succeeded { .. },
+            ..
+        }) => Some(CliOutcome::Finished),
+        CliRunStatus::Target(RunStatus::Finished {
+            terminal_result: TerminalResult::Failed { .. },
+            ..
+        }) => Some(CliOutcome::Failed),
+        _ => None,
+    }
 }
 
 fn write_json(output: &mut impl Write, value: &impl Serialize) -> Result<(), NativeV2CliError> {
@@ -509,4 +518,27 @@ fn write_json(output: &mut impl Write, value: &impl Serialize) -> Result<(), Nat
     output.write_all(b"\n")?;
     output.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod incomplete_stream_tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_history_is_an_error_even_before_the_first_event() {
+        for mut cursor in [None, Some(Cursor::new("v2:3"))] {
+            let before = cursor.clone();
+            let mut output = Vec::new();
+            let result = write_durable_event(
+                DurableItem::Closed(SubscriptionCloseReason::SourceUnavailable),
+                &mut cursor,
+                &mut output,
+            );
+            assert!(
+                matches!(result, Err(NativeV2CliError::Protocol(message)) if message.contains("incomplete"))
+            );
+            assert_eq!(cursor, before);
+            assert!(output.is_empty());
+        }
+    }
 }

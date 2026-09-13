@@ -151,3 +151,37 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         assert_provider_environment(&workspace, provider, provider_value);
     }
 }
+
+#[test]
+fn private_verifier_workspaces_allow_noninteractive_build_side_effects() {
+    use crate::native_v2_claude::command::{ClaudeTurnArguments, claude_arguments};
+    use crate::native_v2_runner::NodeRole;
+
+    let arguments = claude_arguments(
+        Vec::new(),
+        ClaudeTurnArguments {
+            model: "provider-owned-model",
+            effort: None,
+            role: NodeRole::Verifier,
+            private_workspace: true,
+            resume_id: Some("same-session"),
+            json_schema: "{}".to_owned(),
+        },
+    )
+    .assert_value();
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument == "--dangerously-skip-permissions")
+    );
+    assert!(
+        !arguments
+            .iter()
+            .any(|argument| argument == "--permission-mode")
+    );
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair == ["--resume", "same-session"])
+    );
+}

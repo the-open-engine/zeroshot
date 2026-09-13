@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
@@ -17,6 +18,12 @@ use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRole, NodeRunnerError,
 };
 use crate::worker_catalog::ReasoningEffort;
+
+mod contained;
+mod filesystem;
+
+pub(crate) use contained::ProviderProcess;
+pub(crate) use filesystem::{ProviderExecution, ProviderExecutionFiles, ProviderFilesystemConfig};
 
 const CONTINUE_PROMPT: &str = "Continue";
 
@@ -85,7 +92,7 @@ pub(crate) struct ProcessInputFailure<T> {
 /// Cleanup and output draining remain concurrent after an input failure so parsed metadata is
 /// retained without introducing another output buffer.
 pub(crate) async fn exchange_process_io<T>(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     bytes: &[u8],
     output: impl Future<Output = T>,
 ) -> ProcessExchange<T> {
@@ -127,15 +134,18 @@ pub(crate) async fn exchange_process_io<T>(
 }
 
 pub(crate) async fn open_provider_process(
-    runner: LocalProcessRunner,
+    files: Arc<ProviderExecutionFiles>,
     command: ProcessSessionCommand,
     control: &DriverControl,
-) -> Result<Result<ProcessSession, ProcessRunnerError>, NodeRunnerError> {
-    match runner.open(command, control.cancellation()).await {
-        Ok(process) => Ok(Ok(process)),
+) -> Result<Result<ProviderProcess, ProcessRunnerError>, NodeRunnerError> {
+    files.begin_process();
+    match files.runner.open(command, control.cancellation()).await {
+        Ok(process) => Ok(Ok(ProviderProcess::new(process, files))),
         Err(error) => {
             if error.launch_evidence() == ProcessLaunchEvidence::MayHaveStarted {
                 control.record_token_usage(None).await?;
+            } else {
+                files.process_reaped();
             }
             if control.is_cancelled() {
                 return Err(NodeRunnerError::Cancelled);
@@ -148,6 +158,7 @@ pub(crate) async fn open_provider_process(
 pub(crate) struct ProviderSessionCore {
     live: AtomicBool,
     pub(crate) turn: Mutex<()>,
+    home: Mutex<Option<Arc<filesystem::PrivateDirectory>>>,
 }
 
 macro_rules! impl_provider_node_session {
@@ -163,7 +174,7 @@ macro_rules! impl_provider_node_session {
             }
 
             async fn close(&self) {
-                self.core.close();
+                self.core.close().await;
             }
         }
     };
@@ -191,6 +202,7 @@ impl ProviderSessionCore {
         Self {
             live: AtomicBool::new(true),
             turn: Mutex::new(()),
+            home: Mutex::new(None),
         }
     }
 
@@ -198,8 +210,32 @@ impl ProviderSessionCore {
         self.live.load(Ordering::Acquire)
     }
 
-    pub(crate) fn close(&self) {
+    pub(crate) async fn close(&self) {
         self.live.store(false, Ordering::Release);
+        self.home.lock().await.take();
+    }
+
+    async fn retain_home(
+        &self,
+        path: PathBuf,
+    ) -> Result<Arc<filesystem::PrivateDirectory>, ProcessRunnerError> {
+        let mut home = self.home.lock().await;
+        if !self.is_live() {
+            return Err(ProcessRunnerError::InvalidCommand(
+                "provider session is closed".to_owned(),
+            ));
+        }
+        if let Some(home) = home.as_ref() {
+            if home.path() != path {
+                return Err(ProcessRunnerError::InvalidCommand(
+                    "provider session home changed".to_owned(),
+                ));
+            }
+            return Ok(home.clone());
+        }
+        let directory = Arc::new(filesystem::PrivateDirectory::retained(path));
+        *home = Some(directory.clone());
+        Ok(directory)
     }
 
     pub(crate) fn ensure_live(

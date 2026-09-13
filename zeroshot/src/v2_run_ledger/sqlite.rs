@@ -38,19 +38,17 @@ pub struct SqliteRunLedger {
 
 impl SqliteRunLedger {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
-        let connection = Connection::open(path).map_err(|_| RunLedgerError::Storage)?;
+        let connection = Connection::open(path).map_err(sqlite_error)?;
         Self::from_connection(connection)
     }
 
     pub fn open_in_memory() -> Result<Self, RunLedgerError> {
-        let connection = Connection::open_in_memory().map_err(|_| RunLedgerError::Storage)?;
+        let connection = Connection::open_in_memory().map_err(sqlite_error)?;
         Self::from_connection(connection)
     }
 
     fn from_connection(connection: Connection) -> Result<Self, RunLedgerError> {
-        connection
-            .execute_batch(SCHEMA)
-            .map_err(|_| RunLedgerError::Storage)?;
+        connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
@@ -70,12 +68,12 @@ impl RunLedger for SqliteRunLedger {
         let mut connection = self.connection();
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let outcome = match existing_submission(&transaction, &request)? {
             Some(existing) => CreateRunOutcome::Existing(existing),
             None => CreateRunOutcome::Created(insert_new_run(&transaction, request)?),
         };
-        transaction.commit().map_err(|_| RunLedgerError::Storage)?;
+        transaction.commit().map_err(sqlite_error)?;
         Ok(outcome)
     }
 
@@ -95,14 +93,13 @@ impl RunLedger for SqliteRunLedger {
         let connection = self.connection();
         let mut statement = connection
             .prepare("SELECT stored_json FROM v2_runs ORDER BY rowid")
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         rows.map(|row| {
-            let stored: StoredRun =
-                serde_json::from_str(&row.map_err(|_| RunLedgerError::Storage)?)
-                    .map_err(|_| RunLedgerError::Corrupt)?;
+            let stored: StoredRun = serde_json::from_str(&row.map_err(sqlite_error)?)
+                .map_err(|_| RunLedgerError::Corrupt)?;
             Ok(RunSummary::from(&stored.snapshot))
         })
         .collect()
@@ -116,9 +113,9 @@ impl RunLedger for SqliteRunLedger {
         let mut connection = self.connection();
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let result = append_transaction(&transaction, run_id, events)?;
-        transaction.commit().map_err(|_| RunLedgerError::Storage)?;
+        transaction.commit().map_err(sqlite_error)?;
         Ok(result)
     }
 
@@ -126,7 +123,7 @@ impl RunLedger for SqliteRunLedger {
         let mut connection = self.connection();
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let stored = load_by_id(&transaction, run_id)?.ok_or(RunLedgerError::RunNotFound)?;
         let result = if stored.snapshot.force_stop_requested || stored.snapshot.terminal.is_some() {
             AppendResult {
@@ -136,7 +133,7 @@ impl RunLedger for SqliteRunLedger {
         } else {
             append_transaction(&transaction, run_id, vec![RunEvent::ForceStopRequested])?
         };
-        transaction.commit().map_err(|_| RunLedgerError::Storage)?;
+        transaction.commit().map_err(sqlite_error)?;
         Ok(result)
     }
 
@@ -160,15 +157,15 @@ impl RunLedger for SqliteRunLedger {
                 "SELECT sequence, event_json FROM v2_run_events
                  WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence",
             )
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![run_id.as_str(), after], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })
-            .map_err(|_| RunLedgerError::Storage)?;
+            .map_err(sqlite_error)?;
         let events = rows
             .map(|row| {
-                let (sequence, json) = row.map_err(|_| RunLedgerError::Storage)?;
+                let (sequence, json) = row.map_err(sqlite_error)?;
                 let sequence = u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?;
                 let event = serde_json::from_str(&json).map_err(|_| RunLedgerError::Corrupt)?;
                 Ok(StoredRunEvent {
@@ -259,7 +256,7 @@ fn insert_event(
             "INSERT INTO v2_run_events (run_id, sequence, event_json) VALUES (?1, ?2, ?3)",
             params![run_id.as_str(), sequence as i64, event_json],
         )
-        .map_err(|_| RunLedgerError::Storage)?;
+        .map_err(sqlite_error)?;
     Ok(())
 }
 
@@ -275,7 +272,7 @@ fn update_stored_run(
             "UPDATE v2_runs SET cursor = ?2, stored_json = ?3 WHERE run_id = ?1",
             params![run_id.as_str(), sequence as i64, stored_json],
         )
-        .map_err(|_| RunLedgerError::Storage)?;
+        .map_err(sqlite_error)?;
     if changed != 1 {
         return Err(RunLedgerError::Corrupt);
     }
@@ -336,7 +333,7 @@ fn insert_new_run(
                 stored_json,
             ],
         )
-        .map_err(|_| RunLedgerError::Storage)?;
+        .map_err(sqlite_error)?;
     Ok(stored)
 }
 
@@ -351,7 +348,7 @@ fn load_by_id(
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()
-        .map_err(|_| RunLedgerError::Storage)?;
+        .map_err(sqlite_error)?;
     row.map(|(cursor, json)| decode_stored(run_id, cursor, &json))
         .transpose()
 }
@@ -375,7 +372,7 @@ fn load_by_submission(
             },
         )
         .optional()
-        .map_err(|_| RunLedgerError::Storage)?;
+        .map_err(sqlite_error)?;
     row.map(|(run_id, digest, cursor, json)| {
         let stored = decode_stored(&RunId::new(run_id.clone()), cursor, &json)?;
         Ok((run_id, digest, stored))
@@ -396,4 +393,48 @@ fn decode_stored(
         return Err(RunLedgerError::Corrupt);
     }
     Ok(stored)
+}
+
+fn sqlite_error(error: rusqlite::Error) -> RunLedgerError {
+    match error {
+        rusqlite::Error::SqliteFailure(code, _) => RunLedgerError::SqliteStorage(code),
+        _ => RunLedgerError::Storage,
+    }
+}
+
+#[cfg(test)]
+mod storage_failure_tests {
+    use super::*;
+    use openengine_cluster_testkit::assertions::AssertValue;
+
+    #[test]
+    fn a_full_sqlite_database_retains_its_machine_error() {
+        let connection = Connection::open_in_memory().assert_value();
+        connection
+            .pragma_update(None, "max_page_count", 1)
+            .assert_value();
+        let result = SqliteRunLedger::from_connection(connection);
+        let Err(RunLedgerError::SqliteStorage(code)) = result else {
+            panic!("expected SQLite capacity failure");
+        };
+        assert_eq!(code.extended_code, rusqlite::ffi::SQLITE_FULL);
+        assert!(
+            RunLedgerError::SqliteStorage(code)
+                .to_string()
+                .contains("database is full")
+        );
+    }
+
+    #[test]
+    fn sqlite_diagnostics_exclude_arbitrary_input_text() {
+        let error = sqlite_error(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR_WRITE),
+            Some("secret trigger input".to_owned()),
+        ));
+        let message = error.to_string();
+        assert!(message.contains(&rusqlite::ffi::SQLITE_IOERR_WRITE.to_string()));
+        assert!(!message.contains("secret"));
+        assert!(matches!(error, RunLedgerError::SqliteStorage(code)
+            if code.extended_code == rusqlite::ffi::SQLITE_IOERR_WRITE));
+    }
 }

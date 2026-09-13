@@ -23,6 +23,7 @@ pub(super) struct ClaudeTurnArguments<'a> {
     pub(super) model: &'a str,
     pub(super) effort: Option<ReasoningEffort>,
     pub(super) role: NodeRole,
+    pub(super) private_workspace: bool,
     pub(super) resume_id: Option<&'a str>,
     pub(super) json_schema: String,
 }
@@ -49,6 +50,9 @@ pub(super) fn claude_arguments(
     }
     match turn.role {
         NodeRole::Worker => argv.push("--dangerously-skip-permissions".to_owned()),
+        NodeRole::Verifier if turn.private_workspace => {
+            argv.push("--dangerously-skip-permissions".to_owned());
+        }
         NodeRole::Verifier => {
             argv.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
         }

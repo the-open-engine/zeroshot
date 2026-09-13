@@ -65,19 +65,33 @@ async fn concurrent_force_of_reconstructed_run_cleans_up_and_terminalizes_once()
 }
 
 #[tokio::test]
-async fn force_retries_cleanup_after_a_drive_cleanup_failure() {
+async fn drive_cleanup_failure_automatically_retries_and_reports_runtime_failure() {
     let harness = harness(Behavior::Complete).await;
     harness.cleanup.fail_next();
     let receipt = submit_test_request(&harness.controller, request(Value::Null))
         .await
         .assert_value_with("submit");
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while harness.cleanup.exits().is_empty() {
-            tokio::task::yield_now().await;
+    assert_eq!(
+        terminal(&harness.controller, &receipt.run_id).await,
+        TerminalResult::Failed {
+            reason: EnumLabel::new("runtime_failed").assert_value_with("label")
         }
-    })
-    .await
-    .assert_value_with("first cleanup attempted");
+    );
+    assert_eq!(
+        harness.cleanup.exits(),
+        vec![RunRuntimeExit::Completed, RunRuntimeExit::RuntimeLost]
+    );
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false, false]);
+
+    let forced = harness
+        .controller
+        .force(RunForceParams {
+            run_id: receipt.run_id.clone(),
+        })
+        .await
+        .assert_value_with("force after automatic recovery");
+    assert!(matches!(forced.status, RunStatus::Finished { .. }));
+    assert_eq!(harness.cleanup.exits().len(), 2);
     assert!(
         harness
             .ledger
@@ -87,27 +101,8 @@ async fn force_retries_cleanup_after_a_drive_cleanup_failure() {
             .assert_value_with("stored")
             .snapshot
             .terminal
-            .is_none()
+            .is_some()
     );
-
-    harness
-        .controller
-        .force(RunForceParams {
-            run_id: receipt.run_id.clone(),
-        })
-        .await
-        .assert_value_with("force retries cleanup");
-    assert_eq!(
-        terminal(&harness.controller, &receipt.run_id).await,
-        TerminalResult::Failed {
-            reason: EnumLabel::new("force_stopped").assert_value_with("label")
-        }
-    );
-    assert_eq!(
-        harness.cleanup.exits(),
-        vec![RunRuntimeExit::Completed, RunRuntimeExit::ForceStopped]
-    );
-    assert_eq!(harness.cleanup.terminal_seen(), vec![false, false]);
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};

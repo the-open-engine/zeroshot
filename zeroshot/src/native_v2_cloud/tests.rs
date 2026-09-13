@@ -401,3 +401,6 @@ mod cases_4;
 mod cases_5;
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "tests/runtime_failure.rs"]
+mod runtime_failure;

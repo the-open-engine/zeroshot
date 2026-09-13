@@ -1,10 +1,9 @@
-use crate::execution::process::{
-    LocalProcessRunner, ProcessRunnerError, ProcessSession, ProcessSessionCommand,
-    ProcessSessionOutput,
-};
+use std::sync::Arc;
+
+use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput};
 use crate::native_v2_capsule::provider_process::{
-    ProcessExchange, ProcessInputFailure, exchange_process_io, open_provider_process,
-    process_failure_detail,
+    ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
+    exchange_process_io, open_provider_process, process_failure_detail,
 };
 use crate::native_v2_runner::{DriverControl, NodeRunnerError};
 
@@ -12,7 +11,7 @@ use super::transcript::ClaudeTranscript;
 use super::ClaudeAttempt;
 
 pub(super) enum ClaudeProcessStart {
-    Ready(ProcessSession),
+    Ready(ProviderProcess),
     Failed(ClaudeAttempt),
 }
 
@@ -29,11 +28,11 @@ pub(super) fn failed_before_start(
 }
 
 pub(super) async fn open(
-    runner: LocalProcessRunner,
+    files: Arc<ProviderExecutionFiles>,
     command: ProcessSessionCommand,
     control: &DriverControl,
 ) -> Result<ClaudeProcessStart, NodeRunnerError> {
-    let process = match open_provider_process(runner, command, control).await? {
+    let process = match open_provider_process(files, command, control).await? {
         Ok(process) => process,
         Err(error) => return failed_before_start(error, control),
     };
@@ -41,7 +40,7 @@ pub(super) async fn open(
 }
 
 pub(super) async fn finish_process(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     prompt: &[u8],
     mut transcript: ClaudeTranscript,
     control: &DriverControl,
@@ -99,7 +98,7 @@ fn input_failure_cancelled(
 }
 
 async fn finish_output_failure(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     transcript: ClaudeTranscript,
     control: &DriverControl,
     error: NodeRunnerError,
@@ -123,7 +122,7 @@ async fn finish_output_failure(
 }
 
 async fn finish_process_completion(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     transcript: ClaudeTranscript,
     control: &DriverControl,
 ) -> Result<ClaudeAttempt, NodeRunnerError> {
@@ -149,7 +148,7 @@ async fn finish_process_completion(
 }
 
 pub(super) async fn release_failure(
-    process: &mut ProcessSession,
+    process: &mut ProviderProcess,
     mut diagnostic: String,
     control: &DriverControl,
 ) -> Result<ClaudeAttempt, NodeRunnerError> {

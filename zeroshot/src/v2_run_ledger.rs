@@ -331,6 +331,8 @@ pub enum RunLedgerError {
     InvalidEvent(&'static str),
     #[error("run ledger storage is unavailable")]
     Storage,
+    #[error("run ledger SQLite storage failed: {0}")]
+    SqliteStorage(rusqlite::ffi::Error),
     #[error("run ledger storage is corrupt")]
     Corrupt,
 }

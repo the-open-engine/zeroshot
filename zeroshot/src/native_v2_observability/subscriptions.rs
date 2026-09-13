@@ -2,6 +2,7 @@ use super::*;
 
 pub struct RunWatchSubscription {
     pub(super) ledger: Arc<dyn RunLedger>,
+    pub(super) runtime: RuntimeObservation,
     pub(super) subscription_id: SubscriptionId,
     pub(super) run_id: RunId,
     pub(super) scanned_through: Cursor,
@@ -37,13 +38,15 @@ impl RunWatchSubscription {
             pending: &mut self.pending,
         }
         .apply(&tail.events)?;
+        let finished = self.runtime.observe_finished(&tail.snapshot)?;
         self.scanned_through = tail.snapshot.cursor;
-        Ok(tail.snapshot.terminal.is_some())
+        Ok(finished)
     }
 }
 
 pub struct RunLogsSubscription {
     pub(super) ledger: Arc<dyn RunLedger>,
+    pub(super) runtime: RuntimeObservation,
     pub(super) subscription_id: SubscriptionId,
     pub(super) run_id: RunId,
     pub(super) execution: Option<ExecutionId>,
@@ -81,8 +84,9 @@ impl RunLogsSubscription {
                 self.pending.push_back(notification);
             }
         }
+        let finished = self.runtime.observe_finished(&tail.snapshot)?;
         self.scanned_through = tail.snapshot.cursor;
-        Ok(tail.snapshot.terminal.is_some())
+        Ok(finished)
     }
 }
 

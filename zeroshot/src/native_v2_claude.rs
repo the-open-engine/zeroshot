@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, ProcessStdout};
 use crate::native_v2_capsule::provider_process::{
-    ClosedSessionFailure, ProviderProcessRunners, process_scope, redaction_values,
-    with_driver_detail,
+    ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
+    redaction_values, with_driver_detail,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -173,6 +173,7 @@ impl ClaudeAdapter {
         let argv = claude_arguments(
             self.prefix_arguments.clone(),
             ClaudeTurnArguments {
+                private_workspace: input.files.isolated_workspace,
                 model: model.as_str(),
                 effort: *effort,
                 role: invocation.role,
@@ -193,16 +194,22 @@ impl ClaudeAdapter {
             with_driver_detail(error, "Claude command rejected the selected node role")
         })?;
 
+        let mut environment = self
+            .process_environment(&invocation.environment, input.files.home())
+            .map_err(|error| with_driver_detail(error, "Claude provider environment is invalid"))?;
+        environment.insert(
+            "TMPDIR".to_owned(),
+            input
+                .files
+                .scratch_text()
+                .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
+        );
         Ok(ProcessSessionCommand {
             program: self.executable.clone(),
             argv,
-            environment: self
-                .process_environment(&invocation.environment, input.runtime_home)
-                .map_err(|error| {
-                    with_driver_detail(error, "Claude provider environment is invalid")
-                })?,
+            environment,
             workspace: crate::execution::driver::WorkspaceCapability {
-                current_dir: self.workspace.clone(),
+                current_dir: input.files.workspace.clone(),
                 mode: workspace_access(invocation.role).map_err(|error| {
                     with_driver_detail(error, "Claude workspace policy rejected the node role")
                 })?,
@@ -314,10 +321,7 @@ impl ClaudeAdapter {
         turn: &ClaudeTurn<'_>,
         resume_id: Option<&str>,
     ) -> Result<ClaudeProcessStart, NodeRunnerError> {
-        let scope = process_scope(turn.invocation).map_err(|error| {
-            with_driver_detail(error, "Claude process scope requires an agent node role")
-        })?;
-        let (runner, runtime_home) = match self.runners.turn_process(&self.runtime_home, scope) {
+        let files = match turn.execution.prepare(turn.control).await {
             Ok(process) => process,
             Err(error) => return turn_process::failed_before_start(error, turn.control),
         };
@@ -325,10 +329,10 @@ impl ClaudeAdapter {
             turn,
             ClaudeCommandInput {
                 resume_id,
-                runtime_home: &runtime_home,
+                files: &files,
             },
         )?;
-        turn_process::open(runner, command, turn.control).await
+        turn_process::open(files, command, turn.control).await
     }
 }
 
@@ -370,6 +374,7 @@ struct ClaudeTurn<'a> {
     invocation: &'a DriverInvocation,
     session: &'a ClaudeSession,
     control: &'a DriverControl,
+    execution: &'a ProviderExecution<'a>,
 }
 
 enum ClaudeTurnAdvance {
@@ -379,7 +384,7 @@ enum ClaudeTurnAdvance {
 
 struct ClaudeCommandInput<'a> {
     resume_id: Option<&'a str>,
-    runtime_home: &'a Path,
+    files: &'a ProviderExecutionFiles,
 }
 
 async fn collect_transcript(

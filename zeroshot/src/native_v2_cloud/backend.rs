@@ -106,12 +106,7 @@ struct WatchSource(RunWatchSubscription);
 #[async_trait]
 impl RunSubscriptionSource<RunWatchEventNotification> for WatchSource {
     async fn next(&mut self) -> Option<RunSubscriptionItem<RunWatchEventNotification>> {
-        match self.0.recv().await {
-            Ok(Some(event)) => Some(RunSubscriptionItem::Event(event)),
-            Ok(None) | Err(_) => Some(RunSubscriptionItem::Closed {
-                reason: SubscriptionCloseReason::Done,
-            }),
-        }
+        Some(durable_item(self.0.recv().await))
     }
 }
 
@@ -120,12 +115,19 @@ struct LogsSource(RunLogsSubscription);
 #[async_trait]
 impl RunSubscriptionSource<RunLogEventNotification> for LogsSource {
     async fn next(&mut self) -> Option<RunSubscriptionItem<RunLogEventNotification>> {
-        match self.0.recv().await {
-            Ok(Some(event)) => Some(RunSubscriptionItem::Event(event)),
-            Ok(None) | Err(_) => Some(RunSubscriptionItem::Closed {
-                reason: SubscriptionCloseReason::Done,
-            }),
-        }
+        Some(durable_item(self.0.recv().await))
+    }
+}
+
+fn durable_item<E>(result: Result<Option<E>, NativeV2ObservationError>) -> RunSubscriptionItem<E> {
+    match result {
+        Ok(Some(event)) => RunSubscriptionItem::Event(event),
+        Ok(None) => RunSubscriptionItem::Closed {
+            reason: SubscriptionCloseReason::Done,
+        },
+        Err(_) => RunSubscriptionItem::Closed {
+            reason: SubscriptionCloseReason::SourceUnavailable,
+        },
     }
 }
 
@@ -176,6 +178,13 @@ fn cloud_backend_error(error: NativeV2CloudError) -> BackendError {
             NativeV2ObservationError::ExecutionNotActive
             | NativeV2ObservationError::ExecutionNotLive,
         ) => BackendError::application(GONE, "execution is no longer active", None),
+        NativeV2CloudError::Observation(NativeV2ObservationError::Ledger(
+            RunLedgerError::Storage | RunLedgerError::SqliteStorage(_) | RunLedgerError::Corrupt,
+        )) => BackendError::application(
+            "SOURCE_UNAVAILABLE",
+            "durable run history is unavailable",
+            None,
+        ),
         _ => BackendError::new(INTERNAL_ERROR_CODE, "native-v2 operation failed"),
     }
 }

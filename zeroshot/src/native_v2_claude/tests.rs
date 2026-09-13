@@ -298,6 +298,21 @@ async fn two_turn_workspace(
     )
     .await;
     complete_two_turns(&runner, &binding).await;
+    let homes = workspace.read("homes.txt");
+    assert!(
+        homes
+            .lines()
+            .all(|home| Path::new(home).exists() == (scope == SessionScope::NodeInstance))
+    );
+    let scratches = workspace.read("scratches.txt");
+    crate::native_v2_candidate::test_support::assert_removed_directories(
+        &scratches.lines().collect::<Vec<_>>(),
+        2,
+    );
+    runner
+        .close_run(&openengine_cluster_protocol::RunId::new("claude-run"))
+        .await;
+    assert!(homes.lines().all(|home| !Path::new(home).exists()));
     workspace
 }
 
@@ -326,6 +341,7 @@ printf '%s\n' "${AWS_REGION-unset}" > aws-region.txt
 printf '%s\n' "${CLAUDE_CODE_USE_BEDROCK-unset}" > use-bedrock.txt
 printf '%s\n' "${UNDECLARED_AMBIENT_SENTINEL-unset}" > ambient.txt
 printf '%s\n' "$HOME" >> homes.txt
+printf '%s\n' "$TMPDIR" >> scratches.txt
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-1"}'
 printf '%s%s\n' \
   '{"type":"stream_event","event":{"type":"content_block_delta",' \

@@ -30,8 +30,9 @@ impl NativeV2Supervisor {
             })
             .collect();
         if let Err(error) = self.ledger.append(&self.run_id, events).await {
-            let snapshot = self.snapshot().await?;
-            if snapshot.force_stop_requested || snapshot.terminal.is_some() {
+            if let Ok(snapshot) = self.snapshot().await
+                && (snapshot.force_stop_requested || snapshot.terminal.is_some())
+            {
                 return Ok(false);
             }
             return Err(error.into());
@@ -290,15 +291,21 @@ impl NativeV2Supervisor {
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
         self.runner.close_run(&self.run_id).await;
         drain_terminalizing_tasks(tasks).await?;
+        self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
+        self.append_runtime_failure("runtime_lost").await
+    }
+
+    pub(super) async fn append_runtime_failure(
+        &self,
+        reason: &str,
+    ) -> Result<TerminalResult, NativeV2SupervisorError> {
         let snapshot = self.snapshot().await?;
         if let Some(terminal) = snapshot.terminal {
             return Ok(terminal);
         }
         let terminal = TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_lost")
-                .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+            reason: EnumLabel::new(reason).map_err(|_| NativeV2SupervisorError::InvalidState)?,
         };
-        self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
         let mut events = snapshot
             .active_executions()
             .map(|node| RunEvent::NodeCompleted {
