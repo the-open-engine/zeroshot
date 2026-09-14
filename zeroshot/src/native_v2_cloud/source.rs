@@ -43,8 +43,7 @@ mod tests {
     use super::*;
     use crate::native_v2_contract::NodeRuntimeBinding;
     use crate::native_v2_supervisor::{
-        ConnectionResolutionUnavailable, DynamicConnectionPlan, RunConnectionResolver,
-        RunEnvironment,
+        ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver, RunEnvironment,
     };
 
     #[derive(Default)]
@@ -57,7 +56,7 @@ mod tests {
         async fn resolve(
             &self,
             requirements: RunConnectionRequirements,
-        ) -> Result<RunConnectionValues, ConnectionResolutionUnavailable> {
+        ) -> Result<RunConnectionValues, ConnectionResolutionError> {
             let token = format!("source-{}", self.calls.fetch_add(1, Ordering::SeqCst) + 1);
             Ok(requirements
                 .into_iter()

@@ -16,6 +16,8 @@ pub(super) enum Script {
     InspectFailed,
     MergeFailed,
     CiFailed,
+    ReconcileCompletesThenUnavailable,
+    LargeCiDiagnostic,
     Conflict,
     ConflictAtMerge,
     RegistrationRace,
@@ -88,7 +90,12 @@ impl FakeGitHub {
 
     fn static_review_state(&self) -> GitHubReviewState {
         match self.script {
-            Script::CiFailed => open_review(failed_checks()),
+            Script::CiFailed | Script::ReconcileCompletesThenUnavailable => {
+                open_review(failed_checks())
+            }
+            Script::LargeCiDiagnostic => open_review(GitHubChecks::Failed {
+                diagnostic: "failed check: build\n".to_owned() + &"λ🦀".repeat(20_000),
+            }),
             Script::Conflict => GitHubReviewState::Conflict,
             Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
@@ -228,6 +235,98 @@ fn failed_checks() -> GitHubChecks {
 
 #[async_trait]
 impl GitHubDeliveryAuthority for FakeGitHub {
+    async fn observe_delivery(
+        &self,
+        request: GitHubDeliveryRead<'_>,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        let output = tokio::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&self.remote)
+            .args([
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", request.head_branch),
+            ])
+            .output()
+            .await
+            .assert_value();
+        let head_revision = output.status.success().then(|| {
+            String::from_utf8(output.stdout)
+                .assert_value()
+                .trim()
+                .to_owned()
+        });
+        let review = head_revision.as_ref().and_then(|head| {
+            let reviews = self.reviews.lock().assert_value();
+            let request = reviews.last()?;
+            Some(
+                GitHubReviewReceipt {
+                    review_id: "17".to_owned(),
+                    repository: request.target.repository.clone(),
+                    target_branch: request.target.target_branch.clone(),
+                    head_branch: request.head_branch.clone(),
+                    head_revision: head.clone(),
+                }
+                .observation(self.no_ci_state()),
+            )
+        });
+        Ok(GitHubDeliverySnapshot {
+            review,
+            head_revision,
+        })
+    }
+
+    async fn reconcile_delivery_head(
+        &self,
+        request: GitHubHeadReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        if matches!(self.script, Script::ReconcileCompletesThenUnavailable)
+            && request.published.head_revision != request.observed.head_revision
+        {
+            let attempt = self.head_sync_attempts.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                git(
+                    request.workspace,
+                    &[
+                        "fetch",
+                        self.remote.to_str().assert_value(),
+                        &request.observed.head_revision,
+                    ],
+                );
+                git(
+                    request.workspace,
+                    &["merge", "--ff-only", &request.observed.head_revision],
+                );
+                return Err(GitHubAuthorityError::api(
+                    Some(503),
+                    "operation completed but confirmation was unavailable",
+                ));
+            }
+            return Ok(GitHubReconciliationOutcome::Unchanged);
+        }
+        if request.published.head_revision == request.observed.head_revision {
+            return Ok(GitHubReconciliationOutcome::Unchanged);
+        }
+        self.synchronize_review_head(
+            GitHubHeadSynchronization {
+                workspace: request.workspace,
+                previous: request.published,
+                updated: request.observed,
+            },
+            credential,
+        )
+        .await?;
+        Ok(if request.authorized_update {
+            GitHubReconciliationOutcome::Adopted
+        } else {
+            GitHubReconciliationOutcome::NeedsWork(
+                "reconciled an observed remote update".to_owned(),
+            )
+        })
+    }
+
     async fn push_branch(
         &self,
         request: &GitHubPushRequest,

@@ -2,6 +2,7 @@ use std::future::Future;
 
 use super::*;
 use crate::execution::driver::DriverCancellation;
+use crate::native_v2_runner::EnvironmentRefreshError;
 
 struct ReviewSyncInvocation<'a> {
     request: &'a GitHubReviewRequest,
@@ -40,20 +41,40 @@ impl ReviewSyncState<'_, '_> {
 
     async fn refresh_credential(&mut self) -> Result<CredentialRefreshProgress, DeliveryStop> {
         emit(self.control, "delivery: refreshing GitHub credential").await?;
+        let mut interval = REVIEW_SYNC_INTERVAL;
+        loop {
+            let progress = self.refresh_attempt().await?;
+            match progress {
+                CredentialRefreshProgress::Complete => {
+                    self.credential_refreshed = true;
+                    return Ok(progress);
+                }
+                CredentialRefreshProgress::TimedOut => return Ok(progress),
+                CredentialRefreshProgress::Unavailable => {}
+            }
+            emit(
+                self.control,
+                "delivery: GitHub credential refresh temporarily unavailable; retrying",
+            )
+            .await?;
+            if !wait_for_review_sync(self.control, self.deadline, interval).await? {
+                return Ok(CredentialRefreshProgress::TimedOut);
+            }
+            interval = interval.saturating_mul(2).min(REVIEW_SYNC_MAX_INTERVAL);
+        }
+    }
+
+    async fn refresh_attempt(&mut self) -> Result<CredentialRefreshProgress, DeliveryStop> {
         ensure_active(self.control)?;
         let remaining = self
             .deadline
             .saturating_duration_since(tokio::time::Instant::now());
-        let progress = refresh_within_deadline(
-            self.credentials.refresh(),
+        refresh_within_deadline(
+            self.credentials.try_refresh(),
             self.control.cancellation(),
             remaining,
         )
-        .await?;
-        if matches!(progress, CredentialRefreshProgress::Complete) {
-            self.credential_refreshed = true;
-        }
-        Ok(progress)
+        .await
     }
 }
 
@@ -65,6 +86,7 @@ enum ReviewSyncProgress {
 
 enum CredentialRefreshProgress {
     Complete,
+    Unavailable,
     TimedOut,
 }
 
@@ -84,6 +106,33 @@ enum ReviewSyncDisposition {
 
 impl NativeV2DeliveryAdapter {
     pub(super) async fn synchronize_review(
+        &self,
+        request: &GitHubReviewRequest,
+        credentials: &mut DeliveryCredentials<'_>,
+        control: &DriverControl,
+    ) -> Result<GitHubReviewReceipt, DeliveryStop> {
+        let mut retry = preflight::OperationRetry::default();
+        loop {
+            let failure = match self
+                .synchronize_review_batch(request, credentials, control)
+                .await
+            {
+                Err(DeliveryStop::Repair(failure)) if failure.retryable => failure,
+                result => return result,
+            };
+            self.retry_operation(
+                GitHubAuthorityError::Unavailable.with_context(failure.diagnostic),
+                preflight::OperationContext {
+                    credentials,
+                    control,
+                    retry: &mut retry,
+                },
+            )
+            .await?;
+        }
+    }
+
+    async fn synchronize_review_batch(
         &self,
         request: &GitHubReviewRequest,
         credentials: &mut DeliveryCredentials<'_>,
@@ -109,8 +158,12 @@ impl NativeV2DeliveryAdapter {
                 }
                 ReviewSyncProgress::TimedOut => {
                     return Err(last_failure.map_or_else(
-                        || recovery::repair("GitHub review synchronization timed out"),
-                        DeliveryStop::from,
+                        || temporary_sync_failure("GitHub review synchronization timed out").into(),
+                        |error: GitHubAuthorityError| {
+                            error
+                                .with_context("GitHub review synchronization timed out")
+                                .into()
+                        },
                     ));
                 }
             };
@@ -126,17 +179,18 @@ impl NativeV2DeliveryAdapter {
                 ReviewSyncDisposition::Retry => {}
                 ReviewSyncDisposition::Stop => return Err(error.into()),
                 ReviewSyncDisposition::TimedOut => {
-                    return Err(recovery::repair(format!(
-                        "GitHub review synchronization timed out\n{error}"
-                    )));
+                    return Err(error
+                        .with_context("GitHub review synchronization timed out")
+                        .into());
                 }
             }
             retry_interval = retry_interval
                 .saturating_mul(2)
                 .min(REVIEW_SYNC_MAX_INTERVAL);
         }
-        Err(recovery::repair(
-            "GitHub review synchronization exhausted its attempts",
+        Err(last_failure.map_or_else(
+            || temporary_sync_failure("GitHub review synchronization batch exhausted").into(),
+            DeliveryStop::from,
         ))
     }
 
@@ -150,7 +204,11 @@ impl NativeV2DeliveryAdapter {
                 CredentialRefreshProgress::Complete => {
                     self.review_sync_attempt(state.invocation()).await?
                 }
-                CredentialRefreshProgress::TimedOut => ReviewSyncProgress::TimedOut,
+                CredentialRefreshProgress::TimedOut | CredentialRefreshProgress::Unavailable => {
+                    ReviewSyncProgress::Failed(temporary_sync_failure(
+                        "GitHub credential refresh remained unavailable through the synchronization deadline",
+                    ))
+                }
             };
         }
         Ok(progress)
@@ -178,9 +236,15 @@ impl NativeV2DeliveryAdapter {
         Ok(match result {
             Ok(Ok(review)) => ReviewSyncProgress::Complete(review),
             Ok(Err(error)) => ReviewSyncProgress::Failed(error),
-            Err(_) => ReviewSyncProgress::TimedOut,
+            Err(_) => ReviewSyncProgress::Failed(temporary_sync_failure(
+                "GitHub review synchronization request timed out",
+            )),
         })
     }
+}
+
+fn temporary_sync_failure(message: &str) -> GitHubAuthorityError {
+    GitHubAuthorityError::Unavailable.with_context(message)
 }
 
 async fn refresh_within_deadline<F>(
@@ -189,7 +253,7 @@ async fn refresh_within_deadline<F>(
     remaining: Duration,
 ) -> Result<CredentialRefreshProgress, DeliveryStop>
 where
-    F: Future<Output = Result<(), DeliveryStop>>,
+    F: Future<Output = Result<(), EnvironmentRefreshError>>,
 {
     if remaining.is_zero() {
         return Ok(CredentialRefreshProgress::TimedOut);
@@ -201,7 +265,8 @@ where
     };
     match result {
         Ok(Ok(())) => Ok(CredentialRefreshProgress::Complete),
-        Ok(Err(stop)) => Err(stop),
+        Ok(Err(EnvironmentRefreshError::Unavailable)) => Ok(CredentialRefreshProgress::Unavailable),
+        Ok(Err(error)) => Err(refresh_failure(error)),
         Err(_) => Ok(CredentialRefreshProgress::TimedOut),
     }
 }
@@ -257,7 +322,7 @@ mod tests {
     async fn credential_refresh_respects_remaining_deadline() {
         let (_sender, receiver) = tokio::sync::watch::channel(false);
         let result = refresh_within_deadline(
-            std::future::pending::<Result<(), DeliveryStop>>(),
+            std::future::pending::<Result<(), EnvironmentRefreshError>>(),
             DriverCancellation::new(receiver),
             Duration::from_millis(1),
         )
@@ -271,7 +336,7 @@ mod tests {
         let (sender, receiver) = tokio::sync::watch::channel(false);
         assert!(sender.send(true).is_ok());
         let result = refresh_within_deadline(
-            std::future::pending::<Result<(), DeliveryStop>>(),
+            std::future::pending::<Result<(), EnvironmentRefreshError>>(),
             DriverCancellation::new(receiver),
             Duration::from_secs(1),
         )
@@ -283,3 +348,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod outages;

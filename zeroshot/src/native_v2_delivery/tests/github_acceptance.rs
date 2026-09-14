@@ -79,7 +79,10 @@ async fn production_gh_transport_uses_exact_args_and_a_clean_environment() {
     assert!(git_capture.contains("config_count=2"));
     assert!(git_capture.contains("config_key_1=http.https://github.com/.extraheader"));
     assert!(git_capture.contains("arg=https://github.com/acme/project.git"));
-    assert!(git_capture.contains("arg=HEAD:refs/heads/zeroshot/v2-test"));
+    assert!(git_capture.contains(&format!(
+        "arg={}:refs/heads/zeroshot/v2-test",
+        review_request.head_revision
+    )));
     assert!(!argument_lines(&git_capture).contains("test-token"));
 
     let gh_capture = fs::read_to_string(format!("{}.capture", gh_program.display())).assert_value();
@@ -172,12 +175,15 @@ async fn production_gh_transport_rejects_malformed_or_changed_authority() {
     for gh_program in [malformed, mismatch] {
         let authority =
             github_authority(repo.root.path(), PathBuf::from("/usr/bin/git"), gh_program);
-        assert_eq!(
-            authority
-                .open_or_update_review(&request, GitHubCredential("test-token"))
-                .await,
-            Err(GitHubAuthorityError::Rejected)
-        );
+        let error = authority
+            .open_or_update_review(&request, GitHubCredential("test-token"))
+            .await
+            .assert_error();
+        assert!(matches!(
+            error,
+            GitHubAuthorityError::Api(_) | GitHubAuthorityError::Identity(_)
+        ));
+        assert!(!error.retryable_operation());
     }
 }
 

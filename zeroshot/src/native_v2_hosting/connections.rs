@@ -7,10 +7,10 @@ use openengine_cluster_protocol::{
     ConnectionResolveRequest, ConnectionResolveResult, ConnectionKey, RunConnectionRequirements,
     RunConnectionValues, RunId, TargetConnectionResolver,
 };
-use reqwest::{redirect::Policy, Client, Url};
+use reqwest::{redirect::Policy, Client, StatusCode, Url};
 
 use crate::native_v2_supervisor::{
-    ConnectionResolutionUnavailable, DynamicConnectionPlan, RunConnectionResolver,
+    ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver,
 };
 use crate::native_v2_target_authority::TargetAuthorityError;
 
@@ -90,7 +90,7 @@ impl RunConnectionResolver for HttpRunConnectionResolver {
     async fn resolve(
         &self,
         requirements: RunConnectionRequirements,
-    ) -> Result<RunConnectionValues, ConnectionResolutionUnavailable> {
+    ) -> Result<RunConnectionValues, ConnectionResolutionError> {
         let mut response = self
             .client
             .post(self.endpoint.clone())
@@ -101,31 +101,49 @@ impl RunConnectionResolver for HttpRunConnectionResolver {
             })
             .send()
             .await
-            .map_err(|_| ConnectionResolutionUnavailable)?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|size| size > MAX_RESOLUTION_RESPONSE_BYTES as u64)
+            .map_err(|_| ConnectionResolutionError::Unavailable)?;
+        require_resolution_status(response.status())?;
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_RESOLUTION_RESPONSE_BYTES as u64)
         {
-            return Err(ConnectionResolutionUnavailable);
+            return Err(ConnectionResolutionError::InvalidResponse);
         }
         let mut body = Vec::new();
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| ConnectionResolutionUnavailable)?
+            .map_err(|_| ConnectionResolutionError::Unavailable)?
         {
             if body.len().saturating_add(chunk.len()) > MAX_RESOLUTION_RESPONSE_BYTES {
-                return Err(ConnectionResolutionUnavailable);
+                return Err(ConnectionResolutionError::InvalidResponse);
             }
             body.extend_from_slice(&chunk);
         }
         serde_json::from_slice::<ConnectionResolveResult>(&body)
             .map(|result| result.connections)
-            .map_err(|_| ConnectionResolutionUnavailable)
+            .map_err(|_| ConnectionResolutionError::InvalidResponse)
     }
+}
+
+fn require_resolution_status(status: StatusCode) -> Result<(), ConnectionResolutionError> {
+    if status.is_success() {
+        return Ok(());
+    }
+    let error = match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ConnectionResolutionError::Refused,
+        StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS => {
+            ConnectionResolutionError::Unavailable
+        }
+        status if status.is_server_error() => ConnectionResolutionError::Unavailable,
+        _ => ConnectionResolutionError::InvalidResponse,
+    };
+    Err(error)
 }
 
 fn invalid(message: &str) -> TargetAuthorityError {
     TargetAuthorityError::invalid(message.to_owned())
 }
+
+#[cfg(test)]
+mod tests;

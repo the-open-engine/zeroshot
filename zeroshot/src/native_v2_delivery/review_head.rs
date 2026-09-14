@@ -46,3 +46,34 @@ pub(super) fn valid_head_update(
         && valid_revision(&updated.head_revision)
         && updated.head_revision != previous.head_revision
 }
+
+/// Identity-constrained read before any delivery mutation.
+#[derive(Clone, Copy)]
+pub struct GitHubDeliveryRead<'a> {
+    pub target: &'a super::DeliveryTarget,
+    pub head_branch: &'a str,
+    pub known_review: Option<&'a GitHubReviewReceipt>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubDeliverySnapshot {
+    pub review: Option<GitHubReviewObservation>,
+    pub head_revision: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+pub struct GitHubHeadReconciliation<'a> {
+    pub workspace: &'a std::path::Path,
+    pub published: &'a GitHubReviewReceipt,
+    pub observed: &'a GitHubReviewReceipt,
+    pub commit_message: &'a str,
+    pub authorized_update: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GitHubReconciliationOutcome {
+    Unchanged,
+    Adopted,
+    NeedsWork(String),
+    Refused(String),
+}

@@ -17,7 +17,7 @@ impl RunConnectionResolver for RotatingResolver {
     async fn resolve(
         &self,
         requirements: RunConnectionRequirements,
-    ) -> Result<RunConnectionValues, ConnectionResolutionUnavailable> {
+    ) -> Result<RunConnectionValues, ConnectionResolutionError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         requirements
             .into_iter()
@@ -28,7 +28,7 @@ impl RunConnectionResolver for RotatingResolver {
                     .collect();
                 StaticConnectionValues::new(values)
                     .map(|values| (key, values))
-                    .map_err(|_| ConnectionResolutionUnavailable)
+                    .map_err(|_| ConnectionResolutionError::InvalidResponse)
             })
             .collect()
     }
@@ -79,6 +79,20 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     )
     .assert_value();
 
+    assert!(
+        !environment
+            .resolve(&first)
+            .await
+            .assert_value()
+            .can_refresh()
+    );
+    assert!(
+        !environment
+            .resolve(&second)
+            .await
+            .assert_value()
+            .can_refresh()
+    );
     assert_eq!(
         environment.resolve(&first).await.assert_value().get(&name),
         Some("first-secret")
@@ -91,6 +105,27 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
 
 #[tokio::test]
 async fn dynamic_values_are_refreshed_for_node_start_and_runtime_refresh() {
+    let (name, node, environment) = dynamic_environment(Arc::new(RotatingResolver::default()));
+
+    let first = environment.resolve(&node).await.assert_value();
+    assert!(first.can_refresh());
+    assert_eq!(first.get(&name), Some("dynamic-1"));
+    assert_eq!(
+        crate::native_v2_runner::refresh_environment(&first)
+            .await
+            .assert_value()
+            .get(&name),
+        Some("dynamic-2")
+    );
+    assert_eq!(
+        environment.resolve(&node).await.assert_value().get(&name),
+        Some("dynamic-3")
+    );
+}
+
+fn dynamic_environment(
+    resolver: Arc<dyn RunConnectionResolver>,
+) -> (EnvironmentVariableName, NodeRuntimeBinding, RunEnvironment) {
     let name = EnvironmentVariableName::new("GH_TOKEN").assert_value();
     let node = binding("github", &name);
     let runtime = RuntimePlan::Codex {
@@ -105,22 +140,58 @@ async fn dynamic_values_are_refreshed_for_node_start_and_runtime_refresh() {
         DynamicConnectionPlan {
             keys: BTreeSet::from([key.clone()]),
             source_connection: Some(key),
-            resolver: Arc::new(RotatingResolver::default()),
+            resolver,
         },
     )
     .assert_value();
 
-    let first = environment.resolve(&node).await.assert_value();
-    assert_eq!(first.get(&name), Some("dynamic-1"));
-    assert_eq!(
-        crate::native_v2_runner::refresh_environment(&first)
-            .await
-            .assert_value()
-            .get(&name),
-        Some("dynamic-2")
-    );
-    assert_eq!(
-        environment.resolve(&node).await.assert_value().get(&name),
-        Some("dynamic-3")
-    );
+    (name, node, environment)
+}
+
+struct FailAfterFirstResolution {
+    initial: RotatingResolver,
+    error: ConnectionResolutionError,
+}
+
+#[async_trait]
+impl RunConnectionResolver for FailAfterFirstResolution {
+    async fn resolve(
+        &self,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionValues, ConnectionResolutionError> {
+        if self.initial.calls.load(Ordering::SeqCst) > 0 {
+            return Err(self.error);
+        }
+        self.initial.resolve(requirements).await
+    }
+}
+
+#[tokio::test]
+async fn runtime_refresh_preserves_resolution_failure_classification() {
+    for (error, expected) in [
+        (
+            ConnectionResolutionError::Unavailable,
+            EnvironmentRefreshError::Unavailable,
+        ),
+        (
+            ConnectionResolutionError::Refused,
+            EnvironmentRefreshError::Refused,
+        ),
+        (
+            ConnectionResolutionError::InvalidResponse,
+            EnvironmentRefreshError::InvalidResponse,
+        ),
+    ] {
+        let (_, node, environment) = dynamic_environment(Arc::new(FailAfterFirstResolution {
+            initial: RotatingResolver::default(),
+            error,
+        }));
+        let initial = environment.resolve(&node).await.assert_value();
+        assert_eq!(
+            crate::native_v2_runner::refresh_environment(&initial)
+                .await
+                .err(),
+            Some(expected)
+        );
+    }
 }

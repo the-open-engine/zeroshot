@@ -20,7 +20,10 @@ pub(super) async fn push_branch(
             "https://github.com/{}.git",
             request.target.repository
         ))
-        .arg(format!("HEAD:refs/heads/{}", request.head_branch));
+        .arg(format!(
+            "{}:refs/heads/{}",
+            request.head_revision, request.head_branch
+        ));
     match capture(&mut command, authority.config.push_deadline)
         .await
         .and_then(GitCommandFailure::require_success)
@@ -29,14 +32,15 @@ pub(super) async fn push_branch(
         Err(failure) => {
             authority.record_push_failure(&failure);
             // A transport failure may follow an accepted push. Observe the exact remote ref before repair.
-            if authority
-                .confirm_pushed_head(request, credential)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            match authority.confirm_pushed_head(request, credential).await {
+                Ok(()) => Ok(()),
+                Err(error) if error.authentication_failed() || error.retryable_operation() => {
+                    Err(error.with_context(failure))
+                }
+                Err(error) => Err(failure
+                    .with_context(format!("push confirmation failed: {error}"))
+                    .into()),
             }
-            Err(failure.into())
         }
     }
 }

@@ -257,3 +257,20 @@ pub(crate) fn assert_removed_directories(paths: &[&str], expected_count: usize) 
         );
     }
 }
+
+pub(crate) fn commit_all(workspace: &Path, message: &str) {
+    git(workspace, &["add", "--all"]);
+    git(
+        workspace,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--no-verify",
+            "--message",
+            message,
+        ],
+    );
+}

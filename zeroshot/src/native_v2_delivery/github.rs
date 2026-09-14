@@ -12,15 +12,18 @@ use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
 use super::{
-    GitHubAuthorityError, GitHubChecks, GitHubConflictMaterialization, GitHubConflictOutcome,
-    GitHubConflictRequest, GitHubCredential, GitHubDeliveryAuthority, GitHubHeadSynchronization,
-    GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation,
-    GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState, valid_head_update, valid_revision,
+    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
+    GitHubReconciliationOutcome, GitHubAuthorityError, GitHubChecks, GitHubConflictMaterialization,
+    GitHubConflictOutcome, GitHubConflictRequest, GitHubCredential, GitHubDeliveryAuthority,
+    GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
+    GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest,
+    GitHubReviewState, valid_head_update, valid_revision,
 };
 
 mod api;
 mod conflict;
 mod metadata;
+mod observation;
 mod push;
 
 const DEFAULT_API_DEADLINE: Duration = Duration::from_secs(2 * 60);
@@ -83,25 +86,9 @@ impl GhCliDeliveryAuthority {
         request: &GitHubReviewRequest,
         credential: GitHubCredential<'_>,
     ) -> Result<Option<GitHubReviewReceipt>, GitHubAuthorityError> {
-        let owner = request
-            .target
-            .repository
-            .split_once('/')
-            .map(|(owner, _)| owner)
-            .ok_or(GitHubAuthorityError::Rejected)?;
         let value = self
             .api(
-                &[
-                    format!("repos/{}/pulls", request.target.repository),
-                    "--method".to_owned(),
-                    "GET".to_owned(),
-                    "-f".to_owned(),
-                    "state=all".to_owned(),
-                    "-f".to_owned(),
-                    format!("head={owner}:{}", request.head_branch),
-                    "-f".to_owned(),
-                    format!("base={}", request.target.target_branch),
-                ],
+                &review_list_arguments(&request.target, &request.head_branch)?,
                 credential,
             )
             .await?;
@@ -222,6 +209,9 @@ impl GhCliDeliveryAuthority {
                 .await;
             let log = match output {
                 Ok(output) => check_log_tail(&output),
+                Err(error) if error.authentication_failed() || error.retryable_operation() => {
+                    return Err(error);
+                }
                 Err(error) => format!("GitHub job log unavailable: {error}"),
             };
             logs.push((*job, log));
@@ -271,6 +261,22 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
+    async fn observe_delivery(
+        &self,
+        request: GitHubDeliveryRead<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        observation::observe(self, request, credential).await
+    }
+
+    async fn reconcile_delivery_head(
+        &self,
+        request: GitHubHeadReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        head::reconcile(self, request, credential).await
+    }
+
     async fn push_branch(
         &self,
         request: &GitHubPushRequest,
@@ -447,6 +453,28 @@ pub(super) fn test_review_request() -> GitHubReviewRequest {
         description: "Repair the checkout flow.".to_owned(),
         source_issue: None,
     }
+}
+
+fn review_list_arguments(
+    target: &super::DeliveryTarget,
+    head_branch: &str,
+) -> Result<Vec<String>, GitHubAuthorityError> {
+    let owner = target
+        .repository
+        .split_once('/')
+        .map(|(owner, _)| owner)
+        .ok_or(GitHubAuthorityError::Rejected)?;
+    Ok(vec![
+        format!("repos/{}/pulls", target.repository),
+        "--method".to_owned(),
+        "GET".to_owned(),
+        "-f".to_owned(),
+        "state=all".to_owned(),
+        "-f".to_owned(),
+        format!("head={owner}:{head_branch}"),
+        "-f".to_owned(),
+        format!("base={}", target.target_branch),
+    ])
 }
 
 fn clean_command(

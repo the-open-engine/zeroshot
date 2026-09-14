@@ -19,7 +19,7 @@ use openengine_cluster_protocol::{
 use openengine_cluster_server::admission::VerifiedGraph;
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, watch, Mutex};
 use tokio::task::JoinSet;
 
 use crate::full_v1_reducer::{
@@ -117,6 +117,7 @@ pub struct NativeV2Supervisor {
     live_output: Option<Arc<dyn LiveOutputRegistrar>>,
     runtime_cleanup: Option<Arc<dyn RunRuntimeCleanup>>,
     runtime_lost: Arc<AtomicBool>,
+    resolution_stop: watch::Sender<bool>,
     drive_turn: Arc<Mutex<()>>,
 }
 
@@ -137,6 +138,7 @@ impl NativeV2Supervisor {
             live_output: None,
             runtime_cleanup: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
+            resolution_stop: watch::channel(false).0,
             drive_turn: Arc::new(Mutex::new(())),
         }
     }
@@ -215,6 +217,7 @@ impl NativeV2Supervisor {
             .await
             .unwrap_or(Err(NativeV2SupervisorError::TaskPanicked));
         if result.is_err() {
+            self.resolution_stop.send_replace(true);
             self.runner.close_run(&self.run_id).await;
             // Keep ownership until every task has stopped, even when another output append failed.
             while active.tasks.join_next().await.is_some() {}
@@ -230,6 +233,7 @@ impl NativeV2Supervisor {
         loop {
             let snapshot = self.snapshot().await?;
             if let Some(terminal) = snapshot.terminal {
+                self.resolution_stop.send_replace(true);
                 self.runner.close_run(&self.run_id).await;
                 return Ok(terminal);
             }
@@ -314,6 +318,7 @@ impl NativeV2Supervisor {
     /// task observes the durable request and closes the run without dispatching another node.
     pub async fn force_stop(&self) -> Result<(), NativeV2SupervisorError> {
         self.ledger.request_force_stop(&self.run_id).await?;
+        self.resolution_stop.send_replace(true);
         self.runner.close_run(&self.run_id).await;
         Ok(())
     }
@@ -322,6 +327,7 @@ impl NativeV2Supervisor {
     /// closure. The driving turn owns durable crash settlement and terminalization.
     pub async fn runtime_lost(&self) {
         self.runtime_lost.store(true, Ordering::Release);
+        self.resolution_stop.send_replace(true);
         self.runner.close_run(&self.run_id).await;
     }
 
@@ -446,7 +452,5 @@ mod controller;
 mod environment;
 mod runtime;
 pub use environment::{RunEnvironment, RunEnvironmentError};
-pub(crate) use environment::{
-    ConnectionResolutionUnavailable, DynamicConnectionPlan, RunConnectionResolver,
-};
+pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};
 use runtime::*;

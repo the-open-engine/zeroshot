@@ -1,11 +1,13 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
-use crate::native_v2_candidate::test_support::{TestGitRepository, git, git_output, path_text};
+use crate::native_v2_candidate::test_support::{
+    TestGitRepository, commit_all, git, git_output, path_text,
+};
 
 struct ConflictFixture {
     repository: TestGitRepository,
@@ -226,23 +228,6 @@ fn assert_reobservation_cleanup(
         ExpectedCleanup::AlreadyClean => assert!(!git_capture.contains("arg=--abort")),
     }
     assert_transport_keeps_credential_ephemeral(fixture);
-}
-
-fn commit_all(workspace: &Path, message: &str) {
-    git(workspace, &["add", "--all"]);
-    git(
-        workspace,
-        &[
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.invalid",
-            "commit",
-            "--no-verify",
-            "--message",
-            message,
-        ],
-    );
 }
 
 fn git_wrapper(repository: &TestGitRepository) -> PathBuf {

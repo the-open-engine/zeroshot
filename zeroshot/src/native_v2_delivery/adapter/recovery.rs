@@ -1,23 +1,31 @@
 use super::*;
 
 pub(super) struct RepairFailure {
-    diagnostic: String,
+    pub(super) diagnostic: String,
+    pub(super) retryable: bool,
     review: Option<Box<GitHubReviewReceipt>>,
 }
 
 pub(super) fn repair(diagnostic: impl Into<String>) -> DeliveryStop {
     DeliveryStop::Repair(RepairFailure {
         diagnostic: diagnostic.into(),
+        retryable: false,
         review: None,
     })
 }
 
 impl From<GitHubAuthorityError> for DeliveryStop {
     fn from(error: GitHubAuthorityError) -> Self {
-        if error.authentication_failed() {
+        if matches!(error, GitHubAuthorityError::Identity(_)) {
+            Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
+        } else if error.authentication_failed() {
             Self::Outcome(WorkerOutcome::authentication_refusal())
         } else {
-            repair(error.to_string())
+            let mut stop = repair(error.to_string());
+            if let Self::Repair(failure) = &mut stop {
+                failure.retryable = error.retryable_operation();
+            }
+            stop
         }
     }
 }
@@ -85,19 +93,5 @@ impl NativeV2DeliveryAdapter {
                 .replace(&git_auth::encode_basic_credential(token), "[REDACTED]");
         }
         diagnostic
-    }
-}
-
-impl DeliveryCredentials<'_> {
-    pub(super) async fn refresh_after(
-        &mut self,
-        error: GitHubAuthorityError,
-        control: &DriverControl,
-    ) -> Result<(), DeliveryStop> {
-        if !error.authentication_failed() || !self.can_refresh() {
-            return Err(error.into());
-        }
-        emit(control, "delivery: refreshing GitHub credential").await?;
-        self.refresh().await
     }
 }

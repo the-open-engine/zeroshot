@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::native_v2_contract::NodeRuntimeBinding;
 use crate::native_v2_runner::{
-    EnvironmentRefreshUnavailable, ResolvedEnvironment, RuntimeEnvironmentRefresh,
+    EnvironmentRefreshError, ResolvedEnvironment, RuntimeEnvironmentRefresh,
     with_environment_refresh,
 };
 
@@ -23,12 +23,18 @@ pub(crate) trait RunConnectionResolver: Send + Sync {
     async fn resolve(
         &self,
         requirements: RunConnectionRequirements,
-    ) -> Result<RunConnectionValues, ConnectionResolutionUnavailable>;
+    ) -> Result<RunConnectionValues, ConnectionResolutionError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[error("dynamic connection resolution is unavailable")]
-pub(crate) struct ConnectionResolutionUnavailable;
+pub(crate) enum ConnectionResolutionError {
+    #[error("dynamic connection resolution is temporarily unavailable")]
+    Unavailable,
+    #[error("dynamic connection resolution was refused")]
+    Refused,
+    #[error("dynamic connection resolution returned an invalid response")]
+    InvalidResponse,
+}
 
 pub(crate) struct DynamicConnectionPlan {
     pub resolver: Arc<dyn RunConnectionResolver>,
@@ -132,6 +138,13 @@ impl RunEnvironment {
         binding: &NodeRuntimeBinding,
     ) -> Result<ResolvedEnvironment, RunEnvironmentError> {
         let resolved = self.resolve_snapshot(binding).await?;
+        let dynamic = binding
+            .declared_connections()
+            .iter()
+            .any(|(key, _)| self.dynamic_keys.contains(key));
+        if !dynamic {
+            return Ok(resolved);
+        }
         Ok(with_environment_refresh(
             resolved,
             Arc::new(NodeEnvironmentRefresh {
@@ -192,7 +205,7 @@ impl RunEnvironment {
             let resolved = resolver
                 .resolve(dynamic.clone())
                 .await
-                .map_err(|_| RunEnvironmentError::ResolutionUnavailable)?;
+                .map_err(RunEnvironmentError::from)?;
             validate_resolution(&dynamic, &resolved)?;
             selected.extend(resolved);
         }
@@ -209,12 +222,12 @@ struct NodeEnvironmentRefresh {
 
 #[async_trait]
 impl RuntimeEnvironmentRefresh for NodeEnvironmentRefresh {
-    async fn refresh(&self) -> Result<ResolvedEnvironment, EnvironmentRefreshUnavailable> {
+    async fn refresh(&self) -> Result<ResolvedEnvironment, EnvironmentRefreshError> {
         let resolved = self
             .environment
             .resolve_snapshot(&self.binding)
             .await
-            .map_err(|_| EnvironmentRefreshUnavailable)?;
+            .map_err(EnvironmentRefreshError::from)?;
         Ok(with_environment_refresh(resolved, Arc::new(self.clone())))
     }
 }
@@ -388,10 +401,34 @@ pub enum RunEnvironmentError {
     UndeclaredField(ConnectionKey, EnvironmentVariableName),
     #[error("dynamic connection resolution is unavailable")]
     ResolutionUnavailable,
+    #[error("dynamic connection resolution was refused")]
+    ResolutionRefused,
+    #[error("dynamic connection resolution returned an invalid response")]
+    ResolutionInvalid,
     #[error("run environment exceeds the aggregate bound")]
     TooLarge,
     #[error("run runtime plan is inconsistent")]
     InvalidPlan,
+}
+
+impl From<ConnectionResolutionError> for RunEnvironmentError {
+    fn from(error: ConnectionResolutionError) -> Self {
+        match error {
+            ConnectionResolutionError::Unavailable => Self::ResolutionUnavailable,
+            ConnectionResolutionError::Refused => Self::ResolutionRefused,
+            ConnectionResolutionError::InvalidResponse => Self::ResolutionInvalid,
+        }
+    }
+}
+
+impl From<RunEnvironmentError> for EnvironmentRefreshError {
+    fn from(error: RunEnvironmentError) -> Self {
+        match error {
+            RunEnvironmentError::ResolutionUnavailable => Self::Unavailable,
+            RunEnvironmentError::ResolutionRefused => Self::Refused,
+            _ => Self::InvalidResponse,
+        }
+    }
 }
 
 #[cfg(test)]

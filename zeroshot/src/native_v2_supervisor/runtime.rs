@@ -7,17 +7,13 @@ pub(super) async fn drain_terminalizing_tasks(
         let finished = finished.map_err(supervisor_task_error)?;
         match finished.result {
             DispatchResult::DurableEventFailure(error) => return Err(error.into()),
+            DispatchResult::StartFailure(error) => return Err(error),
             DispatchResult::Completed(_)
             | DispatchResult::TimedOut
             | DispatchResult::Interrupted => {}
         }
     }
     Ok(())
-}
-
-pub(super) enum StartNode {
-    Started(NodeHandle),
-    Failed(WorkerOutcome),
 }
 
 pub(super) enum Initialization {
@@ -97,6 +93,7 @@ pub(super) enum DispatchResult {
     TimedOut,
     Interrupted,
     DurableEventFailure(RunLedgerError),
+    StartFailure(NativeV2SupervisorError),
 }
 
 pub(super) struct FinishedDispatch {
@@ -415,6 +412,7 @@ pub(super) fn settled_outcome(
         DispatchResult::TimedOut => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)),
         DispatchResult::Interrupted => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash)),
         DispatchResult::DurableEventFailure(error) => Err(error.into()),
+        DispatchResult::StartFailure(error) => Err(error),
     }
 }
 

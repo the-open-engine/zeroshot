@@ -101,7 +101,7 @@ async fn legacy_response_contract_keeps_receipt_validation_without_repair_opt_in
 
 #[tokio::test]
 async fn later_delivery_errors_preserve_the_existing_review_in_repair_feedback() {
-    for script in [Script::InspectFailed, Script::MergeFailed] {
+    for script in [Script::MergeFailed] {
         let repo = TempRepo::delivery();
         let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
         let outcome = run_delivery(&repo, authority, 3, DeliveryMode::Merge).await;
@@ -116,19 +116,7 @@ async fn later_delivery_errors_preserve_the_existing_review_in_repair_feedback()
 #[tokio::test]
 async fn repair_retry_resumes_the_authorized_remote_head_before_pushing() {
     let repo = TempRepo::delivery();
-    let authority = Arc::new(FakeGitHub::new(
-        repo.remote.clone(),
-        Script::HeadAdoptionAfterRepair,
-    ));
-    let adapter = Arc::new(NativeV2DeliveryAdapter::new(
-        NativeV2DeliveryConfig {
-            workspace: repo.workspace.clone(),
-            git_program: "/usr/bin/git".into(),
-            target: target(&repo),
-            poll: DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
-        },
-        authority.clone(),
-    ));
+    let (authority, adapter) = retained_delivery(&repo, Script::HeadAdoptionAfterRepair);
     let request = || DeliveryRunRequest {
         repo: &repo,
         attempts: 3,
@@ -143,7 +131,135 @@ async fn repair_retry_resumes_the_authorized_remote_head_before_pushing() {
         output["headRevision"].as_str().assert_value()
     );
     let success = run_with_adapter(request(), adapter).await.outcome;
-    assert_delivery_signal(&success, DELIVERY_MERGED_LABEL);
-    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+    head_update::assert_retried_head_adoption(&authority, &success);
+}
+
+#[tokio::test]
+async fn transient_inspection_failure_exhausts_explicit_poll_policy_without_code_repair() {
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::InspectFailed));
+    let outcome = run_delivery(&repo, authority, 3, DeliveryMode::Merge).await;
+    assert_eq!(
+        outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
+    );
+}
+
+#[tokio::test]
+async fn already_merged_pr_preserves_dirty_or_newer_local_work_without_republishing() {
+    for committed in [false, true] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+        let initial = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+        let receipt = assert_delivery_signal(&initial, DELIVERY_MERGED_LABEL);
+        let published = receipt["headRevision"].as_str().assert_value();
+        fs::write(repo.workspace.join("unshipped.txt"), "keep this work\n").assert_value();
+        if committed {
+            git(&repo.workspace, &["add", "unshipped.txt"]);
+            git(
+                &repo.workspace,
+                &[
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--no-verify",
+                    "-m",
+                    "new local work",
+                ],
+            );
+        }
+        let before = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+        let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+        assert_eq!(
+            outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+        );
+        assert_eq!(git_output(&repo.workspace, &["rev-parse", "HEAD"]), before);
+        assert_eq!(
+            git_output(
+                &repo.remote,
+                &[
+                    "rev-parse",
+                    &format!("refs/heads/{}", delivery_branch("delivery-run"))
+                ]
+            ),
+            published
+        );
+        assert_eq!(
+            fs::read_to_string(repo.workspace.join("unshipped.txt")).assert_value(),
+            "keep this work\n"
+        );
+        assert_eq!(authority.review_requests().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn completed_reconciliation_followed_by_retry_still_requires_current_work_review() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = retained_delivery(&repo, Script::ReconcileCompletesThenUnavailable);
+    let request = || DeliveryRunRequest {
+        repo: &repo,
+        attempts: 3,
+        mode: DeliveryMode::Merge,
+        run_id: "completed-reconciliation",
+        refresh: None,
+    };
+    let initial = run_with_adapter(request(), adapter.clone()).await.outcome;
+    assert_delivery_signal(&initial, DELIVERY_CI_FAILED_LABEL);
+    let branch = delivery_branch("completed-reconciliation");
+    let external = repo.root.child("external-reconciliation");
+    git(
+        repo.root.path(),
+        &[
+            "clone",
+            "--branch",
+            &branch,
+            repo.remote.to_str().assert_value(),
+            external.to_str().assert_value(),
+        ],
+    );
+    fs::write(external.join("remote.txt"), "external change\n").assert_value();
+    git(&external, &["add", "remote.txt"]);
+    git(
+        &external,
+        &[
+            "-c",
+            "user.name=External",
+            "-c",
+            "user.email=external@example.invalid",
+            "commit",
+            "--no-verify",
+            "-m",
+            "external change",
+        ],
+    );
+    git(&external, &["push", "origin", &branch]);
+    let external_head = git_output(&external, &["rev-parse", "HEAD"]);
+    let outcome = run_with_adapter(request(), adapter).await.outcome;
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(
+        outcome_diagnostic(&outcome).contains("workspace changed during trusted reconciliation")
+    );
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        external_head
+    );
     assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
+fn retained_delivery(
+    repo: &TempRepo,
+    script: Script,
+) -> (Arc<FakeGitHub>, Arc<NativeV2DeliveryAdapter>) {
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
+    let adapter = retained_adapter(
+        repo,
+        authority.clone(),
+        DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
+    );
+    (authority, adapter)
 }

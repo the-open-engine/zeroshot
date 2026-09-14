@@ -1,5 +1,8 @@
 use super::*;
 
+mod resolution;
+mod start;
+
 impl NativeV2Supervisor {
     pub(super) async fn dispatch(
         &self,
@@ -46,59 +49,6 @@ impl NativeV2Supervisor {
         dispatch: Dispatch,
         active: &mut ActiveDispatches,
     ) -> Result<(), NativeV2SupervisorError> {
-        let mut handle = match self.start_node(program, &dispatch).await? {
-            StartNode::Started(handle) => handle,
-            StartNode::Failed(outcome) => {
-                return self.settle_start_failure(dispatch.reference, outcome).await;
-            }
-        };
-        let Some(output) = handle.take_initial_output() else {
-            handle.cancel();
-            let _ = handle.completion().await;
-            return Err(NativeV2SupervisorError::InvalidState);
-        };
-        let registration = match self.register_live(&dispatch.reference, &mut handle).await {
-            Ok(registration) => registration,
-            Err(_) => {
-                bridge_durable_events(
-                    self.ledger.clone(),
-                    self.run_id.clone(),
-                    dispatch.reference.execution,
-                    output,
-                )
-                .await?;
-                return self
-                    .settle_start_failure(
-                        dispatch.reference,
-                        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
-                    )
-                    .await;
-            }
-        };
-        let timeout = *program
-            .timeouts
-            .get(&dispatch.reference.node)
-            .ok_or(NativeV2SupervisorError::InvalidState)?;
-        let execution = dispatch.reference.execution;
-        let (cancel, receiver) = oneshot::channel();
-        active.cancellations.insert(execution, cancel);
-        active.tasks.spawn(run_dispatch(DispatchTask {
-            handle,
-            timeout,
-            cancel: receiver,
-            ledger: self.ledger.clone(),
-            run_id: self.run_id.clone(),
-            registration,
-            output,
-        }));
-        Ok(())
-    }
-
-    pub(super) async fn start_node(
-        &self,
-        program: &RunProgram,
-        dispatch: &Dispatch,
-    ) -> Result<StartNode, NativeV2SupervisorError> {
         let binding = program
             .admitted
             .runtime
@@ -106,34 +56,30 @@ impl NativeV2Supervisor {
             .get(&dispatch.reference.node)
             .cloned()
             .ok_or(NativeV2SupervisorError::InvalidState)?;
-        let environment = match self.environment.resolve(&binding).await {
-            Ok(environment) => environment,
-            Err(_) => {
-                return Ok(StartNode::Failed(WorkerOutcome::authentication_refusal()));
-            }
-        };
+        let instructions = program
+            .instructions
+            .get(&dispatch.reference.node)
+            .cloned()
+            .ok_or(NativeV2SupervisorError::InvalidState)?;
+        let timeout = *program
+            .timeouts
+            .get(&dispatch.reference.node)
+            .ok_or(NativeV2SupervisorError::InvalidState)?;
         let invocation = NodeInvocation {
-            reference: dispatch.reference.clone(),
-            worker: dispatch.worker.clone(),
-            instructions: program
-                .instructions
-                .get(&dispatch.reference.node)
-                .cloned()
-                .ok_or(NativeV2SupervisorError::InvalidState)?,
-            input: dispatch.input.clone(),
+            reference: dispatch.reference,
+            worker: dispatch.worker,
+            instructions,
+            input: dispatch.input,
             binding,
         };
-        match self
-            .runner
-            .start(NodeRunRequest {
-                invocation,
-                environment,
-            })
-            .await
-        {
-            Ok(handle) => Ok(StartNode::Started(handle)),
-            Err(error) => Ok(StartNode::Failed(runner_failure(error))),
-        }
+        let (cancel, receiver) = oneshot::channel();
+        active
+            .cancellations
+            .insert(invocation.reference.execution, cancel);
+        active
+            .tasks
+            .spawn(self.clone().run_pending_node(invocation, timeout, receiver));
+        Ok(())
     }
 
     pub(super) async fn register_live(
@@ -144,27 +90,8 @@ impl NativeV2Supervisor {
         let Some(registrar) = &self.live_output else {
             return Ok(None);
         };
-        let Some(source) = handle.live_output_source() else {
-            handle.cancel();
-            let _ = handle.completion().await;
-            return Err(LiveOutputUnavailable);
-        };
-        match registrar.register(reference, source).await {
-            Ok(registration) => Ok(Some(registration)),
-            Err(_) => {
-                handle.cancel();
-                let _ = handle.completion().await;
-                Err(LiveOutputUnavailable)
-            }
-        }
-    }
-
-    pub(super) async fn settle_start_failure(
-        &self,
-        reference: ExecutionRef,
-        outcome: WorkerOutcome,
-    ) -> Result<(), NativeV2SupervisorError> {
-        self.append_completion(reference, outcome, None).await
+        let source = handle.live_output_source().ok_or(LiveOutputUnavailable)?;
+        registrar.register(reference, source).await.map(Some)
     }
 
     async fn append_completion(
@@ -262,12 +189,20 @@ impl NativeV2Supervisor {
         Ok(terminal)
     }
 
+    async fn stop_runtime_tasks(
+        &self,
+        tasks: &mut JoinSet<FinishedDispatch>,
+    ) -> Result<(), NativeV2SupervisorError> {
+        self.resolution_stop.send_replace(true);
+        self.runner.close_run(&self.run_id).await;
+        drain_terminalizing_tasks(tasks).await
+    }
+
     pub(super) async fn terminalize_force(
         &self,
         tasks: &mut JoinSet<FinishedDispatch>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
-        self.runner.close_run(&self.run_id).await;
-        drain_terminalizing_tasks(tasks).await?;
+        self.stop_runtime_tasks(tasks).await?;
         let snapshot = self.snapshot().await?;
         if let Some(terminal) = snapshot.terminal {
             return Ok(terminal);
@@ -289,8 +224,7 @@ impl NativeV2Supervisor {
         &self,
         tasks: &mut JoinSet<FinishedDispatch>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
-        self.runner.close_run(&self.run_id).await;
-        drain_terminalizing_tasks(tasks).await?;
+        self.stop_runtime_tasks(tasks).await?;
         self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
         self.append_runtime_failure("runtime_lost").await
     }

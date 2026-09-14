@@ -24,6 +24,9 @@ mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
 }
 "#;
 
+mod reconcile;
+pub(super) use reconcile::reconcile;
+
 const MAX_GIT_OUTPUT_BYTES: usize = 4 * 1_024;
 
 #[derive(Deserialize)]
@@ -171,9 +174,17 @@ async fn require_local_head(
         context.authority.config.api_deadline,
     )
     .await?;
-    (head.trim() == expected && status.is_empty())
-        .then_some(())
-        .ok_or(GitHubAuthorityError::Rejected)
+    if head.trim() == expected && status.is_empty() {
+        return Ok(());
+    }
+    Err(GitHubAuthorityError::api(
+        None,
+        format!(
+            "Local Git state cannot adopt the authorized head: expected HEAD {expected}, actual HEAD {}\n\
+             git status --porcelain=v1 --untracked-files=all:\n{status}",
+            head.trim()
+        ),
+    ))
 }
 
 async fn adopt_local_head(
@@ -184,6 +195,15 @@ async fn adopt_local_head(
     if !local_transition_required(context, previous, updated).await? {
         return Ok(());
     }
+    fetch_head(context, previous, updated).await?;
+    adopt_fetched_head(context, previous, updated).await
+}
+
+async fn fetch_head(
+    context: HeadUpdateContext<'_>,
+    previous: &GitHubReviewReceipt,
+    updated: &GitHubReviewReceipt,
+) -> Result<(), GitHubAuthorityError> {
     let mut fetch = authenticated_git_command(
         &context.authority.config,
         context.workspace,
@@ -196,8 +216,7 @@ async fn adopt_local_head(
         &format!("https://github.com/{}.git", previous.repository),
         &updated.head_revision,
     ]);
-    bounded_status(fetch, context.authority.config.push_deadline).await?;
-    adopt_fetched_head(context, previous, updated).await
+    bounded_status(fetch, context.authority.config.push_deadline).await
 }
 
 async fn adopt_fetched_head(

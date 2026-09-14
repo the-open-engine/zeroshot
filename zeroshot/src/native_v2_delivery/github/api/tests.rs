@@ -376,3 +376,23 @@ exit 1
         "call\n"
     );
 }
+
+#[test]
+fn schema_failures_preserve_bounded_redacted_response_details() {
+    let token = "sensitive-test-token";
+    let value = serde_json::json!({
+        "unexpected": format!("{token} {} {}", encode_basic_credential(token), "λ🦀".repeat(20_000))
+    });
+    let error = decode_response::<GitReferenceWire>(value, GitHubCredential(token))
+        .err()
+        .expect("wrong schema must fail");
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("missing field"));
+    assert!(diagnostic.contains("unexpected"));
+    assert!(diagnostic.contains("truncated=true"));
+    assert!(diagnostic.contains("[REDACTED]"));
+    assert!(!diagnostic.contains(token));
+    assert!(!diagnostic.contains(&encode_basic_credential(token)));
+    assert!(diagnostic.len() < 32 * 1024);
+    assert!(!error.retryable_operation());
+}

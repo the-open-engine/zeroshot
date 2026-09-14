@@ -315,7 +315,7 @@ async fn delivery_runtime_binding(repo: &TempRepo, mode: DeliveryMode) -> NodeRu
 impl crate::native_v2_runner::RuntimeEnvironmentRefresh for RefreshedDeliveryEnvironment {
     async fn refresh(
         &self,
-    ) -> Result<ResolvedEnvironment, crate::native_v2_runner::EnvironmentRefreshUnavailable> {
+    ) -> Result<ResolvedEnvironment, crate::native_v2_runner::EnvironmentRefreshError> {
         ResolvedEnvironment::exact(
             &self.binding,
             BTreeMap::from([(
@@ -323,7 +323,7 @@ impl crate::native_v2_runner::RuntimeEnvironmentRefresh for RefreshedDeliveryEnv
                 "refreshed-token".to_owned(),
             )]),
         )
-        .map_err(|_| crate::native_v2_runner::EnvironmentRefreshUnavailable)
+        .map_err(|_| crate::native_v2_runner::EnvironmentRefreshError::Unavailable)
     }
 }
 
@@ -378,11 +378,17 @@ async fn exact_merge_retry_rediscovers_the_same_review_and_receipt() {
     )
     .await;
 
-    assert_eq!(first, second);
+    assert_eq!(
+        assert_delivery_signal(&first, DELIVERY_MERGED_LABEL),
+        assert_delivery_signal(&second, DELIVERY_MERGED_LABEL),
+    );
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
     let reviews = authority.review_requests();
-    assert_eq!(reviews.len(), 2);
-    assert_eq!(reviews.assert_at(0), reviews.assert_at(1));
+    assert_eq!(
+        reviews.len(),
+        1,
+        "terminal retry must not update PR metadata"
+    );
 }
 
 #[tokio::test]
@@ -444,6 +450,8 @@ fn delivery_contract_rejects_the_other_modes_schema() {
 
 #[path = "tests/github_acceptance.rs"]
 mod github_acceptance;
+#[path = "tests/output.rs"]
+mod output;
 #[path = "tests/recovery.rs"]
 mod recovery;
 
@@ -498,6 +506,22 @@ async fn run_delivery_execution(
     };
     let adapter = Arc::new(NativeV2DeliveryAdapter::new(config, authority));
     run_with_adapter(request, adapter).await
+}
+
+fn retained_adapter(
+    repo: &TempRepo,
+    authority: Arc<dyn GitHubDeliveryAuthority>,
+    poll: DeliveryPollPolicy,
+) -> Arc<NativeV2DeliveryAdapter> {
+    Arc::new(NativeV2DeliveryAdapter::new(
+        NativeV2DeliveryConfig {
+            workspace: repo.workspace.clone(),
+            git_program: "/usr/bin/git".into(),
+            target: target(repo),
+            poll,
+        },
+        authority,
+    ))
 }
 
 async fn run_with_adapter(
@@ -649,4 +673,6 @@ fn assert_receipt_match(output: &Value, mode: DeliveryMode, repo: &TempRepo, exp
     );
 }
 
-use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+use openengine_cluster_testkit::assertions::{AssertValue};
+
+mod transport_matrix;

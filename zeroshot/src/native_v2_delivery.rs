@@ -20,7 +20,11 @@ mod tests;
 pub use command::GitCommandFailure;
 pub use authority_error::{GitHubApiFailure, GitHubAuthorityError};
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
-pub use review_head::{GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome};
+pub use review_head::{
+    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
+    GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
+    GitHubReconciliationOutcome,
+};
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
 pub(crate) use contract::{delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels};
@@ -321,6 +325,20 @@ pub enum GitHubConflictOutcome {
 /// Target-owned, bounded GitHub effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait GitHubDeliveryAuthority: Send + Sync {
+    /// Observes the bound PR and branch without committing, pushing, or changing metadata.
+    async fn observe_delivery(
+        &self,
+        request: GitHubDeliveryRead<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError>;
+
+    /// Fetches the observed head and preserves local work while reconciling its published ancestry.
+    async fn reconcile_delivery_head(
+        &self,
+        request: GitHubHeadReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError>;
+
     async fn push_branch(
         &self,
         request: &GitHubPushRequest,
@@ -554,9 +572,23 @@ fn ensure_active(control: &DriverControl) -> Result<(), NodeRunnerError> {
 }
 
 async fn emit(control: &DriverControl, message: &str) -> Result<(), NodeRunnerError> {
-    control
-        .emit(LiveOutput::new(LiveOutputStream::System, message)?)
-        .await
+    let mut remaining = message;
+    while !remaining.is_empty() {
+        let mut end = remaining
+            .len()
+            .min(crate::native_v2_runner::MAX_LIVE_OUTPUT_BYTES);
+        while !remaining.is_char_boundary(end) {
+            end -= 1;
+        }
+        control
+            .emit(LiveOutput::new(
+                LiveOutputStream::System,
+                &remaining[..end],
+            )?)
+            .await?;
+        remaining = &remaining[end..];
+    }
+    Ok(())
 }
 
 fn valid_repository(value: &str) -> bool {

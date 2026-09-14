@@ -16,20 +16,25 @@ async fn provider_receipt_survives_a_transient_local_adoption_failure() {
 
     let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
 
-    assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
-    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
-    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
+    assert_retried_head_adoption(&authority, &outcome);
 }
 
 #[tokio::test]
 async fn failed_head_adoption_routes_repair_without_repeating_the_remote_mutation() {
     for (script, expected_attempts) in [
         (Script::HeadAdoptionRejected, 1),
-        (Script::HeadAdoptionUnavailable, 5),
+        (Script::HeadAdoptionUnavailable, 3),
     ] {
         let (repo, authority) = delivery_harness(script);
         let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
-        assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        if matches!(script, Script::HeadAdoptionUnavailable) {
+            assert_eq!(
+                outcome,
+                WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
+            );
+        } else {
+            assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        }
         assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
         assert_eq!(
             authority.head_sync_attempts.load(Ordering::SeqCst),
@@ -71,4 +76,10 @@ async fn assert_head_updates(
             .assert_value(),
         String::from_utf8(local_head.stdout).assert_value().trim()
     );
+}
+
+pub(super) fn assert_retried_head_adoption(authority: &FakeGitHub, outcome: &WorkerOutcome) {
+    assert_delivery_signal(outcome, DELIVERY_MERGED_LABEL);
+    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
 }

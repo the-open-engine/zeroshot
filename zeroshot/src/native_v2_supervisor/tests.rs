@@ -278,17 +278,45 @@ async fn harness_with_session_scope(
     driver: FakeDriver,
     session_scope: SessionScope,
 ) -> Harness {
+    harness_with_options(
+        graph,
+        initial_input,
+        driver,
+        HarnessOptions {
+            session_scope,
+            resolver: None,
+        },
+    )
+    .await
+}
+
+struct HarnessOptions {
+    session_scope: SessionScope,
+    resolver: Option<Arc<dyn RunConnectionResolver>>,
+}
+
+async fn harness_with_options(
+    graph: GraphSpec,
+    initial_input: Value,
+    driver: FakeDriver,
+    options: HarnessOptions,
+) -> Harness {
     let runtime_nodes = executable_names(&graph.root)
         .into_iter()
         .map(|name| {
+            let connections = if options.resolver.is_some() {
+                json!({name.clone(): ["OPENAI_API_KEY"]})
+            } else {
+                json!({})
+            };
             (
                 name,
                 json!({
                     "kind": "agent",
                     "model": "gpt-5.6",
                     "effort": "max",
-                    "sessionScope": session_scope,
-                    "connections": {}
+                    "sessionScope": options.session_scope,
+                    "connections": connections
                 }),
             )
         })
@@ -333,8 +361,23 @@ async fn harness_with_session_scope(
         NativeNodeRunner::new(&admitted, driver.clone(), sessions.clone())
             .assert_value_with("runner"),
     );
-    let environment = RunEnvironment::exact(&admitted.runtime, BTreeMap::new())
-        .assert_value_with("empty run environment");
+    let environment = match options.resolver {
+        Some(resolver) => RunEnvironment::with_resolver(
+            &admitted.runtime,
+            BTreeMap::new(),
+            DynamicConnectionPlan {
+                resolver,
+                keys: admitted
+                    .runtime
+                    .connection_requirements()
+                    .into_keys()
+                    .collect(),
+                source_connection: None,
+            },
+        ),
+        None => RunEnvironment::exact(&admitted.runtime, BTreeMap::new()),
+    }
+    .assert_value_with("run environment");
     Harness {
         supervisor: NativeV2Supervisor::new(run_id, ledger.clone(), runner, Arc::new(environment)),
         ledger,
@@ -354,5 +397,10 @@ mod cases_2;
 mod cases_3;
 #[path = "tests/delivery_gate.rs"]
 mod delivery_gate;
+#[path = "tests/resolution.rs"]
+mod resolution;
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "tests/startup.rs"]
+mod startup;

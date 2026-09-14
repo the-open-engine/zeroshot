@@ -52,23 +52,36 @@ pub(super) fn review_receipt(
     wire: PullRequestWire,
     request: &GitHubReviewRequest,
 ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
-    let review_id = wire.number.to_string();
+    let receipt = read_review_receipt(wire, &request.target, &request.head_branch)?;
+    if receipt.head_revision != request.head_revision {
+        return Err(GitHubAuthorityError::review_head_not_visible());
+    }
+    Ok(receipt)
+}
+
+pub(super) fn read_review_receipt(
+    wire: PullRequestWire,
+    target: &super::super::DeliveryTarget,
+    head_branch: &str,
+) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
     let receipt = GitHubReviewReceipt {
-        review_id,
+        review_id: wire.number.to_string(),
         repository: wire.base.repo.full_name,
         target_branch: wire.base.branch,
         head_branch: wire.head.branch,
         head_revision: wire.head.sha,
     };
-    let valid_identity = receipt.repository == request.target.repository
-        && receipt.target_branch == request.target.target_branch
-        && receipt.head_branch == request.head_branch
-        && wire.head.repo.full_name == request.target.repository;
-    if !valid_identity {
-        return Err(GitHubAuthorityError::Rejected);
-    }
-    if receipt.head_revision != request.head_revision {
-        return Err(GitHubAuthorityError::review_head_not_visible());
+    if receipt.repository != target.repository
+        || receipt.target_branch != target.target_branch
+        || receipt.head_branch != head_branch
+        || wire.head.repo.full_name != target.repository
+        || wire.number == 0
+        || !valid_revision(&receipt.head_revision)
+    {
+        return Err(GitHubAuthorityError::identity(format!(
+            "expected repository {} base {} head {}; observed review {receipt:?}",
+            target.repository, target.target_branch, head_branch,
+        )));
     }
     Ok(receipt)
 }

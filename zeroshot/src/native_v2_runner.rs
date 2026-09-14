@@ -26,7 +26,7 @@ use crate::native_v2_contract::{
 };
 
 const LIVE_OUTPUT_CAPACITY: usize = 256;
-const MAX_LIVE_OUTPUT_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_LIVE_OUTPUT_BYTES: usize = 16 * 1024;
 pub(crate) const DURABLE_OUTPUT_CAPACITY: usize = 1024;
 
 mod handle;
@@ -49,7 +49,7 @@ pub use plan::NodeRole;
 use plan::NodeRolePlan;
 mod workspace;
 pub use workspace::{EnvironmentResolutionError, ResolvedEnvironment, WorkspaceAccess, WorkspaceGate};
-pub(crate) use workspace::{EnvironmentRefreshUnavailable, RuntimeEnvironmentRefresh};
+pub(crate) use workspace::{EnvironmentRefreshError, RuntimeEnvironmentRefresh};
 
 pub(crate) fn with_environment_refresh(
     environment: ResolvedEnvironment,
@@ -60,7 +60,7 @@ pub(crate) fn with_environment_refresh(
 
 pub(crate) async fn refresh_environment(
     environment: &ResolvedEnvironment,
-) -> Result<ResolvedEnvironment, EnvironmentRefreshUnavailable> {
+) -> Result<ResolvedEnvironment, EnvironmentRefreshError> {
     workspace::refreshed(environment).await
 }
 

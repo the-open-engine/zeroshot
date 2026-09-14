@@ -3,6 +3,7 @@ use super::*;
 mod conflict;
 mod head;
 mod input;
+mod preflight;
 mod recovery;
 mod review;
 mod sync;
@@ -15,7 +16,7 @@ pub struct NativeV2DeliveryAdapter {
     authority: Arc<dyn GitHubDeliveryAuthority>,
     git: SystemGit,
     trusted_github_token: Option<Arc<str>>,
-    pending_head: Arc<std::sync::Mutex<Option<head::PendingHead>>>,
+    state: Arc<std::sync::Mutex<preflight::DeliveryState>>,
 }
 
 impl NativeV2DeliveryAdapter {
@@ -30,7 +31,7 @@ impl NativeV2DeliveryAdapter {
             authority,
             git,
             trusted_github_token: None,
-            pending_head: Arc::new(std::sync::Mutex::new(None)),
+            state: Arc::new(std::sync::Mutex::new(preflight::DeliveryState::default())),
         }
     }
 
@@ -164,22 +165,35 @@ impl<'a> DeliveryCredentials<'a> {
     }
 
     fn can_refresh(&self) -> bool {
-        self.environment.is_some()
+        self.environment
+            .is_some_and(ResolvedEnvironment::can_refresh)
     }
 
-    async fn refresh(&mut self) -> Result<(), DeliveryStop> {
+    async fn try_refresh(
+        &mut self,
+    ) -> Result<(), crate::native_v2_runner::EnvironmentRefreshError> {
         let Some(environment) = self.environment else {
             return Ok(());
         };
-        let refreshed = crate::native_v2_runner::refresh_environment(environment)
-            .await
-            .map_err(|_| {
-                recovery::repair("GitHub credential refresh is temporarily unavailable")
-            })?;
+        let refreshed = crate::native_v2_runner::refresh_environment(environment).await?;
         let credential = github_credential(&refreshed)
-            .ok_or_else(|| DeliveryStop::Outcome(WorkerOutcome::authentication_refusal()))?;
+            .ok_or(crate::native_v2_runner::EnvironmentRefreshError::Refused)?;
         self.token = credential.expose().to_owned();
         Ok(())
+    }
+}
+
+fn refresh_failure(error: crate::native_v2_runner::EnvironmentRefreshError) -> DeliveryStop {
+    match error {
+        crate::native_v2_runner::EnvironmentRefreshError::Unavailable => {
+            recovery::repair("GitHub credential refresh is temporarily unavailable")
+        }
+        crate::native_v2_runner::EnvironmentRefreshError::Refused => {
+            DeliveryStop::Outcome(WorkerOutcome::authentication_refusal())
+        }
+        crate::native_v2_runner::EnvironmentRefreshError::InvalidResponse => {
+            DeliveryStop::Outcome(WorkerOutcome::malformed())
+        }
     }
 }
 
@@ -219,15 +233,10 @@ impl NativeV2DeliveryAdapter {
 
     async fn prepare_review(
         &self,
-        preparation: DeliveryPreparation<'_, '_>,
+        mut preparation: DeliveryPreparation<'_, '_>,
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
         let input = delivery_input(&preparation.invocation.node.input)?;
-        self.resume_pending_head(
-            preparation.credentials,
-            preparation.control,
-            &delivery_branch(preparation.invocation.node.reference.run_id.as_str()),
-        )
-        .await?;
+        self.preflight(&mut preparation, &input.title).await?;
         let head_revision = self
             .prepare_head(preparation.session, preparation.control, &input.title)
             .await?;
@@ -246,9 +255,21 @@ impl NativeV2DeliveryAdapter {
             head_branch: review_request.head_branch.clone(),
             head_revision: review_request.head_revision.clone(),
         };
-        self.push_review_head(&preparation, &review_request)
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .intended_push = Some(review_request.head_revision.clone());
+        if let Err(stop) = self
+            .push_review_head(&mut preparation, &review_request)
             .await
-            .map_err(|stop| stop.with_review(&pending))?;
+        {
+            if matches!(stop, DeliveryStop::Repair(_)) {
+                // A push may have succeeded, or the remote may have advanced. Fetch before asking for local repair.
+                self.preflight(&mut preparation, &review_request.title)
+                    .await?;
+            }
+            return Err(stop.with_review(&pending));
+        }
         let review = self
             .synchronize_review(
                 &review_request,
@@ -260,6 +281,7 @@ impl NativeV2DeliveryAdapter {
         if !valid_review(&review_request, &review) {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
+        self.record_published(review.clone());
         emit(
             preparation.control,
             "delivery: review created or rediscovered",
@@ -287,7 +309,7 @@ impl NativeV2DeliveryAdapter {
 
     async fn push_review_head(
         &self,
-        preparation: &DeliveryPreparation<'_, '_>,
+        preparation: &mut DeliveryPreparation<'_, '_>,
         review: &GitHubReviewRequest,
     ) -> Result<(), DeliveryStop> {
         let push = GitHubPushRequest {
@@ -297,10 +319,21 @@ impl NativeV2DeliveryAdapter {
             head_revision: review.head_revision.clone(),
         };
         emit(preparation.control, "delivery: pushing run branch").await?;
-        self.authority
-            .push_branch(&push, preparation.credentials.current())
-            .await?;
-        Ok(())
+        let mut refreshed = preflight::OperationRetry::default();
+        loop {
+            ensure_active(preparation.control)?;
+            match self
+                .authority
+                .push_branch(&push, preparation.credentials.current())
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    self.retry_operation(error, preparation.operation_context(&mut refreshed))
+                        .await?
+                }
+            }
+        }
     }
 
     async fn drive_review(
@@ -444,27 +477,39 @@ impl NativeV2DeliveryAdapter {
         &self,
         drive: &mut ReviewDrive<'_>,
     ) -> Result<ReviewProgress, DeliveryStop> {
-        let observation = match self
-            .authority
-            .inspect_review(&drive.review, drive.credentials.current())
-            .await
-        {
-            Ok(observation) => observation,
-            Err(error) => {
-                drive
-                    .credentials
-                    .refresh_after(error, drive.control)
-                    .await?;
-                self.authority
-                    .inspect_review(&drive.review, drive.credentials.current())
-                    .await
-                    .map_err(DeliveryStop::from)?
+        let mut retry = preflight::OperationRetry::default();
+        loop {
+            ensure_active(drive.control)?;
+            match self
+                .authority
+                .inspect_review(&drive.review, drive.credentials.current())
+                .await
+            {
+                Ok(observation) => {
+                    return checked_progress(&drive.review, observation);
+                }
+                Err(error) if error.authentication_failed() || error.retryable_operation() => {
+                    self.retry_operation(error, drive.operation_context(&mut retry))
+                        .await?;
+                }
+                Err(error) => self.reconcile_observation_error(drive, error).await?,
             }
-        };
-        if !valid_observation(&drive.review, &observation) {
-            return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
-        ReviewProgress::from_state(observation.state)
+    }
+
+    async fn reconcile_observation_error(
+        &self,
+        drive: &mut ReviewDrive<'_>,
+        error: GitHubAuthorityError,
+    ) -> Result<(), DeliveryStop> {
+        emit(drive.control, &format!("delivery: {error}")).await?;
+        let DeliveryStop::Repair(failure) = DeliveryStop::from(error.clone()) else {
+            return Err(error.into());
+        };
+        match self.recover_head_update(drive, failure).await? {
+            ReviewStep::Continue => Ok(()),
+            ReviewStep::Complete(outcome) => Err(DeliveryStop::Outcome(outcome)),
+        }
     }
 
     async fn request_merge(
@@ -472,22 +517,29 @@ impl NativeV2DeliveryAdapter {
         drive: &mut ReviewDrive<'_>,
     ) -> Result<GitHubMergeRequestOutcome, DeliveryStop> {
         emit(drive.control, "delivery: requesting merge").await?;
-        match self
-            .authority
-            .request_merge(&drive.review, drive.credentials.current())
-            .await
-        {
-            Ok(outcome) => Ok(outcome),
-            Err(error) => {
-                drive
-                    .credentials
-                    .refresh_after(error, drive.control)
-                    .await?;
-                self.authority
-                    .request_merge(&drive.review, drive.credentials.current())
-                    .await
-                    .map_err(DeliveryStop::from)
+        let mut retry = preflight::OperationRetry::default();
+        loop {
+            ensure_active(drive.control)?;
+            let result = self
+                .authority
+                .request_merge(&drive.review, drive.credentials.current())
+                .await;
+            if let Some(value) = self
+                .operation_result(result, drive.operation_context(&mut retry))
+                .await?
+            {
+                return Ok(value);
             }
         }
     }
+}
+
+fn checked_progress(
+    review: &GitHubReviewReceipt,
+    observation: GitHubReviewObservation,
+) -> Result<ReviewProgress, DeliveryStop> {
+    if !valid_observation(review, &observation) {
+        return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
+    }
+    ReviewProgress::from_state(observation.state)
 }

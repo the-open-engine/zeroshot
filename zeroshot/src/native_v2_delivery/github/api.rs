@@ -17,7 +17,12 @@ impl GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<Value, GitHubAuthorityError> {
         let output = self.api_output(arguments, credential).await?;
-        serde_json::from_slice(&output).map_err(|_| GitHubAuthorityError::Rejected)
+        serde_json::from_slice(&output).map_err(|error| {
+            let (text, truncated) = api_diagnostic_text(output, false, MAX_API_OUTPUT_BYTES, credential);
+            redacted_api_error(None, format!(
+                "GitHub returned invalid JSON: {error}\nresponse (truncated={truncated}):\n{text}"
+            ), credential)
+        })
     }
 
     pub(super) async fn api_output(
@@ -31,11 +36,17 @@ impl GhCliDeliveryAuthority {
         bounded_output(command, self.config.api_deadline, credential)
             .await
             .map_err(|error| {
-                redacted_api_error(
+                let retryable = error.retryable_operation();
+                let wrapped = redacted_api_error(
                     error.api_status(),
                     format!("{context}\n{error}"),
                     credential,
-                )
+                );
+                if retryable {
+                    wrapped.temporary()
+                } else {
+                    wrapped
+                }
             })
     }
 
@@ -109,8 +120,29 @@ impl GhCliDeliveryAuthority {
                 credential,
             )
             .await?;
-        serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)
+        decode_response(value, credential)
     }
+}
+
+pub(super) fn decode_response<T: serde::de::DeserializeOwned>(
+    value: Value,
+    credential: GitHubCredential<'_>,
+) -> Result<T, GitHubAuthorityError> {
+    T::deserialize(&value).map_err(|error| {
+        let (text, truncated) = api_diagnostic_text(
+            value.to_string().into_bytes(),
+            false,
+            MAX_API_OUTPUT_BYTES,
+            credential,
+        );
+        redacted_api_error(
+            None,
+            format!(
+                "GitHub returned an invalid response: {error}\nresponse (truncated={truncated}):\n{text}"
+            ),
+            credential,
+        )
+    })
 }
 
 async fn bounded_output(
@@ -157,14 +189,16 @@ async fn bounded_output(
             credential,
         )),
         Ok(Err(error)) => Err(output.failure(None, &error, credential)),
-        Err(_) => Err(output.failure(
-            None,
-            &format!(
-                "command timed out after {} milliseconds",
-                deadline.as_millis()
-            ),
-            credential,
-        )),
+        Err(_) => Err(output
+            .failure(
+                None,
+                &format!(
+                    "command timed out after {} milliseconds",
+                    deadline.as_millis()
+                ),
+                credential,
+            )
+            .temporary()),
     }
 }
 
@@ -195,7 +229,11 @@ impl ApiOutput {
             MAX_API_ERROR_BYTES,
             credential,
         );
-        redacted_api_error(
+        let transient = api_status.is_none()
+            && stderr.lines().any(|line| {
+                line.starts_with("error connecting to ") || line.contains(": TLS handshake timeout")
+            });
+        let failure = redacted_api_error(
             api_status,
             format!(
                 "exitStatus: {:?}\n{context}\nstderr (truncated={stderr_truncated}):\n{stderr}\n\
@@ -203,7 +241,12 @@ impl ApiOutput {
                 status.and_then(|status| status.code())
             ),
             credential,
-        )
+        );
+        if transient {
+            failure.temporary()
+        } else {
+            failure
+        }
     }
 }
 

@@ -30,10 +30,10 @@ fn stale_review_head_is_retryable_but_changed_identity_is_rejected() {
 
     *value.pointer_mut("/base/ref").assert_value() = json!("other");
     let changed = serde_json::from_value(value).assert_value();
-    assert_eq!(
+    assert!(matches!(
         review_receipt(changed, &request()),
-        Err(GitHubAuthorityError::Rejected)
-    );
+        Err(GitHubAuthorityError::Identity(_))
+    ));
 }
 
 #[test]

@@ -20,6 +20,7 @@ pub struct GitCommandFailure {
     pub(crate) stdout_truncated: bool,
     pub(crate) stderr_truncated: bool,
     context: Box<str>,
+    timed_out: bool,
 }
 
 impl fmt::Display for GitCommandFailure {
@@ -50,6 +51,49 @@ impl fmt::Display for GitCommandFailure {
 impl std::error::Error for GitCommandFailure {}
 
 impl GitCommandFailure {
+    pub(super) fn with_context(mut self, context: impl fmt::Display) -> Self {
+        self.context = format!("{}\n{context}", self.context).into_boxed_str();
+        self
+    }
+
+    pub(super) fn http_status(&self) -> Option<u16> {
+        self.stderr.lines().find_map(|line| {
+            line.split_once("The requested URL returned error: ")
+                .and_then(|(_, status)| status.split_whitespace().next())
+                .and_then(|status| status.parse().ok())
+        })
+    }
+
+    pub(super) fn authentication_failed(&self) -> bool {
+        self.http_status() == Some(401)
+            || self.stderr.lines().any(|line| {
+                line.starts_with("fatal: Authentication failed for ")
+                    || terminal_http_auth_prompt(line)
+            })
+    }
+
+    pub(super) fn retryable_transport(&self) -> bool {
+        self.timed_out
+            || self
+                .http_status()
+                .is_some_and(|status| matches!(status, 429 | 500..=599))
+            || self
+                .stderr
+                .lines()
+                .filter(|line| line.starts_with("fatal: unable to access "))
+                .any(|line| {
+                    [
+                        "Could not resolve host:",
+                        "Failed to connect to ",
+                        "Connection timed out",
+                        "Recv failure: Connection reset by peer",
+                        "Empty reply from server",
+                    ]
+                    .iter()
+                    .any(|message| line.contains(message))
+                })
+    }
+
     pub(crate) fn operator_stderr(&self) -> String {
         format!(
             "stderr{}:\n{}\ncommand: {}\nworkingDirectory: {}\nexitStatus: {:?}\n{}",
@@ -73,6 +117,21 @@ impl GitCommandFailure {
             Err(self)
         }
     }
+}
+
+// With terminal prompts disabled, Git reports an HTTP authentication challenge this way
+// when it has no credential-helper username, even if the rejected token used extraHeader.
+fn terminal_http_auth_prompt(line: &str) -> bool {
+    let Some(prompt) = line.strip_prefix("fatal: could not read ") else {
+        return false;
+    };
+    let remote = prompt
+        .strip_prefix("Username for '")
+        .or_else(|| prompt.strip_prefix("Password for '"));
+    remote.is_some_and(|remote| {
+        (remote.starts_with("http://") || remote.starts_with("https://"))
+            && remote.ends_with("': terminal prompts disabled")
+    })
 }
 
 #[derive(Default)]
@@ -127,6 +186,7 @@ pub(crate) async fn capture(
         .and_then(|r| r.as_ref().ok())
         .and_then(ExitStatus::code);
     if result.is_err() {
+        diagnostic.timed_out = true;
         captured_stdout.truncated = true;
         captured_stderr.truncated = true;
     }
@@ -169,6 +229,7 @@ fn command_diagnostic(command: &Command, secrets: &[String]) -> GitCommandFailur
         stdout_truncated: false,
         stderr_truncated: false,
         context: Box::<str>::default(),
+        timed_out: false,
     }
 }
 

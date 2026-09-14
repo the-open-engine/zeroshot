@@ -67,6 +67,7 @@ impl NodeDriver for DeliveryLoopLane {
         let conflicted = self.workspace.join("result.txt");
         if fs::read_to_string(&conflicted).is_ok_and(|contents| contents.contains("<<<<<<<")) {
             fs::write(&conflicted, "resolved\n").map_err(|_| NodeRunnerError::Driver)?;
+            git(&self.workspace, &["add", "result.txt"]);
         }
         fs::write(
             self.workspace.join("repair.txt"),

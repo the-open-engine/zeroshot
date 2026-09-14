@@ -1,4 +1,8 @@
 use super::*;
+use zeroshot_engine::native_v2_delivery::{
+    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
+    GitHubReconciliationOutcome,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) enum DeliveryScenario {
@@ -136,6 +140,55 @@ fn review_observation(
 
 #[async_trait]
 impl GitHubDeliveryAuthority for DeliveryAuthority {
+    async fn observe_delivery(
+        &self,
+        request: GitHubDeliveryRead<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        require_test_credential(credential)?;
+        let output = git_command(&self.remote)
+            .args(["rev-parse", "--verify", "--quiet"])
+            .arg(format!("refs/heads/{}", request.head_branch))
+            .output()
+            .map_err(|_| GitHubAuthorityError::Unavailable)?;
+        let head_revision = match output.status.code() {
+            Some(0) => Some(String::from_utf8_lossy(&output.stdout).trim().to_owned()),
+            Some(1) => None,
+            _ => return Err(GitHubAuthorityError::Rejected),
+        };
+        let review = match request.known_review {
+            Some(known) => Some(self.inspect_review(known, credential).await?),
+            None => None,
+        };
+        Ok(GitHubDeliverySnapshot {
+            review,
+            head_revision,
+        })
+    }
+
+    async fn reconcile_delivery_head(
+        &self,
+        request: GitHubHeadReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        require_test_credential(credential)?;
+        // This fixture models CI repair without remote branch edits.
+        assert_eq!(request.published, request.observed);
+        assert!(
+            git_command(request.workspace)
+                .args([
+                    "merge-base",
+                    "--is-ancestor",
+                    &request.observed.head_revision,
+                    "HEAD"
+                ])
+                .status()
+                .assert_value()
+                .success()
+        );
+        Ok(GitHubReconciliationOutcome::Unchanged)
+    }
+
     async fn push_branch(
         &self,
         request: &GitHubPushRequest,

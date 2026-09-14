@@ -33,21 +33,27 @@ impl NativeV2DeliveryAdapter {
         credentials: &mut DeliveryCredentials<'_>,
         control: &DriverControl,
     ) -> Result<GitHubConflictOutcome, DeliveryStop> {
-        match self
-            .authority
-            .materialize_merge_conflict(request, credentials.current())
-            .await
-        {
-            Ok(materialization) => Ok(materialization),
-            Err(error) if error.authentication_failed() && credentials.can_refresh() => {
-                emit(control, "delivery: refreshing GitHub credential").await?;
-                credentials.refresh().await?;
-                self.authority
-                    .materialize_merge_conflict(request, credentials.current())
-                    .await
-                    .map_err(DeliveryStop::from)
+        let mut retry = preflight::OperationRetry::default();
+        loop {
+            ensure_active(control)?;
+            match self
+                .authority
+                .materialize_merge_conflict(request, credentials.current())
+                .await
+            {
+                Ok(materialization) => return Ok(materialization),
+                Err(error) => {
+                    self.retry_operation(
+                        error,
+                        preflight::OperationContext {
+                            credentials,
+                            control,
+                            retry: &mut retry,
+                        },
+                    )
+                    .await?
+                }
             }
-            Err(error) => Err(error.into()),
         }
     }
 }

@@ -44,12 +44,18 @@ pub struct ResolvedEnvironment {
 
 #[async_trait]
 pub(crate) trait RuntimeEnvironmentRefresh: Send + Sync {
-    async fn refresh(&self) -> Result<ResolvedEnvironment, EnvironmentRefreshUnavailable>;
+    async fn refresh(&self) -> Result<ResolvedEnvironment, EnvironmentRefreshError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("runtime environment refresh is unavailable")]
-pub(crate) struct EnvironmentRefreshUnavailable;
+pub(crate) enum EnvironmentRefreshError {
+    #[error("runtime environment refresh is temporarily unavailable")]
+    Unavailable,
+    #[error("runtime environment refresh was refused")]
+    Refused,
+    #[error("runtime environment refresh returned an invalid response")]
+    InvalidResponse,
+}
 
 impl ResolvedEnvironment {
     pub fn exact(
@@ -81,6 +87,10 @@ impl ResolvedEnvironment {
         self.values.get(name).map(String::as_str)
     }
 
+    pub(crate) fn can_refresh(&self) -> bool {
+        self.refresh.is_some()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&EnvironmentVariableName, &str)> {
         self.values
             .iter()
@@ -98,7 +108,7 @@ pub(super) fn with_refresh(
 
 pub(super) async fn refreshed(
     environment: &ResolvedEnvironment,
-) -> Result<ResolvedEnvironment, EnvironmentRefreshUnavailable> {
+) -> Result<ResolvedEnvironment, EnvironmentRefreshError> {
     match &environment.refresh {
         Some(refresh) => refresh.refresh().await,
         None => Ok(environment.clone()),

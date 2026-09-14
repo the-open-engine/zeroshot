@@ -42,9 +42,11 @@ use crate::native_v2_contract::{
     SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_delivery::{
-    DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,
-    GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt,
-    GitHubReviewRequest, GitHubReviewState, GITHUB_TOKEN_ENV,
+    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
+    GitHubReconciliationOutcome, DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError,
+    GitHubChecks, GitHubCredential, GitHubMergeRequestOutcome, GitHubPushRequest,
+    GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState,
+    GITHUB_TOKEN_ENV,
 };
 use crate::native_v2_runner::NodeRole;
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
@@ -71,6 +73,33 @@ impl ScriptedGitHub {
 
 #[async_trait]
 impl GitHubDeliveryAuthority for ScriptedGitHub {
+    async fn observe_delivery(
+        &self,
+        request: GitHubDeliveryRead<'_>,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        let head_revision = request
+            .known_review
+            .map(|review| review.head_revision.clone());
+        let review = request.known_review.map(|review| {
+            review.observation(GitHubReviewState::Open {
+                checks: GitHubChecks::Pending,
+            })
+        });
+        Ok(GitHubDeliverySnapshot {
+            review,
+            head_revision,
+        })
+    }
+
+    async fn reconcile_delivery_head(
+        &self,
+        _request: GitHubHeadReconciliation<'_>,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        Ok(GitHubReconciliationOutcome::Unchanged)
+    }
+
     async fn push_branch(
         &self,
         request: &GitHubPushRequest,

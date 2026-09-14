@@ -7,6 +7,7 @@ const MAX_GITHUB_API_DIAGNOSTIC_BYTES: usize = 32 * 1024;
 pub struct GitHubApiFailure {
     status: Option<u16>,
     diagnostic: Box<str>,
+    transient: bool,
 }
 
 impl GitHubApiFailure {
@@ -26,6 +27,7 @@ impl GitHubApiFailure {
         Self {
             status,
             diagnostic: diagnostic.into_boxed_str(),
+            transient: false,
         }
     }
 
@@ -51,6 +53,8 @@ pub enum GitHubAuthorityError {
     Unavailable,
     #[error("GitHub rejected delivery")]
     Rejected,
+    #[error("GitHub delivery identity mismatch: {0}")]
+    Identity(Box<str>),
     #[error("GitHub API request failed: {0}")]
     Api(GitHubApiFailure),
     #[error("{0}")]
@@ -72,13 +76,61 @@ impl GitHubAuthorityError {
     pub(super) fn retryable_review_sync(&self) -> bool {
         match self {
             Self::Unavailable => true,
-            Self::Rejected | Self::Command(_) => false,
+            Self::Rejected | Self::Identity(_) | Self::Command(_) => false,
             Self::Api(failure) => failure.retryable_review_sync(),
         }
     }
 
     pub(super) fn authentication_failed(&self) -> bool {
-        matches!(self, Self::Api(failure) if failure.authentication_failed())
+        match self {
+            Self::Api(failure) => failure.authentication_failed(),
+            Self::Command(failure) => failure.authentication_failed(),
+            _ => false,
+        }
+    }
+
+    pub(super) fn retryable_operation(&self) -> bool {
+        match self {
+            Self::Unavailable => true,
+            Self::Api(failure) => {
+                failure.transient
+                    || failure
+                        .status
+                        .is_some_and(|status| matches!(status, 429 | 500..=599))
+            }
+            Self::Command(failure) => failure.retryable_transport(),
+            Self::Rejected | Self::Identity(_) => false,
+        }
+    }
+
+    pub(super) fn temporary(mut self) -> Self {
+        if let Self::Api(failure) = &mut self {
+            failure.transient = true;
+        }
+        self
+    }
+
+    pub(super) fn identity(diagnostic: impl Into<String>) -> Self {
+        Self::Identity(GitHubApiFailure::new(None, diagnostic).diagnostic)
+    }
+
+    pub(super) fn with_context(self, context: impl fmt::Display) -> Self {
+        match self {
+            Self::Api(failure) => {
+                let mut wrapped =
+                    GitHubApiFailure::new(failure.status, format!("{context}\n{failure}"));
+                wrapped.transient = failure.transient;
+                Self::Api(wrapped)
+            }
+            Self::Identity(detail) => Self::identity(format!("{context}\n{detail}")),
+            Self::Unavailable => Self::api(
+                None,
+                format!("{context}\nGitHub delivery authority is unavailable"),
+            )
+            .temporary(),
+            Self::Rejected => Self::api(None, format!("{context}\nGitHub rejected delivery")),
+            Self::Command(failure) => Self::Command(Box::new(failure.with_context(context))),
+        }
     }
 
     pub(super) fn review_head_not_visible() -> Self {
