@@ -4,8 +4,7 @@ import type { WorkflowNodeObservation } from './workflow-observation';
 
 export type ExecutionId = string;
 export type RunTerminal =
-  | { status: 'succeeded'; output: unknown }
-  | { status: 'failed'; reason: string };
+  { status: 'succeeded'; output: unknown } | { status: 'failed'; reason: string };
 export type RuntimeFailure = { atCursor: string; reason: 'runtime_failed' };
 export type RunSummary = {
   runId: string;
