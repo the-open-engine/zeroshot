@@ -87,10 +87,22 @@ pub struct VerifiedGraph {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum VerificationError {
-    #[error("graph verification rejected the graph")]
+    #[error("{}", rejected_graph_message(.diagnostics))]
     Rejected { diagnostics: Vec<GraphDiagnostic> },
     #[error("graph verifier failed internally: {0}")]
     Internal(String),
+}
+
+fn rejected_graph_message(diagnostics: &[GraphDiagnostic]) -> String {
+    diagnostics.first().map_or_else(
+        || "graph verification rejected the graph".to_owned(),
+        |diagnostic| {
+            format!(
+                "graph verification rejected the graph: {}",
+                diagnostic.message
+            )
+        },
+    )
 }
 
 #[async_trait]

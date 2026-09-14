@@ -369,16 +369,35 @@ async fn uniform_runtime_rejects_only_known_incompatible_pair_without_contacting
 }
 
 #[tokio::test]
-async fn validation_only_rejects_runtime_graph_mismatch_without_backend_contact() {
-    let files = FixtureFiles::new(environment_graph(), json!({"task":"inspect it"}));
-    let command = parse_native_v2_args(run_args(
-        &files.graph,
-        &files.input,
-        &files.runtime,
-        &["--validate-only"],
-    ))
-    .assert_value();
-    let backend = FakeBackend::default();
-    let error = rejected_without_backend_contact(command, &backend).await;
-    assert!(error.to_string().contains("worker"));
+async fn validation_only_reports_graph_and_runtime_causes_without_backend_contact() {
+    let mut invalid = graph();
+    invalid["root"]["output"] = json!({
+        "kind":"record",
+        "fields":{"issueNumber":{"type":{"kind":"string"},"required":true}}
+    });
+    for (graph, expected) in [
+        (
+            environment_graph(),
+            "run validation failed: runtime plan has no binding for executable node worker",
+        ),
+        (
+            invalid,
+            concat!(
+                "run validation failed: graph verification rejected the graph: ",
+                "required payload target issueNumber is not defined by a binding"
+            ),
+        ),
+    ] {
+        let files = FixtureFiles::new(graph, json!({"task":"inspect it"}));
+        let command = parse_native_v2_args(run_args(
+            &files.graph,
+            &files.input,
+            &files.runtime,
+            &["--validate-only"],
+        ))
+        .assert_value();
+        let backend = FakeBackend::default();
+        let error = rejected_without_backend_contact(command, &backend).await;
+        assert_eq!(error.to_string(), expected);
+    }
 }
