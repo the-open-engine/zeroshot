@@ -1,7 +1,7 @@
 use super::*;
 
 const MAX_FAILURE_ITEM_CHARS: usize = 1_024;
-const MAX_FAILED_CHECK_LOGS: usize = 3;
+const MAX_FAILED_CHECK_LOGS: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RequiredChecks {
@@ -48,11 +48,37 @@ pub(super) fn classify_required_checks(contexts: &[CheckContextWire]) -> Require
             }
         }
     }
-    failed_job_ids.truncate(MAX_FAILED_CHECK_LOGS);
+    if !failures.is_empty() {
+        append_supporting_failures(contexts, &mut failures, &mut failed_job_ids);
+    }
+    let mut seen = BTreeSet::new();
+    failed_job_ids.retain(|job| seen.insert(*job));
+    if failed_job_ids.len() > MAX_FAILED_CHECK_LOGS {
+        failures.push(format!(
+            "Log excerpts limited to {MAX_FAILED_CHECK_LOGS} of {} failed jobs; see check URLs",
+            failed_job_ids.len()
+        ));
+        failed_job_ids.truncate(MAX_FAILED_CHECK_LOGS);
+    }
     RequiredCheckEvidence {
         checks,
         failures,
         failed_job_ids,
+    }
+}
+
+fn append_supporting_failures(
+    contexts: &[CheckContextWire],
+    failures: &mut Vec<String>,
+    failed_job_ids: &mut Vec<u64>,
+) {
+    for context in contexts {
+        if required_check_outcome(context).is_none()
+            && let RequiredCheckOutcome::Failed { diagnostic, job_id } = check_outcome(context)
+        {
+            failures.push(format!("Supporting check: {diagnostic}"));
+            failed_job_ids.extend(job_id);
+        }
     }
 }
 
@@ -64,6 +90,12 @@ fn required_check_outcome(context: &CheckContextWire) -> Option<RequiredCheckOut
         | CheckContextWire::StatusContext {
             is_required: false, ..
         } => None,
+        _ => Some(check_outcome(context)),
+    }
+}
+
+fn check_outcome(context: &CheckContextWire) -> RequiredCheckOutcome {
+    match context {
         CheckContextWire::CheckRun {
             name,
             status,
@@ -71,7 +103,7 @@ fn required_check_outcome(context: &CheckContextWire) -> Option<RequiredCheckOut
             details_url,
             database_id,
             ..
-        } => Some(check_run_outcome(
+        } => check_run_outcome(
             name,
             status,
             CheckRunEvidence {
@@ -79,19 +111,19 @@ fn required_check_outcome(context: &CheckContextWire) -> Option<RequiredCheckOut
                 details_url: details_url.as_deref(),
                 job_id: *database_id,
             },
-        )),
+        ),
         CheckContextWire::StatusContext {
             context,
             state,
             description,
             target_url,
             ..
-        } => Some(status_context_outcome(
+        } => status_context_outcome(
             context,
             state,
             description.as_deref(),
             target_url.as_deref(),
-        )),
+        ),
     }
 }
 

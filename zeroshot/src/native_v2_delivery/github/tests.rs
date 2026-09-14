@@ -214,7 +214,10 @@ fn required_check_failures_win_and_preserve_diagnostics() {
     assert_eq!(snapshot.failed_job_ids, vec![91]);
     include_check_logs(
         &mut snapshot,
-        &["setup passed\nAssertionError: validation failed".to_owned()],
+        &[(
+            91,
+            "setup passed\nAssertionError: validation failed".to_owned(),
+        )],
     );
     let diagnostic = match snapshot.state {
         GitHubReviewState::Open {
@@ -489,4 +492,130 @@ fn receipt_rejects_changed_authority() {
     }))
     .assert_value();
     assert!(review_receipt(wire, &request).is_err());
+}
+
+#[test]
+fn required_gate_failure_includes_supporting_job_failures() {
+    let mut child = check_run("frontend-tests", "COMPLETED", Some("FAILURE"), false);
+    child["databaseId"] = json!(92);
+    let snapshot = classify(policy_page(
+        "MERGEABLE",
+        "BLOCKED",
+        Some(vec![
+            check_run("required-gate", "COMPLETED", Some("FAILURE"), true),
+            child,
+            status_context("external-tests", "ERROR", false),
+        ]),
+        (false, None),
+    ));
+    assert_eq!(snapshot.failed_job_ids, vec![91, 92]);
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = snapshot.state
+    else {
+        panic!("expected failed required gate");
+    };
+    assert!(diagnostic.contains("required-gate concluded FAILURE"));
+    assert!(diagnostic.contains("Supporting check: frontend-tests concluded FAILURE"));
+    assert!(diagnostic.contains("Supporting check: external-tests concluded ERROR"));
+}
+
+#[test]
+fn supporting_failures_do_not_change_pending_or_passed_required_policy() {
+    for (status, conclusion, merge_state, expected) in [
+        ("IN_PROGRESS", None, "BLOCKED", GitHubChecks::Pending),
+        ("COMPLETED", Some("SUCCESS"), "CLEAN", GitHubChecks::Passed),
+    ] {
+        let snapshot = classify(policy_page(
+            "MERGEABLE",
+            merge_state,
+            Some(vec![
+                check_run("required", status, conclusion, true),
+                check_run("optional", "COMPLETED", Some("FAILURE"), false),
+            ]),
+            (false, None),
+        ));
+        assert_eq!(snapshot.state, GitHubReviewState::Open { checks: expected });
+        assert!(snapshot.failed_job_ids.is_empty());
+    }
+}
+
+#[test]
+fn failed_job_log_limit_is_explicit_and_preserves_failure_names() {
+    let mut contexts = vec![check_run("required", "COMPLETED", Some("FAILURE"), true)];
+    for index in 0..10 {
+        let mut context = check_run(
+            &format!("child-{index}"),
+            "COMPLETED",
+            Some("FAILURE"),
+            false,
+        );
+        context["databaseId"] = json!(100 + index);
+        contexts.push(context);
+    }
+    let snapshot = classify(policy_page(
+        "MERGEABLE",
+        "BLOCKED",
+        Some(contexts),
+        (false, None),
+    ));
+    assert_eq!(snapshot.failed_job_ids.len(), 8);
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = snapshot.state
+    else {
+        panic!("expected failed required gate");
+    };
+    assert!(diagnostic.contains("child-9 concluded FAILURE"));
+    assert!(diagnostic.contains("Log excerpts limited to 8 of 11 failed jobs"));
+}
+
+#[test]
+fn large_first_log_cannot_hide_other_failed_job_excerpts() {
+    let mut snapshot = classify_conclusion("FAILURE", "BLOCKED");
+    let logs = (91..99)
+        .map(|job| {
+            (
+                job,
+                format!("{}\nassertion failed in job {job}", "界".repeat(70_000)),
+            )
+        })
+        .collect::<Vec<_>>();
+    include_check_logs(&mut snapshot, &logs);
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = snapshot.state
+    else {
+        panic!("expected failed required gate");
+    };
+    assert!(diagnostic.chars().count() <= 64 * 1024);
+    for job in 91..99 {
+        assert!(diagnostic.contains(&format!("GitHub Actions job {job} log excerpt")));
+        assert!(diagnostic.contains(&format!("assertion failed in job {job}")));
+    }
+    assert_eq!(
+        diagnostic.matches("[earlier log output truncated]").count(),
+        8
+    );
+}
+
+#[test]
+fn oversized_failure_summary_marks_omitted_text() {
+    let contexts = (0..12)
+        .map(|_| check_run(&"界".repeat(2000), "COMPLETED", Some("FAILURE"), true))
+        .collect();
+    let snapshot = classify(policy_page(
+        "MERGEABLE",
+        "BLOCKED",
+        Some(contexts),
+        (false, None),
+    ));
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = snapshot.state
+    else {
+        panic!("expected failed required checks");
+    };
+    assert_eq!(diagnostic.chars().count(), 8 * 1024);
+    assert!(diagnostic.ends_with("[diagnostic truncated]"));
 }

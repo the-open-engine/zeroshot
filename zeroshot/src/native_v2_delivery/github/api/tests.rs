@@ -261,3 +261,20 @@ async fn api_pipe_failure_preserves_stream_and_partial_output_with_redaction() {
         assert!(!failure.authentication_failed());
     }
 }
+
+#[test]
+fn failed_step_output_survives_large_github_cleanup_logs() {
+    let mut output =
+        b"setup\nassertion: expected 400, received 202\n2026-09-14 ##[error]exit code 1\n".to_vec();
+    output.extend_from_slice(&vec![b'x'; MAX_CHECK_LOG_TAIL_BYTES * 2]);
+    let excerpt = check_log_tail(&output);
+    assert!(excerpt.contains("assertion: expected 400, received 202"));
+    assert!(excerpt.ends_with("##[error]exit code 1\n"));
+    assert!(!excerpt.contains("xxxx"));
+}
+
+#[test]
+fn last_github_error_is_retained_without_rewriting_its_output() {
+    let output = b"first ##[error]earlier failure\nraw final failure\nlast ##[error]later failure";
+    assert_eq!(check_log_tail(output).as_bytes(), output);
+}

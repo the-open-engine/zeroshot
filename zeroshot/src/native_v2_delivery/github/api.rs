@@ -288,8 +288,21 @@ fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, GitHubAuthorityError>
 }
 
 pub(super) fn check_log_tail(output: &[u8]) -> String {
-    let start = output.len().saturating_sub(MAX_CHECK_LOG_TAIL_BYTES);
-    String::from_utf8_lossy(output.get(start..).unwrap_or_default()).into_owned()
+    const ERROR_MARKER: &[u8] = b"##[error]";
+    // GitHub appends checkout and service cleanup after the failed step. Keep
+    // the raw context ending at its last error annotation instead of that noise.
+    let end = output
+        .windows(ERROR_MARKER.len())
+        .rposition(|window| window == ERROR_MARKER)
+        .map(|offset| {
+            output[offset..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(output.len(), |length| offset + length + 1)
+        })
+        .unwrap_or(output.len());
+    let start = end.saturating_sub(MAX_CHECK_LOG_TAIL_BYTES);
+    String::from_utf8_lossy(&output[start..end]).into_owned()
 }
 
 #[cfg(test)]

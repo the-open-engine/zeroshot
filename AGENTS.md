@@ -106,7 +106,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
   credential, and the trusted lane pins their repository-local commit identity to
   `Zeroshot <delivery@zeroshot.invalid>` before handoff. Merge receipts preserve GitHub's
-  authoritative merged revision.
+  authoritative merged revision. When a required check fails, bounded repair diagnostics include
+  supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
+  Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding

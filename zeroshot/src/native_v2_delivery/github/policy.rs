@@ -64,6 +64,7 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
 "#;
 
 const MAX_FAILURE_DIAGNOSTIC_CHARS: usize = 8 * 1_024;
+const MAX_FAILURE_FEEDBACK_CHARS: usize = 64 * 1_024;
 
 pub(super) struct PolicySnapshot {
     pub(super) state: GitHubReviewState,
@@ -289,7 +290,7 @@ fn page_is_complete(
     }
 }
 
-pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[String]) {
+pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, String)]) {
     let GitHubReviewState::Open {
         checks: GitHubChecks::Failed { diagnostic },
     } = &mut snapshot.state
@@ -299,15 +300,13 @@ pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[String])
     if logs.is_empty() {
         return;
     }
-    let logs = logs
-        .iter()
-        .map(|log| log_tail(log))
-        .collect::<Vec<_>>()
-        .join("\n---\n");
-    *diagnostic = bounded_text(
-        &format!("{diagnostic}\nFailed check log tail:\n{logs}"),
-        MAX_FAILURE_DIAGNOSTIC_CHARS,
-    );
+    let budget = MAX_FAILURE_FEEDBACK_CHARS.saturating_sub(diagnostic.chars().count()) / logs.len();
+    for (job, log) in logs {
+        let heading = format!("\n--- GitHub Actions job {job} log excerpt ---\n");
+        let excerpt = log_tail(log, budget.saturating_sub(heading.chars().count()));
+        diagnostic.push_str(&heading);
+        diagnostic.push_str(&excerpt);
+    }
 }
 
 fn require_identity<'a>(
@@ -484,16 +483,32 @@ fn waiting_snapshot() -> PolicySnapshot {
 }
 
 fn bounded_text(value: &str, maximum: usize) -> String {
-    value.chars().take(maximum).collect()
+    const TRUNCATED: &str = "[diagnostic truncated]";
+    if value.chars().count() <= maximum {
+        return value.to_owned();
+    }
+    let mut text = value
+        .chars()
+        .take(maximum.saturating_sub(TRUNCATED.len()))
+        .collect::<String>();
+    text.extend(TRUNCATED.chars().take(maximum));
+    text
 }
 
-fn log_tail(value: &str) -> String {
-    let mut tail = value
+fn log_tail(value: &str, maximum: usize) -> String {
+    const TRUNCATED: &str = "[earlier log output truncated]\n";
+    let clean = value
         .chars()
         .filter(|character| !character.is_control() || matches!(character, '\n' | '\t'))
-        .rev()
-        .take(MAX_FAILURE_DIAGNOSTIC_CHARS)
-        .collect::<Vec<_>>();
+        .collect::<String>();
+    if clean.chars().count() <= maximum {
+        return clean;
+    }
+    let retain = maximum.saturating_sub(TRUNCATED.chars().count());
+    let mut tail = clean.chars().rev().take(retain).collect::<Vec<_>>();
     tail.reverse();
-    tail.into_iter().collect()
+    bounded_text(
+        &format!("{TRUNCATED}{}", tail.into_iter().collect::<String>()),
+        maximum,
+    )
 }

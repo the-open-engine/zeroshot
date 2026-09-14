@@ -227,9 +227,11 @@ impl GhCliDeliveryAuthority {
                     credential,
                 )
                 .await;
-            if let Ok(output) = output {
-                logs.push(check_log_tail(&output));
-            }
+            let log = match output {
+                Ok(output) => check_log_tail(&output),
+                Err(error) => format!("GitHub job log unavailable: {error}"),
+            };
+            logs.push((*job, log));
         }
         include_check_logs(&mut snapshot, &logs);
         Ok(snapshot)
