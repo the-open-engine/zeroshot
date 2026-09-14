@@ -109,6 +109,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
   supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
+  Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
+  controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding

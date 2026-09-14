@@ -218,14 +218,7 @@ impl GhCliDeliveryAuthority {
         let mut logs = Vec::new();
         for job in &snapshot.failed_job_ids {
             let output = self
-                .api_output(
-                    &[
-                        format!("repos/{}/actions/jobs/{job}/logs", review.repository),
-                        "--method".to_owned(),
-                        "GET".to_owned(),
-                    ],
-                    credential,
-                )
+                .job_log_output(&review.repository, *job, credential)
                 .await;
             let log = match output {
                 Ok(output) => check_log_tail(&output),

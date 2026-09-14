@@ -278,3 +278,101 @@ fn last_github_error_is_retained_without_rewriting_its_output() {
     let output = b"first ##[error]earlier failure\nraw final failure\nlast ##[error]later failure";
     assert_eq!(check_log_tail(output).as_bytes(), output);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn job_log_capture_opts_in_and_feedback_removes_terminal_controls() {
+    let root = TemporaryDirectory::for_test("github-job-log");
+    let expected = concat!(
+        "\x1b[31massertion failed: expected 400, got 202\x1b[0m\n",
+        "\x1b]8;;https://example.invalid\x07link\x1b]8;;\x07\n"
+    )
+    .as_bytes();
+    std::fs::write(root.as_path().join("payload"), expected).assert_value();
+    let program = script(
+        root.as_path(),
+        r#"case "$*" in
+  'api repos/acme/project/actions/jobs/91/logs --method GET --allow-escape-sequences') ;;
+  *) printf '%s\n' 'the response contains terminal escape sequences' >&2; exit 1 ;;
+esac
+exec /bin/cat "$HOME/payload"
+"#,
+    );
+    let output = authority(program, Duration::from_secs(10))
+        .job_log_output("acme/project", 91, GitHubCredential("test-token"))
+        .await
+        .assert_value();
+    assert_eq!(output, expected);
+    let mut snapshot = PolicySnapshot {
+        state: GitHubReviewState::Open {
+            checks: GitHubChecks::Failed {
+                diagnostic: "Required CI checks failed".to_owned(),
+            },
+        },
+        failed_job_ids: vec![91],
+        merge_method: None,
+        head_update: None,
+    };
+    include_check_logs(&mut snapshot, &[(91, check_log_tail(&output))]);
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = snapshot.state
+    else {
+        panic!("expected failed required checks");
+    };
+    assert!(diagnostic.contains("GitHub Actions job 91 log excerpt"));
+    assert!(diagnostic.contains("assertion failed: expected 400, got 202"));
+    assert!(
+        diagnostic
+            .chars()
+            .all(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn job_log_capture_supports_older_gh_without_the_opt_in_flag() {
+    let root = TemporaryDirectory::for_test("github-job-log");
+    let program = script(
+        root.as_path(),
+        r#"printf 'call\n' >> "$HOME/calls"
+case "$*" in
+  *--allow-escape-sequences*) printf '%s\n' 'unknown flag: --allow-escape-sequences' >&2; exit 1 ;;
+esac
+printf 'older CLI failure details\n'
+"#,
+    );
+    let output = authority(program, Duration::from_secs(10))
+        .job_log_output("acme/project", 91, GitHubCredential("test-token"))
+        .await
+        .assert_value();
+    assert_eq!(output, b"older CLI failure details\n");
+    assert_eq!(
+        std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
+        "call\ncall\n"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn job_log_capture_does_not_retry_unrelated_api_failures() {
+    let root = TemporaryDirectory::for_test("github-job-log");
+    let program = script(
+        root.as_path(),
+        r#"printf 'call\n' >> "$HOME/calls"
+printf 'gh: permission denied (HTTP 403)\n' >&2
+exit 1
+"#,
+    );
+    let error = authority(program, Duration::from_secs(10))
+        .job_log_output("acme/project", 91, GitHubCredential("test-token"))
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.api_status(), Some(403));
+    assert!(error.to_string().contains("permission denied"));
+    assert_eq!(
+        std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
+        "call\n"
+    );
+}

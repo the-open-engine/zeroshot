@@ -39,6 +39,29 @@ impl GhCliDeliveryAuthority {
             })
     }
 
+    pub(super) async fn job_log_output(
+        &self,
+        repository: &str,
+        job: u64,
+        credential: GitHubCredential<'_>,
+    ) -> Result<Vec<u8>, GitHubAuthorityError> {
+        let mut arguments = vec![
+            format!("repos/{repository}/actions/jobs/{job}/logs"),
+            "--method".to_owned(),
+            "GET".to_owned(),
+            "--allow-escape-sequences".to_owned(),
+        ];
+        let output = self.api_output(&arguments, credential).await;
+        if matches!(&output, Err(error) if error.api_status().is_none()
+            && error.to_string().lines().any(|line| line == "unknown flag: --allow-escape-sequences"))
+        {
+            // Older gh rejects this flag before sending the request.
+            arguments.pop();
+            return self.api_output(&arguments, credential).await;
+        }
+        output
+    }
+
     pub(super) async fn confirm_review_head(
         &self,
         request: &GitHubReviewRequest,
