@@ -94,7 +94,9 @@ macro_rules! durable_subscription {
             pub async fn read_available(
                 &mut self,
             ) -> Result<Vec<$notification>, NativeV2ObservationError> {
-                self.refresh().await?;
+                if self.pending.is_empty() {
+                    self.refresh().await?;
+                }
                 Ok(self.pending.drain(..).collect())
             }
 

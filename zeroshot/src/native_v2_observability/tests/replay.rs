@@ -138,3 +138,28 @@ async fn large_sqlite_replay_stays_bounded() {
     );
     assert_resumed_streams(ledger, run_id, log_count).await;
 }
+
+#[tokio::test]
+async fn read_available_drains_the_buffered_page_before_loading_another() {
+    let ledger = Arc::new(SqliteRunLedger::open_in_memory().assert_value());
+    let run_id = seed_replay(ledger.as_ref(), MAX_REPLAY_EVENTS * 3, 64).await;
+    let service = NativeV2Observability::new(ledger);
+    let (_, mut logs) = service
+        .logs(RunLogsParams {
+            run_id,
+            from_cursor: None,
+            execution: None,
+        })
+        .await
+        .assert_value();
+    let loaded = logs.pending.len();
+    assert!(loaded > 0 && loaded <= MAX_REPLAY_EVENTS);
+    let cursor = logs.scanned_through.clone();
+    let first = logs.read_available().await.assert_value();
+    assert_eq!(first.len(), loaded);
+    assert_eq!(logs.scanned_through, cursor);
+    assert!(logs.pending.is_empty());
+    let second = logs.read_available().await.assert_value();
+    assert!(!second.is_empty() && second.len() <= MAX_REPLAY_EVENTS);
+    assert_ne!(logs.scanned_through, cursor);
+}
