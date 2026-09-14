@@ -1,11 +1,9 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::time::Duration;
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue, JsonAt};
 use serde_json::{Value, json};
-use tokio::time::sleep;
 
 #[path = "native_v2_cli_local/fixture.rs"]
 mod fixture;
@@ -211,7 +209,10 @@ async fn dead_controller_reconciles_runtime_loss_and_keeps_durable_observation()
     let fixture = LocalFixture::new();
     let run_id = fixture.submit_detached("block").await;
     fixture.wait_running(&run_id).await;
-    sleep(Duration::from_millis(250)).await;
+    let logs = fixture
+        .interrupted(&["logs", &run_id], "block", "Codex turn started")
+        .await;
+    assert_success(&logs, "durable log readiness before controller loss");
 
     let controller_pid = fixture.ready_pid(&run_id);
     signal(controller_pid, libc::SIGKILL).assert_value_with("kill detached controller");

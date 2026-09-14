@@ -41,6 +41,7 @@ impl SystemGit {
         base_revision: &str,
         commit_message: &str,
     ) -> Result<String, GitError> {
+        self.require_supported_operation(workspace).await?;
         let unresolved = self
             .require_success(workspace, &["diff", "--name-only", "--diff-filter=U"])
             .await?;
@@ -67,10 +68,54 @@ impl SystemGit {
         self.deliverable_revision(workspace, base_revision).await
     }
 
+    async fn require_supported_operation(&self, workspace: &Path) -> Result<(), GitError> {
+        let directory = self
+            .require_success(workspace, &["rev-parse", "--absolute-git-dir"])
+            .await?;
+        if directory.stdout_truncated || directory.stdout.is_empty() {
+            return Err(directory
+                .with_context("Git directory path is unavailable")
+                .into());
+        }
+        let path = Path::new(
+            directory
+                .stdout
+                .strip_suffix('\n')
+                .unwrap_or(&directory.stdout),
+        );
+        for marker in [
+            "rebase-merge",
+            "rebase-apply",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "sequencer",
+        ] {
+            let pending = path.join(marker).try_exists().map_err(|error| {
+                directory
+                    .clone()
+                    .with_context(format!("cannot inspect Git state {marker}: {error}"))
+            })?;
+            if pending {
+                let status = self
+                    .require_success(
+                        workspace,
+                        &["--no-optional-locks", "status", "--untracked-files=all"],
+                    )
+                    .await?;
+                return Err(status.with_context(format!(
+                    "workspace has an unfinished Git operation ({marker}); finish or abort it before delivery; \
+                     no files were staged or committed"
+                )).into());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn workspace_state(
         &self,
         workspace: &Path,
     ) -> Result<(String, bool), GitError> {
+        self.require_supported_operation(workspace).await?;
         let head = self
             .require_success(workspace, &["rev-parse", "HEAD"])
             .await?;
@@ -263,3 +308,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "git/tests/operations.rs"]
+mod operations;

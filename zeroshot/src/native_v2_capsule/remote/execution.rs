@@ -8,7 +8,6 @@ struct RemoteInputAction<'a> {
     closing_signal: &'a mut watch::Receiver<bool>,
     closing: &'a mut bool,
     cancellation_handled: &'a mut bool,
-    acceptance: &'a mut Option<oneshot::Receiver<()>>,
     pending_bridge_failure: &'a mut Option<NodeRunnerError>,
 }
 
@@ -19,7 +18,6 @@ pub(super) async fn drive_remote_execution(task: RemoteExecutionTask) {
         mut stream,
         mut bridge,
         registration,
-        mut acceptance,
     } = task;
     let mut closing_signal = registration.closing;
     let mut closed_signal = registration.closed;
@@ -36,7 +34,6 @@ pub(super) async fn drive_remote_execution(task: RemoteExecutionTask) {
             closed_signal: &mut closed_signal,
             closing,
             cancellation_handled,
-            acceptance: &mut acceptance,
         })
         .await;
         let finished = apply_remote_input(
@@ -49,7 +46,6 @@ pub(super) async fn drive_remote_execution(task: RemoteExecutionTask) {
                 closing_signal: &mut closing_signal,
                 closing: &mut closing,
                 cancellation_handled: &mut cancellation_handled,
-                acceptance: &mut acceptance,
                 pending_bridge_failure: &mut pending_bridge_failure,
             },
         )
@@ -59,7 +55,6 @@ pub(super) async fn drive_remote_execution(task: RemoteExecutionTask) {
         }
     };
     let result = prefer_pending_bridge_failure(result, pending_bridge_failure);
-    settle_remote_acceptance(&mut acceptance, &mut connection_loss, &mut closing_signal).await;
     bridge.finish(result);
     runtime
         .activity
@@ -73,29 +68,17 @@ async fn apply_remote_input(
 ) -> Option<Result<NodeCompletion, NodeRunnerError>> {
     match input {
         RemoteInput::Lost => Some(Err(NodeRunnerError::ConnectionLost)),
-        RemoteInput::Closed => {
-            context.acceptance.take();
-            Some(Err(if connection_is_lost(context.connection_loss) {
-                NodeRunnerError::ConnectionLost
-            } else {
-                NodeRunnerError::Cancelled
-            }))
-        }
+        RemoteInput::Closed => Some(Err(if connection_is_lost(context.connection_loss) {
+            NodeRunnerError::ConnectionLost
+        } else {
+            NodeRunnerError::Cancelled
+        })),
         RemoteInput::Closing => {
-            context.acceptance.take();
             *context.closing = true;
             *context.cancellation_handled = true;
             None
         }
         RemoteInput::Cancel => cancel_remote_input(&mut context).await,
-        RemoteInput::Acceptance(result) => {
-            context.acceptance.take();
-            if result.is_err() {
-                cancel_remote_input(&mut context).await
-            } else {
-                None
-            }
-        }
         RemoteInput::Event(event) => {
             handle_remote_event(
                 event,
@@ -126,7 +109,6 @@ fn prefer_pending_bridge_failure(
 async fn cancel_remote_input(
     context: &mut RemoteInputAction<'_>,
 ) -> Option<Result<NodeCompletion, NodeRunnerError>> {
-    context.acceptance.take();
     *context.cancellation_handled = true;
     handle_remote_cancel(RemoteCancelContext {
         runtime: context.runtime,

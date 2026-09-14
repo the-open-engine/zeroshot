@@ -247,13 +247,17 @@ async fn a_waiting_resolver_does_not_block_a_parallel_winner_or_its_void() {
         resolver.clone(),
     )
     .await;
+    assert_parallel_winner(&harness).await;
+    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(resolver.dropped.load(Ordering::SeqCst), 1);
+}
+
+pub(super) async fn assert_parallel_winner(harness: &Harness) {
     let terminal = tokio::time::timeout(Duration::from_secs(1), harness.supervisor.drive())
         .await
         .assert_value()
         .assert_value();
     assert!(matches!(terminal, TerminalResult::Succeeded { .. }));
-    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(resolver.dropped.load(Ordering::SeqCst), 1);
     assert_eq!(harness.driver.starts("fast"), 1);
     assert_eq!(harness.driver.starts("slow"), 0);
     assert_eq!(harness.sessions.opened.load(Ordering::SeqCst), 1);

@@ -58,29 +58,6 @@ impl ProxyActivity {
         })
     }
 
-    pub(super) async fn accept_start(
-        &self,
-        reference: &ExecutionRef,
-        done: &watch::Sender<bool>,
-        acceptance: tokio::sync::oneshot::Sender<()>,
-    ) -> Result<(), crate::native_v2_runner::NodeRunnerError> {
-        let expected = done.subscribe();
-        let state = self.state.lock().await;
-        if state.closed_runs.contains(&reference.run_id) {
-            return Err(crate::native_v2_runner::NodeRunnerError::RunClosed);
-        }
-        if !state
-            .entries
-            .iter()
-            .any(|entry| entry.reference == *reference && entry.done.same_channel(&expected))
-        {
-            return Err(crate::native_v2_runner::NodeRunnerError::Cancelled);
-        }
-        acceptance
-            .send(())
-            .map_err(|_| crate::native_v2_runner::NodeRunnerError::Cancelled)
-    }
-
     pub(super) async fn finish(&self, reference: &ExecutionRef, done: &watch::Sender<bool>) {
         let expected = done.subscribe();
         let mut state = self.state.lock().await;

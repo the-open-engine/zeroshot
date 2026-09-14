@@ -231,6 +231,10 @@ pub trait NodeDriver: Send + Sync {
 
 #[async_trait]
 pub trait NodeRunner: Send + Sync {
+    /// Reserves execution and returns ownership before asynchronous provider startup.
+    /// This future must be cancellation-safe: dropping it before a handle is returned
+    /// leaves no running work behind. Once returned, cancel and drain the handle to
+    /// retain cleanup and durable metadata, including failures during startup.
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError>;
     async fn close_run(&self, run_id: &RunId);
 }

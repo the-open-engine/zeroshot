@@ -40,16 +40,17 @@ impl NativeV2Supervisor {
         if let Some(stopped) = self.startup_interrupt(deadline, &mut cancel) {
             return Ok(stopped);
         }
-        let handle = match self
-            .runner
-            .start(NodeRunRequest {
-                invocation,
-                environment,
-            })
-            .await
-        {
-            Ok(handle) => handle,
-            Err(error) => return Ok(DispatchResult::Completed(Err(error))),
+        let request = NodeRunRequest {
+            invocation,
+            environment,
+        };
+        let handle = tokio::select! {
+            biased;
+            result = self.runner.start(request) => match result {
+                Ok(handle) => handle,
+                Err(error) => return Ok(DispatchResult::Completed(Err(error))),
+            },
+            stopped = self.wait_startup_interrupt(deadline, &mut cancel) => return Ok(stopped),
         };
         self.run_started_node(handle, deadline, cancel).await
     }

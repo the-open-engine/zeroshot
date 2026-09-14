@@ -24,19 +24,23 @@ struct DelayedRunner {
     inner: Arc<dyn NodeRunner>,
     entered: Notify,
     release: Notify,
+    dropped: AtomicUsize,
+    node: &'static str,
 }
 
 #[async_trait]
 impl NodeRunner for DelayedRunner {
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
-        self.entered.notify_one();
-        self.release.notified().await;
+        if request.invocation.reference.node.as_str() == self.node {
+            let _pending = super::resolution::PendingResolution(&self.dropped);
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
         self.inner.start(request).await
     }
 
     async fn close_run(&self, run_id: &RunId) {
         self.inner.close_run(run_id).await;
-        self.release.notify_one();
     }
 }
 
@@ -49,11 +53,13 @@ async fn hanging_worker(timeout: Option<u64>) -> Harness {
     .await
 }
 
-fn with_delayed_start(harness: &mut Harness) -> Arc<DelayedRunner> {
+fn with_delayed_start(harness: &mut Harness, node: &'static str) -> Arc<DelayedRunner> {
     let delayed = Arc::new(DelayedRunner {
         inner: harness.supervisor.runner.clone(),
         entered: Notify::new(),
         release: Notify::new(),
+        dropped: AtomicUsize::new(0),
+        node,
     });
     harness.supervisor.runner = delayed.clone();
     delayed
@@ -92,23 +98,41 @@ async fn force_stop_during_live_registration_has_no_late_registration_or_output(
 }
 
 #[tokio::test]
-async fn run_close_during_start_rejects_late_readiness_without_a_handle_or_live_registration() {
-    let mut harness = hanging_worker(None).await;
-    let (_delayed, registrar, drive) = begin_delayed_start(&mut harness).await;
-    force_stop_and_join(&harness, drive).await;
-    assert_eq!(harness.driver.starts("worker"), 0);
-    assert_eq!(harness.sessions.opened.load(Ordering::SeqCst), 0);
-    assert!(registrar.registered.lock().assert_value().is_empty());
-    assert_terminal_is_last(&harness).await;
+async fn force_stop_and_runtime_loss_cancel_a_never_ready_start_without_late_work() {
+    for lost in [false, true] {
+        let mut harness = hanging_worker(None).await;
+        let (delayed, registrar, drive) = begin_delayed_start(&mut harness).await;
+        if lost {
+            harness.supervisor.runtime_lost().await;
+            tokio::time::timeout(Duration::from_secs(1), drive)
+                .await
+                .assert_value()
+                .assert_value()
+                .assert_value();
+        } else {
+            force_stop_and_join(&harness, drive).await;
+        }
+        assert_eq!(delayed.dropped.load(Ordering::SeqCst), 1);
+        delayed.release.notify_one();
+        assert_eq!(harness.driver.starts("worker"), 0);
+        assert_eq!(harness.sessions.opened.load(Ordering::SeqCst), 0);
+        assert!(registrar.registered.lock().assert_value().is_empty());
+        assert_terminal_is_last(&harness).await;
+    }
 }
 
 #[tokio::test(start_paused = true)]
-async fn deadline_during_start_cancels_returned_handle_before_live_registration() {
+async fn deadline_cancels_a_never_ready_start_before_live_registration() {
     let mut harness = hanging_worker(Some(20)).await;
     let (delayed, registrar, drive) = begin_delayed_start(&mut harness).await;
     tokio::time::advance(Duration::from_millis(30)).await;
-    delayed.release.notify_one();
-    drive.await.assert_value().assert_value();
+    tokio::time::timeout(Duration::from_secs(1), drive)
+        .await
+        .assert_value()
+        .assert_value()
+        .assert_value();
+    assert_eq!(delayed.dropped.load(Ordering::SeqCst), 1);
+    assert_eq!(harness.driver.starts("worker"), 0);
     assert!(registrar.registered.lock().assert_value().is_empty());
     let stored = stored_run(&harness.ledger).await;
     assert_eq!(
@@ -155,9 +179,106 @@ async fn force_stop_and_join(harness: &Harness, drive: Driving) {
 async fn begin_delayed_start(
     harness: &mut Harness,
 ) -> (Arc<DelayedRunner>, Arc<FakeLiveRegistrar>, Driving) {
-    let delayed = with_delayed_start(harness);
+    let delayed = with_delayed_start(harness, "worker");
     let registrar = Arc::new(FakeLiveRegistrar::default());
     let drive = drive_with_registrar(harness, registrar.clone());
     delayed.entered.notified().await;
     (delayed, registrar, drive)
+}
+
+#[tokio::test]
+async fn a_never_ready_start_does_not_block_a_parallel_winner_or_its_void() {
+    let mut harness = harness(
+        parallel(
+            json!({"kind": "any"}),
+            vec![verifier("slow", 10_000), verifier("fast", 10_000)],
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    let delayed = with_delayed_start(&mut harness, "slow");
+    super::resolution::assert_parallel_winner(&harness).await;
+    assert_eq!(delayed.dropped.load(Ordering::SeqCst), 1);
+}
+
+#[derive(Default)]
+struct CleanupState {
+    started: Notify,
+    cancelled: Notify,
+    release: Notify,
+}
+
+struct CleanupRunner(Arc<CleanupState>);
+
+#[async_trait]
+impl NodeRunner for CleanupRunner {
+    async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
+        let (handle, mut bridge) =
+            crate::native_v2_runner::remote_node_handle(request.invocation.reference);
+        let state = self.0.clone();
+        tokio::spawn(async move {
+            state.started.notify_one();
+            bridge.cancelled().await;
+            let usage =
+                serde_json::from_value(json!({"inputTokens": 7, "outputTokens": 5})).assert_value();
+            bridge.record_token_usage(Some(usage)).await.assert_value();
+            state.cancelled.notify_one();
+            state.release.notified().await;
+            bridge.finish(Err(NodeRunnerError::Cancelled));
+        });
+        Ok(handle)
+    }
+
+    async fn close_run(&self, _run_id: &RunId) {}
+}
+
+#[tokio::test(start_paused = true)]
+async fn capsule_deadline_preserves_usage_and_waits_for_cleanup_before_settlement() {
+    use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
+
+    let mut harness = hanging_worker(Some(20)).await;
+    let state = Arc::new(CleanupState::default());
+    let endpoint = NativeCapsuleNodeEndpoint::new(Arc::new(CleanupRunner(state.clone())));
+    harness.supervisor.runner = Arc::new(RemoteCapsuleNodeRunner::new(Arc::new(endpoint)));
+    let supervisor = harness.supervisor.clone();
+    let drive = tokio::spawn(async move { supervisor.drive().await });
+    state.started.notified().await;
+    tokio::time::advance(Duration::from_millis(30)).await;
+    state.cancelled.notified().await;
+    assert!(!drive.is_finished());
+    let pending = stored_run(&harness.ledger).await;
+    assert!(pending.snapshot.terminal.is_none());
+    assert!(
+        pending
+            .snapshot
+            .executions
+            .values()
+            .all(|entry| entry.outcome().is_none())
+    );
+    state.release.notify_one();
+    drive.await.assert_value().assert_value();
+    let tail = harness
+        .ledger
+        .snapshot_and_tail(&harness.supervisor.run_id, None)
+        .await
+        .assert_value();
+    let usage = tail
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                &event.event,
+                RunEvent::TokenUsageObserved { usage: Some(usage), .. }
+                    if usage.input_tokens.get() == 7 && usage.output_tokens.get() == 5
+            )
+        })
+        .assert_value();
+    let completion = tail.events.iter().position(|event| matches!(
+        &event.event,
+        RunEvent::NodeCompleted { completion }
+            if completion.outcome == WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
+    )).assert_value();
+    assert!(usage < completion);
+    assert_terminal_is_last(&harness).await;
 }

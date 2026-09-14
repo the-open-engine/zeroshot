@@ -31,80 +31,11 @@ const CLOSE_RPC_TRANSPORT_MARGIN: Duration = Duration::from_secs(60);
 const CLOSE_RPC_TIMEOUT: Duration =
     CONTAINED_PROCESS_CLEANUP_BUDGET.saturating_add(CLOSE_RPC_TRANSPORT_MARGIN);
 
-#[cfg(test)]
-#[derive(Clone)]
-struct StartReadinessPause {
-    sent: watch::Sender<bool>,
-    release: watch::Sender<bool>,
-}
-
-#[cfg(test)]
-impl Default for StartReadinessPause {
-    fn default() -> Self {
-        let (sent, _) = watch::channel(false);
-        let (release, _) = watch::channel(false);
-        Self { sent, release }
-    }
-}
-
-#[cfg(test)]
-impl StartReadinessPause {
-    fn mark_sent(&self) {
-        self.sent.send_replace(true);
-    }
-
-    async fn pause_before_receive(&self) {
-        wait_for_signal(&mut self.sent.subscribe()).await;
-        wait_for_signal(&mut self.release.subscribe()).await;
-    }
-
-    async fn wait_until_sent(&self) {
-        wait_for_signal(&mut self.sent.subscribe()).await;
-    }
-
-    fn release(&self) {
-        self.release.send_replace(true);
-    }
-}
-
-#[cfg(test)]
-trait WithStartReadinessPause: Sized {
-    fn start_readiness_pause(&mut self) -> &mut Option<StartReadinessPause>;
-
-    fn with_start_readiness_pause(mut self, pause: StartReadinessPause) -> Self {
-        *self.start_readiness_pause() = Some(pause);
-        self
-    }
-}
-
-#[cfg(test)]
-fn mark_start_readiness_sent(pause: Option<&StartReadinessPause>) {
-    if let Some(pause) = pause {
-        pause.mark_sent();
-    }
-}
-
-#[cfg(test)]
-async fn pause_before_start_readiness(pause: Option<&StartReadinessPause>) {
-    if let Some(pause) = pause {
-        pause.pause_before_receive().await;
-    }
-}
-
 async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
     while !*signal.borrow_and_update() {
         if signal.changed().await.is_err() {
             return;
         }
-    }
-}
-
-async fn receive_start_acceptance(
-    acceptance: &mut Option<oneshot::Receiver<()>>,
-) -> Result<(), oneshot::error::RecvError> {
-    match acceptance {
-        Some(acceptance) => acceptance.await,
-        None => std::future::pending().await,
     }
 }
 
@@ -251,6 +182,9 @@ pub enum CapsuleConnectionError {
 
 #[async_trait]
 pub trait CapsuleNodeChannel: Send + Sync {
+    /// Reserves execution and returns its stream before starting provider work.
+    /// Dropping a pending start must leave no work or reservation behind. Once returned,
+    /// the stream carries startup failures and terminal metadata through cancellation.
     async fn start(
         &self,
         request: NodeRunRequest,

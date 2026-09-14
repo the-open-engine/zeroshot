@@ -9,28 +9,26 @@ pub(super) struct LocalExecutionTask {
     pub(super) state: Arc<Mutex<EndpointState>>,
     pub(super) reference: ExecutionRef,
     pub(super) done: watch::Sender<bool>,
-    pub(super) acceptance: Option<oneshot::Receiver<()>>,
 }
 
 enum LocalInput {
     Completion(Result<NodeCompletion, NodeRunnerError>),
     Output(Result<DurableNodeEvent, crate::native_v2_runner::AttachReceiveError>),
     Cancel,
-    Acceptance(Result<(), oneshot::error::RecvError>),
+    ConsumerGone,
 }
 
 struct LocalAwait {
     completion: bool,
     output: bool,
     command: bool,
-    acceptance: bool,
 }
 
 struct LocalInputContext<'a> {
     handle: &'a mut NodeHandle,
     durable: &'a mut crate::native_v2_runner::DurableOutput,
     commands: &'a mut watch::Receiver<bool>,
-    acceptance: &'a mut Option<oneshot::Receiver<()>>,
+    events: &'a mpsc::Sender<CapsuleNodeEvent>,
     awaiting: LocalAwait,
 }
 
@@ -42,7 +40,6 @@ struct LocalOutputContext<'a> {
     consumer_gone: &'a mut bool,
     cancelled: &'a mut bool,
     terminal_metadata: &'a mut TerminalMetadata,
-    acceptance: &'a mut Option<oneshot::Receiver<()>>,
 }
 
 #[derive(Default)]
@@ -142,25 +139,22 @@ pub(super) async fn serve_local_execution(task: LocalExecutionTask) {
         state,
         reference,
         done,
-        mut acceptance,
     } = task;
     let mut completion = None;
     let mut output_closed = false;
     let mut consumer_gone = false;
     let mut cancelled = false;
     let mut terminal_metadata = TerminalMetadata::default();
-    while local_execution_pending(&completion, output_closed, acceptance.is_some()) {
-        let awaiting_acceptance = acceptance.is_some();
+    while completion.is_none() || !output_closed {
         let next = next_local_input(LocalInputContext {
             handle: &mut handle,
             durable: &mut durable,
             commands: &mut commands,
-            acceptance: &mut acceptance,
+            events: &events,
             awaiting: LocalAwait {
                 completion: completion.is_none(),
                 output: !output_closed,
                 command: !consumer_gone && !cancelled,
-                acceptance: awaiting_acceptance,
             },
         })
         .await;
@@ -177,7 +171,6 @@ pub(super) async fn serve_local_execution(task: LocalExecutionTask) {
                         consumer_gone: &mut consumer_gone,
                         cancelled: &mut cancelled,
                         terminal_metadata: &mut terminal_metadata,
-                        acceptance: &mut acceptance,
                     },
                 )
                 .await;
@@ -185,15 +178,11 @@ pub(super) async fn serve_local_execution(task: LocalExecutionTask) {
             LocalInput::Cancel => {
                 cancelled = true;
                 handle.cancel();
-                acceptance.take();
             }
-            LocalInput::Acceptance(result) => {
-                acceptance.take();
-                if result.is_err() {
-                    consumer_gone = true;
-                    cancelled = true;
-                    handle.cancel();
-                }
+            LocalInput::ConsumerGone => {
+                consumer_gone = true;
+                cancelled = true;
+                handle.cancel();
             }
         }
     }
@@ -203,21 +192,12 @@ pub(super) async fn serve_local_execution(task: LocalExecutionTask) {
     let _ = done.send(true);
 }
 
-fn local_execution_pending(
-    completion: &Option<Result<NodeCompletion, NodeRunnerError>>,
-    output_closed: bool,
-    awaiting_acceptance: bool,
-) -> bool {
-    completion.is_none() || !output_closed || awaiting_acceptance
-}
-
 async fn next_local_input(context: LocalInputContext<'_>) -> LocalInput {
     tokio::select! {
         result = context.handle.completion(), if context.awaiting.completion => LocalInput::Completion(result),
         output = context.durable.recv(), if context.awaiting.output => LocalInput::Output(output),
         () = wait_for_signal(context.commands), if context.awaiting.command => LocalInput::Cancel,
-        result = receive_start_acceptance(context.acceptance),
-            if context.awaiting.acceptance => LocalInput::Acceptance(result),
+        () = context.events.closed(), if context.awaiting.command => LocalInput::ConsumerGone,
     }
 }
 
@@ -248,7 +228,6 @@ async fn apply_local_output(
         () = wait_for_signal(context.commands) => {
             *context.cancelled = true;
             context.handle.cancel();
-            context.acceptance.take();
             context.terminal_metadata.retain(event);
         }
         permit = context.events.reserve() => match permit {

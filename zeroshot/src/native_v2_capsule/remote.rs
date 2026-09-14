@@ -14,8 +14,6 @@ pub struct RemoteCapsuleNodeRunner {
     activity: ProxyActivity,
     control_timeout: Duration,
     close_timeout: Duration,
-    #[cfg(test)]
-    start_readiness_pause: Option<StartReadinessPause>,
 }
 
 impl RemoteCapsuleNodeRunner {
@@ -39,8 +37,6 @@ impl RemoteCapsuleNodeRunner {
             activity: ProxyActivity::default(),
             control_timeout: CONTROL_RPC_TIMEOUT,
             close_timeout: CLOSE_RPC_TIMEOUT,
-            #[cfg(test)]
-            start_readiness_pause: None,
         }
     }
 
@@ -95,13 +91,6 @@ impl NodeRunner for RemoteCapsuleNodeRunner {
     }
 }
 
-#[cfg(test)]
-impl WithStartReadinessPause for RemoteCapsuleNodeRunner {
-    fn start_readiness_pause(&mut self) -> &mut Option<StartReadinessPause> {
-        &mut self.start_readiness_pause
-    }
-}
-
 #[derive(Clone)]
 struct RunnerLoss {
     raised: Arc<AtomicBool>,
@@ -145,7 +134,6 @@ struct RemoteExecutionTask {
     stream: CapsuleExecutionStream,
     bridge: RemoteNodeHandleBridge,
     registration: ProxyRegistration,
-    acceptance: Option<oneshot::Receiver<()>>,
 }
 
 struct RemoteEventContext<'a> {
@@ -163,24 +151,6 @@ enum RemoteInput {
     Closing,
     Closed,
     Lost,
-    Acceptance(Result<(), oneshot::error::RecvError>),
-}
-
-async fn settle_remote_acceptance(
-    acceptance: &mut Option<oneshot::Receiver<()>>,
-    connection_loss: &mut watch::Receiver<bool>,
-    closing: &mut watch::Receiver<bool>,
-) {
-    if acceptance.is_none() {
-        return;
-    }
-    tokio::select! {
-        biased;
-        () = wait_for_signal(connection_loss) => {}
-        () = wait_for_signal(closing) => {}
-        _ = receive_start_acceptance(acceptance) => {}
-    }
-    acceptance.take();
 }
 
 async fn handle_remote_cancel(
@@ -225,19 +195,8 @@ async fn next_remote_input(context: RemoteInputContext<'_>) -> RemoteInput {
             () = wait_for_signal(context.connection_loss) => RemoteInput::Lost,
             () = wait_for_signal(context.closing_signal) => RemoteInput::Closing,
             () = context.bridge.cancelled(), if !context.cancellation_handled => RemoteInput::Cancel,
-            input = receive_remote_event_or_acceptance(context.stream, context.acceptance) => input,
+            event = context.stream.recv() => RemoteInput::Event(event),
         }
-    }
-}
-
-async fn receive_remote_event_or_acceptance(
-    stream: &mut CapsuleExecutionStream,
-    acceptance: &mut Option<oneshot::Receiver<()>>,
-) -> RemoteInput {
-    if acceptance.is_some() {
-        RemoteInput::Acceptance(receive_start_acceptance(acceptance).await)
-    } else {
-        RemoteInput::Event(stream.recv().await)
     }
 }
 
@@ -249,7 +208,6 @@ struct RemoteInputContext<'a> {
     closed_signal: &'a mut watch::Receiver<bool>,
     closing: bool,
     cancellation_handled: bool,
-    acceptance: &'a mut Option<oneshot::Receiver<()>>,
 }
 
 async fn handle_remote_event(

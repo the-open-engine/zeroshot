@@ -273,10 +273,11 @@ async fn start_loss_promotes_the_runner_loss_signal() {
     let proxy = RemoteCapsuleNodeRunner::new(Arc::new(StartLostChannel::new()));
     let loss = proxy.connection_loss();
 
-    assert!(matches!(
-        proxy.start(request("start-lost", 1)).await,
+    let mut handle = proxy.start(request("start-lost", 1)).await.assert_value();
+    assert_eq!(
+        handle.completion().await,
         Err(NodeRunnerError::ConnectionLost)
-    ));
+    );
     assert!(*loss.borrow());
 }
 
@@ -284,6 +285,7 @@ async fn start_loss_promotes_the_runner_loss_signal() {
 struct HangingControlChannel {
     loss: watch::Sender<bool>,
     streams: Arc<StdMutex<Vec<mpsc::Sender<CapsuleNodeEvent>>>>,
+    ready: Arc<Notify>,
 }
 
 impl HangingControlChannel {
@@ -292,6 +294,7 @@ impl HangingControlChannel {
         Self {
             loss,
             streams: Arc::new(StdMutex::new(Vec::new())),
+            ready: Arc::default(),
         }
     }
 }
@@ -304,6 +307,7 @@ impl CapsuleNodeChannel for HangingControlChannel {
     ) -> Result<CapsuleExecutionStream, CapsuleConnectionError> {
         let (events, receiver) = mpsc::channel(1);
         self.streams.lock().assert_value().push(events);
+        self.ready.notify_one();
         Ok(CapsuleExecutionStream::from_receiver(receiver))
     }
 
@@ -320,18 +324,22 @@ impl CapsuleNodeChannel for HangingControlChannel {
     }
 }
 
-fn hanging_proxy() -> RemoteCapsuleNodeRunner {
-    RemoteCapsuleNodeRunner::new(Arc::new(HangingControlChannel::new()))
+fn hanging_proxy() -> (RemoteCapsuleNodeRunner, Arc<Notify>) {
+    let channel = Arc::new(HangingControlChannel::new());
+    let ready = channel.ready.clone();
+    let proxy = RemoteCapsuleNodeRunner::new(channel)
         .with_control_timeout(Duration::from_millis(20))
-        .with_close_timeout(Duration::from_millis(20))
+        .with_close_timeout(Duration::from_millis(20));
+    (proxy, ready)
 }
 
 #[tokio::test]
 async fn hanging_cancel_is_bounded_and_promotes_loss() {
-    let proxy = hanging_proxy();
+    let (proxy, ready) = hanging_proxy();
     let loss = proxy.connection_loss();
     let mut handle = proxy.start(request("cancel-hangs", 1)).await.assert_value();
 
+    ready.notified().await;
     handle.cancel();
     let result = tokio::time::timeout(Duration::from_secs(1), handle.completion())
         .await
@@ -343,9 +351,10 @@ async fn hanging_cancel_is_bounded_and_promotes_loss() {
 
 #[tokio::test]
 async fn hanging_close_is_bounded_and_promotes_loss() {
-    let proxy = hanging_proxy();
+    let (proxy, ready) = hanging_proxy();
     let loss = proxy.connection_loss();
     let mut handle = proxy.start(request("close-hangs", 1)).await.assert_value();
+    ready.notified().await;
 
     tokio::time::timeout(
         Duration::from_secs(1),

@@ -9,8 +9,6 @@ pub struct NativeCapsuleNodeEndpoint {
     runner: Arc<dyn NodeRunner>,
     loss: watch::Sender<bool>,
     state: Arc<Mutex<EndpointState>>,
-    #[cfg(test)]
-    start_readiness_pause: Option<StartReadinessPause>,
 }
 
 #[derive(Default)]
@@ -25,8 +23,6 @@ struct EndpointExecution {
     done: watch::Receiver<bool>,
 }
 
-type LocalStartAcceptance = oneshot::Sender<()>;
-
 impl NativeCapsuleNodeEndpoint {
     #[must_use]
     pub fn new(runner: Arc<dyn NodeRunner>) -> Self {
@@ -35,8 +31,6 @@ impl NativeCapsuleNodeEndpoint {
             runner,
             loss,
             state: Arc::default(),
-            #[cfg(test)]
-            start_readiness_pause: None,
         }
     }
 
@@ -97,38 +91,30 @@ impl NativeCapsuleNodeEndpoint {
         Ok(())
     }
 
-    async fn start_reserved(self, request: NodeRunRequest, reserved: ReservedLocalStart) {
-        let mut handle = match self.runner.start(request).await {
+    async fn start_reserved(self, request: NodeRunRequest, mut reserved: ReservedLocalStart) {
+        let result = if *reserved.commands.borrow() || reserved.events.is_closed() {
+            Err(NodeRunnerError::Cancelled)
+        } else {
+            tokio::select! {
+                biased;
+                result = self.runner.start(request) => result,
+                () = wait_for_signal(&mut reserved.commands) => Err(NodeRunnerError::Cancelled),
+                () = reserved.events.closed() => Err(NodeRunnerError::Cancelled),
+            }
+        };
+        let mut handle = match result {
             Ok(handle) => handle,
             Err(error) => {
-                self.finish_reservation(&reserved.reference, &reserved.done)
-                    .await;
-                let _ = reserved.ready.send(Err(CapsuleConnectionError::Rejected(
-                    CapsuleNodeFailure::from_runner(&error),
-                )));
-                #[cfg(test)]
-                mark_start_readiness_sent(self.start_readiness_pause.as_ref());
+                self.finish_failed_start(reserved, error).await;
                 return;
             }
         };
         let Some(durable) = handle.take_initial_output() else {
-            let settled = self.settle_unusable_handle(handle).await;
-            self.finish_reservation(&reserved.reference, &reserved.done)
+            self.settle_unusable_handle(handle).await;
+            self.finish_failed_start(reserved, NodeRunnerError::Driver)
                 .await;
-            let error = if settled {
-                CapsuleConnectionError::Rejected(CapsuleNodeFailure::ExecutionFailed)
-            } else {
-                CapsuleConnectionError::Lost
-            };
-            let _ = reserved.ready.send(Err(error));
-            #[cfg(test)]
-            mark_start_readiness_sent(self.start_readiness_pause.as_ref());
             return;
         };
-        let (accept, acceptance) = oneshot::channel();
-        let _ = reserved.ready.send(Ok(accept));
-        #[cfg(test)]
-        mark_start_readiness_sent(self.start_readiness_pause.as_ref());
         serve_local_execution(LocalExecutionTask {
             handle,
             durable,
@@ -138,32 +124,17 @@ impl NativeCapsuleNodeEndpoint {
             state: self.state.clone(),
             reference: reserved.reference,
             done: reserved.done,
-            acceptance: Some(acceptance),
         })
         .await;
     }
 
-    async fn accept_local_start(
-        &self,
-        reference: &ExecutionRef,
-        done: &watch::Sender<bool>,
-        acceptance: LocalStartAcceptance,
-    ) -> Result<(), CapsuleConnectionError> {
-        let expected = done.subscribe();
-        let state = self.state.lock().await;
-        self.ensure_run_open(&state, &reference.run_id)?;
-        if !state
-            .active
-            .iter()
-            .any(|entry| entry.reference == *reference && entry.done.same_channel(&expected))
-        {
-            return Err(CapsuleConnectionError::Rejected(
-                CapsuleNodeFailure::Cancelled,
-            ));
-        }
-        acceptance
-            .send(())
-            .map_err(|_| CapsuleConnectionError::Rejected(CapsuleNodeFailure::Cancelled))
+    async fn finish_failed_start(&self, reserved: ReservedLocalStart, error: NodeRunnerError) {
+        drop(reserved.events);
+        let _ = reserved.terminal.send(vec![CapsuleNodeEvent::Failed {
+            failure: CapsuleNodeFailure::from_runner(&error),
+        }]);
+        self.finish_reservation(&reserved.reference, &reserved.done)
+            .await;
     }
 
     async fn close_local_run(&self, run_id: &RunId) {
@@ -209,7 +180,6 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
         let (terminal, terminal_receiver) = oneshot::channel();
         let (cancel, commands) = watch::channel(false);
         let (done_sender, done) = watch::channel(false);
-        let done_identity = done_sender.clone();
         {
             let mut state = self.state.lock().await;
             self.ensure_run_open(&state, &reference.run_id)?;
@@ -228,7 +198,6 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
                 done,
             });
         }
-        let (ready, readiness) = oneshot::channel();
         let endpoint = self.clone();
         let reserved_reference = reference.clone();
         tokio::spawn(endpoint.start_reserved(
@@ -236,19 +205,11 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
             ReservedLocalStart {
                 reference: reserved_reference,
                 done: done_sender,
-                ready,
                 commands,
                 events,
                 terminal,
             },
         ));
-        #[cfg(test)]
-        pause_before_start_readiness(self.start_readiness_pause.as_ref()).await;
-        let acceptance = readiness
-            .await
-            .unwrap_or(Err(CapsuleConnectionError::Lost))?;
-        self.accept_local_start(&reference, &done_identity, acceptance)
-            .await?;
         Ok(CapsuleExecutionStream::from_bounded_receiver(
             receiver,
             terminal_receiver,
@@ -283,17 +244,9 @@ impl CapsuleNodeChannel for NativeCapsuleNodeEndpoint {
     }
 }
 
-#[cfg(test)]
-impl WithStartReadinessPause for NativeCapsuleNodeEndpoint {
-    fn start_readiness_pause(&mut self) -> &mut Option<StartReadinessPause> {
-        &mut self.start_readiness_pause
-    }
-}
-
 struct ReservedLocalStart {
     reference: ExecutionRef,
     done: watch::Sender<bool>,
-    ready: oneshot::Sender<Result<LocalStartAcceptance, CapsuleConnectionError>>,
     commands: watch::Receiver<bool>,
     events: mpsc::Sender<CapsuleNodeEvent>,
     terminal: oneshot::Sender<Vec<CapsuleNodeEvent>>,
