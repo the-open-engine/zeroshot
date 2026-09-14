@@ -7,40 +7,24 @@ pub struct RunWatchSubscription {
     pub(super) run_id: RunId,
     pub(super) scanned_through: Cursor,
     pub(super) projection: RunSnapshot,
+    pub(super) after: u64,
     pub(super) pending: VecDeque<RunWatchEventNotification>,
 }
 
 impl RunWatchSubscription {
-    /// Returns all status transitions currently durable after the exclusive resume cursor.
-    pub async fn read_available(
-        &mut self,
-    ) -> Result<Vec<RunWatchEventNotification>, NativeV2ObservationError> {
-        self.refresh().await?;
-        Ok(self.pending.drain(..).collect())
-    }
-
-    /// Waits for the next durable status transition. Dropping this value only stops observation.
-    pub async fn recv(
-        &mut self,
-    ) -> Result<Option<RunWatchEventNotification>, NativeV2ObservationError> {
-        recv_durable(self).await
-    }
-
-    async fn refresh(&mut self) -> Result<bool, NativeV2ObservationError> {
+    async fn refresh(&mut self) -> Result<ReplayProgress, NativeV2ObservationError> {
         let tail = self
             .ledger
             .snapshot_and_tail(&self.run_id, Some(&self.scanned_through))
             .await?;
         WatchFold {
             subscription_id: &self.subscription_id,
-            after: cursor_sequence(&self.scanned_through)?,
+            after: self.after,
             projection: &mut self.projection,
             pending: &mut self.pending,
         }
         .apply(&tail.events)?;
-        let finished = self.runtime.observe_finished(&tail.snapshot)?;
-        self.scanned_through = tail.snapshot.cursor;
-        Ok(finished)
+        replay_progress(&self.runtime, &tail, &mut self.scanned_through)
     }
 }
 
@@ -55,21 +39,7 @@ pub struct RunLogsSubscription {
 }
 
 impl RunLogsSubscription {
-    /// Returns every currently durable matching log strictly after the resume cursor.
-    pub async fn read_available(
-        &mut self,
-    ) -> Result<Vec<RunLogEventNotification>, NativeV2ObservationError> {
-        self.refresh().await?;
-        Ok(self.pending.drain(..).collect())
-    }
-
-    pub async fn recv(
-        &mut self,
-    ) -> Result<Option<RunLogEventNotification>, NativeV2ObservationError> {
-        recv_durable(self).await
-    }
-
-    async fn refresh(&mut self) -> Result<bool, NativeV2ObservationError> {
+    async fn refresh(&mut self) -> Result<ReplayProgress, NativeV2ObservationError> {
         let tail = self
             .ledger
             .snapshot_and_tail(&self.run_id, Some(&self.scanned_through))
@@ -84,10 +54,29 @@ impl RunLogsSubscription {
                 self.pending.push_back(notification);
             }
         }
-        let finished = self.runtime.observe_finished(&tail.snapshot)?;
-        self.scanned_through = tail.snapshot.cursor;
-        Ok(finished)
+        replay_progress(&self.runtime, &tail, &mut self.scanned_through)
     }
+}
+
+struct ReplayProgress {
+    caught_up: bool,
+    finished: bool,
+}
+
+fn replay_progress(
+    runtime: &RuntimeObservation,
+    tail: &crate::v2_run_ledger::SnapshotAndTail,
+    scanned_through: &mut Cursor,
+) -> Result<ReplayProgress, NativeV2ObservationError> {
+    if let Some(last) = tail.events.last() {
+        *scanned_through = last.cursor.clone();
+    }
+    let caught_up = *scanned_through == tail.snapshot.cursor;
+    let finished = runtime.observe_finished(&tail.snapshot)? && caught_up;
+    Ok(ReplayProgress {
+        caught_up,
+        finished,
+    })
 }
 
 #[async_trait]
@@ -95,34 +84,47 @@ trait DurableSubscription {
     type Notification: Send;
 
     fn pending(&mut self) -> &mut VecDeque<Self::Notification>;
-    async fn refresh_subscription(&mut self) -> Result<bool, NativeV2ObservationError>;
+    async fn refresh_subscription(&mut self) -> Result<ReplayProgress, NativeV2ObservationError>;
 }
 
-#[async_trait]
-impl DurableSubscription for RunWatchSubscription {
-    type Notification = RunWatchEventNotification;
+macro_rules! durable_subscription {
+    ($subscription:ty, $notification:ty) => {
+        impl $subscription {
+            /// Returns one bounded batch of currently durable notifications.
+            pub async fn read_available(
+                &mut self,
+            ) -> Result<Vec<$notification>, NativeV2ObservationError> {
+                self.refresh().await?;
+                Ok(self.pending.drain(..).collect())
+            }
 
-    fn pending(&mut self) -> &mut VecDeque<Self::Notification> {
-        &mut self.pending
-    }
+            /// Waits for a durable notification. Dropping an observer cannot stop execution.
+            pub async fn recv(
+                &mut self,
+            ) -> Result<Option<$notification>, NativeV2ObservationError> {
+                recv_durable(self).await
+            }
+        }
 
-    async fn refresh_subscription(&mut self) -> Result<bool, NativeV2ObservationError> {
-        self.refresh().await
-    }
+        #[async_trait]
+        impl DurableSubscription for $subscription {
+            type Notification = $notification;
+
+            fn pending(&mut self) -> &mut VecDeque<Self::Notification> {
+                &mut self.pending
+            }
+
+            async fn refresh_subscription(
+                &mut self,
+            ) -> Result<ReplayProgress, NativeV2ObservationError> {
+                self.refresh().await
+            }
+        }
+    };
 }
 
-#[async_trait]
-impl DurableSubscription for RunLogsSubscription {
-    type Notification = RunLogEventNotification;
-
-    fn pending(&mut self) -> &mut VecDeque<Self::Notification> {
-        &mut self.pending
-    }
-
-    async fn refresh_subscription(&mut self) -> Result<bool, NativeV2ObservationError> {
-        self.refresh().await
-    }
-}
+durable_subscription!(RunWatchSubscription, RunWatchEventNotification);
+durable_subscription!(RunLogsSubscription, RunLogEventNotification);
 
 async fn recv_durable<S>(
     subscription: &mut S,
@@ -134,14 +136,18 @@ where
         if let Some(event) = subscription.pending().pop_front() {
             return Ok(Some(event));
         }
-        let terminal = subscription.refresh_subscription().await?;
+        let progress = subscription.refresh_subscription().await?;
         if let Some(event) = subscription.pending().pop_front() {
             return Ok(Some(event));
         }
-        if terminal {
+        if progress.finished {
             return Ok(None);
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        if progress.caught_up {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        } else {
+            tokio::task::yield_now().await;
+        }
     }
 }
 

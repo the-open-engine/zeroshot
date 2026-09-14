@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
     SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    validate_create,
+    validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
 };
 
 const SCHEMA: &str = "
@@ -142,43 +142,79 @@ impl RunLedger for SqliteRunLedger {
         run_id: &RunId,
         after: Option<&Cursor>,
     ) -> Result<SnapshotAndTail, RunLedgerError> {
-        // This mutex is the adapter's entire atomic snapshot/tail handoff. A cloud implementation
-        // provides the equivalent transaction behind the same port.
-        let connection = self.connection();
-        let stored = load_by_id(&connection, run_id)?.ok_or(RunLedgerError::RunNotFound)?;
-        let after = after.map_or(Ok(0), cursor_sequence)?;
-        let current = cursor_sequence(&stored.snapshot.cursor)?;
-        if after > current {
-            return Err(RunLedgerError::CursorAhead);
-        }
-        let after = i64::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
-        let mut statement = connection
-            .prepare(
-                "SELECT sequence, event_json FROM v2_run_events
-                 WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence",
-            )
-            .map_err(sqlite_error)?;
-        let rows = statement
-            .query_map(params![run_id.as_str(), after], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(sqlite_error)?;
-        let events = rows
-            .map(|row| {
-                let (sequence, json) = row.map_err(sqlite_error)?;
-                let sequence = u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?;
-                let event = serde_json::from_str(&json).map_err(|_| RunLedgerError::Corrupt)?;
-                Ok(StoredRunEvent {
-                    cursor: cursor_for(sequence),
-                    event,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(SnapshotAndTail {
-            snapshot: stored.snapshot,
-            events,
+        let connection = self.connection.clone();
+        let run_id = run_id.clone();
+        let after = after.cloned();
+        tokio::task::spawn_blocking(move || {
+            let connection = connection
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            snapshot_page(&connection, &run_id, after.as_ref())
         })
+        .await
+        .map_err(|_| RunLedgerError::Storage)?
     }
+}
+
+fn snapshot_page(
+    connection: &Connection,
+    run_id: &RunId,
+    after: Option<&Cursor>,
+) -> Result<SnapshotAndTail, RunLedgerError> {
+    let stored = load_by_id(connection, run_id)?.ok_or(RunLedgerError::RunNotFound)?;
+    let after = after.map_or(Ok(0), cursor_sequence)?;
+    if after > cursor_sequence(&stored.snapshot.cursor)? {
+        return Err(RunLedgerError::CursorAhead);
+    }
+    let after = i64::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
+    Ok(SnapshotAndTail {
+        snapshot: stored.snapshot,
+        events: read_page(connection, run_id, after)?,
+    })
+}
+
+fn read_page(
+    connection: &Connection,
+    run_id: &RunId,
+    after: i64,
+) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT sequence, event_json FROM v2_run_events
+                  WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3",
+        )
+        .map_err(sqlite_error)?;
+    let mut rows = statement
+        .query(params![run_id.as_str(), after, MAX_REPLAY_EVENTS as i64])
+        .map_err(sqlite_error)?;
+    let mut events = Vec::new();
+    let mut raw_bytes = 0;
+    while let Some(row) = rows.next().map_err(sqlite_error)? {
+        let json = row.get_ref(1).map_err(sqlite_error)?;
+        let json = json.as_str().map_err(|_| RunLedgerError::Corrupt)?;
+        if json.len() > MAX_REPLAY_BYTES {
+            return Err(RunLedgerError::Corrupt);
+        }
+        if raw_bytes + json.len() > MAX_REPLAY_BYTES {
+            break;
+        }
+        events.push(decode_replay_event(row, json)?);
+        raw_bytes += json.len();
+    }
+    Ok(events)
+}
+
+fn decode_replay_event(
+    row: &rusqlite::Row<'_>,
+    json: &str,
+) -> Result<StoredRunEvent, RunLedgerError> {
+    let sequence = row.get::<_, i64>(0).map_err(sqlite_error)?;
+    let sequence = u64::try_from(sequence).map_err(|_| RunLedgerError::Corrupt)?;
+    let event = serde_json::from_str(json).map_err(|_| RunLedgerError::Corrupt)?;
+    Ok(StoredRunEvent {
+        cursor: cursor_for(sequence),
+        event,
+    })
 }
 
 fn append_transaction(

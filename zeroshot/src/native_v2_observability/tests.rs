@@ -178,6 +178,8 @@ mod errors;
 mod logs;
 #[path = "tests/parallel_attach.rs"]
 mod parallel_attach;
+#[path = "tests/replay.rs"]
+mod replay;
 #[path = "tests/status.rs"]
 mod status;
 #[path = "tests/watch.rs"]
@@ -188,3 +190,20 @@ use errors::{attach_text, persist_output};
 use status::cursor_fixture;
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+async fn finish_worker_run(ledger: &dyn RunLedger, worker: &ExecutionRef) {
+    ledger
+        .append(
+            &worker.run_id,
+            vec![
+                completed(worker, Value::Null),
+                RunEvent::Terminal {
+                    result: TerminalResult::Succeeded {
+                        output: Value::Null,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+}

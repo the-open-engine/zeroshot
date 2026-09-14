@@ -245,6 +245,19 @@ where
 {
     #[must_use]
     pub fn new(ws: WebSocketStream<S>) -> Self {
+        Self::with_delivery(ws, false)
+    }
+
+    /// Creates a dedicated bulk replay connection with an eight-frame receive queue.
+    /// Pausing a subscriber backpressures the entire connection; use separate connections for
+    /// control requests and other observers. Messages above one MiB end the connection before entering the queue.
+    /// Configure the WebSocket frame/message limits when dialing to bound wire allocation too.
+    #[must_use]
+    pub fn with_subscription_backpressure(ws: WebSocketStream<S>) -> Self {
+        Self::with_delivery(ws, true)
+    }
+
+    fn with_delivery(ws: WebSocketStream<S>, backpressure: bool) -> Self {
         let (sink, stream) = ws.split();
         let pending: PendingMap = Arc::new(ParkingMutex::new(HashMap::new()));
         let subscriptions: SubscriptionMap = Arc::new(ParkingMutex::new(HashMap::new()));
@@ -255,8 +268,11 @@ where
             stream,
             Arc::clone(&pending),
             subscriptions,
-            WebSocketFrameSink {
-                sink: Arc::clone(&sink.sink),
+            PumpRouting {
+                sink: WebSocketFrameSink {
+                    sink: Arc::clone(&sink.sink),
+                },
+                backpressure,
             },
         ));
         Self {
@@ -270,6 +286,11 @@ multiplex::impl_multiplexed_transport!(
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static
 );
 
+struct PumpRouting<S> {
+    sink: WebSocketFrameSink<S>,
+    backpressure: bool,
+}
+
 /// Drives the read half: decodes `Message::Text` frames (one JSON-RPC object per frame -- no
 /// reassembly needed, unlike NDJSON's newline-delimited lines) and routes each one via
 /// [`multiplex::route_and_maybe_cancel`] -- shared verbatim with [`crate::NdjsonTransport`]'s pump,
@@ -281,7 +302,7 @@ async fn run_pump<S>(
     mut stream: SplitStream<WebSocketStream<S>>,
     pending: PendingMap,
     subscriptions: SubscriptionMap,
-    sink: WebSocketFrameSink<S>,
+    routing: PumpRouting<S>,
 ) where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -293,13 +314,28 @@ async fn run_pump<S>(
                 continue;
             }
         };
-        multiplex::route_and_maybe_cancel(
-            text.as_str().to_owned(),
-            &pending,
-            &subscriptions,
-            &sink,
-        )
-        .await;
+        if routing.backpressure && text.len() > crate::MAX_FRAME_BYTES {
+            break;
+        }
+        if routing.backpressure {
+            if let Some(id) = crate::ndjson_pump::route_backpressured_message(
+                text.as_str().to_owned(),
+                &pending,
+                &subscriptions,
+            )
+            .await
+            {
+                let _ = multiplex::cancel_subscription(&routing.sink, id).await;
+            }
+        } else {
+            multiplex::route_and_maybe_cancel(
+                text.as_str().to_owned(),
+                &pending,
+                &subscriptions,
+                &routing.sink,
+            )
+            .await;
+        }
     }
     multiplex::finish_pump(&pending, &subscriptions);
 }
@@ -370,3 +406,6 @@ mod tls_trust_policy_tests {
         assert!(matches!(error, WebSocketDialError::SystemTrustRoots { .. }));
     }
 }
+
+#[cfg(test)]
+mod backpressure_tests;

@@ -70,6 +70,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Durable provider events cross bounded async queues with backpressure. Cancellation preserves token
   usage and event order; overflow is explicit and produces an incomplete marker rather than silent
   loss.
+- Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
+  A finished snapshot closes a subscription only after replay reaches its durable cursor.
+- Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
+  connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
 - Run close reserves and tombstones execution activity atomically. No late start, handle, or stream

@@ -43,20 +43,7 @@ async fn usage_is_hidden_during_execution_and_reported_only_at_terminal() {
         .assert_value();
     assert!(watch.read_available().await.assert_value().is_empty());
 
-    ledger
-        .append(
-            &run_id,
-            vec![
-                completed(&worker, Value::Null),
-                RunEvent::Terminal {
-                    result: TerminalResult::Succeeded {
-                        output: Value::Null,
-                    },
-                },
-            ],
-        )
-        .await
-        .assert_value();
+    finish_worker_run(ledger.as_ref(), &worker).await;
     let transitions = watch.read_available().await.assert_value();
     assert_watch_cursors(&transitions, &["v2:4", "v2:5"]);
     let metadata = match &transitions.assert_at(1).status {

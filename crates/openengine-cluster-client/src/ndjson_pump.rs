@@ -30,6 +30,15 @@ pub(super) fn route_pumped_message(
     pending: &PendingMap,
     subscriptions: &SubscriptionMap,
 ) -> Option<SubscriptionId> {
+    route_with_capacity(line, pending, subscriptions, SUBSCRIPTION_QUEUE_CAPACITY)
+}
+
+fn route_with_capacity(
+    line: String,
+    pending: &PendingMap,
+    subscriptions: &SubscriptionMap,
+    capacity: usize,
+) -> Option<SubscriptionId> {
     let Ok(value) = serde_json::from_str::<Value>(&line) else {
         return None;
     };
@@ -43,7 +52,7 @@ pub(super) fn route_pumped_message(
         .and_then(|result| result.get("subscriptionId"))
         .and_then(Value::as_str)
         .map(|subscription_id| {
-            let (sender, receiver) = mpsc::channel(SUBSCRIPTION_QUEUE_CAPACITY);
+            let (sender, receiver) = mpsc::channel(capacity);
             let overflowed = Arc::new(AtomicBool::new(false));
             subscriptions.lock().insert(
                 SubscriptionId::new(subscription_id),
@@ -95,4 +104,26 @@ pub(super) fn forward_notification(
             (!terminal).then_some(subscription_id)
         }
     }
+}
+
+/// Dedicated replay connections wait for their bounded receiver instead of discarding history.
+/// No map lock is held across the wait. Dropping the receiver releases a blocked pump.
+pub(super) async fn route_backpressured_message(
+    line: String,
+    pending: &PendingMap,
+    subscriptions: &SubscriptionMap,
+) -> Option<SubscriptionId> {
+    let value: Value = serde_json::from_str(&line).ok()?;
+    if value.get("method").is_none() {
+        return route_with_capacity(line, pending, subscriptions, 8);
+    }
+    let subscription_id =
+        SubscriptionId::new(value.get("params")?.get("subscriptionId")?.as_str()?);
+    let terminal = value.get("method").and_then(Value::as_str) == Some("subscription/closed");
+    let registration = subscriptions.lock().get(&subscription_id).cloned()?;
+    let abandoned = registration.sender.send(line).await.is_err();
+    if terminal || abandoned {
+        subscriptions.lock().remove(&subscription_id);
+    }
+    (abandoned && !terminal).then_some(subscription_id)
 }

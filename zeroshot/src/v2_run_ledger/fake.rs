@@ -9,7 +9,7 @@ use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
     SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    validate_create,
+    validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
 };
 
 #[derive(Clone, Default)]
@@ -151,16 +151,29 @@ impl RunLedger for FakeRunLedger {
         }
         Ok(SnapshotAndTail {
             snapshot: run.stored.snapshot.clone(),
-            events: run
-                .events
-                .iter()
-                .filter(|event| {
-                    cursor_sequence(&event.cursor).is_ok_and(|sequence| sequence > after)
-                })
-                .cloned()
-                .collect(),
+            events: replay_page(&run.events, after)?,
         })
     }
+}
+
+fn replay_page(
+    events: &[StoredRunEvent],
+    after: u64,
+) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
+    let after = usize::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
+    let mut page = Vec::new();
+    let mut raw_bytes = 0;
+    for stored in events.iter().skip(after).take(MAX_REPLAY_EVENTS) {
+        let bytes = serde_json::to_vec(&stored.event)
+            .map_err(|_| RunLedgerError::Corrupt)?
+            .len();
+        if raw_bytes + bytes > MAX_REPLAY_BYTES {
+            break;
+        }
+        raw_bytes += bytes;
+        page.push(stored.clone());
+    }
+    Ok(page)
 }
 
 fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResult, RunLedgerError> {

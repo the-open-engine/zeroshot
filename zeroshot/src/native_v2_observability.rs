@@ -102,6 +102,10 @@ impl NativeV2Observability {
             pending: &mut pending,
         }
         .apply(&complete.events)?;
+        let scanned_through = complete
+            .events
+            .last()
+            .map_or_else(initial_cursor, |event| event.cursor.clone());
         let result = RunWatchResult {
             subscription_id: subscription_id.clone(),
             run_id: params.run_id.clone(),
@@ -112,7 +116,8 @@ impl NativeV2Observability {
             runtime: self.runtime.clone(),
             subscription_id,
             run_id: params.run_id,
-            scanned_through: complete.snapshot.cursor,
+            scanned_through,
+            after: start_sequence,
             projection,
             pending,
         };
@@ -147,13 +152,17 @@ impl NativeV2Observability {
                 log_notification(&subscription_id, &tail.snapshot, execution, stored).transpose()
             })
             .collect::<Result<VecDeque<_>, _>>()?;
+        let scanned_through = tail
+            .events
+            .last()
+            .map_or_else(|| start.clone(), |event| event.cursor.clone());
         let subscription = RunLogsSubscription {
             ledger: self.ledger.clone(),
             runtime: self.runtime.clone(),
             subscription_id,
             run_id: params.run_id,
             execution,
-            scanned_through: tail.snapshot.cursor,
+            scanned_through,
             pending,
         };
         Ok((result, subscription))

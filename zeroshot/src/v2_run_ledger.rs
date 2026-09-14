@@ -33,6 +33,9 @@ pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 1024 * 1024;
 pub const MAX_SAFE_LOG_BYTES: usize = 16 * 1024;
+/// Bounds one replay read independently of the size of retained history.
+pub const MAX_REPLAY_EVENTS: usize = 256;
+pub const MAX_REPLAY_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -272,7 +275,8 @@ pub struct AppendResult {
 pub struct SnapshotAndTail {
     /// Current projection and cursor, read atomically with `events`.
     pub snapshot: RunSnapshot,
-    /// Durable events strictly after the requested cursor.
+    /// One bounded page strictly after the requested cursor. Resume after its last event
+    /// until that cursor reaches `snapshot.cursor`; a terminal snapshot may precede the last page.
     pub events: Vec<StoredRunEvent>,
 }
 
@@ -360,7 +364,8 @@ pub trait RunLedger: Send + Sync {
     /// Records force-stop intent once. Repeated requests and requests after terminal are no-ops.
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError>;
 
-    /// Reads the current projection and reconnect tail under the same store snapshot.
+    /// Reads the current projection and a bounded reconnect page under the same store snapshot.
+    /// Pages contain at most `MAX_REPLAY_EVENTS` events and `MAX_REPLAY_BYTES` encoded event bytes.
     async fn snapshot_and_tail(
         &self,
         run_id: &RunId,
