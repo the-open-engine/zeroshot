@@ -82,8 +82,10 @@ async fn root_writer_membership_survives_namespaces_and_detached_exec() {
         capture_process_tree, register_process_tree_for, terminate_process_tree,
     };
 
+    let require_namespaces = std::env::var_os("ZEROSHOT_REQUIRE_USER_NAMESPACES").is_some();
     // SAFETY: geteuid only inspects the test process identity.
     if unsafe { libc::geteuid() } != 0 {
+        assert!(!require_namespaces, "required namespace probe needs root");
         eprintln!("root-only process membership gate skipped outside the capsule identity");
         return;
     }
@@ -109,7 +111,9 @@ async fn root_writer_membership_survives_namespaces_and_detached_exec() {
     configure_process(&mut command, containment);
     // SAFETY: this probe uses only raw syscalls and preallocated mapping bytes after fork.
     unsafe {
-        command.pre_exec(move || namespace_group_probe(uid_map.as_bytes(), gid_map.as_bytes()));
+        command.pre_exec(move || {
+            namespace_group_probe(uid_map.as_bytes(), gid_map.as_bytes(), require_namespaces)
+        });
     }
     let mut child = command
         .spawn()
@@ -149,7 +153,11 @@ async fn root_writer_membership_survives_namespaces_and_detached_exec() {
     assert!(!worker_has_live_members(membership).assert_value());
 }
 
-fn namespace_group_probe(uid_map: &[u8], gid_map: &[u8]) -> io::Result<()> {
+fn namespace_group_probe(
+    uid_map: &[u8],
+    gid_map: &[u8],
+    require_namespaces: bool,
+) -> io::Result<()> {
     groups_cannot_be_dropped()?;
     // Model the dumpable state after ordinary exec; dropping the UID before exec cleared it.
     // SAFETY: prctl inspects and updates only the post-fork child.
@@ -158,17 +166,17 @@ fn namespace_group_probe(uid_map: &[u8], gid_map: &[u8]) -> io::Result<()> {
     {
         return Err(io::Error::from_raw_os_error(libc::EINVAL));
     }
-    if !enter_user_namespace()? {
+    if !enter_user_namespace(require_namespaces)? {
         return Ok(());
     }
-    map_user_namespace(uid_map, gid_map)?;
-    if enter_user_namespace()? {
+    map_user_namespace(uid_map, gid_map, require_namespaces)?;
+    if enter_user_namespace(require_namespaces)? {
         groups_cannot_be_dropped()?;
     }
     Ok(())
 }
 
-fn map_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> io::Result<()> {
+fn map_user_namespace(uid_map: &[u8], gid_map: &[u8], require_namespaces: bool) -> io::Result<()> {
     groups_cannot_be_dropped()?;
     for (path, bytes) in [
         (c"/proc/self/uid_map", uid_map),
@@ -179,7 +187,10 @@ fn map_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> io::Result<()> {
         groups_cannot_be_dropped()?;
         match result {
             Ok(()) => {}
-            Err(error) if matches!(error.raw_os_error(), Some(libc::EPERM | libc::EACCES)) => {
+            Err(error)
+                if !require_namespaces
+                    && matches!(error.raw_os_error(), Some(libc::EPERM | libc::EACCES)) =>
+            {
                 // Host policies may allow a namespace while denying its UID/GID mappings.
                 // The child still proves marker inheritance and cleanup in that namespace.
                 report_namespace_probe(b"namespace mapping denied at ", path.to_bytes());
@@ -207,16 +218,18 @@ fn groups_cannot_be_dropped() -> io::Result<()> {
     }
 }
 
-fn enter_user_namespace() -> io::Result<bool> {
+fn enter_user_namespace(require_namespaces: bool) -> io::Result<bool> {
     // SAFETY: this changes only the post-fork child's namespace membership.
     if unsafe { libc::unshare(libc::CLONE_NEWUSER) } == 0 {
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    if matches!(
-        error.raw_os_error(),
-        Some(libc::EPERM | libc::EACCES | libc::EINVAL | libc::ENOSPC)
-    ) {
+    if !require_namespaces
+        && matches!(
+            error.raw_os_error(),
+            Some(libc::EPERM | libc::EACCES | libc::EINVAL | libc::ENOSPC)
+        )
+    {
         report_namespace_probe(
             b"namespace creation unavailable at ",
             b"unshare(CLONE_NEWUSER)",
