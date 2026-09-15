@@ -68,6 +68,8 @@ enum Behavior {
         outcome: WorkerOutcome,
     },
     Fail(NodeRunnerError),
+    Together(Arc<tokio::sync::Barrier>),
+    CancelAfterStart(Arc<tokio::sync::Barrier>, NodeRunnerError),
     Hang,
 }
 
@@ -170,6 +172,18 @@ impl NodeDriver for FakeDriver {
                         Err(NodeRunnerError::Cancelled)
                     }
                 }
+            }
+            Behavior::Together(barrier) => {
+                tokio::select! {
+                    _ = barrier.wait() => Ok(success_for(invocation.role)),
+                    _ = control.cancelled() => Err(NodeRunnerError::Cancelled),
+                }
+            }
+            Behavior::CancelAfterStart(barrier, error) => {
+                barrier.wait().await;
+                control.cancelled().await;
+                self.state().cancellations.push(node.clone());
+                Err(error)
             }
             Behavior::Hang => {
                 control.cancelled().await;

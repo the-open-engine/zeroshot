@@ -56,13 +56,13 @@ fn active_run_slots_are_disjoint_from_source_and_each_other() {
 
     assert_eq!(writer_identity(host), (10_002, 10_002));
     assert_eq!(writer_identity(first), (20_000, 10_002));
-    assert_eq!(writer_identity(second), (151_073, 10_002));
+    assert_eq!(writer_identity(second), (282_145, 10_002));
     assert_eq!(
         first
             .identity(HostedProcessScope::VerifierExecution(65_536))
             .assert_value()
             .uid(),
-        151_072
+        282_142
     );
     assert!(host.active_run_slot(u32::MAX, 65_536).is_err());
     let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4, 2).assert_value();
@@ -385,4 +385,60 @@ fn process_command_with_deadline(
 fn writer_identity(pool: HostedProcessPool) -> (u32, u32) {
     let identity = pool.identity(HostedProcessScope::Writer).assert_value();
     (identity.uid(), identity.gid())
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn writer_and_verifier_memberships_are_disjoint_across_runs() {
+    use super::platform::WorkerMembership;
+
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let mut memberships = std::collections::BTreeSet::new();
+    for slot in 0..2 {
+        let pool = host.active_run_slot(slot, 8).assert_value();
+        let owner = pool.identity(HostedProcessScope::Writer).assert_value();
+        assert!(memberships.insert(owner.uid()));
+        for index in [1, 8] {
+            for scope in [
+                HostedProcessScope::WriterNodeInstance(index),
+                HostedProcessScope::WriterExecution(index),
+                HostedProcessScope::VerifierNodeInstance(index),
+                HostedProcessScope::VerifierExecution(index),
+            ] {
+                let identity = pool.identity(scope).assert_value();
+                let membership = identity.runner().containment.membership().assert_value();
+                assert_eq!(
+                    pool.identity(scope)
+                        .assert_value()
+                        .runner()
+                        .containment
+                        .membership(),
+                    Some(membership)
+                );
+                let member = match membership {
+                    WorkerMembership::SupplementaryGroup(group) => {
+                        assert_eq!((identity.uid(), identity.gid()), (owner.uid(), owner.gid()));
+                        group
+                    }
+                    WorkerMembership::Uid(uid) => {
+                        assert_ne!(uid, owner.uid());
+                        assert_eq!(identity.gid(), 20_000);
+                        uid
+                    }
+                };
+                assert!(memberships.insert(member));
+            }
+        }
+        assert!(
+            pool.identity(HostedProcessScope::WriterExecution(0))
+                .is_err()
+        );
+        assert!(
+            pool.identity(HostedProcessScope::WriterNodeInstance(u64::MAX))
+                .is_err()
+        );
+    }
+    for group in [0, u32::MAX] {
+        assert!(LocalProcessRunner::hosted_identity(10_002, 10_002, Some(group)).is_err());
+    }
 }

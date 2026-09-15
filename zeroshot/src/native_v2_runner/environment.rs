@@ -1,40 +1,5 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WorkspaceAccess {
-    ReadOnly,
-    Exclusive,
-}
-
-/// One run-local gate around its single shared workspace.
-#[derive(Clone, Debug, Default)]
-pub struct WorkspaceGate {
-    inner: Arc<RwLock<()>>,
-}
-
-impl WorkspaceGate {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub(super) async fn acquire(&self, access: WorkspaceAccess) -> WorkspacePermit {
-        match access {
-            WorkspaceAccess::ReadOnly => WorkspacePermit::Read {
-                _guard: self.inner.clone().read_owned().await,
-            },
-            WorkspaceAccess::Exclusive => WorkspacePermit::Write {
-                _guard: self.inner.clone().write_owned().await,
-            },
-        }
-    }
-}
-
-pub(super) enum WorkspacePermit {
-    Read { _guard: OwnedRwLockReadGuard<()> },
-    Write { _guard: OwnedRwLockWriteGuard<()> },
-}
-
 /// Runtime-only environment values. Debug output exposes names, never values.
 #[derive(Clone)]
 pub struct ResolvedEnvironment {

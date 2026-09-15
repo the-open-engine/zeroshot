@@ -106,6 +106,30 @@ jobs:
       - name: Run workspace tests
         run: cargo test --workspace
 
+      - name: Test hosted process and filesystem boundaries as root
+        run: |
+          cargo test --package zeroshot --lib --no-run --message-format=json > "$RUNNER_TEMP/zeroshot-tests.json"
+          python3 - "$RUNNER_TEMP/zeroshot-tests.json" <<'PYTHON'
+          import json
+          import subprocess
+          import sys
+
+          with open(sys.argv[1], encoding='utf-8') as source:
+              artifacts = [json.loads(line) for line in source]
+          executables = [
+              artifact['executable']
+              for artifact in artifacts
+              if artifact.get('reason') == 'compiler-artifact'
+              and artifact['target']['name'] == 'zeroshot_engine'
+              and artifact['profile']['test']
+              and artifact.get('executable')
+          ]
+          assert len(executables) == 1, executables
+          subprocess.run(
+              ['sudo', '-n', executables[0], 'root_', '--test-threads=1'], check=True
+          )
+          PYTHON
+
       - name: Build documentation with warnings denied
         env:
           RUSTDOCFLAGS: -Dwarnings

@@ -1,6 +1,6 @@
 //! Native-v2 node execution boundary.
 //!
-//! The runner owns workspace gates, session lifetimes, live output, and durable handoff while
+//! The runner owns session lifetimes, live output, and durable handoff while
 //! provider processes remain behind [`NodeDriver`].
 
 use std::any::Any;
@@ -13,9 +13,7 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{
     GraphNode, NodeInstructions, NodeName, RunId, UnixTimestampMillis, WorkerOutcome, WorkerRef,
 };
-use tokio::sync::{
-    broadcast, oneshot, watch, Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock,
-};
+use tokio::sync::{broadcast, oneshot, watch, Mutex};
 
 use crate::execution::driver::DriverCancellation;
 use crate::execution::SessionScope;
@@ -47,21 +45,21 @@ pub(crate) use remote::{RemoteNodeHandleBridge, remote_node_handle};
 mod plan;
 pub use plan::NodeRole;
 use plan::NodeRolePlan;
-mod workspace;
-pub use workspace::{EnvironmentResolutionError, ResolvedEnvironment, WorkspaceAccess, WorkspaceGate};
-pub(crate) use workspace::{EnvironmentRefreshError, RuntimeEnvironmentRefresh};
+mod environment;
+pub use environment::{EnvironmentResolutionError, ResolvedEnvironment};
+pub(crate) use environment::{EnvironmentRefreshError, RuntimeEnvironmentRefresh};
 
 pub(crate) fn with_environment_refresh(
     environment: ResolvedEnvironment,
     refresh: Arc<dyn RuntimeEnvironmentRefresh>,
 ) -> ResolvedEnvironment {
-    workspace::with_refresh(environment, refresh)
+    environment::with_refresh(environment, refresh)
 }
 
 pub(crate) async fn refresh_environment(
     environment: &ResolvedEnvironment,
 ) -> Result<ResolvedEnvironment, EnvironmentRefreshError> {
-    workspace::refreshed(environment).await
+    environment::refreshed(environment).await
 }
 
 #[derive(Clone, Debug)]
@@ -116,6 +114,8 @@ pub enum NodeRunnerError {
     DriverDetail(String),
     #[error("the remote node runtime connection was lost")]
     ConnectionLost,
+    #[error("provider process cleanup could not be confirmed")]
+    CleanupUnconfirmed,
     #[error("node execution was cancelled")]
     Cancelled,
     #[error("live output was not safe to publish")]
@@ -243,7 +243,6 @@ pub trait NodeRunner: Send + Sync {
 pub struct NativeNodeRunner {
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
-    workspace: WorkspaceGate,
     roles: NodeRolePlan,
     activity: ActivityRegistry,
 }
@@ -257,7 +256,6 @@ impl NativeNodeRunner {
         Ok(Self {
             driver,
             sessions: SessionPool::new(sessions),
-            workspace: WorkspaceGate::new(),
             roles: NodeRolePlan::from_admitted(admitted)?,
             activity: ActivityRegistry::default(),
         })
@@ -280,7 +278,6 @@ impl NodeRunner for NativeNodeRunner {
         let runtime = RunnerTaskRuntime {
             driver: self.driver.clone(),
             sessions: self.sessions.clone(),
-            workspace: self.workspace.clone(),
         };
         let task_output = output_sender.clone();
 
@@ -325,7 +322,6 @@ impl NodeRunner for NativeNodeRunner {
 struct RunnerTaskRuntime {
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
-    workspace: WorkspaceGate,
 }
 
 struct RunnerTask<'a> {
@@ -342,13 +338,6 @@ async fn execute(
     runtime: RunnerTaskRuntime,
     mut task: RunnerTask<'_>,
 ) -> Result<NodeCompletion, NodeRunnerError> {
-    let _workspace = tokio::select! {
-        biased;
-        _ = wait_for_cancellation(&mut task.cancellation) => {
-            return Err(NodeRunnerError::Cancelled)
-        },
-        permit = runtime.workspace.acquire(task.role.workspace_access()) => permit,
-    };
     let lease = match runtime
         .sessions
         .checkout(

@@ -37,6 +37,18 @@ Selectors, guards, and bindings are structured data. They are not snippets of Ja
 shell code, or prompt text. Full field rules live in the
 [graph contract](../reference/cluster/graph.md).
 
+## Concurrent workspace changes
+
+`par` branches and `map` items can run multiple writing agents at once. Writers share the run's
+workspace, so the graph and agent instructions must coordinate edits to the same files. Hosted
+verifiers work in disposable copies; copying while a writer is active does not provide an atomic
+snapshot. Place verification after the writers when it needs their completed changes.
+
+Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
+parallel delivery and writing, including delivery in a map that can have multiple items. Delivery
+can run alongside read-only verifiers. A delivery receipt can certify run success only when every
+other writer settled before that delivery execution started.
+
 ## State reduction chooses the next step
 
 An agent returns a value through a declared output channel. Zeroshot checks that value, applies

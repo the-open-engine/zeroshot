@@ -13,5 +13,5 @@ pub use openengine_cluster_protocol::SessionScope;
 pub enum WorkspaceAccessMode {
     ReadOnly,
     #[default]
-    Exclusive,
+    ReadWrite,
 }

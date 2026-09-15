@@ -143,7 +143,8 @@ pub(crate) async fn open_provider_process(
         Ok(process) => Ok(Ok(ProviderProcess::new(process, files))),
         Err(error) => {
             if error.launch_evidence() == ProcessLaunchEvidence::MayHaveStarted {
-                control.record_token_usage(None).await?;
+                let _ = control.record_token_usage(None).await;
+                return Err(NodeRunnerError::CleanupUnconfirmed);
             } else {
                 files.process_reaped();
             }
@@ -453,3 +454,15 @@ pub(crate) const fn effort_token(effort: ReasoningEffort) -> &'static str {
 #[cfg(test)]
 #[path = "provider_process/tests.rs"]
 mod tests;
+
+// An opened provider without confirmed cleanup may still mutate the candidate. This failure must
+// never become a retryable provider error or be hidden by cancellation.
+pub(crate) fn require_process_cleanup(
+    completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
+) -> Result<&ProcessSessionOutput, NodeRunnerError> {
+    completion
+        .as_ref()
+        .ok()
+        .filter(|output| output.cleanup.proves_tree_empty())
+        .ok_or(NodeRunnerError::CleanupUnconfirmed)
+}

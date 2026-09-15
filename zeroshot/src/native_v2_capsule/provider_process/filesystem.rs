@@ -253,7 +253,11 @@ fn copy_candidate(specification: &ExecutionFilesystemSpec, workspace: &Path) -> 
     if candidate.starts_with(&runtime_root) || runtime_root.starts_with(&candidate) {
         return Err(io::Error::other("candidate and runtime roots overlap"));
     }
-    copy_entry(&candidate, workspace, specification)
+    let source = open_copy_source(libc::AT_FDCWD, &candidate)?;
+    if !source.metadata()?.is_dir() {
+        return Err(io::Error::other("candidate is not a directory"));
+    }
+    copy_entry(source, workspace, specification)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -261,28 +265,82 @@ fn copy_candidate(_specification: &ExecutionFilesystemSpec, _workspace: &Path) -
     Err(io::Error::other("hosted verifier copies require Linux"))
 }
 
+// O_PATH pins an entry without following symlinks or opening FIFOs/devices for I/O.
+#[cfg(target_os = "linux")]
+fn open_copy_source(parent: std::os::fd::RawFd, name: &Path) -> io::Result<fs::File> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = std::ffi::CString::new(name.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("invalid candidate path"))?;
+    // SAFETY: name is NUL-terminated and parent is a live directory descriptor or AT_FDCWD.
+    let descriptor = unsafe {
+        libc::openat(
+            parent,
+            name.as_ptr(),
+            libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if descriptor < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: openat returned a new descriptor whose ownership is transferred to File exactly once.
+    Ok(unsafe { fs::File::from_raw_fd(descriptor) })
+}
+
+#[cfg(target_os = "linux")]
+fn copy_source_path(source: &fs::File) -> PathBuf {
+    use std::os::fd::AsRawFd;
+
+    PathBuf::from(format!("/proc/self/fd/{}", source.as_raw_fd()))
+}
+
+#[cfg(target_os = "linux")]
+fn read_copy_symlink(source: &fs::File) -> io::Result<PathBuf> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut buffer = [0_u8; libc::PATH_MAX as usize];
+    // SAFETY: source pins a symlink, the empty name selects that inode, and buffer is writable.
+    let length = unsafe {
+        libc::readlinkat(
+            source.as_raw_fd(),
+            c"".as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+        )
+    };
+    let length = usize::try_from(length).map_err(|_| io::Error::last_os_error())?;
+    if length == buffer.len() {
+        return Err(io::Error::other(
+            "candidate symlink target exceeds its bound",
+        ));
+    }
+    Ok(std::ffi::OsString::from_vec(buffer[..length].to_vec()).into())
+}
+
 #[cfg(target_os = "linux")]
 fn copy_entry(
-    source: &Path,
+    source: fs::File,
     destination: &Path,
     specification: &ExecutionFilesystemSpec,
 ) -> io::Result<()> {
     check_cancelled(&specification.cancellation)?;
-    let metadata = fs::symlink_metadata(source)?;
-    copy_contents(source, destination, &metadata, specification)?;
+    let metadata = source.metadata()?;
+    copy_contents(&source, destination, &metadata, specification)?;
     set_owner(destination, specification.identity)?;
     preserve_times(destination, &metadata)
 }
 
 #[cfg(target_os = "linux")]
 fn copy_contents(
-    source: &Path,
+    source: &fs::File,
     destination: &Path,
     metadata: &fs::Metadata,
     specification: &ExecutionFilesystemSpec,
 ) -> io::Result<()> {
     if metadata.file_type().is_symlink() {
-        return std::os::unix::fs::symlink(fs::read_link(source)?, destination);
+        return std::os::unix::fs::symlink(read_copy_symlink(source)?, destination);
     }
     if metadata.is_dir() {
         return copy_directory(source, destination, metadata, specification);
@@ -298,39 +356,35 @@ fn copy_contents(
 
 #[cfg(target_os = "linux")]
 fn copy_directory(
-    source: &Path,
+    source: &fs::File,
     destination: &Path,
     metadata: &fs::Metadata,
     specification: &ExecutionFilesystemSpec,
 ) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
     create_private_directory(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        copy_entry(
-            &entry.path(),
-            &destination.join(entry.file_name()),
-            specification,
-        )?;
+    for entry in fs::read_dir(copy_source_path(source))? {
+        check_cancelled(&specification.cancellation)?;
+        let name = entry?.file_name();
+        // Resolve only this child against the pinned parent; a renamed ancestor is never followed.
+        let child = open_copy_source(source.as_raw_fd(), Path::new(&name))?;
+        copy_entry(child, &destination.join(name), specification)?;
     }
     fs::set_permissions(destination, metadata.permissions())
 }
 
 #[cfg(target_os = "linux")]
 fn copy_file(
-    source: &Path,
+    source: &fs::File,
     destination: &Path,
     cancellation: &DriverCancellation,
 ) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
 
-    let source = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(source)?;
-    if !source.metadata()?.is_file() {
-        return Err(io::Error::other("candidate file changed type"));
-    }
+    // The O_PATH handle pins this regular inode even if writers rename or replace its entry.
+    let source = fs::File::open(copy_source_path(source))?;
     let mut destination = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

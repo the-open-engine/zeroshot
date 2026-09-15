@@ -152,7 +152,7 @@ pub(super) fn role_settings(
     role: NodeRole,
 ) -> Result<(&'static str, WorkspaceAccessMode), NodeRunnerError> {
     match role {
-        NodeRole::Worker => Ok(("workspace-write", WorkspaceAccessMode::Exclusive)),
+        NodeRole::Worker => Ok(("workspace-write", WorkspaceAccessMode::ReadWrite)),
         NodeRole::Verifier => Ok(("read-only", WorkspaceAccessMode::ReadOnly)),
         NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
     }

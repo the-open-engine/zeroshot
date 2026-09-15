@@ -77,14 +77,14 @@ pub(crate) fn write_new_file(path: &Path, bytes: &[u8], unix_mode: u32) -> std::
 
 /// Linux identity allocation for one contained provider process domain.
 ///
-/// Within an active run, workers reuse one identity because the workspace gate serializes them.
-/// Verifiers derive stable, disjoint identities from their session scope so parallel cleanup cannot
-/// affect peers. A production host derives one such pool per active run.
+/// Writers share the workspace owner UID and use session-specific supplementary groups for
+/// process cleanup. Verifiers retain distinct UIDs. A production host reserves disjoint UID and
+/// supplementary-group ranges for each active run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostedProcessPool {
     writer_uid: u32,
     writer_gid: u32,
-    verifier_uid_base: u32,
+    session_identity_base: u32,
     verifier_gid: u32,
 }
 
@@ -115,9 +115,11 @@ impl HostedProcessScope {
         root.join(leaf)
     }
 
-    fn verifier_identity(self) -> Option<(u64, u32)> {
+    fn session_identity(self) -> Option<(u64, u32)> {
         match self {
-            Self::Writer | Self::WriterNodeInstance(_) | Self::WriterExecution(_) => None,
+            Self::Writer => None,
+            Self::WriterNodeInstance(identity) => Some((identity, 2)),
+            Self::WriterExecution(identity) => Some((identity, 3)),
             Self::VerifierNodeInstance(identity) => Some((identity, 0)),
             Self::VerifierExecution(identity) => Some((identity, 1)),
         }
@@ -180,7 +182,7 @@ impl HostedProcessPool {
         Self {
             writer_uid: HOSTED_WORKER_UID,
             writer_gid: HOSTED_WORKER_GID,
-            verifier_uid_base: 20_000,
+            session_identity_base: 20_000,
             verifier_gid: 20_000,
         }
     }
@@ -188,15 +190,15 @@ impl HostedProcessPool {
     pub fn new(
         writer_uid: u32,
         writer_gid: u32,
-        verifier_uid_base: u32,
+        session_identity_base: u32,
         verifier_gid: u32,
     ) -> Result<Self, ProcessRunnerError> {
         if writer_uid == 0
             || writer_gid == 0
-            || verifier_uid_base == 0
+            || session_identity_base == 0
             || verifier_gid == 0
-            || verifier_uid_base == u32::MAX
-            || writer_uid >= verifier_uid_base
+            || session_identity_base == u32::MAX
+            || writer_uid >= session_identity_base
         {
             return Err(ProcessRunnerError::InvalidCommand(
                 "hosted provider identities are invalid".to_owned(),
@@ -205,7 +207,7 @@ impl HostedProcessPool {
         Ok(Self {
             writer_uid,
             writer_gid,
-            verifier_uid_base,
+            session_identity_base,
             verifier_gid,
         })
     }
@@ -223,34 +225,34 @@ impl HostedProcessPool {
     /// Derives one disjoint active-run pool from this host pool.
     ///
     /// The host pool's writer identity remains reserved for serialized source resolution. Active
-    /// runs start at its verifier base and reserve one writer plus both verifier session variants
-    /// for every admitted execution identity.
+    /// runs start at its session base and reserve one workspace owner plus both writer group and
+    /// verifier UID session variants for every admitted execution identity.
     pub(crate) fn active_run_slot(
         self,
         slot: u32,
         maximum_identity: u64,
     ) -> Result<Self, ProcessRunnerError> {
         let width = maximum_identity
-            .checked_mul(2)
+            .checked_mul(4)
             .and_then(|value| value.checked_add(1))
             .ok_or_else(identity_range_exhausted)?;
-        let verifier_span = maximum_identity
-            .checked_mul(2)
+        let session_span = maximum_identity
+            .checked_mul(4)
             .and_then(|value| value.checked_sub(1))
             .and_then(|value| u32::try_from(value).ok())
             .ok_or_else(identity_range_exhausted)?;
         let offset = u64::from(slot)
             .checked_mul(width)
             .ok_or_else(identity_range_exhausted)?;
-        let writer_uid = u64::from(self.verifier_uid_base)
+        let writer_uid = u64::from(self.session_identity_base)
             .checked_add(offset)
             .and_then(|value| u32::try_from(value).ok())
             .ok_or_else(identity_range_exhausted)?;
-        let verifier_uid_base = writer_uid
+        let session_identity_base = writer_uid
             .checked_add(1)
             .ok_or_else(identity_range_exhausted)?;
-        let highest_uid = verifier_uid_base
-            .checked_add(verifier_span)
+        let highest_uid = session_identity_base
+            .checked_add(session_span)
             .ok_or_else(identity_range_exhausted)?;
         if highest_uid == u32::MAX {
             return Err(identity_range_exhausted());
@@ -258,7 +260,7 @@ impl HostedProcessPool {
         Self::new(
             writer_uid,
             self.writer_gid,
-            verifier_uid_base,
+            session_identity_base,
             self.verifier_gid,
         )
     }
@@ -268,8 +270,8 @@ impl HostedProcessPool {
         scope: HostedProcessScope,
     ) -> Result<HostedProcessIdentity, ProcessRunnerError> {
         scope.validate()?;
-        let (uid, gid) = match scope.verifier_identity() {
-            None => (self.writer_uid, self.writer_gid),
+        let (uid, gid, group) = match scope.session_identity() {
+            None => (self.writer_uid, self.writer_gid, None),
             Some((identity, discriminator)) => {
                 let index = identity.checked_sub(1).ok_or_else(|| {
                     ProcessRunnerError::InvalidCommand(
@@ -277,23 +279,30 @@ impl HostedProcessPool {
                     )
                 })?;
                 let offset = index
-                    .checked_mul(2)
+                    .checked_mul(4)
                     .and_then(|value| value.checked_add(u64::from(discriminator)))
                     .and_then(|value| u32::try_from(value).ok())
                     .ok_or_else(|| {
                         ProcessRunnerError::InvalidCommand(
-                            "verifier identity range is exhausted".to_owned(),
+                            "provider identity range is exhausted".to_owned(),
                         )
                     })?;
-                let uid = self.verifier_uid_base.checked_add(offset).ok_or_else(|| {
-                    ProcessRunnerError::InvalidCommand(
-                        "verifier identity range is exhausted".to_owned(),
-                    )
-                })?;
-                (uid, self.verifier_gid)
+                let identity = self
+                    .session_identity_base
+                    .checked_add(offset)
+                    .ok_or_else(|| {
+                        ProcessRunnerError::InvalidCommand(
+                            "provider identity range is exhausted".to_owned(),
+                        )
+                    })?;
+                if discriminator >= 2 {
+                    (self.writer_uid, self.writer_gid, Some(identity))
+                } else {
+                    (identity, self.verifier_gid, None)
+                }
             }
         };
-        let runner = LocalProcessRunner::hosted_worker_identity(uid, gid)?;
+        let runner = LocalProcessRunner::hosted_identity(uid, gid, group)?;
         Ok(HostedProcessIdentity {
             runner,
             uid,
@@ -321,16 +330,21 @@ fn prepare_private_directory(
     path: &Path,
     owner: Option<(u32, u32)>,
 ) -> Result<(), ProcessRunnerError> {
-    create_private_directory(path)?;
-    validate_private_directory(path)?;
-    set_private_directory_mode(path)?;
-    set_private_directory_owner(path, owner)
+    let created = create_private_directory(path)?;
+    let result = validate_private_directory(path)
+        .and_then(|()| set_private_directory_mode(path))
+        .and_then(|()| set_private_directory_owner(path, owner));
+    if created && result.is_err() {
+        // Only remove the empty directory created by this attempt; retained session homes survive.
+        let _ = std::fs::remove_dir(path);
+    }
+    result
 }
 
-fn create_private_directory(path: &Path) -> Result<(), ProcessRunnerError> {
+fn create_private_directory(path: &Path) -> Result<bool, ProcessRunnerError> {
     match std::fs::create_dir(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(error) => Err(ProcessRunnerError::Launch(io_error_detail(
             "provider private home create failed",
             &error,
@@ -449,38 +463,30 @@ impl LocalProcessRunner {
     }
 
     pub fn hosted_worker() -> Result<Self, ProcessRunnerError> {
-        #[cfg(target_os = "linux")]
-        {
-            Ok(Self {
-                containment: ProcessContainment::WorkerUid {
-                    uid: HOSTED_WORKER_UID,
-                    gid: HOSTED_WORKER_GID,
-                },
-            })
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            Err(ProcessRunnerError::Launch(
-                "hosted worker containment requires Linux".to_owned(),
-            ))
-        }
+        Self::hosted_worker_identity(HOSTED_WORKER_UID, HOSTED_WORKER_GID)
     }
 
     pub fn hosted_worker_identity(uid: u32, gid: u32) -> Result<Self, ProcessRunnerError> {
+        Self::hosted_identity(uid, gid, None)
+    }
+
+    fn hosted_identity(uid: u32, gid: u32, group: Option<u32>) -> Result<Self, ProcessRunnerError> {
         #[cfg(target_os = "linux")]
         {
-            if uid == 0 || gid == 0 {
+            if uid == 0 || gid == 0 || group.is_some_and(|group| group == 0 || group == u32::MAX) {
                 return Err(ProcessRunnerError::InvalidCommand(
                     "hosted worker identity must be unprivileged".to_owned(),
                 ));
             }
-            Ok(Self {
-                containment: ProcessContainment::WorkerUid { uid, gid },
-            })
+            let containment = match group {
+                Some(group) => ProcessContainment::WorkerGroup { uid, gid, group },
+                None => ProcessContainment::WorkerUid { uid, gid },
+            };
+            Ok(Self { containment })
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (uid, gid);
+            let _ = (uid, gid, group);
             Err(ProcessRunnerError::Launch(
                 "hosted worker containment requires Linux".to_owned(),
             ))

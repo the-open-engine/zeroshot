@@ -85,7 +85,11 @@ impl TerminalMetadata {
         if self.incomplete {
             events.push(CapsuleNodeEvent::TokenUsage { usage: None });
         }
-        let terminal = if self.overflowed {
+        let terminal = if matches!(completion, Err(NodeRunnerError::CleanupUnconfirmed)) {
+            CapsuleNodeEvent::Failed {
+                failure: CapsuleNodeFailure::CleanupUnconfirmed,
+            }
+        } else if self.overflowed {
             CapsuleNodeEvent::Failed {
                 failure: CapsuleNodeFailure::ExecutionFailed,
             }
@@ -308,5 +312,19 @@ mod tests {
                 }
             ] if known.input_tokens.get() == MAX_SAFE_GENERATION
         ));
+    }
+    #[test]
+    fn cleanup_failure_survives_usage_overflow_and_wire_roundtrip() {
+        let metadata = TerminalMetadata {
+            overflowed: true,
+            ..TerminalMetadata::default()
+        };
+        let events = metadata.into_events(Err(NodeRunnerError::CleanupUnconfirmed));
+        let encoded = serde_json::to_string(&events).assert_value();
+        let decoded: Vec<CapsuleNodeEvent> = serde_json::from_str(&encoded).assert_value();
+        let [CapsuleNodeEvent::Failed { failure }] = decoded.as_slice() else {
+            panic!("cleanup failure must survive metadata and serialization");
+        };
+        assert_eq!(failure.into_runner(), NodeRunnerError::CleanupUnconfirmed);
     }
 }

@@ -144,9 +144,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   tools. They expose Rust through the fixed runtime PATH without a shared writable Cargo cache;
   explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
   tests compile native fixtures as an isolated user with a read-only root and fresh home.
+- Native-v2 admits concurrent writers in parallel branches and map items. Writers share the run's
+  workspace owner identity; hosted session cleanup tracks an immutable supplementary group marker
+  per session. Authored graphs coordinate overlapping edits. Admission rejects Git delivery that
+  can overlap another writer or delivery; delivery may run alongside read-only verifiers.
+  A delivery receipt certifies success only if every other writer settled before delivery started.
+  Unconfirmed process cleanup is a fatal runtime failure, including after cancellation; it cannot
+  be reduced to a retryable node crash or an authored parallel-join void.
 - Hosted verifiers build in disposable writable copies of the current candidate. Copies include
-  dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies;
-  verifier writes are never promoted to the candidate or peers. Provider scratch permits execution.
+  dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
+  Source traversal pins descriptors without following symlinks so concurrent renames cannot escape
+  the candidate; copying alongside writers does not provide an atomic snapshot. Verifier writes
+  are never promoted to the candidate or peers. Provider scratch permits execution.
   Managed copies and execution-scoped homes are removed only after confirmed process-tree cleanup;
   node-instance homes survive authorized continuation and loop revisits until session closure.
 
@@ -258,7 +267,8 @@ python -m mkdocs build --strict
 
 ## Release convention
 
-- CI has native, Python, and repository-tooling lanes plus stable aggregate `required`.
+- CI has native, Python, and repository-tooling lanes plus stable aggregate `required`. The native
+  lane also executes hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.

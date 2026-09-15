@@ -156,6 +156,9 @@ impl NativeV2Supervisor {
         finished: FinishedDispatch,
         pending_voids: &mut BTreeMap<ExecutionId, ExecutionVoidReason>,
     ) -> Result<(), NativeV2SupervisorError> {
+        if finished.result.cleanup_unconfirmed() {
+            return Err(NativeV2SupervisorError::CleanupUnconfirmed);
+        }
         if let Some(reason) = pending_voids.remove(&finished.execution) {
             self.ledger
                 .append(

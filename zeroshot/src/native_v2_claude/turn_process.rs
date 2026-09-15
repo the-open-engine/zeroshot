@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand, ProcessSessionOutput};
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
-    exchange_process_io, open_provider_process, process_failure_detail,
+    exchange_process_io, open_provider_process, process_failure_detail, require_process_cleanup,
 };
 use crate::native_v2_runner::{DriverControl, NodeRunnerError};
 
@@ -71,6 +71,7 @@ async fn finish_input_failure(
         completion,
     } = failure;
     let usage = control.record_token_usage(transcript.token_usage()).await;
+    require_process_cleanup(&completion)?;
     if input_failure_cancelled(control, &output, &completion) {
         return Err(NodeRunnerError::Cancelled);
     }
@@ -128,22 +129,23 @@ async fn finish_process_completion(
 ) -> Result<ClaudeAttempt, NodeRunnerError> {
     let completion = process.wait().await;
     let usage = control.record_token_usage(transcript.token_usage()).await;
-    let output = match completion {
-        Ok(output) => output,
-        Err(_) if control.is_cancelled() => return Err(NodeRunnerError::Cancelled),
-        Err(error) => {
+    let attempt = resolve_process_completion(transcript, completion, control.is_cancelled());
+    match attempt {
+        Err(error) => Err(error),
+        Ok(attempt) => {
             usage?;
-            return transcript.finish(Some(&format!(
-                "provider process completion failed: {error}"
-            )));
+            Ok(attempt)
         }
-    };
-    let failure =
-        match process_failure_detail(&output, control.is_cancelled(), !transcript.is_success()) {
-            Err(NodeRunnerError::Cancelled) => return Err(NodeRunnerError::Cancelled),
-            result => result?,
-        };
-    usage?;
+    }
+}
+
+fn resolve_process_completion(
+    transcript: ClaudeTranscript,
+    completion: Result<ProcessSessionOutput, ProcessRunnerError>,
+    cancelled: bool,
+) -> Result<ClaudeAttempt, NodeRunnerError> {
+    let output = require_process_cleanup(&completion)?;
+    let failure = process_failure_detail(output, cancelled, !transcript.is_success())?;
     transcript.finish(failure.as_deref())
 }
 
@@ -153,6 +155,7 @@ pub(super) async fn release_failure(
     control: &DriverControl,
 ) -> Result<ClaudeAttempt, NodeRunnerError> {
     let completion = process.release().await;
+    require_process_cleanup(&completion)?;
     if control.is_cancelled() {
         return Err(NodeRunnerError::Cancelled);
     }
@@ -183,5 +186,40 @@ fn append_detail(diagnostic: &mut String, detail: &str) {
     if !detail.is_empty() && detail != diagnostic.trim() {
         diagnostic.push_str("; ");
         diagnostic.push_str(detail);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution::process::{ProcessCleanupEvidence, ProcessLaunchEvidence};
+
+    #[test]
+    fn unconfirmed_cleanup_never_becomes_a_retryable_claude_attempt() {
+        for cancelled in [false, true] {
+            let output = ProcessSessionOutput {
+                launch_evidence: ProcessLaunchEvidence::MayHaveStarted,
+                exit_code: Some(0),
+                termination_signal: None,
+                core_dumped: false,
+                stderr_tail: Vec::new(),
+                stderr_tail_truncated: false,
+                cancelled,
+                timed_out: false,
+                cleanup: ProcessCleanupEvidence::TimedOut,
+                post_launch_error: None,
+            };
+            for completion in [
+                Ok(output),
+                Err(ProcessRunnerError::Io("completion lost".to_owned())),
+            ] {
+                let attempt = resolve_process_completion(
+                    ClaudeTranscript::new(Vec::new()),
+                    completion,
+                    cancelled,
+                );
+                assert!(matches!(attempt, Err(NodeRunnerError::CleanupUnconfirmed)));
+            }
+        }
     }
 }

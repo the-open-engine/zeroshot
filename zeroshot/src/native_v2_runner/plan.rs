@@ -12,15 +12,6 @@ pub(super) struct ResolvedNodePlan {
     pub(super) response: NodeResponseContract,
 }
 
-impl NodeRole {
-    pub(super) const fn workspace_access(self) -> WorkspaceAccess {
-        match self {
-            Self::Verifier => WorkspaceAccess::ReadOnly,
-            Self::Worker | Self::GitDelivery => WorkspaceAccess::Exclusive,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct PlannedNode {
     worker: WorkerRef,

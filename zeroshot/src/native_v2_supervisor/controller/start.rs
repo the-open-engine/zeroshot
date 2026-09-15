@@ -113,6 +113,9 @@ impl NativeV2Supervisor {
             output,
         })
         .await;
+        if finished.result.cleanup_unconfirmed() {
+            return finished.result;
+        }
         match finished.result {
             DispatchResult::DurableEventFailure(error) => {
                 DispatchResult::DurableEventFailure(error)

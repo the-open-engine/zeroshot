@@ -2,9 +2,9 @@
 //!
 //! Admission keeps [`GraphSpec`] unchanged. It resolves executable leaves into an exact,
 //! graph-local [`WorkerRegistry`], validates the actual initial input and secret-free runtime
-//! bindings, applies the deliberately small MVP execution restrictions, and only then delegates
-//! the workflow-language invariants to [`ProductionGraphVerifier`]. No method in this module
-//! allocates a workspace, resolves an environment value, or performs another runtime effect.
+//! bindings, and delegates the workflow-language invariants to [`ProductionGraphVerifier`]. No
+//! method in this module allocates a workspace, resolves an environment value, or performs another
+//! runtime effect.
 
 use std::collections::BTreeMap;
 
@@ -87,10 +87,15 @@ pub enum NativeV2AdmissionError {
         first: NodeName,
         second: NodeName,
     },
-    #[error("MVP concurrency would overlap writer {writer} with executable node {other}")]
-    ConcurrentWriter { writer: NodeName, other: NodeName },
-    #[error("MVP map {map} may execute writer {writer} concurrently across items")]
-    ConcurrentMapWriter { map: NodeName, writer: NodeName },
+    #[error(
+        "Git delivery node {delivery} may overlap writer {writer}; sequence delivery after writers settle"
+    )]
+    ConcurrentDelivery {
+        delivery: NodeName,
+        writer: NodeName,
+    },
+    #[error("map {map} may execute Git delivery node {delivery} concurrently across items")]
+    ConcurrentMapDelivery { map: NodeName, delivery: NodeName },
     #[error("graph-local worker descriptor could not be constructed: {0}")]
     WorkerDescriptor(String),
     #[error(transparent)]
@@ -114,7 +119,7 @@ impl NativeV2Admission {
         }
         let declarations = executable_declarations(&graph.root);
         validate_executable_bindings(&declarations, runtime.nodes(), delivery_policy)?;
-        validate_concurrency(&graph.root, runtime.nodes())?;
+        validate_delivery_concurrency(&graph.root)?;
         let registry = GraphBoundWorkerRegistry::from_declarations(graph, &declarations, runtime)?;
         ProductionGraphVerifier::new(registry)
             .verify(graph)
@@ -230,7 +235,7 @@ fn prepare_submission(
     validate_graph_input(&graph, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, runtime.nodes(), delivery_policy)?;
-    validate_concurrency(&graph.root, runtime.nodes())?;
+    validate_delivery_concurrency(&graph.root)?;
 
     Ok(PreparedSubmission {
         title,
@@ -258,7 +263,7 @@ async fn verify_submission(
 
 mod concurrency;
 mod validation;
-use concurrency::validate_concurrency;
+use concurrency::validate_delivery_concurrency;
 pub(crate) use validation::{sole_delivery_node, writer_nodes};
 use validation::{
     ExecutableDeclaration, executable_declarations, validate_executable_bindings,

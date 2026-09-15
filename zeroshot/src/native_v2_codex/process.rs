@@ -5,7 +5,8 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
-    exchange_process_io, open_provider_process, process_failure_detail, safe_provider_text,
+    exchange_process_io, open_provider_process, process_failure_detail, require_process_cleanup,
+    safe_provider_text,
 };
 use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
@@ -92,8 +93,11 @@ pub(super) async fn exchange_turn(
         }
     };
     let recorded = control.record_token_usage(usage).await;
-    if matches!(&resolved, Err(NodeRunnerError::Cancelled)) {
-        return Err(NodeRunnerError::Cancelled);
+    if matches!(
+        &resolved,
+        Err(NodeRunnerError::Cancelled | NodeRunnerError::CleanupUnconfirmed)
+    ) {
+        return resolved;
     }
     recorded?;
     resolved
@@ -142,9 +146,7 @@ pub(super) fn resolve_process_completion(
     completion: Result<ProcessSessionOutput, ProcessRunnerError>,
     cancelled: bool,
 ) -> Result<CodexOutput, NodeRunnerError> {
-    if process_was_cancelled(&output, &completion, cancelled) {
-        return Err(NodeRunnerError::Cancelled);
-    }
+    check_process_completion(&output, &completion, cancelled)?;
     let provider_output_failed = output
         .as_ref()
         .map_or(true, |output| output.failure_message().is_some());
@@ -158,9 +160,7 @@ pub(super) fn resolve_input_failure(
     completion: Result<ProcessSessionOutput, ProcessRunnerError>,
     cancelled: bool,
 ) -> Result<CodexOutput, NodeRunnerError> {
-    if process_was_cancelled(&output, &completion, cancelled) {
-        return Err(NodeRunnerError::Cancelled);
-    }
+    check_process_completion(&output, &completion, cancelled)?;
     let mut output = output.unwrap_or_else(|error| {
         CodexOutput::provider_failure(format!("provider output collection failed: {error}"))
     });
@@ -171,14 +171,20 @@ pub(super) fn resolve_input_failure(
     Ok(output)
 }
 
-fn process_was_cancelled(
+fn check_process_completion(
     output: &Result<CodexOutput, NodeRunnerError>,
     completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
     externally_cancelled: bool,
-) -> bool {
-    externally_cancelled
+) -> Result<(), NodeRunnerError> {
+    require_process_cleanup(completion)?;
+    if externally_cancelled
         || matches!(output, Err(NodeRunnerError::Cancelled))
         || matches!(completion, Ok(output) if output.cancelled)
+    {
+        Err(NodeRunnerError::Cancelled)
+    } else {
+        Ok(())
+    }
 }
 
 fn completion_detail(

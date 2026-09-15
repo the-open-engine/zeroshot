@@ -82,6 +82,7 @@ impl From<LiveOutput> for CapsuleOutput {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapsuleNodeFailure {
+    CleanupUnconfirmed,
     Cancelled,
     SessionLost,
     RunClosed,
@@ -92,6 +93,7 @@ pub enum CapsuleNodeFailure {
 impl CapsuleNodeFailure {
     fn from_runner(error: &NodeRunnerError) -> Self {
         match error {
+            NodeRunnerError::CleanupUnconfirmed => Self::CleanupUnconfirmed,
             NodeRunnerError::Cancelled => Self::Cancelled,
             NodeRunnerError::SessionLost => Self::SessionLost,
             NodeRunnerError::RunClosed => Self::RunClosed,
@@ -103,6 +105,7 @@ impl CapsuleNodeFailure {
 
     fn into_runner(self) -> NodeRunnerError {
         match self {
+            Self::CleanupUnconfirmed => NodeRunnerError::CleanupUnconfirmed,
             Self::Cancelled => NodeRunnerError::Cancelled,
             Self::SessionLost => NodeRunnerError::SessionLost,
             Self::RunClosed => NodeRunnerError::RunClosed,
@@ -220,7 +223,7 @@ pub struct CapsuleFilesystem {
 
 /// Establishes the capsule's role-aware Linux filesystem boundary.
 ///
-/// The single writer owns the shared workspace. Distinct verifier UIDs receive read/traverse but
+/// Writers share the run's workspace owner identity. Distinct verifier UIDs receive read/traverse but
 /// no mutation authority. The runtime root remains root-owned and non-writable; provider-specific
 /// private homes are created beneath it by [`HostedProcessPool`] identities.
 pub fn prepare_capsule_filesystem(

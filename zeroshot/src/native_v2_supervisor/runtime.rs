@@ -96,6 +96,15 @@ pub(super) enum DispatchResult {
     StartFailure(NativeV2SupervisorError),
 }
 
+impl DispatchResult {
+    pub(super) fn cleanup_unconfirmed(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed(Err(NodeRunnerError::CleanupUnconfirmed))
+        )
+    }
+}
+
 pub(super) struct FinishedDispatch {
     pub(super) execution: ExecutionId,
     pub(super) reference: ExecutionRef,
@@ -179,6 +188,9 @@ async fn observe_dispatch(
         Some(result) => result,
         None => events.await,
     };
+    if result.cleanup_unconfirmed() {
+        return result;
+    }
     match output_result {
         Ok(()) => interrupted.unwrap_or(result),
         Err(error) => DispatchResult::DurableEventFailure(error),
@@ -387,6 +399,7 @@ pub(super) fn runner_failure(error: NodeRunnerError) -> WorkerOutcome {
         | NodeRunnerError::Driver
         | NodeRunnerError::DriverDetail(_)
         | NodeRunnerError::ConnectionLost
+        | NodeRunnerError::CleanupUnconfirmed
         | NodeRunnerError::UnsafeOutput
         | NodeRunnerError::DurableOutputClosed
         | NodeRunnerError::CompletionClosed

@@ -226,3 +226,21 @@ fn driver_context_upgrades_only_payload_free_failures() {
         NodeRunnerError::DriverDetail("specific".to_owned())
     );
 }
+
+#[test]
+fn cleanup_confirmation_is_required_even_for_cancelled_processes() {
+    for cancelled in [false, true] {
+        let mut output = process_output();
+        output.cancelled = cancelled;
+        assert!(require_process_cleanup(&Ok(output.clone())).is_ok());
+        output.cleanup = crate::execution::process::ProcessCleanupEvidence::TimedOut;
+        assert!(matches!(
+            require_process_cleanup(&Ok(output)),
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+    }
+    assert!(matches!(
+        require_process_cleanup(&Err(ProcessRunnerError::Io("lost completion".to_owned()))),
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    ));
+}

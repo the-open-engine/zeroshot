@@ -197,3 +197,90 @@ async fn every_parallel_join_observes_completion_order_and_cancels_losers() {
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+
+#[tokio::test]
+async fn concurrent_writers_run_in_parallel_and_map_with_distinct_sessions() {
+    let mapped = graph(
+        sequence(
+            vec![
+                json!({
+                    "kind": "map", "name": "each", "state": record_type(),
+                    "body": step("mapped", 1_000),
+                    "over": {"source": "state", "path": ["items"]},
+                    "maxItems": 2, "promotedStatePaths": []
+                }),
+                succeed("done"),
+            ],
+            record_type(),
+        ),
+        record_type(),
+    );
+    let cases = [
+        (
+            parallel(
+                json!({"kind": "all"}),
+                vec![step("left", 1_000), step("right", 1_000)],
+            ),
+            Value::Null,
+            ["left", "right"],
+        ),
+        (
+            parallel(
+                json!({"kind": "all"}),
+                vec![step("left", 1_000), verifier("right", 1_000)],
+            ),
+            Value::Null,
+            ["left", "right"],
+        ),
+        (
+            mapped,
+            json!({"items": ["one", "two"]}),
+            ["mapped", "mapped"],
+        ),
+    ];
+    for scope in [SessionScope::Execution, SessionScope::NodeInstance] {
+        for (graph, input, nodes) in &cases {
+            let barrier = Arc::new(tokio::sync::Barrier::new(2));
+            let driver = FakeDriver::default();
+            for node in nodes {
+                driver
+                    .state()
+                    .scripts
+                    .entry((*node).to_owned())
+                    .or_default()
+                    .push_back(Behavior::Together(barrier.clone()));
+            }
+            let harness =
+                harness_with_session_scope(graph.clone(), input.clone(), driver, scope).await;
+            assert_eq!(
+                harness
+                    .supervisor
+                    .drive()
+                    .await
+                    .assert_value_with("concurrent writers complete"),
+                TerminalResult::Succeeded {
+                    output: Value::Null
+                }
+            );
+            assert_eq!(harness.driver.max_active(), 2);
+            assert_eq!(harness.sessions.opened.load(Ordering::SeqCst), 2);
+            assert_eq!(harness.sessions.closed.load(Ordering::SeqCst), 2);
+            let stored = stored_run(&harness.ledger).await;
+            assert_eq!(stored.snapshot.executions.len(), 2);
+            let identities: BTreeSet<_> = stored
+                .snapshot
+                .executions
+                .values()
+                .map(|execution| execution.reference.node_instance)
+                .collect();
+            assert_eq!(identities.len(), 2);
+            assert!(
+                stored
+                    .snapshot
+                    .executions
+                    .values()
+                    .all(|execution| { matches!(execution.state, NodeState::Completed { .. }) })
+            );
+        }
+    }
+}

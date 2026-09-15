@@ -405,7 +405,7 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
 }
 
 #[tokio::test]
-async fn rejects_parallel_writers_mixed_parallelism_and_writer_maps() {
+async fn admits_parallel_writers_mixed_parallelism_and_writer_maps() {
     let par = |left, right| {
         graph(vec![
             json!({
@@ -424,10 +424,7 @@ async fn rejects_parallel_writers_mixed_parallelism_and_writer_maps() {
         (named("left"), binding("claude-sonnet-5", None)),
         (named("right"), binding("claude-sonnet-5", None)),
     ]);
-    assert!(matches!(
-        NativeV2Admission.admit(submission(workers, nodes)).await,
-        Err(NativeV2AdmissionError::ConcurrentWriter { .. })
-    ));
+    assert_concurrent_admission(submission(workers, nodes), DeliveryPolicy::Optional).await;
 
     let mixed = par(
         null_step("writer", "agent.writer@1"),
@@ -437,10 +434,7 @@ async fn rejects_parallel_writers_mixed_parallelism_and_writer_maps() {
         (named("writer"), binding("claude-sonnet-5", None)),
         (named("reader"), binding("claude-sonnet-5", None)),
     ]);
-    assert!(matches!(
-        NativeV2Admission.admit(submission(mixed, nodes)).await,
-        Err(NativeV2AdmissionError::ConcurrentWriter { .. })
-    ));
+    assert_concurrent_admission(submission(mixed, nodes), DeliveryPolicy::Optional).await;
 
     let delivery_parallel = par(
         delivery_verifier("deliver", DeliveryMode::PullRequest),
@@ -453,10 +447,7 @@ async fn rejects_parallel_writers_mixed_parallelism_and_writer_maps() {
             (named("reader"), binding("claude-sonnet-5", None)),
         ]),
     );
-    assert!(matches!(
-        NativeV2Admission.admit(delivery_request).await,
-        Err(NativeV2AdmissionError::ConcurrentWriter { .. })
-    ));
+    assert_concurrent_admission(delivery_request, DeliveryPolicy::Required).await;
 
     let mapped = graph(vec![
         json!({
@@ -468,10 +459,28 @@ async fn rejects_parallel_writers_mixed_parallelism_and_writer_maps() {
         succeed("done"),
     ]);
     let nodes = BTreeMap::from([(named("mapped"), binding("claude-sonnet-5", None))]);
-    assert!(matches!(
-        NativeV2Admission.admit(submission(mapped, nodes)).await,
-        Err(NativeV2AdmissionError::ConcurrentMapWriter { .. })
-    ));
+    let mut request = submission(mapped, nodes);
+    request.initial_input = json!({"items":[null,null]});
+    assert_concurrent_admission(request, DeliveryPolicy::Optional).await;
+}
+
+async fn assert_concurrent_admission(request: RunSubmission, policy: DeliveryPolicy) {
+    NativeV2Admission
+        .validate_profile(&request.graph, &request.runtime, policy)
+        .await
+        .assert_value_with("concurrent reusable profile");
+    NativeV2Admission
+        .validate_intent(&submission_intent(&request), policy)
+        .await
+        .assert_value_with("concurrent source-neutral intent");
+    let expected_graph = request.graph.root.clone();
+    let expected_input = request.initial_input.clone();
+    let admitted = NativeV2Admission
+        .admit_with_policy(request, policy)
+        .await
+        .assert_value_with("concurrent submission");
+    assert_eq!(admitted.graph.root, expected_graph);
+    assert_eq!(admitted.initial_input, expected_input);
 }
 
 #[tokio::test]
@@ -505,3 +514,17 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 
 #[path = "tests/delivery.rs"]
 mod delivery;
+
+#[path = "tests/concurrency.rs"]
+mod concurrency;
+
+fn submission_intent(request: &RunSubmission) -> RunSubmissionIntent {
+    RunSubmissionIntent {
+        title: request.title.clone(),
+        graph: request.graph.clone(),
+        initial_input: request.initial_input.clone(),
+        runtime: request.runtime.clone(),
+        branch: None,
+        submission_key: request.submission_key.clone(),
+    }
+}

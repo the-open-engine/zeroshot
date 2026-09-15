@@ -392,3 +392,195 @@ fn build_cargo_fixture(workspace: &Path, scratch: &Path) -> std::process::Output
     );
     output
 }
+
+#[tokio::test]
+async fn root_concurrent_writers_share_files_and_cleanup_independently() {
+    // SAFETY: geteuid only inspects the current process identity.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only concurrent writer gate skipped outside the capsule identity");
+        return;
+    }
+    let fixture = Fixture::new();
+    let pool = HostedProcessPool::new(91_002, 91_002, 92_000, 92_000).assert_value();
+    crate::native_v2_capsule::prepare_capsule_filesystem(
+        crate::native_v2_capsule::CapsuleFilesystemSpec {
+            workspace: &fixture.candidate,
+            runtime_home: &fixture.runtime,
+            process_pool: pool,
+        },
+    )
+    .assert_value();
+    initialize_writer_repository(&fixture, pool);
+    let left_identity = pool
+        .identity(HostedProcessScope::WriterExecution(1))
+        .assert_value();
+    let right_identity = pool
+        .identity(HostedProcessScope::WriterExecution(2))
+        .assert_value();
+    assert_eq!(left_identity.uid(), right_identity.uid());
+    let left = shared_writer_files(&fixture, pool, 1);
+    let right = shared_writer_files(&fixture, pool, 2);
+    let left_script = "set -eu\n\
+        mkdir shared\n\
+        printf left > shared/left\n\
+        printf ready\n\
+        read finish\n\
+        test -f shared/right\n\
+        git status --porcelain >/dev/null";
+    let mut left_process = open(
+        left.clone(),
+        command(&left, left_script),
+        &fixture.cancellation,
+    )
+    .await;
+    assert!(left_process.recv_stdout().await.is_some());
+    let (right_cancel, _) = watch::channel(false);
+    let right_script = "set -eu\n\
+        printf right > shared/right\n\
+        chmod +x shared/left\n\
+        printf '+right' >> shared/left\n\
+        git status --porcelain >/dev/null\n\
+        printf ready\n\
+        read finish";
+    let mut right_process = open(right.clone(), command(&right, right_script), &right_cancel).await;
+    assert!(right_process.recv_stdout().await.is_some());
+    right_cancel.send_replace(true);
+    let stopped = right_process.wait().await.assert_value();
+    assert!(stopped.cancelled);
+    assert!(stopped.cleanup.proves_tree_empty());
+    drop(right_process);
+    let right_root = right.root.path.clone();
+    drop(right);
+    assert!(!right_root.exists());
+    assert!(left.root.path.exists());
+    left_process
+        .send(crate::execution::process::ProcessFrame::new(b"finish\n".to_vec()).assert_value())
+        .await
+        .assert_value();
+    left_process.close_stdin().await.assert_value();
+    let completed = left_process.wait().await.assert_value();
+    assert_eq!(completed.exit_code, Some(0));
+    assert!(!completed.cancelled);
+    assert!(completed.cleanup.proves_tree_empty());
+    assert_eq!(
+        fs::read_to_string(fixture.candidate.join("shared/left")).assert_value(),
+        "left+right"
+    );
+    assert_ne!(
+        fs::metadata(fixture.candidate.join("shared/left"))
+            .assert_value()
+            .permissions()
+            .mode()
+            & 0o100,
+        0
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.candidate.join("shared/right")).assert_value(),
+        "right"
+    );
+}
+
+fn shared_writer_files(
+    fixture: &Fixture,
+    pool: HostedProcessPool,
+    execution: u64,
+) -> Arc<ProviderExecutionFiles> {
+    let identity = pool
+        .identity(HostedProcessScope::WriterExecution(execution))
+        .assert_value();
+    let mut specification = fixture.specification(execution);
+    specification.runner = identity.runner();
+    specification.identity = Some(identity);
+    specification.verifier_copy = false;
+    set_owner(specification.home.path(), Some(identity)).assert_value();
+    Arc::new(ProviderExecutionFiles::prepare(specification).assert_value())
+}
+
+fn initialize_writer_repository(fixture: &Fixture, pool: HostedProcessPool) {
+    use std::os::unix::process::CommandExt;
+    let owner = pool.identity(HostedProcessScope::Writer).assert_value();
+    let output = std::process::Command::new("/usr/bin/git")
+        .args(["init", "--quiet"])
+        .current_dir(&fixture.candidate)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .uid(owner.uid())
+        .gid(owner.gid())
+        .output()
+        .assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn candidate_copy_preserves_a_pinned_symlink_after_its_path_is_replaced() {
+    let fixture = Fixture::new();
+    let link = fixture.candidate.join("link");
+    std::os::unix::fs::symlink("original-target", &link).assert_value();
+    let source = open_copy_source(libc::AT_FDCWD, &link).assert_value();
+    fs::remove_file(&link).assert_value();
+    std::os::unix::fs::symlink("replacement-target", &link).assert_value();
+
+    let specification = fixture.specification(1);
+    let destination = fixture.runtime.join("copied-link");
+    copy_entry(source, &destination, &specification).assert_value();
+    assert_eq!(
+        fs::read_link(destination).assert_value(),
+        Path::new("original-target")
+    );
+}
+
+#[test]
+fn root_candidate_copy_does_not_follow_a_writer_replaced_directory() {
+    use std::os::unix::process::CommandExt;
+
+    // SAFETY: geteuid only inspects the current process identity.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only candidate copy race gate skipped outside the capsule identity");
+        return;
+    }
+    let fixture = Fixture::new();
+    let writer_uid = 121_003;
+    let writer_gid = 121_000;
+    std::os::unix::fs::chown(&fixture.candidate, Some(writer_uid), Some(writer_gid)).assert_value();
+    let changing = fixture.candidate.join("changing");
+    fs::create_dir(&changing).assert_value();
+    fs::write(changing.join("public"), "candidate contents").assert_value();
+    let private = fixture.runtime.join("root-private");
+    create_private_directory(&private).assert_value();
+    fs::write(private.join("secret"), "private session state").assert_value();
+    fs::set_permissions(private.join("secret"), fs::Permissions::from_mode(0o600)).assert_value();
+    let source = open_copy_source(libc::AT_FDCWD, &changing).assert_value();
+    let writer = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "test ! -r \"$1/secret\" && mv changing retained && ln -s \"$1\" changing",
+            "copy-race",
+        ])
+        .arg(&private)
+        .current_dir(&fixture.candidate)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .uid(writer_uid)
+        .gid(writer_gid)
+        .output()
+        .assert_value();
+    assert!(
+        writer.status.success(),
+        "{}",
+        String::from_utf8_lossy(&writer.stderr)
+    );
+
+    let specification = fixture.specification(1);
+    let destination = fixture.runtime.join("copied-directory");
+    copy_entry(source, &destination, &specification).assert_value();
+    assert_eq!(
+        fs::read_to_string(destination.join("public")).assert_value(),
+        "candidate contents"
+    );
+    assert!(!destination.join("secret").exists());
+    assert_eq!(fs::read_link(changing).assert_value(), private);
+}

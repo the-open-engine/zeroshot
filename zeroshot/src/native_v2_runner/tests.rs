@@ -20,7 +20,7 @@ use super::test_support::{
 use crate::native_v2_contract::{DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName};
 
 #[tokio::test]
-async fn parallel_verifiers_overlap_but_writers_are_exclusive() {
+async fn parallel_writers_and_verifiers_overlap() {
     let (runner, driver, _) = runner();
     let mut left = runner
         .start(request("run", "left", (1, 1)))
@@ -55,7 +55,7 @@ async fn parallel_verifiers_overlap_but_writers_are_exclusive() {
     first.assert_value();
     second.assert_value();
     verifier.assert_value();
-    assert!(!driver.concurrency.overlap.load(Ordering::SeqCst));
+    assert!(driver.concurrency.overlap.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

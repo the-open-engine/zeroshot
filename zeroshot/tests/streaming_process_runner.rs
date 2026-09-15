@@ -32,7 +32,7 @@ fn command(program: &str, argv: Vec<&str>) -> ProcessSessionCommand {
         environment: BTreeMap::new(),
         workspace: WorkspaceCapability {
             current_dir: std::env::temp_dir(),
-            mode: WorkspaceAccessMode::Exclusive,
+            mode: WorkspaceAccessMode::ReadWrite,
         },
         deadline: Some(Instant::now() + Duration::from_secs(10)),
     }

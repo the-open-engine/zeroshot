@@ -93,6 +93,8 @@ pub enum NativeV2SupervisorError {
     RunNotFound,
     #[error("durable run state is inconsistent with the active supervisor")]
     InvalidState,
+    #[error("provider process cleanup could not be confirmed")]
+    CleanupUnconfirmed,
     #[error("a supervisor task failed")]
     Task,
     #[error("supervisor task panicked")]
@@ -429,7 +431,26 @@ fn has_required_delivery_receipt(
     let Some(WorkerOutcome::Verifier { output, .. }) = last_writer.outcome() else {
         return false;
     };
-    is_matching_success_receipt(output, mode, &target)
+    let Ok(delivery_start) = cursor_sequence(&last_writer.started_at) else {
+        return false;
+    };
+    // A receipt can certify the candidate only after every other writer has stopped mutating it.
+    // Completion order alone is insufficient when a writer overlaps the delivery execution.
+    let writers_settled = snapshot.executions.values().all(|execution| {
+        if execution.reference.execution == last_writer.reference.execution
+            || !writers.contains(&execution.reference.node)
+        {
+            return true;
+        }
+        match &execution.state {
+            NodeState::Completed { at, .. } | NodeState::Voided { at, .. } => {
+                cursor_sequence(at).is_ok_and(|at| at < delivery_start)
+            }
+            NodeState::Active => false,
+        }
+    });
+    writers_settled
+        && is_matching_success_receipt(output, mode, &target)
         && contains_exact_value(terminal_output, output)
 }
 

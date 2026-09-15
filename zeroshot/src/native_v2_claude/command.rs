@@ -67,7 +67,7 @@ pub(super) fn claude_arguments(
 pub(super) fn workspace_access(role: NodeRole) -> Result<WorkspaceAccessMode, NodeRunnerError> {
     match role {
         NodeRole::Verifier => Ok(WorkspaceAccessMode::ReadOnly),
-        NodeRole::Worker => Ok(WorkspaceAccessMode::Exclusive),
+        NodeRole::Worker => Ok(WorkspaceAccessMode::ReadWrite),
         NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
     }
 }

@@ -30,28 +30,39 @@ fn process_cancellation_wins_over_output_collection_failure() {
 }
 
 #[test]
-fn external_cancellation_wins_over_process_completion_failure() {
+fn unknown_process_cleanup_is_fatal_despite_external_cancellation() {
     let resolved = resolve_process_completion(
         Err(NodeRunnerError::DurableOutputClosed),
         Err(ProcessRunnerError::Io("supervisor stopped".to_owned())),
         true,
     );
 
-    assert!(matches!(resolved, Err(NodeRunnerError::Cancelled)));
+    assert!(matches!(resolved, Err(NodeRunnerError::CleanupUnconfirmed)));
 }
 
 #[test]
-fn cleanup_evidence_is_retained_with_output_collection_failure() {
-    let output = resolve_process_completion(
-        Err(NodeRunnerError::DurableOutputClosed),
-        Ok(completion(ProcessCleanupEvidence::TimedOut, false)),
-        false,
-    )
-    .assert_value();
-    let detail = output.failure_message().assert_value();
-
-    assert!(detail.contains("provider output collection failed"));
-    assert!(detail.contains("cleanup did not prove the process tree empty"));
+fn unconfirmed_cleanup_cannot_become_retryable_provider_output() {
+    for cancelled in [false, true] {
+        let completed = resolve_process_completion(
+            Err(NodeRunnerError::DurableOutputClosed),
+            Ok(completion(ProcessCleanupEvidence::TimedOut, cancelled)),
+            cancelled,
+        );
+        let input_failed = resolve_input_failure(
+            Err(NodeRunnerError::Cancelled),
+            ProcessRunnerError::Io("stdin closed".to_owned()),
+            Ok(completion(ProcessCleanupEvidence::TimedOut, cancelled)),
+            cancelled,
+        );
+        assert!(matches!(
+            completed,
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+        assert!(matches!(
+            input_failed,
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        ));
+    }
 }
 
 #[test]

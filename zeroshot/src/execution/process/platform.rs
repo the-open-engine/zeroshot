@@ -13,25 +13,39 @@ pub enum ProcessContainment {
         uid: u32,
         gid: u32,
     },
+    #[cfg(target_os = "linux")]
+    WorkerGroup {
+        uid: u32,
+        gid: u32,
+        group: u32,
+    },
+}
+
+/// Immutable membership used to find descendants after they detach from a process group.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum WorkerMembership {
+    Uid(u32),
+    SupplementaryGroup(u32),
 }
 
 impl ProcessContainment {
-    #[cfg(unix)]
-    #[must_use]
-    const fn worker_uid(self) -> Option<u32> {
-        #[cfg(target_os = "linux")]
-        if let Self::WorkerUid { uid, .. } = self {
-            return Some(uid);
+    #[cfg(target_os = "linux")]
+    pub(super) const fn membership(self) -> Option<WorkerMembership> {
+        match self {
+            Self::ProcessGroup => None,
+            Self::WorkerUid { uid, .. } => Some(WorkerMembership::Uid(uid)),
+            Self::WorkerGroup { group, .. } => Some(WorkerMembership::SupplementaryGroup(group)),
         }
-        None
     }
 
     #[cfg(unix)]
-    #[must_use]
-    const fn worker_identity(self) -> Option<(u32, u32)> {
+    pub(super) const fn worker_identity(self) -> Option<(u32, u32, Option<u32>)> {
         #[cfg(target_os = "linux")]
-        if let Self::WorkerUid { uid, gid } = self {
-            return Some((uid, gid));
+        match self {
+            Self::WorkerUid { uid, gid } => return Some((uid, gid, None)),
+            Self::WorkerGroup { uid, gid, group } => return Some((uid, gid, Some(group))),
+            Self::ProcessGroup => {}
         }
         None
     }
@@ -66,8 +80,8 @@ pub struct CleanupOutcome {
 pub struct ProcessTreeRegistration {
     #[cfg(windows)]
     job: Option<usize>,
-    #[cfg(target_os = "linux")]
-    worker_uid: Option<u32>,
+    #[cfg(unix)]
+    containment: ProcessContainment,
 }
 
 impl ProcessTreeRegistration {
@@ -90,8 +104,8 @@ impl Drop for ProcessTreeRegistration {
 pub struct ProcessTreeHandle {
     #[cfg(unix)]
     process_group_id: Option<i32>,
-    #[cfg(target_os = "linux")]
-    worker_uid: Option<u32>,
+    #[cfg(unix)]
+    containment: ProcessContainment,
 
     #[cfg(windows)]
     job: usize,
@@ -101,7 +115,7 @@ impl ProcessTreeHandle {
     pub const fn requires_explicit_cleanup_evidence(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            self.worker_uid.is_some()
+            self.containment.membership().is_some()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -121,7 +135,7 @@ pub fn register_process_tree_for(
     containment: ProcessContainment,
 ) -> Result<ProcessTreeRegistration, io::Error> {
     #[cfg(unix)]
-    super::platform_unix::register_process_tree(containment.worker_uid())?;
+    super::platform_unix::register_process_tree(containment)?;
     #[cfg(not(unix))]
     let _ = containment;
     #[cfg(windows)]
@@ -133,8 +147,8 @@ pub fn register_process_tree_for(
     #[cfg(not(windows))]
     {
         Ok(ProcessTreeRegistration {
-            #[cfg(target_os = "linux")]
-            worker_uid: containment.worker_uid(),
+            #[cfg(unix)]
+            containment,
         })
     }
 }
@@ -145,12 +159,9 @@ pub fn capture_process_tree(
 ) -> Result<ProcessTreeHandle, io::Error> {
     #[cfg(unix)]
     {
-        #[cfg(not(target_os = "linux"))]
-        let _ = registration;
         Ok(ProcessTreeHandle {
             process_group_id: child.id().and_then(|value| i32::try_from(value).ok()),
-            #[cfg(target_os = "linux")]
-            worker_uid: registration.worker_uid,
+            containment: registration.containment,
         })
     }
 
@@ -200,7 +211,7 @@ pub async fn terminate_process_tree(
 
 #[cfg(unix)]
 pub fn configure_process(command: &mut Command, containment: ProcessContainment) {
-    super::platform_unix::configure_process(command, containment.worker_identity());
+    super::platform_unix::configure_process(command, containment);
 }
 #[cfg(windows)]
 pub fn configure_process(command: &mut Command, _containment: ProcessContainment) {
@@ -212,20 +223,7 @@ pub fn configure_process(_command: &mut Command, _containment: ProcessContainmen
 
 #[cfg(unix)]
 fn kill_process_tree(handle: &ProcessTreeHandle, child: &mut tokio::process::Child) -> Vec<String> {
-    super::platform_unix::kill_process_tree(
-        handle.process_group_id,
-        {
-            #[cfg(target_os = "linux")]
-            {
-                handle.worker_uid
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                None
-            }
-        },
-        child,
-    )
+    super::platform_unix::kill_process_tree(handle.process_group_id, handle.containment, child)
 }
 
 #[cfg(windows)]
@@ -248,8 +246,8 @@ pub fn process_tree_has_live_members(handle: &ProcessTreeHandle) -> Result<bool,
     #[cfg(unix)]
     {
         #[cfg(target_os = "linux")]
-        if let Some(worker_uid) = handle.worker_uid {
-            return super::platform_unix::worker_uid_has_live_members(worker_uid);
+        if let Some(membership) = handle.containment.membership() {
+            return super::platform_unix::worker_has_live_members(membership);
         }
         let Some(process_group_id) = handle.process_group_id else {
             return Ok(false);
@@ -271,8 +269,8 @@ pub fn process_tree_has_live_members(handle: &ProcessTreeHandle) -> Result<bool,
 #[cfg(unix)]
 async fn await_group_exit(handle: &ProcessTreeHandle, deadline: Instant) -> CleanupOutcome {
     #[cfg(target_os = "linux")]
-    if let Some(worker_uid) = handle.worker_uid {
-        return await_worker_uid_exit(worker_uid, deadline).await;
+    if let Some(membership) = handle.containment.membership() {
+        return await_worker_exit(membership, deadline).await;
     }
     let Some(process_group_id) = handle.process_group_id else {
         return CleanupOutcome {
@@ -320,9 +318,9 @@ async fn await_process_group_exit(process_group_id: i32, deadline: Instant) -> C
     }
 }
 #[cfg(target_os = "linux")]
-async fn await_worker_uid_exit(worker_uid: u32, deadline: Instant) -> CleanupOutcome {
+async fn await_worker_exit(membership: WorkerMembership, deadline: Instant) -> CleanupOutcome {
     loop {
-        match super::platform_unix::reap_and_kill_worker_uid_processes(worker_uid) {
+        match super::platform_unix::reap_and_kill_worker_processes(membership) {
             Ok(false) => {
                 return CleanupOutcome {
                     cleanup: ProcessCleanupEvidence::Reaped,
