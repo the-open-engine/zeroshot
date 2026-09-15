@@ -243,7 +243,8 @@ fn set_owner(path: &Path, identity: Option<HostedProcessIdentity>) -> io::Result
 
 #[cfg(target_os = "linux")]
 fn copy_candidate(specification: &ExecutionFilesystemSpec, workspace: &Path) -> io::Result<()> {
-    let candidate = fs::canonicalize(&specification.candidate)?;
+    let source = open_copy_root(&specification.candidate)?;
+    let candidate = fs::read_link(copy_source_path(&source))?;
     let runtime_root = fs::canonicalize(
         specification
             .root
@@ -253,16 +254,50 @@ fn copy_candidate(specification: &ExecutionFilesystemSpec, workspace: &Path) -> 
     if candidate.starts_with(&runtime_root) || runtime_root.starts_with(&candidate) {
         return Err(io::Error::other("candidate and runtime roots overlap"));
     }
-    let source = open_copy_source(libc::AT_FDCWD, &candidate)?;
-    if !source.metadata()?.is_dir() {
-        return Err(io::Error::other("candidate is not a directory"));
-    }
     copy_entry(source, workspace, specification)
 }
 
 #[cfg(not(target_os = "linux"))]
 fn copy_candidate(_specification: &ExecutionFilesystemSpec, _workspace: &Path) -> io::Result<()> {
     Err(io::Error::other("hosted verifier copies require Linux"))
+}
+
+// Hosted filesystem preparation canonicalizes paths before writers start. Pin every component
+// without resolving fresh symlinks: O_NOFOLLOW on an absolute open protects only its leaf.
+#[cfg(target_os = "linux")]
+fn open_copy_root(path: &Path) -> io::Result<fs::File> {
+    use std::os::fd::AsRawFd;
+    use std::path::Component;
+
+    let path = std::path::absolute(path)?;
+    let mut source = open_copy_directory(libc::AT_FDCWD, Path::new("/"))?;
+    let mut parents = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                if let Some(parent) = parents.pop() {
+                    source = parent;
+                }
+            }
+            Component::Normal(name) => {
+                let child = open_copy_directory(source.as_raw_fd(), Path::new(name))?;
+                parents.push(source);
+                source = child;
+            }
+            Component::Prefix(_) => return Err(io::Error::other("invalid candidate path")),
+        }
+    }
+    Ok(source)
+}
+
+#[cfg(target_os = "linux")]
+fn open_copy_directory(parent: std::os::fd::RawFd, name: &Path) -> io::Result<fs::File> {
+    let source = open_copy_source(parent, name)?;
+    if !source.metadata()?.is_dir() {
+        return Err(io::Error::other("candidate path is not a directory"));
+    }
+    Ok(source)
 }
 
 // O_PATH pins an entry without following symlinks or opening FIFOs/devices for I/O.

@@ -5,6 +5,9 @@ pub(super) async fn drain_terminalizing_tasks(
 ) -> Result<(), NativeV2SupervisorError> {
     while let Some(finished) = tasks.join_next().await {
         let finished = finished.map_err(supervisor_task_error)?;
+        if finished.result.cleanup_unconfirmed() {
+            return Err(NativeV2SupervisorError::CleanupUnconfirmed);
+        }
         match finished.result {
             DispatchResult::DurableEventFailure(error) => return Err(error.into()),
             DispatchResult::StartFailure(error) => return Err(error),

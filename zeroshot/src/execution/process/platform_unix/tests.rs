@@ -100,38 +100,52 @@ async fn root_writer_membership_survives_namespaces_and_detached_exec() {
         printf '%s %s\n' \"$$\" \"$!\"; read finish";
     command
         .args(["-c", script])
+        .current_dir(std::env::temp_dir())
         .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
-    let registration = register_process_tree_for(containment).assert_value();
+    let registration = register_process_tree_for(containment)
+        .unwrap_or_else(|error| panic!("namespace probe registration failed: {error}"));
     configure_process(&mut command, containment);
     // SAFETY: this probe uses only raw syscalls and preallocated mapping bytes after fork.
     unsafe {
         command.pre_exec(move || namespace_group_probe(uid_map.as_bytes(), gid_map.as_bytes()));
     }
-    let mut child = command.spawn().assert_value();
+    let mut child = command
+        .spawn()
+        .unwrap_or_else(|error| panic!("namespace probe launch failed: {error}"));
     let handle = capture_process_tree(registration, &mut child).assert_value();
     let mut stdout = tokio::io::BufReader::new(child.stdout.take().assert_value());
     let mut line = String::new();
-    tokio::time::timeout(
+    let output = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         stdout.read_line(&mut line),
     )
-    .await
-    .assert_value()
-    .assert_value();
+    .await;
+    let members = linux_worker_processes(membership);
+    let occupied = validate_linux_worker_boundary(membership).is_err();
+    let completed = terminate_process_tree(&handle, &mut child).await;
+    output
+        .unwrap_or_else(|error| panic!("namespace probe output timed out: {error}"))
+        .unwrap_or_else(|error| panic!("namespace probe output read failed: {error}"));
     let observed = line
         .split_whitespace()
         .map(str::parse::<i32>)
         .collect::<Result<Vec<_>, _>>()
-        .assert_value();
-    let members = linux_worker_processes(membership).assert_value();
-    let occupied = validate_linux_worker_boundary(membership).is_err();
-    let completed = terminate_process_tree(&handle, &mut child).await;
-    assert_eq!(observed.len(), 2);
-    assert!(observed.iter().all(|pid| members.contains(pid)));
+        .unwrap_or_else(|error| panic!("invalid namespace probe PIDs {line:?}: {error}"));
+    let members =
+        members.unwrap_or_else(|error| panic!("namespace probe membership scan failed: {error}"));
+    assert_eq!(observed.len(), 2, "namespace probe output: {line:?}");
+    assert!(
+        observed.iter().all(|pid| members.contains(pid)),
+        "expected {observed:?} in {members:?}"
+    );
     assert!(occupied);
-    assert!(completed.cleanup.proves_tree_empty());
+    assert!(
+        completed.cleanup.proves_tree_empty(),
+        "{:?}",
+        completed.error
+    );
     assert!(!worker_has_live_members(membership).assert_value());
 }
 
@@ -161,8 +175,21 @@ fn map_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> io::Result<()> {
         (c"/proc/self/setgroups", b"deny\n"),
         (c"/proc/self/gid_map", gid_map),
     ] {
-        write_namespace_mapping(path, bytes)?;
+        let result = write_namespace_mapping(path, bytes);
         groups_cannot_be_dropped()?;
+        match result {
+            Ok(()) => {}
+            Err(error) if matches!(error.raw_os_error(), Some(libc::EPERM | libc::EACCES)) => {
+                // Host policies may allow a namespace while denying its UID/GID mappings.
+                // The child still proves marker inheritance and cleanup in that namespace.
+                report_namespace_probe(b"namespace mapping denied at ", path.to_bytes());
+                return Ok(());
+            }
+            Err(error) => {
+                report_namespace_probe(b"namespace mapping failed at ", path.to_bytes());
+                return Err(error);
+            }
+        }
     }
     Ok(())
 }
@@ -188,16 +215,25 @@ fn enter_user_namespace() -> io::Result<bool> {
     let error = io::Error::last_os_error();
     if matches!(
         error.raw_os_error(),
-        Some(libc::EPERM | libc::EINVAL | libc::ENOSPC)
+        Some(libc::EPERM | libc::EACCES | libc::EINVAL | libc::ENOSPC)
     ) {
-        let skipped = b"user namespace subcase skipped: namespaces unavailable\n";
-        // SAFETY: the static byte slice remains live; stderr is the inherited diagnostic pipe.
-        unsafe {
-            libc::write(libc::STDERR_FILENO, skipped.as_ptr().cast(), skipped.len());
-        }
+        report_namespace_probe(
+            b"namespace creation unavailable at ",
+            b"unshare(CLONE_NEWUSER)",
+        );
         return Ok(false);
     }
+    report_namespace_probe(b"namespace creation failed at ", b"unshare(CLONE_NEWUSER)");
     Err(error)
+}
+
+fn report_namespace_probe(message: &[u8], operation: &[u8]) {
+    for bytes in [message, operation, b"\n"] {
+        // SAFETY: borrowed bytes stay live; raw write avoids allocation in the post-fork child.
+        unsafe {
+            libc::write(libc::STDERR_FILENO, bytes.as_ptr().cast(), bytes.len());
+        }
+    }
 }
 
 fn write_namespace_mapping(path: &std::ffi::CStr, bytes: &[u8]) -> io::Result<()> {

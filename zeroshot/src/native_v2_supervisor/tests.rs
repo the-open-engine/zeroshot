@@ -418,3 +418,6 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 
 #[path = "tests/startup.rs"]
 mod startup;
+
+#[path = "tests/terminalization.rs"]
+mod terminalization;

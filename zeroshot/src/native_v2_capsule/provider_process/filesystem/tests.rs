@@ -547,17 +547,37 @@ fn root_candidate_copy_does_not_follow_a_writer_replaced_directory() {
     let writer_gid = 121_000;
     std::os::unix::fs::chown(&fixture.candidate, Some(writer_uid), Some(writer_gid)).assert_value();
     let changing = fixture.candidate.join("changing");
-    fs::create_dir(&changing).assert_value();
-    fs::write(changing.join("public"), "candidate contents").assert_value();
-    let private = fixture.runtime.join("root-private");
+    let candidate = changing.join("workspace");
+    fs::create_dir_all(&candidate).assert_value();
+    fs::write(candidate.join("public"), "candidate contents").assert_value();
+    let private = fixture._directory.child("root-private");
     create_private_directory(&private).assert_value();
-    fs::write(private.join("secret"), "private session state").assert_value();
-    fs::set_permissions(private.join("secret"), fs::Permissions::from_mode(0o600)).assert_value();
-    let source = open_copy_source(libc::AT_FDCWD, &changing).assert_value();
+    fs::create_dir(private.join("workspace")).assert_value();
+    let secret = private.join("workspace/secret");
+    fs::write(&secret, "private session state").assert_value();
+    fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).assert_value();
+    // Existing configured aliases are resolved by the filesystem preparer before workers start.
+    let alias = fixture._directory.child("candidate-alias");
+    std::os::unix::fs::symlink(&fixture.candidate, &alias).assert_value();
+    let prepared = crate::native_v2_capsule::prepare_capsule_filesystem(
+        crate::native_v2_capsule::CapsuleFilesystemSpec {
+            workspace: &alias.join("changing/workspace"),
+            runtime_home: &fixture.runtime,
+            process_pool: HostedProcessPool::new(writer_uid, writer_gid, 122_000, 122_000)
+                .assert_value(),
+        },
+    )
+    .assert_value();
+    assert_eq!(
+        prepared.workspace,
+        fs::canonicalize(candidate).assert_value()
+    );
+    let candidate = prepared.workspace;
+    let source = open_copy_root(&candidate).assert_value();
     let writer = std::process::Command::new("/bin/sh")
         .args([
             "-c",
-            "test ! -r \"$1/secret\" && mv changing retained && ln -s \"$1\" changing",
+            "test ! -r \"$1/workspace/secret\" && mv changing retained && ln -s \"$1\" changing",
             "copy-race",
         ])
         .arg(&private)
@@ -574,7 +594,14 @@ fn root_candidate_copy_does_not_follow_a_writer_replaced_directory() {
         String::from_utf8_lossy(&writer.stderr)
     );
 
-    let specification = fixture.specification(1);
+    // A source root reopened after the swap must reject the symlinked ancestor, even though
+    // the final workspace component is a directory and the target is outside the runtime root.
+    let mut specification = fixture.specification(1);
+    specification.candidate = candidate;
+    assert!(ProviderExecutionFiles::prepare(specification).is_err());
+
+    // A root pinned before the swap must still copy the original directory inode.
+    let specification = fixture.specification(2);
     let destination = fixture.runtime.join("copied-directory");
     copy_entry(source, &destination, &specification).assert_value();
     assert_eq!(
