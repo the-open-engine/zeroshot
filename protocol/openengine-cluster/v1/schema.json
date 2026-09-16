@@ -507,6 +507,12 @@
       ],
       "type": "string"
     },
+    "CopilotProvider": {
+      "enum": [
+        "github"
+      ],
+      "type": "string"
+    },
     "DataSelector": {
       "oneOf": [
         {
@@ -4290,6 +4296,37 @@
     },
     "RuntimePlan": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "copilot",
+              "type": "string"
+            },
+            "nodes": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/NodeRuntimeBinding"
+                }
+              },
+              "type": "object"
+            },
+            "provider": {
+              "$ref": "#/$defs/CopilotProvider"
+            },
+            "size": {
+              "$ref": "#/$defs/RunSize"
+            }
+          },
+          "required": [
+            "harness",
+            "provider",
+            "size",
+            "nodes"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {

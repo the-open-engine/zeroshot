@@ -96,7 +96,7 @@ fn help_explains_runtime_configuration() {
     let contract_prose = [
         concat!(
             "provider choices are codex/openai, codex/openrouter, codex/bedrock, ",
-            "claude/anthropic, claude/openrouter, claude/bedrock, codex/gateway, and claude/gateway."
+            "claude/anthropic, claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, and copilot/github."
         )
         .to_owned(),
         concat!(

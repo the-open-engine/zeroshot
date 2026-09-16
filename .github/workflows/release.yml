@@ -377,6 +377,14 @@ jobs:
             exit 1
           }
 
+      - name: Smoke Copilot as an isolated user
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /work:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=10001,gid=10001 \
+            --user 10001:10001 --env HOME=/work \
+            --entrypoint copilot "$ZEROSHOT_IMAGE:$RELEASE_VERSION" \
+            --no-auto-update --version
+
       - name: Compile with the isolated runtime toolchains
         run: |
           docker run --rm --network none --read-only \

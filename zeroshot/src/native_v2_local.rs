@@ -26,6 +26,7 @@ use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, Cla
 use crate::native_v2_cli::PreparedRunRequest;
 use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
+use crate::native_v2_copilot::CopilotConfig;
 use crate::native_v2_delivery::{
     DeliveryTarget, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
 };
@@ -210,6 +211,13 @@ pub fn build_local_process_candidate(
     let local_home = current_user_home();
     let process_pool = HostedProcessPool::hosted_default();
     let harness = match &admitted.runtime {
+        RuntimePlan::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
+            executable: PathBuf::from("copilot"),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.clone(),
+            search_path: search_path.clone(),
+            process_pool,
+        }),
         RuntimePlan::Codex { provider, .. } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
             provider: *provider,
             executable: PathBuf::from("codex"),

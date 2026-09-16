@@ -777,10 +777,11 @@ RUNTIME CONFIGURATION
       }
 
     Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-    claude/openrouter, claude/bedrock, codex/gateway, and claude/gateway. Gateway connections
+    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, and copilot/github. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY; Codex uses Responses and Claude uses Messages.
     Known-incompatible harness/provider pairs are
-    codex/anthropic and claude/openai. Model IDs are passed unchanged to the selected harness and
+    codex/anthropic and claude/openai. Copilot uses a user-backed GitHub connection with
+    COPILOT_GITHUB_TOKEN. Model IDs are passed unchanged to the selected harness and
     provider; Zeroshot does not maintain or validate provider model catalogs.
 
     Sizes are small, medium, and large.

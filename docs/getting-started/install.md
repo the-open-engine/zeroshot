@@ -17,7 +17,8 @@ installer dependency; the command itself is a Rust executable.
 Run Zeroshot from a Git worktree, and install the agent harness named by the runtime plan:
 
 - install and sign in to Codex for `"harness": "codex"`;
-- install and sign in to Claude Code for `"harness": "claude"`.
+- install and sign in to Claude Code for `"harness": "claude"`;
+- install GitHub Copilot CLI 1.0.85 for `"harness": "copilot"` with `"provider": "github"`.
 
 Provider credentials can come from the current environment or the private Zeroshot connection
 store. The command below prompts without echo and keeps the value out of runtime JSON:
@@ -46,3 +47,23 @@ For a long-running target, use `ghcr.io/the-open-engine/zeroshot-target`. See th
 [targets guide](../concepts/targets.md) for a Docker setup bound to loopback.
 
 [Validate and run a first task](first-run.md) after installation.
+
+## GitHub Copilot
+
+Copilot uses your GitHub user identity and Copilot entitlement. Store a user OAuth token or
+fine-grained personal token with Copilot Requests permission in the `github` connection's
+`COPILOT_GITHUB_TOKEN` field. A GitHub App installation token is not the user-backed route.
+The token stays in private RPC and is excluded from agent tool environments.
+
+```json
+{"harness":"copilot","provider":"github","model":"auto"}
+```
+
+Model IDs pass unchanged to Copilot. Zeroshot uses headless RPC schema output and validates each
+response locally, allowing at most two correction turns in the same session. Install the pinned
+CLI version above; the target image already includes it.
+
+Hosted connection resolvers may additionally declare `COPILOT_GITHUB_TOKEN_EXPIRES_AT` (Unix
+seconds). Copilot then requests credentials through the resolver throughout a long execution.
+The resolver must return a refreshed token with more than one hour remaining. Static tokens
+without expiry metadata are supplied once when each provider process starts.

@@ -9,6 +9,7 @@ pub mod native_v2_cli;
 pub mod native_v2_cloud;
 pub mod native_v2_codex;
 pub mod native_v2_contract;
+pub mod native_v2_copilot;
 pub mod native_v2_delivery;
 pub mod native_v2_hosting;
 pub mod native_v2_local;

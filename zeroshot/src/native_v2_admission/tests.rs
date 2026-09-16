@@ -367,7 +367,7 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
     let admitted = NativeV2Admission.admit(codex_runtime).await.assert_value();
     let provider = match &admitted.runtime {
         RuntimePlan::Codex { provider, .. } => Some(provider),
-        RuntimePlan::Claude { .. } => None,
+        RuntimePlan::Claude { .. } | RuntimePlan::Copilot { .. } => None,
     };
     let provider = provider.assert_value_with("admission preserves the Codex harness");
     assert_eq!(*provider, CodexProvider::Bedrock);
@@ -386,14 +386,14 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
     );
     let provider = match &mut claude_runtime.runtime {
         RuntimePlan::Claude { provider, .. } => Some(provider),
-        RuntimePlan::Codex { .. } => None,
+        RuntimePlan::Codex { .. } | RuntimePlan::Copilot { .. } => None,
     };
     let provider = provider.assert_value_with("submission fixture uses Claude");
     *provider = ClaudeProvider::Bedrock;
     let admitted = NativeV2Admission.admit(claude_runtime).await.assert_value();
     let provider = match &admitted.runtime {
         RuntimePlan::Claude { provider, .. } => Some(provider),
-        RuntimePlan::Codex { .. } => None,
+        RuntimePlan::Codex { .. } | RuntimePlan::Copilot { .. } => None,
     };
     let provider = provider.assert_value_with("admission preserves the Claude harness");
     assert_eq!(*provider, ClaudeProvider::Bedrock);

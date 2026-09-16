@@ -90,7 +90,7 @@ zeroshot run \
 ### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
-engine plus pinned Codex and Claude harness CLIs.
+engine plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
 
 ```bash
 docker run --rm --detach --name zeroshot-target \

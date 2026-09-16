@@ -416,3 +416,33 @@ async fn validation_only_reports_graph_and_runtime_causes_without_backend_contac
         assert_eq!(error.to_string(), expected);
     }
 }
+
+#[tokio::test]
+async fn copilot_uniform_runtime_preserves_model_and_declares_only_its_user_token() {
+    let (_files, command) = uniform_runtime_command(
+        "Copilot runtime",
+        json!({
+            "harness":"copilot", "provider":"github", "model":"opaque-future-model",
+        }),
+    );
+    let backend = FakeBackend::default();
+    let available =
+        |name: &str| (name == "COPILOT_GITHUB_TOKEN").then(|| OsString::from("user-token"));
+    execute_with_environment(command, &backend, &available)
+        .await
+        .assert_value();
+    let calls = backend.calls();
+    let runtime = match calls.as_slice() {
+        [Call::Submit { runtime, .. }] => Some(runtime),
+        _ => None,
+    }
+    .assert_value();
+    let runtime = serde_json::to_value(runtime).assert_value();
+    assert_eq!(runtime["harness"], "copilot");
+    assert_eq!(runtime["provider"], "github");
+    assert_eq!(runtime["nodes"]["worker"]["model"], "opaque-future-model");
+    assert_eq!(
+        runtime["nodes"]["worker"]["connections"],
+        json!({"github":["COPILOT_GITHUB_TOKEN"]})
+    );
+}

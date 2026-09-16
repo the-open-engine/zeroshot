@@ -39,6 +39,7 @@ use identity_leases::{ActiveRunProcessPool, ActiveRunProcessPools};
 
 pub(super) struct ProductionCapsuleConfig {
     pub storage_root: PathBuf,
+    pub copilot_executable: PathBuf,
     pub codex_executable: PathBuf,
     pub claude_executable: String,
     pub claude_prefix_arguments: Vec<String>,
@@ -66,7 +67,8 @@ pub(super) struct ProductionCapsuleAllocator {
 
 impl ProductionCapsuleAllocator {
     pub fn new(config: ProductionCapsuleConfig) -> Result<Self, ProductionHostingError> {
-        if config.codex_executable.as_os_str().is_empty()
+        if config.copilot_executable.as_os_str().is_empty()
+            || config.codex_executable.as_os_str().is_empty()
             || config.claude_executable.is_empty()
             || config.git_program.as_os_str().is_empty()
             || config.gh_program.as_os_str().is_empty()
@@ -195,6 +197,15 @@ impl ProductionCapsuleAllocator {
         process_pool: HostedProcessPool,
     ) -> Result<NativeV2HarnessConfig, CapsuleAllocationUnavailable> {
         match &admitted.runtime {
+            RuntimePlan::Copilot { .. } => Ok(NativeV2HarnessConfig::Copilot(
+                crate::native_v2_copilot::CopilotConfig {
+                    executable: self.config.copilot_executable.clone(),
+                    workspace: filesystem.workspace.clone(),
+                    runtime_home: filesystem.runtime_home.clone(),
+                    search_path: self.config.executable_search_path.clone(),
+                    process_pool,
+                },
+            )),
             RuntimePlan::Codex { provider, .. } => {
                 Ok(NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
                     provider: *provider,

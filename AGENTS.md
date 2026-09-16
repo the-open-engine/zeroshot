@@ -64,6 +64,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
+- Copilot uses the pinned CLI's headless JSON-RPC protocol 3, with provider `github` and
+  caller-owned model IDs. Structured output and corrections share one session; node-instance
+  revisits resume it from the private home. `COPILOT_GITHUB_TOKEN` crosses private RPC only,
+  never process/tool environments. Optional `COPILOT_GITHUB_TOKEN_EXPIRES_AT` is Unix seconds;
+  expiring credentials use the runtime resolver callback and must retain more than one hour.
+  Copilot RPC bounds each message to 64 MiB and bounds pending requests and output queues.
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.

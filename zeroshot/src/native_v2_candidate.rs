@@ -1,7 +1,7 @@
 //! Composition root for the integrated native-v2 capsule candidate.
 //!
 //! The cloud controller owns admission, durability, observation, and runtime allocation. Inside
-//! one allocated capsule this module binds the graph-wide Codex or Claude lane together with the
+//! one allocated capsule this module binds the graph-wide agent harness together with the
 //! trusted Git delivery lane and hands the resulting runner to the private capsule transport.
 
 use std::sync::Arc;
@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
+use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
 use crate::native_v2_contract::{AdmittedRun, NodeInvocation, NodeRuntimeBinding, RuntimePlan};
 use crate::native_v2_delivery::{
     GitHubDeliveryAuthority, NativeV2DeliveryAdapter, NativeV2DeliveryConfig,
@@ -29,6 +30,7 @@ pub(crate) mod test_support;
 
 /// The one harness/provider lane selected for the entire graph.
 pub enum NativeV2HarnessConfig {
+    Copilot(CopilotConfig),
     Codex(NativeV2CodexConfig),
     Claude(ClaudeAdapterConfig),
 }
@@ -103,17 +105,27 @@ fn build_candidate(
             .with_trusted_github_token(github_token),
     );
     match config.harness {
+        NativeV2HarnessConfig::Copilot(config) => {
+            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+                CopilotAdapter::new_local(config)
+            } else {
+                CopilotAdapter::new(config)
+            });
+            assemble_runner(admitted, agent.clone(), agent, delivery)
+        }
         NativeV2HarnessConfig::Codex(config) => {
-            let agent = Arc::new(match placement {
-                ProcessPlacement::Capsule => NativeV2CodexAdapter::new(config),
-                ProcessPlacement::Local => NativeV2CodexAdapter::new_local(config),
+            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+                NativeV2CodexAdapter::new_local(config)
+            } else {
+                NativeV2CodexAdapter::new(config)
             });
             assemble_runner(admitted, agent.clone(), agent, delivery)
         }
         NativeV2HarnessConfig::Claude(config) => {
-            let agent = Arc::new(match placement {
-                ProcessPlacement::Capsule => ClaudeAdapter::new(config)?,
-                ProcessPlacement::Local => ClaudeAdapter::new_local(config)?,
+            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+                ClaudeAdapter::new_local(config)?
+            } else {
+                ClaudeAdapter::new(config)?
             });
             assemble_runner(admitted, agent.clone(), agent, delivery)
         }
@@ -125,6 +137,9 @@ fn validate_config(
     config: &NativeV2CandidateConfig,
 ) -> Result<(), NativeV2CandidateError> {
     let workspace_matches = match (&admitted.runtime, &config.harness) {
+        (RuntimePlan::Copilot { .. }, NativeV2HarnessConfig::Copilot(harness)) => {
+            harness.workspace == config.delivery.workspace
+        }
         (RuntimePlan::Codex { provider, .. }, NativeV2HarnessConfig::Codex(harness))
             if provider == &harness.provider =>
         {

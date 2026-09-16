@@ -305,6 +305,7 @@ fn materialize_runtime(
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum UniformHarness {
+    Copilot,
     Codex,
     Claude,
 }
@@ -312,6 +313,7 @@ enum UniformHarness {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum UniformProvider {
+    Github,
     #[serde(rename = "openai")]
     OpenAi,
     #[serde(rename = "openrouter")]
@@ -376,57 +378,60 @@ impl UniformRuntimePlan {
         harness: UniformHarness,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
-        match (harness, self.provider) {
-            (UniformHarness::Codex, UniformProvider::OpenAi) => Ok(RuntimePlan::Codex {
-                provider: CodexProvider::OpenAi,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Codex, UniformProvider::OpenRouter) => Ok(RuntimePlan::Codex {
-                provider: CodexProvider::OpenRouter,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Codex, UniformProvider::Gateway) => Ok(RuntimePlan::Codex {
-                provider: CodexProvider::Gateway,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Codex, UniformProvider::Bedrock) => Ok(RuntimePlan::Codex {
-                provider: CodexProvider::Bedrock,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Claude, UniformProvider::Anthropic) => Ok(RuntimePlan::Claude {
-                provider: ClaudeProvider::Anthropic,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Claude, UniformProvider::OpenRouter) => Ok(RuntimePlan::Claude {
-                provider: ClaudeProvider::OpenRouter,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Claude, UniformProvider::Gateway) => Ok(RuntimePlan::Claude {
-                provider: ClaudeProvider::Gateway,
-                size: self.size,
-                nodes,
-            }),
-            (UniformHarness::Claude, UniformProvider::Bedrock) => Ok(RuntimePlan::Claude {
-                provider: ClaudeProvider::Bedrock,
-                size: self.size,
-                nodes,
-            }),
-            _ => Err(NativeV2CliError::Usage(format!(
+        let incompatible = || {
+            NativeV2CliError::Usage(format!(
                 "provider {:?} is incompatible with harness {:?}",
                 self.provider, harness
-            ))),
+            ))
+        };
+        match harness {
+            UniformHarness::Copilot if self.provider == UniformProvider::Github => {
+                Ok(RuntimePlan::Copilot {
+                    provider: crate::native_v2_contract::CopilotProvider::Github,
+                    size: self.size,
+                    nodes,
+                })
+            }
+            UniformHarness::Codex => Ok(RuntimePlan::Codex {
+                provider: self.provider.codex().ok_or_else(incompatible)?,
+                size: self.size,
+                nodes,
+            }),
+            UniformHarness::Claude => Ok(RuntimePlan::Claude {
+                provider: self.provider.claude().ok_or_else(incompatible)?,
+                size: self.size,
+                nodes,
+            }),
+            UniformHarness::Copilot => Err(incompatible()),
+        }
+    }
+}
+
+impl UniformProvider {
+    const fn codex(self) -> Option<CodexProvider> {
+        match self {
+            Self::OpenAi => Some(CodexProvider::OpenAi),
+            Self::OpenRouter => Some(CodexProvider::OpenRouter),
+            Self::Gateway => Some(CodexProvider::Gateway),
+            Self::Bedrock => Some(CodexProvider::Bedrock),
+            _ => None,
+        }
+    }
+
+    const fn claude(self) -> Option<ClaudeProvider> {
+        match self {
+            Self::Anthropic => Some(ClaudeProvider::Anthropic),
+            Self::OpenRouter => Some(ClaudeProvider::OpenRouter),
+            Self::Gateway => Some(ClaudeProvider::Gateway),
+            Self::Bedrock => Some(ClaudeProvider::Bedrock),
+            _ => None,
         }
     }
 }
 
 fn default_connections(provider: UniformProvider) -> Result<DeclaredConnections, NativeV2CliError> {
     let (key, names): (&str, &[&str]) = match provider {
+        UniformProvider::Github => ("github", &["COPILOT_GITHUB_TOKEN"]),
         UniformProvider::OpenAi => ("openai", &["OPENAI_API_KEY"]),
         UniformProvider::OpenRouter => ("openrouter", &["OPENROUTER_API_KEY"]),
         UniformProvider::Gateway => ("gateway", &["GATEWAY_BASE_URL", "GATEWAY_API_KEY"]),
@@ -462,7 +467,9 @@ fn insert_template_binding(
     binding: NodeRuntimeBinding,
 ) -> Result<(), NativeV2CliError> {
     let nodes = match runtime {
-        RuntimePlan::Codex { nodes, .. } | RuntimePlan::Claude { nodes, .. } => nodes,
+        RuntimePlan::Copilot { nodes, .. }
+        | RuntimePlan::Codex { nodes, .. }
+        | RuntimePlan::Claude { nodes, .. } => nodes,
     };
     if nodes.contains_key(&name) {
         return Err(NativeV2CliError::Usage(format!(

@@ -1,7 +1,7 @@
 # Zeroshot target image
 
 `ghcr.io/the-open-engine/zeroshot-target` is the canonical self-hosted target server image. It
-contains the native `zeroshot` executable plus pinned Codex and Claude harness CLIs.
+contains the native `zeroshot` executable plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
 
 Coding tools include Node.js 24 and npm, Python 3.12 with pip, venv and extension headers,
 Rust 1.97 with Cargo, rustfmt and Clippy, and C/C++ compilers, make, pkgconf, OpenSSL and

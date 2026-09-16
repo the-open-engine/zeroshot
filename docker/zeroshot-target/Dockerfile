@@ -18,6 +18,7 @@ FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c
 
 FROM node:24-trixie-slim AS tooling
 
+ARG COPILOT_VERSION=1.0.85
 ARG CODEX_VERSION=0.148.0
 ARG CLAUDE_CODE_VERSION=2.1.237
 ARG NPM_VERSION=11.19.1
@@ -63,6 +64,7 @@ RUN npm install --global --no-audit --no-fund "npm@${NPM_VERSION}" \
     && npm install --global --no-audit --no-fund \
         --strict-allow-scripts \
         --allow-scripts=@anthropic-ai/claude-code \
+        "@github/copilot@${COPILOT_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force

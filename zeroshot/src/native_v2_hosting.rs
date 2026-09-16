@@ -53,6 +53,7 @@ pub async fn build_production_target_authority(
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
     pub storage_root: PathBuf,
+    pub copilot_executable: PathBuf,
     pub codex_executable: PathBuf,
     pub claude_executable: String,
     pub claude_prefix_arguments: Vec<String>,
@@ -102,6 +103,7 @@ impl ProductionTargetControllerFactory {
         );
         let allocator = Arc::new(ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
             storage_root: root,
+            copilot_executable: self.config.copilot_executable.clone(),
             codex_executable: self.config.codex_executable.clone(),
             claude_executable: self.config.claude_executable.clone(),
             claude_prefix_arguments: self.config.claude_prefix_arguments.clone(),
@@ -253,6 +255,7 @@ impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),
+            copilot_executable: PathBuf::from("/usr/local/bin/copilot"),
             codex_executable: PathBuf::from("/usr/local/bin/codex"),
             claude_executable: "/usr/local/bin/claude".to_owned(),
             claude_prefix_arguments: Vec::new(),
