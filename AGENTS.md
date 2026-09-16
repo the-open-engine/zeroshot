@@ -56,8 +56,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   keep an external binding catalog. `openengine.worker.builtin/v1` is reserved for native
   in-process workers. No portable external binding currently ships; do not reintroduce retired
   worker profiles.
-- Structured-output recovery is provider-owned and fail-closed. A recovery turn must disable reused
-  provider sessions, MCP, approval bypass, write/network tools, and user-defined agents/config.
+- Structured-output correction runs in the same provider session under the node's existing
+  execution policy; local response validation remains authoritative.
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.

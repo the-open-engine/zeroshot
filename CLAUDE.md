@@ -60,7 +60,10 @@ actionlint .github/workflows/*.yml
 cd sdks/python
 python -m ruff check src tests examples
 python -m ruff format --check src tests examples
+pydoclint src/zeroshot
 python -m mypy src examples
 python -m pytest
+
+cd ../..
 python -m mkdocs build --strict
 ```
