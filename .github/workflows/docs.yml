@@ -246,6 +246,30 @@ jobs:
             exit 1
           fi
 
+      - name: Initialize Current before a first release publication
+        if: env.DOCS_VERSION != 'current'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git cat-file -e refs/heads/gh-pages:current/manifest.json 2>/dev/null; then
+            exit 0
+          fi
+          current_source="$RUNNER_TEMP/zeroshot-current-bootstrap"
+          git worktree add --detach "$current_source" origin/main
+          (
+            cd "$current_source"
+            export ZEROSHOT_DOCS_VERSION=current
+            export ZEROSHOT_PRODUCT_DOCS_VERSION=
+            export ZEROSHOT_DOCS_COMMIT="$(git rev-parse HEAD)"
+            cp "$GITHUB_WORKSPACE/.docs-publisher/scripts/docs_hook.py" scripts/docs_hook.py
+            cp "$GITHUB_WORKSPACE/.docs-publisher/docs/project/versioning.md" docs/project/versioning.md
+            cargo run --locked -p zeroshot --example generate_cli_docs -- --check
+            cargo run --locked -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check
+            mike deploy --config-file mkdocs.yml --alias-type redirect \
+              --title Current --update-aliases current dev
+          )
+          git worktree remove --force "$current_source"
+
       - name: Publish Current or minor documentation locally
         shell: bash
         run: |

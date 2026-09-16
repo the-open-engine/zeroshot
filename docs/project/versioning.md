@@ -90,3 +90,5 @@ released-docs redirect; it never changes the site's Current default.
 The publisher consolidates existing patch snapshots before publishing, retaining the newest patch
 per minor and replacing old pages with redirects. It stages the complete result before pushing
 `gh-pages` and deploying through GitHub Pages Actions. No release tags or binary artifacts change.
+If a release is the first publication, the publisher first builds Current from `main` in an isolated
+checkout, then publishes the requested minor from its release source. Both become visible together.

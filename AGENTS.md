@@ -184,6 +184,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   SDK, source, and publication-tooling identity. Legacy patch page URLs redirect to their minor.
 - Documentation publication tools come from the workflow commit separately from the exact release
   source. The publisher migrates the existing Pages tree locally and pushes once after validation.
+  A first release publication bootstraps Current from `main` in an isolated checkout before setting
+  the default; Current never inherits the requested release's product identity.
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
 - Secret-bearing target inputs never enter run ledgers, target configuration, or observation records.
