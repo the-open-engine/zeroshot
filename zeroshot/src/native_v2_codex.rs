@@ -1,4 +1,4 @@
-//! Native-v2 Codex harness for the OpenAI, OpenRouter, and Amazon Bedrock provider lanes.
+//! Native-v2 Codex harness for the OpenAI, OpenRouter, gateway, and Amazon Bedrock provider lanes.
 //!
 //! The graph-wide provider is fixed when the adapter is constructed. Model, effort, session
 //! scope, input, and declared environment remain per-node admitted values. Provider sessions are
@@ -124,10 +124,13 @@ impl NativeV2CodexAdapter {
             with_driver_detail(error, "Codex executable path is not valid on this platform")
         })?;
         let workspace = input.files.workspace.clone();
+        let mut environment = self
+            .provider_environment(&invocation.environment, input.files.home())
+            .map_err(|error| with_driver_detail(error, "Codex provider environment is invalid"))?;
         let mut argv = vec!["exec".to_owned()];
         self.add_execution_policy(&mut argv, sandbox);
         add_resume_command(&mut argv, input.resume);
-        add_provider_args(&mut argv, self.config.provider);
+        add_provider_args(&mut argv, self.config.provider, &environment)?;
         self.add_execution_config(&mut argv, invocation.role);
         add_node_args(&mut argv, model.as_str(), effort.copied());
         argv.extend([
@@ -141,9 +144,6 @@ impl NativeV2CodexAdapter {
         ]);
         add_session_target(&mut argv, input.resume);
 
-        let mut environment = self
-            .provider_environment(&invocation.environment, input.files.home())
-            .map_err(|error| with_driver_detail(error, "Codex provider environment is invalid"))?;
         environment.entry("TMPDIR".to_owned()).or_insert(
             input
                 .files

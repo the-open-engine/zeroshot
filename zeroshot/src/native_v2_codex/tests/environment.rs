@@ -49,7 +49,8 @@ fn command_is_exact_and_rejects_adapter_owned_collisions() {
     );
 }
 
-fn bedrock_environment(
+pub(super) fn provider_environment(
+    provider: CodexProvider,
     values: &[(&str, &str)],
 ) -> Result<BTreeMap<String, String>, NodeRunnerError> {
     let directory = TestDirectory::new("codex-bedrock-environment");
@@ -62,7 +63,7 @@ fn bedrock_environment(
             .map(|(name, value)| (environment_name(name), value.to_owned())),
     );
     let resolved = ResolvedEnvironment::exact(&binding, resolved_values).assert_value();
-    scripted_adapter(&directory, CodexProvider::Bedrock)
+    scripted_adapter(&directory, provider)
         .provider_environment(&resolved, &directory.child("runtime-home"))
 }
 
@@ -72,7 +73,7 @@ fn bedrock_environment_requires_aws_values_and_rejects_conflicting_codex_control
         (AWS_BEARER_TOKEN_BEDROCK, "bedrock-secret"),
         (AWS_REGION, "us-east-1"),
     ];
-    let valid = bedrock_environment(&required).assert_value();
+    let valid = provider_environment(CodexProvider::Bedrock, &required).assert_value();
     for (name, expected) in required {
         assert_eq!(valid.get(name).map(String::as_str), Some(expected));
     }
@@ -83,7 +84,7 @@ fn bedrock_environment_requires_aws_values_and_rejects_conflicting_codex_control
             .filter(|(name, _)| *name != omitted_or_empty)
             .collect::<Vec<_>>();
         assert!(
-            bedrock_environment(&omitted).is_err(),
+            provider_environment(CodexProvider::Bedrock, &omitted).is_err(),
             "accepted missing {omitted_or_empty}"
         );
         let empty = required.map(|(name, value)| {
@@ -94,7 +95,7 @@ fn bedrock_environment_requires_aws_values_and_rejects_conflicting_codex_control
             }
         });
         assert!(
-            bedrock_environment(&empty).is_err(),
+            provider_environment(CodexProvider::Bedrock, &empty).is_err(),
             "accepted empty {omitted_or_empty}"
         );
     }
@@ -113,7 +114,7 @@ fn bedrock_environment_requires_aws_values_and_rejects_conflicting_codex_control
             (conflict, "conflict"),
         ];
         assert!(
-            bedrock_environment(&values).is_err(),
+            provider_environment(CodexProvider::Bedrock, &values).is_err(),
             "accepted conflicting {conflict}"
         );
     }
@@ -201,4 +202,28 @@ fn log_redactions_are_longest_first_and_do_not_leave_overlapping_suffixes() {
         safe_provider_text("value=secret-tail\0after", &redactions),
         "value=[REDACTED]\u{fffd}after"
     );
+}
+
+#[test]
+fn gateway_environment_rejects_conflicting_provider_credentials() {
+    let required = [
+        ("GATEWAY_BASE_URL", "https://gateway.example/api"),
+        ("GATEWAY_API_KEY", "gateway-secret"),
+    ];
+    assert!(provider_environment(CodexProvider::Gateway, &required).is_ok());
+    for conflict in [
+        "CODEX_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "CODEX_BASE_URL",
+        "OPENAI_BASE_URL",
+    ] {
+        let mut values = required.to_vec();
+        values.push((conflict, "conflict"));
+        assert!(
+            provider_environment(CodexProvider::Gateway, &values).is_err(),
+            "accepted {conflict}"
+        );
+    }
 }

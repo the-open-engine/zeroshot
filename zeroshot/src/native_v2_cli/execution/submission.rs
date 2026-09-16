@@ -316,14 +316,10 @@ enum UniformProvider {
     OpenAi,
     #[serde(rename = "openrouter")]
     OpenRouter,
+    Gateway,
     Anthropic,
     Bedrock,
 }
-
-const KNOWN_INCOMPATIBLE_HARNESS_PROVIDER_PAIRS: &[(UniformHarness, UniformProvider)] = &[
-    (UniformHarness::Codex, UniformProvider::Anthropic),
-    (UniformHarness::Claude, UniformProvider::OpenAi),
-];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -380,12 +376,6 @@ impl UniformRuntimePlan {
         harness: UniformHarness,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
-        if KNOWN_INCOMPATIBLE_HARNESS_PROVIDER_PAIRS.contains(&(harness, self.provider)) {
-            return Err(NativeV2CliError::Usage(format!(
-                "provider {:?} is incompatible with harness {:?}",
-                self.provider, harness
-            )));
-        }
         match (harness, self.provider) {
             (UniformHarness::Codex, UniformProvider::OpenAi) => Ok(RuntimePlan::Codex {
                 provider: CodexProvider::OpenAi,
@@ -394,6 +384,11 @@ impl UniformRuntimePlan {
             }),
             (UniformHarness::Codex, UniformProvider::OpenRouter) => Ok(RuntimePlan::Codex {
                 provider: CodexProvider::OpenRouter,
+                size: self.size,
+                nodes,
+            }),
+            (UniformHarness::Codex, UniformProvider::Gateway) => Ok(RuntimePlan::Codex {
+                provider: CodexProvider::Gateway,
                 size: self.size,
                 nodes,
             }),
@@ -412,14 +407,20 @@ impl UniformRuntimePlan {
                 size: self.size,
                 nodes,
             }),
+            (UniformHarness::Claude, UniformProvider::Gateway) => Ok(RuntimePlan::Claude {
+                provider: ClaudeProvider::Gateway,
+                size: self.size,
+                nodes,
+            }),
             (UniformHarness::Claude, UniformProvider::Bedrock) => Ok(RuntimePlan::Claude {
                 provider: ClaudeProvider::Bedrock,
                 size: self.size,
                 nodes,
             }),
-            _ => Err(NativeV2CliError::Usage(
-                "unsupported harness/provider pair".to_owned(),
-            )),
+            _ => Err(NativeV2CliError::Usage(format!(
+                "provider {:?} is incompatible with harness {:?}",
+                self.provider, harness
+            ))),
         }
     }
 }
@@ -428,6 +429,7 @@ fn default_connections(provider: UniformProvider) -> Result<DeclaredConnections,
     let (key, names): (&str, &[&str]) = match provider {
         UniformProvider::OpenAi => ("openai", &["OPENAI_API_KEY"]),
         UniformProvider::OpenRouter => ("openrouter", &["OPENROUTER_API_KEY"]),
+        UniformProvider::Gateway => ("gateway", &["GATEWAY_BASE_URL", "GATEWAY_API_KEY"]),
         UniformProvider::Anthropic => ("anthropic", &["ANTHROPIC_API_KEY"]),
         UniformProvider::Bedrock => ("bedrock", &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]),
     };

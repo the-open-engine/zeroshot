@@ -53,6 +53,7 @@ prompt=$(/usr/bin/cat)
   done
   /usr/bin/printf 'prompt=%s\n' "$prompt"
   /usr/bin/printf 'codex_home=%s\n' "$CODEX_HOME"
+  /usr/bin/printf 'gateway_key=%s\n' "${GATEWAY_API_KEY-unset}"
   /usr/bin/printf 'openrouter_key=%s\n' "${OPENROUTER_API_KEY-unset}"
   /usr/bin/printf 'openai_key=%s\n' "${OPENAI_API_KEY-unset}"
   /usr/bin/printf 'codex_key=%s\n' "${CODEX_API_KEY-unset}"
@@ -88,6 +89,11 @@ if [ "${OPENROUTER_API_KEY-unset}" != unset ]; then
   /usr/bin/printf '%s%s\n' \
     '{"type":"item.completed","item":{"type":"agent_message",' \
     '"text":"visible fake-openrouter-key"}}'
+fi
+if [ "${GATEWAY_API_KEY-unset}" != unset ]; then
+  /usr/bin/printf '%s%s\n' \
+    '{"type":"item.completed","item":{"type":"agent_message",' \
+    '"text":"visible fake-gateway-key"}}'
 fi
 if [ "${ALWAYS_MALFORMED-false}" = true ]; then
   /usr/bin/printf '%s%s\n' \

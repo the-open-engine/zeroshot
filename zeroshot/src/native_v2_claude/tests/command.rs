@@ -21,6 +21,15 @@ fn provider_fixture(provider: ClaudeProvider) -> ProviderFixture {
             environment: vec![OPENROUTER_KEY],
             values: vec![(OPENROUTER_KEY, "openrouter-fake")],
         },
+        ClaudeProvider::Gateway => ProviderFixture {
+            model: "provider-owned-model",
+            provider_value: "gateway-fake",
+            environment: vec!["GATEWAY_BASE_URL", "GATEWAY_API_KEY"],
+            values: vec![
+                ("GATEWAY_BASE_URL", "https://gateway.example/anthropic"),
+                ("GATEWAY_API_KEY", "gateway-fake"),
+            ],
+        },
         ClaudeProvider::Bedrock => ProviderFixture {
             model: "global.anthropic.provider-owned-model",
             provider_value: "bedrock-fake",
@@ -67,6 +76,15 @@ fn assert_provider_environment(
             "unset",
             "unset",
         ],
+        ClaudeProvider::Gateway => [
+            provider_value,
+            "unset",
+            "https://gateway.example/anthropic",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+        ],
         ClaudeProvider::Bedrock => [
             "unset",
             "unset",
@@ -87,6 +105,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         ClaudeProvider::Anthropic,
         ClaudeProvider::OpenRouter,
         ClaudeProvider::Bedrock,
+        ClaudeProvider::Gateway,
     ] {
         let workspace = TestDirectory::new("claude-command");
         workspace.write("fake-claude.sh", SUCCESS_SCRIPT);

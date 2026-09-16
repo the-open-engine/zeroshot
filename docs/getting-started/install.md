@@ -26,7 +26,7 @@ store. The command below prompts without echo and keeps the value out of runtime
 zeroshot connection set openai --field OPENAI_API_KEY
 ```
 
-Use `openrouter`, `anthropic`, or `bedrock` as the connection key when the runtime declares that
+Use `openrouter`, `anthropic`, `bedrock`, or `gateway` as the connection key when the runtime declares that
 provider. [Runtimes and connections](../concepts/runtimes-and-connections.md) lists the default field
 names and explains the separation.
 

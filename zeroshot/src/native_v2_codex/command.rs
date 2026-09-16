@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::execution::WorkspaceAccessMode;
+use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::effort_token;
 use crate::native_v2_contract::{CodexProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{NodeRole, NodeRunnerError, ResolvedEnvironment};
@@ -46,6 +47,20 @@ pub(super) fn configure_provider_auth(
     match provider {
         CodexProvider::OpenAi => configure_openai_auth(values, has_local_user),
         CodexProvider::Bedrock => configure_bedrock_auth(values),
+        CodexProvider::Gateway => {
+            if [
+                CODEX_API_KEY,
+                OPENAI_API_KEY,
+                "OPENROUTER_API_KEY",
+                AWS_BEARER_TOKEN_BEDROCK,
+            ]
+            .iter()
+            .any(|name| values.contains_key(*name))
+            {
+                return Err(NodeRunnerError::Driver);
+            }
+            gateway::connection(values).map(|_| ())
+        }
         CodexProvider::OpenRouter => values
             .get("OPENROUTER_API_KEY")
             .is_some_and(|value| !value.is_empty())
@@ -80,13 +95,18 @@ fn configure_openai_auth(
     Ok(())
 }
 
-pub(super) fn add_provider_args(argv: &mut Vec<String>, provider: CodexProvider) {
+pub(super) fn add_provider_args(
+    argv: &mut Vec<String>,
+    provider: CodexProvider,
+    environment: &BTreeMap<String, String>,
+) -> Result<(), NodeRunnerError> {
     argv.extend([
         "--config".to_owned(),
         match provider {
             CodexProvider::OpenAi => "model_provider=\"openai\"".to_owned(),
             CodexProvider::OpenRouter => "model_provider=\"openrouter\"".to_owned(),
             CodexProvider::Bedrock => "model_provider=\"amazon-bedrock\"".to_owned(),
+            CodexProvider::Gateway => "model_provider=\"gateway\"".to_owned(),
         },
     ]);
     if provider == CodexProvider::OpenRouter {
@@ -101,6 +121,23 @@ pub(super) fn add_provider_args(argv: &mut Vec<String>, provider: CodexProvider)
             "model_providers.openrouter.wire_api=\"responses\"".to_owned(),
         ]);
     }
+    if provider == CodexProvider::Gateway {
+        let (base_url, _) = gateway::connection(environment)?;
+        let base_url = serde_json::to_string(base_url).map_err(|_| NodeRunnerError::Driver)?;
+        argv.extend([
+            "--config".to_owned(),
+            "model_providers.gateway.name=\"Gateway\"".to_owned(),
+            "--config".to_owned(),
+            format!("model_providers.gateway.base_url={base_url}"),
+            "--config".to_owned(),
+            "model_providers.gateway.env_key=\"GATEWAY_API_KEY\"".to_owned(),
+            "--config".to_owned(),
+            "model_providers.gateway.wire_api=\"responses\"".to_owned(),
+            "--config".to_owned(),
+            "model_providers.gateway.requires_openai_auth=false".to_owned(),
+        ]);
+    }
+    Ok(())
 }
 
 pub(super) fn add_local_execution_policy(argv: &mut Vec<String>, sandbox: &str) {

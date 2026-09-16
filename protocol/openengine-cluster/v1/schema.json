@@ -416,6 +416,7 @@
       "enum": [
         "anthropic",
         "openrouter",
+        "gateway",
         "bedrock"
       ],
       "type": "string"
@@ -465,6 +466,7 @@
       "enum": [
         "openai",
         "openrouter",
+        "gateway",
         "bedrock"
       ],
       "type": "string"

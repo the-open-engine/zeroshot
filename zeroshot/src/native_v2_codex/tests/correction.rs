@@ -12,32 +12,32 @@ async fn corrected_output(
             "fake-openrouter-key",
             "openai/gpt-5.6-sol",
         )),
+        CodexProvider::Gateway => Some(("GATEWAY_API_KEY", "fake-gateway-key", "opaque/model")),
         CodexProvider::Bedrock => None,
     }
-    .assert_value_with("correction fixture supports OpenAI and OpenRouter");
+    .assert_value_with("correction fixture supports OpenAI, OpenRouter, and gateway");
     let (credential_name, credential_value, model) = configuration;
+    let mut names = vec!["CAPTURE_PATH", "CORRECT_OUTPUT", credential_name];
+    let mut values = vec![
+        ("CAPTURE_PATH", capture.display().to_string()),
+        ("CORRECT_OUTPUT", "true".to_owned()),
+        (credential_name, credential_value.to_owned()),
+    ];
+    if provider == CodexProvider::Gateway {
+        names.push("GATEWAY_BASE_URL");
+        values.push((
+            "GATEWAY_BASE_URL",
+            "https://gateway.example/quoted\"path/v1".to_owned(),
+        ));
+    }
     let adapter = scripted_adapter(directory, provider);
     let admitted = admitted(
-        binding_with_model(
-            model,
-            SessionScope::Execution,
-            &["CAPTURE_PATH", "CORRECT_OUTPUT", credential_name],
-        ),
+        binding_with_model(model, SessionScope::Execution, &names),
         provider,
     )
     .await;
     let runtime = runner(&admitted, adapter);
-    let handle = start(
-        &runtime,
-        &admitted,
-        1,
-        &[
-            ("CAPTURE_PATH", capture.display().to_string()),
-            ("CORRECT_OUTPUT", "true".to_owned()),
-            (credential_name, credential_value.to_owned()),
-        ],
-    )
-    .await;
+    let handle = start(&runtime, &admitted, 1, &values).await;
     let (logs, outcome) = complete_with_logs(handle).await;
     (
         outcome.assert_value(),
@@ -127,4 +127,36 @@ async fn malformed_output_stops_after_two_correction_turns() {
     let capture = fs::read_to_string(capture).assert_value();
     assert_eq!(capture.matches("prompt=").count(), 3);
     assert_eq!(capture.matches("arg=resume").count(), 2);
+}
+
+#[tokio::test]
+async fn gateway_correction_keeps_endpoint_auth_and_model_on_resume() {
+    let directory = TestDirectory::new("codex-gateway-correction");
+    let (outcome, capture, logs) = corrected_output(&directory, CodexProvider::Gateway).await;
+    assert!(
+        matches!(outcome, WorkerOutcome::Verified { output, .. } if output == json!({"answer":43}))
+    );
+    assert_eq!(capture.matches("arg=resume\n").count(), 1);
+    let expected_url =
+        serde_json::to_string("https://gateway.example/quoted\"path/v1").assert_value();
+    for turn in capture.split("---\n").skip(1) {
+        for expected in [
+            "arg=model_provider=\"gateway\"".to_owned(),
+            format!("arg=model_providers.gateway.base_url={expected_url}"),
+            "arg=model_providers.gateway.env_key=\"GATEWAY_API_KEY\"".to_owned(),
+            "arg=model_providers.gateway.wire_api=\"responses\"".to_owned(),
+            "arg=model_providers.gateway.requires_openai_auth=false".to_owned(),
+            "arg=--model\narg=opaque/model".to_owned(),
+            "gateway_key=fake-gateway-key".to_owned(),
+        ] {
+            assert!(turn.contains(&expected), "missing {expected}");
+        }
+        assert!(
+            !turn
+                .lines()
+                .any(|line| line.starts_with("arg=") && line.contains("fake-gateway-key"))
+        );
+    }
+    assert!(logs.contains("visible [REDACTED]"));
+    assert!(!logs.contains("fake-gateway-key"));
 }

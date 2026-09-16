@@ -371,6 +371,7 @@ pub enum CodexProvider {
     OpenAi,
     #[serde(rename = "openrouter")]
     OpenRouter,
+    Gateway,
     Bedrock,
 }
 
@@ -380,6 +381,7 @@ pub enum ClaudeProvider {
     Anthropic,
     #[serde(rename = "openrouter")]
     OpenRouter,
+    Gateway,
     Bedrock,
 }
 

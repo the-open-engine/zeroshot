@@ -77,3 +77,45 @@ printf '%s%s\n' \
     assert_eq!(completion.outcome, WorkerOutcome::malformed());
     assert_eq!(workspace.read("attempts.args").matches("---").count(), 3);
 }
+
+#[tokio::test]
+async fn gateway_correction_keeps_endpoint_and_key_on_resume() {
+    let workspace = TestDirectory::new("claude-gateway-correction");
+    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    let binding = agent_binding(
+        "opaque/model",
+        None,
+        SessionScope::Execution,
+        &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "CORRECT_OUTPUT"],
+    );
+    let runtime = runner(&workspace, ClaudeProvider::Gateway, binding.clone(), false).await;
+    let completion = runtime
+        .start(request(
+            binding,
+            1,
+            &[
+                ("GATEWAY_BASE_URL", "https://gateway.example/anthropic"),
+                ("GATEWAY_API_KEY", "gateway-key"),
+                ("CORRECT_OUTPUT", "true"),
+            ],
+        ))
+        .await
+        .assert_value()
+        .completion()
+        .await
+        .assert_value();
+    assert_eq!(
+        completion.outcome,
+        WorkerOutcome::Verified {
+            output: json!("done"),
+            artifacts: Vec::new()
+        }
+    );
+    assert_resumed_session(&workspace.read("resumed.args"));
+    assert_eq!(
+        workspace.read("anthropic-base-url.txt").trim(),
+        "https://gateway.example/anthropic"
+    );
+    assert_eq!(workspace.read("anthropic-key.txt").trim(), "gateway-key");
+    assert_eq!(workspace.read("anthropic-token.txt").trim(), "unset");
+}

@@ -202,6 +202,7 @@ pub trait CapsuleNodeChannel: Send + Sync {
 }
 
 mod endpoint;
+pub(crate) mod gateway;
 pub(crate) mod provider_json_lines;
 pub(crate) mod provider_process;
 mod remote;

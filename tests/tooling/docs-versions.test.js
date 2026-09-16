@@ -8,8 +8,13 @@ const path = require('node:path');
 const { it } = require('node:test');
 const yaml = require('js-yaml');
 
+// Hooks export repository-local Git settings; fixtures must own their Git state.
+const fixtureEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+);
+
 function execute(command, args, options) {
-  const result = spawnSync(command, args, { encoding: 'utf8', ...options });
+  const result = spawnSync(command, args, { encoding: 'utf8', env: fixtureEnvironment, ...options });
   assert.equal(result.status, 0, result.error?.message ?? result.stdout + result.stderr);
   return result.stdout.trim();
 }
@@ -39,6 +44,7 @@ it('migrates published documentation and guards minor updates', () => {
   const result = spawnSync('python3', ['-m', 'unittest', 'discover', '-s', 'tests/docs', '-v'], {
     cwd: path.resolve(__dirname, '../..'),
     encoding: 'utf8',
+    env: fixtureEnvironment,
   });
   assert.equal(result.status, 0, result.error?.message ?? result.stdout + result.stderr);
 });
@@ -76,7 +82,7 @@ it('bootstraps missing Current from main without inheriting release identity', (
     cwd: repository,
     input: bootstrap.run,
     env: {
-      ...process.env,
+      ...fixtureEnvironment,
       PATH: `${commands}${path.delimiter}${process.env.PATH}`,
       GITHUB_WORKSPACE: repository,
       RUNNER_TEMP: temporary,

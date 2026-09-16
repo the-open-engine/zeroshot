@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
 use crate::execution::WorkspaceAccessMode;
+use crate::native_v2_contract::ClaudeProvider;
+use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
 use crate::native_v2_runner::{
     render_agent_prompt, DriverInvocation, NodeRole, NodeRunnerError, ResolvedEnvironment,
@@ -131,6 +133,29 @@ pub(super) fn configure_bedrock(
     Ok(())
 }
 
+pub(super) fn configure_gateway(
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), NodeRunnerError> {
+    if [
+        ANTHROPIC_TOKEN,
+        ANTHROPIC_KEY,
+        CLAUDE_CODE_OAUTH_REFRESH_TOKEN,
+        CLAUDE_CODE_OAUTH_TOKEN,
+        OPENROUTER_KEY,
+        AWS_BEARER_TOKEN_BEDROCK,
+    ]
+    .iter()
+    .any(|name| environment.contains_key(*name))
+    {
+        return Err(NodeRunnerError::Driver);
+    }
+    let (base_url, api_key) = gateway::connection(environment)?;
+    let (base_url, api_key) = (base_url.to_owned(), api_key.to_owned());
+    environment.insert(ANTHROPIC_BASE_URL.to_owned(), base_url);
+    environment.insert(ANTHROPIC_KEY.to_owned(), api_key);
+    Ok(())
+}
+
 pub(super) fn configure_openrouter(
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(), NodeRunnerError> {
@@ -161,4 +186,38 @@ pub(super) fn prompt(invocation: &DriverInvocation) -> Result<String, NodeRunner
         &invocation.response,
     )
     .map_err(|error| with_driver_detail(error, "Claude prompt could not be serialized"))
+}
+
+pub(super) fn configure_provider(
+    environment: &mut BTreeMap<String, String>,
+    provider: ClaudeProvider,
+) -> Result<(), NodeRunnerError> {
+    match provider {
+        ClaudeProvider::Anthropic => {}
+        ClaudeProvider::Gateway => {
+            configure_gateway(environment).map_err(|error| {
+                with_driver_detail(
+                    error,
+                    "Claude gateway credentials are missing or conflict with other credentials",
+                )
+            })?;
+        }
+        ClaudeProvider::OpenRouter => {
+            configure_openrouter(environment).map_err(|error| {
+                    with_driver_detail(
+                        error,
+                        "Claude OpenRouter credentials are missing or conflict with Anthropic credentials",
+                    )
+                })?;
+        }
+        ClaudeProvider::Bedrock => {
+            configure_bedrock(environment).map_err(|error| {
+                    with_driver_detail(
+                        error,
+                        "Claude Bedrock credentials are missing or conflict with other provider credentials",
+                    )
+                })?;
+        }
+    }
+    Ok(())
 }

@@ -69,7 +69,8 @@ fn capsule_environment_roots_home_defaults_path_and_preserves_minimal_values() {
     );
 }
 
-fn bedrock_environment(
+pub(super) fn provider_environment(
+    provider: ClaudeProvider,
     values: &[(&str, &str)],
 ) -> Result<BTreeMap<String, String>, NodeRunnerError> {
     let workspace = TestDirectory::new("claude-bedrock-environment");
@@ -88,7 +89,7 @@ fn bedrock_environment(
     )
     .assert_value();
     let adapter = ClaudeAdapter::new_for_test(ClaudeAdapterConfig {
-        provider: ClaudeProvider::Bedrock,
+        provider,
         executable: "claude".to_owned(),
         prefix_arguments: Vec::new(),
         workspace: workspace.path().to_owned(),
@@ -107,10 +108,13 @@ fn bedrock_environment(
 
 #[test]
 fn bedrock_environment_sets_control_and_rejects_missing_or_conflicting_values() {
-    let valid = bedrock_environment(&[
-        (AWS_BEARER_TOKEN_BEDROCK, "bedrock-secret"),
-        (AWS_REGION, "us-east-1"),
-    ])
+    let valid = provider_environment(
+        ClaudeProvider::Bedrock,
+        &[
+            (AWS_BEARER_TOKEN_BEDROCK, "bedrock-secret"),
+            (AWS_REGION, "us-east-1"),
+        ],
+    )
     .assert_value();
     assert_eq!(
         valid.get(AWS_BEARER_TOKEN_BEDROCK).map(String::as_str),
@@ -131,7 +135,10 @@ fn bedrock_environment_sets_control_and_rejects_missing_or_conflicting_values() 
             (AWS_REGION, ""),
         ],
     ] {
-        assert!(bedrock_environment(&values).is_err(), "accepted {values:?}");
+        assert!(
+            provider_environment(ClaudeProvider::Bedrock, &values).is_err(),
+            "accepted {values:?}"
+        );
     }
 
     for conflict in [
@@ -158,8 +165,34 @@ fn bedrock_environment_sets_control_and_rejects_missing_or_conflicting_values() 
             (conflict, "conflict"),
         ];
         assert!(
-            bedrock_environment(&values).is_err(),
+            provider_environment(ClaudeProvider::Bedrock, &values).is_err(),
             "accepted conflicting {conflict}"
+        );
+    }
+}
+
+#[test]
+fn gateway_environment_rejects_conflicting_provider_credentials() {
+    let required = [
+        ("GATEWAY_BASE_URL", "https://gateway.example/api"),
+        ("GATEWAY_API_KEY", "gateway-secret"),
+    ];
+    assert!(provider_environment(ClaudeProvider::Gateway, &required).is_ok());
+    for conflict in [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+        "OPENROUTER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "CLAUDE_CODE_USE_BEDROCK",
+    ] {
+        let mut values = required.to_vec();
+        values.push((conflict, "conflict"));
+        assert!(
+            provider_environment(ClaudeProvider::Gateway, &values).is_err(),
+            "accepted {conflict}"
         );
     }
 }
