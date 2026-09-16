@@ -53,7 +53,7 @@ pub(super) async fn acquire(
     session_id: &str,
 ) -> Result<ResolvedEnvironment, NodeRunnerError> {
     if params["registrationId"].as_str() != Some(REGISTRATION)
-        || params["host"].as_str() != Some("github.com")
+        || params["host"].as_str() != Some("https://github.com")
         || params["sessionId"]
             .as_str()
             .is_some_and(|id| id != session_id)

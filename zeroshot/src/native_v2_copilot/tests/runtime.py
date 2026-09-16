@@ -50,7 +50,7 @@ while (message := read()) is not None:
         if params.get("gitHubTokenProviderRegistrationId"):
             send({"id": "auth-1", "method": "gitHubToken.getToken", "params": {
                 "registrationId": params["gitHubTokenProviderRegistrationId"],
-                "host": "github.com", "sessionId": session, "reason": "initial"}})
+                "host": "https://github.com", "sessionId": session, "reason": "initial"}})
             auth = read()
             assert auth["result"]["kind"] == "token"
             assert auth["result"]["expiresIn"] > 3600
@@ -61,7 +61,8 @@ while (message := read()) is not None:
         turn += 1
         if mode == "refresh":
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
-                "registrationId": registration, "host": "github.com", "sessionId": session, "reason": "refresh"}})
+                "registrationId": registration, "host": "https://github.com",
+                "sessionId": session, "reason": "refresh"}})
             auth = read()
             assert auth["result"]["accessToken"] == "rotated-sensitive-value"
             assert auth["result"]["expiresIn"] > 3600

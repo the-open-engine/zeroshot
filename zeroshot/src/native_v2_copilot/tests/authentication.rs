@@ -78,9 +78,10 @@ async fn expiry_and_callback_identity_fail_closed() {
     let environment = fixture.request(1).environment;
     assert!(auth::result(&environment).is_err());
     for params in [
+        json!({"registrationId":auth::REGISTRATION,"host":"github.com","reason":"initial"}),
         json!({"registrationId":auth::REGISTRATION,"host":"elsewhere.invalid","reason":"initial"}),
-        json!({"registrationId":"other","host":"github.com","reason":"initial"}),
-        json!({"registrationId":auth::REGISTRATION,"host":"github.com","sessionId":"other","reason":"initial"}),
+        json!({"registrationId":"other","host":"https://github.com","reason":"initial"}),
+        json!({"registrationId":auth::REGISTRATION,"host":"https://github.com","sessionId":"other","reason":"initial"}),
     ] {
         assert!(
             auth::acquire(&params, &environment, "session")
@@ -120,4 +121,24 @@ async fn large_prompt_and_cumulative_rpc_output_do_not_deadlock_or_hit_a_total_l
             .await
             .1,
     );
+}
+
+#[tokio::test]
+#[ignore = "requires an explicitly authorized live Copilot user token and pinned CLI"]
+async fn live_user_token_callback_authenticates_and_resumes() {
+    let token = std::env::var("ZEROSHOT_COPILOT_TEST_TOKEN").assert_value();
+    let executable = std::env::var_os("ZEROSHOT_COPILOT_TEST_EXECUTABLE").assert_value();
+    // The non-expiring test OAuth token receives a finite lease to exercise callback transport.
+    let fixture = Fixture::with_executable(
+        TestDirectory::new("copilot-live-callback"),
+        PathBuf::from(executable),
+        BTreeMap::from([
+            (auth::TOKEN.to_owned(), token),
+            (auth::EXPIRES_AT.to_owned(), expiry()),
+        ]),
+        INSTRUCTIONS,
+    )
+    .await;
+    verified(complete(fixture.start(1).await).await.1);
+    verified(complete(fixture.start(2).await).await.1);
 }
