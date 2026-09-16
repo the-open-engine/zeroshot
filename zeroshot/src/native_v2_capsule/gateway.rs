@@ -45,7 +45,9 @@ fn validate_base_url(value: &str) -> Result<(), NodeRunnerError> {
         return Err(invalid());
     }
     let url = Url::parse(value).map_err(|_| invalid())?;
-    let http = value.starts_with("https://") || value.starts_with("http://");
+    let http = value.split_once("://").is_some_and(|(scheme, _)| {
+        scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+    });
     let plain = [url.password(), url.query(), url.fragment()]
         .iter()
         .all(Option::is_none);
@@ -64,6 +66,8 @@ mod tests {
     fn gateway_preserves_base_paths_and_rejects_invalid_or_secret_bearing_urls() {
         for base in [
             "https://gateway.example/api/v1",
+            "HTTPS://gateway.example/API/v1",
+            "hTtP://localhost:8080/anthropic",
             "http://localhost:8080/anthropic/",
             "https://gateway.example/a%2Fb",
             "https://gateway.example/quoted\"path",
