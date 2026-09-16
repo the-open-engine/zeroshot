@@ -123,8 +123,8 @@ extra_css:
 extra:
   version:
     provider: mike
-    default: stable
-    alias: true
+    default: current
+    alias: false
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/the-open-engine/zeroshot

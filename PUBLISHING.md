@@ -15,7 +15,7 @@ One successful release produces the same version across:
 - target image source tag: `sha-<full-commit>`
 - Python revision 1 GitHub wheel release: `zeroshot-python-vX.Y.Z_1`
 - Python package when PyPI publication is enabled: `the-open-engine-zeroshot==X.Y.Z.post1`
-- immutable documentation snapshot: `vX.Y.Z/` relative to the docs base, with Python revision `1`
+- moving minor documentation: `vX.Y/` relative to the docs base, with Python revision `1`
 - moving documentation alias: `stable/` when the release receives the image `latest` tag
 
 The checked-in Cargo and npm versions are development placeholders. The release workspace stages the
@@ -64,16 +64,17 @@ not a blanket ignored failure. The workflow:
 8. invokes the Python SDK workflow for revision `1`, always creating or verifying its immutable
    GitHub wheel release and publishing the same wheels to PyPI when `publish_pypi` is enabled.
 9. publishes the generated CLI, Cluster API, and Python API documentation from that exact source
-   commit, then advances `stable` when this is the newest release.
+   commit into `vX.Y/`, then advances the legacy `stable` redirect when this is the newest release.
+   The site root continues to select Current from `main`.
 
 Later Python-only revisions may dispatch `Release Python SDK` with the same Zeroshot version, a
 higher positive SDK revision, and an exact `main` commit containing the SDK changes.
 
-The documentation workflow also publishes current `main` to `dev/`. It will not overwrite an exact
-version whose manifest records a different source commit. Select **GitHub Actions** as the GitHub
-Pages source once after the workflow lands, then dispatch **Publish versioned documentation** if the
-initial push ran before setup completed. `gh-pages` remains Mike's version store. See
-`docs/project/versioning.md` for the URL and manifest contract.
+The documentation workflow publishes `main` to `current/`, the site default. Each minor version
+tracks its newest published patch; publication refuses a patch rollback or another source commit
+for the same product version. The workflow migrates old patch snapshots into minor versions while
+retaining page redirects. Select **GitHub Actions** as the GitHub Pages source. `gh-pages` remains
+Mike's version store. See `docs/project/versioning.md` for the URL and manifest contract.
 
 ## Deferred PyPI publication
 
@@ -100,4 +101,6 @@ tarball, GitHub asset, Python wheel, image source label, or tag target.
 
 To recover documentation independently, dispatch **Publish versioned documentation** with
 `version: vX.Y.Z`, the release's exact `release_commit`, and `stable: true` only when it is the
-newest canonical release. Omitting the version and commit publishes current `main` to `dev/`.
+newest canonical release. Omitting the version and commit publishes `main` to `current/`.
+Publication tooling and version-policy prose come from the workflow commit, while generated API
+references and other content come from the exact source. The manifest records both commits.

@@ -124,7 +124,7 @@ describe('Python release publication contract', () => {
 });
 
 describe('Versioned documentation publication contract', () => {
-  it('publishes development docs and accepts exact release snapshots', () => {
+  it('publishes Current from main and accepts exact releases for minor documentation', () => {
     const docs = yaml.load(read('.github/workflows/docs.yml'));
 
     assert.equal(docs.name, 'Publish versioned documentation');
@@ -139,9 +139,7 @@ describe('Versioned documentation publication contract', () => {
     assertPagesPublisherPermissions(docs.permissions);
     assert.equal(docs.concurrency['cancel-in-progress'], false);
     assert.equal(docs.concurrency.queue, 'max');
-    const rustSetup = docs.jobs.publish.steps.find(
-      (step) => step.name === 'Setup Rust 1.97.0'
-    );
+    const rustSetup = docs.jobs.publish.steps.find((step) => step.name === 'Setup Rust 1.97.0');
     assert.deepEqual(rustSetup.with, {
       toolchain: '1.97.0',
       components: 'clippy,rustfmt',
@@ -162,27 +160,23 @@ describe('Versioned documentation publication contract', () => {
     });
   });
 
-  it('checks generated references and refuses a mismatched immutable snapshot', () => {
+  it('checks generated references and guards publication identity', () => {
     const docs = read('.github/workflows/docs.yml');
 
     assert.match(docs, /generate_cli_docs -- --check/);
     assert.match(docs, /generate-cluster-protocol -- --check/);
     assert.match(docs, /pip install.*docs\/requirements\.lock/);
     assert.match(docs, /python -m mkdocs build --strict/);
-    assert.match(docs, /development documentation must use current main \$main_commit/);
+    assert.match(docs, /Current documentation must use current main \$main_commit/);
     assert.match(docs, /id="zeroshot\.Client"/);
     assert.match(docs, /id="zeroshot\.RunResult"/);
     assert.match(docs, /id="zeroshot\.InvalidRequestError"/);
-    assert.match(docs, /is immutable and already belongs to/);
-    assert.match(docs, /cmp -s "\$remote_manifest" site\/manifest\.json/);
-    assert.match(docs, /required_snapshot_paths=\(/);
-    assert.match(docs, /is missing \$relative/);
-    assert.match(docs, /required_python_anchors=\(/);
-    assert.match(docs, /has an invalid rendered Python API at \$relative/);
-    assert.match(docs, /exact-exists.*== 'false'/);
+    assert.match(docs, /docs_versions\.py migrate/);
+    assert.match(docs, /docs_versions\.py check-update/);
+    assert.match(docs, /ZEROSHOT_PRODUCT_DOCS_VERSION/);
+    assert.match(docs, /ZEROSHOT_DOCS_PUBLISHER_COMMIT/);
     assert.match(docs, /--alias-type redirect/);
-    assert.match(docs, /mike alias/);
-    assert.match(docs, /mike set-default/);
+    assert.match(docs, /mike set-default --config-file mkdocs.yml current/);
     assert.match(docs, /actions\/upload-pages-artifact@[0-9a-f]{40}/);
     assert.match(docs, /actions\/deploy-pages@[0-9a-f]{40}/);
     assert.doesNotMatch(docs, /python -m mike/);

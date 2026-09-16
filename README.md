@@ -125,7 +125,7 @@ submitting runs.
 - [Distribution contract](docs/zeroshot-distribution.md)
 - [Target image guide](docker/zeroshot-target/README.md)
 - [Python SDK](sdks/python/README.md)
-- [Cluster API reference](https://the-open-engine.github.io/zeroshot/dev/reference/cluster/api/)
+- [Cluster API reference](https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/)
 - [OpenEngine graph contract](docs/reference/cluster/graph.md)
 
 ## Development

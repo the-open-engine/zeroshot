@@ -172,9 +172,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   required by mkdocstrings directives. Rendered-symbol CI checks are the contract.
 - `docs/reference/cluster/api.md` is generated from the final OpenRPC value
   through the Rust testkit. Do not hand-edit it or add a parallel method registry.
-- Published documentation uses immutable `vX.Y.Z/` snapshots relative to the docs base, moving
-  `stable` and `dev` aliases, and a per-snapshot `manifest.json` with exact source identity and
-  logical routes.
+- Published documentation defaults to `current/` from `main` and keeps one moving `vX.Y/` version
+  per minor release. Each minor advances to its newest published patch; retries cannot roll it back
+  or substitute another source for the same product version. Schema-2 manifests record exact product,
+  SDK, source, and publication-tooling identity. Legacy patch page URLs redirect to their minor.
+- Documentation publication tools come from the workflow commit separately from the exact release
+  source. The publisher migrates the existing Pages tree locally and pushes once after validation.
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
 - Secret-bearing target inputs never enter run ledgers, target configuration, or observation records.
@@ -214,7 +217,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                                          |
 | Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs` |
 | Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                                             |
-| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `.github/workflows/docs.yml`                                   |
+| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `scripts/docs_versions.py`, `.github/workflows/docs.yml`                                   |
 | npm package                   | `npm/zeroshot/`                                                                                               |
 | Target image                  | `docker/zeroshot-target/`                                                                                     |
 | Target declarations           | `distribution/zeroshot-targets.json`                                                                          |
@@ -275,7 +278,8 @@ python -m mkdocs build --strict
 - Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by
   default and may be explicitly deferred with `publish_pypi: false`.
 - `.github/workflows/release-python.yml` may publish later SDK-only revisions.
-- `.github/workflows/docs.yml` publishes `main` as `dev` and canonical releases as immutable
-  snapshots after Python revision `1`; later SDK-only releases do not rebuild product snapshots.
+- `.github/workflows/docs.yml` publishes `main` as Current and canonical releases into `vX.Y/`
+  after Python revision `1`; later SDK-only releases do not rebuild product documentation.
+  The root always selects Current. Legacy `dev` and `stable` redirects stay outside the selector.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.

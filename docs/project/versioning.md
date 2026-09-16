@@ -1,100 +1,92 @@
 # Documentation versions
 
-For every release published through this workflow, the documentation site writes an immutable
-snapshot whose pages do not change later.
+**Current** follows `main` and is the default. It may describe changes that have not shipped yet.
+For an installed release, choose its minor version from the header. Each minor version documents
+its newest published patch: releases `10.2.0` through `10.2.8` share `v10.2/`, whose content comes
+from `10.2.8` after that release publishes.
+
+Patch releases update the existing minor documentation without adding another selector entry.
+Older minor versions remain available.
 
 ## URL contract
 
-The initial docs base URL is `https://the-open-engine.github.io/zeroshot/`. Every path in this table
-is relative to that base. Keep its `/zeroshot/` project prefix while using GitHub Pages; with another
-docs base, resolve the same relative paths against that base instead.
+The docs base is `https://the-open-engine.github.io/zeroshot/`. Resolve these paths against that
+base, including its `/zeroshot/` project prefix:
 
-| Relative path          | Meaning                                      | Mutable? |
-| ---------------------- | -------------------------------------------- | -------- |
-| `vX.Y.Z/`              | Exact canonical product release              | No       |
-| `stable/`              | Redirect to the newest canonical release     | Yes      |
-| `dev/`                 | Current `main` documentation                 | Yes      |
-| `versions.json`        | Version selector data written by Mike        | Yes      |
-| `vX.Y.Z/manifest.json` | Machine-readable identity and logical routes | No       |
+| Relative path                                 | Meaning                                                          |
+| --------------------------------------------- | ---------------------------------------------------------------- |
+| `current/`                                    | Current `main` documentation; the site root redirects here       |
+| `vX.Y/`                                       | Newest published patch within that minor version                 |
+| `versions.json`                               | Selector entries: Current and minor versions                     |
+| `current/manifest.json`, `vX.Y/manifest.json` | Source identity and logical routes                               |
+| `dev/`                                        | Legacy page redirects to Current                                 |
+| `stable/`                                     | Legacy page redirects to the newest released minor               |
+| `vX.Y.Z/`                                     | Previously published patch pages redirect to their minor version |
 
-The site root redirects to `stable` after the first release deployment. Before that, it points to
-`dev`.
+The selector does not list legacy aliases. Existing patch links retain their page, query string,
+and fragment, but now show the minor version's newest patch. New releases do not create patch paths.
 
-## Snapshot manifest
+## Build manifest
 
-The build hook writes this manifest beside the pages:
+Manifest schema 2 distinguishes a docs channel from the exact product used to generate its APIs:
 
 ```json
 {
-  "docsVersion": "v9.1.0",
-  "productVersion": "9.1.0",
-  "pythonSdkVersion": "9.1.0.post1",
+  "schemaVersion": 2,
+  "docsVersion": "v10.2",
+  "productVersion": "10.2.8",
+  "pythonSdkVersion": "10.2.8.post1",
+  "sourceCommit": "FULL_PRODUCT_SOURCE_COMMIT",
+  "publisherCommit": "FULL_PUBLICATION_WORKFLOW_COMMIT",
   "routes": {
-    "clusterApi": "reference/cluster/api/",
-    "cli": "zeroshot-cli/",
-    "execution": "concepts/execution/",
-    "graphSpec": "reference/cluster/graph/",
-    "install": "getting-started/install/",
-    "openrpc": "reference/cluster/openrpc.json",
     "overview": "",
-    "portableBindings": "reference/cluster/portable-bindings/",
-    "pythonApi": "reference/python/",
-    "pythonSdk": "guides/python-sdk/",
-    "quickstart": "getting-started/first-run/",
-    "runControl": "guides/observe-and-control/",
     "runtimePlan": "concepts/runtimes-and-connections/",
-    "schema": "reference/cluster/schema.json",
-    "targets": "concepts/targets/"
-  },
-  "schemaVersion": 1,
-  "sourceCommit": "FULL_GIT_COMMIT"
+    "runControl": "guides/observe-and-control/",
+    "cli": "zeroshot-cli/",
+    "pythonApi": "reference/python/",
+    "clusterApi": "reference/cluster/api/"
+  }
 }
 ```
 
-Route values are relative to the version root. Consumers should reject an unknown
-`schemaVersion`, check `productVersion`, and then join the selected route to the exact version base.
+The example abbreviates `routes`; builds retain the complete logical route map, including protocol
+schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
+and null product and Python SDK versions; its source commit identifies `main` at build time.
+
+Publication tools and this version-policy page can come from a newer workflow commit than the
+product source. `publisherCommit` records that distinction. Minor pages migrated from the old site
+retain their original source identity and omit `publisherCommit` until rebuilt; their existing
+rendered product content is reused.
+
+Old patch manifests now contain a schema-2 redirect record such as
+`{"schemaVersion": 2, "redirect": "../v10.2/manifest.json"}`. This is JSON metadata, not an HTTP
+redirect: GitHub Pages cannot redirect JSON clients with its HTML redirect pages. Clients that need
+an exact historical patch manifest must use the site's Git history. Do not treat a minor manifest
+as proof that the docs match an older patch exactly.
 
 ## Linking from Zeroshot Cloud
 
-The Cloud deployment already knows the Zeroshot image version and source commit, which is enough to
-link to matching core documentation without copying it. Use this sequence:
+For a deployed product version `X.Y.Z`, fetch `vX.Y/manifest.json` and require schema 2. Confirm that
+`productVersion` belongs to the deployed major/minor line, then resolve a logical route against
+`vX.Y/`. For example, `10.2.3` uses the `v10.2` docs, whose manifest may identify `10.2.8`.
+Callers should label this as minor-version documentation and account for features added after their
+installed patch. Compare source commits only when the documented and deployed product versions match.
 
-1. read the deployed image's `X.Y.Z` version;
-2. resolve `vX.Y.Z/manifest.json` against the docs base and fetch it once during deployment or
-   startup;
-3. confirm `productVersion` and, when available, `sourceCommit`;
-4. resolve a logical route from the manifest against that same exact-version base.
+If the minor has no docs, offer an explicitly labelled Current link. Current may contain unreleased
+behavior. Cloud owns instructions for accounts, organization policy, OAuth, GitHub Apps, and capacity;
+core graph, runtime, CLI, protocol, and SDK material stays here.
 
-For example, version `9.1.0` uses
-`https://the-open-engine.github.io/zeroshot/v9.1.0/manifest.json`. Joining
-`routes.runtimePlan` produces
-`https://the-open-engine.github.io/zeroshot/v9.1.0/concepts/runtimes-and-connections/`.
+## Publication and recovery
 
-A Cloud runtime-plan page can select `routes.runtimePlan`, while a run page can select
-`routes.runControl`. The Cloud site owns instructions for OAuth, GitHub Apps, accounts, organization
-policy, and capacity; graph, runtime, CLI, protocol, and SDK material stays here.
+Every `main` publication updates Current. After Python SDK revision 1, a product release updates its
+minor documentation from the exact release tag and commit. A retry cannot replace a newer patch with
+an older one or substitute a different source for the same product version. Later Python-only
+revisions do not rebuild product docs.
 
-Link to these pages instead of importing HTML or placing the site in an iframe. Each snapshot has its
-own search index, navigation, canonical URL, and generated anchors, while Cloud avoids serving a copy
-of the build output.
+To retry, run **Publish versioned documentation**. Omit inputs for Current, or supply the exact
+`vX.Y.Z` release and source commit for a minor. The optional `stable` input maintains the legacy
+released-docs redirect; it never changes the site's Current default.
 
-## Release and recovery rules
-
-`main` publishes `dev`. After Python SDK revision 1, the product release workflow calls the docs
-publisher with the same tag and source commit. The publisher refuses to replace a version path when
-its manifest names another commit; rerunning the same source can repair `stable` without rebuilding
-the snapshot.
-
-Later Python-only revisions can use a separate `python/X.Y.Z.postN/` namespace when that need first
-arises. They must not rebuild `vX.Y.Z/` from a newer commit.
-
-Canonical tags created before this publisher lands do not contain the site source and cannot be
-backfilled without misrepresenting their provenance. Cloud should test for the exact manifest and
-either hide the core-doc link or label a `dev/` fallback as development documentation. Exact-version
-links begin with the first later canonical release.
-
-GitHub Pages hosts the site at `https://the-open-engine.github.io/zeroshot/` with **GitHub Actions**
-as its publishing source. If a publication needs to be retried, manually run **Publish versioned
-documentation**. Mike keeps the version tree on `gh-pages`, and the publisher uploads that tree
-through the official Pages actions; repository owners can add a custom domain later without changing
-version or manifest paths.
+The publisher consolidates existing patch snapshots before publishing, retaining the newest patch
+per minor and replacing old pages with redirects. It stages the complete result before pushing
+`gh-pages` and deploying through GitHub Pages Actions. No release tags or binary artifacts change.

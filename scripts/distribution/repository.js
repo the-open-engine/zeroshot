@@ -141,10 +141,10 @@ function checkDocsWorkflowInputs(docsDocument) {
 
 function checkDocsWorkflowSettings(docsDocument) {
   if (!docsDocument.on?.push?.branches?.includes('main')) {
-    failIntegrity('docs workflow must publish mutable development docs from main');
+    failIntegrity('docs workflow must publish Current docs from main');
   }
   if (!(docsDocument.on && 'workflow_dispatch' in docsDocument.on)) {
-    failIntegrity('docs workflow must support manual development publication after Pages setup');
+    failIntegrity('docs workflow must support manual Current publication after Pages setup');
   }
   if (docsDocument.permissions?.contents !== 'write') {
     failIntegrity('docs workflow must receive contents write permission');
@@ -251,10 +251,10 @@ function checkReleaseFragments(workflow) {
 
 function checkDocsWorkflowFragments(workflow) {
   requireFragments('docs workflow', workflow, [
-    'ZEROSHOT_DOCS_VERSION:',
-    'ZEROSHOT_DOCS_COMMIT:',
-    'development documentation must use current main $main_commit',
-    'python -m pip install --disable-pip-version-check -r docs/requirements.lock',
+    'ZEROSHOT_DOCS_VERSION=',
+    'ZEROSHOT_DOCS_COMMIT=',
+    'Current documentation must use current main $main_commit',
+    'python -m pip install --disable-pip-version-check -r .docs-publisher/docs/requirements.lock',
     'cargo run --locked -p zeroshot --example generate_cli_docs -- --check',
     'cargo run --locked -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check',
     'python -m mkdocs build --strict',
@@ -262,18 +262,16 @@ function checkDocsWorkflowFragments(workflow) {
     'id="zeroshot.Client"',
     'id="zeroshot.RunResult"',
     'id="zeroshot.InvalidRequestError"',
-    'refs/remotes/origin/gh-pages:${DOCS_VERSION}/manifest.json',
-    '$DOCS_VERSION is immutable and already belongs to $existing_commit',
-    'cmp -s "$remote_manifest" site/manifest.json',
-    'required_snapshot_paths=(',
-    '$DOCS_VERSION is missing $relative',
-    'required_python_anchors=(',
-    '$DOCS_VERSION has an invalid rendered Python API at $relative',
-    "steps.published.outputs['exact-exists'] == 'false'",
+    'docs_version="${REQUESTED_VERSION%.*}"',
+    'ZEROSHOT_PRODUCT_DOCS_VERSION=',
+    'ZEROSHOT_DOCS_PUBLISHER_COMMIT:',
+    'ref: ${{ github.workflow_sha }}',
+    'python .docs-publisher/scripts/docs_versions.py migrate',
+    'python .docs-publisher/scripts/docs_versions.py check-update',
     'mike deploy',
-    'mike alias',
     '--alias-type redirect',
-    'mike set-default',
+    'mike set-default --config-file mkdocs.yml current',
+    'git push origin refs/heads/gh-pages:refs/heads/gh-pages',
     'actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b',
     'actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b',
     'actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e',

@@ -81,6 +81,6 @@ The reference section is built from product-owned definitions:
 - [Cluster API](reference/cluster/api.md), generated from the checked-in
   OpenRPC contract and protocol schemas.
 
-When reading about an installed release, choose its version from the header. Exact release paths do
-not change, while `stable` and `dev` move; [Documentation versions](project/versioning.md) defines
-the URL and manifest contract.
+Current follows `main` and may describe unreleased changes. For an installed release, choose its
+minor version from the header; each minor documents its newest published patch.
+[Documentation versions](project/versioning.md) defines the URL and manifest contract.

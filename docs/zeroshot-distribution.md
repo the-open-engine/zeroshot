@@ -15,7 +15,7 @@
 | Target image         | `ghcr.io/the-open-engine/zeroshot-target`                                |
 | Python wheel release | `zeroshot-python-vX.Y.Z_1`                                               |
 | Python package       | `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled |
-| Docs snapshot        | `vX.Y.Z/` relative to the docs base, including Python SDK revision `1`   |
+| Minor documentation  | `vX.Y/` at its newest patch, including Python SDK revision `1`           |
 
 The workflow publishes no alternate tag prefix, package, image, executable alias, source-build
 fallback, or compatibility artifact.
@@ -47,6 +47,6 @@ those staged versions.
 | 6    | Pack, install, smoke, and publish `@the-open-engine-company/zeroshot`.                                 |
 | 7    | Build and publish Python SDK revision `1` as an immutable GitHub wheel release.                        |
 | 8    | Publish that wheel set to PyPI; use `publish_pypi: false` only when trusted publishing is unavailable. |
-| 9    | Publish the immutable docs snapshot and advance `stable` for the newest release.                       |
+| 9    | Publish into `vX.Y/`; update the legacy `stable` redirect for the newest release.                      |
 
 `PUBLISHING.md` contains the operator setup and recovery rules.
