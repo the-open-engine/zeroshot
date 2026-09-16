@@ -96,7 +96,12 @@ fn help_explains_runtime_configuration() {
     let contract_prose = [
         concat!(
             "provider choices are codex/openai, codex/openrouter, codex/bedrock, ",
-            "claude/anthropic, claude/openrouter, and claude/bedrock."
+            "claude/anthropic, claude/openrouter, claude/bedrock, codex/gateway, and claude/gateway."
+        )
+        .to_owned(),
+        concat!(
+            "gateway connections require gateway_base_url and gateway_api_key; ",
+            "codex uses responses and claude uses messages."
         )
         .to_owned(),
         "known-incompatible harness/provider pairs are codex/anthropic and claude/openai."
