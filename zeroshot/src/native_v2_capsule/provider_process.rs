@@ -19,6 +19,12 @@ use crate::native_v2_runner::{
 };
 use crate::worker_catalog::ReasoningEffort;
 
+mod environment;
+pub(crate) use environment::{
+    CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, local_environment, provider_redactions,
+};
+mod configuration;
+pub(crate) use configuration::{ConfigurationRequest, PermissionPolicy, inspect_configuration};
 mod contained;
 mod filesystem;
 

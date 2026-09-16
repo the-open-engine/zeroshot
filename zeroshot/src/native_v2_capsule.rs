@@ -317,3 +317,7 @@ fn set_directory_boundary(
 #[cfg(test)]
 #[path = "native_v2_capsule/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "native_v2_capsule/permission_tests.rs"]
+mod permission_tests;

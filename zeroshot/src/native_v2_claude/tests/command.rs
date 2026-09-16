@@ -172,7 +172,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
 }
 
 #[test]
-fn private_verifier_workspaces_allow_noninteractive_build_side_effects() {
+fn private_verifier_workspaces_do_not_force_read_only_policy() {
     use crate::native_v2_claude::command::{ClaudeTurnArguments, claude_arguments};
     use crate::native_v2_runner::NodeRole;
 
@@ -189,7 +189,7 @@ fn private_verifier_workspaces_allow_noninteractive_build_side_effects() {
     )
     .assert_value();
     assert!(
-        arguments
+        !arguments
             .iter()
             .any(|argument| argument == "--dangerously-skip-permissions")
     );

@@ -363,9 +363,7 @@ fn assert_openrouter_capture(capture: &str) {
         "arg=--model\narg=openai/gpt-5.6-sol",
         "arg=model_reasoning_effort=\"max\"",
         "arg=--output-schema",
-        "arg=--sandbox\narg=workspace-write",
-        "arg=approval_policy=\"never\"",
-        "arg=web_search=\"disabled\"",
+        "arg=--dangerously-bypass-approvals-and-sandbox",
         "Authored instructions:\nExercise the Codex adapter.",
         "Input JSON:\n{\"task\":\"change the workspace\"}",
         "Runtime-owned response contract:\n{\"kind\":\"worker\",\"output\":{\"kind\":\"record\"",
@@ -380,7 +378,13 @@ fn assert_openrouter_capture(capture: &str) {
         );
     }
     assert_schema_capture(capture);
-    for suppressed in ["--ignore-user-config", "--ignore-rules", "--strict-config"] {
+    for suppressed in [
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--strict-config",
+        "web_search=",
+        "sandbox_workspace_write.network_access=",
+    ] {
         assert!(!capture.contains(suppressed));
     }
 }
@@ -446,13 +450,17 @@ async fn openrouter_script_observes_exact_configuration_environment_output_and_a
 }
 
 #[test]
-fn hosted_codex_uses_the_capsule_as_its_sandbox_boundary() {
+fn only_local_verifiers_force_a_read_only_sandbox() {
     let directory = TestDirectory::new("codex-hosted-policy");
     let local = scripted_adapter(&directory, CodexProvider::OpenAi);
     let hosted = NativeV2CodexAdapter::new(local.config.clone());
     let mut arguments = Vec::new();
     hosted.add_execution_policy(&mut arguments, "read-only");
-    assert_eq!(arguments, ["--dangerously-bypass-approvals-and-sandbox"]);
+    assert!(arguments.is_empty());
+    local.add_execution_policy(&mut arguments, "workspace-write");
+    assert!(arguments.is_empty());
+    local.add_execution_policy(&mut arguments, "read-only");
+    assert_eq!(arguments, ["--sandbox", "read-only"]);
 }
 
 #[tokio::test]

@@ -52,6 +52,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The `gateway` provider resolves `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` through named
   connections. Codex uses Responses with bearer authentication; Claude uses Messages with
   `x-api-key`. Preserve caller-owned base paths and model identifiers without protocol detection.
+- Local Codex `openai` runs inherit the user's configured model provider and transport, including
+  OpenAI-compatible proxies. Preserve declared `OPENAI_API_KEY` for custom provider authentication
+  while supplying the native `CODEX_API_KEY` alias. Hosted runs and explicit OpenRouter/Bedrock/gateway
+  selections retain adapter-owned provider setup.
+- Local runs preserve shell endpoint settings, Claude configuration directories and permission controls;
+  declared connection values take precedence. Hosted adapters do not inherit ambient settings.
+  Endpoint and Claude control variables in declared connections are passed to the harness; active
+  transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
+- Codex inherits harness settings for web search and sandbox network access. Runtime arguments
+  select the admitted model, optional effort, and response contract; they must not override unrelated
+  user preferences. Local and hosted workers use approval/sandbox bypass only when the harness's
+  native configuration query proves no authored permission policy. Configured or unavailable policy
+  keeps native behavior. Explicit cached Codex web search also prevents bypass because native full
+  access can promote cached search to live. Configuration probes have a separate ten-second/4 MiB budget, never send a
+  model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
+  model turn. They do not rewrite settings files; normal native startup state may still be updated.
+  Local verifiers retain read-only/plan policy; hosted verifiers use the same fallback in private copies.
+  Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
+  policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
+  configured, and unavailable inspection results.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding

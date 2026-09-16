@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::{
     ProviderExecution, ProviderFilesystemConfig, ProviderFailure, ProviderFailureRetry,
-    ProviderSessionCore, impl_provider_node_session, redaction_values,
+    ProviderSessionCore, impl_provider_node_session, provider_redactions,
 };
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -78,7 +78,12 @@ impl NodeDriver for ClaudeAdapter {
             control: &control,
             execution: &execution,
         };
-        let mut state = ClaudeRunState::new(&invocation, session).await?;
+        let mut state = ClaudeRunState::new(
+            &invocation,
+            session,
+            provider_redactions(&invocation.environment, &self.local_environment),
+        )
+        .await?;
         loop {
             if let Some(outcome) = self.advance_run(&turn, &mut state, &control).await? {
                 retain_session(&invocation.node, session, state.resume_id.as_deref()).await?;
@@ -138,9 +143,9 @@ impl ClaudeRunState {
     async fn new(
         invocation: &DriverInvocation,
         session: &ClaudeSession,
+        redactions: Vec<String>,
     ) -> Result<Self, NodeRunnerError> {
         let prompt = prompt(invocation)?;
-        let redactions = redaction_values(invocation.environment.iter().map(|(_, value)| value));
         Ok(Self {
             resume_id: session.resume_id.lock().await.clone(),
             retry: ProviderFailureRetry::new("Claude", prompt.clone(), redactions),

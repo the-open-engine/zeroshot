@@ -5,6 +5,9 @@ use tokio::process::Command;
 
 use super::{NativeV2CliError, local_io, local_message};
 use crate::native_v2_cli::{absolute_user_path, nonempty_environment};
+use crate::native_v2_capsule::provider_process::{
+    CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, local_environment,
+};
 
 pub(super) fn validate_local_run_id(run_id: &RunId) -> Result<(), NativeV2CliError> {
     is_canonical_uuid_v7(run_id)
@@ -44,7 +47,11 @@ fn local_socket_path_capacity() -> usize {
     address.sun_path.len()
 }
 
-pub(super) fn copy_minimal_process_environment(command: &mut Command) {
+pub(super) fn copy_minimal_process_environment(
+    command: &mut Command,
+) -> Result<(), NativeV2CliError> {
+    command.envs(local_environment(CODEX_LOCAL_ENVIRONMENT));
+    command.envs(local_environment(CLAUDE_LOCAL_ENVIRONMENT));
     for name in [
         "PATH",
         "LANG",
@@ -55,9 +62,17 @@ pub(super) fn copy_minimal_process_environment(command: &mut Command) {
         "CODEX_HOME",
     ] {
         if let Some(value) = std::env::var_os(name).filter(|value| !value.is_empty()) {
+            let value = if name == "CODEX_HOME" {
+                std::path::absolute(value)
+                    .map_err(local_io)?
+                    .into_os_string()
+            } else {
+                value
+            };
             command.env(name, value);
         }
     }
+    Ok(())
 }
 
 pub(super) fn prepare_private_directory(path: &Path) -> Result<(), NativeV2CliError> {
@@ -139,7 +154,7 @@ mod tests {
     fn local_controller_inherits_current_user_cli_home_paths() {
         let mut command = Command::new("true");
         command.env_clear();
-        copy_minimal_process_environment(&mut command);
+        copy_minimal_process_environment(&mut command).expect("copy local environment");
         let environment = command
             .as_std()
             .get_envs()
@@ -147,7 +162,17 @@ mod tests {
             .collect::<std::collections::BTreeMap<_, _>>();
 
         for name in ["HOME", "CODEX_HOME"] {
-            let expected = std::env::var_os(name).filter(|value| !value.is_empty());
+            let expected = std::env::var_os(name)
+                .filter(|value| !value.is_empty())
+                .map(|value| {
+                    if name == "CODEX_HOME" {
+                        std::path::absolute(value)
+                            .expect("absolute config home")
+                            .into_os_string()
+                    } else {
+                        value
+                    }
+                });
             assert_eq!(
                 environment.get(std::ffi::OsStr::new(name)),
                 expected.as_ref()

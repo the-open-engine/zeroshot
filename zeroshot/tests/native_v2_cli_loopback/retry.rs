@@ -279,6 +279,8 @@ printf 'RETRY=%s\nLOGS=%s\nSTATUS=%s\n' "$result" "$logs" "$status"
 
 const CODEX_RETRY_SCRIPT: &str = r#"#!/bin/sh
 set -eu
+# This fixture implements model turns only; configuration discovery is unsupported.
+if [ "${1-}" = app-server ]; then exit 1; fi
 prompt=$(/usr/bin/cat)
 attempt=1
 if [ -e attempt.state ]; then attempt=$(( $(/usr/bin/cat attempt.state) + 1 )); fi
@@ -298,6 +300,8 @@ fi
 
 const CLAUDE_RETRY_SCRIPT: &str = r#"#!/bin/sh
 set -eu
+# Keep configuration requests outside the model continuation counter.
+for arg in "$@"; do if [ "$arg" = --safe-mode ]; then exit 1; fi; done
 attempt=1
 if [ -e attempt.state ]; then attempt=$(( $(/usr/bin/cat attempt.state) + 1 )); fi
 /usr/bin/printf '%s' "$attempt" > attempt.state

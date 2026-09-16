@@ -329,7 +329,7 @@ impl LocalCliBackend {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .env_clear();
-        copy_minimal_process_environment(&mut command);
+        copy_minimal_process_environment(&mut command)?;
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() == -1 {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_v2_capsule::provider_process::safe_provider_text;
+use crate::native_v2_capsule::provider_process::{redaction_values, safe_provider_text};
 
 #[test]
 fn command_is_exact_and_rejects_adapter_owned_collisions() {
@@ -63,7 +63,7 @@ pub(super) fn provider_environment(
             .map(|(name, value)| (environment_name(name), value.to_owned())),
     );
     let resolved = ResolvedEnvironment::exact(&binding, resolved_values).assert_value();
-    scripted_adapter(&directory, provider)
+    NativeV2CodexAdapter::new(scripted_adapter(&directory, provider).config.clone())
         .provider_environment(&resolved, &directory.child("runtime-home"))
 }
 
@@ -100,14 +100,7 @@ fn bedrock_environment_requires_aws_values_and_rejects_conflicting_codex_control
         );
     }
 
-    for conflict in [
-        "CODEX_API_KEY",
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "CODEX_BASE_URL",
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-    ] {
+    for conflict in ["CODEX_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"] {
         let values = [
             (AWS_BEARER_TOKEN_BEDROCK, "bedrock-secret"),
             (AWS_REGION, "us-east-1"),
@@ -216,8 +209,6 @@ fn gateway_environment_rejects_conflicting_provider_credentials() {
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         "AWS_BEARER_TOKEN_BEDROCK",
-        "CODEX_BASE_URL",
-        "OPENAI_BASE_URL",
     ] {
         let mut values = required.to_vec();
         values.push((conflict, "conflict"));
@@ -226,4 +217,99 @@ fn gateway_environment_rejects_conflicting_provider_credentials() {
             "accepted {conflict}"
         );
     }
+}
+
+#[test]
+fn hosted_codex_preserves_declared_endpoint_overrides_for_all_providers() {
+    for (provider, required) in [
+        (
+            CodexProvider::OpenAi,
+            vec![("OPENAI_API_KEY", "openai-secret")],
+        ),
+        (
+            CodexProvider::OpenRouter,
+            vec![("OPENROUTER_API_KEY", "router-secret")],
+        ),
+        (
+            CodexProvider::Bedrock,
+            vec![
+                (AWS_BEARER_TOKEN_BEDROCK, "bedrock-secret"),
+                (AWS_REGION, "us-east-1"),
+            ],
+        ),
+        (
+            CodexProvider::Gateway,
+            vec![
+                ("GATEWAY_BASE_URL", "https://gateway.example/api"),
+                ("GATEWAY_API_KEY", "gateway-secret"),
+            ],
+        ),
+    ] {
+        for name in crate::native_v2_capsule::provider_process::CODEX_LOCAL_ENVIRONMENT {
+            let mut values = required.clone();
+            values.push((name, "https://proxy.example/custom"));
+            let environment = provider_environment(provider, &values).assert_value();
+            assert_eq!(
+                environment.get(*name).map(String::as_str),
+                Some("https://proxy.example/custom")
+            );
+        }
+    }
+}
+
+#[test]
+fn codex_declared_connection_overrides_local_endpoint_and_redacts_both() {
+    let directory = TestDirectory::new("codex-endpoint-precedence");
+    let mut adapter = NativeV2CodexAdapter::new_for_test(
+        scripted_adapter(&directory, CodexProvider::OpenAi)
+            .config
+            .clone(),
+    );
+    adapter.local_environment.insert(
+        "OPENAI_BASE_URL".to_owned(),
+        "https://shell.example/private".to_owned(),
+    );
+    let binding = binding(
+        SessionScope::Execution,
+        &["OPENAI_API_KEY", "OPENAI_BASE_URL"],
+    );
+    let resolved = ResolvedEnvironment::exact(
+        &binding,
+        BTreeMap::from([
+            (
+                environment_name("OPENAI_API_KEY"),
+                "declared-key".to_owned(),
+            ),
+            (
+                environment_name("OPENAI_BASE_URL"),
+                "https://connection.example/private".to_owned(),
+            ),
+        ]),
+    )
+    .assert_value();
+    let values = adapter
+        .provider_environment(&resolved, &directory.child("runtime"))
+        .assert_value();
+    assert_eq!(
+        values["OPENAI_BASE_URL"],
+        "https://connection.example/private"
+    );
+    adapter
+        .local_environment
+        .insert("CLAUDE_CODE_USE_GATEWAY".to_owned(), "1".to_owned());
+    let redactions = provider_redactions(&resolved, &adapter.local_environment);
+    assert_eq!(
+        safe_provider_text(
+            "HTTP 401, retry 1: https://shell.example/private",
+            &redactions
+        ),
+        "HTTP 401, retry 1: [REDACTED]"
+    );
+    assert!(redactions.contains(&"https://shell.example/private".to_owned()));
+    assert!(redactions.contains(&"https://connection.example/private".to_owned()));
+    assert!(
+        NativeV2CodexAdapter::new(adapter.config.clone())
+            .local_environment
+            .is_empty()
+    );
 }

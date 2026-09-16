@@ -6,6 +6,7 @@
 
 mod command;
 mod output;
+mod permissions;
 mod process;
 mod schema_file;
 #[path = "native_v2_codex/session.rs"]
@@ -21,12 +22,13 @@ use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
-    ProviderExecution, ProviderFilesystemConfig, redaction_values, with_driver_detail,
+    ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, local_environment,
+    provider_redactions, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
     AgentResponse, AgentResponseState, render_agent_prompt, resolve_agent_response_with_dialect,
-    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRole, NodeRunnerError,
+    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRunnerError,
     ProviderSchemaDialect, ResolvedEnvironment,
 };
 
@@ -66,6 +68,9 @@ pub struct NativeV2CodexAdapter {
     config: NativeV2CodexConfig,
     runners: ProviderProcessRunners,
     externally_sandboxed: bool,
+    local_environment: BTreeMap<String, String>,
+    #[cfg(test)]
+    test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
 
 impl NativeV2CodexAdapter {
@@ -77,34 +82,43 @@ impl NativeV2CodexAdapter {
             config,
             runners: ProviderProcessRunners::hosted(process_pool),
             externally_sandboxed: true,
+            #[cfg(test)]
+            test_permission_policy: None,
+            local_environment: BTreeMap::new(),
         }
     }
 
     #[must_use]
     pub fn new_local(config: NativeV2CodexConfig) -> Self {
+        let local_environment = local_environment(CODEX_LOCAL_ENVIRONMENT);
         Self {
             config,
             runners: ProviderProcessRunners::local(),
             externally_sandboxed: false,
+            #[cfg(test)]
+            test_permission_policy: None,
+            local_environment,
         }
     }
 
     #[cfg(test)]
     fn new_for_test(config: NativeV2CodexConfig) -> Self {
-        Self::new_local(config)
+        let mut adapter = Self::new_local(config);
+        adapter.local_environment.clear();
+        adapter.test_permission_policy =
+            Some(crate::native_v2_capsule::provider_process::PermissionPolicy::Unset);
+        adapter
     }
 
     fn add_execution_policy(&self, argv: &mut Vec<String>, sandbox: &str) {
-        if self.externally_sandboxed {
-            argv.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
-            return;
+        if !self.externally_sandboxed && sandbox == "read-only" {
+            add_local_execution_policy(argv, sandbox);
         }
-        add_local_execution_policy(argv, sandbox);
     }
 
-    fn add_execution_config(&self, argv: &mut Vec<String>, role: NodeRole) {
-        if !self.externally_sandboxed {
-            add_local_execution_config(argv, role);
+    fn add_execution_config(&self, argv: &mut Vec<String>, sandbox: &str) {
+        if !self.externally_sandboxed && sandbox == "read-only" {
+            add_local_execution_config(argv);
         }
     }
 
@@ -130,8 +144,11 @@ impl NativeV2CodexAdapter {
         let mut argv = vec!["exec".to_owned()];
         self.add_execution_policy(&mut argv, sandbox);
         add_resume_command(&mut argv, input.resume);
-        add_provider_args(&mut argv, self.config.provider, &environment)?;
-        self.add_execution_config(&mut argv, invocation.role);
+        // Local OpenAI-compatible routing belongs to the user's Codex configuration.
+        if !(self.config.local_user.is_some() && self.config.provider == CodexProvider::OpenAi) {
+            add_provider_args(&mut argv, self.config.provider, &environment)?;
+        }
+        self.add_execution_config(&mut argv, sandbox);
         add_node_args(&mut argv, model.as_str(), effort.copied());
         argv.extend([
             "--output-schema".to_owned(),
@@ -198,12 +215,8 @@ impl NativeV2CodexAdapter {
                 "Codex declared environment conflicts with reserved runtime configuration",
             )
         })?;
-        for provider_control in ["CODEX_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"] {
-            if values.contains_key(provider_control) {
-                return Err(NodeRunnerError::DriverDetail(format!(
-                    "Codex declared environment contains provider-owned variable {provider_control}"
-                )));
-            }
+        for (name, value) in &self.local_environment {
+            values.entry(name.clone()).or_insert_with(|| value.clone());
         }
         configure_provider_auth(
             &mut values,
@@ -247,7 +260,10 @@ impl NativeV2CodexAdapter {
             &invocation.response,
         )
         .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))?;
-        let mut state = CodexRunState::new(invocation, prompt);
+        let mut state = CodexRunState::new(
+            prompt,
+            provider_redactions(&invocation.environment, &self.local_environment),
+        );
         loop {
             if let Some(outcome) = self.advance_run(&turn, &mut state).await? {
                 return Ok(outcome);
@@ -310,8 +326,7 @@ impl NativeV2CodexAdapter {
                 return Ok(CodexOutput::provider_failure(detail));
             }
         };
-        let redactions =
-            redaction_values(turn.invocation.environment.iter().map(|(_, value)| value));
+        let redactions = provider_redactions(&turn.invocation.environment, &self.local_environment);
         exchange_turn(&mut turn_process.process, prompt, turn.control, &redactions).await
     }
 
@@ -340,7 +355,7 @@ impl NativeV2CodexAdapter {
                 return Ok(CodexTurnProcessOpen::ProviderFailure(error.to_string()));
             }
         };
-        let command = self.command(
+        let mut command = self.command(
             turn,
             CodexCommandInput {
                 resume,
@@ -348,6 +363,8 @@ impl NativeV2CodexAdapter {
                 schema_path: schema.path(),
             },
         )?;
+        self.apply_permission_default(files.clone(), &mut command, turn.control)
+            .await?;
         let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,
             ProcessOpen::ProviderFailure(detail) => {
@@ -374,8 +391,7 @@ struct CodexRunState {
 }
 
 impl CodexRunState {
-    fn new(invocation: &DriverInvocation, prompt: String) -> Self {
-        let redactions = redaction_values(invocation.environment.iter().map(|(_, value)| value));
+    fn new(prompt: String, redactions: Vec<String>) -> Self {
         Self {
             retry: ProviderFailureRetry::new("Codex", prompt.clone(), redactions),
             response: AgentResponseState::new(prompt),

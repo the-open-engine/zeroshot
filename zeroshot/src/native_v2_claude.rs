@@ -2,11 +2,12 @@
 //!
 //! One adapter serves the graph-wide Anthropic, OpenRouter, gateway, or Amazon Bedrock lane.
 //! Admission has already selected the model, effort, session scope, and declared environment for
-//! each node; it preserves those choices without consulting legacy coordination or ambient process
-//! state.
+//! each node. Only the local adapter inherits the current user's harness configuration environment.
 
 #[path = "native_v2_claude/command.rs"]
 mod command;
+#[path = "native_v2_claude/permissions.rs"]
+mod permissions;
 #[path = "native_v2_claude/session.rs"]
 mod session;
 #[path = "native_v2_claude/transcript.rs"]
@@ -20,7 +21,7 @@ use std::path::{Path, PathBuf};
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, ProcessStdout};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
-    redaction_values, with_driver_detail,
+    CLAUDE_LOCAL_ENVIRONMENT, local_environment, provider_redactions, with_driver_detail,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -29,7 +30,7 @@ use crate::native_v2_runner::{
 };
 use command::{
     ClaudeTurnArguments, claude_arguments, configure_provider, extend_declared_environment, prompt,
-    reject_provider_controls, workspace_access,
+    workspace_access,
 };
 use session::{ClaudeSession, attempt_session_id, observe_session};
 use transcript::{ClaudeAttempt, ClaudeEmission, ClaudeTranscript};
@@ -110,6 +111,9 @@ pub struct ClaudeAdapter {
     local_user_home: Option<PathBuf>,
     base_environment: ClaudeProcessEnvironment,
     runners: ProviderProcessRunners,
+    local_environment: BTreeMap<String, String>,
+    #[cfg(test)]
+    test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
 
 pub struct ClaudeAdapterConfig {
@@ -132,7 +136,26 @@ impl ClaudeAdapter {
     }
 
     pub fn new_local(configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
-        Self::configured(configuration, ProviderProcessRunners::local())
+        let inherit_selectors = configuration.provider == ClaudeProvider::Anthropic;
+        let mut adapter = Self::configured(configuration, ProviderProcessRunners::local())?;
+        adapter.local_environment = local_environment(CLAUDE_LOCAL_ENVIRONMENT);
+        if let Some(path) = adapter
+            .local_environment
+            .get_mut("CLAUDE_CONFIG_DIR")
+            .filter(|path| !path.is_empty())
+        {
+            *path = std::path::absolute(&*path)
+                .map_err(|_| ClaudeAdapterConfigError::InvalidEnvironment)?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| ClaudeAdapterConfigError::InvalidEnvironment)?;
+        }
+        if !inherit_selectors {
+            adapter
+                .local_environment
+                .retain(|name, _| !name.starts_with("CLAUDE_CODE_USE_"));
+        }
+        Ok(adapter)
     }
 
     fn configured(
@@ -151,12 +174,19 @@ impl ClaudeAdapter {
             local_user_home: configuration.local_user_home,
             base_environment: configuration.base_environment,
             runners,
+            local_environment: BTreeMap::new(),
+            #[cfg(test)]
+            test_permission_policy: None,
         })
     }
 
     #[cfg(test)]
     fn new_for_test(configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
-        Self::new_local(configuration)
+        let mut adapter = Self::new_local(configuration)?;
+        adapter.local_environment.clear();
+        adapter.test_permission_policy =
+            Some(crate::native_v2_capsule::provider_process::PermissionPolicy::Unset);
+        Ok(adapter)
     }
 
     fn command(
@@ -248,12 +278,11 @@ impl ClaudeAdapter {
                 "Claude declared environment conflicts with reserved process configuration",
             )
         })?;
-        reject_provider_controls(&environment).map_err(|error| {
-            with_driver_detail(
-                error,
-                "Claude declared environment contains a provider-owned control variable",
-            )
-        })?;
+        for (name, value) in &self.local_environment {
+            environment
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
+        }
         configure_provider(&mut environment, self.provider)?;
         Ok(environment)
     }
@@ -291,8 +320,9 @@ impl ClaudeAdapter {
             ClaudeProcessStart::Ready(process) => process,
             ClaudeProcessStart::Failed(attempt) => return Ok(attempt),
         };
-        let transcript = ClaudeTranscript::new(redaction_values(
-            turn.invocation.environment.iter().map(|(_, value)| value),
+        let transcript = ClaudeTranscript::new(provider_redactions(
+            &turn.invocation.environment,
+            &self.local_environment,
         ));
         turn_process::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
             .await
@@ -307,13 +337,15 @@ impl ClaudeAdapter {
             Ok(process) => process,
             Err(error) => return turn_process::failed_before_start(error, turn.control),
         };
-        let command = self.command(
+        let mut command = self.command(
             turn,
             ClaudeCommandInput {
                 resume_id,
                 files: &files,
             },
         )?;
+        self.apply_permission_default(files.clone(), &mut command, turn.control)
+            .await?;
         turn_process::open(files, command, turn.control).await
     }
 }

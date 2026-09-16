@@ -7,8 +7,8 @@ use std::time::Duration;
 use openengine_cluster_testkit::TemporaryDirectory;
 use openengine_cluster_testkit::assertions::{AssertValue, JsonAt};
 use serde_json::{Value, json};
-use tokio::process::{Child, Command};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::process::{Child, Command};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
@@ -16,7 +16,9 @@ const DECLARED_KEY: &str = "local-declared-key";
 
 pub(super) struct LocalFixture {
     root: TemporaryDirectory,
+    harness_environment: std::collections::BTreeMap<String, String>,
     pub(super) repository: PathBuf,
+    working_directory: PathBuf,
     state: PathBuf,
     pub(super) config_blocker: PathBuf,
     graph: PathBuf,
@@ -52,6 +54,8 @@ impl LocalFixture {
         write_json(&runtime, &local_runtime());
         Self {
             root,
+            harness_environment: std::collections::BTreeMap::new(),
+            working_directory: repository.clone(),
             repository,
             state,
             config_blocker,
@@ -66,7 +70,7 @@ impl LocalFixture {
         let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
         command
             .args(args)
-            .current_dir(&self.repository)
+            .current_dir(&self.working_directory)
             .env_clear()
             .env(
                 "PATH",
@@ -75,6 +79,7 @@ impl LocalFixture {
             .env("ZEROSHOT_STATE_DIR", &self.state)
             .env("ZEROSHOT_CONFIG_DIR", &self.config_blocker)
             .env("UNDECLARED_SECRET", "must-not-cross")
+            .envs(&self.harness_environment)
             .kill_on_drop(true);
         if inline {
             command
@@ -474,7 +479,8 @@ pub(super) fn git(repository: &Path, arguments: &[&str]) -> String {
 fn write_fake_codex(path: &Path) {
     fs::write(
         path,
-        br#"#!/bin/sh
+        with_configuration_probe(
+            br#"#!/bin/sh
 test "${CODEX_API_KEY-}" = "local-declared-key" || exit 41
 test -z "${OPENAI_API_KEY+x}" || exit 42
 test -z "${UNDECLARED_SECRET+x}" || exit 43
@@ -495,10 +501,117 @@ fi
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"null"}}'
 printf '%s\n' '{"type":"turn.completed"}'
 "#,
+            "codex",
+            &ProbeResponse::Configured(json!({})),
+        ),
     )
     .assert_value_with("write fake Codex");
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
         .assert_value_with("make fake Codex executable");
+}
+
+enum ProbeResponse {
+    Configured(Value),
+    Unsupported,
+    Invalid,
+}
+
+fn with_configuration_probe(script: &[u8], harness: &str, response: &ProbeResponse) -> String {
+    let script = std::str::from_utf8(script).assert_value_with("fake harness script");
+    let probe = match harness {
+        "codex" => codex_configuration_probe(response),
+        "claude" => claude_configuration_probe(response),
+        _ => unreachable!(),
+    };
+    script.replacen("#!/bin/sh\n", &format!("#!/bin/sh\n{probe}\n"), 1)
+}
+
+fn codex_configuration_probe(response: &ProbeResponse) -> String {
+    let result = match response {
+        ProbeResponse::Unsupported => "exit 64".to_owned(),
+        ProbeResponse::Invalid => {
+            "printf '%s\\n' '{\"id\":2,\"result\":{\"config\":null,\"origins\":{},\"layers\":[]}}'"
+                .to_owned()
+        }
+        ProbeResponse::Configured(settings) => {
+            let mut configuration = json!({
+                "sandbox_mode":null,"approval_policy":null,"permissions":null,
+                "active_permissions":null,"sandbox_workspace_write":null,"projects":null
+            });
+            configuration
+                .as_object_mut()
+                .assert_value()
+                .extend(settings.as_object().assert_value().clone());
+            let response = json!({"id":2,"result":{
+                "config":configuration,"origins":{},"layers":[]
+            }});
+            format!("printf '%s\\n' {}", shell_literal(&response.to_string()))
+        }
+    };
+    format!(
+        r#"if test "${{1-}}" = app-server; then
+  while IFS= read -r request; do
+    case "$request" in
+      *'"method":"initialize"'*) printf '%s\n' '{{"id":1,"result":{{}}}}' ;;
+      *'"method":"config/read"'*) {result} ;;
+      *'"method":"configRequirements/read"'*) printf '%s\n' '{{"id":3,"result":{{"requirements":null}}}}' ;;
+    esac
+  done
+  exit 0
+fi"#
+    )
+}
+
+fn claude_configuration_probe(response: &ProbeResponse) -> String {
+    let (mode, settings) = match response {
+        ProbeResponse::Unsupported => ("default", "exit 64".to_owned()),
+        ProbeResponse::Invalid => (
+            "default",
+            format!("printf '%s\\n' {}", shell_literal(&json!({
+            "type":"control_response","response":{"subtype":"success",
+                "request_id":"zeroshot-settings","response":{
+                    "effective":{},"sources":[],"errors":[{"message":"Invalid or malformed JSON"}]
+                }}
+        }).to_string())),
+        ),
+        ProbeResponse::Configured(configuration) => {
+            let mode = configuration
+                .pointer("/permissions/defaultMode")
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let response = json!({"type":"control_response","response":{
+                "subtype":"success","request_id":"zeroshot-settings","response":{
+                    "effective":configuration,"sources":[{"source":"userSettings","settings":configuration}]
+                }
+            }});
+            (
+                mode,
+                format!("printf '%s\\n' {}", shell_literal(&response.to_string())),
+            )
+        }
+    };
+    let initialize = json!({"type":"control_response","response":{
+        "subtype":"success","request_id":"zeroshot-initialize",
+        "response":{"current_permission_mode":mode}
+    }});
+    let initialize = shell_literal(&initialize.to_string());
+    format!(
+        r#"for argument in "$@"; do
+  if test "$argument" = --safe-mode; then
+    while IFS= read -r request; do
+      case "$request" in
+        *'"subtype":"initialize"'*) printf '%s\n' {initialize} ;;
+        *'"subtype":"get_settings"'*) {settings} ;;
+      esac
+    done
+    exit 0
+  fi
+done"#
+    )
+}
+
+fn shell_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn local_runtime() -> Value {
@@ -551,3 +664,6 @@ fn write_json(path: &Path, value: &Value) {
     let bytes = serde_json::to_vec(value).assert_value_with("encode fixture JSON");
     fs::write(path, bytes).assert_value_with("write fixture JSON");
 }
+
+#[path = "harness_environment.rs"]
+mod harness_environment;

@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn local_and_managed_openai_auth_preserve_explicit_codex_keys() {
+    for has_local_user in [true, false] {
+        let mut values = BTreeMap::from([
+            (
+                "OPENAI_API_KEY".to_owned(),
+                "custom-provider-key".to_owned(),
+            ),
+            ("CODEX_API_KEY".to_owned(), "native-provider-key".to_owned()),
+        ]);
+        configure_provider_auth(&mut values, CodexProvider::OpenAi, has_local_user).assert_value();
+        assert_eq!(
+            values.get("CODEX_API_KEY").map(String::as_str),
+            Some("native-provider-key")
+        );
+        assert_eq!(
+            values.get("OPENAI_API_KEY").map(String::as_str),
+            has_local_user.then_some("custom-provider-key")
+        );
+    }
+}
+
+#[test]
 fn local_codex_user_reuses_native_homes_without_an_openai_api_key() {
     let directory = TestDirectory::new("codex-local-user");
     let runtime_home = directory.child("runtime");
@@ -39,4 +61,91 @@ fn local_codex_user_reuses_native_homes_without_an_openai_api_key() {
                 .to_owned()
         ))
     );
+}
+
+#[tokio::test]
+async fn local_codex_turns_preserve_litellm_configuration_and_credentials() {
+    let directory = TestDirectory::new("codex-local-config");
+    let home = directory.child("home");
+    let codex_home = directory.child("custom-codex-home");
+    fs::create_dir_all(&home).assert_value();
+    fs::create_dir_all(&codex_home).assert_value();
+    let config = concat!(
+        "model_provider = \"litellm\"\n",
+        "web_search = \"live\"\n",
+        "model_reasoning_effort = \"low\"\n",
+        "[sandbox_workspace_write]\n",
+        "network_access = false\n",
+        "[model_providers.litellm]\n",
+        "name = \"LiteLLM\"\n",
+        "base_url = \"http://127.0.0.1:4000/v1\"\n",
+        "env_key = \"OPENAI_API_KEY\"\n",
+        "wire_api = \"responses\"\n",
+    );
+    let config_path = codex_home.join("config.toml");
+    fs::write(&config_path, config).assert_value();
+    let script = SCRIPT.replace(
+        "schema_path=\n",
+        "/usr/bin/cat \"$CODEX_HOME/config.toml\" >> \"$CONFIG_CAPTURE\"\nschema_path=\n",
+    );
+    let adapter = scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-script", &script);
+    let mut configuration = adapter.config.clone();
+    configuration.local_user = Some(NativeV2CodexUser { home, codex_home });
+    let mut adapter = NativeV2CodexAdapter::new_for_test(configuration);
+    adapter.test_permission_policy =
+        Some(crate::native_v2_capsule::provider_process::PermissionPolicy::Configured);
+    let adapter = Arc::new(adapter);
+    let mut binding = binding(
+        SessionScope::NodeInstance,
+        &["CAPTURE_PATH", "CONFIG_CAPTURE", "OPENAI_API_KEY"],
+    );
+    let NodeRuntimeBinding::Agent { effort, .. } = &mut binding else {
+        panic!("expected an agent binding");
+    };
+    *effort = None;
+    let admitted = admitted(binding, CodexProvider::OpenAi).await;
+    let runtime = runner(&admitted, adapter);
+    let capture_path = directory.child("capture");
+    let config_capture = directory.child("config-capture");
+    let values = [
+        ("CAPTURE_PATH", capture_path.display().to_string()),
+        ("CONFIG_CAPTURE", config_capture.display().to_string()),
+        ("OPENAI_API_KEY", "fake-litellm-key".to_owned()),
+    ];
+    for execution in [1, 2] {
+        let handle = start(&runtime, &admitted, execution, &values).await;
+        let (_, outcome) = complete_with_logs(handle).await;
+        assert!(matches!(
+            outcome.assert_value(),
+            WorkerOutcome::Verified { .. }
+        ));
+    }
+    runtime
+        .close_run(&openengine_cluster_protocol::RunId::new("run-codex"))
+        .await;
+
+    assert_eq!(fs::read_to_string(config_path).assert_value(), config);
+    assert_eq!(
+        fs::read_to_string(config_capture).assert_value(),
+        config.repeat(2)
+    );
+    let capture = fs::read_to_string(capture_path).assert_value();
+    assert_eq!(capture.matches("arg=resume\n").count(), 1);
+    assert_eq!(capture.matches("openai_key=fake-litellm-key\n").count(), 2);
+    assert_eq!(capture.matches("codex_key=fake-litellm-key\n").count(), 2);
+    for forbidden in [
+        "arg=model_provider=",
+        "arg=model_providers.",
+        "arg=web_search=",
+        "arg=sandbox_workspace_write.network_access=",
+        "arg=model_reasoning_effort=",
+        "arg=approval_policy=",
+        "arg=--sandbox",
+        "arg=--dangerously-bypass",
+    ] {
+        assert!(
+            !capture.contains(forbidden),
+            "unexpected override: {forbidden}"
+        );
+    }
 }

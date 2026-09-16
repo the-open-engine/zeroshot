@@ -16,8 +16,6 @@ pub(super) const OPENROUTER_KEY: &str = "OPENROUTER_API_KEY";
 const ANTHROPIC_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
 pub(super) const ANTHROPIC_KEY: &str = "ANTHROPIC_API_KEY";
 const ANTHROPIC_BASE_URL: &str = "ANTHROPIC_BASE_URL";
-const ANTHROPIC_BEDROCK_BASE_URL: &str = "ANTHROPIC_BEDROCK_BASE_URL";
-const ANTHROPIC_BEDROCK_MANTLE_BASE_URL: &str = "ANTHROPIC_BEDROCK_MANTLE_BASE_URL";
 const CLAUDE_CODE_OAUTH_REFRESH_TOKEN: &str = "CLAUDE_CODE_OAUTH_REFRESH_TOKEN";
 const CLAUDE_CODE_OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
@@ -51,10 +49,8 @@ pub(super) fn claude_arguments(
         argv.extend(["--effort".to_owned(), effort_token(effort).to_owned()]);
     }
     match turn.role {
-        NodeRole::Worker => argv.push("--dangerously-skip-permissions".to_owned()),
-        NodeRole::Verifier if turn.private_workspace => {
-            argv.push("--dangerously-skip-permissions".to_owned());
-        }
+        NodeRole::Worker => {}
+        NodeRole::Verifier if turn.private_workspace => {}
         NodeRole::Verifier => {
             argv.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
         }
@@ -85,29 +81,6 @@ pub(super) fn extend_declared_environment(
         environment.insert(name.as_str().to_owned(), value.to_owned());
     }
     Ok(())
-}
-
-pub(super) fn reject_provider_controls(
-    environment: &BTreeMap<String, String>,
-) -> Result<(), NodeRunnerError> {
-    const CONTROLS: [&str; 11] = [
-        ANTHROPIC_BASE_URL,
-        ANTHROPIC_BEDROCK_BASE_URL,
-        ANTHROPIC_BEDROCK_MANTLE_BASE_URL,
-        "CLAUDE_CONFIG_DIR",
-        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
-        "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
-        "CLAUDE_CODE_USE_BEDROCK",
-        "CLAUDE_CODE_USE_GATEWAY",
-        "CLAUDE_CODE_USE_MANTLE",
-        "CLAUDE_CODE_USE_VERTEX",
-        "CLAUDE_CODE_USE_FOUNDRY",
-    ];
-    CONTROLS
-        .iter()
-        .all(|name| !environment.contains_key(*name))
-        .then_some(())
-        .ok_or(NodeRunnerError::Driver)
 }
 
 pub(super) fn configure_bedrock(
@@ -172,10 +145,9 @@ pub(super) fn configure_openrouter(
     }
     environment.insert(ANTHROPIC_TOKEN.to_owned(), token);
     environment.insert(ANTHROPIC_KEY.to_owned(), String::new());
-    environment.insert(
-        ANTHROPIC_BASE_URL.to_owned(),
-        OPENROUTER_BASE_URL.to_owned(),
-    );
+    environment
+        .entry(ANTHROPIC_BASE_URL.to_owned())
+        .or_insert_with(|| OPENROUTER_BASE_URL.to_owned());
     Ok(())
 }
 
@@ -192,6 +164,7 @@ pub(super) fn configure_provider(
     environment: &mut BTreeMap<String, String>,
     provider: ClaudeProvider,
 ) -> Result<(), NodeRunnerError> {
+    validate_provider_selection(environment, provider)?;
     match provider {
         ClaudeProvider::Anthropic => {}
         ClaudeProvider::Gateway => {
@@ -217,6 +190,41 @@ pub(super) fn configure_provider(
                         "Claude Bedrock credentials are missing or conflict with other provider credentials",
                     )
                 })?;
+        }
+    }
+    Ok(())
+}
+
+// Endpoint settings are caller-owned. Active transport selectors must still agree with an
+// explicitly selected provider; otherwise Claude can silently send gateway credentials elsewhere.
+fn validate_provider_selection(
+    environment: &BTreeMap<String, String>,
+    provider: ClaudeProvider,
+) -> Result<(), NodeRunnerError> {
+    if provider == ClaudeProvider::Anthropic {
+        return Ok(());
+    }
+    for name in [
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_MANTLE",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+        "CLAUDE_CODE_USE_GATEWAY",
+    ] {
+        let compatible = provider == ClaudeProvider::Bedrock
+            && matches!(name, "CLAUDE_CODE_USE_BEDROCK" | "CLAUDE_CODE_USE_MANTLE");
+        let active = environment.get(name).is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        });
+        if active && !compatible {
+            return Err(NodeRunnerError::DriverDetail(format!(
+                "Claude {name} conflicts with the selected provider"
+            )));
         }
     }
     Ok(())

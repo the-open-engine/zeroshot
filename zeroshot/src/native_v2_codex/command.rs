@@ -86,7 +86,12 @@ fn configure_openai_auth(
     values: &mut BTreeMap<String, String>,
     has_local_user: bool,
 ) -> Result<(), NodeRunnerError> {
-    let openai = values.remove(OPENAI_API_KEY);
+    // A local custom provider may use OPENAI_API_KEY as its configured env_key.
+    let openai = if has_local_user {
+        values.get(OPENAI_API_KEY).cloned()
+    } else {
+        values.remove(OPENAI_API_KEY)
+    };
     if values.contains_key(CODEX_API_KEY) || has_local_user && openai.is_none() {
         return Ok(());
     }
@@ -144,17 +149,11 @@ pub(super) fn add_local_execution_policy(argv: &mut Vec<String>, sandbox: &str) 
     argv.extend(["--sandbox".to_owned(), sandbox.to_owned()]);
 }
 
-pub(super) fn add_local_execution_config(argv: &mut Vec<String>, role: NodeRole) {
+pub(super) fn add_local_execution_config(argv: &mut Vec<String>) {
     argv.extend([
         "--config".to_owned(),
         "approval_policy=\"never\"".to_owned(),
     ]);
-    if role == NodeRole::Worker {
-        argv.extend([
-            "--config".to_owned(),
-            "sandbox_workspace_write.network_access=true".to_owned(),
-        ]);
-    }
 }
 
 pub(super) fn add_resume_command(argv: &mut Vec<String>, resume: Option<&str>) {
@@ -171,11 +170,7 @@ pub(super) fn add_node_args(argv: &mut Vec<String>, model: &str, effort: Option<
             format!("model_reasoning_effort=\"{}\"", effort_token(effort)),
         ]);
     }
-    argv.extend([
-        "--skip-git-repo-check".to_owned(),
-        "--config".to_owned(),
-        "web_search=\"disabled\"".to_owned(),
-    ]);
+    argv.push("--skip-git-repo-check".to_owned());
 }
 
 pub(super) fn add_session_target(argv: &mut Vec<String>, resume: Option<&str>) {

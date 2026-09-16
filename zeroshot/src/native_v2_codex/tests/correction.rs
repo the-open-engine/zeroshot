@@ -76,7 +76,7 @@ async fn openrouter_correction_scopes_configuration_to_the_resume_command() {
     let resumed = capture.rsplit_once("---\n").assert_value().1;
     let resume_index = resumed.find("arg=resume\n").assert_value();
     let sandbox_index = resumed
-        .find("arg=--sandbox\narg=workspace-write\n")
+        .find("arg=--dangerously-bypass-approvals-and-sandbox\n")
         .assert_value();
     assert!(sandbox_index < resume_index);
     for expected in [
@@ -84,10 +84,7 @@ async fn openrouter_correction_scopes_configuration_to_the_resume_command() {
         "arg=model_providers.openrouter.base_url=\"https://openrouter.ai/api/v1\"\n",
         "arg=model_providers.openrouter.env_key=\"OPENROUTER_API_KEY\"\n",
         "arg=model_providers.openrouter.wire_api=\"responses\"\n",
-        "arg=approval_policy=\"never\"\n",
-        "arg=sandbox_workspace_write.network_access=true\n",
         "arg=model_reasoning_effort=\"max\"\n",
-        "arg=web_search=\"disabled\"\n",
     ] {
         assert!(
             resumed.find(expected).assert_value() > resume_index,
@@ -96,6 +93,8 @@ async fn openrouter_correction_scopes_configuration_to_the_resume_command() {
     }
     assert!(resumed.contains("arg=--model\narg=openai/gpt-5.6-sol\n"));
     assert!(resumed.contains("arg=thread-123\narg=-\n"));
+    assert!(!capture.contains("arg=web_search="));
+    assert!(!capture.contains("arg=sandbox_workspace_write.network_access="));
 }
 
 #[tokio::test]
