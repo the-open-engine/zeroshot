@@ -243,14 +243,17 @@ impl NativeV2Observability {
         self.runtime.track(snapshot)
     }
 
-    pub(crate) async fn runtime_failed(&self, run_id: &RunId) {
+    pub(crate) fn runtime_failed(&self, run_id: &RunId) {
+        self.runtime.fail(run_id);
+    }
+
+    pub(crate) async fn refresh_runtime(&self, run_id: &RunId) {
         let refreshed = std::panic::AssertUnwindSafe(self.ledger.get(run_id))
             .catch_unwind()
             .await;
         if let Ok(Ok(Some(stored))) = refreshed {
             let _ = self.runtime.observe(&stored.snapshot);
         }
-        self.runtime.fail(run_id);
     }
 
     pub(crate) fn runtime_finished(&self, run_id: &RunId) {

@@ -422,10 +422,17 @@ impl NativeV2CloudController {
     }
 
     async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2CloudError> {
-        // Serialize only the durable decision and runtime-slot capture with submission. A force
-        // can therefore observe neither the durable-create gap nor an in-flight allocation; the
-        // potentially slow runner and allocator cleanup remains outside this turn.
+        // An existing runtime owns cancellation independently of submission and storage.
+        if let Some(RuntimeSlot::Running(engine)) = self.runtimes.lock().await.get(run_id).cloned()
+        {
+            return Ok(ForceTarget::Running(engine));
+        }
+        // Without a live owner, wait out durable creation/allocation before reconstructing.
         let _turn = self.submission_turn.lock().await;
+        if let Some(RuntimeSlot::Running(engine)) = self.runtimes.lock().await.get(run_id).cloned()
+        {
+            return Ok(ForceTarget::Running(engine));
+        }
         let stored = self
             .ledger
             .get(run_id)
@@ -435,10 +442,7 @@ impl NativeV2CloudController {
             return Ok(ForceTarget::Terminal);
         }
         self.ledger.request_force_stop(run_id).await?;
-        match self.runtimes.lock().await.get(run_id).cloned() {
-            Some(RuntimeSlot::Running(supervisor)) => Ok(ForceTarget::Running(supervisor)),
-            None => Ok(ForceTarget::Reconstructed),
-        }
+        Ok(ForceTarget::Reconstructed)
     }
 
     async fn force_running(

@@ -87,3 +87,64 @@ pub(super) async fn cursor_fixture() -> (
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+
+#[tokio::test]
+async fn failure_fallback_refreshes_usage_and_yields_to_a_durable_terminal() {
+    let (ledger, run_id) = ledger_run("failure-refresh").await;
+    let worker = reference(&run_id, "worker", 1);
+    let initial = ledger
+        .append(&run_id, vec![RunEvent::RunStarted, started(&worker)])
+        .await
+        .assert_value();
+    let service = NativeV2Observability::new(ledger.clone());
+    service.track_runtime(&initial.snapshot).assert_value();
+    service.runtime_failed(&run_id);
+
+    let updated = ledger
+        .append(
+            &run_id,
+            vec![RunEvent::TokenUsageObserved {
+                execution: worker.execution,
+                usage: Some(TokenUsageDelta {
+                    input_tokens: TokenCount::new(17).assert_value(),
+                    output_tokens: TokenCount::new(4).assert_value(),
+                    cache_read_input_tokens: None,
+                    cache_creation_input_tokens: None,
+                }),
+            }],
+        )
+        .await
+        .assert_value();
+    service.refresh_runtime(&run_id).await;
+    let params = RunStatusParams {
+        run_id: run_id.clone(),
+    };
+    let fallback = service.status(params.clone()).await.assert_value();
+    assert_eq!(fallback.at_cursor, updated.snapshot.cursor);
+    let RunStatus::Finished {
+        terminal_result,
+        metadata,
+    } = fallback.status
+    else {
+        panic!("storage refresh must retain the known failure");
+    };
+    assert!(matches!(terminal_result, TerminalResult::Failed { reason }
+        if reason.as_str() == "runtime_failed"));
+    let usage = metadata.token_usage.assert_value();
+    assert_eq!(usage.input_tokens.get(), 17);
+    assert_eq!(usage.output_tokens.get(), 4);
+
+    finish_worker_run(ledger.as_ref(), &worker).await;
+    service.refresh_runtime(&run_id).await;
+    let terminal = service.status(params.clone()).await.assert_value();
+    assert_eq!(terminal.at_cursor.as_str(), "v2:5");
+    assert!(matches!(
+        terminal.status,
+        RunStatus::Finished {
+            terminal_result: TerminalResult::Succeeded { .. },
+            ..
+        }
+    ));
+    service.runtime_failed(&run_id);
+    assert_eq!(service.status(params).await.assert_value(), terminal);
+}

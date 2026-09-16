@@ -10,7 +10,9 @@ impl NativeV2Supervisor {
         dispatches: Vec<Dispatch>,
         active: &mut ActiveDispatches,
     ) -> Result<bool, NativeV2SupervisorError> {
-        if !self.record_dispatches(&dispatches).await? {
+        if self.force_requested.load(Ordering::Acquire)
+            || !self.record_dispatches(&dispatches).await?
+        {
             return Ok(false);
         }
         for dispatch in dispatches {
@@ -171,7 +173,8 @@ impl NativeV2Supervisor {
                 .await?;
             return Ok(());
         }
-        let force = self.snapshot().await?.force_stop_requested;
+        let snapshot = self.snapshot().await?;
+        let force = self.force_requested.load(Ordering::Acquire) || snapshot.force_stop_requested;
         let outcome = settled_outcome(&finished.reference, finished.result, force)?;
         self.append_completion(finished.reference, outcome, Some(finished.elapsed))
             .await

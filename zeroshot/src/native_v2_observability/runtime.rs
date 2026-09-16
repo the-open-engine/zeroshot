@@ -45,8 +45,15 @@ impl RuntimeObservation {
             let failure = runtime.failed.then(|| runtime.last.status.clone());
             runtime.last = current;
             runtime.metadata.token_usage = snapshot.token_usage.clone();
-            if let Some(failure) = failure {
-                runtime.last.status = failure;
+            if snapshot.terminal.is_none()
+                && let Some(RunStatus::Finished {
+                    terminal_result, ..
+                }) = failure
+            {
+                runtime.last.status = RunStatus::Finished {
+                    metadata: runtime.metadata.clone(),
+                    terminal_result,
+                };
             }
         }
         Ok(runtime.last.clone())

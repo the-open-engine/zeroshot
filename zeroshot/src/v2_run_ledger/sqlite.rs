@@ -1,7 +1,9 @@
 //! Minimal local durable adapter for the native-v2 run ledger port.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
@@ -54,10 +56,33 @@ impl SqliteRunLedger {
         })
     }
 
-    fn connection(&self) -> MutexGuard<'_, Connection> {
-        self.connection
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    async fn with_connection<T, F>(&self, operation: F) -> Result<T, RunLedgerError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, RunLedgerError> + Send + 'static,
+    {
+        // Wait asynchronously before reserving a blocking thread. The closure owns the guard,
+        // so cancelling its caller cannot admit another operation before this one finishes.
+        let mut connection = self.connection.clone().lock_owned().await;
+        tokio::task::spawn_blocking(move || operation(&mut connection))
+            .await
+            .map_err(|_| RunLedgerError::Storage)?
+    }
+
+    async fn with_transaction<T, F>(&self, operation: F) -> Result<T, RunLedgerError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Transaction<'_>) -> Result<T, RunLedgerError> + Send + 'static,
+    {
+        self.with_connection(move |connection| {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(sqlite_error)?;
+            let result = operation(&transaction)?;
+            transaction.commit().map_err(sqlite_error)?;
+            Ok(result)
+        })
+        .await
     }
 }
 
@@ -65,44 +90,52 @@ impl SqliteRunLedger {
 impl RunLedger for SqliteRunLedger {
     async fn create_or_get(&self, request: CreateRun) -> Result<CreateRunOutcome, RunLedgerError> {
         validate_create(&request)?;
-        let mut connection = self.connection();
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(sqlite_error)?;
-        let outcome = match existing_submission(&transaction, &request)? {
-            Some(existing) => CreateRunOutcome::Existing(existing),
-            None => CreateRunOutcome::Created(insert_new_run(&transaction, request)?),
-        };
-        transaction.commit().map_err(sqlite_error)?;
-        Ok(outcome)
+        self.with_transaction(move |transaction| {
+            match existing_submission(transaction, &request)? {
+                Some(existing) => Ok(CreateRunOutcome::Existing(existing)),
+                None => Ok(CreateRunOutcome::Created(insert_new_run(
+                    transaction,
+                    request,
+                )?)),
+            }
+        })
+        .await
     }
 
     async fn get(&self, run_id: &RunId) -> Result<Option<StoredRun>, RunLedgerError> {
-        load_by_id(&self.connection(), run_id)
+        let run_id = run_id.clone();
+        self.with_connection(move |connection| load_by_id(connection, &run_id))
+            .await
     }
 
     async fn get_by_submission_key(
         &self,
         submission_key: &IdempotencyKey,
     ) -> Result<Option<StoredRun>, RunLedgerError> {
-        load_by_submission(&self.connection(), submission_key.as_str())
-            .map(|stored| stored.map(|(_, _, stored)| stored))
+        let submission_key = submission_key.clone();
+        self.with_connection(move |connection| {
+            load_by_submission(connection, submission_key.as_str())
+                .map(|stored| stored.map(|(_, _, stored)| stored))
+        })
+        .await
     }
 
     async fn list(&self) -> Result<Vec<RunSummary>, RunLedgerError> {
-        let connection = self.connection();
-        let mut statement = connection
-            .prepare("SELECT stored_json FROM v2_runs ORDER BY rowid")
-            .map_err(sqlite_error)?;
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(sqlite_error)?;
-        rows.map(|row| {
-            let stored: StoredRun = serde_json::from_str(&row.map_err(sqlite_error)?)
-                .map_err(|_| RunLedgerError::Corrupt)?;
-            Ok(RunSummary::from(&stored.snapshot))
+        self.with_connection(|connection| {
+            let mut statement = connection
+                .prepare("SELECT stored_json FROM v2_runs ORDER BY rowid")
+                .map_err(sqlite_error)?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(sqlite_error)?;
+            rows.map(|row| {
+                let stored: StoredRun = serde_json::from_str(&row.map_err(sqlite_error)?)
+                    .map_err(|_| RunLedgerError::Corrupt)?;
+                Ok(RunSummary::from(&stored.snapshot))
+            })
+            .collect()
         })
-        .collect()
+        .await
     }
 
     async fn append(
@@ -110,31 +143,25 @@ impl RunLedger for SqliteRunLedger {
         run_id: &RunId,
         events: Vec<RunEvent>,
     ) -> Result<AppendResult, RunLedgerError> {
-        let mut connection = self.connection();
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(sqlite_error)?;
-        let result = append_transaction(&transaction, run_id, events)?;
-        transaction.commit().map_err(sqlite_error)?;
-        Ok(result)
+        let run_id = run_id.clone();
+        self.with_transaction(move |transaction| append_transaction(transaction, &run_id, events))
+            .await
     }
 
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
-        let mut connection = self.connection();
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(sqlite_error)?;
-        let stored = load_by_id(&transaction, run_id)?.ok_or(RunLedgerError::RunNotFound)?;
-        let result = if stored.snapshot.force_stop_requested || stored.snapshot.terminal.is_some() {
-            AppendResult {
-                snapshot: stored.snapshot,
-                events: Vec::new(),
+        let run_id = run_id.clone();
+        self.with_transaction(move |transaction| {
+            let stored = load_by_id(transaction, &run_id)?.ok_or(RunLedgerError::RunNotFound)?;
+            if stored.snapshot.force_stop_requested || stored.snapshot.terminal.is_some() {
+                Ok(AppendResult {
+                    snapshot: stored.snapshot,
+                    events: Vec::new(),
+                })
+            } else {
+                append_transaction(transaction, &run_id, vec![RunEvent::ForceStopRequested])
             }
-        } else {
-            append_transaction(&transaction, run_id, vec![RunEvent::ForceStopRequested])?
-        };
-        transaction.commit().map_err(sqlite_error)?;
-        Ok(result)
+        })
+        .await
     }
 
     async fn snapshot_and_tail(
@@ -142,17 +169,10 @@ impl RunLedger for SqliteRunLedger {
         run_id: &RunId,
         after: Option<&Cursor>,
     ) -> Result<SnapshotAndTail, RunLedgerError> {
-        let connection = self.connection.clone();
         let run_id = run_id.clone();
         let after = after.cloned();
-        tokio::task::spawn_blocking(move || {
-            let connection = connection
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            snapshot_page(&connection, &run_id, after.as_ref())
-        })
-        .await
-        .map_err(|_| RunLedgerError::Storage)?
+        self.with_connection(move |connection| snapshot_page(connection, &run_id, after.as_ref()))
+            .await
     }
 }
 
@@ -474,3 +494,7 @@ mod storage_failure_tests {
             if code.extended_code == rusqlite::ffi::SQLITE_IOERR_WRITE));
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite/scheduling_tests.rs"]
+mod scheduling_tests;

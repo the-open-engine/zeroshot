@@ -86,8 +86,17 @@ impl PortableRunEngine {
             match task_result(result) {
                 Ok(_) => observability.runtime_finished(&run_id),
                 Err(cause) => {
+                    let failed_observability = observability.clone();
+                    let failed_run_id = run_id.clone();
                     let recovery = task_result(
-                        tokio::spawn(async move { supervisor.fail_runtime().await }).await,
+                        tokio::spawn(async move {
+                            supervisor
+                                .fail_runtime(|| {
+                                    failed_observability.runtime_failed(&failed_run_id)
+                                })
+                                .await
+                        })
+                        .await,
                     );
                     let mut details = format!("supervisor.drive: {cause}");
                     if let Err(error) = recovery {
@@ -110,7 +119,8 @@ impl PortableRunEngine {
                         stdout_truncated: false,
                         stderr_truncated: false,
                     });
-                    observability.runtime_failed(&run_id).await;
+                    observability.runtime_failed(&run_id);
+                    observability.refresh_runtime(&run_id).await;
                 }
             }
             // Removal follows an explicit observed outcome, never a dropped false sender.

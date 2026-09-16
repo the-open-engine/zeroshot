@@ -25,6 +25,9 @@ struct FaultLedger {
     armed: AtomicBool,
     triggered: AtomicBool,
     peer: Option<Arc<PeerPanicGate>>,
+    reads: LedgerGate,
+    force_write: LedgerGate,
+    terminal_write: LedgerGate,
 }
 
 impl FaultLedger {
@@ -42,6 +45,9 @@ impl FaultLedger {
             armed: AtomicBool::new(false),
             triggered: AtomicBool::new(false),
             peer: None,
+            reads: LedgerGate::default(),
+            force_write: LedgerGate::default(),
+            terminal_write: LedgerGate::default(),
         }
     }
 
@@ -67,6 +73,36 @@ impl FaultLedger {
     }
 }
 
+struct LedgerGate {
+    held: watch::Sender<bool>,
+    entered: tokio::sync::Notify,
+}
+
+impl Default for LedgerGate {
+    fn default() -> Self {
+        Self {
+            held: watch::channel(false).0,
+            entered: tokio::sync::Notify::new(),
+        }
+    }
+}
+
+impl LedgerGate {
+    fn hold(&self, held: bool) {
+        self.held.send_replace(held);
+    }
+
+    async fn wait(&self) {
+        let mut held = self.held.subscribe();
+        while *held.borrow_and_update() {
+            self.entered.notify_one();
+            if held.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 fn sqlite_failure() -> RunLedgerError {
     RunLedgerError::SqliteStorage(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL))
 }
@@ -78,6 +114,7 @@ impl RunLedger for FaultLedger {
     }
 
     async fn get(&self, run_id: &RunId) -> Result<Option<StoredRun>, RunLedgerError> {
+        self.reads.wait().await;
         self.read_available()?;
         self.inner.get(run_id).await
     }
@@ -86,11 +123,13 @@ impl RunLedger for FaultLedger {
         &self,
         key: &IdempotencyKey,
     ) -> Result<Option<StoredRun>, RunLedgerError> {
+        self.reads.wait().await;
         self.read_available()?;
         self.inner.get_by_submission_key(key).await
     }
 
     async fn list(&self) -> Result<Vec<RunSummary>, RunLedgerError> {
+        self.reads.wait().await;
         self.read_available()?;
         self.inner.list().await
     }
@@ -100,6 +139,12 @@ impl RunLedger for FaultLedger {
         run_id: &RunId,
         events: Vec<RunEvent>,
     ) -> Result<AppendResult, RunLedgerError> {
+        if events
+            .iter()
+            .any(|event| matches!(event, RunEvent::Terminal { .. }))
+        {
+            self.terminal_write.wait().await;
+        }
         if let Some(peer) = &self.peer {
             if events.iter().any(|event| {
                 matches!(
@@ -130,6 +175,7 @@ impl RunLedger for FaultLedger {
     }
 
     async fn request_force_stop(&self, run_id: &RunId) -> Result<AppendResult, RunLedgerError> {
+        self.force_write.wait().await;
         if self.permanent && self.triggered.load(Ordering::SeqCst) {
             return Err(sqlite_failure());
         }
@@ -141,6 +187,7 @@ impl RunLedger for FaultLedger {
         run_id: &RunId,
         after: Option<&Cursor>,
     ) -> Result<SnapshotAndTail, RunLedgerError> {
+        self.reads.wait().await;
         self.read_available()?;
         self.inner.snapshot_and_tail(run_id, after).await
     }
@@ -148,6 +195,7 @@ impl RunLedger for FaultLedger {
 
 struct FaultDriver {
     point: FailurePoint,
+    starts: AtomicUsize,
     release: watch::Sender<bool>,
     cancelled: AtomicBool,
     completed: AtomicBool,
@@ -158,6 +206,7 @@ impl FaultDriver {
         let (release, _) = watch::channel(false);
         Self {
             point,
+            starts: AtomicUsize::new(0),
             release,
             cancelled: AtomicBool::new(false),
             completed: AtomicBool::new(false),
@@ -172,15 +221,21 @@ impl NodeDriver for FaultDriver {
         invocation: DriverInvocation,
         mut control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
         control
             .emit(LiveOutput::new(LiveOutputStream::Output, RETAINED_OUTPUT)?)
             .await?;
         let mut release = self.release.subscribe();
         while !*release.borrow_and_update() {
-            release
-                .changed()
-                .await
-                .map_err(|_| NodeRunnerError::Driver)?;
+            tokio::select! {
+                changed = release.changed() => {
+                    changed.map_err(|_| NodeRunnerError::Driver)?;
+                }
+                () = control.cancelled() => {
+                    self.cancelled.store(true, Ordering::SeqCst);
+                    return Err(NodeRunnerError::Cancelled);
+                }
+            }
         }
         if matches!(self.point, FailurePoint::Output) {
             control
@@ -631,4 +686,105 @@ async fn supervisor_panic_waits_for_peer_output_before_cleanup_and_durable_failu
     assert!(peer_output < terminal_event);
     assert_eq!(terminal_event + 1, retained.events.len());
     assert!(retained.snapshot.active_executions().next().is_none());
+}
+
+#[tokio::test]
+async fn force_cancels_before_storage_recovers_and_survives_a_dropped_waiter() {
+    for drop_waiter in [false, true] {
+        let harness = FailureHarness::new(FailurePoint::Output, false, false).await;
+        harness.ledger.reads.hold(true);
+        harness.ledger.force_write.hold(true);
+        let controller = harness.controller.clone();
+        let run_id = harness.before.run_id.clone();
+        let force = tokio::spawn(async move { controller.force(RunForceParams { run_id }).await });
+
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            harness.ledger.force_write.entered.notified(),
+        )
+        .await
+        .assert_value_with("force reaches persistence after cancelling without a ledger read");
+        assert!(harness.driver.cancelled.load(Ordering::SeqCst));
+        assert!(!force.is_finished());
+        let retained = harness.retained().await;
+        assert!(!retained.snapshot.force_stop_requested);
+        assert!(retained.snapshot.terminal.is_none());
+
+        if drop_waiter {
+            force.abort();
+            assert!(force.await.is_err_and(|error| error.is_cancelled()));
+        } else {
+            harness.ledger.reads.hold(false);
+            harness.ledger.force_write.hold(false);
+            tokio::time::timeout(Duration::from_secs(2), force)
+                .await
+                .assert_value_with("force returns after storage recovers")
+                .assert_value_with("force task completes")
+                .assert_value_with("force result");
+        }
+        harness.ledger.reads.hold(false);
+        harness.ledger.force_write.hold(false);
+        assert_eq!(
+            terminal(&harness.controller, &harness.before.run_id).await,
+            TerminalResult::Failed {
+                reason: EnumLabel::new("force_stopped").assert_value_with("force reason"),
+            }
+        );
+        assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 1);
+        let retained = harness.retained().await;
+        assert!(retained.snapshot.active_executions().next().is_none());
+        assert_eq!(
+            retained
+                .events
+                .iter()
+                .filter(|event| matches!(event.event, RunEvent::Terminal { .. }))
+                .count(),
+            1,
+        );
+        assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::ForceStopped]);
+        assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+    }
+}
+
+#[tokio::test]
+async fn confirmed_failure_is_observable_while_terminal_persistence_is_blocked() {
+    let harness = FailureHarness::new(FailurePoint::Completion, false, false).await;
+    harness.ledger.terminal_write.hold(true);
+    harness.release_fault();
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        harness.ledger.terminal_write.entered.notified(),
+    )
+    .await
+    .assert_value_with("recovery attempts terminal persistence");
+    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+    assert!(harness.retained().await.snapshot.terminal.is_none());
+
+    harness.ledger.reads.hold(true);
+    let status = tokio::time::timeout(
+        Duration::from_secs(2),
+        harness.controller.status(RunStatusParams {
+            run_id: harness.before.run_id.clone(),
+        }),
+    )
+    .await
+    .assert_value_with("failure observation is independent of pending ledger operations")
+    .assert_value_with("retained failure status");
+    assert!(matches!(
+        status.status,
+        RunStatus::Finished {
+            terminal_result: TerminalResult::Failed { ref reason },
+            ..
+        } if reason.as_str() == "runtime_failed"
+    ));
+    assert_eq!(status.at_cursor, harness.before.at_cursor);
+
+    harness.ledger.reads.hold(false);
+    harness.ledger.terminal_write.hold(false);
+    let persisted = harness.failed().await;
+    let retained = harness.retained().await;
+    assert_ne!(persisted.at_cursor, status.at_cursor);
+    assert_eq!(persisted.at_cursor, retained.snapshot.cursor);
+    assert!(retained.snapshot.terminal.is_some());
 }

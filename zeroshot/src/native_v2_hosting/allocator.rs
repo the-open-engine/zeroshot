@@ -98,7 +98,7 @@ impl ProductionCapsuleAllocator {
         set_traversable_directory(&run_root).map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let allocation = self.build_capsule(run_id, admitted, github_token).await;
         if allocation.is_err() {
-            let _ = remove_run_directory(&run_root);
+            let _ = remove_run_directory(&run_root).await;
         }
         allocation
     }
@@ -279,7 +279,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         if let Some(state) = self.active.lock().await.get(run_id).cloned() {
             cleanup_state(run_id, &state, &self.active).await?;
         } else {
-            remove_run_directory(&run_directory(&self.config.storage_root, run_id))?;
+            remove_run_directory(&run_directory(&self.config.storage_root, run_id)).await?;
         }
         Ok(CapsuleDestroyed::confirmed())
     }
@@ -348,7 +348,7 @@ async fn cleanup_state(
         return Ok(());
     }
     state.endpoint.disconnect().await;
-    remove_run_directory(&state.run_root)?;
+    remove_run_directory(&state.run_root).await?;
     active.lock().await.remove(run_id);
     state.process_pool.lock().await.take();
     *cleaned = true;
@@ -382,7 +382,14 @@ fn controller_lock_path(root: &Path, run_id: &RunId) -> PathBuf {
     root.join(format!("controller-{:x}.lock", digest.finalize()))
 }
 
-fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
+async fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || remove_run_directory_blocking(&path))
+        .await
+        .map_err(|_| CapsuleCleanupUnavailable)?
+}
+
+fn remove_run_directory_blocking(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

@@ -119,6 +119,7 @@ pub struct NativeV2Supervisor {
     live_output: Option<Arc<dyn LiveOutputRegistrar>>,
     runtime_cleanup: Option<Arc<dyn RunRuntimeCleanup>>,
     runtime_lost: Arc<AtomicBool>,
+    force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
     drive_turn: Arc<Mutex<()>>,
 }
@@ -140,6 +141,7 @@ impl NativeV2Supervisor {
             live_output: None,
             runtime_cleanup: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
+            force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
             drive_turn: Arc::new(Mutex::new(())),
         }
@@ -177,7 +179,10 @@ impl NativeV2Supervisor {
         if let Some(terminal) = stored.snapshot.terminal {
             return Ok(Initialization::Terminal(terminal));
         }
-        if stored.snapshot.force_stop_requested || stored.snapshot.phase == RunPhase::Stopping {
+        if self.force_requested.load(Ordering::Acquire)
+            || stored.snapshot.force_stop_requested
+            || stored.snapshot.phase == RunPhase::Stopping
+        {
             return self
                 .terminalize_force(&mut JoinSet::new())
                 .await
@@ -242,7 +247,7 @@ impl NativeV2Supervisor {
             if self.runtime_lost.load(Ordering::Acquire) {
                 return self.terminalize_lost(&mut active.tasks).await;
             }
-            if snapshot.force_stop_requested {
+            if self.force_requested.load(Ordering::Acquire) || snapshot.force_stop_requested {
                 return self.terminalize_force(&mut active.tasks).await;
             }
             if let Some(terminal) = self.advance(program, &snapshot, active).await? {
@@ -316,12 +321,13 @@ impl NativeV2Supervisor {
         Ok(finished)
     }
 
-    /// Requests the deliberately force-only stop and waits for runner-owned cleanup. The driving
-    /// task observes the durable request and closes the run without dispatching another node.
+    /// Stops live work before waiting for persistence. Local intent prevents interrupted work
+    /// from becoming a retryable crash while the durable force request is pending.
     pub async fn force_stop(&self) -> Result<(), NativeV2SupervisorError> {
-        self.ledger.request_force_stop(&self.run_id).await?;
+        self.force_requested.store(true, Ordering::Release);
         self.resolution_stop.send_replace(true);
         self.runner.close_run(&self.run_id).await;
+        self.ledger.request_force_stop(&self.run_id).await?;
         Ok(())
     }
 
@@ -333,12 +339,16 @@ impl NativeV2Supervisor {
         self.runner.close_run(&self.run_id).await;
     }
 
-    /// Stops owned work without depending on a readable or writable ledger. Durable failure is
-    /// attempted only after runtime cleanup has been acknowledged; the engine retains status if it fails.
-    pub(crate) async fn fail_runtime(&self) -> Result<(), NativeV2SupervisorError> {
+    /// Publishes stopped-runtime failure after confirmed cleanup, before attempting persistence.
+    /// The driving turn remains owned through both publication and the durable append.
+    pub(crate) async fn fail_runtime(
+        &self,
+        on_stopped: impl FnOnce(),
+    ) -> Result<(), NativeV2SupervisorError> {
         let _turn = self.drive_turn.lock().await;
         self.runner.close_run(&self.run_id).await;
         self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
+        on_stopped();
         self.append_runtime_failure("runtime_failed")
             .await
             .map(|_| ())

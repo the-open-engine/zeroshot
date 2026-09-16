@@ -70,6 +70,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Durable provider events cross bounded async queues with backpressure. Cancellation preserves token
   usage and event order; overflow is explicit and produces an incomplete marker rather than silent
   loss.
+- SQLite operations acquire the single connection asynchronously before running on a blocking
+  thread; cancelling a caller does not release an in-flight database operation's ownership.
+- Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
+  interrupted work from becoming a retryable crash. Cleanup and durable output still precede
+  final settlement. Confirmed runtime failure is observable before its persistence attempt;
+  a later durable terminal snapshot remains authoritative over the in-memory fallback.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
