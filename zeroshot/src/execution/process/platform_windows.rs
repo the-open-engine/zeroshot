@@ -1,4 +1,5 @@
 use std::io;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use tokio::process::Command;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
@@ -136,41 +137,36 @@ fn resume_suspended_process(process_id: u32) -> Result<(), io::Error> {
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
     }
+    let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot) };
     let mut entry = THREADENTRY32 {
         dwSize: u32::try_from(std::mem::size_of::<THREADENTRY32>())
             .expect("thread entry fits in u32"),
         ..THREADENTRY32::default()
     };
-    let mut has_entry = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    let mut has_entry = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } != 0;
     while has_entry {
-        if entry.th32OwnerProcessID == process_id {
-            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
-            if thread.is_null() {
-                let error = io::Error::last_os_error();
-                unsafe {
-                    CloseHandle(snapshot);
-                }
-                return Err(error);
-            }
-            let resumed = unsafe { ResumeThread(thread) };
-            unsafe {
-                CloseHandle(thread);
-                CloseHandle(snapshot);
-            }
-            return if resumed == u32::MAX {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(())
-            };
+        if entry.th32OwnerProcessID == process_id && resume_thread(entry.th32ThreadID)? {
+            return Ok(());
         }
-        has_entry = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
-    }
-    unsafe {
-        CloseHandle(snapshot);
+        has_entry = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
     }
     Err(io::Error::other(
         "spawned process suspended thread is unavailable",
     ))
+}
+
+fn resume_thread(thread_id: u32) -> io::Result<bool> {
+    let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
+    if thread.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+    match unsafe { ResumeThread(thread.as_raw_handle()) } {
+        u32::MAX => Err(io::Error::last_os_error()),
+        // Running auxiliary threads do not prove that the suspended launch thread resumed.
+        0 => Ok(false),
+        _ => Ok(true),
+    }
 }
 
 pub(super) fn create_kill_on_close_job() -> Result<usize, io::Error> {
@@ -257,6 +253,12 @@ mod tests {
         ProcessCleanupEvidence, ProcessContainment, ProcessTreeRegistration, capture_process_tree,
         configure_process, register_process_tree_for, terminate_process_tree,
     };
+
+    #[test]
+    fn an_already_running_thread_does_not_acknowledge_process_resume() {
+        let current = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+        assert!(!super::resume_thread(current).unwrap());
+    }
 
     fn spawn_suspended_sentinel(
         name: &str,
