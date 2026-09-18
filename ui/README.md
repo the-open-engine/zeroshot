@@ -77,7 +77,7 @@ For native UI/server changes, also run the affected crate with the feature enabl
 
 ```sh
 cargo clippy -p zeroshot --all-targets --features ui -- -D warnings
-cargo test -p zeroshot --features ui
+cargo test -p zeroshot --features ui # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1 -Ui
 ```
 
 Default Cargo checks omit `ui`. Browser scenarios and evidence:
