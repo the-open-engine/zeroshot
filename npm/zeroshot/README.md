@@ -10,6 +10,8 @@ The same managed skill is installed for Codex and GitHub Copilot at
 managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so
 the conflict cannot pass unnoticed.
 
+When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skill has one stable location.
+
 npm 7 and newer do not run uninstall lifecycle scripts. After uninstalling the package, remove the
 two skill directories above manually if their `SKILL.md` files are still unmodified managed copies.
 

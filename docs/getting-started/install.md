@@ -15,6 +15,7 @@ The package installs one managed skill for Codex and GitHub Copilot under `$HOME
 and for Claude Code under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
 package, delete its two skill directories manually only if their `SKILL.md` files remain unmodified.
+When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skill has one stable location.
 
 On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
 Install Git for Windows and put Git and your chosen harness on `PATH`; npm-installed `.cmd`

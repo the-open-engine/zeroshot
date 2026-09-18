@@ -186,13 +186,17 @@ describe('npm Zeroshot skill installation boundaries', () => {
     }
   );
 
-  it('rejects relative homes instead of writing under cwd', () => {
+  it('rejects relative homes and Claude config roots instead of writing under cwd', () => {
     const fixture = makeFixture();
-    const results = install(fixture, { homeDirectory: 'relative-home' });
+    let results = install(fixture, { homeDirectory: 'relative-home' });
     assert.deepEqual(
       results.map(({ status }) => status),
       ['failed', 'failed']
     );
+
+    results = install(fixture, { environment: { CLAUDE_CONFIG_DIR: 'relative-claude' } });
+    assert.equal(resultFor(results, 'agents').status, 'installed');
+    assert.equal(resultFor(results, 'claude').status, 'failed');
   });
 
   it('does not guess the invoking user home under sudo', () => {
@@ -225,28 +229,6 @@ describe('npm Zeroshot skill installation boundaries', () => {
     assert.throws(
       () => requireCompleteSkillInstall(results, stdout, stderr),
       /SKILL_INSTALL_INCOMPLETE/
-    );
-  });
-});
-
-describe('npm Zeroshot skill installation with relative Claude configuration', () => {
-  it('resolves CLAUDE_CONFIG_DIR from the npm invocation directory', () => {
-    const fixture = makeFixture();
-    const invocationDirectory = path.join(fixture.root, 'project');
-    const claudeRoot = path.join(invocationDirectory, 'relative-claude');
-    fs.mkdirSync(invocationDirectory);
-
-    const results = install(fixture, {
-      environment: {
-        CLAUDE_CONFIG_DIR: 'relative-claude',
-        INIT_CWD: invocationDirectory,
-      },
-    });
-
-    assert.equal(resultFor(results, 'claude').status, 'installed');
-    assert.equal(
-      managedSource(fs.readFileSync(destinations(fixture, claudeRoot).claude, 'utf8')),
-      fixture.document
     );
   });
 });
