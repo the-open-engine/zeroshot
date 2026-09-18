@@ -104,7 +104,7 @@ fn help_explains_runtime_configuration() {
             "codex uses responses and claude uses messages."
         )
         .to_owned(),
-        "known-incompatible harness/provider pairs are codex/anthropic and claude/openai."
+        "known-incompatible harness/provider pairs include codex/anthropic and claude/openai."
             .to_owned(),
         concat!(
             "model ids are passed unchanged to the selected harness and provider; ",
