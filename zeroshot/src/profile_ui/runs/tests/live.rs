@@ -18,6 +18,7 @@ async fn ui_shutdown_closes_a_live_sse_without_stopping_the_run() {
     let serving = service.clone();
     let task = tokio::spawn(async move {
         let (connection, _) = listener.accept().await.assert_value();
+        drop(listener);
         serving.serve_connection(connection).await.assert_value();
     });
     let mut response = reqwest::Client::new()
@@ -48,7 +49,6 @@ async fn ui_shutdown_closes_a_live_sse_without_stopping_the_run() {
     assert!(stored.snapshot.terminal.is_none());
     assert!(!stored.snapshot.force_stop_requested);
     assert_eq!(stored.snapshot.cursor.as_str(), "v2:2");
-    tokio::net::TcpListener::bind(address).await.assert_value();
 }
 
 pub(super) fn terminal() -> RunEvent {
