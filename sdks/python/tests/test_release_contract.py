@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -35,10 +36,26 @@ def test_sdk_release_is_manual_and_zeroshot_release_triggered() -> None:
 
 
 def test_python_ci_is_selected_without_native_for_sdk_only_changes() -> None:
-    classifier = (_ROOT / ".github/ci-path-classifier.js").read_text(encoding="utf-8")
     workflow = (_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "'sdks/python/'" in classifier
-    assert "selected.has('python')" in classifier
-    assert "const native = selected.has('native')" in classifier
+    script = """
+const { classifyPaths } = require('./.github/ci-path-classifier');
+process.stdout.write(JSON.stringify(classifyPaths(['sdks/python/src/zeroshot/client.py'])));
+"""
+    classified = json.loads(
+        subprocess.run(
+            ["node", "-e", script],
+            cwd=_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    assert {lane: classified[lane] for lane in ("native", "python", "tooling", "npm", "docs")} == {
+        "native": False,
+        "python": True,
+        "tooling": False,
+        "npm": False,
+        "docs": True,
+    }
     assert "python-check:" in workflow
     assert "needs.classify.outputs.python == 'true'" in workflow

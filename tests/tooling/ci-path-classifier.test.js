@@ -3,89 +3,118 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
-const { describe, it } = require('node:test');
+const { it } = require('node:test');
 
 const { classifyPath, classifyPaths } = require('../../.github/ci-path-classifier');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const classifierPath = path.join(projectRoot, '.github', 'ci-path-classifier.js');
+const selections = (result) => {
+  const { native, python, tooling, npm, docs } = result;
+  return { native, python, tooling, npm, docs };
+};
 
-describe('CI path classifier', () => {
-  it('selects the native product and dependent Python SDK for native changes', () => {
-    assert.equal(classifyPath('zeroshot/src/main.rs'), 'native');
-    assert.equal(classifyPath('npm/zeroshot/install.js'), 'native');
-    assert.equal(classifyPath('ui/src/App.tsx'), 'native');
-    assert.equal(classifyPath('ui/package-lock.json'), 'native');
-    assert.equal(classifyPath('.dockerignore'), 'native');
-    assert.equal(classifyPath('tests/tooling/smoke-ui.js'), 'native');
-    assert.deepEqual(classifyPaths(['zeroshot/src/main.rs']), {
+it('selects native checks and their established dependent lanes', () => {
+  for (const pathname of [
+    'zeroshot/src/main.rs',
+    'ui/src/App.tsx',
+    'ui/package-lock.json',
+    '.dockerignore',
+    'tests/tooling/smoke-ui.js',
+  ]) {
+    assert.equal(classifyPath(pathname), 'native');
+  }
+  assert.deepEqual(selections(classifyPaths(['zeroshot/src/main.rs'])), {
+    native: true,
+    python: true,
+    tooling: true,
+    npm: false,
+    docs: false,
+  });
+});
+
+it('keeps npm-only changes out of native, Python, and docs checks', () => {
+  assert.equal(classifyPath('npm/zeroshot/install.js'), 'npm');
+  assert.deepEqual(selections(classifyPaths(['npm/zeroshot/install.js'])), {
+    native: false,
+    python: false,
+    tooling: false,
+    npm: true,
+    docs: false,
+  });
+});
+
+it('keeps ordinary documentation changes in the strict docs lane', () => {
+  assert.equal(classifyPath('docs/concepts/targets.md'), 'docs');
+  assert.deepEqual(selections(classifyPaths(['docs/concepts/targets.md'])), {
+    native: false,
+    python: false,
+    tooling: false,
+    npm: false,
+    docs: true,
+  });
+});
+
+it('runs strict docs alongside direct Python SDK changes', () => {
+  assert.equal(classifyPath('sdks/python/src/zeroshot/client.py'), 'python');
+  assert.deepEqual(selections(classifyPaths(['sdks/python/src/zeroshot/client.py'])), {
+    native: false,
+    python: true,
+    tooling: false,
+    npm: false,
+    docs: true,
+  });
+});
+
+it('preserves explicit cross-lane ownership', () => {
+  const cases = new Map([
+    [
+      '.github/workflows/release-python.yml',
+      { native: false, python: true, tooling: true, npm: false, docs: true },
+    ],
+    [
+      'distribution/zeroshot-targets.json',
+      { native: true, python: true, tooling: true, npm: true, docs: false },
+    ],
+    [
+      'scripts/distribution/artifacts.js',
+      { native: true, python: true, tooling: true, npm: true, docs: false },
+    ],
+    ['docs/zeroshot-cli.md', { native: true, python: true, tooling: true, npm: false, docs: true }],
+    [
+      'docs/getting-started/install.md',
+      { native: false, python: false, tooling: false, npm: false, docs: true },
+    ],
+    ['package-lock.json', { native: false, python: false, tooling: true, npm: true, docs: false }],
+  ]);
+  for (const [pathname, expected] of cases) {
+    assert.deepEqual(selections(classifyPaths([pathname])), expected, pathname);
+  }
+});
+
+it('runs every lane for release, CI, unknown, or unresolvable changes', () => {
+  for (const paths of [
+    ['.github/workflows/ci.yml'],
+    ['.github/workflows/release.yml'],
+    ['new-surface/file'],
+    [],
+  ]) {
+    assert.deepEqual(selections(classifyPaths(paths)), {
       native: true,
       python: true,
       tooling: true,
-      ownership: {
-        native: ['zeroshot/src/main.rs'],
-        python: [],
-        tooling: [],
-        shared: [],
-      },
+      npm: true,
+      docs: true,
     });
-  });
+  }
+});
 
-  it('keeps Python-only changes independent from native builds', () => {
-    assert.equal(classifyPath('sdks/python/src/zeroshot/client.py'), 'python');
-    assert.deepEqual(classifyPaths(['sdks/python/src/zeroshot/client.py']), {
-      native: false,
-      python: true,
-      tooling: false,
-      ownership: {
-        native: [],
-        python: ['sdks/python/src/zeroshot/client.py'],
-        tooling: [],
-        shared: [],
-      },
-    });
+it('emits every GitHub output from null-delimited paths', () => {
+  const result = spawnSync(process.execPath, [classifierPath], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    input: 'npm/zeroshot/install.js\0docs/concepts/targets.md\0',
   });
-
-  it('runs Python and tooling checks for the Python release workflow', () => {
-    assert.deepEqual(classifyPaths(['.github/workflows/release-python.yml']), {
-      native: false,
-      python: true,
-      tooling: true,
-      ownership: {
-        native: [],
-        python: ['.github/workflows/release-python.yml'],
-        tooling: ['.github/workflows/release-python.yml'],
-        shared: [],
-      },
-    });
-  });
-
-  it('runs every lane for repository-wide or unknown changes', () => {
-    for (const pathname of [
-      '.github/workflows/ci.yml',
-      '.github/workflows/docs.yml',
-      'scripts/docs_hook.py',
-      'new-surface/file',
-    ]) {
-      const result = classifyPaths([pathname]);
-      assert.deepEqual(
-        { native: result.native, python: result.python, tooling: result.tooling },
-        { native: true, python: true, tooling: true }
-      );
-    }
-    assert.deepEqual(
-      (({ native, python, tooling }) => ({ native, python, tooling }))(classifyPaths([])),
-      { native: true, python: true, tooling: true }
-    );
-  });
-
-  it('emits GitHub outputs from null-delimited paths', () => {
-    const result = spawnSync(process.execPath, [classifierPath], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      input: 'zeroshot/src/main.rs\0npm/zeroshot/install.js\0',
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, 'native=true\npython=true\ntooling=true\n');
-  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'native=false\npython=false\ntooling=false\nnpm=true\ndocs=true\n');
 });

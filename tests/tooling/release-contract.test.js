@@ -165,6 +165,74 @@ describe('Embedded UI distribution', () => {
   });
 });
 
+describe('CI efficiency contract', () => {
+  it('cancels only superseded pull-request runs and classifies both sides of renames', () => {
+    const source = read('.github/workflows/ci.yml');
+    const workflow = yaml.load(source);
+
+    assert.deepEqual(workflow.concurrency, {
+      group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
+      'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+    });
+    assert.match(source, /git diff --no-renames --name-only -z/);
+    assert.deepEqual(Object.keys(workflow.jobs.classify.outputs), [
+      'native',
+      'python',
+      'tooling',
+      'npm',
+      'docs',
+    ]);
+  });
+
+  it('pins the Rust cache without weakening native checks', () => {
+    const workflow = yaml.load(read('.github/workflows/ci.yml'));
+    const native = workflow.jobs['native-check'];
+    const cache = native.steps.find((step) => step.uses?.startsWith('Swatinem/rust-cache@'));
+    const rustdocs = native.steps.find(
+      (step) => step.name === 'Build documentation with warnings denied'
+    );
+    const commands = native.steps.map((step) => step.run || '').join('\n');
+
+    assert.equal(cache.uses, 'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6');
+    assert.deepEqual(cache.with, { 'cache-on-failure': true });
+    assert.match(commands, /cargo clippy --workspace --all-targets -- -D warnings/);
+    assert.match(commands, /cargo test --workspace/);
+    assert.equal(rustdocs.env.RUSTDOCFLAGS, '-Dwarnings');
+    assert.match(commands, /cargo build --locked --release/);
+  });
+
+  it('keeps npm and docs checks strict, cross-platform where relevant, and fail-closed', () => {
+    const workflow = yaml.load(read('.github/workflows/ci.yml'));
+    const npm = workflow.jobs['npm-check'];
+    const docs = workflow.jobs['docs-check'];
+    const required = workflow.jobs.required;
+    const npmCommands = npm.steps.map((step) => step.run || '').join('\n');
+    const docsCommands = docs.steps.map((step) => step.run || '').join('\n');
+
+    assert.deepEqual(npm.strategy.matrix.os, ['ubuntu-latest', 'windows-latest']);
+    const lineEndings = npm.steps.find(
+      (step) => step.name === 'Preserve package line endings on Windows'
+    );
+    assert.equal(lineEndings.if, "runner.os == 'Windows'");
+    assert.equal(lineEndings.run, 'git config --global core.autocrlf false');
+    assert.match(npmCommands, /npm-package-install\.test\.js/);
+    assert.match(npmCommands, /npm-skill-install\.test\.js/);
+    assert.match(npmCommands, /npm run distribution:check/);
+    assert.match(docsCommands, /docs-versions\.test\.js/);
+    assert.match(docsCommands, /release-contract\.test\.js/);
+    assert.match(docsCommands, /python -m mkdocs build --strict/);
+    assert.match(docsCommands, /id="zeroshot\.Client"/);
+    assert.match(docsCommands, /id="zeroshot\.RunResult"/);
+    assert.match(docsCommands, /id="zeroshot\.InvalidRequestError"/);
+    assert.equal(required.needs.includes('npm-check'), true);
+    assert.equal(required.needs.includes('docs-check'), true);
+    assert.equal(required.steps[0].env.NPM_SELECTED, '${{ needs.classify.outputs.npm }}');
+    assert.equal(required.steps[0].env.DOCS_RESULT, '${{ needs.docs-check.result }}');
+    assert.match(required.steps[0].run, /require_result "\$NPM_SELECTED" "\$NPM_RESULT"/);
+    assert.match(required.steps[0].run, /require_result "\$DOCS_SELECTED" "\$DOCS_RESULT"/);
+  });
+});
+
 describe('Versioned documentation publication contract', () => {
   it('publishes Current from main and accepts exact releases for minor documentation', () => {
     const docs = yaml.load(read('.github/workflows/docs.yml'));
