@@ -386,6 +386,8 @@ async fn windows_job_release_reaps_a_descendant() {
         .open(launch, cancellation)
         .await
         .assert_value();
+    // This command takes no input; deliver EOF before waiting for its child.
+    session.close_stdin().await.assert_value();
     let child_pid = tokio::select! {
         pid = wait_for_child_pid(&pid_file) => pid,
         output = session.wait() => {
