@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 mod problem;
@@ -114,6 +115,16 @@ impl fmt::Debug for StaticConnectionValues {
     }
 }
 
+impl JsonSchema for StaticConnectionValues {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "StaticConnectionValues".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<BTreeMap<EnvironmentVariableName, String>>()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ConnectionSetRequest {
@@ -187,7 +198,7 @@ pub struct ConnectionResolveResult {
 }
 
 /// Run-scoped callback authority for dynamic connection keys.
-#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TargetConnectionResolver {
     pub endpoint: String,
@@ -382,6 +393,14 @@ pub struct TargetConnectionsDiscovery {
     pub dynamic_kinds: Vec<String>,
 }
 
+pub const WORKSPACE_RECOVERY_KIND: &str = "openengine.workspace-recovery/v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetWorkspaceRecoveryDiscovery {
+    pub kind: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
@@ -393,6 +412,8 @@ pub struct TargetDiscoveryExtensions {
     pub connections: Option<TargetConnectionsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_profiles: Option<TargetRunProfilesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_recovery: Option<TargetWorkspaceRecoveryDiscovery>,
 }
 
 /// One discovery document for direct Docker targets and OAuth-hosted targets.
@@ -422,6 +443,7 @@ impl TargetDiscoveryExtensions {
             && self.merge_plans.is_none()
             && self.connections.is_none()
             && self.run_profiles.is_none()
+            && self.workspace_recovery.is_none()
     }
 }
 
@@ -442,7 +464,12 @@ impl TargetDiscoveryDocument {
             .then(|| TARGET_PRIVATE_BOOTSTRAP_PATH.to_owned()),
             oauth: None,
             login_session: None,
-            extensions: TargetDiscoveryExtensions::default(),
+            extensions: TargetDiscoveryExtensions {
+                workspace_recovery: Some(TargetWorkspaceRecoveryDiscovery {
+                    kind: WORKSPACE_RECOVERY_KIND.to_owned(),
+                }),
+                ..TargetDiscoveryExtensions::default()
+            },
         }
     }
 }

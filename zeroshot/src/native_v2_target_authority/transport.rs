@@ -5,7 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     GetParams, GetResult, InitializeParams, InitializeResult, RunAttachParams, RunAttachResult,
-    RunForceParams, RunForceResult, RunListParams, RunListResult, RunLogsParams, RunLogsResult,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunForceResult,
+    RunListParams, RunListResult, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
     RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchParams,
     RunWatchResult, TargetOecpSessionRequest, TargetPrivateBootstrapRequest,
     TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7, RUN_CONFLICT,
@@ -527,6 +528,22 @@ impl ClusterBackend for TargetOecpBackend {
         params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
         ClusterBackend::run_force(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_resume(
+        &self,
+        context: &ConnectionContext,
+        params: RunResumeParams,
+    ) -> Result<RunResumeResult, BackendError> {
+        ClusterBackend::run_resume(self.controller.as_ref(), context, params).await
+    }
+
+    async fn run_discard_workspace(
+        &self,
+        context: &ConnectionContext,
+        params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, BackendError> {
+        ClusterBackend::run_discard_workspace(self.controller.as_ref(), context, params).await
     }
 }
 

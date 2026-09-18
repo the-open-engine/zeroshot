@@ -58,6 +58,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
         size: RunSize::Medium,
         at_cursor: Cursor::new("v2:7"),
         status: running_status(),
+        workspace_recovery: Default::default(),
     };
     let value = serde_json::to_value(&result).assert_value();
 
@@ -79,7 +80,8 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
                     { "execution": "opaque-verifier-a", "node": "verify-a" },
                     { "execution": "opaque-verifier-b", "node": "verify-b" }
                 ]
-            }
+            },
+            "workspaceRecovery": {"recoverable": false}
         })
     );
     let encoded = serde_json::to_string(&value).assert_value();
@@ -296,6 +298,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
         status: RunStatus::Stopping {
             active_executions: vec![active("opaque-verifier-b", "verify-b")],
         },
+        workspace_recovery: Default::default(),
     };
     let value = serde_json::to_value(result).assert_value();
     assert_eq!(

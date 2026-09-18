@@ -22,6 +22,7 @@ pub(super) fn status_result(
         size: snapshot.size,
         at_cursor: snapshot.cursor.clone(),
         status: status_from_snapshot(snapshot)?,
+        workspace_recovery: Default::default(),
     })
 }
 

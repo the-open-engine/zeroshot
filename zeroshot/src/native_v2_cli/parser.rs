@@ -108,6 +108,12 @@ enum UtilityCommand {
     /// Force a run to stop and write the result as JSON.
     ForceStop(RunSelectorArgs),
 
+    /// Start a new attempt from a failed run's retained workspace.
+    Resume(RunSelectorArgs),
+
+    /// Permanently delete an abandoned retained target workspace.
+    DiscardWorkspace(RunSelectorArgs),
+
     /// Print the Zeroshot version.
     Version,
 }

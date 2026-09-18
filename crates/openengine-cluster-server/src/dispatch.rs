@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use openengine_cluster_protocol::{
     ApplyParams, DeleteParams, DomainErrorData, GetParams, InitializeParams, PlanParams, RequestId,
-    ResubmitParams, RetryParams, RunForceParams, RunListParams, RunStatusParams, RunSubmitParams,
-    StopParams, UpdateParams, APPLICATION_ERROR, INTERNAL_ERROR_CODE, INVALID_PARAMS,
-    METHOD_NOT_FOUND, PROTOCOL_VERSION, RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_STATUS_METHOD,
-    RUN_SUBMIT_METHOD, SCHEMA_VIOLATION, UNSUPPORTED_PROTOCOL_VERSION,
+    ResubmitParams, RetryParams, RunDiscardWorkspaceParams, RunForceParams, RunListParams,
+    RunResumeParams, RunStatusParams, RunSubmitParams, StopParams, UpdateParams, APPLICATION_ERROR,
+    INTERNAL_ERROR_CODE, INVALID_PARAMS, METHOD_NOT_FOUND, PROTOCOL_VERSION,
+    RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_RESUME_METHOD,
+    RUN_STATUS_METHOD, RUN_SUBMIT_METHOD, SCHEMA_VIOLATION, UNSUPPORTED_PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -103,6 +104,8 @@ where
             RUN_LIST_METHOD => self.dispatch_run_list(id, params).await,
             RUN_STATUS_METHOD => self.dispatch_run_status(id, params).await,
             RUN_FORCE_METHOD => self.dispatch_run_force(id, params).await,
+            RUN_RESUME_METHOD => self.dispatch_run_resume(id, params).await,
+            RUN_DISCARD_WORKSPACE_METHOD => self.dispatch_run_discard_workspace(id, params).await,
             _ => serialize_error(Some(id), METHOD_NOT_FOUND, "Method not found", None),
         }
     }
@@ -335,6 +338,28 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_force(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_run_resume(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<RunResumeParams>(params) {
+            Ok(params) => params,
+            Err(_) => return native_v2_invalid_params(id),
+        };
+        match self.run_resume(params).await {
+            Ok(result) => serialize_success(id, result),
+            Err(error) => serialize_backend_error(id, error),
+        }
+    }
+
+    async fn dispatch_run_discard_workspace(&self, id: RequestId, params: Value) -> String {
+        let params = match serde_json::from_value::<RunDiscardWorkspaceParams>(params) {
+            Ok(params) => params,
+            Err(_) => return native_v2_invalid_params(id),
+        };
+        match self.run_discard_workspace(params).await {
             Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }

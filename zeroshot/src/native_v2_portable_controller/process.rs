@@ -31,6 +31,8 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
     run_id: RunId,
+    delivery_run_id: RunId,
+    adopt_existing_delivery: bool,
     submission: RunSubmission,
     connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,6 +51,8 @@ impl PortableBootstrapDocument {
         let environment = RunEnvironment::exact(&self.submission.runtime, self.connections)?;
         Ok(PortableControllerBootstrap {
             run_id: self.run_id,
+            delivery_run_id: self.delivery_run_id,
+            adopt_existing_delivery: self.adopt_existing_delivery,
             submission: self.submission,
             environment,
             github_token: self.github_token,
@@ -113,14 +117,20 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
     let bootstrap = load_bootstrap_file(bootstrap_path)?;
     let workspace = bootstrap.workspace.clone();
     let storage = bootstrap.storage.clone();
+    let delivery_run_id = bootstrap.delivery_run_id.clone();
+    let adopt_existing_delivery = bootstrap.adopt_existing_delivery;
     let github_token = bootstrap.github_token.clone();
     let controller = Arc::new(
         PortableRunController::start(bootstrap, move |admitted| {
             crate::native_v2_local::build_local_process_candidate(
-                admitted,
-                &workspace,
-                &storage,
-                github_token,
+                crate::native_v2_local::LocalProcessCandidateRequest {
+                    admitted,
+                    delivery_run_id: delivery_run_id.clone(),
+                    adopt_existing_delivery,
+                    workspace: &workspace,
+                    storage: &storage,
+                    github_token,
+                },
             )
             .map(PortableRuntime::new)
         })
@@ -161,6 +171,8 @@ fn encode_bootstrap(
         .for_runtime(&bootstrap.submission.runtime)?;
     let document = PortableBootstrapDocument {
         run_id: bootstrap.run_id.clone(),
+        delivery_run_id: bootstrap.delivery_run_id.clone(),
+        adopt_existing_delivery: bootstrap.adopt_existing_delivery,
         submission: bootstrap.submission.clone(),
         connections: environment.bootstrap_values(),
         github_token: bootstrap.github_token.clone(),

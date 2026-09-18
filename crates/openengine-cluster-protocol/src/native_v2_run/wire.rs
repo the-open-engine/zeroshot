@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{
     ConnectionKey, EnvironmentVariableName, GraphSpec, IdempotencyKey, NodeName, RunId,
-    RunStatusResult,
+    RunConnectionValues, RunStatusResult, TargetConnectionResolver,
 };
 
 use super::{
@@ -96,6 +96,55 @@ pub struct RunSubmitParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSubmitResult {
     pub run_id: RunId,
+}
+
+#[derive(Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunResumeParams {
+    pub run_id: RunId,
+    pub successor_run_id: RunId,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connections: RunConnectionValues,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_resolver: Option<TargetConnectionResolver>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
+}
+
+impl std::fmt::Debug for RunResumeParams {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunResumeParams")
+            .field("run_id", &self.run_id)
+            .field("successor_run_id", &self.successor_run_id)
+            .field("connections", &self.connections.keys().collect::<Vec<_>>())
+            .field("connection_resolver", &self.connection_resolver)
+            .field(
+                "github_token",
+                &self.github_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunResumeResult {
+    pub run_id: RunId,
+    pub resumed_from: RunId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunDiscardWorkspaceParams {
+    pub run_id: RunId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunDiscardWorkspaceResult {
+    pub run_id: RunId,
+    pub discarded: bool,
 }
 
 /// The MVP inventory has no filters or pagination controls.

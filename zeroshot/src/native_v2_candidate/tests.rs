@@ -294,6 +294,8 @@ impl CapsuleAllocator for CandidateAllocator {
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let delivery = Arc::new(NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                delivery_run_id: RunId::new("candidate-test"),
+                adopt_existing_delivery: false,
                 workspace: self.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: self.target.clone(),

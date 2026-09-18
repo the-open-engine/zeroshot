@@ -284,6 +284,8 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     ForceStop(RunSelector),
+    Resume(RunSelector),
+    DiscardWorkspace(RunSelector),
 }
 
 impl NativeV2CliCommand {
@@ -591,6 +593,24 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError>;
+    async fn run_resume(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support workspace recovery".to_owned(),
+        ))
+    }
+    async fn run_discard_workspace(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
+    ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support workspace recovery".to_owned(),
+        ))
+    }
 }
 
 impl NativeV2CliError {

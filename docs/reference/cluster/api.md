@@ -388,3 +388,40 @@ This method has no parameters.
 | Name | Schema |
 | --- | --- |
 | <code>runForceResult</code> | <a href="../schema.json#/$defs/RunForceResult"><code>schema.json#/$defs/RunForceResult</code></a> |
+
+### <code>run/resume</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>successorRunId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runResumeResult</code> | <a href="../schema.json#/$defs/RunResumeResult"><code>schema.json#/$defs/RunResumeResult</code></a> |
+
+### <code>run/discard_workspace</code>
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runDiscardWorkspaceResult</code> | <a href="../schema.json#/$defs/RunDiscardWorkspaceResult"><code>schema.json#/$defs/RunDiscardWorkspaceResult</code></a> |

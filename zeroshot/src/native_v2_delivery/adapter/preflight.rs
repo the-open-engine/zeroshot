@@ -68,7 +68,7 @@ impl NativeV2DeliveryAdapter {
         preparation: &mut DeliveryPreparation<'_, '_>,
         commit_message: &str,
     ) -> Result<(), DeliveryStop> {
-        let branch = delivery_branch(preparation.invocation.node.reference.run_id.as_str());
+        let branch = delivery_branch(self.config.delivery_run_id.as_str());
         let known = self.delivery_state();
         let request = GitHubDeliveryRead {
             target: &self.config.target,
@@ -126,7 +126,7 @@ impl NativeV2DeliveryAdapter {
         observed: &GitHubReviewReceipt,
         control: &DriverControl,
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
-        match reconciliation_anchor(known, observed) {
+        match reconciliation_anchor(known, observed, self.config.adopt_existing_delivery) {
             Ok(published) => Ok(published),
             Err(error) => {
                 emit(control, &format!("delivery: {error}")).await?;
@@ -384,6 +384,7 @@ impl NativeV2DeliveryAdapter {
 fn reconciliation_anchor(
     known: &DeliveryState,
     observed: &GitHubReviewReceipt,
+    adopt_existing_delivery: bool,
 ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
     if let Some(published) = &known.published {
         return Ok(published.clone());
@@ -392,6 +393,9 @@ fn reconciliation_anchor(
         let mut anchor = observed.clone();
         anchor.head_revision.clone_from(intended);
         return Ok(anchor);
+    }
+    if adopt_existing_delivery {
+        return Ok(observed.clone());
     }
     Err(GitHubAuthorityError::identity(format!(
         "unexpected existing run branch at {}; no published candidate or pending push proves ownership",

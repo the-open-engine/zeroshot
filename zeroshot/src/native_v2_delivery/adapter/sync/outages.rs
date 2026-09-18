@@ -190,6 +190,8 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
     };
     let adapter = NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            delivery_run_id: openengine_cluster_protocol::RunId::new("outage-test"),
+            adopt_existing_delivery: false,
             workspace: std::env::temp_dir(),
             git_program: PathBuf::from("unused-git"),
             target: request.target.clone(),

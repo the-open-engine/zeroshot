@@ -107,6 +107,7 @@ fn status() -> RunStatusResult {
                 },
             ],
         },
+        workspace_recovery: Default::default(),
     }
 }
 
@@ -217,6 +218,7 @@ fn force_fixture() -> Value {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status,
+            workspace_recovery: result.workspace_recovery,
         }
     })
 }

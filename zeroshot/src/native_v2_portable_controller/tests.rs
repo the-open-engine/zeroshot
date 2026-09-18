@@ -91,6 +91,8 @@ fn bootstrap(
     let environment = RunEnvironment::exact(&submission.runtime, BTreeMap::new())
         .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        delivery_run_id: run_id.clone(),
+        adopt_existing_delivery: false,
         run_id,
         submission,
         environment,

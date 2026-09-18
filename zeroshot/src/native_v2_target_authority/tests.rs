@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use openengine_cluster_client::ClusterClient;
 use openengine_cluster_client::websocket::WebSocketTransport;
 use openengine_cluster_protocol::{
-    IdempotencyKey, ResolvedSource, RunId, RunListParams, RunSize, RunSubmission, RunTitle,
-    RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    IdempotencyKey, ResolvedSource, RunId, RunListParams, RunResumeParams, RunSize, RunSubmission,
+    RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
     TargetPrivateBootstrapRequest,
 };
 use openengine_cluster_server::identity::{
@@ -379,6 +379,30 @@ async fn direct_target_remains_auth_free_without_private_bootstrap() {
     let session: TargetOecpSession = serde_json::from_slice(&session.body).assert_value();
     assert_eq!(session.bearer_token, None);
     connect_and_list(&endpoint, None).await;
+    task.abort();
+}
+
+#[tokio::test]
+async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
+    let (_, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
+    let (websocket, _) = tokio_tungstenite::connect_async(&endpoint)
+        .await
+        .assert_value();
+    let client = ClusterClient::new(WebSocketTransport::new(websocket));
+    client.initialize().await.assert_value();
+
+    let error = client
+        .run_resume(RunResumeParams {
+            run_id: run_id(),
+            successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+        })
+        .await
+        .expect_err("missing run must be rejected by controller");
+    assert!(!error.to_string().contains("does not support"));
+
     task.abort();
 }
 

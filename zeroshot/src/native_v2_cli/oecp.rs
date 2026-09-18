@@ -402,6 +402,36 @@ where
             .map(Into::into)
             .map_err(protocol_error)
     }
+
+    async fn run_resume(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let transport = self
+            .connector
+            .connect(require_named_target(target)?, Some(params.run_id.clone()))
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_resume(params)
+            .await
+            .map_err(protocol_error)
+    }
+
+    async fn run_discard_workspace(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
+    ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
+        let transport = self
+            .connector
+            .connect(require_named_target(target)?, Some(params.run_id.clone()))
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_discard_workspace(params)
+            .await
+            .map_err(protocol_error)
+    }
 }
 
 fn task_is_active(status: &CliRunStatus) -> bool {

@@ -33,6 +33,79 @@ async fn foreground_run_reports_a_terminal_failure_after_printing_it() {
     );
 }
 
+#[tokio::test]
+async fn named_target_resume_resolves_current_values_for_original_requirements() {
+    let key = openengine_cluster_protocol::ConnectionKey::new("openai").assert_value();
+    let field =
+        openengine_cluster_protocol::EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
+    let backend = FakeBackend::with_resume_requirements(std::collections::BTreeMap::from([(
+        key.clone(),
+        vec![field.clone()],
+    )]));
+    let command =
+        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
+    let environment = |name: &str| match name {
+        "OPENAI_API_KEY" => Some(OsString::from("fresh-openai-token")),
+        "GH_TOKEN" => Some(OsString::from("fresh-github-token")),
+        _ => None,
+    };
+    let context = CliExecutionContext::new(&backend, &environment);
+
+    execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new())
+        .await
+        .assert_value();
+
+    let calls = backend.calls();
+    let Call::Resume { target, params } = &calls[1] else {
+        panic!("resume call was not recorded");
+    };
+    assert_eq!(target.as_deref(), Some("docker"));
+    assert_eq!(
+        params.connections[&key]
+            .as_map()
+            .get(&field)
+            .map(String::as_str),
+        Some("fresh-openai-token")
+    );
+    assert_eq!(params.github_token.as_deref(), Some("fresh-github-token"));
+}
+
+#[tokio::test]
+async fn local_resume_resolves_current_values_for_original_requirements() {
+    let key = openengine_cluster_protocol::ConnectionKey::new("openai").assert_value();
+    let field =
+        openengine_cluster_protocol::EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
+    let backend = FakeBackend::with_resume_requirements(std::collections::BTreeMap::from([(
+        key.clone(),
+        vec![field.clone()],
+    )]));
+    let command = parse_native_v2_args(args(&["resume", "run-failed"])).assert_value();
+    let environment = |name: &str| match name {
+        "OPENAI_API_KEY" => Some(OsString::from("fresh-openai-token")),
+        "GH_TOKEN" => Some(OsString::from("fresh-github-token")),
+        _ => None,
+    };
+    let context = CliExecutionContext::new(&backend, &environment);
+
+    execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new())
+        .await
+        .assert_value();
+
+    let calls = backend.calls();
+    let Call::Resume { target, params } = &calls[1] else {
+        panic!("resume call was not recorded");
+    };
+    assert_eq!(target, &None);
+    assert_eq!(
+        params.connections[&key]
+            .as_map()
+            .get(&field)
+            .map(String::as_str),
+        Some("fresh-openai-token")
+    );
+    assert_eq!(params.github_token.as_deref(), Some("fresh-github-token"));
+}
+
 fn merge_plan_fixture() -> FixtureFiles {
     let expires = time::OffsetDateTime::now_utc() + time::Duration::days(1);
     let expires_at = format!(

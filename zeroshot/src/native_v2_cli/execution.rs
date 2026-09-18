@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    Cursor, RunAttachParams, RunForceParams, RunId, RunListParams, RunLogEventNotification,
-    RunLogsParams, RunStatus, RunStatusParams, RunWatchParams, SubscriptionCloseReason,
-    TerminalResult,
+    Cursor, RunAttachParams, RunDiscardWorkspaceParams, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunResumeParams, RunStatus, RunStatusParams,
+    RunWatchParams, SubscriptionCloseReason, TerminalResult,
 };
 use serde::Serialize;
 
@@ -32,7 +32,7 @@ mod submission;
 use attach::{RoutedAttach, follow_attach};
 pub(crate) use context::CliExecutionContext;
 pub use submission::{try_execute_native_v2_preflight, try_execute_native_v2_static};
-use submission::submit_run;
+use submission::{select_connection_requirements, submit_run};
 use status::outcome_for_status;
 
 pub async fn execute_native_v2_cli<B, S, W>(
@@ -85,7 +85,7 @@ where
         NativeV2CliCommand::Update
         | NativeV2CliCommand::TargetServe(_)
         | NativeV2CliCommand::Ui { .. } => Err(NativeV2CliError::ProcessCommand),
-        command => execute_run_operation(command, context.backend, signal, output).await,
+        command => execute_run_operation(command, context, signal, output).await,
     }
 }
 
@@ -110,7 +110,7 @@ where
 
 async fn execute_run_operation<B, S, W>(
     command: NativeV2CliCommand,
-    backend: &B,
+    context: &CliExecutionContext<'_, B>,
     signal: &mut S,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError>
@@ -119,9 +119,51 @@ where
     S: DetachSignal,
     W: Write,
 {
+    let backend = context.backend;
     let command = match command {
         NativeV2CliCommand::ForceStop(run) => {
             return execute_force_stop(run, backend, output).await;
+        }
+        NativeV2CliCommand::Resume(run) => {
+            let successor_run_id = RunId::new(uuid::Uuid::now_v7().to_string());
+            let status = backend
+                .run_status(
+                    run.target.as_deref(),
+                    RunStatusParams {
+                        run_id: run.run_id.clone(),
+                    },
+                )
+                .await?;
+            let connections = select_connection_requirements(
+                status.workspace_recovery.connection_requirements,
+                context.environment,
+            )?;
+            let result = backend
+                .run_resume(
+                    run.target.as_deref(),
+                    RunResumeParams {
+                        run_id: run.run_id,
+                        successor_run_id,
+                        connections,
+                        connection_resolver: None,
+                        github_token: (context.environment)("GH_TOKEN")
+                            .and_then(|value| value.into_string().ok())
+                            .filter(|value| !value.is_empty()),
+                    },
+                )
+                .await?;
+            write_json(output, &result)?;
+            return Ok(CliOutcome::Completed);
+        }
+        NativeV2CliCommand::DiscardWorkspace(run) => {
+            let result = backend
+                .run_discard_workspace(
+                    run.target.as_deref(),
+                    RunDiscardWorkspaceParams { run_id: run.run_id },
+                )
+                .await?;
+            write_json(output, &result)?;
+            return Ok(CliOutcome::Completed);
         }
         command => command,
     };

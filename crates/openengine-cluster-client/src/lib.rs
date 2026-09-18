@@ -31,10 +31,11 @@ use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, DeleteParams, DeleteResult, GetParams, GetResult, InitializeParams,
     InitializeResult, JsonRpcError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccess,
     PlanParams, PlanResult, RequestId, ResubmitParams, ResubmitResult, RetryParams, RetryResult,
-    RunForceParams, RunForceResult, RunListParams, RunListResult, RunStatusParams, RunStatusResult,
-    RunSubmitParams, RunSubmitResult, StopParams, StopResult, SubscriptionId, UpdateParams,
-    UpdateResult, JSON_RPC_VERSION, PROTOCOL_VERSION, RUN_FORCE_METHOD, RUN_LIST_METHOD,
-    RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunForceResult,
+    RunListParams, RunListResult, RunResumeParams, RunResumeResult, RunStatusParams,
+    RunStatusResult, RunSubmitParams, RunSubmitResult, StopParams, StopResult, SubscriptionId,
+    UpdateParams, UpdateResult, JSON_RPC_VERSION, PROTOCOL_VERSION, RUN_DISCARD_WORKSPACE_METHOD,
+    RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
 };
 use openengine_cluster_server::{ClusterBackend, Dispatcher};
 use serde::de::DeserializeOwned;
@@ -353,6 +354,20 @@ where
 
     pub async fn run_force(&self, params: RunForceParams) -> Result<RunForceResult, ClientError> {
         self.call(RUN_FORCE_METHOD, params).await
+    }
+
+    pub async fn run_resume(
+        &self,
+        params: RunResumeParams,
+    ) -> Result<RunResumeResult, ClientError> {
+        self.call(RUN_RESUME_METHOD, params).await
+    }
+
+    pub async fn run_discard_workspace(
+        &self,
+        params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, ClientError> {
+        self.call(RUN_DISCARD_WORKSPACE_METHOD, params).await
     }
 
     async fn call<P, R>(&self, method: &str, params: P) -> Result<R, ClientError>

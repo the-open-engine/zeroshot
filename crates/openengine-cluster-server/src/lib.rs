@@ -349,6 +349,30 @@ pub trait ClusterBackend: Send + Sync + 'static {
             None,
         ))
     }
+
+    async fn run_resume(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support native-v2 workspace recovery",
+            None,
+        ))
+    }
+
+    async fn run_discard_workspace(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
+    ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support native-v2 workspace recovery",
+            None,
+        ))
+    }
 }
 
 pub struct Dispatcher<B> {

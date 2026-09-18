@@ -7,13 +7,14 @@
 //! learning product-local execution, capsule, harness, provider, or session identities.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentAttachEvent, Cursor, ExecutionRef, LogRecord, NodeName, RunId, SubscriptionId, RunSize,
-    RunTitle, ResolvedSource, TerminalResult, MAX_SAFE_GENERATION,
+    AgentAttachEvent, Cursor, ExecutionRef, LogRecord, NodeName, RunConnectionRequirements, RunId,
+    RunSize, RunTitle, SubscriptionId, ResolvedSource, TerminalResult, MAX_SAFE_GENERATION,
 };
 
 /// Non-negative token counter that remains exact in JavaScript clients.
@@ -181,6 +182,20 @@ pub struct RunStatusResult {
     pub size: RunSize,
     pub at_cursor: Cursor,
     pub status: RunStatus,
+    #[serde(default)]
+    pub workspace_recovery: WorkspaceRecovery,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WorkspaceRecovery {
+    pub recoverable: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_requirements: RunConnectionRequirements,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed_from: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor_run_id: Option<RunId>,
 }
 
 /// Establishes a durable run watch.
@@ -309,4 +324,6 @@ pub struct RunForceResult {
     pub at_cursor: Cursor,
     /// Public phase projected after the force request was recorded.
     pub status: RunStatus,
+    #[serde(default)]
+    pub workspace_recovery: WorkspaceRecovery,
 }

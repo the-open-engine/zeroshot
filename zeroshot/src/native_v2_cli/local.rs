@@ -1,11 +1,13 @@
 //! Auth-free local CLI backend for one-run controller processes.
 
 use std::path::{Path, PathBuf};
+use std::fs::{File, OpenOptions};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use fs2::FileExt;
 use openengine_cluster_client::{ClientError, ClusterClient};
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
@@ -14,8 +16,10 @@ use openengine_cluster_protocol::{
     RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
     RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
     RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatusParams,
-    RunStatusResult, RunSubmitResult, RunWatchParams, Sha256Digest,
+    RunStatusResult, RunSubmitResult, RunWatchParams, Sha256Digest, RunSubmission, TerminalResult,
+    WorkspaceRecovery,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
 use crate::execution::platform::ControllerChild as Child;
@@ -57,6 +61,22 @@ const BOOTSTRAP_FILE: &str = "controller.bootstrap.json";
 const SUBMISSION_LOCK_FILE: &str = "submission.lock";
 const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const CONTROLLER_HANDOFF_RETRY_DELAY: Duration = Duration::from_millis(25);
+const RECOVERY_FILE: &str = "workspace-recovery.json";
+const RECOVERY_CLAIM_FILE: &str = "workspace-recovery.claim";
+const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct LocalRecoveryDocument {
+    submission: RunSubmission,
+    workspace: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resumed_from: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    successor_run_id: Option<RunId>,
+}
 
 #[derive(Clone, Debug)]
 pub struct LocalCliBackend {
@@ -192,12 +212,34 @@ impl LocalCliBackend {
         &self,
         prepared: PreparedLocalRun,
     ) -> Result<RunId, NativeV2CliError> {
+        self.start_prepared_controller_with_lineage(prepared, None)
+            .await
+    }
+
+    async fn start_prepared_controller_with_lineage(
+        &self,
+        prepared: PreparedLocalRun,
+        resumed_from: Option<RunId>,
+    ) -> Result<RunId, NativeV2CliError> {
+        let adopt_existing_delivery = resumed_from.is_some();
         let paths = self.paths(&prepared.run_id)?;
         let storage = self.create_run_storage(&prepared.run_id)?;
+        self.write_recovery_document(
+            &prepared.run_id,
+            &LocalRecoveryDocument {
+                submission: prepared.submission.clone(),
+                workspace: prepared.workspace.clone(),
+                delivery_run_id: Some(prepared.delivery_run_id.clone()),
+                resumed_from,
+                successor_run_id: None,
+            },
+        )?;
         let workspace_lease = self.workspace_lease(&prepared.workspace)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
             run_id: prepared.run_id.clone(),
+            delivery_run_id: prepared.delivery_run_id,
+            adopt_existing_delivery,
             submission: prepared.submission,
             environment: prepared.environment,
             github_token: prepared.github_token,
@@ -372,10 +414,14 @@ impl LocalCliBackend {
 
     async fn list_entry_once(&self, run_id: &RunId) -> Result<RunListResult, NativeV2CliError> {
         let transport = self.connect_run(run_id).await?;
-        ClusterClient::new(transport.as_ref())
+        let mut result = ClusterClient::new(transport.as_ref())
             .run_list(RunListParams::default())
             .await
-            .map_err(protocol_error)
+            .map_err(protocol_error)?;
+        for status in &mut result.runs {
+            status.workspace_recovery = self.workspace_recovery(status)?;
+        }
+        Ok(result)
     }
 
     async fn status_local(
@@ -384,12 +430,166 @@ impl LocalCliBackend {
     ) -> Result<RunStatusResult, NativeV2CliError> {
         let retry = params.clone();
         match self.status_once(params).await {
-            Ok(result) => Ok(result),
+            Ok(mut result) => {
+                result.workspace_recovery = self.workspace_recovery(&result)?;
+                Ok(result)
+            }
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
-                self.status_once(retry).await
+                let mut result = self.status_once(retry).await?;
+                result.workspace_recovery = self.workspace_recovery(&result)?;
+                Ok(result)
             }
         }
+    }
+
+    fn recovery_path(&self, run_id: &RunId) -> Result<PathBuf, NativeV2CliError> {
+        Ok(self.run_storage(run_id)?.join(RECOVERY_FILE))
+    }
+
+    fn recovery_claim_path(&self, run_id: &RunId) -> Result<PathBuf, NativeV2CliError> {
+        Ok(self.run_storage(run_id)?.join(RECOVERY_CLAIM_FILE))
+    }
+
+    fn claim_recovery_workspace(&self, run_id: &RunId) -> Result<File, NativeV2CliError> {
+        let claim = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.recovery_claim_path(run_id)?)
+            .map_err(local_io)?;
+        claim.try_lock_exclusive().map_err(|error| {
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                local_message("retained workspace is already being resumed")
+            } else {
+                local_io(error)
+            }
+        })?;
+        Ok(claim)
+    }
+
+    fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
+        match self.claim_recovery_workspace(run_id) {
+            Ok(claim) => {
+                drop(claim);
+                Ok(true)
+            }
+            Err(NativeV2CliError::Local(message))
+                if message == "retained workspace is already being resumed" =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn reconcile_local_resume_claim(&self, run_id: &RunId) -> Result<(), NativeV2CliError> {
+        let mut recovery = self.read_recovery_document(run_id)?;
+        let Some(successor_run_id) = recovery.successor_run_id.clone() else {
+            return Ok(());
+        };
+        let successor_storage = self.run_storage(&successor_run_id)?;
+        if !successor_storage.exists() {
+            recovery.successor_run_id = None;
+            return self.write_recovery_document(run_id, &recovery);
+        }
+        let paths = self.paths(&successor_run_id)?;
+        let ledger_path = successor_storage.join("runs.sqlite3");
+        let deadline = Instant::now() + self.ready_timeout;
+        loop {
+            if require_existing_ledger(&ledger_path)? || read_ready(&paths).is_ok() {
+                return Ok(());
+            }
+            match ControllerLease::acquire(paths.lease()) {
+                Err(ControllerLeaseError::Held) => return Ok(()),
+                Ok(lease) if Instant::now() >= deadline => {
+                    std::fs::remove_dir_all(&successor_storage).map_err(local_io)?;
+                    drop(lease);
+                    recovery.successor_run_id = None;
+                    return self.write_recovery_document(run_id, &recovery);
+                }
+                Ok(lease) => {
+                    drop(lease);
+                    sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
+                }
+                Err(error) => return Err(local_error(error)),
+            }
+        }
+    }
+
+    fn read_recovery_document(
+        &self,
+        run_id: &RunId,
+    ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
+        let bytes = std::fs::read(self.recovery_path(run_id)?).map_err(local_io)?;
+        serde_json::from_slice(&bytes)
+            .map_err(|_| local_message("workspace recovery metadata is invalid"))
+    }
+
+    fn write_recovery_document(
+        &self,
+        run_id: &RunId,
+        document: &LocalRecoveryDocument,
+    ) -> Result<(), NativeV2CliError> {
+        let path = self.recovery_path(run_id)?;
+        let temporary = path.with_extension("json.tmp");
+        let bytes = serde_json::to_vec(document)
+            .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
+        std::fs::write(&temporary, bytes).map_err(local_io)?;
+        std::fs::rename(temporary, path).map_err(local_io)
+    }
+
+    fn delivery_run_id(
+        &self,
+        run_id: &RunId,
+        document: &LocalRecoveryDocument,
+    ) -> Result<RunId, NativeV2CliError> {
+        let mut lineage_run_id = run_id.clone();
+        let mut lineage = document.clone();
+        for _ in 0..MAX_RECOVERY_LINEAGE_DEPTH {
+            if let Some(delivery_run_id) = lineage.delivery_run_id {
+                return Ok(delivery_run_id);
+            }
+            let Some(predecessor) = lineage.resumed_from else {
+                return Ok(lineage_run_id);
+            };
+            lineage_run_id = predecessor;
+            lineage = self.read_recovery_document(&lineage_run_id)?;
+        }
+        Err(local_message("workspace recovery lineage is too deep"))
+    }
+
+    fn workspace_recovery(
+        &self,
+        status: &RunStatusResult,
+    ) -> Result<WorkspaceRecovery, NativeV2CliError> {
+        let document = match self.read_recovery_document(&status.run_id) {
+            Ok(document) => document,
+            Err(_) => return Ok(WorkspaceRecovery::default()),
+        };
+        let failed = matches!(
+            status.status,
+            openengine_cluster_protocol::RunStatus::Finished {
+                terminal_result: TerminalResult::Failed { .. },
+                ..
+            }
+        );
+        Ok(WorkspaceRecovery {
+            recoverable: failed
+                && document.successor_run_id.is_none()
+                && document.workspace.is_dir()
+                && self.recovery_workspace_is_unclaimed(&status.run_id)?,
+            connection_requirements: document
+                .submission
+                .runtime
+                .connection_requirements()
+                .into_iter()
+                .map(|(key, fields)| (key, fields.into_iter().collect()))
+                .collect(),
+            resumed_from: document.resumed_from,
+            successor_run_id: document.successor_run_id,
+        })
     }
 
     async fn status_once(
@@ -474,4 +674,40 @@ fn local_io(error: std::io::Error) -> NativeV2CliError {
 
 fn local_message(message: impl Into<String>) -> NativeV2CliError {
     NativeV2CliError::Local(message.into())
+}
+
+#[cfg(test)]
+mod recovery_claim_tests {
+    use super::*;
+    use openengine_cluster_testkit::assertions::AssertValue;
+
+    #[test]
+    fn interrupted_resume_releases_the_workspace_claim_for_retry() {
+        let root =
+            std::env::temp_dir().join(format!("zeroshot-local-recovery-{}", uuid::Uuid::now_v7()));
+        let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
+        std::fs::create_dir_all(root.join("runs").join(run_id.as_str())).assert_value();
+        let backend = LocalCliBackend::new(
+            root.clone(),
+            PathBuf::from("zeroshot"),
+            root.clone(),
+            PathBuf::from("git"),
+        );
+
+        let interrupted_process_claim = backend.claim_recovery_workspace(&run_id).assert_value();
+        assert!(
+            !backend
+                .recovery_workspace_is_unclaimed(&run_id)
+                .assert_value()
+        );
+
+        drop(interrupted_process_claim);
+        assert!(
+            backend
+                .recovery_workspace_is_unclaimed(&run_id)
+                .assert_value()
+        );
+
+        std::fs::remove_dir_all(root).assert_value();
+    }
 }

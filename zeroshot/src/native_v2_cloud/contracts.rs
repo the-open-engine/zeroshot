@@ -63,6 +63,13 @@ pub struct AllocatedCapsule {
     pub cleanup: Arc<dyn CapsuleCleanup>,
 }
 
+pub struct RetainedAllocationRequest<'a> {
+    pub source_run_id: &'a RunId,
+    pub run_id: &'a RunId,
+    pub admitted: &'a AdmittedRun,
+    pub github_token: Option<&'a str>,
+}
+
 /// Allocator-owned proof that this is the only active controller for one run.
 ///
 /// The allocator must keep the claim exclusive until the last reference is dropped. This is a
@@ -93,4 +100,22 @@ pub trait CapsuleAllocator: Send + Sync {
         run_id: &RunId,
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable>;
+
+    async fn allocate_from_retained(
+        &self,
+        _request: RetainedAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        Err(CapsuleAllocationUnavailable::Runtime)
+    }
+
+    async fn workspace_recovery(
+        &self,
+        _run_id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        Default::default()
+    }
+
+    async fn discard_workspace(&self, _run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {
+        Ok(false)
+    }
 }

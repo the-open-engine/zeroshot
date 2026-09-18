@@ -3875,6 +3875,12 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspaceRecovery": {
+          "$ref": "#/$defs/WorkspaceRecovery",
+          "default": {
+            "recoverable": false
+          }
         }
       },
       "required": [
@@ -4136,6 +4142,12 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspaceRecovery": {
+          "$ref": "#/$defs/WorkspaceRecovery",
+          "default": {
+            "recoverable": false
+          }
         }
       },
       "required": [
@@ -5145,6 +5157,45 @@
           "type": "object"
         }
       ]
+    },
+    "WorkspaceRecovery": {
+      "additionalProperties": false,
+      "properties": {
+        "connectionRequirements": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "resumedFrom": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "successorRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "recoverable"
+      ],
+      "type": "object"
     },
     "WriteBinding": {
       "additionalProperties": false,

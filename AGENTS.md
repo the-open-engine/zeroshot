@@ -119,6 +119,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
   a later durable terminal snapshot remains authoritative over the in-memory fallback.
+- Failed local and direct-target runs retain an exclusively claimable workspace for a successor
+  attempt. Local recovery metadata lives beside each run ledger while the checkout remains
+  user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime
+  state after confirmed process cleanup, quarantine retained trees under supervisor ownership, and
+  recursively transfer them to the successor's newly leased writer identity before admission. They
+  advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
+  lineage before controller launch, uses a process-held file lock during admission, and reconciles
+  an interrupted launch before permitting another successor. Direct-target retained-workspace
+  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup. Direct-target status
+  exposes the immutable admitted connection requirements so the CLI resolves fresh resume values
+  without consulting changed profiles. Recovery lineage also retains the root attempt's delivery
+  identity so every successor reuses the same delivery branch and pull request. Successor
+  composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned branch;
+  ordinary fresh adapters still reject unexplained existing run branches.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated

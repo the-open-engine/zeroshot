@@ -60,6 +60,7 @@ fn status(phase: RunStatus, at: u64) -> RunStatusResult {
         size: RunSize::Small,
         at_cursor: cursor(at),
         status: phase,
+        workspace_recovery: Default::default(),
     }
 }
 
@@ -233,6 +234,7 @@ impl ClusterBackend for FakeBackend {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status,
+            workspace_recovery: result.workspace_recovery,
         })
     }
 }

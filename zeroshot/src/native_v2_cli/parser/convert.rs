@@ -150,6 +150,10 @@ impl UtilityCommand {
             Self::Logs(args) => args.into_command(),
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
+            Self::Resume(args) => args.into_selector().map(NativeV2CliCommand::Resume),
+            Self::DiscardWorkspace(args) => args
+                .into_selector()
+                .map(NativeV2CliCommand::DiscardWorkspace),
             Self::Version => Ok(NativeV2CliCommand::Version),
         }
     }

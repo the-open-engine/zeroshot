@@ -155,6 +155,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
             size: RunSize::Small,
             at_cursor: openengine_cluster_protocol::Cursor::new("v2:1"),
             status: RunStatus::Admitted {},
+            workspace_recovery: Default::default(),
         }],
     };
     let wire = serde_json::to_value(result).assert_value();

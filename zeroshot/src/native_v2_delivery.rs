@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use openengine_cluster_protocol::RunId;
 use openengine_cluster_protocol::{EnumLabel, FieldName, WorkerErrorCode, WorkerOutcome, WorkerRef};
 use serde_json::{Map, Value, json};
 
@@ -211,6 +212,8 @@ impl Default for DeliveryPollPolicy {
 
 #[derive(Clone, Debug)]
 pub struct NativeV2DeliveryConfig {
+    pub delivery_run_id: RunId,
+    pub adopt_existing_delivery: bool,
     pub workspace: PathBuf,
     pub git_program: PathBuf,
     pub target: DeliveryTarget,
@@ -219,8 +222,15 @@ pub struct NativeV2DeliveryConfig {
 
 impl NativeV2DeliveryConfig {
     #[must_use]
-    pub fn for_hosted_workspace(workspace: PathBuf, target: DeliveryTarget) -> Self {
+    pub fn for_hosted_workspace(
+        delivery_run_id: RunId,
+        adopt_existing_delivery: bool,
+        workspace: PathBuf,
+        target: DeliveryTarget,
+    ) -> Self {
         Self {
+            delivery_run_id,
+            adopt_existing_delivery,
             workspace,
             git_program: PathBuf::from("/usr/bin/git"),
             target,

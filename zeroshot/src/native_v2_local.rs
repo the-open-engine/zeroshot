@@ -61,10 +61,20 @@ pub enum LocalCompositionError {
 /// Host-assigned immutable inputs for one local controller process.
 pub struct PreparedLocalRun {
     pub run_id: RunId,
+    pub delivery_run_id: RunId,
     pub submission: RunSubmission,
     pub environment: RunEnvironment,
     pub github_token: Option<String>,
     pub workspace: PathBuf,
+}
+
+pub struct LocalProcessCandidateRequest<'a> {
+    pub admitted: &'a AdmittedRun,
+    pub delivery_run_id: RunId,
+    pub adopt_existing_delivery: bool,
+    pub workspace: &'a Path,
+    pub storage: &'a Path,
+    pub github_token: Option<String>,
 }
 
 /// Snapshots local source and revalidates the request's exact runtime environment.
@@ -84,6 +94,7 @@ pub fn prepare_local_run(
     let environment = RunEnvironment::exact(&intent.runtime, connections)?;
     let (workspace, source) = local_resolved_source(current_directory, git_program)?;
     Ok(PreparedLocalRun {
+        delivery_run_id: run_id.clone(),
         run_id,
         submission: RunSubmission {
             title: intent.title,
@@ -200,11 +211,16 @@ fn github_remote_path(origin: &str) -> Option<String> {
 /// `storage` owns only provider session homes and controller state. No cleanup object is returned
 /// because the existing workspace and every mutation within it remain user-owned.
 pub fn build_local_process_candidate(
-    admitted: &AdmittedRun,
-    workspace: &Path,
-    storage: &Path,
-    github_token: Option<String>,
+    request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<dyn NodeRunner>, LocalCompositionError> {
+    let LocalProcessCandidateRequest {
+        admitted,
+        delivery_run_id,
+        adopt_existing_delivery,
+        workspace,
+        storage,
+        github_token,
+    } = request;
     let runtime_home = storage.join("runtime");
     prepare_private_directory(&runtime_home)?;
     let search_path = std::env::var("PATH").unwrap_or_else(|_| DEFAULT_SEARCH_PATH.to_owned());
@@ -259,6 +275,8 @@ pub fn build_local_process_candidate(
         NativeV2CandidateConfig {
             harness,
             delivery: NativeV2DeliveryConfig {
+                delivery_run_id,
+                adopt_existing_delivery,
                 workspace: workspace.to_owned(),
                 git_program: PathBuf::from("git"),
                 target,
