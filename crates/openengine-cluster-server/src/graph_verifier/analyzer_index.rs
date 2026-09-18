@@ -13,6 +13,8 @@ impl<'a> Analyzer<'a> {
             guard_nodes: 0,
             exhaustive_choices: BTreeSet::new(),
             choice_reachability: BTreeMap::new(),
+            choice_execution_correlations: BTreeMap::new(),
+            choice_write_conditions: BTreeMap::new(),
             parallel_join_correlations: BTreeMap::new(),
             map_execution_correlations: BTreeMap::new(),
             node_completion: BTreeMap::new(),

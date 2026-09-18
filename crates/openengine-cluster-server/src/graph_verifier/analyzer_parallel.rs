@@ -240,7 +240,17 @@ impl<'a> Analyzer<'a> {
             let indexed = context
                 .target_overrides
                 .is_some_and(|targets| targets.contains_key(promoted_path));
-            (!indexed && is_required_path(context.group_state, promoted_path)) || written
+            let required = is_required_path(context.group_state, promoted_path);
+            // Optional output routes carry presence together with their producer outcome.
+            // Promotion does not make the value definite: retained outcome writes still require
+            // the consumer's control path to prove a successful producer before reading it.
+            let conditional = !required
+                && context.effects.outcome_writes.values().any(|writes| {
+                    writes
+                        .values()
+                        .any(|write| write.guaranteed_paths.contains_key(promoted_path))
+                });
+            (!indexed && required) || written || conditional
         }
     }
 }

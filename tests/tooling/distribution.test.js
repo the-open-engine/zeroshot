@@ -53,6 +53,24 @@ describe('canonical distribution', () => {
     assert.equal(distribution.checkRepository(), true);
   });
 
+  it('rejects releases that omit the embedded UI build', () => {
+    const workflow = fs.readFileSync(
+      path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'),
+      'utf8'
+    );
+    for (const required of [
+      'npm --prefix ui ci --ignore-scripts',
+      'npm --prefix ui run build',
+      '--features ui',
+    ]) {
+      assert.throws(
+        () => distribution.checkRepository({ workflow: workflow.replace(required, '') }),
+        /ZEROSHOT_DISTRIBUTION_INTEGRITY/,
+        required
+      );
+    }
+  });
+
   it('rejects unexpected assets on an existing GitHub Release', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-release-assets-'));
     try {

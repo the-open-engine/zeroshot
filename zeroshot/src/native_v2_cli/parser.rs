@@ -25,6 +25,16 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Serve the local profile editor and live or recorded run history.
+    ///
+    /// Open the printed /ui/ URL. Uses the CLI's saved profiles and local run history.
+    /// Ctrl-C stops the UI server; active runs continue.
+    Ui {
+        /// Loopback address for the local UI.
+        #[arg(long, default_value = "127.0.0.1:4173")]
+        listen: SocketAddr,
+    },
+
     /// Manage named targets or serve a direct target.
     ///
     /// The built-in `cloud` target points to https://api.cloud.zeroshot.sh.
@@ -149,6 +159,9 @@ enum TargetCommand {
     Login(TargetNameArgs),
 
     /// Serve an unauthenticated direct target.
+    ///
+    /// Builds with UI support also serve the profile editor and run history at /ui/.
+    /// The UI shares this listener and stores profiles under --storage.
     ///
     /// Direct mode is unauthenticated. Bind or publish it only on trusted networks.
     Serve(TargetServeArgs),
@@ -278,10 +291,12 @@ struct TargetServeArgs {
     listen: SocketAddr,
 
     /// Public HTTP(S) origin advertised to clients.
+    ///
+    /// Must match the browser's origin, including the published port, when using the UI.
     #[arg(long, value_name = "ORIGIN")]
     public_origin: String,
 
-    /// Directory that stores target state and run data.
+    /// Directory that stores target state, UI profiles, and run data.
     #[arg(long, value_name = "DIRECTORY")]
     storage: PathBuf,
 

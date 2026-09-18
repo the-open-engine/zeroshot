@@ -1,0 +1,131 @@
+.node-data-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.node-data-section {
+  border-top: 1px solid var(--hairline);
+  padding: 12px 0;
+}
+.node-data-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+.node-data-section h3 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+.node-data-section > header .icon-button {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+}
+.node-data-section input,
+.node-data-section select {
+  font-size: 12px;
+  padding: 6px;
+  min-width: 0;
+}
+.node-data-bound,
+.node-data-declaration {
+  padding: 8px 0;
+}
+.node-data-bound + .node-data-bound,
+.node-data-declaration + .node-data-declaration {
+  border-top: 1px solid var(--hairline);
+}
+.node-data-bound-heading,
+.node-data-declaration-heading {
+  display: grid;
+  grid-template-columns: minmax(60px, 1fr) 83px 24px;
+  gap: 5px;
+  align-items: center;
+}
+.node-data-bound-heading .icon-button,
+.node-data-declaration-heading .icon-button {
+  width: 24px;
+  height: 27px;
+  color: var(--muted);
+}
+.node-data-bound > select {
+  width: 100%;
+  margin-top: 5px;
+}
+.node-data-type {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-data-required {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  margin: 5px 0;
+}
+.node-data-required input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--rust);
+}
+.node-data-add-source {
+  width: 100%;
+  margin-top: 7px;
+}
+.node-data-add-actions {
+  display: flex;
+  gap: 12px;
+}
+.node-data-section .text-button {
+  font-size: 12px;
+}
+.node-data-items {
+  padding-left: 8px;
+  border-left: 1px solid var(--hairline);
+  margin-top: 6px;
+}
+.node-data-items > label,
+.node-data-options,
+.node-data-source-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 7px 0;
+}
+.node-data-items > label {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.node-data-items > label select {
+  max-width: 120px;
+}
+.node-data-child {
+  display: flex;
+  width: 100%;
+  border: 0;
+  background: none;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  padding: 7px 0;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.node-data-child small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.node-data-child:hover {
+  color: var(--rust-text);
+}

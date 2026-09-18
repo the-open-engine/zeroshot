@@ -87,6 +87,10 @@ zeroshot run \
   --runtime-config ./runtime.json
 ```
 
+Run `zeroshot ui` to edit profiles and inspect live or completed runs in your browser.
+Open `http://127.0.0.1:4173/ui/`. It shares the CLI's saved profiles and history;
+Ctrl-C stops the UI server while runs continue. See [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
+
 ### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
@@ -100,6 +104,8 @@ docker run --detach --restart unless-stopped --name zeroshot-target \
 
 zeroshot target add local --url http://127.0.0.1:8080 --direct
 ```
+
+The target also serves its profile editor and run viewer at `http://127.0.0.1:8080/ui/`.
 
 See the [target image guide](docker/zeroshot-target/README.md) for persistent storage, network
 isolation, builds, and HTTPS.
@@ -136,7 +142,8 @@ npm run check
 cargo test --workspace
 ```
 
-Node.js is repository tooling and the npm delivery mechanism only. See
+Node.js builds the static UI and supports repository tooling and npm delivery; Rust serves the UI.
+See [UI development](ui/README.md),
 [CONTRIBUTING.md](CONTRIBUTING.md), [PUBLISHING.md](PUBLISHING.md), and [SECURITY.md](SECURITY.md).
 
 ## License

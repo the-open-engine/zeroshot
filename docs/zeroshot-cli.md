@@ -14,6 +14,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  ui          Serve the local profile editor and live or recorded run history
   target      Manage named targets or serve a direct target
   connection  Inspect and manage named runtime connections
   profile     Manage reusable graph/runtime profiles
@@ -32,6 +33,25 @@ Commands:
 Options:
   -V, --version
           Print the Zeroshot version
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `zeroshot ui`
+
+```text
+Serve the local profile editor and live or recorded run history.
+
+Open the printed /ui/ URL. Uses the CLI's saved profiles and local run history. Ctrl-C stops the UI server; active runs continue.
+
+Usage: zeroshot ui [OPTIONS]
+
+Options:
+      --listen <LISTEN>
+          Loopback address for the local UI
+
+          [default: 127.0.0.1:4173]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -102,6 +122,8 @@ Options:
 ```text
 Serve an unauthenticated direct target.
 
+Builds with UI support also serve the profile editor and run history at /ui/. The UI shares this listener and stores profiles under --storage.
+
 Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
 Usage: zeroshot target serve --listen <ADDRESS> --public-origin <ORIGIN> --storage <DIRECTORY>
@@ -111,10 +133,12 @@ Options:
           IP socket address on which the target listens
 
       --public-origin <ORIGIN>
-          Public HTTP(S) origin advertised to clients
+          Public HTTP(S) origin advertised to clients.
+
+          Must match the browser's origin, including the published port, when using the UI.
 
       --storage <DIRECTORY>
-          Directory that stores target state and run data
+          Directory that stores target state, UI profiles, and run data
 
   -h, --help
           Print help (see a summary with '-h')
@@ -941,6 +965,7 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  ui          Serve the local profile editor and live or recorded run history
   target      Manage named targets or serve a direct target
   connection  Inspect and manage named runtime connections
   profile     Manage reusable graph/runtime profiles

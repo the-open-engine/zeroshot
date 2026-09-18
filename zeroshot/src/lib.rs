@@ -26,3 +26,7 @@ pub mod worker_catalog;
 
 pub mod fault;
 pub mod observability;
+
+/// Local browser profile editor, served from the native binary.
+#[cfg(feature = "ui")]
+pub mod profile_ui;

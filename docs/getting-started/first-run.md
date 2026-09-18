@@ -77,6 +77,9 @@ zeroshot status RUN_ID
 zeroshot logs RUN_ID
 ```
 
+For a graph view with node transcripts, open [`zeroshot ui`](install.md#open-the-workspace-ui)
+and select the run in **Runs**.
+
 Normal completion happens when the graph reaches a terminal node. An explicit
 `zeroshot force-stop RUN_ID` also closes the run, while engine or target failures can produce a
 terminal failure result.

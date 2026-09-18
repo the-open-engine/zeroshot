@@ -45,6 +45,10 @@ async fn run() -> Result<(), ProcessError> {
     }
     let command = parse_native_v2_args(arguments)?;
     match command {
+        NativeV2CliCommand::Ui { listen } => {
+            serve_ui(listen).await?;
+            Ok(())
+        }
         NativeV2CliCommand::TargetServe(config) => {
             serve_direct_target(config).await?;
             Ok(())
@@ -202,6 +206,18 @@ fn write_process_error(error: &ProcessError) {
         }
     } else {
         eprintln!("zeroshot: {error}");
+    }
+}
+
+async fn serve_ui(listen: std::net::SocketAddr) -> Result<(), NativeV2CliError> {
+    #[cfg(feature = "ui")]
+    {
+        zeroshot_engine::profile_ui::serve(listen).await
+    }
+    #[cfg(not(feature = "ui"))]
+    {
+        let _ = listen;
+        Err(NativeV2CliError::Local("Build the editor with npm --prefix ui ci && npm --prefix ui run build, then cargo build -p zeroshot --features ui".to_owned()))
     }
 }
 

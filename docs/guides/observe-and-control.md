@@ -3,6 +3,17 @@
 Run state persists when an observation client leaves, and reconnecting does not change the run
 lifetime.
 
+## Browser
+
+Run [`zeroshot ui`](../getting-started/install.md#open-the-workspace-ui), then select a run in **Runs**.
+The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
+decisions, and transcript; use the timeline to replay its history. Active runs update live.
+Seeking pauses following; **Go live** returns to the latest event. Scrolling a transcript keeps
+the graph live and follows new output only when you reach the bottom.
+
+For a direct target, open `/ui/` on its configured public origin. Closing either browser view
+leaves the run active.
+
 ## Foreground and detached submission
 
 `zeroshot run` follows the durable event stream by default and writes NDJSON. Add `--detach` to

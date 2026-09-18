@@ -56,3 +56,25 @@ pub(super) fn write_and_commit(
 fn local_io(error: std::io::Error) -> NativeV2CliError {
     NativeV2CliError::Local(error.to_string())
 }
+
+#[cfg(any(unix, feature = "ui"))]
+pub(crate) fn default_local_state_root() -> Result<PathBuf, NativeV2CliError> {
+    if let Some(path) = nonempty_environment("ZEROSHOT_STATE_DIR") {
+        return absolute_user_path(path, "controller state path must be absolute");
+    }
+    if let Some(path) = nonempty_environment("XDG_STATE_HOME") {
+        return absolute_user_path(
+            PathBuf::from(path).join("zeroshot"),
+            "controller state path must be absolute",
+        );
+    }
+    let home = nonempty_environment("HOME")
+        .ok_or_else(|| NativeV2CliError::Local("HOME and XDG_STATE_HOME are unavailable".into()))?;
+    absolute_user_path(
+        PathBuf::from(home)
+            .join(".local")
+            .join("state")
+            .join("zeroshot"),
+        "controller state path must be absolute",
+    )
+}

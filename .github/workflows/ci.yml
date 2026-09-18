@@ -97,14 +97,30 @@ jobs:
           toolchain: 1.97.0
           components: clippy,rustfmt
 
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build and test embedded UI
+        run: |
+          npm --prefix ui ci --ignore-scripts
+          npm --prefix ui run build
+          npm --prefix ui test
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --package zeroshot --all-targets --features ui -- -D warnings
 
       - name: Run workspace tests
-        run: cargo test --workspace
+        run: |
+          cargo test --workspace
+          cargo test --package zeroshot --features ui
 
       - name: Test hosted process and filesystem boundaries as root
         run: |
@@ -148,8 +164,9 @@ jobs:
 
       - name: Build and smoke canonical executable
         run: |
-          cargo build --locked --release --package zeroshot --bin zeroshot
+          cargo build --locked --release --package zeroshot --bin zeroshot --features ui
           target/release/zeroshot --version
+          node tests/tooling/smoke-ui.js --binary target/release/zeroshot
 
   python-check:
     name: Python SDK
@@ -248,11 +265,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
       - name: Build canonical target image
         run: |
           docker build --pull --platform linux/amd64 \
             --file docker/zeroshot-target/Dockerfile \
             --tag zeroshot-target:ci .
+
+      - name: Smoke embedded UI and target restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="$(docker run --detach --publish 127.0.0.1:4185:8080 \
+            zeroshot-target:ci target serve --listen 0.0.0.0:8080 \
+            --public-origin http://127.0.0.1:4185 --storage /var/lib/zeroshot/native-v2)"
+          trap 'docker logs "$container"; docker rm --force --volumes "$container"' EXIT
+          node tests/tooling/smoke-ui.js --url http://127.0.0.1:4185
+          docker stop --time 20 "$container"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
+          docker start "$container"
+          node tests/tooling/smoke-ui.js --url http://127.0.0.1:4185
+          docker stop --time 20 "$container"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
 
       - name: Smoke executable and bundled harnesses
         run: |

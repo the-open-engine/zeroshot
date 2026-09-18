@@ -10,6 +10,9 @@ Its authored transitions determine which node runs next.
 [Run a first task](getting-started/first-run.md){ .md-button .md-button--primary }
 [Read the CLI reference](zeroshot-cli.md){ .md-button }
 
+[Open the workspace UI](getting-started/install.md#open-the-workspace-ui) to design profiles,
+watch live runs, and replay recorded history.
+
 ## What a run contains
 
 Three authored values determine execution:

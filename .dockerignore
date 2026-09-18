@@ -2,6 +2,8 @@
 .cache
 node_modules
 **/node_modules
+ui/dist
+ui/*.tsbuildinfo
 target
 **/target
 sdks/python/.venv

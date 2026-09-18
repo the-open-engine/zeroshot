@@ -258,7 +258,7 @@ pub(super) fn reduce(
     })?)
 }
 
-pub(super) fn durable_history(
+pub(crate) fn durable_history(
     snapshot: &RunSnapshot,
 ) -> Result<Vec<DurableExecution>, NativeV2SupervisorError> {
     let mut executions = snapshot
@@ -302,7 +302,7 @@ pub(super) fn history_position(
         .map_err(|_| NativeV2SupervisorError::InvalidState)
 }
 
-pub(super) fn next_node_instance(
+pub(crate) fn next_node_instance(
     executions: &[DurableExecution],
 ) -> Result<u64, NativeV2SupervisorError> {
     executions
@@ -314,7 +314,7 @@ pub(super) fn next_node_instance(
         .ok_or(NativeV2SupervisorError::InvalidState)
 }
 
-pub(super) fn next_execution(
+pub(crate) fn next_execution(
     executions: &[DurableExecution],
 ) -> Result<u64, NativeV2SupervisorError> {
     executions

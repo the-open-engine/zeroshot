@@ -31,15 +31,32 @@ The target is a long-running server: finishing a run leaves the container runnin
 including after a reboot. Docker must itself be running. A manual `docker stop zeroshot-target`
 keeps it stopped until you run `docker start zeroshot-target`.
 
-The named `zeroshot-data` volume preserves target state when the container is replaced. If you
+The named `zeroshot-data` volume preserves profiles and run history when the container is replaced. If you
 previously used `--rm` and the container disappeared, repeat the command above with the same volume.
 Use `docker ps -a --filter name=zeroshot-target` to check whether the container exists and is running.
 
-The container listens on port `8080` internally. With the loopback-only host publish above, register
-it at `http://127.0.0.1:8080`:
+The container listens on port `8080` internally. Open `http://127.0.0.1:8080/ui/` for the profile
+editor and live or recorded run history. The UI and target API share the same process and port;
+there is no frontend server to start. With the loopback-only host publish above, register the target:
 
 ```bash
 zeroshot target add local --url http://127.0.0.1:8080 --direct
+```
+
+Closing the browser leaves runs active.
+Stopping the container stops its runtime; on restart, interrupted runs are reconciled as lost,
+not restarted. Completed histories remain readable. Private cloud target containers do not expose
+the unauthenticated standalone UI.
+
+If the browser uses another port or an HTTPS reverse proxy, set `--public-origin` to that exact
+origin. For example:
+
+```bash
+docker run --detach --restart unless-stopped --name zeroshot-target \
+  -p 127.0.0.1:8185:8080 -v zeroshot-data:/var/lib/zeroshot \
+  ghcr.io/the-open-engine/zeroshot-target:latest \
+  target serve --listen 0.0.0.0:8080 --public-origin http://127.0.0.1:8185 \
+  --storage /var/lib/zeroshot/native-v2
 ```
 
 By default, the target performs no application-level authentication. Anyone who can reach the
@@ -48,7 +65,7 @@ not expose the port to the public internet.
 
 ## Build
 
-Build from the repository root:
+Build from the repository root. The image build compiles and embeds the UI assets:
 
 ```bash
 docker build --pull -f docker/zeroshot-target/Dockerfile -t zeroshot-target:dev .

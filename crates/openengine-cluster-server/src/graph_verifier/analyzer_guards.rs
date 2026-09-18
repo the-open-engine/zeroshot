@@ -1,4 +1,5 @@
 use super::*;
+use super::analyzer_choice_writes::{guarded_selector_uses, refine_common_choice_writes};
 
 impl<'a> Analyzer<'a> {
     pub(super) fn validate_choice(
@@ -10,12 +11,38 @@ impl<'a> Analyzer<'a> {
         if !self.validate_choice_guards(choice, incoming, path) {
             return ChoiceControl::unknown(choice);
         }
-        let guards = choice
+        let mut guards = choice
             .branches
             .as_slice()
             .iter()
             .map(|branch| &branch.when)
             .collect::<Vec<_>>();
+        // Immediate failure outcomes neither read nor carry data. Their real guards still need
+        // the ordinary availability/domain/exhaustiveness proofs, but unrelated pending output
+        // predicates must not enlarge that guard's assignment space.
+        let only_failures = choice
+            .branches
+            .as_slice()
+            .iter()
+            .all(|branch| matches!(branch.node, GraphNode::Fail(_)))
+            && choice
+                .otherwise
+                .as_deref()
+                .is_none_or(|node| matches!(node, GraphNode::Fail(_)));
+        let conditions = incoming
+            .outcome_writes
+            .keys()
+            .filter(|_| !only_failures)
+            .filter(|name| incoming.available.contains(*name))
+            .filter_map(|name| {
+                self.choice_write_conditions
+                    .get(name)
+                    .map(|condition| (name.clone(), condition.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (_, condition) in &conditions {
+            condition.collect_guards(&mut guards);
+        }
         let Some(assignments) = self.assignments_for_guards(&guards, &with_field(path, "branches"))
         else {
             return ChoiceControl::unknown(choice);
@@ -29,7 +56,7 @@ impl<'a> Analyzer<'a> {
             .collect::<Vec<_>>();
         let (exhaustive, otherwise_reachable) =
             self.record_choice_exhaustiveness(choice, &uncovered, path);
-        ChoiceControl {
+        let mut control = ChoiceControl {
             branches,
             branch_reachable,
             branch_completion: choice_branch_completion_predicates(choice),
@@ -37,7 +64,9 @@ impl<'a> Analyzer<'a> {
             otherwise_reachable,
             otherwise_completion: choice_otherwise_completion_predicate(choice),
             exhaustive,
-        }
+        };
+        refine_common_choice_writes(&mut control, choice, &assignments, &conditions);
+        control
     }
 
     pub(super) fn validate_choice_guards(
@@ -141,12 +170,15 @@ impl<'a> Analyzer<'a> {
         context: GuardValidationContext<'_>,
     ) -> bool {
         let mut valid = true;
-        for (selector, map_aggregate) in guard_selector_uses(guard) {
+        for (selector, map_aggregate, condition) in guarded_selector_uses(guard) {
             let map_available = map_aggregate
                 && self
                     .map_owner(&selector.name)
                     .is_some_and(|owner| available.contains(owner));
-            if !available.contains(&selector.name) && !map_available {
+            if !available.contains(&selector.name)
+                && !map_available
+                && !self.choice_error_is_available(selector, available, (&condition, context.path))
+            {
                 emit_diagnostic!(
                     self,
                     GraphDiagnosticCode::UndefinedRead,

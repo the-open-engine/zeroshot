@@ -462,6 +462,10 @@ mod cases_dataflow;
 mod cases_parallel;
 #[path = "graph_verifier/cases_structure.rs"]
 mod cases_structure;
+#[path = "graph_verifier/choice_common_outputs.rs"]
+mod choice_common_outputs;
+#[path = "graph_verifier/loop_error_exits.rs"]
+mod loop_error_exits;
 #[path = "graph_verifier/map_regressions.rs"]
 mod map_regressions;
 #[path = "graph_verifier/parallel_control_regressions.rs"]

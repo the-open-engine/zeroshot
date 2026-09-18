@@ -1,12 +1,12 @@
 # Contributing
 
-Zeroshot v8 is a native Rust product with a Python SDK and a small Node.js repository-tooling layer.
-There is no legacy Node runtime in this repository.
+Zeroshot v8 is a native Rust product with a browser UI and Python SDK.
+Node.js builds the UI and runs repository tooling; Rust serves the UI.
 
 ## Prerequisites
 
 - Rust 1.97.0 with `rustfmt` and `clippy`
-- Node.js 24 and npm for repository tooling and release scripts
+- Node.js 24 and npm for UI builds, repository tooling, and release scripts
 - Python 3.12 for SDK work
 - Docker for target-image changes
 
@@ -24,6 +24,7 @@ sdks/python/.venv/bin/python -m pip install -e 'sdks/python[dev]' -r docs/requir
 | Area                              | Path                                         |
 | --------------------------------- | -------------------------------------------- |
 | Canonical executable and engine   | `zeroshot/`                                  |
+| Workspace UI and native services  | `ui/`, `zeroshot/src/profile_ui/`            |
 | Shared cluster protocol           | `crates/openengine-cluster-protocol/`        |
 | Cluster server/client             | `crates/openengine-cluster-{server,client}/` |
 | Protocol fixtures and conformance | `crates/openengine-cluster-testkit/`         |
@@ -59,6 +60,9 @@ python -m pytest
 cd ../..
 python -m mkdocs build --strict
 ```
+
+UI changes also require the frontend and Cargo `ui` feature checks in
+[UI development](ui/README.md#verification); default Cargo checks omit that feature.
 
 Use `npm run check` for the complete repository-tooling gate. Docker changes should also build and
 smoke `docker/zeroshot-target/Dockerfile`.

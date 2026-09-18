@@ -69,8 +69,13 @@ zeroshot target add local-target \
 
 The target keeps running between runs. Docker restarts it after a reboot or unexpected exit with
 `--restart unless-stopped`; manually stopping it keeps it stopped until `docker start zeroshot-target`.
-Docker itself must be running. Target state persists in the named `zeroshot-data` volume, including
-when you recreate a container that was previously started with `--rm`.
+Docker itself must be running. Stopping the target stops its runtime; restart retains history and
+marks interrupted runs as lost.
+
+The image's `target serve` process also serves the UI at `http://127.0.0.1:8080/ui/`.
+Profiles and run history persist under `--storage` in the named `zeroshot-data` volume, including
+when you recreate a container previously started with `--rm`. If you change the published port or
+use a proxy, set `--public-origin` to the exact browser origin.
 
 !!! danger "Direct means unauthenticated"
 

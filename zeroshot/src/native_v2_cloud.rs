@@ -384,6 +384,13 @@ impl NativeV2CloudController {
         Ok(self.observability.status(params).await?)
     }
 
+    /// Shares observation with a host UI without granting runtime control or creating a controller.
+    #[cfg(feature = "ui")]
+    #[must_use]
+    pub fn observations(&self) -> NativeV2Observability {
+        self.observability.clone()
+    }
+
     pub async fn watch(
         &self,
         params: RunWatchParams,

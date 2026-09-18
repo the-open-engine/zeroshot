@@ -34,6 +34,9 @@ use crate::v2_run_ledger::fake::FakeRunLedger;
 mod http_fixture;
 use http_fixture::{TestHttpRequest, http};
 
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 

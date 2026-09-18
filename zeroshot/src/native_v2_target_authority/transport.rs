@@ -1,4 +1,5 @@
 use std::io;
+use std::future::Future;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -18,6 +19,7 @@ use openengine_cluster_server::native_v2::{
 };
 use openengine_cluster_server::{BackendError, ClusterBackend, ConnectionContext};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
 use tokio_tungstenite::accept_async_with_config;
 use url::Url;
 
@@ -41,6 +43,8 @@ const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_PRIVATE_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BEARER_BYTES: usize = 16 * 1024;
 const REQUEST_HEAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const CONNECTION_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const MAX_CONNECTIONS: usize = 256;
 
 /// Concrete target-wide HTTP/WebSocket binding. Hosted access consumes bearer authority supplied
 /// by its host. Explicit direct access uses one static target identity and no Authorization.
@@ -48,6 +52,8 @@ pub struct NativeV2TargetServer {
     target: Arc<NativeV2TargetAuthority>,
     access: TargetServerAccess,
     oecp_endpoint: String,
+    #[cfg(feature = "ui")]
+    ui: Option<crate::profile_ui::UiService>,
 }
 
 enum TargetServerAccess {
@@ -81,6 +87,8 @@ impl NativeV2TargetServer {
             target,
             access: TargetServerAccess::Hosted(sessions),
             oecp_endpoint: endpoint,
+            #[cfg(feature = "ui")]
+            ui: None,
         })
     }
 
@@ -95,6 +103,8 @@ impl NativeV2TargetServer {
             target,
             access: TargetServerAccess::Direct(identity),
             oecp_endpoint: endpoint,
+            #[cfg(feature = "ui")]
+            ui: None,
         })
     }
 
@@ -113,19 +123,71 @@ impl NativeV2TargetServer {
                 identity,
             },
             oecp_endpoint: endpoint,
+            #[cfg(feature = "ui")]
+            ui: None,
         })
+    }
+
+    /// Mounts the standalone workspace only on an explicitly unauthenticated direct target.
+    /// Private and hosted targets need their host's authenticated UI adapter instead.
+    #[cfg(feature = "ui")]
+    pub fn with_ui(
+        mut self,
+        ui: crate::profile_ui::UiService,
+    ) -> Result<Self, TargetAuthorityError> {
+        if !matches!(self.access, TargetServerAccess::Direct(_)) {
+            return Err(TargetAuthorityError::invalid(
+                "the standalone UI requires direct target access",
+            ));
+        }
+        self.ui = Some(ui);
+        Ok(self)
     }
 
     /// Serves a supplied listener. Cloud hosting may instead call [`Self::serve_connection`] from
     /// its existing listener/TLS lifecycle.
     pub async fn serve(self: Arc<Self>, listener: TcpListener) -> io::Result<()> {
-        loop {
-            let (stream, _) = listener.accept().await?;
-            let server = self.clone();
-            tokio::spawn(async move {
-                let _ = server.serve_connection(stream).await;
-            });
+        self.serve_until(listener, std::future::pending()).await
+    }
+
+    /// Stops accepting on host shutdown, closes UI subscriptions, and bounds connection draining.
+    /// These connections only observe/control the separately owned target; closing them never
+    /// synthesizes a run cancellation. Dropping this future also drops its owned connection tasks.
+    pub async fn serve_until(
+        self: Arc<Self>,
+        listener: TcpListener,
+        shutdown: impl Future<Output = ()>,
+    ) -> io::Result<()> {
+        tokio::pin!(shutdown);
+        let mut connections = JoinSet::new();
+        let result = loop {
+            tokio::select! {
+                biased;
+                () = &mut shutdown => break Ok(()),
+                accepted = listener.accept(), if connections.len() < MAX_CONNECTIONS => {
+                    let (stream, _) = match accepted {
+                        Ok(accepted) => accepted,
+                        Err(error) => break Err(error),
+                    };
+                    let server = self.clone();
+                    connections.spawn(async move { server.serve_connection(stream).await });
+                }
+                _ = connections.join_next(), if !connections.is_empty() => {}
+            }
+        };
+        drop(listener);
+        #[cfg(feature = "ui")]
+        if let Some(ui) = &self.ui {
+            ui.shutdown();
         }
+        let drained = tokio::time::timeout(CONNECTION_DRAIN_TIMEOUT, async {
+            while connections.join_next().await.is_some() {}
+        })
+        .await;
+        if drained.is_err() {
+            connections.shutdown().await;
+        }
+        result
     }
 
     /// Routes one real TCP connection. WebSocket handshakes remain on the same target authority
@@ -135,6 +197,14 @@ impl NativeV2TargetServer {
             Ok(head) => head,
             Err(error) => return write_request_error(&mut stream, error).await,
         };
+        #[cfg(feature = "ui")]
+        if head.is_ui_route() {
+            if let Some(ui) = &self.ui {
+                // The UI router owns every subsequent request on this connection. Its route
+                // set excludes native control endpoints, including HTTP keep-alive requests.
+                return ui.serve_connection(stream).await;
+            }
+        }
         if head.is_websocket_upgrade() {
             return self.serve_oecp(stream, head).await;
         }

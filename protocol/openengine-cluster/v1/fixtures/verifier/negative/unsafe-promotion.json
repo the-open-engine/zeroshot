@@ -3,7 +3,7 @@
     "diagnostics": [
       {
         "code": "undefined_read",
-        "message": "promoted path is not defined by every completing alternative",
+        "message": "selector path is not definitely defined on every reaching path",
         "path": [
           {
             "kind": "field",
@@ -18,20 +18,24 @@
             "name": "children"
           },
           {
-            "index": 1,
+            "index": 2,
             "kind": "index"
           },
           {
             "kind": "node",
-            "name": "promote"
+            "name": "done"
           },
           {
             "kind": "field",
-            "name": "promotedStatePaths"
+            "name": "bindings"
           },
           {
             "index": 0,
             "kind": "index"
+          },
+          {
+            "kind": "field",
+            "name": "value"
           }
         ],
         "relatedNodes": [],
@@ -274,11 +278,31 @@
           }
         },
         {
-          "bindings": [],
+          "bindings": [
+            {
+              "target": [
+                "result"
+              ],
+              "value": {
+                "path": [
+                  "result"
+                ],
+                "source": "state"
+              }
+            }
+          ],
           "kind": "succeed",
           "name": "done",
           "output": {
-            "kind": "null"
+            "fields": {
+              "result": {
+                "required": true,
+                "type": {
+                  "kind": "number"
+                }
+              }
+            },
+            "kind": "record"
           }
         }
       ],

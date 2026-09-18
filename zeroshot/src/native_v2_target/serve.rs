@@ -26,17 +26,30 @@ pub enum TargetServeError {
     Io(#[from] std::io::Error),
     #[error("invalid direct target public origin: {0}")]
     InvalidOrigin(String),
+    #[cfg(feature = "ui")]
+    #[error(transparent)]
+    Ui(#[from] zeroshot_engine::native_v2_cli::NativeV2CliError),
 }
 
 pub async fn serve_direct_target(config: TargetServe) -> Result<(), TargetServeError> {
+    let shutdown = shutdown_signal()?;
+    tokio::pin!(shutdown);
     let public_origin = normalize_origin(&config.public_origin)
         .map_err(|error| TargetServeError::InvalidOrigin(error.to_string()))?;
-    let (server, listener) = prepare_server(&config, &public_origin).await?;
+    let (server, listener) = tokio::select! {
+        biased;
+        () = &mut shutdown => return Ok(()),
+        prepared = prepare_server(&config, &public_origin) => prepared?,
+    };
     eprintln!(
         "Zeroshot direct target listening on {} as {}",
         config.listen, public_origin
     );
-    server.serve(listener).await?;
+    #[cfg(feature = "ui")]
+    if config.bootstrap_key_file.is_none() {
+        eprintln!("Zeroshot UI: {public_origin}/ui/");
+    }
+    server.serve_until(listener, shutdown).await?;
     Ok(())
 }
 
@@ -56,11 +69,45 @@ async fn prepare_server(
         ..ProductionHostingConfig::default()
     };
     let target = Arc::new(build_production_target_authority(hosting).await?);
-    let server = Arc::new(match bootstrap_key {
+    // Target ownership, including recovery of interrupted runs, is established before any UI
+    // reader can observe the ledger. UI connections never create a second controller.
+    let controller = target.controller().await?;
+    #[cfg(not(feature = "ui"))]
+    let _ = controller;
+    let server = match bootstrap_key {
         Some(key) => NativeV2TargetServer::new_private(target, direct_identity(), endpoint, key)?,
-        None => NativeV2TargetServer::new_direct(target, direct_identity(), endpoint)?,
-    });
-    Ok((server, listener))
+        None => {
+            let server = NativeV2TargetServer::new_direct(target, direct_identity(), endpoint)?;
+            #[cfg(feature = "ui")]
+            let server = server.with_ui(zeroshot_engine::profile_ui::UiService::for_target(
+                std::fs::canonicalize(&config.storage)?,
+                public_origin,
+                controller.observations(),
+            )?)?;
+            server
+        }
+    };
+    Ok((Arc::new(server), listener))
+}
+
+#[cfg(unix)]
+fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+    Ok(async move {
+        tokio::select! {
+            _ = interrupt.recv() => {}
+            _ = terminate.recv() => {}
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    Ok(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
 }
 
 fn oecp_endpoint(origin: &str) -> Result<String, TargetAuthorityError> {
@@ -96,6 +143,41 @@ fn direct_identity() -> ConnectionIdentity {
 mod tests {
     use super::*;
     use openengine_cluster_testkit::assertions::AssertValue;
+
+    struct Storage(std::path::PathBuf);
+
+    impl Drop for Storage {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn relative_storage_has_an_initialized_ledger_before_accepting_connections() {
+        let storage = Storage(
+            std::path::PathBuf::from("target")
+                .join(format!("target-serve-{}", uuid::Uuid::now_v7())),
+        );
+        let config = TargetServe {
+            listen: "127.0.0.1:0".parse().assert_value(),
+            public_origin: "http://127.0.0.1:8080".to_owned(),
+            storage: storage.0.clone(),
+            bootstrap_key_file: None,
+        };
+        let (server, listener) = prepare_server(&config, &config.public_origin)
+            .await
+            .assert_value();
+        assert!(storage.0.join("runs.sqlite3").is_file());
+        let ledger = zeroshot_engine::v2_run_ledger::sqlite::SqliteRunLedger::open_read_only(
+            storage.0.join("runs.sqlite3"),
+        )
+        .assert_value();
+        use zeroshot_engine::v2_run_ledger::RunLedger;
+        assert!(ledger.list().await.assert_value().is_empty());
+        drop(ledger);
+        drop(listener);
+        drop(server);
+    }
 
     #[test]
     fn target_serve_derives_only_same_authority_websocket_endpoints() {

@@ -60,6 +60,7 @@ impl Cli {
 impl CliCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::Ui { listen } => Ok(NativeV2CliCommand::Ui { listen }),
             Self::Target { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),

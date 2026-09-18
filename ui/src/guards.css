@@ -1,0 +1,138 @@
+.control-section {
+  margin: 18px 0;
+  min-width: 0;
+}
+.control-section h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+.guard-condition,
+.signal-declaration {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+}
+.guard-condition > legend,
+.signal-declaration > legend {
+  color: var(--secondary);
+  font-size: 12px;
+  padding: 0 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.guard-condition .guard-condition {
+  padding: 8px;
+  margin-bottom: 2px;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+.control-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--secondary);
+  font-size: 12px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+.control-label select,
+.control-text input {
+  font-size: 12px;
+  padding: 7px;
+}
+.control-text {
+  min-width: 0;
+  flex: 1;
+}
+.control-text .error-text {
+  margin: 6px 0;
+}
+.control-stack {
+  min-width: 0;
+}
+.guard-selector + .guard-selector {
+  border-top: 1px solid var(--hairline);
+  padding-top: 10px;
+}
+.control-labels {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.control-labels legend {
+  font-size: 12px;
+  color: var(--secondary);
+  padding: 0 0 7px;
+}
+.control-labels > label,
+.control-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--secondary);
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.control-labels input,
+.control-check input {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  accent-color: var(--rust-text);
+}
+.control-labels small {
+  color: var(--muted);
+}
+.control-add,
+.control-remove {
+  font-size: 12px;
+  color: var(--secondary);
+}
+.control-remove:hover:not(:disabled) {
+  color: var(--rust-text);
+}
+.guard-child > .control-remove {
+  margin: 0 0 6px 8px;
+}
+.control-confirm {
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  padding: 10px;
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.control-confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 9px;
+}
+.control-confirm .button {
+  white-space: normal;
+}
+.signal-name-row,
+.signal-label-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+.signal-label-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0 12px;
+  border-left: 1px solid var(--hairline);
+  padding-left: 10px;
+}
+.signal-label-row input {
+  font-family: var(--font-mono);
+}

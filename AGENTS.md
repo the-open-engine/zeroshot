@@ -22,7 +22,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Product and release identity
 
 - The Rust crate in `zeroshot/` is the canonical product and owns the `zeroshot` CLI.
-- Node.js exists only for repository tooling and the npm binary delivery package.
+- Node.js is used for repository tooling, the npm binary delivery package, and building the static
+  profile UI. The UI is served by Rust and never needs a production Node server.
 - Canonical releases are explicit `vX.Y.Z` tags with major version 8 or newer.
 - The npm package is `@the-open-engine-company/zeroshot`.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
@@ -45,8 +46,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
   proves this and reduction materializes missing null, string, and recursively empty record values.
+- Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
+  error leaves an incomplete collection unchanged while its controls remain available to authored
+  guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
-  maintain model catalogs, or validate provider availability. Admission may reject only known
+  maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.
 - Runtime selection requires caller-authored `harness`, `provider`, and `model` values.
 - The `gateway` provider resolves `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` through named
@@ -237,43 +241,116 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## Where to look
 
-| Concept                       | Path                                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Canonical crate and CLI       | `zeroshot/`                                                                                                   |
-| CLI grammar/help              | `zeroshot/src/native_v2_cli/parser.rs`                                                                        |
-| CLI composition               | `zeroshot/src/native_v2_cli.rs`, `zeroshot/src/main.rs`                                                       |
-| Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                    |
-| Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                             |
-| Hosted/cloud composition      | `zeroshot/src/native_v2_cloud.rs`, `zeroshot/src/native_v2_hosting.rs`                                        |
+| Concept                       | Path                                                                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical crate and CLI       | `zeroshot/`                                                                                                                                                                                       |
+| CLI grammar/help              | `zeroshot/src/native_v2_cli/parser.rs`                                                                                                                                                            |
+| CLI composition               | `zeroshot/src/native_v2_cli.rs`, `zeroshot/src/main.rs`                                                                                                                                           |
+| Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                                                                                                        |
+| Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                                                                                                                 |
+| Hosted/cloud composition      | `zeroshot/src/native_v2_cloud.rs`, `zeroshot/src/native_v2_hosting.rs`                                                                                                                            |
 | Hosted merge plans            | `crates/openengine-cluster-protocol/src/native_v2_hosted/merge_plan.rs`, `zeroshot/src/native_v2_cli/execution/merge_plans.rs`, `zeroshot/src/native_v2_target/controller_authority/hosted_runs/` |
-| Portable controller           | `zeroshot/src/native_v2_portable_controller.rs`, `zeroshot/src/native_v2_portable_controller/`                |
-| Provider/delivery composition | `zeroshot/src/native_v2_candidate.rs`, `zeroshot/src/native_v2_candidate/`                                    |
-| Target server                 | `zeroshot/src/native_v2_target.rs`, `zeroshot/src/native_v2_target/`                                          |
-| Target authority/auth         | `zeroshot/src/native_v2_target_authority.rs`, `zeroshot/src/native_v2_target_authority/`                      |
-| Contained execution           | `zeroshot/src/execution.rs`, `zeroshot/src/execution/`                                                        |
-| Faults and redaction          | `zeroshot/src/fault.rs`, `zeroshot/src/fault/`                                                                |
-| Run ledger                    | `zeroshot/src/v2_run_ledger.rs`, `zeroshot/src/v2_run_ledger/`                                                |
-| Cluster protocol types        | `crates/openengine-cluster-protocol/`                                                                         |
-| Cluster server                | `crates/openengine-cluster-server/`                                                                           |
-| Cluster client                | `crates/openengine-cluster-client/`                                                                           |
-| Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                                          |
-| Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs` |
-| Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                                             |
-| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `scripts/docs_versions.py`, `.github/workflows/docs.yml`                                   |
-| npm package                   | `npm/zeroshot/`                                                                                               |
-| Target image                  | `docker/zeroshot-target/`                                                                                     |
-| Target declarations           | `distribution/zeroshot-targets.json`                                                                          |
-| Distribution tooling          | `scripts/distribution.js`, `scripts/distribution/`, `npm/zeroshot/lib/release-artifacts.js`                   |
-| Python SDK                    | `sdks/python/`                                                                                                |
-| Release workflow              | `.github/workflows/release.yml`                                                                               |
-| Python release workflow       | `.github/workflows/release-python.yml`                                                                        |
-| CI classifier                 | `.github/ci-path-classifier.js`                                                                               |
-| Repository tooling tests      | `tests/tooling/`                                                                                              |
+| Portable controller           | `zeroshot/src/native_v2_portable_controller.rs`, `zeroshot/src/native_v2_portable_controller/`                                                                                                    |
+| Provider/delivery composition | `zeroshot/src/native_v2_candidate.rs`, `zeroshot/src/native_v2_candidate/`                                                                                                                        |
+| Target server                 | `zeroshot/src/native_v2_target.rs`, `zeroshot/src/native_v2_target/`                                                                                                                              |
+| Target authority/auth         | `zeroshot/src/native_v2_target_authority.rs`, `zeroshot/src/native_v2_target_authority/`                                                                                                          |
+| Contained execution           | `zeroshot/src/execution.rs`, `zeroshot/src/execution/`                                                                                                                                            |
+| Faults and redaction          | `zeroshot/src/fault.rs`, `zeroshot/src/fault/`                                                                                                                                                    |
+| Run ledger                    | `zeroshot/src/v2_run_ledger.rs`, `zeroshot/src/v2_run_ledger/`                                                                                                                                    |
+| Cluster protocol types        | `crates/openengine-cluster-protocol/`                                                                                                                                                             |
+| Cluster server                | `crates/openengine-cluster-server/`                                                                                                                                                               |
+| Cluster client                | `crates/openengine-cluster-client/`                                                                                                                                                               |
+| Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                                                                                                                              |
+| Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs`                                                                                     |
+| Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                                                                                                                                 |
+| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `scripts/docs_versions.py`, `.github/workflows/docs.yml`                                                                                           |
+| npm package                   | `npm/zeroshot/`                                                                                                                                                                                   |
+| Target image                  | `docker/zeroshot-target/`                                                                                                                                                                         |
+| Target declarations           | `distribution/zeroshot-targets.json`                                                                                                                                                              |
+| Distribution tooling          | `scripts/distribution.js`, `scripts/distribution/`, `npm/zeroshot/lib/release-artifacts.js`                                                                                                       |
+| Python SDK                    | `sdks/python/`                                                                                                                                                                                    |
+| Release workflow              | `.github/workflows/release.yml`                                                                                                                                                                   |
+| Python release workflow       | `.github/workflows/release-python.yml`                                                                                                                                                            |
+| CI classifier                 | `.github/ci-path-classifier.js`                                                                                                                                                                   |
+| Repository tooling tests      | `tests/tooling/`                                                                                                                                                                                  |
+
+## Standalone workspace UI
+
+- `ui/` owns React/Vite; `zeroshot/src/profile_ui.rs` owns native services, with browser lifecycle
+  in `profile_ui/server.rs`. Build `ui/dist` before enabling Cargo's optional `ui` feature.
+  Releases and target images embed it. Build, development, and feature checks: [ui/README.md](ui/README.md).
+- `zeroshot ui` serves local CLI profiles and ledgers at `http://127.0.0.1:4173/ui/` by default;
+  `--listen` accepts loopback only. Direct `target serve` mounts `/ui/` on its existing listener,
+  uses `--storage` for profiles/history, and initializes its single controller before UI reads.
+  Private/hosted targets reject this standalone mount. Opening the UI never starts a run.
+- Browser access requires the configured public origin, exact Host, and valid Fetch-Site;
+  forwarded headers cannot broaden authority. UI keepalive requests cannot reach target control
+  endpoints. Keep JSON writes, request bounds, and connection-owned SSE readers/timers.
+- SIGINT/SIGTERM close listeners and observers with bounded draining. Stopping the local UI leaves
+  detached runs active. Target restart reconciles interrupted runs as runtime loss, never as an
+  invented user stop or automatic retry.
+- `WorkspaceServices` separates profile storage, native authoring, run listing, and observation.
+  `RunHistorySource` supplies the viewer's run identity and transport. The standalone shell owns
+  selection/navigation; graph components must remain independent of the host.
+- Profiles use `LocalRunProfileStore` and `NativeV2Admission::validate_profile`. Saves check content
+  revision and the bootstrap workspace UUID under the CLI's store lock. Identity persists with the
+  store; replacement rejects stale tabs, including creation requests without a prior revision.
+- Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
+  generation; imports carry no foreign revision. Pending numeric text belongs to the document,
+  survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
+- The structured graph is canonical; React Flow/ELK provide presentation only. Flattening sequences
+  or folding standard error routes must preserve scopes, identities, priority, conditions, and
+  runtime bindings. Custom/unfamiliar routes stay visible. Layout and themes stay out of profiles.
+- Normal authoring exposes Inputs and Outputs. Run inputs/results and runtime settings belong in
+  the toolbar. Do not restore state, mapping, promotion, join-strategy, or error-policy panels.
+  Keep defaults/restriction prose on the info icon's `#defaults` page, preserving the mounted editor.
+- `/ui/api/data` (`profile_ui/data.rs`) creates typed bindings/promotions; `/ui/api/authoring`
+  (`profile_ui/outcomes.rs`) creates ordinary completion/error nodes. Both return drafts without
+  saving or running. Required sources need native success proof; source selection and error
+  protection form one transaction, preserving custom recovery, reasons, priority, and terminal scope.
+- Optional promotions preserve absence; required reads still need availability proof. Promote only
+  current-scope writes, never stale results from a prior loop iteration. Required incoming state
+  retains carry semantics. Maps collect in input order, including `[]`; never infer a branch winner.
+- Choice outputs require a producer on every continuing alternative, with first-match execution
+  and success proof. Later writes invalidate pending presence facts. Loop error exits require a
+  guaranteed completing Step; fixed loops complete on normal exhaustion, review loops fail.
+- Data edits update only owned routes and linked schemas, including carried state and Map items.
+  Removing a producer leaves typed, unbound inputs. Previous-attempt reuse requires native proof
+  of the original source and compatible path. Label only unchanged caller values as Run input.
+- Structural actions are atomic and preserve identities, bindings, and completion checkpoints.
+  Parallel grouping checks dependencies; body replacement removes obsolete bindings. Converting a
+  Verifier rejects remaining verifier-only contracts. Review loops carry feedback into the next
+  attempt, starting with an implicit empty string; reviewers never inherit credentials or sessions.
+- Artifact-producing work uses writing Agents; Verifiers perform independent checks/classification.
+  Parallel/Map writers remain writers. Examples pass file paths and compact decisions, with separate
+  files per writer and fresh directories per mapped item. Authors coordinate overlapping edits.
+- Runtime schemas/workers come from `profile_ui/catalog.rs` native contracts. Git delivery keeps its
+  fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
+  identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
+- `profile_ui/runs.rs` reads ledgers without creating, repairing, or recovering them. Definitions
+  come from admission snapshots. Preserve ordered cursors, explicit gaps, bounded pages, and string
+  u64 IDs. SSE resumes after `Last-Event-ID` and drains through the terminal cursor before closing.
+- Status reads query only an already-owned controller. Unpersisted runtime failure stays separate
+  from durable snapshots/events and marks history incomplete. Missing authority drains retained
+  history before an explicit error. Never invent completion; a durable terminal record takes precedence.
+- `run-history.ts` projects only the selected history prefix. Rust's canonical reducer supplies
+  structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
+  guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
+  failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
+- Read-only history reuses `WorkflowCanvas`; groups start collapsed and scrubbing preserves expansion.
+  Seek pauses following; transcript scrolling stays live and follows only at the bottom. Keep the
+  execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
+  Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
+  remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
+- Visual tokens/fonts follow `zero-cloud/frontend/VISUAL_DESIGN.md`; bundle all runtime assets.
+  Cloud embedding is pending [zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301):
+  Zeroshot still needs a shell-less entry, host bridge, authenticated definition/history export,
+  and structured stream errors. Cloud owns menus, auth, profile CAS, and live/archive adapters.
 
 ## Development conventions
 
 - Fix root causes and keep changes scoped.
-- Use existing patterns; do not add parallel registries, provider lists, model catalogs, or release
+- Use existing patterns; do not add parallel registries, provider lists, runtime model catalogs, or release
   authorities.
 - Keep optional developer and agent analysis tools external to the repository. Do not add package
   dependencies, hooks, CI gates, skills, or checked-in state for personal analysis tooling.

@@ -56,13 +56,17 @@ pub use diagnostic::{ERROR_FORMAT_ENV, JSON_ERROR_FORMAT, NativeV2CliDiagnostic}
 mod parser;
 
 mod profiles;
-use profiles::LocalRunProfileStore;
+pub(crate) use profiles::LocalRunProfileStore;
+#[cfg(feature = "ui")]
+pub(crate) use profiles::{profile_revision, ProfileSaveConflict};
 
 mod profile_contract;
 pub use profile_contract::*;
 
 mod support;
 use support::{absolute_user_path, nonempty_environment};
+#[cfg(any(unix, feature = "ui"))]
+pub(crate) use support::default_local_state_root;
 pub use support::VERSION;
 
 pub use execution::{
@@ -231,6 +235,9 @@ pub enum NativeV2CliCommand {
         name: String,
     },
     TargetServe(TargetServe),
+    Ui {
+        listen: SocketAddr,
+    },
     ConnectionList(ConnectionRoute),
     ConnectionSet(ConnectionSetCommand),
     ConnectionDelete {
