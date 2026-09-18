@@ -1,0 +1,48 @@
+name: Windows Job diagnostic
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - shell: pwsh
+        run: |
+          $source = @'
+          using System;
+          using System.Diagnostics;
+          using System.Runtime.InteropServices;
+          public class JobProbe {
+            [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+            [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool present);
+            [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int kind, IntPtr info, uint size, IntPtr returned);
+            public static void Main() {
+              bool present;
+              IsProcessInJob(GetCurrentProcess(), IntPtr.Zero, out present);
+              IntPtr buffer = Marshal.AllocHGlobal(144);
+              try {
+                bool queried = present && QueryInformationJobObject(IntPtr.Zero, 9, buffer, 144, IntPtr.Zero);
+                Console.WriteLine("pid=" + Process.GetCurrentProcess().Id + " job=" + present + " flags=" + (queried ? Marshal.ReadInt32(buffer, 16).ToString("X") : "unavailable"));
+              } finally { Marshal.FreeHGlobal(buffer); }
+            }
+          }
+          '@
+          $path = Join-Path $env:RUNNER_TEMP 'job-probe.cs'
+          $binary = Join-Path $env:RUNNER_TEMP 'job-probe.exe'
+          Set-Content -Path $path -Value $source
+          Add-Type -Path $path
+          Write-Output 'PowerShell host:'
+          [JobProbe]::Main()
+          & "$env:WINDIR/Microsoft.NET/Framework64/v4.0.30319/csc.exe" /nologo "/out:$binary" $path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output 'Direct native executable:'
+          & $binary
+          Write-Output 'Parent process chain:'
+          $current = $PID
+          for ($i = 0; $i -lt 8 -and $current -ne 0; $i++) {
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$current"
+            $process | Select-Object ProcessId, ParentProcessId, Name | Format-Table
+            $current = $process.ParentProcessId
+          }
