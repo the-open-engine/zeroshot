@@ -39,6 +39,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output 'Direct native executable:'
           & $binary
+          Write-Output 'Windows management process launch:'
+          $log = Join-Path $env:RUNNER_TEMP 'job-probe-wmi.log'
+          $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ CreateFlags = [uint32]0x01000000 }
+          $command = 'cmd.exe /d /s /c ""' + $binary + '" > "' + $log + '" 2>&1"'
+          $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $command; ProcessStartupInformation = $startup }
+          $result | Format-List
+          for ($i = 0; $i -lt 20 -and !(Test-Path $log); $i++) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path $log) { Get-Content $log }
           Write-Output 'Parent process chain:'
           $current = $PID
           for ($i = 0; $i -lt 8 -and $current -ne 0; $i++) {
