@@ -46,7 +46,7 @@ function managedSource(document) {
   return digest(source) === match[1] ? source : null;
 }
 
-function locationResults(homeDirectory, environment) {
+function locationResults(homeDirectory, environment, currentDirectory) {
   if (!homeDirectory || !path.isAbsolute(homeDirectory)) {
     return TARGETS.map((target) => ({
       ...target,
@@ -56,16 +56,12 @@ function locationResults(homeDirectory, environment) {
   }
   const shared = path.join(homeDirectory, '.agents', 'skills', SKILL_NAME);
   const configuredClaude = environment.CLAUDE_CONFIG_DIR;
-  const claudeRoot = configuredClaude || path.join(homeDirectory, '.claude');
+  const claudeRoot = configuredClaude
+    ? path.resolve(currentDirectory, configuredClaude)
+    : path.join(homeDirectory, '.claude');
   return [
     { ...TARGETS[0], directory: shared },
-    path.isAbsolute(claudeRoot)
-      ? { ...TARGETS[1], directory: path.join(claudeRoot, 'skills', SKILL_NAME) }
-      : {
-          ...TARGETS[1],
-          status: 'failed',
-          message: 'CLAUDE_CONFIG_DIR must be absolute during package installation',
-        },
+    { ...TARGETS[1], directory: path.join(claudeRoot, 'skills', SKILL_NAME) },
   ];
 }
 
@@ -131,6 +127,10 @@ function installAt(location, canonical, managed) {
   }
 }
 
+function installCurrentDirectory(options, environment) {
+  return options.currentDirectory ?? environment.INIT_CWD ?? process.cwd();
+}
+
 function installSkills(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, '..');
   const source = path.join(packageRoot, 'skills', SKILL_NAME, 'SKILL.md');
@@ -138,8 +138,9 @@ function installSkills(options = {}) {
   const managed = managedDocument(canonical);
   const homeDirectory = options.homeDirectory ?? os.homedir();
   const environment = options.environment ?? process.env;
+  const currentDirectory = installCurrentDirectory(options, environment);
   const uid = options.uid ?? (typeof process.getuid === 'function' ? process.getuid() : undefined);
-  const locations = locationResults(homeDirectory, environment);
+  const locations = locationResults(homeDirectory, environment, currentDirectory);
   if (uid === 0 && environment.SUDO_USER && environment.SUDO_USER !== 'root') {
     return locations.map((location) => ({
       ...location,

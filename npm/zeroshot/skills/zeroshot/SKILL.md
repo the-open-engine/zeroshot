@@ -65,8 +65,9 @@ zeroshot run --title "TASK" --profile org:NAME --input input.json \
   --target cloud --submission-key KEY
 ```
 
-`--validate-only` materializes and validates without contacting the target or starting a run. It
-does not prove target access or connection availability.
+`--validate-only` materializes and validates without starting a run. A named Cloud profile must
+still be fetched from the target first, so this command requires Cloud access. It does not prove
+connection availability.
 
 For named targets, Zeroshot resolves source from the invoking Git worktree's attached upstream.
 Without an upstream, it requires exactly one GitHub remote. Detached worktrees require explicit
