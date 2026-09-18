@@ -11,15 +11,16 @@ $tests = @($artifacts | Where-Object {
 })
 if ($tests.Count -eq 0) { throw 'Cargo produced no workspace test executables' }
 
+$failed = $false
 foreach ($test in $tests) {
     Push-Location (Split-Path -Parent $test.manifest_path)
     try {
         & $test.executable
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
     } finally {
         Pop-Location
     }
 }
 
 cargo test --workspace --doc
-exit $LASTEXITCODE
+if ($failed -or $LASTEXITCODE -ne 0) { exit 1 }

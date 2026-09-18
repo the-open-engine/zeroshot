@@ -323,7 +323,8 @@ python -m mkdocs build --strict
 
 - CI has native, Python, and repository-tooling lanes plus stable aggregate `required`. The native
   lane runs on Linux and Windows, including real local CLI subprocess tests. Windows uses
-  `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job. Linux also executes
+  `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
+  `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and

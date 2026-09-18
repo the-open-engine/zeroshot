@@ -121,7 +121,7 @@ jobs:
 
       - name: Run Windows workspace tests
         if: runner.os == 'Windows'
-        run: ./scripts/test-windows.ps1
+        run: ./.github/scripts/test-windows-host.ps1
 
       - name: Test hosted process and filesystem boundaries as root
         if: runner.os == 'Linux'

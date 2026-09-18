@@ -21,6 +21,7 @@ const NATIVE_PREFIXES = [
 ];
 const NATIVE_PATHS = new Set([
   '.github/workflows/release.yml',
+  '.github/scripts/test-windows-host.ps1',
   'Cargo.lock',
   'Cargo.toml',
   'clippy.toml',
