@@ -133,7 +133,7 @@ submitting runs.
 ```bash
 npm ci
 npm run check
-cargo test --workspace
+cargo test --workspace # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1
 ```
 
 Node.js is repository tooling and the npm delivery mechanism only. See

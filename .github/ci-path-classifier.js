@@ -27,6 +27,7 @@ const NATIVE_PATHS = new Set([
   'rust-toolchain.toml',
   'rustfmt.toml',
   'scripts/distribution.js',
+  'scripts/test-windows.ps1',
 ]);
 
 const PYTHON_PREFIXES = ['sdks/python/'];

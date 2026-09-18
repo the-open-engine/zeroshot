@@ -116,7 +116,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run workspace tests
+        if: runner.os != 'Windows'
         run: cargo test --workspace
+
+      - name: Run Windows workspace tests
+        if: runner.os == 'Windows'
+        run: ./scripts/test-windows.ps1
 
       - name: Test hosted process and filesystem boundaries as root
         if: runner.os == 'Linux'

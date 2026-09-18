@@ -300,7 +300,7 @@ Run the narrowest relevant checks first, then the complete affected lane.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo test --workspace # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1
 RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps
 
 npm run lint
@@ -322,7 +322,8 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, and repository-tooling lanes plus stable aggregate `required`. The native
-  lane runs on Linux and Windows, including real local CLI subprocess tests. Linux also executes
+  lane runs on Linux and Windows, including real local CLI subprocess tests. Windows uses
+  `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
