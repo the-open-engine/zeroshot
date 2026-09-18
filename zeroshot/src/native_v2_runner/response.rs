@@ -448,12 +448,23 @@ pub fn render_agent_prompt(
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
+    let verifier_guidance = match response {
+        NodeResponseContract::Verifier { .. } => {
+            "Runtime-owned verifier guidance:\n\
+             Independently verify the work. Do not modify source, tests, configuration, or other \
+             material under review, and do not implement repairs. You may run checks and create \
+             their temporary files and generated artifacts. Report findings with evidence and \
+             describe failed or unavailable checks accurately.\n"
+        }
+        NodeResponseContract::Worker { .. } => "",
+    };
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
+         {verifier_guidance}\
          Input JSON:\n{input}\n\
          Runtime-owned response contract:\n{response}\n\
          The response contract describes the required type; never return the contract itself. \

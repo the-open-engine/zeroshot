@@ -46,8 +46,8 @@ snapshot. Place verification after the writers when it needs their completed cha
 
 Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
 parallel delivery and writing, including delivery in a map that can have multiple items. Delivery
-can run alongside read-only verifiers. A delivery receipt can certify run success only when every
-other writer settled before that delivery execution started.
+can run alongside verifiers, which are instructed not to edit the candidate. A delivery receipt can
+certify run success only when every other writer settled before that delivery execution started.
 
 ## State reduction chooses the next step
 

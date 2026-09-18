@@ -19,8 +19,8 @@ to `%LOCALAPPDATA%\zeroshot\state`. `ZEROSHOT_CONFIG_DIR` and `ZEROSHOT_STATE_DI
 these with absolute paths. The hosted target image requires Linux.
 
 For Codex, complete its [native Windows sandbox setup](https://developers.openai.com/codex/windows)
-before running graphs with reviewers. Zeroshot keeps local Codex reviewers read-only; it does not
-install their sandbox.
+if your Codex permission settings require it. Workers and reviewers use the same permission handling;
+Zeroshot does not install the sandbox.
 
 ## Open the workspace UI
 

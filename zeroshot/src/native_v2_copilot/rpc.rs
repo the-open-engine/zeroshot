@@ -60,7 +60,6 @@ pub(super) struct CopilotRpc<'a> {
     pub(super) response: Option<String>,
     pub(super) provider_error: Option<String>,
     pub(super) redactions: Vec<String>,
-    pub(super) writable: bool,
 }
 
 impl<'a> CopilotRpc<'a> {
@@ -80,7 +79,6 @@ impl<'a> CopilotRpc<'a> {
             session_id: String::new(),
             response: None,
             provider_error: None,
-            writable: false,
             redactions: redaction_values(invocation.environment.iter().map(|(_, value)| value)),
         }
     }
@@ -112,8 +110,6 @@ impl<'a> CopilotRpc<'a> {
         self.session_id = resume
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        self.writable = files.isolated_workspace
-            || self.invocation.role == crate::native_v2_runner::NodeRole::Worker;
         let params = command::session_parameters(self.invocation, files, &self.session_id)?;
         let method = if resume.is_some() {
             "session.resume"

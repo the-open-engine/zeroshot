@@ -159,7 +159,7 @@ fn permission(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerEr
         .filter(|id| !id.is_empty())
         .ok_or_else(|| failure("Copilot permission request identity is invalid"))?;
     let request = &data["permissionRequest"];
-    let allowed = permission_allowed(request, rpc.writable);
+    let allowed = permission_allowed(request);
     rpc.send_request(
         "session.permissions.handlePendingPermissionRequest",
         json!({
@@ -170,25 +170,14 @@ fn permission(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerEr
     Ok(())
 }
 
-pub(super) fn permission_allowed(request: &Value, writable: bool) -> bool {
+pub(super) fn permission_allowed(request: &Value) -> bool {
     if request["managedApprovalRequired"].as_bool() == Some(true)
         || request["requestSandboxBypass"].as_bool() == Some(true)
     {
         return false;
     }
-    match request["kind"].as_str() {
-        Some("read" | "url") => true,
-        Some("write") => writable,
-        Some("shell") if writable => true,
-        Some("shell") => {
-            request["hasWriteFileRedirection"].as_bool() == Some(false)
-                && request["commands"].as_array().is_some_and(|commands| {
-                    !commands.is_empty()
-                        && commands
-                            .iter()
-                            .all(|command| command["readOnly"].as_bool() == Some(true))
-                })
-        }
-        _ => false,
-    }
+    matches!(
+        request["kind"].as_str(),
+        Some("read" | "url" | "write" | "shell")
+    )
 }

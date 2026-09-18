@@ -144,7 +144,6 @@ pub(crate) struct ProviderExecutionFiles {
     pub(crate) runner: LocalProcessRunner,
     pub(crate) workspace: PathBuf,
     scratch: PathBuf,
-    pub(crate) isolated_workspace: bool,
     home: Arc<PrivateDirectory>,
     root: PrivateDirectory,
 }
@@ -174,7 +173,6 @@ impl ProviderExecutionFiles {
             runner: specification.runner,
             workspace,
             scratch,
-            isolated_workspace: specification.verifier_copy,
             home: specification.home,
             root,
         })

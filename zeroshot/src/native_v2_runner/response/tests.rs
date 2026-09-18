@@ -16,6 +16,25 @@ fn worker_contract() -> NodeResponseContract {
 }
 
 #[test]
+fn verifier_guidance_is_runtime_owned_and_independent_of_authored_instructions() {
+    let instructions = NodeInstructions::new("Assess a custom project's behavior.").assert_value();
+    let input = json!({"task":"custom review"});
+    let verifier = NodeResponseContract::Verifier {
+        output: PayloadType::Null,
+        signals: BTreeMap::new(),
+        diagnostic: PayloadType::Null,
+    };
+    let prompt = render_agent_prompt(&instructions, &input, &verifier).assert_value();
+    assert!(prompt.contains(instructions.as_str()));
+    assert!(prompt.contains("Do not modify source, tests, configuration"));
+    assert!(prompt.contains("temporary files and generated artifacts"));
+    assert!(prompt.contains(&input.to_string()));
+    assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
+    let worker = render_agent_prompt(&instructions, &input, &worker_contract()).assert_value();
+    assert!(!worker.contains("Runtime-owned verifier guidance:"));
+}
+
+#[test]
 fn agent_response_reports_mechanical_json_and_payload_errors() {
     let contract = worker_contract();
     let malformed = contract

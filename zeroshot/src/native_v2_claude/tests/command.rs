@@ -172,7 +172,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
 }
 
 #[test]
-fn private_verifier_workspaces_do_not_force_read_only_policy() {
+fn verifiers_do_not_force_a_permission_policy() {
     use crate::native_v2_claude::command::{ClaudeTurnArguments, claude_arguments};
     use crate::native_v2_runner::NodeRole;
 
@@ -182,7 +182,6 @@ fn private_verifier_workspaces_do_not_force_read_only_policy() {
             model: "provider-owned-model",
             effort: None,
             role: NodeRole::Verifier,
-            private_workspace: true,
             resume_id: Some("same-session"),
             json_schema: "{}".to_owned(),
         },

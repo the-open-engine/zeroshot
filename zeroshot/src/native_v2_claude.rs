@@ -30,7 +30,6 @@ use crate::native_v2_runner::{
 };
 use command::{
     ClaudeTurnArguments, claude_arguments, configure_provider, extend_declared_environment, prompt,
-    workspace_access,
 };
 use session::{ClaudeSession, attempt_session_id, observe_session};
 use transcript::{ClaudeAttempt, ClaudeEmission, ClaudeTranscript};
@@ -203,7 +202,6 @@ impl ClaudeAdapter {
         let argv = claude_arguments(
             self.prefix_arguments.clone(),
             ClaudeTurnArguments {
-                private_workspace: input.files.isolated_workspace,
                 model: model.as_str(),
                 effort: *effort,
                 role: invocation.role,
@@ -240,7 +238,10 @@ impl ClaudeAdapter {
             environment,
             workspace: crate::execution::driver::WorkspaceCapability {
                 current_dir: input.files.workspace.clone(),
-                mode: workspace_access(invocation.role).map_err(|error| {
+                mode: crate::native_v2_capsule::provider_process::agent_workspace_access(
+                    invocation.role,
+                )
+                .map_err(|error| {
                     with_driver_detail(error, "Claude workspace policy rejected the node role")
                 })?,
             },

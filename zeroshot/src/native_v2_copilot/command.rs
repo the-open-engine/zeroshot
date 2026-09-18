@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use serde_json::{Value, json};
-use crate::execution::WorkspaceAccessMode;
 use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::ProcessSessionCommand;
-use crate::native_v2_capsule::provider_process::{ProviderExecutionFiles, effort_token};
+use crate::native_v2_capsule::provider_process::{
+    ProviderExecutionFiles, agent_workspace_access, effort_token,
+};
 use crate::native_v2_contract::NodeRuntimeBinding;
-use crate::native_v2_runner::{DriverInvocation, NodeRole, NodeRunnerError};
+use crate::native_v2_runner::{DriverInvocation, NodeRunnerError};
 use super::{CopilotConfig, auth};
 
 pub(super) fn command(
@@ -15,11 +16,7 @@ pub(super) fn command(
     files: &ProviderExecutionFiles,
 ) -> Result<ProcessSessionCommand, NodeRunnerError> {
     let environment = process_environment(config, invocation, files)?;
-    let mode = match invocation.role {
-        NodeRole::Worker => WorkspaceAccessMode::ReadWrite,
-        NodeRole::Verifier => WorkspaceAccessMode::ReadOnly,
-        NodeRole::GitDelivery => return Err(NodeRunnerError::Driver),
-    };
+    let mode = agent_workspace_access(invocation.role)?;
     Ok(ProcessSessionCommand {
         program: path_text(&config.executable)?,
         argv: [

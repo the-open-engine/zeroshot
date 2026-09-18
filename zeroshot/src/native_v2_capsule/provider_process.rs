@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::execution::SessionScope;
+use crate::execution::{SessionScope, WorkspaceAccessMode};
 use crate::execution::process::{
     HostedProcessPool, HostedProcessScope, LocalProcessRunner, ProcessFrame, ProcessLaunchEvidence,
     ProcessRunnerError, ProcessSession, ProcessSessionCommand, ProcessSessionOutput,
@@ -32,6 +32,16 @@ pub(crate) use contained::ProviderProcess;
 pub(crate) use filesystem::{ProviderExecution, ProviderExecutionFiles, ProviderFilesystemConfig};
 
 const CONTINUE_PROMPT: &str = "Continue";
+
+/// Agent roles share execution permissions; verifier edit restrictions live in the prompt.
+pub(crate) fn agent_workspace_access(
+    role: NodeRole,
+) -> Result<WorkspaceAccessMode, NodeRunnerError> {
+    match role {
+        NodeRole::Worker | NodeRole::Verifier => Ok(WorkspaceAccessMode::ReadWrite),
+        NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
+    }
+}
 
 #[path = "provider_process/diagnostic.rs"]
 mod diagnostic;

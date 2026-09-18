@@ -23,7 +23,7 @@ use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
     ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, local_environment,
-    provider_redactions, with_driver_detail,
+    agent_workspace_access, provider_redactions, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -33,9 +33,8 @@ use crate::native_v2_runner::{
 };
 
 use command::{
-    add_local_execution_config, add_local_execution_policy, add_node_args, add_provider_args,
-    add_resume_command, add_session_target, agent_selection, configure_provider_auth,
-    process_environment, path_text, role_settings,
+    add_node_args, add_provider_args, add_resume_command, add_session_target, agent_selection,
+    configure_provider_auth, process_environment, path_text,
 };
 use output::CodexOutput;
 use process::{ProcessOpen, exchange_turn, open_process};
@@ -67,7 +66,6 @@ pub struct NativeV2CodexUser {
 pub struct NativeV2CodexAdapter {
     config: NativeV2CodexConfig,
     runners: ProviderProcessRunners,
-    externally_sandboxed: bool,
     local_environment: BTreeMap<String, String>,
     #[cfg(test)]
     test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
@@ -81,7 +79,6 @@ impl NativeV2CodexAdapter {
         Self {
             config,
             runners: ProviderProcessRunners::hosted(process_pool),
-            externally_sandboxed: true,
             #[cfg(test)]
             test_permission_policy: None,
             local_environment: BTreeMap::new(),
@@ -94,7 +91,6 @@ impl NativeV2CodexAdapter {
         Self {
             config,
             runners: ProviderProcessRunners::local(),
-            externally_sandboxed: false,
             #[cfg(test)]
             test_permission_policy: None,
             local_environment,
@@ -110,18 +106,6 @@ impl NativeV2CodexAdapter {
         adapter
     }
 
-    fn add_execution_policy(&self, argv: &mut Vec<String>, sandbox: &str) {
-        if !self.externally_sandboxed && sandbox == "read-only" {
-            add_local_execution_policy(argv, sandbox);
-        }
-    }
-
-    fn add_execution_config(&self, argv: &mut Vec<String>, sandbox: &str) {
-        if !self.externally_sandboxed && sandbox == "read-only" {
-            add_local_execution_config(argv);
-        }
-    }
-
     fn command(
         &self,
         turn: &CodexTurn<'_>,
@@ -131,7 +115,7 @@ impl NativeV2CodexAdapter {
         let (model, effort) = agent_selection(&invocation.node.binding).map_err(|error| {
             with_driver_detail(error, "Codex command requires an agent runtime binding")
         })?;
-        let (sandbox, access) = role_settings(invocation.role).map_err(|error| {
+        let access = agent_workspace_access(invocation.role).map_err(|error| {
             with_driver_detail(error, "Codex workspace policy rejected the node role")
         })?;
         let executable = path_text(&self.config.executable).map_err(|error| {
@@ -142,13 +126,11 @@ impl NativeV2CodexAdapter {
             .provider_environment(&invocation.environment, input.files.home())
             .map_err(|error| with_driver_detail(error, "Codex provider environment is invalid"))?;
         let mut argv = vec!["exec".to_owned()];
-        self.add_execution_policy(&mut argv, sandbox);
         add_resume_command(&mut argv, input.resume);
         // Local OpenAI-compatible routing belongs to the user's Codex configuration.
         if !(self.config.local_user.is_some() && self.config.provider == CodexProvider::OpenAi) {
             add_provider_args(&mut argv, self.config.provider, &environment)?;
         }
-        self.add_execution_config(&mut argv, sandbox);
         add_node_args(&mut argv, model.as_str(), effort.copied());
         argv.extend([
             "--output-schema".to_owned(),

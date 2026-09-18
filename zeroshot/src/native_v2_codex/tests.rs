@@ -449,18 +449,63 @@ async fn openrouter_script_observes_exact_configuration_environment_output_and_a
     assert_openrouter_capture(&capture);
 }
 
-#[test]
-fn only_local_verifiers_force_a_read_only_sandbox() {
-    let directory = TestDirectory::new("codex-hosted-policy");
-    let local = scripted_adapter(&directory, CodexProvider::OpenAi);
-    let hosted = NativeV2CodexAdapter::new(local.config.clone());
-    let mut arguments = Vec::new();
-    hosted.add_execution_policy(&mut arguments, "read-only");
-    assert!(arguments.is_empty());
-    local.add_execution_policy(&mut arguments, "workspace-write");
-    assert!(arguments.is_empty());
-    local.add_execution_policy(&mut arguments, "read-only");
-    assert_eq!(arguments, ["--sandbox", "read-only"]);
+#[tokio::test]
+async fn verifiers_and_workers_share_permission_defaults_and_preserve_authored_policy() {
+    use crate::native_v2_capsule::provider_process::PermissionPolicy;
+    use crate::native_v2_runner::test_support;
+
+    for node in ["verify", "worker"] {
+        for policy in [
+            PermissionPolicy::Unset,
+            PermissionPolicy::Configured,
+            PermissionPolicy::Unavailable,
+        ] {
+            let directory = TestDirectory::new("codex-agent-policy");
+            let response = if node == "verify" {
+                json!({"response":{"output":null,"signals":{},"diagnostic":null}})
+            } else {
+                json!({"response":null})
+            };
+            let final_message = json!({"type":"item.completed","item":{
+                "type":"agent_message","text":response.to_string()
+            }});
+            let script = format!(
+                "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > arguments\n\
+                 cat > prompt\nmkdir -p target\ntouch target/check-output\n\
+                 printf '%s\\n' '{final_message}' '{{\"type\":\"turn.completed\"}}'\n"
+            );
+            let mut adapter =
+                scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-policy", &script);
+            let configuration = Arc::get_mut(&mut adapter).assert_value();
+            configuration.test_permission_policy = Some(policy);
+            configuration.config.local_user = Some(NativeV2CodexUser {
+                home: directory.path().to_owned(),
+                codex_home: directory.path().to_owned(),
+            });
+            let workspace = configuration.config.workspace.clone();
+            let runtime = runner(&test_support::admitted(), adapter);
+            runtime
+                .start(test_support::request("policy", node, (1, 1)))
+                .await
+                .assert_value()
+                .completion()
+                .await
+                .assert_value();
+            let arguments = fs::read_to_string(workspace.join("arguments")).assert_value();
+            assert_eq!(
+                arguments.contains("--dangerously-bypass-approvals-and-sandbox"),
+                policy == PermissionPolicy::Unset
+            );
+            assert!(!arguments.contains("--sandbox"));
+            assert!(!arguments.contains("approval_policy"));
+            assert!(workspace.join("target/check-output").exists());
+            let prompt = fs::read_to_string(workspace.join("prompt")).assert_value();
+            assert_eq!(
+                prompt.contains("Runtime-owned verifier guidance:"),
+                node == "verify"
+            );
+        }
+    }
 }
 
 #[tokio::test]

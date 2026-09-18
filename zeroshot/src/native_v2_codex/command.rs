@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::execution::WorkspaceAccessMode;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::effort_token;
 use crate::native_v2_contract::{CodexProvider, NodeRuntimeBinding};
-use crate::native_v2_runner::{NodeRole, NodeRunnerError, ResolvedEnvironment};
+use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 use crate::worker_catalog::{ModelId, ReasoningEffort};
 
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
@@ -145,17 +144,6 @@ pub(super) fn add_provider_args(
     Ok(())
 }
 
-pub(super) fn add_local_execution_policy(argv: &mut Vec<String>, sandbox: &str) {
-    argv.extend(["--sandbox".to_owned(), sandbox.to_owned()]);
-}
-
-pub(super) fn add_local_execution_config(argv: &mut Vec<String>) {
-    argv.extend([
-        "--config".to_owned(),
-        "approval_policy=\"never\"".to_owned(),
-    ]);
-}
-
 pub(super) fn add_resume_command(argv: &mut Vec<String>, resume: Option<&str>) {
     if resume.is_some() {
         argv.push("resume".to_owned());
@@ -178,16 +166,6 @@ pub(super) fn add_session_target(argv: &mut Vec<String>, resume: Option<&str>) {
         argv.push(session_id.to_owned());
     }
     argv.push("-".to_owned());
-}
-
-pub(super) fn role_settings(
-    role: NodeRole,
-) -> Result<(&'static str, WorkspaceAccessMode), NodeRunnerError> {
-    match role {
-        NodeRole::Worker => Ok(("workspace-write", WorkspaceAccessMode::ReadWrite)),
-        NodeRole::Verifier => Ok(("read-only", WorkspaceAccessMode::ReadOnly)),
-        NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
-    }
 }
 
 pub(super) fn path_text(path: &Path) -> Result<String, NodeRunnerError> {

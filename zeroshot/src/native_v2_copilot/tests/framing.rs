@@ -27,21 +27,20 @@ fn framing_rejects_oversized_and_ambiguous_records() {
 }
 
 #[test]
-fn verifier_permission_policy_rejects_writes_escalation_and_unknown_tools() {
-    assert!(permission_allowed(&json!({"kind":"read"}), false));
-    assert!(!permission_allowed(&json!({"kind":"write"}), false));
-    assert!(permission_allowed(&json!({"kind":"write"}), true));
-    assert!(!permission_allowed(
-        &json!({"kind":"write","managedApprovalRequired":true}),
-        true
+fn agent_permissions_allow_checks_and_reject_escalation_and_unknown_tools() {
+    for kind in ["read", "url", "write", "shell"] {
+        assert!(permission_allowed(&json!({"kind":kind})));
+        assert!(!permission_allowed(
+            &json!({"kind":kind,"managedApprovalRequired":true})
+        ));
+        assert!(!permission_allowed(
+            &json!({"kind":kind,"requestSandboxBypass":true})
+        ));
+    }
+    assert!(!permission_allowed(&json!({"kind":"future"})));
+    assert!(!permission_allowed(&json!({})));
+    assert!(permission_allowed(
+        &json!({"kind":"shell", "hasWriteFileRedirection":true,
+        "commands":[{"readOnly":false}]})
     ));
-    assert!(!permission_allowed(
-        &json!({"kind":"shell","requestSandboxBypass":true}),
-        true
-    ));
-    assert!(!permission_allowed(&json!({"kind":"future"}), true));
-    let shell = json!({"kind":"shell", "hasWriteFileRedirection":false,
-        "commands":[{"readOnly":true}]});
-    assert!(permission_allowed(&shell, false));
-    assert!(!permission_allowed(&json!({"kind":"shell"}), false));
 }

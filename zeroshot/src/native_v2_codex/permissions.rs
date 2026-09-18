@@ -19,13 +19,10 @@ impl NativeV2CodexAdapter {
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<(), NodeRunnerError> {
-        let local_verifier = !files.isolated_workspace
-            && command.workspace.mode == crate::execution::WorkspaceAccessMode::ReadOnly;
-        if !local_verifier
-            && self
-                .inspect_permission_policy(files, command.clone(), control)
-                .await?
-                == PermissionPolicy::Unset
+        if self
+            .inspect_permission_policy(files, command.clone(), control)
+            .await?
+            == PermissionPolicy::Unset
         {
             command
                 .argv

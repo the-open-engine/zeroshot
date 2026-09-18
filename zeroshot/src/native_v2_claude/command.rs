@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::execution::WorkspaceAccessMode;
 use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
@@ -23,7 +22,6 @@ pub(super) struct ClaudeTurnArguments<'a> {
     pub(super) model: &'a str,
     pub(super) effort: Option<ReasoningEffort>,
     pub(super) role: NodeRole,
-    pub(super) private_workspace: bool,
     pub(super) resume_id: Option<&'a str>,
     pub(super) json_schema: String,
 }
@@ -49,25 +47,13 @@ pub(super) fn claude_arguments(
         argv.extend(["--effort".to_owned(), effort_token(effort).to_owned()]);
     }
     match turn.role {
-        NodeRole::Worker => {}
-        NodeRole::Verifier if turn.private_workspace => {}
-        NodeRole::Verifier => {
-            argv.extend(["--permission-mode".to_owned(), "plan".to_owned()]);
-        }
+        NodeRole::Worker | NodeRole::Verifier => {}
         NodeRole::GitDelivery => return Err(NodeRunnerError::Driver),
     }
     if let Some(resume_id) = turn.resume_id {
         argv.extend(["--resume".to_owned(), resume_id.to_owned()]);
     }
     Ok(argv)
-}
-
-pub(super) fn workspace_access(role: NodeRole) -> Result<WorkspaceAccessMode, NodeRunnerError> {
-    match role {
-        NodeRole::Verifier => Ok(WorkspaceAccessMode::ReadOnly),
-        NodeRole::Worker => Ok(WorkspaceAccessMode::ReadWrite),
-        NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
-    }
 }
 
 pub(super) fn extend_declared_environment(

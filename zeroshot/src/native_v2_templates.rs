@@ -157,8 +157,9 @@ fn parallel_reviewers(
         worker: "builtin.agent.acceptance-verifier@1",
         authored_instructions: if delivery_metadata {
             "Verify the change independently against the user's request and observable behavior. \
-             Do not edit files. When delivery feedback is present, verify that the repair addresses \
-             it. Accept only with concrete evidence; otherwise return actionable feedback. Provide \
+             Try to run the repository's pre-commit checks and report the results. \
+             When delivery feedback is present, verify that the repair addresses it. \
+             Accept only with concrete evidence; otherwise return actionable feedback. Provide \
              an accurate, informative prospective pull request title and description for the \
              complete change under review regardless of the verdict. Follow the repository's pull \
              request conventions, keep the title concise, and keep the description focused on \
@@ -166,8 +167,9 @@ fn parallel_reviewers(
              directly by command output and do not infer counts. Do not add issue-closing \
              references because delivery owns them."
         } else {
-            "Verify the change independently against the user's request and observable behavior. Do \
-             not edit files. When delivery feedback is present, verify that the repair addresses it. \
+            "Verify the change independently against the user's request and observable behavior. \
+             Try to run the repository's pre-commit checks and report the results. \
+             When delivery feedback is present, verify that the repair addresses it. \
              Accept only with concrete evidence; otherwise return actionable feedback."
         },
         feedback_target: ACCEPTANCE_FEEDBACK_FIELD,
@@ -189,8 +191,8 @@ fn parallel_reviewers(
         name: "code",
         worker: "builtin.agent.code-verifier@1",
         authored_instructions: "Review the change independently for correctness, safety, \
-             integration, and substantive maintainability. Do not edit files or reject for \
-             style-only preferences. When delivery feedback is present, verify that the repair \
+             integration, and substantive maintainability. Do not reject for style-only preferences. \
+             When delivery feedback is present, verify that the repair \
              addresses it. Return actionable feedback when rejecting.",
         feedback_target: CODE_FEEDBACK_FIELD,
         output: PayloadType::Null,

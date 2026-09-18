@@ -456,11 +456,16 @@ printf '%s%s%s%s\n' \
             artifacts: Vec::new(),
         }
     );
+    assert!(
+        workspace
+            .read("verifier.prompt")
+            .contains("Runtime-owned verifier guidance:")
+    );
     let arguments = workspace.read("verifier.args");
-    assert!(arguments.contains("--permission-mode\nplan"));
+    assert!(!arguments.contains("--permission-mode"));
     assert!(!arguments.contains("--tools"));
     assert!(!arguments.contains("--setting-sources"));
-    assert!(!arguments.contains("--dangerously-skip-permissions"));
+    assert!(arguments.contains("--dangerously-skip-permissions"));
     assert!(
         workspace
             .read("verifier.prompt")

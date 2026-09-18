@@ -66,13 +66,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
 - Codex inherits harness settings for web search and sandbox network access. Runtime arguments
   select the admitted model, optional effort, and response contract; they must not override unrelated
-  user preferences. Local and hosted workers use approval/sandbox bypass only when the harness's
-  native configuration query proves no authored permission policy. Configured or unavailable policy
+  user preferences. Local and hosted workers and verifiers use approval/sandbox bypass only when the
+  harness's native configuration query proves no authored permission policy. Configured or unavailable policy
   keeps native behavior. Explicit cached Codex web search also prevents bypass because native full
   access can promote cached search to live. Configuration probes have a separate ten-second/4 MiB budget, never send a
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
-  Local verifiers retain read-only/plan policy; hosted verifiers use the same fallback in private copies.
+  Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
+  renderer always adds verifier guidance prohibiting edits to material under review and repairs while
+  allowing checks and their generated artifacts. Local verifiers share the candidate; hosted verifiers
+  retain private copies. This local review boundary is instructional, not filesystem enforcement.
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
@@ -189,7 +192,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Native-v2 admits concurrent writers in parallel branches and map items. Writers share the run's
   workspace owner identity; hosted session cleanup tracks an immutable supplementary group marker
   per session. Authored graphs coordinate overlapping edits. Admission rejects Git delivery that
-  can overlap another writer or delivery; delivery may run alongside read-only verifiers.
+  can overlap another writer or delivery; delivery may run alongside verifiers, which are instructed
+  not to edit the candidate.
   A delivery receipt certifies success only if every other writer settled before delivery started.
   Unconfirmed process cleanup is a fatal runtime failure, including after cancellation; it cannot
   be reduced to a retryable node crash or an authored parallel-join void.
