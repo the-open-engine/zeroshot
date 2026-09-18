@@ -140,9 +140,9 @@ pub fn register_process_tree_for(
     let _ = containment;
     #[cfg(windows)]
     {
-        return Ok(ProcessTreeRegistration {
+        Ok(ProcessTreeRegistration {
             job: Some(super::platform_windows::create_kill_on_close_job()?),
-        });
+        })
     }
     #[cfg(not(windows))]
     {

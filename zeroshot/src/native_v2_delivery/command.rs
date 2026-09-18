@@ -152,16 +152,10 @@ pub(crate) async fn capture(
         .kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.as_std_mut().process_group(0);
-    }
-    let mut child = command.spawn().map_err(|error| {
-        diagnostic.context = format!("could not start command: {error}").into_boxed_str();
+    let (mut child, _process_group) = spawn_contained(command).map_err(|error| {
+        diagnostic.context = format!("could not start contained command: {error}").into_boxed_str();
         diagnostic.clone()
     })?;
-    let _process_group = ProcessGroup(child.id());
     let Some(stdout) = child.stdout.take() else {
         return Err(diagnostic);
     };
@@ -314,12 +308,44 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
         .arg("-C")
         .arg(workspace)
         .stdin(Stdio::null());
+    let mut environment = std::collections::BTreeMap::new();
+    crate::execution::platform::process_environment(&mut environment);
+    command.envs(environment);
     command
 }
 
+fn spawn_contained(
+    command: &mut Command,
+) -> std::io::Result<(tokio::process::Child, ProcessGroup)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+        let child = command.spawn()?;
+        let group = ProcessGroup(child.id());
+        Ok((child, group))
+    }
+    #[cfg(windows)]
+    {
+        use crate::execution::process::platform::{
+            configure_process, register_process_tree_for, capture_process_tree, ProcessContainment,
+        };
+        let registration = register_process_tree_for(ProcessContainment::ProcessGroup)?;
+        configure_process(command, ProcessContainment::ProcessGroup);
+        let mut child = command.spawn()?;
+        let group = capture_process_tree(registration, &mut child)?;
+        Ok((child, group))
+    }
+}
+
+#[cfg(windows)]
+type ProcessGroup = crate::execution::process::platform::ProcessTreeHandle;
+
 // Dropping a cancelled capture must stop helpers such as git-remote-https as well as Git itself.
+#[cfg(unix)]
 struct ProcessGroup(Option<u32>);
 
+#[cfg(unix)]
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         #[cfg(unix)]

@@ -47,9 +47,8 @@ pub(super) fn write_and_commit(
     writer.write_all(contents).map_err(local_io)?;
     writer.flush().map_err(local_io)?;
     writer.get_ref().sync_all().map_err(local_io)?;
-    std::fs::rename(paths.temporary, paths.destination).map_err(local_io)?;
-    File::open(paths.parent)
-        .and_then(|directory| directory.sync_all())
+    drop(writer);
+    crate::execution::platform::commit_file(paths.temporary, paths.destination, paths.parent)
         .map_err(local_io)
 }
 

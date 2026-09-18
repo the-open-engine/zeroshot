@@ -213,13 +213,7 @@ impl ProviderExecutionFiles {
 }
 
 fn create_private_directory(path: &Path) -> io::Result<()> {
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(path)
+    crate::execution::platform::create_private_directory(path)
 }
 
 fn check_cancelled(cancellation: &DriverCancellation) -> io::Result<()> {

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::BufReader;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+use crate::execution::platform::{FileAccess, private_file};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -100,16 +100,7 @@ impl LocalConnectionStore {
     fn lock(&self) -> Result<File, NativeV2CliError> {
         prepare_private_directory(&self.root)?;
         let path = self.root.join(CONNECTIONS_LOCK_FILE);
-        let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .write(true)
-            .create(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW);
-        let file = options.open(path).map_err(local_io)?;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .map_err(local_io)?;
+        let file = private_file(&path, FileAccess::ReadWrite).map_err(local_io)?;
         Ok(file)
     }
 
@@ -127,11 +118,7 @@ impl LocalConnectionStore {
                 "local connection store is not a regular file",
             ));
         }
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(local_io)?;
-        let mut options = OpenOptions::new();
-        options.read(true).custom_flags(libc::O_NOFOLLOW);
-        let file = options.open(&path).map_err(local_io)?;
+        let file = private_file(&path, FileAccess::Read).map_err(local_io)?;
         serde_json::from_reader(BufReader::new(file))
             .map_err(|_| local_message("local connection store is malformed"))
     }
@@ -141,14 +128,8 @@ impl LocalConnectionStore {
         let mut encoded = serde_json::to_vec(connections)
             .map_err(|_| local_message("local connection store could not be encoded"))?;
         encoded.push(b'\n');
-        let mut options = OpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW);
         let result = (|| {
-            let file = options.open(&temporary).map_err(local_io)?;
+            let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
             let destination = self.root.join(CONNECTIONS_FILE);
             write_and_commit(
                 file,
@@ -222,6 +203,7 @@ fn summary(key: ConnectionKey, fields: Vec<EnvironmentVariableName>) -> Connecti
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt as _;
 
     use openengine_cluster_protocol::{
@@ -305,16 +287,20 @@ mod tests {
             })
             .assert_value();
         assert_eq!(list.connections, [mutation.connection]);
-        let metadata = std::fs::metadata(root.0.join(CONNECTIONS_FILE)).assert_value();
-        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
-        assert_eq!(
-            std::fs::metadata(&root.0)
-                .assert_value()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
+        drop(private_file(&root.0.join(CONNECTIONS_FILE), FileAccess::Read).assert_value());
+        #[cfg(unix)]
+        {
+            let metadata = std::fs::metadata(root.0.join(CONNECTIONS_FILE)).assert_value();
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&root.0)
+                    .assert_value()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
 
         let deleted = store
             .delete(ConnectionDeleteRequest {

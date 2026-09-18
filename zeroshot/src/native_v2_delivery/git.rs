@@ -223,7 +223,7 @@ mod tests {
     #[tokio::test]
     async fn uses_manifest_title_as_the_commit_message() {
         let repository = TestGitRepository::delivery();
-        let git = SystemGit::new(PathBuf::from("/usr/bin/git"));
+        let git = SystemGit::new(PathBuf::from("git"));
 
         let revision = git
             .prepare_revision(
@@ -271,7 +271,7 @@ mod tests {
         assert!(!merge.status.success());
         let index = git_output(workspace, &["ls-files", "--unmerged"]);
         assert!(!index.is_empty());
-        let system = SystemGit::new(PathBuf::from("/usr/bin/git"));
+        let system = SystemGit::new(PathBuf::from("git"));
         let error = system
             .prepare_revision(workspace, &repository.base, "delivery")
             .await

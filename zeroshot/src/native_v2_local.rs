@@ -272,9 +272,7 @@ pub fn build_local_process_candidate(
 }
 
 fn current_user_home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    crate::execution::platform::user_home()
 }
 
 fn local_claude_environment(
@@ -290,27 +288,7 @@ fn local_claude_environment(
 }
 
 fn prepare_private_directory(path: &Path) -> Result<(), LocalCompositionError> {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder
-        .create(path)
-        .map_err(|_| LocalCompositionError::Storage)?;
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| LocalCompositionError::Storage)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(LocalCompositionError::Storage);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|_| LocalCompositionError::Storage)?;
-    }
-    Ok(())
+    crate::execution::platform::private_directory(path).map_err(|_| LocalCompositionError::Storage)
 }
 
 #[cfg(test)]

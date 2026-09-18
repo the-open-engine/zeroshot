@@ -180,7 +180,7 @@ impl ClaudeAdapter {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn new_for_test(configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
         let mut adapter = Self::new_local(configuration)?;
         adapter.local_environment.clear();

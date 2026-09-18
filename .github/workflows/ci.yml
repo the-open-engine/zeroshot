@@ -83,14 +83,29 @@ jobs:
         run: npm run protocol:check
 
   native-check:
-    name: Native product
+    name: Native product (${{ matrix.os }})
     needs: classify
     if: needs.classify.outputs.native == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -107,6 +122,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Test hosted process and filesystem boundaries as root
+        if: runner.os == 'Linux'
         run: |
           # Exercise mapped namespaces on this disposable runner, including Ubuntu AppArmor hosts.
           if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then

@@ -84,7 +84,7 @@ async fn assert_operation_preserved(operation: Operation, linked: bool) {
     }
     let head = git_output(&workspace, &["rev-parse", "HEAD"]);
     let index = std::fs::read(directory.join("index")).assert_value();
-    let system = SystemGit::new(PathBuf::from("/usr/bin/git"));
+    let system = SystemGit::new(PathBuf::from("git"));
     let state_error = system
         .workspace_state(&workspace)
         .await

@@ -49,7 +49,7 @@ impl LocalFixture {
         let graph = root.path("graph.json");
         let input = root.path("input.json");
         let runtime = root.path("runtime.json");
-        write_json(&graph, &local_graph());
+        write_json(&graph, &local_graph::graph());
         write_json(&input, &Value::Null);
         write_json(&runtime, &local_runtime());
         Self {
@@ -631,34 +631,8 @@ fn local_runtime() -> Value {
     })
 }
 
-fn local_graph() -> Value {
-    json!({
-        "profile":"openengine.graph.full/v1",
-        "initialInput":{"kind":"null"},
-        "policy":{"policy":"policy.native-v2@1", "default":"deny"},
-        "root":{
-            "kind":"seq",
-            "name":"root",
-            "state":{"kind":"null"},
-            "children":[
-                {
-                    "kind":"step",
-                    "name":"worker",
-                    "worker":"agent.worker@1",
-                    "instructions":"Exercise the local worker.",
-                    "input":{"kind":"null"},
-                    "output":{"kind":"null"},
-                    "inputBindings":[],
-                    "writeBindings":[],
-                    "timeoutMs":30000,
-                    "attempts":1
-                },
-                {"kind":"succeed", "name":"done", "output":{"kind":"null"}, "bindings":[]}
-            ],
-            "promotedStatePaths":[]
-        }
-    })
-}
+#[path = "../support/local_graph.rs"]
+mod local_graph;
 
 fn write_json(path: &Path, value: &Value) {
     let bytes = serde_json::to_vec(value).assert_value_with("encode fixture JSON");

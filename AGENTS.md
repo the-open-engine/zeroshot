@@ -197,6 +197,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Managed copies and execution-scoped homes are removed only after confirmed process-tree cleanup;
   node-instance homes survive authorized continuation and loop revisits until session closure.
 
+- Native local CLI and in-process execution support Unix and Windows. Shared OS facilities live in
+  `execution::platform`; local controller transport selects Unix sockets or private Windows named
+  pipes behind one NDJSON protocol. Windows state uses protected current-user/SYSTEM ACLs, rejects
+  reparse points, and pins volume/file identity. Provider and delivery descendants belong to
+  kill-on-close Job Objects before their first instruction. Detached controllers inherit no caller
+  handles and leave a caller Job only when it permits breakaway. Windows config defaults to
+  `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
+
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
@@ -313,7 +321,8 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, and repository-tooling lanes plus stable aggregate `required`. The native
-  lane also executes hosted process and filesystem boundary tests as root against its built test binary.
+  lane runs on Linux and Windows, including real local CLI subprocess tests. Linux also executes
+  hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.

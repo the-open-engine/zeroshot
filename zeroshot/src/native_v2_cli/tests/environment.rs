@@ -1,7 +1,9 @@
 use std::ffi::OsString;
 
 use openengine_cluster_protocol::RuntimePlan;
-use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+use openengine_cluster_testkit::assertions::AssertValue;
+#[cfg(unix)]
+use openengine_cluster_testkit::assertions::AssertError;
 use serde_json::json;
 
 use super::*;
@@ -64,6 +66,7 @@ async fn execute_with_environment(
     execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new()).await
 }
 
+#[cfg(unix)]
 async fn assert_declared_environment_rejected(
     command: NativeV2CliCommand,
     backend: &FakeBackend,

@@ -234,6 +234,21 @@ fn default_config_root() -> Result<PathBuf, NativeV2CliError> {
     if let Some(path) = nonempty_environment("ZEROSHOT_CONFIG_DIR") {
         return absolute_user_path(path, "profile configuration path must be absolute");
     }
+    #[cfg(windows)]
+    {
+        let root = nonempty_environment("LOCALAPPDATA")
+            .ok_or_else(|| local_message("LOCALAPPDATA is unavailable"))?;
+        absolute_user_path(
+            PathBuf::from(root).join("zeroshot"),
+            "profile configuration path must be absolute",
+        )
+    }
+    #[cfg(unix)]
+    default_unix_config_root()
+}
+
+#[cfg(unix)]
+fn default_unix_config_root() -> Result<PathBuf, NativeV2CliError> {
     if let Some(path) = nonempty_environment("XDG_CONFIG_HOME") {
         return absolute_user_path(
             PathBuf::from(path).join("zeroshot"),

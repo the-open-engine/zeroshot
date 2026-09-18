@@ -1,4 +1,5 @@
 pub mod driver;
+pub(crate) mod platform;
 pub mod process;
 
 use serde::{Deserialize, Serialize};

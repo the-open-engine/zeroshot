@@ -49,12 +49,20 @@ static INJECT_ASSIGN_FAILURE: std::sync::atomic::AtomicBool =
 static INJECT_RESUME_FAILURE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 #[cfg(test)]
+static TEST_PROCESS_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+#[cfg(test)]
+static TEST_JOB: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
 static JOB_CLOSE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 impl WindowsContainmentCalls for SystemWindowsContainmentCalls<'_> {
     fn assign(&mut self) -> Result<(), io::Error> {
         #[cfg(test)]
-        if INJECT_ASSIGN_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if self.process_id == TEST_PROCESS_ID.load(std::sync::atomic::Ordering::SeqCst) {
+            TEST_JOB.store(self.job, std::sync::atomic::Ordering::SeqCst);
+        }
+        #[cfg(test)]
+        if self.injected_error(&INJECT_ASSIGN_FAILURE) {
             return Err(io::Error::other("injected assignment failure"));
         }
         let assigned = unsafe { AssignProcessToJobObject(self.job as HANDLE, self.process) };
@@ -67,7 +75,7 @@ impl WindowsContainmentCalls for SystemWindowsContainmentCalls<'_> {
 
     fn resume(&mut self) -> Result<(), io::Error> {
         #[cfg(test)]
-        if INJECT_RESUME_FAILURE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        if self.injected_error(&INJECT_RESUME_FAILURE) {
             return Err(io::Error::other("injected resume failure"));
         }
         resume_suspended_process(self.process_id)
@@ -210,15 +218,35 @@ pub(super) fn job_has_live_members(job: usize) -> Result<bool, io::Error> {
 
 pub(super) fn close_job(job: usize) {
     #[cfg(test)]
-    JOB_CLOSE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if TEST_JOB
+        .compare_exchange(
+            job,
+            0,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_ok()
+    {
+        JOB_CLOSE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     unsafe {
         CloseHandle(job as HANDLE);
     }
 }
 
 #[cfg(test)]
+impl SystemWindowsContainmentCalls<'_> {
+    fn injected_error(&self, flag: &std::sync::atomic::AtomicBool) -> bool {
+        use std::sync::atomic::Ordering;
+        self.process_id == TEST_PROCESS_ID.load(Ordering::SeqCst)
+            && flag.swap(false, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+
+    use std::path::{Path, PathBuf};
     use std::process::Stdio;
     use std::sync::atomic::Ordering;
 
@@ -243,7 +271,9 @@ mod tests {
             sentinel.display()
         );
         let mut command = tokio::process::Command::new(program);
-        command.args(["/D", "/S", "/C", &script]);
+        use std::os::windows::process::CommandExt;
+        command.args(["/D", "/S", "/C"]);
+        command.as_std_mut().raw_arg(format!("\"{script}\""));
         command.current_dir(std::env::temp_dir());
         command.env_clear();
         command.env("SystemRoot", system_root);
@@ -253,10 +283,11 @@ mod tests {
         command.kill_on_drop(true);
         configure_process(&mut command, ProcessContainment::ProcessGroup);
         let child = command.spawn().unwrap();
+        super::TEST_PROCESS_ID.store(child.id().unwrap(), Ordering::SeqCst);
         (registration, child, sentinel)
     }
 
-    async fn assert_still_suspended(sentinel: &PathBuf) {
+    async fn assert_still_suspended(sentinel: &Path) {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(
             !sentinel.exists(),
@@ -264,7 +295,7 @@ mod tests {
         );
     }
 
-    async fn wait_for_sentinel(sentinel: &PathBuf) {
+    async fn wait_for_sentinel(sentinel: &Path) {
         let deadline = Instant::now() + Duration::from_secs(2);
         while !sentinel.exists() {
             assert!(

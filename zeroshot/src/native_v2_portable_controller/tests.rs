@@ -147,7 +147,17 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
         .await
         .assert_value_with("start portable controller"),
     );
+    #[cfg(unix)]
     assert_eq!(controller.paths().socket(), storage.join("controller.sock"));
+    #[cfg(windows)]
+    assert!(
+        controller
+            .paths()
+            .socket()
+            .to_str()
+            .unwrap()
+            .starts_with(r"\\.\pipe\zeroshot-")
+    );
     assert_eq!(
         controller.paths().ready(),
         storage.join("controller.ready.json")

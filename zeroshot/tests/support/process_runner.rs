@@ -19,6 +19,7 @@ pub fn unique_temp_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{name}-{nanos}"))
 }
 
+#[cfg(unix)]
 pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }

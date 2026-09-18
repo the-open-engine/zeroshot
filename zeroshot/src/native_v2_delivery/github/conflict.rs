@@ -259,6 +259,6 @@ async fn bounded_exit_code(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "conflict/tests.rs"]
 mod tests;

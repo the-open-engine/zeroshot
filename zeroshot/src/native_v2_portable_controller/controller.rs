@@ -23,7 +23,6 @@ use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 
 use super::engine::PortableRuntime;
-#[cfg(unix)]
 use super::process::PortableControllerServer;
 use super::process::{
     clear_stale_endpoint, require_absolute, validate_existing_ledger_path,
@@ -195,7 +194,6 @@ impl PortableRunController {
         }
     }
 
-    #[cfg(unix)]
     pub async fn bind(
         self: Arc<Self>,
     ) -> Result<PortableControllerServer, PortableControllerError> {
@@ -406,76 +404,28 @@ async fn validate_existing_run(
 
 #[derive(Clone, Debug)]
 pub(crate) struct WorkspaceIdentity {
-    #[cfg(unix)]
-    // Pins the admitted inode so an immediate replacement cannot reuse its identity between polls.
     _handle: Arc<std::fs::File>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(not(unix))]
-    canonical_path: PathBuf,
+    identity: crate::execution::platform::FileIdentity,
 }
 
 impl WorkspaceIdentity {
     pub(crate) fn capture(path: &Path) -> Result<Self, PortableControllerError> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
-
-            let mut options = std::fs::OpenOptions::new();
-            options
-                .read(true)
-                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
-            let handle = options
-                .open(path)
-                .map_err(|_| PortableControllerError::Workspace)?;
-            let metadata = handle
-                .metadata()
-                .map_err(|_| PortableControllerError::Workspace)?;
-            if !metadata.is_dir() {
-                return Err(PortableControllerError::Workspace);
-            }
-            Ok(Self {
-                _handle: Arc::new(handle),
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            })
+        let file = crate::execution::platform::open_directory(path)
+            .map_err(|_| PortableControllerError::Workspace)?;
+        if !file.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+            return Err(PortableControllerError::Workspace);
         }
-        #[cfg(not(unix))]
-        {
-            let metadata =
-                std::fs::symlink_metadata(path).map_err(|_| PortableControllerError::Workspace)?;
-            if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                return Err(PortableControllerError::Workspace);
-            }
-            let canonical_path =
-                std::fs::canonicalize(path).map_err(|_| PortableControllerError::Workspace)?;
-            Ok(Self { canonical_path })
-        }
+        let identity = crate::execution::platform::file_identity(&file)
+            .map_err(|_| PortableControllerError::Workspace)?;
+        Ok(Self {
+            _handle: Arc::new(file),
+            identity,
+        })
     }
 
     pub(crate) fn is_current(&self, path: &Path) -> bool {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-
-            let Ok(metadata) = std::fs::symlink_metadata(path) else {
-                return false;
-            };
-            metadata.is_dir()
-                && !metadata.file_type().is_symlink()
-                && metadata.dev() == self.device
-                && metadata.ino() == self.inode
-        }
-        #[cfg(not(unix))]
-        {
-            let Ok(metadata) = std::fs::symlink_metadata(path) else {
-                return false;
-            };
-            metadata.is_dir()
-                && !metadata.file_type().is_symlink()
-                && std::fs::canonicalize(path).is_ok_and(|current| current == self.canonical_path)
-        }
+        crate::execution::platform::open_directory(path)
+            .and_then(|file| crate::execution::platform::file_identity(&file))
+            .is_ok_and(|identity| identity == self.identity)
     }
 }

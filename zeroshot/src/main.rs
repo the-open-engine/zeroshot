@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use thiserror::Error;
-#[cfg(unix)]
 use zeroshot_engine::native_v2_cli::local::{LOCAL_CONTROLLER_MODE, LocalCliBackend};
 use zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend;
 use zeroshot_engine::native_v2_cli::{
@@ -14,7 +13,6 @@ use zeroshot_engine::native_v2_cli::{
     try_execute_native_v2_static, CtrlCDetachSignal, NativeV2CliCommand, NativeV2CliDiagnostic,
     NativeV2CliError, ERROR_FORMAT_ENV, JSON_ERROR_FORMAT,
 };
-#[cfg(unix)]
 use zeroshot_engine::native_v2_portable_controller::{PortableControllerError, run_controller_process};
 
 use native_v2_target::{
@@ -28,7 +26,6 @@ enum ProcessError {
     Target(#[from] TargetConnectorError),
     #[error(transparent)]
     Cli(#[from] NativeV2CliError),
-    #[cfg(unix)]
     #[error(transparent)]
     Portable(#[from] PortableControllerError),
     #[error(transparent)]
@@ -39,7 +36,6 @@ enum ProcessError {
 
 async fn run() -> Result<(), ProcessError> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    #[cfg(unix)]
     if run_private_controller(&arguments).await? {
         return Ok(());
     }
@@ -53,7 +49,6 @@ async fn run() -> Result<(), ProcessError> {
     }
 }
 
-#[cfg(unix)]
 async fn run_private_controller(arguments: &[std::ffi::OsString]) -> Result<bool, ProcessError> {
     let Some(bootstrap) = private_controller_bootstrap(arguments)? else {
         return Ok(false);
@@ -98,7 +93,6 @@ async fn run_named_target_command(
     Ok(())
 }
 
-#[cfg(unix)]
 async fn run_local_command(
     command: NativeV2CliCommand,
     detach: &mut CtrlCDetachSignal,
@@ -107,18 +101,6 @@ async fn run_local_command(
     let backend = LocalCliBackend::production()?;
     execute_native_v2_cli(command, &backend, detach, output).await?;
     Ok(())
-}
-
-#[cfg(not(unix))]
-async fn run_local_command(
-    _command: NativeV2CliCommand,
-    _detach: &mut CtrlCDetachSignal,
-    _output: &mut impl Write,
-) -> Result<(), ProcessError> {
-    Err(
-        NativeV2CliError::Local("local controllers are unavailable on this platform".to_owned())
-            .into(),
-    )
 }
 
 fn is_local_command(command: &NativeV2CliCommand) -> bool {
@@ -164,7 +146,6 @@ fn profile_operation_is_local(command: &NativeV2CliCommand) -> bool {
     }
 }
 
-#[cfg(unix)]
 fn private_controller_bootstrap(
     arguments: &[std::ffi::OsString],
 ) -> Result<Option<PathBuf>, NativeV2CliError> {

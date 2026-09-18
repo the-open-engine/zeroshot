@@ -1,4 +1,5 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+use crate::execution::platform::{self, FileAccess, FileIdentity};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -19,7 +20,7 @@ pub enum ControllerLeaseError {
 pub struct ControllerLease {
     file: File,
     path: PathBuf,
-    identity: LeaseIdentity,
+    identity: FileIdentity,
 }
 
 impl ControllerLease {
@@ -28,12 +29,7 @@ impl ControllerLease {
         let parent = path.parent().ok_or(ControllerLeaseError::StateDirectory)?;
         prepare_state_directory(parent)?;
         reject_non_file(&path)?;
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
+        let file = platform::private_file(&path, FileAccess::ReadWrite)
             .map_err(|_| ControllerLeaseError::StateDirectory)?;
         let metadata = file
             .metadata()
@@ -44,7 +40,8 @@ impl ControllerLease {
         file.try_lock_exclusive()
             .map_err(|_| ControllerLeaseError::Held)?;
         Ok(Self {
-            identity: LeaseIdentity::from_metadata(&metadata),
+            identity: platform::file_identity(&file)
+                .map_err(|_| ControllerLeaseError::InvalidPath)?,
             file,
             path,
         })
@@ -63,11 +60,12 @@ impl ControllerLease {
         if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
             return false;
         }
-        let Ok(file_metadata) = self.file.metadata() else {
+        if !platform::file_identity(&self.file).is_ok_and(|identity| identity == self.identity) {
             return false;
-        };
-        self.identity == LeaseIdentity::from_metadata(&path_metadata)
-            && self.identity == LeaseIdentity::from_metadata(&file_metadata)
+        }
+        platform::open_identity(&self.path)
+            .and_then(|file| platform::file_identity(&file))
+            .is_ok_and(|identity| identity == self.identity)
     }
 }
 
@@ -81,14 +79,7 @@ impl std::fmt::Debug for ControllerLease {
 }
 
 fn prepare_state_directory(path: &Path) -> Result<(), ControllerLeaseError> {
-    std::fs::create_dir_all(path).map_err(|_| ControllerLeaseError::StateDirectory)?;
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|_| ControllerLeaseError::StateDirectory)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(ControllerLeaseError::StateDirectory);
-    }
-    set_private_directory_permissions(path)?;
-    Ok(())
+    platform::private_directory(path).map_err(|_| ControllerLeaseError::StateDirectory)
 }
 
 fn reject_non_file(path: &Path) -> Result<(), ControllerLeaseError> {
@@ -97,44 +88,5 @@ fn reject_non_file(path: &Path) -> Result<(), ControllerLeaseError> {
         Ok(_) => Err(ControllerLeaseError::InvalidPath),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(ControllerLeaseError::InvalidPath),
-    }
-}
-
-#[cfg(unix)]
-fn set_private_directory_permissions(path: &Path) -> Result<(), ControllerLeaseError> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-        .map_err(|_| ControllerLeaseError::StateDirectory)
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> Result<(), ControllerLeaseError> {
-    Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct LeaseIdentity {
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl LeaseIdentity {
-    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-            Self {
-                device: metadata.dev(),
-                inode: metadata.ino(),
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = metadata;
-            Self {}
-        }
     }
 }

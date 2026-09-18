@@ -17,7 +17,8 @@ use openengine_cluster_protocol::{
     RunStatusResult, RunSubmitResult, RunWatchParams, Sha256Digest,
 };
 use sha2::{Digest, Sha256};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
+use crate::execution::platform::ControllerChild as Child;
 use tokio::time::{Instant, sleep};
 
 use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
@@ -297,11 +298,9 @@ impl LocalCliBackend {
     }
 
     fn workspace_lease(&self, workspace: &Path) -> Result<PathBuf, NativeV2CliError> {
-        use std::os::unix::ffi::OsStrExt as _;
-
         let root = self.state_root.join("workspaces");
         prepare_private_directory(&root)?;
-        let digest = Sha256::digest(workspace.as_os_str().as_bytes());
+        let digest = Sha256::digest(workspace.as_os_str().as_encoded_bytes());
         Ok(root.join(format!("{digest:x}.lock")))
     }
 
@@ -312,10 +311,7 @@ impl LocalCliBackend {
         let runs = self.state_root.join("runs");
         prepare_private_directory(&runs)?;
         let storage = self.run_storage(run_id)?;
-        private_directory_builder()
-            .create(&storage)
-            .map_err(local_io)?;
-        validate_private_directory(&storage)?;
+        crate::execution::platform::create_private_directory(&storage).map_err(local_io)?;
         Ok(storage)
     }
 
@@ -330,15 +326,7 @@ impl LocalCliBackend {
             .stderr(Stdio::null())
             .env_clear();
         copy_minimal_process_environment(&mut command)?;
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        command.spawn().map_err(local_io)
+        crate::execution::platform::spawn_controller(&mut command).map_err(local_io)
     }
 
     async fn list_local(&self) -> Result<RunListResult, NativeV2CliError> {

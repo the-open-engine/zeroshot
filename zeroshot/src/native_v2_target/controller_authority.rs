@@ -168,19 +168,21 @@ impl TargetHttpControlAuthority {
     }
 
     async fn login_inner(&self, request: HostedLogin<'_>) -> Result<(), TargetAuthorityError> {
-        if let CredentialStorePreparation::PrivateFile(path) = self
+        match self
             .credentials
             .prepare_for_login(request.target_id)
             .await?
         {
-            eprintln!(
+            #[cfg(target_os = "linux")]
+            CredentialStorePreparation::PrivateFile(path) => eprintln!(
                 concat!(
                     "\nWarning: the refresh token will be stored unencrypted in this private ",
                     "file:\n  {}\nSet ZEROSHOT_CREDENTIAL_STORE=system to require Secret ",
                     "Service.\n"
                 ),
                 path.display()
-            );
+            ),
+            CredentialStorePreparation::Managed => {}
         }
         let code: DeviceCodeWire = self
             .post_form_json(

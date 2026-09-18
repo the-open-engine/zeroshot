@@ -107,11 +107,16 @@ pub(super) fn build_child_command(
     spec: ChildCommandSpec<'_>,
     containment: ProcessContainment,
 ) -> Command {
-    let mut child = Command::new(spec.program);
+    let mut environment = spec.environment.clone();
+    crate::execution::platform::process_environment(&mut environment);
+    let mut child = Command::new(crate::execution::platform::executable(
+        spec.program,
+        &environment,
+    ));
     child.args(spec.argv);
     child.current_dir(PathBuf::from(&spec.workspace.current_dir));
     child.env_clear();
-    child.envs(spec.environment.iter());
+    child.envs(environment.iter());
     child.stdin(std::process::Stdio::piped());
     child.stdout(std::process::Stdio::piped());
     child.stderr(std::process::Stdio::piped());

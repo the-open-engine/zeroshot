@@ -405,7 +405,7 @@ fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
     std::fs::remove_dir_all(path).map_err(|_| CapsuleCleanupUnavailable)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl ProductionCapsuleAllocator {
     pub(super) fn with_test_filesystem_and_source(
         mut self,

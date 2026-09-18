@@ -25,6 +25,7 @@ pub(super) fn local_run_id_from_entry(entry: std::fs::DirEntry) -> Option<RunId>
     validate_local_run_id(&run_id).ok().map(|()| run_id)
 }
 
+#[cfg(unix)]
 pub(super) fn validate_local_socket_path(path: &Path) -> Result<(), NativeV2CliError> {
     use std::os::unix::ffi::OsStrExt as _;
 
@@ -42,6 +43,12 @@ pub(super) fn validate_local_socket_path(path: &Path) -> Result<(), NativeV2CliE
     Ok(())
 }
 
+#[cfg(windows)]
+pub(super) fn validate_local_socket_path(_path: &Path) -> Result<(), NativeV2CliError> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn local_socket_path_capacity() -> usize {
     let address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     address.sun_path.len()
@@ -60,6 +67,15 @@ pub(super) fn copy_minimal_process_environment(
         "TMPDIR",
         "HOME",
         "CODEX_HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "SystemRoot",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
     ] {
         if let Some(value) = std::env::var_os(name).filter(|value| !value.is_empty()) {
             let value = if name == "CODEX_HOME" {
@@ -76,26 +92,7 @@ pub(super) fn copy_minimal_process_environment(
 }
 
 pub(super) fn prepare_private_directory(path: &Path) -> Result<(), NativeV2CliError> {
-    private_directory_builder().create(path).map_err(local_io)?;
-    validate_private_directory(path)
-}
-
-pub(super) fn private_directory_builder() -> std::fs::DirBuilder {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    use std::os::unix::fs::DirBuilderExt as _;
-    builder.mode(0o700);
-    builder
-}
-
-pub(super) fn validate_private_directory(path: &Path) -> Result<(), NativeV2CliError> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let metadata = std::fs::symlink_metadata(path).map_err(local_io)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(local_message("controller state path is not a directory"));
-    }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(local_io)
+    crate::execution::platform::private_directory(path).map_err(local_io)
 }
 
 pub(super) fn require_existing_ledger(path: &Path) -> Result<bool, NativeV2CliError> {
@@ -119,6 +116,21 @@ pub(super) fn default_local_state_root() -> Result<PathBuf, NativeV2CliError> {
     if let Some(path) = nonempty_environment("ZEROSHOT_STATE_DIR") {
         return absolute_user_path(path, "controller state path must be absolute");
     }
+    #[cfg(windows)]
+    {
+        let root = nonempty_environment("LOCALAPPDATA")
+            .ok_or_else(|| local_message("LOCALAPPDATA is unavailable"))?;
+        absolute_user_path(
+            PathBuf::from(root).join("zeroshot").join("state"),
+            "controller state path must be absolute",
+        )
+    }
+    #[cfg(unix)]
+    default_unix_state_root()
+}
+
+#[cfg(unix)]
+fn default_unix_state_root() -> Result<PathBuf, NativeV2CliError> {
     if let Some(path) = nonempty_environment("XDG_STATE_HOME") {
         return absolute_user_path(
             PathBuf::from(path).join("zeroshot"),
@@ -140,6 +152,7 @@ pub(super) fn default_local_state_root() -> Result<PathBuf, NativeV2CliError> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn rejects_socket_paths_that_cannot_fit_the_platform_address() {
         let capacity = local_socket_path_capacity();

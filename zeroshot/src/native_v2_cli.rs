@@ -41,7 +41,6 @@ pub use lifecycle::{
     CliRunWatchEventNotification,
 };
 
-#[cfg(unix)]
 #[path = "native_v2_cli/local.rs"]
 pub mod local;
 

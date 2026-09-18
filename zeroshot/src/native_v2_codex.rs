@@ -101,7 +101,7 @@ impl NativeV2CodexAdapter {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn new_for_test(config: NativeV2CodexConfig) -> Self {
         let mut adapter = Self::new_local(config);
         adapter.local_environment.clear();

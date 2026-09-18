@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -493,6 +494,12 @@ fn clean_command(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    let mut environment = BTreeMap::from([(
+        "HOME".to_owned(),
+        config.home_directory.to_string_lossy().into_owned(),
+    )]);
+    crate::execution::platform::process_environment(&mut environment);
+    command.envs(environment);
     command
 }
 

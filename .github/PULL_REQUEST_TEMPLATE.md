@@ -16,6 +16,6 @@ How was this tested?
 
 ## Checklist
 
-- [ ] Tests pass (`npm test`)
+- [ ] Relevant validation checks pass (see `CONTRIBUTING.md`)
 - [ ] Documentation updated (if needed)
 - [ ] Follows commit guidelines

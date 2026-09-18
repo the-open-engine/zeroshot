@@ -1,4 +1,4 @@
-mod platform;
+pub(crate) mod platform;
 #[cfg(unix)]
 mod platform_unix;
 #[cfg(windows)]
@@ -58,7 +58,9 @@ pub(crate) const CONTAINED_PROCESS_CLEANUP_BUDGET: Duration = Duration::from_sec
 );
 
 pub(crate) fn write_new_file(path: &Path, bytes: &[u8], unix_mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
     let mut options = std::fs::OpenOptions::new();
+    #[cfg(unix)]
     options.create_new(true).write(true);
     #[cfg(unix)]
     {
@@ -67,7 +69,13 @@ pub(crate) fn write_new_file(path: &Path, bytes: &[u8], unix_mode: u32) -> std::
     }
     #[cfg(not(unix))]
     let _ = unix_mode;
+    #[cfg(unix)]
     let mut file = options.open(path)?;
+    #[cfg(windows)]
+    let mut file = crate::execution::platform::private_file(
+        path,
+        crate::execution::platform::FileAccess::CreateNew,
+    )?;
     if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
         let _ = std::fs::remove_file(path);
         return Err(error);
@@ -342,7 +350,7 @@ fn prepare_private_directory(
 }
 
 fn create_private_directory(path: &Path) -> Result<bool, ProcessRunnerError> {
-    match std::fs::create_dir(path) {
+    match crate::execution::platform::create_private_directory(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(error) => Err(ProcessRunnerError::Launch(io_error_detail(
@@ -380,8 +388,9 @@ fn set_private_directory_mode(path: &Path) -> Result<(), ProcessRunnerError> {
 }
 
 #[cfg(not(unix))]
-fn set_private_directory_mode(_path: &Path) -> Result<(), ProcessRunnerError> {
-    Ok(())
+fn set_private_directory_mode(path: &Path) -> Result<(), ProcessRunnerError> {
+    crate::execution::platform::private_directory(path)
+        .map_err(|error| ProcessRunnerError::Io(error.to_string()))
 }
 
 #[cfg(target_os = "linux")]

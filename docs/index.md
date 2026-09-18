@@ -47,7 +47,7 @@ review loop, use `single-worker`; custom graphs follow the same protocol contrac
 - **Local**
 
   Local mode works in the current Git worktree, keeps state on the same machine, and calls your
-  installed Codex or Claude harness.
+  chosen harness.
 
   [Install Zeroshot](getting-started/install.md)
 

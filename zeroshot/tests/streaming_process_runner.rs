@@ -233,7 +233,9 @@ async fn release_drain_timeout_force_kills_and_reaps_descendants() {
     let _ = fs::remove_file(pid_file);
 }
 
-use openengine_cluster_testkit::assertions::{AssertValue, AssertError};
+use openengine_cluster_testkit::assertions::AssertValue;
+#[cfg(unix)]
+use openengine_cluster_testkit::assertions::AssertError;
 
 #[cfg(unix)]
 #[tokio::test]

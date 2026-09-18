@@ -4,6 +4,7 @@ mod controller;
 mod engine;
 mod lease;
 pub(crate) mod process;
+mod transport;
 
 #[cfg(test)]
 mod tests;
@@ -24,7 +25,6 @@ pub(crate) use controller::WorkspaceIdentity;
 pub use engine::{PortableRunEngine, PortableRunEngineBootstrap, PortableRuntime};
 pub use lease::{ControllerLease, ControllerLeaseError};
 pub use process::{load_bootstrap_file, read_ready, wait_ready, write_bootstrap_file};
-#[cfg(unix)]
 pub use process::{
     PortableControllerServer, PortableControllerTransport, connect_transport,
     run_controller_process,
@@ -57,7 +57,16 @@ impl PortableControllerPaths {
 
     #[must_use]
     pub fn socket(&self) -> PathBuf {
-        self.storage.join("controller.sock")
+        #[cfg(unix)]
+        {
+            self.storage.join("controller.sock")
+        }
+        #[cfg(windows)]
+        {
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(self.storage.as_os_str().as_encoded_bytes());
+            PathBuf::from(format!(r"\\.\pipe\zeroshot-{digest:x}"))
+        }
     }
 
     #[must_use]

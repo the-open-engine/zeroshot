@@ -1,10 +1,16 @@
-use std::{fs, path::Path};
+use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::Path;
 
-use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+use openengine_cluster_testkit::assertions::AssertValue;
+#[cfg(unix)]
+use openengine_cluster_testkit::assertions::AssertError;
 
 #[cfg(unix)]
 use super::session_io::PROCESS_OUTPUT_CHUNK_BYTES;
-use super::{HostedProcessPool, HostedProcessScope, write_new_file};
+use super::write_new_file;
+#[cfg(target_os = "linux")]
+use super::{HostedProcessPool, HostedProcessScope};
 #[cfg(unix)]
 use super::{
     LocalProcessRunner, PROCESS_STDOUT_CAPACITY, ProcessCleanupEvidence, ProcessSession,
@@ -17,6 +23,7 @@ use crate::execution::driver::{DriverCancellation, WorkspaceCapability};
 use crate::native_v2_candidate::test_support::TestDirectory;
 
 #[test]
+#[cfg(target_os = "linux")]
 fn hosted_scopes_keep_loop_sessions_stable_and_executions_disjoint() {
     let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
     let loop_scope = HostedProcessScope::VerifierNodeInstance(7);
@@ -49,6 +56,7 @@ fn hosted_scopes_keep_loop_sessions_stable_and_executions_disjoint() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn active_run_slots_are_disjoint_from_source_and_each_other() {
     let host = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
     let first = host.active_run_slot(0, 65_536).assert_value();
@@ -382,6 +390,7 @@ fn process_command_with_deadline(
     }
 }
 
+#[cfg(target_os = "linux")]
 fn writer_identity(pool: HostedProcessPool) -> (u32, u32) {
     let identity = pool.identity(HostedProcessScope::Writer).assert_value();
     (identity.uid(), identity.gid())

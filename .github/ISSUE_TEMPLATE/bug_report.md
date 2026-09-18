@@ -25,9 +25,9 @@ What actually happens.
 ## Environment
 
 - OS:
-- Node.js version:
+- Node.js version (if installed through npm):
 - zeroshot version:
-- Docker version (if using --docker):
+- Docker version (if using the target image):
 
 ## Logs
 

@@ -31,6 +31,7 @@ pub(crate) trait TargetCredentialStore: Send + Sync {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum CredentialStorePreparation {
     Managed,
+    #[cfg(target_os = "linux")]
     PrivateFile(PathBuf),
 }
 

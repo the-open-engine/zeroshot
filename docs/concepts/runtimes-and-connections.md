@@ -8,19 +8,20 @@ run the same graph.
 
 Each agent binding names:
 
-1. a **harness**, `codex` or `claude`;
+1. a **harness**, `codex`, `claude`, or `copilot`;
 2. a **provider** supported by that harness;
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
 
 Zeroshot accepts these harness/provider pairs:
 
-| Harness  | Providers                                       |
-| -------- | ----------------------------------------------- |
-| `codex`  | `openai`, `openrouter`, `bedrock`, `gateway`    |
-| `claude` | `anthropic`, `openrouter`, `bedrock`, `gateway` |
+| Harness   | Providers                                       |
+| --------- | ----------------------------------------------- |
+| `codex`   | `openai`, `openrouter`, `bedrock`, `gateway`    |
+| `claude`  | `anthropic`, `openrouter`, `bedrock`, `gateway` |
+| `copilot` | `github`                                        |
 
-Admission rejects the two known-incompatible pairs, `codex` with `anthropic` and `claude` with
+Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
 `openai`. Zeroshot does not check current provider availability, and model names remain
 provider-owned.
 
@@ -72,6 +73,7 @@ The uniform runtime defaults are:
 | `anthropic`  | `anthropic`    | `ANTHROPIC_API_KEY`                      |
 | `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`    |
 | `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
+| `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
 
 Store a local static connection by prompting for its fields:
 
@@ -88,7 +90,7 @@ kinds depend on the target; Zeroshot consumes only the resolved fields declared 
 
 ## Gateways
 
-Use `provider: "gateway"` with either harness and the gateway's model identifier:
+Use `provider: "gateway"` with `codex` or `claude` and the gateway's model identifier:
 
 ```json
 { "harness": "codex", "provider": "gateway", "model": "PROVIDER_MODEL_ID" }

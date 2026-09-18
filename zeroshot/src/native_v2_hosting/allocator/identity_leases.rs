@@ -68,7 +68,7 @@ impl Drop for ActiveRunProcessPool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct IdentityLeaseUnavailable;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use openengine_cluster_testkit::assertions::AssertValue;
 

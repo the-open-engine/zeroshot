@@ -60,19 +60,19 @@ impl PortableBootstrapDocument {
     }
 }
 
-#[cfg(unix)]
-pub type PortableControllerTransport =
-    NdjsonTransport<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
+pub type PortableControllerTransport = NdjsonTransport<
+    tokio::io::ReadHalf<super::transport::Client>,
+    tokio::io::WriteHalf<super::transport::Client>,
+>;
 
-#[cfg(unix)]
 pub async fn connect_transport(
     paths: &PortableControllerPaths,
 ) -> Result<Arc<PortableControllerTransport>, PortableControllerError> {
     let ready = read_ready(paths)?;
-    let stream = tokio::net::UnixStream::connect(&ready.socket)
+    let stream = super::transport::connect(&ready.socket)
         .await
         .map_err(PortableControllerError::Io)?;
-    let (reader, writer) = stream.into_split();
+    let (reader, writer) = tokio::io::split(stream);
     Ok(Arc::new(NdjsonTransport::new(reader, writer)))
 }
 
@@ -109,7 +109,6 @@ pub async fn wait_ready(
 
 /// Runs the private one-run controller child used by the shipped executable's re-exec path.
 /// The bootstrap is consumed before any durable controller effect and is never retained.
-#[cfg(unix)]
 pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), PortableControllerError> {
     let bootstrap = load_bootstrap_file(bootstrap_path)?;
     let workspace = bootstrap.workspace.clone();
@@ -133,8 +132,8 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
 pub fn load_bootstrap_file(
     path: &Path,
 ) -> Result<PortableControllerBootstrap, PortableControllerError> {
-    validate_private_bootstrap(path)?;
-    let bytes = read_bounded_regular_file(path, BOOTSTRAP_MAX_BYTES)?;
+    let file = validate_private_bootstrap(path)?;
+    let bytes = read_bounded_file(file, BOOTSTRAP_MAX_BYTES)?;
     let parsed = serde_json::from_slice::<PortableBootstrapDocument>(&bytes)
         .map_err(|_| PortableControllerError::Bootstrap)
         .and_then(PortableBootstrapDocument::validate);
@@ -180,7 +179,7 @@ fn encode_bootstrap(
 fn prepare_bootstrap_parent(path: &Path) -> Result<(), PortableControllerError> {
     require_absolute(path)?;
     let parent = path.parent().ok_or(PortableControllerError::Path)?;
-    std::fs::create_dir_all(parent).map_err(PortableControllerError::Io)?;
+    crate::execution::platform::private_directory(parent).map_err(PortableControllerError::Io)?;
     let metadata = std::fs::symlink_metadata(parent).map_err(PortableControllerError::Io)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(PortableControllerError::Bootstrap);
@@ -188,22 +187,18 @@ fn prepare_bootstrap_parent(path: &Path) -> Result<(), PortableControllerError> 
     Ok(())
 }
 
-#[cfg(unix)]
 pub struct PortableControllerServer {
     controller: Arc<PortableRunController>,
-    listener: tokio::net::UnixListener,
+    listener: super::transport::Listener,
 }
 
-#[cfg(unix)]
 impl PortableControllerServer {
     pub(super) async fn bind(
         controller: Arc<PortableRunController>,
     ) -> Result<Self, PortableControllerError> {
         let socket = controller.paths().socket();
-        remove_existing_socket(&socket)?;
         let listener =
-            tokio::net::UnixListener::bind(&socket).map_err(PortableControllerError::Io)?;
-        set_private_socket_permissions(&socket)?;
+            super::transport::Listener::bind(&socket).map_err(PortableControllerError::Io)?;
         write_ready(&controller)?;
         Ok(Self {
             controller,
@@ -241,10 +236,10 @@ impl PortableControllerServer {
     }
 
     async fn accept(&self) -> io::Result<()> {
-        let (stream, _) = self.listener.accept().await?;
+        let stream = self.listener.accept().await?;
         let controller = self.controller.clone();
         tokio::spawn(async move {
-            let (reader, writer) = stream.into_split();
+            let (reader, writer) = tokio::io::split(stream);
             let binding = local_binding(controller);
             let _ = openengine_cluster_server::stdio::serve_ndjson(
                 binding,
@@ -256,7 +251,6 @@ impl PortableControllerServer {
     }
 }
 
-#[cfg(unix)]
 fn local_binding(
     controller: Arc<PortableRunController>,
 ) -> ConnectionBinding<PortableRunController, StaticConnectionIdentityResolver, SystemConnectionTime>
@@ -318,16 +312,8 @@ pub(super) fn clear_stale_endpoint(
     remove_existing_regular_file(&paths.ready())
 }
 
-#[cfg(unix)]
 fn remove_existing_socket(path: &Path) -> Result<(), PortableControllerError> {
-    use std::os::unix::fs::FileTypeExt as _;
-
-    remove_existing_endpoint(path, |file_type| file_type.is_socket())
-}
-
-#[cfg(not(unix))]
-fn remove_existing_socket(_path: &Path) -> Result<(), PortableControllerError> {
-    Ok(())
+    super::transport::remove_endpoint(path).map_err(|_| PortableControllerError::EndpointPath)
 }
 
 fn remove_existing_regular_file(path: &Path) -> Result<(), PortableControllerError> {
@@ -352,14 +338,24 @@ fn read_bounded_regular_file(
     path: &Path,
     maximum: u64,
 ) -> Result<Vec<u8>, PortableControllerError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(PortableControllerError::Io)?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum {
+    let file = crate::execution::platform::private_file(
+        path,
+        crate::execution::platform::FileAccess::Read,
+    )
+    .map_err(PortableControllerError::Io)?;
+    read_bounded_file(file, maximum)
+}
+
+fn read_bounded_file(
+    file: std::fs::File,
+    maximum: u64,
+) -> Result<Vec<u8>, PortableControllerError> {
+    let metadata = file.metadata().map_err(PortableControllerError::Io)?;
+    if !metadata.is_file() || metadata.len() > maximum {
         return Err(PortableControllerError::Bootstrap);
     }
     let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
-    std::fs::File::open(path)
-        .map_err(PortableControllerError::Io)?
-        .take(maximum + 1)
+    file.take(maximum + 1)
         .read_to_end(&mut bytes)
         .map_err(PortableControllerError::Io)?;
     if bytes.len() as u64 > maximum {
@@ -368,41 +364,17 @@ fn read_bounded_regular_file(
     Ok(bytes)
 }
 
-fn validate_private_bootstrap(path: &Path) -> Result<(), PortableControllerError> {
+fn validate_private_bootstrap(path: &Path) -> Result<std::fs::File, PortableControllerError> {
     require_absolute(path)?;
-    let metadata = std::fs::symlink_metadata(path).map_err(PortableControllerError::Io)?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(PortableControllerError::Bootstrap);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-
-        if metadata.uid() != unsafe { libc::geteuid() }
-            || metadata.permissions().mode() & 0o077 != 0
-        {
-            return Err(PortableControllerError::BootstrapPermissions);
-        }
-    }
-    Ok(())
+    crate::execution::platform::private_file(path, crate::execution::platform::FileAccess::Read)
+        .map_err(|_| PortableControllerError::BootstrapPermissions)
 }
 
 fn write_private_new_file(path: &Path, bytes: &[u8]) -> Result<(), PortableControllerError> {
     write_new_file(path, bytes, 0o600).map_err(PortableControllerError::Io)
 }
 
-#[cfg(unix)]
-fn set_private_socket_permissions(path: &Path) -> Result<(), PortableControllerError> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .map_err(PortableControllerError::Io)
-}
-
-#[cfg(unix)]
 fn write_ready(controller: &PortableRunController) -> Result<(), PortableControllerError> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-
     let ready = PortableControllerReady {
         kind: READY_KIND.to_owned(),
         run_id: controller.run_id().clone(),
@@ -421,16 +393,21 @@ fn write_ready(controller: &PortableRunController) -> Result<(), PortableControl
         .storage()
         .join(format!(".controller.ready-{suffix}.tmp"));
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temporary)
-            .map_err(PortableControllerError::Io)?;
+        let mut file = crate::execution::platform::private_file(
+            &temporary,
+            crate::execution::platform::FileAccess::CreateNew,
+        )
+        .map_err(PortableControllerError::Io)?;
         file.write_all(&bytes)
             .map_err(PortableControllerError::Io)?;
         file.sync_all().map_err(PortableControllerError::Io)?;
-        std::fs::rename(&temporary, controller.paths().ready()).map_err(PortableControllerError::Io)
+        drop(file);
+        crate::execution::platform::commit_file(
+            &temporary,
+            &controller.paths().ready(),
+            controller.paths().storage(),
+        )
+        .map_err(PortableControllerError::Io)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(temporary);
