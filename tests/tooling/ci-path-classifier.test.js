@@ -14,6 +14,10 @@ describe('CI path classifier', () => {
   it('selects the native product and dependent Python SDK for native changes', () => {
     assert.equal(classifyPath('zeroshot/src/main.rs'), 'native');
     assert.equal(classifyPath('npm/zeroshot/install.js'), 'native');
+    assert.equal(classifyPath('ui/src/App.tsx'), 'native');
+    assert.equal(classifyPath('ui/package-lock.json'), 'native');
+    assert.equal(classifyPath('.dockerignore'), 'native');
+    assert.equal(classifyPath('tests/tooling/smoke-ui.js'), 'native');
     assert.deepEqual(classifyPaths(['zeroshot/src/main.rs']), {
       native: true,
       python: true,

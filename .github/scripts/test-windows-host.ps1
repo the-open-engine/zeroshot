@@ -9,7 +9,7 @@ if ($State) {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
         }
         Set-Location $context.Workspace
-        & $context.Shell -NoProfile -NonInteractive -File ./scripts/test-windows.ps1 *> (Join-Path $State 'output.log')
+        & $context.Shell -NoProfile -NonInteractive -File ./scripts/test-windows.ps1 -Ui *> (Join-Path $State 'output.log')
         $status = $LASTEXITCODE
     } catch {
         $_ | Out-File (Join-Path $State 'output.log') -Append

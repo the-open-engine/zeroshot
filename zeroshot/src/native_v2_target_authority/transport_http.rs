@@ -28,6 +28,11 @@ pub(super) struct RequestHead {
 }
 
 impl RequestHead {
+    #[cfg(feature = "ui")]
+    pub(super) fn is_ui_route(&self) -> bool {
+        is_ui_target(&self.path)
+    }
+
     pub(super) fn is_websocket_upgrade(&self) -> bool {
         self.header_exact("upgrade")
             .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
@@ -105,7 +110,8 @@ fn parse_request_head(bytes: &[u8]) -> io::Result<Option<RequestHead>> {
         .path
         .ok_or_else(|| invalid_http("missing path"))?
         .to_owned();
-    if !path.starts_with('/') || path.contains('?') || path.contains('#') {
+    if !path.starts_with('/') || path.contains('#') || (path.contains('?') && !is_ui_target(&path))
+    {
         return Err(invalid_http("invalid request target"));
     }
     let headers = request
@@ -122,6 +128,11 @@ fn parse_request_head(bytes: &[u8]) -> io::Result<Option<RequestHead>> {
         headers,
         encoded_len,
     }))
+}
+
+fn is_ui_target(target: &str) -> bool {
+    let path = target.split('?').next().unwrap_or(target);
+    path == "/" || path == "/ui" || path.starts_with("/ui/")
 }
 
 fn invalid_http(error: impl std::fmt::Display) -> io::Error {

@@ -1,10 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use openengine_cluster_protocol::{RunId, is_canonical_uuid_v7};
 use tokio::process::Command;
 
 use super::{NativeV2CliError, local_io, local_message};
-use crate::native_v2_cli::{absolute_user_path, nonempty_environment};
 use crate::native_v2_capsule::provider_process::{
     CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, local_environment,
 };
@@ -110,42 +109,6 @@ pub(super) fn remove_private_bootstrap(path: &Path) {
     {
         let _ = std::fs::remove_file(path);
     }
-}
-
-pub(super) fn default_local_state_root() -> Result<PathBuf, NativeV2CliError> {
-    if let Some(path) = nonempty_environment("ZEROSHOT_STATE_DIR") {
-        return absolute_user_path(path, "controller state path must be absolute");
-    }
-    #[cfg(windows)]
-    {
-        let root = nonempty_environment("LOCALAPPDATA")
-            .ok_or_else(|| local_message("LOCALAPPDATA is unavailable"))?;
-        absolute_user_path(
-            PathBuf::from(root).join("zeroshot").join("state"),
-            "controller state path must be absolute",
-        )
-    }
-    #[cfg(unix)]
-    default_unix_state_root()
-}
-
-#[cfg(unix)]
-fn default_unix_state_root() -> Result<PathBuf, NativeV2CliError> {
-    if let Some(path) = nonempty_environment("XDG_STATE_HOME") {
-        return absolute_user_path(
-            PathBuf::from(path).join("zeroshot"),
-            "controller state path must be absolute",
-        );
-    }
-    let home = nonempty_environment("HOME")
-        .ok_or_else(|| local_message("HOME and XDG_STATE_HOME are unavailable"))?;
-    absolute_user_path(
-        PathBuf::from(home)
-            .join(".local")
-            .join("state")
-            .join("zeroshot"),
-        "controller state path must be absolute",
-    )
 }
 
 #[cfg(test)]

@@ -269,7 +269,7 @@ async fn success_routing_does_not_define_an_optional_diagnostic_path() {
 }
 
 #[tokio::test]
-async fn output_backed_promotions_require_success_guarantees() {
+async fn optional_output_promotions_preserve_presence_until_a_guarded_read() {
     let graph = graph_with_root_child(json!({
         "kind":"seq","name":"root","state":record(),"children":[
             {"kind":"seq","name":"promoteWork","state":record(),
@@ -278,7 +278,15 @@ async fn output_backed_promotions_require_success_guarantees() {
             {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
         ],"promotedStatePaths":[]
     }));
-    let error = assert_graph_rejected(&graph).await;
+    ProductionGraphVerifier::new(registry())
+        .verify(&graph)
+        .await
+        .assert_value();
+    let mut read = serde_json::to_value(&graph).assert_value();
+    read["root"]["children"][1]["output"] = json!({"kind":"record","fields":{"result":{"type":record()["fields"]["result"]["type"],"required":true}}});
+    read["root"]["children"][1]["bindings"] =
+        json!([{"target":["result"],"value":{"source":"state","path":["result"]}}]);
+    let error = assert_graph_rejected(&serde_json::from_value(read).assert_value()).await;
 
     assert!(rejection_codes(error).contains(&GraphDiagnosticCode::UndefinedRead));
 }

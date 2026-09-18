@@ -9,6 +9,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod history;
+mod trace;
+
+pub use trace::{StructuralTrace, StructuralTraceState, TracedReduction};
+use trace::TraceCollector;
 
 pub use history::{
     DurableExecution, DurableExecutionState, ExecutionId, ExecutionVoidReason, HistoryPosition,
@@ -97,6 +101,8 @@ pub enum ReducerError {
     MissingChoiceRoute,
     #[error("decision encoding failed")]
     Encoding,
+    #[error("structural observation exceeds its bounded projection budget")]
+    TraceLimit,
 }
 
 pub struct FullV1Reducer<'a> {
@@ -129,17 +135,36 @@ impl<'a> FullV1Reducer<'a> {
     }
 
     pub fn reduce(&self, input: ReductionInput<'_>) -> Result<Reduction, ReducerError> {
+        self.evaluate(input, false).map(|result| result.reduction)
+    }
+
+    /// Observe the canonical traversal without applying any dispatch or cancellation decisions.
+    /// The trace is a deterministic projection of the supplied history, not additional ledger facts.
+    pub fn reduce_with_trace(
+        &self,
+        input: ReductionInput<'_>,
+    ) -> Result<TracedReduction, ReducerError> {
+        self.evaluate(input, true)
+    }
+
+    fn evaluate(
+        &self,
+        input: ReductionInput<'_>,
+        trace: bool,
+    ) -> Result<TracedReduction, ReducerError> {
         let mut initial_state = input.initial_input.clone();
         if let Some(state) = self.graph.compiled_ir.root.state() {
             state.materialize_missing_fields(&mut initial_state);
         }
         let mut engine = Engine::new(input, &self.graph.compiled_ir.root, self.execution_mode)?;
+        engine.trace = trace.then(TraceCollector::default);
         let mut context = Context::new(initial_state);
         let status = engine.eval(
             &self.graph.compiled_ir.root,
             &mut context,
             Traversal {
                 map_indices: &[],
+                loop_iterations: &[],
                 item: None,
                 mode: EvalMode::Decide,
                 cutoff: HistoryPosition::MAX,
@@ -154,9 +179,15 @@ impl<'a> FullV1Reducer<'a> {
         if let Some(projection) = terminal.clone() {
             engine.decisions.push(Decision::Terminal { projection });
         }
-        Ok(Reduction {
-            decisions: engine.decisions,
-            terminal,
+        Ok(TracedReduction {
+            reduction: Reduction {
+                decisions: engine.decisions,
+                terminal,
+            },
+            evaluations: engine.trace.as_ref().map_or(0, TraceCollector::evaluations),
+            trace: engine
+                .trace
+                .map_or_else(Vec::new, TraceCollector::into_records),
         })
     }
 }
@@ -208,6 +239,7 @@ enum EvalMode {
 #[derive(Clone, Copy)]
 struct Traversal<'a> {
     map_indices: &'a [u64],
+    loop_iterations: &'a [u64],
     item: Option<&'a Value>,
     mode: EvalMode,
     cutoff: HistoryPosition,
@@ -267,6 +299,7 @@ struct PromotionRequest<'a> {
     node: &'a NodeName,
     map_indices: &'a [u64],
     paths: &'a [FieldPath],
+    optional_paths: &'a BTreeSet<FieldPath>,
     local: &'a Context,
     parent: &'a mut Context,
     mode: EvalMode,
@@ -323,9 +356,11 @@ struct Engine<'a> {
     next_execution: u64,
     decisions: Vec<Decision>,
     map_depths: BTreeMap<NodeName, usize>,
+    optional_promotions: BTreeMap<NodeName, BTreeSet<FieldPath>>,
     consumed_executions: BTreeSet<ExecutionId>,
     void_cutoffs: BTreeMap<ExecutionId, VoidCutoff>,
     execution_mode: ExecutionMode,
+    trace: Option<TraceCollector>,
 }
 
 impl<'a> Engine<'a> {
@@ -339,6 +374,8 @@ impl<'a> Engine<'a> {
         collect_map_depths(root, 0, &mut map_depths);
         let mut executable_depths = BTreeMap::new();
         collect_executable_depths(root, 0, &mut executable_depths);
+        let mut optional_promotions = BTreeMap::new();
+        collect_optional_promotions(root, &mut optional_promotions)?;
         if input.executions.iter().any(|execution| {
             execution.execution.get() >= input.next_execution
                 || execution.node_instance.get() >= input.next_node_instance
@@ -354,9 +391,11 @@ impl<'a> Engine<'a> {
             next_execution: input.next_execution,
             decisions: Vec::new(),
             map_depths,
+            optional_promotions,
             consumed_executions: BTreeSet::new(),
             void_cutoffs: BTreeMap::new(),
             execution_mode,
+            trace: None,
         })
     }
 

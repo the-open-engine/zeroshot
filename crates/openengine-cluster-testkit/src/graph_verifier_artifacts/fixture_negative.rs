@@ -198,10 +198,17 @@ pub(super) fn unsafe_promotion_graph() -> Value {
         "branches":[{"when":in_guard(),"node":data_step("work")}],
         "otherwise":fail("failed"),"promotedStatePaths":[["result"]]
     });
+    // Optional promotion may retain absence. A required consumer still needs
+    // proof that the selected producer succeeded before reading the result.
+    let consumer = json!({
+        "kind":"succeed","name":"done",
+        "output":{"kind":"record","fields":{"result":{"type":{"kind":"number"},"required":true}}},
+        "bindings":[{"target":["result"],"value":{"source":"state","path":["result"]}}]
+    });
     graph(
         data_state_type(),
         data_state_type(),
-        vec![verifier_node("verify"), decision, succeed("done")],
+        vec![verifier_node("verify"), decision, consumer],
     )
 }
 

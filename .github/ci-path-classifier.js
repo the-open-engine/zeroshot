@@ -17,9 +17,11 @@ const NATIVE_PREFIXES = [
   'docs/zeroshot-distribution',
   'npm/zeroshot/',
   'protocol/',
+  'ui/',
   'zeroshot/',
 ];
 const NATIVE_PATHS = new Set([
+  '.dockerignore',
   '.github/workflows/release.yml',
   '.github/scripts/test-windows-host.ps1',
   'Cargo.lock',
@@ -29,6 +31,7 @@ const NATIVE_PATHS = new Set([
   'rustfmt.toml',
   'scripts/distribution.js',
   'scripts/test-windows.ps1',
+  'tests/tooling/smoke-ui.js',
 ]);
 
 const PYTHON_PREFIXES = ['sdks/python/'];
@@ -37,7 +40,6 @@ const MULTI_LANE_PATHS = new Map([['.github/workflows/release-python.yml', ['pyt
 
 const TOOLING_PREFIXES = ['.github/', '.husky/', 'scripts/', 'tests/'];
 const TOOLING_PATHS = new Set([
-  '.dockerignore',
   '.gitignore',
   '.prettierignore',
   '.prettierrc.json',

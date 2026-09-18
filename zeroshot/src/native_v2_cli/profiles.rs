@@ -39,6 +39,12 @@ pub(crate) struct LocalRunProfileStore {
     root: PathBuf,
 }
 
+#[cfg(feature = "ui")]
+pub(crate) enum ProfileSaveConflict {
+    Revision,
+    Workspace,
+}
+
 impl LocalRunProfileStore {
     pub(crate) fn production() -> Result<Self, NativeV2CliError> {
         Ok(Self {
@@ -46,9 +52,42 @@ impl LocalRunProfileStore {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui"))]
     pub(crate) fn new(root: PathBuf) -> Self {
         Self { root }
+    }
+
+    #[cfg(feature = "ui")]
+    pub(crate) fn workspace_id(&self) -> Result<String, NativeV2CliError> {
+        let lock = self.lock()?;
+        lock.lock_exclusive().map_err(local_io)?;
+        let destination = self.root.join("ui-workspace-id");
+        if let Some(id) = read_workspace_id(&destination)? {
+            return Ok(id);
+        }
+        let id = uuid::Uuid::now_v7().to_string();
+        let temporary = temporary_path(&self.root);
+        let result = (|| {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            let file = options.open(&temporary).map_err(local_io)?;
+            write_and_commit(
+                file,
+                format!("{id}\n").as_bytes(),
+                CommitPaths {
+                    temporary: &temporary,
+                    destination: &destination,
+                    parent: &self.root,
+                },
+            )
+        })();
+        cleanup_temporary(result, &temporary)?;
+        Ok(id)
     }
 
     pub(crate) fn list(
@@ -90,10 +129,54 @@ impl LocalRunProfileStore {
         &self,
         request: RunProfileSetRequest,
     ) -> Result<RunProfileMutationResult, NativeV2CliError> {
+        self.set_inner(request, None)?
+            .ok_or_else(|| local_message("profile conflict"))
+    }
+
+    /// Atomically protects browser edits against changes by another tab or the CLI.
+    #[cfg(feature = "ui")]
+    pub(crate) fn set_checked(
+        &self,
+        request: RunProfileSetRequest,
+        expected: Option<&str>,
+        workspace: &str,
+    ) -> Result<Result<RunProfileMutationResult, ProfileSaveConflict>, NativeV2CliError> {
         require_local_scope(request.scope)?;
         let lock = self.lock()?;
         lock.lock_exclusive().map_err(local_io)?;
+        if read_workspace_id(&self.root.join("ui-workspace-id"))?.as_deref() != Some(workspace) {
+            return Ok(Err(ProfileSaveConflict::Workspace));
+        }
+        self.set_locked(request, Some(expected))
+            .map(|saved| saved.ok_or(ProfileSaveConflict::Revision))
+    }
+
+    fn set_inner(
+        &self,
+        request: RunProfileSetRequest,
+        expected: Option<Option<&str>>,
+    ) -> Result<Option<RunProfileMutationResult>, NativeV2CliError> {
+        require_local_scope(request.scope)?;
+        let lock = self.lock()?;
+        lock.lock_exclusive().map_err(local_io)?;
+        self.set_locked(request, expected)
+    }
+
+    fn set_locked(
+        &self,
+        request: RunProfileSetRequest,
+        expected: Option<Option<&str>>,
+    ) -> Result<Option<RunProfileMutationResult>, NativeV2CliError> {
         let mut stored = self.read()?;
+        if let Some(expected) = expected {
+            let current = profile(&stored, &request.name)
+                .as_ref()
+                .map(profile_revision)
+                .transpose()?;
+            if current.as_deref() != expected {
+                return Ok(None);
+            }
+        }
         let id = stored
             .profiles
             .get(&request.name)
@@ -111,10 +194,10 @@ impl LocalRunProfileStore {
             stored.default = Some(request.name.clone());
         }
         self.write(&stored)?;
-        Ok(RunProfileMutationResult {
+        Ok(Some(RunProfileMutationResult {
             profile: profile(&stored, &request.name)
                 .ok_or_else(|| local_message("stored profile disappeared"))?,
-        })
+        }))
     }
 
     pub(crate) fn delete(
@@ -208,6 +291,38 @@ impl LocalRunProfileStore {
     }
 }
 
+#[cfg(feature = "ui")]
+fn read_workspace_id(path: &Path) -> Result<Option<String>, NativeV2CliError> {
+    use std::io::Read as _;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(local_io(error)),
+    };
+    if !metadata.is_file() || metadata.len() > 64 {
+        return Err(local_message(
+            "UI workspace identity is not a regular bounded file",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut encoded = String::new();
+    options
+        .open(path)
+        .map_err(local_io)?
+        .take(65)
+        .read_to_string(&mut encoded)
+        .map_err(local_io)?;
+    let id = uuid::Uuid::parse_str(encoded.trim())
+        .map_err(|_| local_message("UI workspace identity is malformed"))?;
+    Ok(Some(id.to_string()))
+}
+
 fn profile(stored: &StoredProfiles, name: &RunProfileName) -> Option<RunProfile> {
     let value = stored.profiles.get(name)?;
     Some(RunProfile {
@@ -275,6 +390,14 @@ fn local_message(message: impl Into<String>) -> NativeV2CliError {
     NativeV2CliError::Local(message.into())
 }
 
+/// Content identity includes metadata so default changes cannot be overwritten silently.
+pub(crate) fn profile_revision(value: &RunProfile) -> Result<String, NativeV2CliError> {
+    use sha2::{Digest, Sha256};
+    let encoded =
+        serde_json::to_vec(value).map_err(|_| local_message("profile could not be encoded"))?;
+    Ok(format!("{:x}", Sha256::digest(encoded)))
+}
+
 #[cfg(test)]
 mod tests {
     use openengine_cluster_testkit::admission::graph_fixture;
@@ -282,6 +405,98 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[cfg(feature = "ui")]
+    #[test]
+    fn workspace_identity_survives_restart_and_move_but_not_store_replacement() {
+        let root =
+            std::env::temp_dir().join(format!("zeroshot-workspace-{}", uuid::Uuid::now_v7()));
+        let moved = root.with_extension("moved");
+        let first = LocalRunProfileStore::new(root.clone())
+            .workspace_id()
+            .assert_value();
+        assert_eq!(
+            first,
+            LocalRunProfileStore::new(root.clone())
+                .workspace_id()
+                .assert_value()
+        );
+        assert!(!root.join(PROFILES_FILE).exists());
+        std::fs::rename(&root, &moved).assert_value();
+        assert_eq!(
+            first,
+            LocalRunProfileStore::new(moved.clone())
+                .workspace_id()
+                .assert_value()
+        );
+        let replacement = LocalRunProfileStore::new(root.clone())
+            .workspace_id()
+            .assert_value();
+        assert_ne!(first, replacement);
+        std::fs::remove_dir_all(root).assert_value();
+        std::fs::remove_dir_all(moved).assert_value();
+    }
+
+    #[cfg(feature = "ui")]
+    #[test]
+    fn concurrent_ui_hosts_share_one_durable_workspace_identity() {
+        let root =
+            std::env::temp_dir().join(format!("zeroshot-workspace-{}", uuid::Uuid::now_v7()));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let root = root.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    LocalRunProfileStore::new(root)
+                        .workspace_id()
+                        .assert_value()
+                })
+            })
+            .collect();
+        let ids: std::collections::BTreeSet<_> = threads
+            .into_iter()
+            .map(|thread| thread.join().assert_value())
+            .collect();
+        assert_eq!(ids.len(), 1);
+        std::fs::remove_dir_all(root).assert_value();
+    }
+
+    #[cfg(feature = "ui")]
+    #[test]
+    fn malformed_workspace_identity_is_not_silently_replaced() {
+        let root =
+            std::env::temp_dir().join(format!("zeroshot-workspace-{}", uuid::Uuid::now_v7()));
+        let store = LocalRunProfileStore::new(root.clone());
+        store.workspace_id().assert_value();
+        let path = root.join("ui-workspace-id");
+        for malformed in ["not-an-identity".to_owned(), "x".repeat(128)] {
+            std::fs::write(&path, &malformed).assert_value();
+            assert!(store.workspace_id().is_err());
+            assert_eq!(std::fs::read_to_string(&path).assert_value(), malformed);
+        }
+        std::fs::remove_dir_all(root).assert_value();
+    }
+
+    #[cfg(all(feature = "ui", unix))]
+    #[test]
+    fn workspace_identity_does_not_follow_a_symlink() {
+        let root =
+            std::env::temp_dir().join(format!("zeroshot-workspace-{}", uuid::Uuid::now_v7()));
+        let store = LocalRunProfileStore::new(root.clone());
+        store.workspace_id().assert_value();
+        let path = root.join("ui-workspace-id");
+        let outside = root.with_extension("identity");
+        let id = uuid::Uuid::now_v7().to_string();
+        std::fs::write(&outside, &id).assert_value();
+        std::fs::remove_file(&path).assert_value();
+        std::os::unix::fs::symlink(&outside, &path).assert_value();
+        assert!(store.workspace_id().is_err());
+        assert_eq!(std::fs::read_to_string(&outside).assert_value(), id);
+        std::fs::remove_file(outside).assert_value();
+        std::fs::remove_dir_all(root).assert_value();
+    }
 
     #[test]
     fn stable_identity_and_default_survive_profile_edits() {

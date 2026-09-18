@@ -44,6 +44,18 @@ impl SqliteRunLedger {
         Self::from_connection(connection)
     }
 
+    /// Opens retained history without creating a database, changing schema, or admitting writes.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
+        let connection = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(sqlite_error)?;
+        Ok(Self {
+            connection: Arc::new(Mutex::new(connection)),
+        })
+    }
+
     pub fn open_in_memory() -> Result<Self, RunLedgerError> {
         let connection = Connection::open_in_memory().map_err(sqlite_error)?;
         Self::from_connection(connection)
@@ -54,6 +66,35 @@ impl SqliteRunLedger {
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
         })
+    }
+
+    /// Lists a bounded descending page through the run-ID index without loading run payloads.
+    #[cfg(feature = "ui")]
+    pub(crate) async fn list_ids_page(
+        &self,
+        after: Option<&RunId>,
+        limit: u16,
+    ) -> Result<Vec<RunId>, RunLedgerError> {
+        let after = after.cloned();
+        self.with_connection(move |connection| {
+            let query = if after.is_some() {
+                "SELECT run_id FROM v2_runs WHERE run_id < ?1 ORDER BY run_id DESC LIMIT ?2"
+            } else {
+                "SELECT run_id FROM v2_runs ORDER BY run_id DESC LIMIT ?1"
+            };
+            let mut statement = connection.prepare(query).map_err(sqlite_error)?;
+            let mut rows = match after {
+                Some(after) => statement.query(params![after.as_str(), limit]),
+                None => statement.query(params![limit]),
+            }
+            .map_err(sqlite_error)?;
+            let mut ids = Vec::new();
+            while let Some(row) = rows.next().map_err(sqlite_error)? {
+                ids.push(RunId::new(row.get::<_, String>(0).map_err(sqlite_error)?));
+            }
+            Ok(ids)
+        })
+        .await
     }
 
     async fn with_connection<T, F>(&self, operation: F) -> Result<T, RunLedgerError>
@@ -498,3 +539,7 @@ mod storage_failure_tests {
 #[cfg(test)]
 #[path = "sqlite/scheduling_tests.rs"]
 mod scheduling_tests;
+
+#[cfg(all(test, feature = "ui"))]
+#[path = "sqlite/listing_tests.rs"]
+mod listing_tests;

@@ -197,6 +197,11 @@ jobs:
       - name: Install pinned script dependencies
         run: npm ci --ignore-scripts
 
+      - name: Build embedded UI
+        run: |
+          npm --prefix ui ci --ignore-scripts
+          npm --prefix ui run build
+
       - name: Setup Rust 1.97.0 target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -243,7 +248,7 @@ jobs:
         shell: bash
 
       - name: Build standalone Zeroshot release binary
-        run: cargo build --release --locked -p zeroshot --bin zeroshot --target ${{ matrix.target }}
+        run: cargo build --release --locked -p zeroshot --bin zeroshot --features ui --target ${{ matrix.target }}
 
       - name: Verify static Linux release binary
         if: runner.os == 'Linux'

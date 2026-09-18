@@ -181,6 +181,12 @@ struct MapExecutionCorrelation {
     presence: CompletionPredicate,
 }
 
+#[derive(Clone)]
+struct ChoiceExecutionCorrelation {
+    owner: NodeName,
+    presence: CompletionPredicate,
+}
+
 impl ParallelJoinCorrelation {
     fn collect_guards<'a>(&'a self, guards: &mut Vec<&'a Guard>) {
         match self {
@@ -449,6 +455,8 @@ struct Analyzer<'a> {
     guard_nodes: u64,
     exhaustive_choices: BTreeSet<NodeName>,
     choice_reachability: BTreeMap<NodeName, ChoiceReachability>,
+    choice_execution_correlations: BTreeMap<NodeName, Vec<ChoiceExecutionCorrelation>>,
+    choice_write_conditions: BTreeMap<NodeName, CompletionPredicate>,
     parallel_join_correlations: BTreeMap<NodeName, ParallelJoinCorrelation>,
     map_execution_correlations: BTreeMap<NodeName, MapExecutionCorrelation>,
     node_completion: BTreeMap<NodeName, CompletionPredicate>,
@@ -469,6 +477,7 @@ macro_rules! emit_diagnostic {
 mod analyzer_assignments;
 mod analyzer_bindings;
 mod analyzer_bounds;
+mod analyzer_choice_writes;
 mod analyzer_guards;
 mod analyzer_index;
 mod analyzer_maps;

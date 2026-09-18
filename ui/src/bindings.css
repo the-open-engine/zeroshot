@@ -1,0 +1,202 @@
+.bindings-section {
+  border-top: 1px solid var(--hairline);
+  padding: 17px 0;
+}
+.bindings-section h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.bindings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bindings-heading > span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.bindings-helper,
+.bindings-empty,
+.bindings-unresolved {
+  margin: 8px 0 12px;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.bindings-empty {
+  color: var(--muted);
+}
+.bindings-row {
+  min-width: 0;
+  padding: 10px;
+  margin: 12px 0;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: var(--surface);
+}
+.bindings-row > legend {
+  padding: 0 4px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.bindings-field {
+  min-width: 0;
+  margin-bottom: 10px;
+}
+.bindings-field > label {
+  display: block;
+  margin: 0 0 5px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.bindings-field > select {
+  font-size: 12px;
+  padding: 8px;
+  text-overflow: ellipsis;
+}
+.bindings-field > small {
+  display: block;
+  margin: 5px 0 0;
+}
+.bindings-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.bindings-remove:hover {
+  color: var(--rust-text);
+}
+.bindings-add {
+  font-size: 12px;
+}
+.bindings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.bindings-draft {
+  border-color: var(--control-border);
+}
+.bindings-promotions {
+  min-width: 0;
+  padding: 0;
+  margin: 10px 0 0;
+  border: 0;
+}
+.bindings-promotions > legend {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 7px;
+}
+.bindings-promotions > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary);
+}
+.bindings-promotions input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--rust);
+}
+.bindings-promotions span {
+  overflow-wrap: anywhere;
+}
+.promotion-card {
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  margin: 8px 0;
+  background: var(--surface);
+}
+.promotion-card > summary {
+  padding: 10px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 12px;
+}
+.promotion-card > summary > strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.promotion-card > summary > span {
+  display: block;
+  padding: 4px 0 0 13px;
+  font-size: 11px;
+  color: var(--secondary);
+}
+.promotion-content {
+  padding: 0 10px 10px;
+}
+.promotion-destination,
+.promotion-chain {
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: var(--secondary);
+  margin: 6px 0;
+}
+.promotion-chain {
+  color: var(--ink);
+}
+.promotion-route {
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+}
+.promotion-route .text-button {
+  font-size: 11px;
+}
+.promotion-connect {
+  margin: 12px 0;
+}
+.promotion-connect > label {
+  display: block;
+  font-size: 11px;
+  color: var(--secondary);
+  margin-bottom: 5px;
+}
+.promotion-connect > select {
+  font-size: 12px;
+}
+.promotion-connect > button {
+  margin-top: 9px;
+}
+.promotion-unavailable > summary {
+  font-size: 11px;
+  color: var(--secondary);
+  cursor: pointer;
+}
+.promotion-unavailable strong {
+  font-weight: 500;
+}
+.promotion-add {
+  margin-top: 12px;
+}
+.promotion-add > label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.promotion-add > select {
+  font-size: 12px;
+}
+.promotion-add > .text-button {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.bindings-section > .bindings-add {
+  margin-top: 10px;
+}

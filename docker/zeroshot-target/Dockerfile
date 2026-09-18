@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1
 
+FROM node:24-trixie-slim AS ui-builder
+
+WORKDIR /src
+COPY ui/package.json ui/package-lock.json ./ui/
+RUN npm --prefix ui ci --ignore-scripts
+COPY ui ./ui
+RUN npm --prefix ui run build
+
 FROM rust:1.97.0-trixie AS rust-toolchain
 RUN rustup component add rustfmt clippy \
     && mkdir -p /opt/rustup \
@@ -13,8 +21,9 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY zeroshot ./zeroshot
+COPY --from=ui-builder /src/ui/dist ./ui/dist
 
-RUN cargo build --locked --release --package zeroshot --bin zeroshot
+RUN cargo build --locked --release --package zeroshot --bin zeroshot --features ui
 
 FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS python-runtime
 

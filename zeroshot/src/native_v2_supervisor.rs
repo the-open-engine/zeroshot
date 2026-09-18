@@ -482,6 +482,9 @@ fn contains_exact_value(container: &Value, expected: &Value) -> bool {
 mod controller;
 mod environment;
 mod runtime;
+// Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
+#[cfg(feature = "ui")]
+pub(crate) use runtime::{durable_history, next_execution, next_node_instance};
 pub use environment::{RunEnvironment, RunEnvironmentError};
 pub(crate) use environment::{ConnectionResolutionError, DynamicConnectionPlan, RunConnectionResolver};
 use runtime::*;

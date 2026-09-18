@@ -219,5 +219,9 @@ mod cases_2;
 mod cases_3;
 #[path = "full_v1_reducer/cases_4.rs"]
 mod cases_4;
+#[path = "full_v1_reducer/map_collections.rs"]
+mod map_collections;
+#[path = "full_v1_reducer/trace.rs"]
+mod trace;
 
 use openengine_cluster_testkit::assertions::{AssertValue};

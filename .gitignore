@@ -24,3 +24,5 @@ tmp/
 .eslintcache
 *.cast
 /site/
+/ui/dist/
+/ui/*.tsbuildinfo

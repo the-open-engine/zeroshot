@@ -1,8 +1,10 @@
+param([switch]$Ui)
 $ErrorActionPreference = 'Stop'
+$features = if ($Ui) { @('--features', 'zeroshot/ui') } else { @() }
 
 # Cargo's Windows Job forbids breakaway. Build first, then launch tests outside that Job
 # so detached controllers can exercise their actual lifetime and restrictive-Job behavior.
-$artifacts = @(cargo test --workspace --no-run --message-format=json | ForEach-Object {
+$artifacts = @(cargo test --workspace @features --no-run --message-format=json | ForEach-Object {
     $_ | ConvertFrom-Json
 })
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -22,5 +24,5 @@ foreach ($test in $tests) {
     }
 }
 
-cargo test --workspace --doc
+cargo test --workspace @features --doc
 if ($failed -or $LASTEXITCODE -ne 0) { exit 1 }

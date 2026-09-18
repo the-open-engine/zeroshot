@@ -209,7 +209,7 @@ async fn conflicting_parallel_writes_fail_closed() {
 }
 
 #[tokio::test]
-async fn unsafe_choice_promotion_fails_closed() {
+async fn optional_choice_promotion_does_not_make_an_unguarded_read_safe() {
     let work = valid_graph()
         .assert_at("root")
         .assert_at("children")
@@ -229,10 +229,18 @@ async fn unsafe_choice_promotion_fails_closed() {
             {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}
         ],"promotedStatePaths":[]
     }));
+    ProductionGraphVerifier::new(registry())
+        .verify(&unsafe_promotion)
+        .await
+        .assert_value();
+    let mut read = serde_json::to_value(&unsafe_promotion).assert_value();
+    read["root"]["children"][2]["output"] = json!({"kind":"record","fields":{"result":{"type":record()["fields"]["result"]["type"],"required":true}}});
+    read["root"]["children"][2]["bindings"] =
+        json!([{"target":["result"],"value":{"source":"state","path":["result"]}}]);
     assert!(
         rejection_codes(
             ProductionGraphVerifier::new(registry())
-                .verify(&unsafe_promotion)
+                .verify(&serde_json::from_value(read).assert_value())
                 .await
                 .assert_error()
         )

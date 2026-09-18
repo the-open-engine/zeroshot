@@ -116,6 +116,11 @@ impl<'a> Analyzer<'a> {
                     ..context.node
                 },
             );
+            self.invalidate_choice_writes(&mut flow.outcome_writes, &child_effects.possible_writes);
+            self.invalidate_choice_writes(
+                &mut effects.outcome_writes,
+                &child_effects.possible_writes,
+            );
             if falls_through {
                 flow.apply_effects(&child_effects);
             }
@@ -217,6 +222,7 @@ impl<'a> Analyzer<'a> {
             _ => {}
         }
         let mut effects = merge_alternatives(&alternatives);
+        self.correlate_choice_writes(group, &alternatives, &mut effects);
         effects.definite_nodes.insert(group.name.clone());
         self.restrict_promotions(PromotionValidationContext {
             group_state: &group.state,
@@ -325,16 +331,17 @@ impl<'a> Analyzer<'a> {
         );
         for selector in guard_selectors(until) {
             let guaranteed = body.definite_nodes.contains(&selector.name)
-                && self
-                    .nodes
-                    .get(&selector.name)
-                    .is_some_and(|info| matches!(info.node, GraphNode::Verifier(_)));
+                && self.nodes.get(&selector.name).is_some_and(|info| {
+                    matches!(info.node, GraphNode::Verifier(_))
+                        || (matches!(info.node, GraphNode::Step(_))
+                            && selector.source == ControlSource::Error)
+                });
             if !guaranteed {
                 emit_diagnostic!(
                     self,
                     GraphDiagnosticCode::LoopExitSatisfiability,
                     format!(
-                        "loop exit selector {} is not a verifier guaranteed in every iteration",
+                        "loop exit selector {} must select a verifier or a step error guaranteed in every iteration",
                         selector.name
                     ),
                     until_path.clone(),

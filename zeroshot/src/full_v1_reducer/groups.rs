@@ -31,6 +31,7 @@ impl Engine<'_> {
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
         let mut local = context.clone();
+        local.local_writes.clear();
         let selected = group
             .branches
             .as_slice()
@@ -42,12 +43,17 @@ impl Engine<'_> {
             .map(|branch| &branch.node)
             .or(group.otherwise.as_deref())
             .ok_or(ReducerError::MissingChoiceRoute)?;
+        self.trace_branch(&group.name, selected.name());
         let status = self.eval(selected, &mut local, traversal)?;
         if let Status::Continue { position } = status {
             promote(PromotionRequest {
                 node: &group.name,
                 map_indices: traversal.map_indices,
                 paths: &group.promoted_state_paths,
+                optional_paths: self
+                    .optional_promotions
+                    .get(&group.name)
+                    .ok_or(ReducerError::InconsistentHistory)?,
                 local: &local,
                 parent: context,
                 mode: traversal.mode,
@@ -67,7 +73,9 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
+        let checkpoint = self.trace_checkpoint();
         let probes = self.probe_parallel(group, context, traversal)?;
+        let probe_trace = self.take_trace_since(checkpoint);
         let (mut ordered, required) = self.parallel_completions(group, &probes, traversal)?;
         ordered.sort_by_key(|(index, position)| (*position, *index));
         if let Some(status) = self.unreached_parallel_join(
@@ -82,6 +90,11 @@ impl Engine<'_> {
                 required,
             },
         )? {
+            // A settled, unreachable join has no winner pass. Its completed branch paths are
+            // canonical facts of the reduction; pending probes and race losers stay private.
+            if !matches!(status, Status::Pending) {
+                self.restore_trace(probe_trace)?;
+            }
             return Ok(status);
         }
         let winners = ordered.into_iter().take(required).collect::<Vec<_>>();
@@ -223,6 +236,7 @@ impl Engine<'_> {
             .map(|(index, _)| *index)
             .collect::<BTreeSet<_>>();
         let mut joined = context.clone();
+        joined.local_writes.clear();
         for (index, _) in winners {
             let mut branch_context = context.clone();
             branch_context.local_writes.clear();
@@ -263,7 +277,7 @@ impl Engine<'_> {
     fn finish_parallel_join(
         &mut self,
         evaluation: GroupMutation<'_, ParNode>,
-        join: ParallelJoinResult,
+        mut join: ParallelJoinResult,
     ) -> Result<Status, ReducerError> {
         let GroupMutation {
             group,
@@ -271,6 +285,9 @@ impl Engine<'_> {
             traversal,
         } = evaluation;
         self.emit_parallel_promotion(group, &join.joined, traversal)?;
+        join.joined
+            .local_writes
+            .extend(context.local_writes.clone());
         *context = join.joined;
         self.record_parallel_control(
             GroupMutation {
@@ -338,16 +355,27 @@ impl Engine<'_> {
         if traversal.mode != EvalMode::Decide || group.promoted_state_paths.is_empty() {
             return Ok(());
         }
-        let values = group
-            .promoted_state_paths
-            .iter()
-            .map(|path| {
-                Ok(PromotedValue {
+        let optional_paths = self
+            .optional_promotions
+            .get(&group.name)
+            .ok_or(ReducerError::InconsistentHistory)?;
+        let mut values = Vec::new();
+        for path in &group.promoted_state_paths {
+            if let Some(value) = promoted_value(
+                &joined.state,
+                path,
+                &joined.local_writes,
+                optional_paths.contains(path),
+            )? {
+                values.push(PromotedValue {
                     path: path.clone(),
-                    value: select(&joined.state, path)?.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, ReducerError>>()?;
+                    value,
+                });
+            }
+        }
+        if values.is_empty() {
+            return Ok(());
+        }
         self.decisions.push(Decision::Promote {
             node: group.name.clone(),
             map_indices: traversal.map_indices.to_vec(),

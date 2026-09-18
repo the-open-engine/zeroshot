@@ -19,6 +19,7 @@ impl Engine<'_> {
         if items.len() as u64 > group.max_items.get() {
             return Ok(self.map_overflow(group, context, traversal));
         }
+        let checkpoint = self.trace_checkpoint();
         let probes = self.evaluate_map_items(
             MapItemsEvaluation {
                 evaluation: GroupEvaluation {
@@ -30,7 +31,17 @@ impl Engine<'_> {
             },
             EvalMode::Probe,
         )?;
+        let probe_trace = self.take_trace_since(checkpoint);
         if let Some((terminal_index, terminal)) = earliest_terminal(&probes) {
+            if traversal.mode == EvalMode::Probe {
+                let scope = &probes[terminal_index].scope;
+                self.restore_trace(
+                    probe_trace
+                        .into_iter()
+                        .filter(|record| record.map_indices.starts_with(scope))
+                        .collect(),
+                )?;
+            }
             return self.finish_terminal_map_item(
                 GroupEvaluation {
                     group,
@@ -46,6 +57,7 @@ impl Engine<'_> {
             );
         }
         let results = if traversal.mode == EvalMode::Probe {
+            self.restore_trace(probe_trace)?;
             probes
         } else {
             self.evaluate_map_items(
@@ -118,6 +130,8 @@ impl Engine<'_> {
                 let mut scope = traversal.map_indices.to_vec();
                 scope.push(index as u64);
                 let mut item_context = context.clone();
+                // An incoming array is not a value produced for this item.
+                item_context.local_writes.clear();
                 let status = self.eval(
                     &group.body,
                     &mut item_context,
@@ -198,13 +212,24 @@ impl Engine<'_> {
             traversal,
         } = evaluation;
         let mut local = context.clone();
+        let mut collected_paths = Vec::new();
         for path in &group.promoted_state_paths {
+            // A worker error has no output write. Leave the whole collection
+            // unchanged so authored outcome guards can handle that error;
+            // never fabricate placeholders or silently shorten the array.
+            if results.iter().any(|item| {
+                promoted_write_paths(&item.context.local_writes, std::slice::from_ref(path))
+                    .is_empty()
+            }) {
+                continue;
+            }
             let values = results
                 .iter()
                 .map(|item| select(&item.context.state, path).cloned())
                 .collect::<Result<Vec<_>, _>>()?;
             set_path(&mut local.state, path, Value::Array(values))?;
             local.local_writes.insert(path.clone());
+            collected_paths.push(path.clone());
         }
         self.set_group_control(
             &mut local,
@@ -218,7 +243,11 @@ impl Engine<'_> {
         promote(PromotionRequest {
             node: &group.name,
             map_indices: traversal.map_indices,
-            paths: &group.promoted_state_paths,
+            paths: &collected_paths,
+            optional_paths: self
+                .optional_promotions
+                .get(&group.name)
+                .ok_or(ReducerError::InconsistentHistory)?,
             local: &local,
             parent: context,
             mode: traversal.mode,

@@ -14,7 +14,15 @@ path = "src/lib.rs"
 name = "zeroshot"
 path = "src/main.rs"
 
+[features]
+ui = ["dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir", "dep:schemars"]
+
 [dependencies]
+axum = { version = "0.8", optional = true }
+hyper = { version = "1", features = ["http1", "server"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true }
+include_dir = { version = "0.7", optional = true }
+schemars = { workspace = true, optional = true }
 async-trait.workspace = true
 clap.workspace = true
 fs2.workspace = true

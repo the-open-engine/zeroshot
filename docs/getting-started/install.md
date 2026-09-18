@@ -22,6 +22,40 @@ For Codex, complete its [native Windows sandbox setup](https://developers.openai
 before running graphs with reviewers. Zeroshot keeps local Codex reviewers read-only; it does not
 install their sandbox.
 
+## Open the workspace UI
+
+```console
+zeroshot ui
+```
+
+Open `http://127.0.0.1:4173/ui/` to edit profiles and inspect live or completed local runs.
+Use `--listen 127.0.0.1:4185` to choose another loopback port. Ctrl-C stops the UI server;
+active runs continue. Restart the command to reconnect.
+
+**Profiles** edits graphs and runtime settings; the info icon explains authoring defaults.
+Saved profiles share the CLI's configuration store (`ZEROSHOT_CONFIG_DIR`); run history uses
+`ZEROSHOT_STATE_DIR`. Start a saved local profile from the CLI:
+
+```console
+zeroshot run --title "My task" --profile local:my-profile --input input.json
+```
+
+Open **Runs** for [live monitoring and replay](../guides/observe-and-control.md#browser).
+The [Docker target](../concepts/targets.md#direct-target) serves its own profiles and runs at `/ui/`.
+Cloud embedding remains tracked in [zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301).
+
+Release executables embed the UI. To build it from source:
+
+```console
+npm --prefix ui ci --ignore-scripts
+npm --prefix ui run build
+cargo build --release --package zeroshot --features ui
+./target/release/zeroshot ui
+```
+
+Node.js is needed for this build, not to serve the resulting UI. Library consumers
+can leave the `ui` feature disabled.
+
 ## Prepare a local run
 
 Run Zeroshot from a Git worktree, and install the agent harness named by the runtime plan:

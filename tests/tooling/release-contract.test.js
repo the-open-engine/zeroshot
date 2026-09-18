@@ -123,6 +123,48 @@ describe('Python release publication contract', () => {
   });
 });
 
+describe('Embedded UI distribution', () => {
+  it('builds locked UI assets before every released executable', () => {
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const commands = release.jobs.binaries.steps.map((step) => step.run || '').join('\n');
+    const install = commands.indexOf('npm --prefix ui ci --ignore-scripts');
+    const assets = commands.indexOf('npm --prefix ui run build');
+    const binary = commands.indexOf('cargo build --release --locked');
+    assert.ok(install >= 0 && assets > install && binary > assets);
+    assert.match(commands, /cargo build[^\n]+--features ui[^\n]+--target/);
+  });
+
+  it('builds target UI assets independently of local generated files', () => {
+    const dockerfile = read('docker/zeroshot-target/Dockerfile');
+    const ignore = read('.dockerignore');
+    assert.match(dockerfile, /FROM node:24-trixie-slim AS ui-builder/);
+    assert.match(dockerfile, /COPY ui\/package\.json ui\/package-lock\.json/);
+    assert.match(dockerfile, /npm --prefix ui ci --ignore-scripts/);
+    assert.match(dockerfile, /npm --prefix ui run build/);
+    assert.match(dockerfile, /COPY --from=ui-builder \/src\/ui\/dist \.\/ui\/dist/);
+    assert.match(dockerfile, /cargo build[^\n]+--features ui/);
+    assert.match(ignore, /^ui\/dist$/m);
+    assert.match(ignore, /^\*\*\/node_modules$/m);
+  });
+
+  it('checks library and UI feature lanes plus native and Docker lifecycle smoke', () => {
+    const workflow = yaml.load(read('.github/workflows/ci.yml'));
+    const commands = workflow.jobs['native-check'].steps.map((step) => step.run || '').join('\n');
+    assert.match(commands, /npm --prefix ui test/);
+    assert.match(commands, /cargo clippy --workspace --all-targets -- -D warnings/);
+    assert.match(commands, /cargo clippy --package zeroshot --all-targets --features ui/);
+    assert.match(commands, /cargo test --workspace/);
+    assert.match(commands, /cargo test --package zeroshot --features ui/);
+    assert.match(commands, /smoke-ui\.js --binary target\/release\/zeroshot/);
+    const imageCommands = workflow.jobs['target-image'].steps
+      .map((step) => step.run || '')
+      .join('\n');
+    assert.match(imageCommands, /smoke-ui\.js --url http:\/\/127\.0\.0\.1:4185/);
+    assert.match(imageCommands, /docker start "\$container"/);
+    assert.match(imageCommands, /State\.ExitCode/);
+  });
+});
+
 describe('Versioned documentation publication contract', () => {
   it('publishes Current from main and accepts exact releases for minor documentation', () => {
     const docs = yaml.load(read('.github/workflows/docs.yml'));

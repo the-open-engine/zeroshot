@@ -10,7 +10,8 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
-        match node {
+        let trace = self.trace_enter(node, traversal)?;
+        let status = match node {
             GraphNode::Step(_) | GraphNode::Verifier(_) => {
                 self.eval_worker_node(node, context, traversal)
             }
@@ -22,7 +23,12 @@ impl Engine<'_> {
             GraphNode::Succeed(_) | GraphNode::Fail(_) => {
                 self.eval_terminal_node(node, context, traversal)
             }
+        }?;
+        self.trace_finish(trace, &status, context);
+        if matches!(node, GraphNode::Succeed(_) | GraphNode::Fail(_)) {
+            self.trace_terminal(trace, &status)?;
         }
+        Ok(status)
     }
 
     fn eval_worker_node(
@@ -107,6 +113,7 @@ impl Engine<'_> {
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
         let mut local = context.clone();
+        local.local_writes.clear();
         let mut position = HistoryPosition::ZERO;
         for child in group.children.as_slice() {
             match self.eval(child, &mut local, traversal)? {
@@ -122,6 +129,10 @@ impl Engine<'_> {
             node: &group.name,
             map_indices: traversal.map_indices,
             paths: &group.promoted_state_paths,
+            optional_paths: self
+                .optional_promotions
+                .get(&group.name)
+                .ok_or(ReducerError::InconsistentHistory)?,
             local: &local,
             parent: context,
             mode: traversal.mode,
@@ -139,8 +150,21 @@ impl Engine<'_> {
     ) -> Result<Status, ReducerError> {
         let mut local = context.clone();
         let mut position = HistoryPosition::ZERO;
-        for _ in 1..=group.max_iterations.get() {
-            match self.eval(&group.body, &mut local, traversal)? {
+        for iteration in 1..=group.max_iterations.get() {
+            // Optional outputs describe this iteration; required state still carries across rounds.
+            local.local_writes.clear();
+            let mut loop_iterations = traversal.loop_iterations.to_vec();
+            if self.trace.is_some() {
+                loop_iterations.push(iteration);
+            }
+            match self.eval(
+                &group.body,
+                &mut local,
+                Traversal {
+                    loop_iterations: &loop_iterations,
+                    ..traversal
+                },
+            )? {
                 Status::Continue {
                     position: body_position,
                 } => {
@@ -194,6 +218,10 @@ impl Engine<'_> {
             node: &group.name,
             map_indices: traversal.map_indices,
             paths: &group.promoted_state_paths,
+            optional_paths: self
+                .optional_promotions
+                .get(&group.name)
+                .ok_or(ReducerError::InconsistentHistory)?,
             local: &local,
             parent: context,
             mode: traversal.mode,

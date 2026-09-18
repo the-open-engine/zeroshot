@@ -79,7 +79,9 @@ where
     }
     match command {
         NativeV2CliCommand::Run(run) => execute_run(run, context, signal, output).await,
-        NativeV2CliCommand::TargetServe(_) => Err(NativeV2CliError::ProcessCommand),
+        NativeV2CliCommand::TargetServe(_) | NativeV2CliCommand::Ui { .. } => {
+            Err(NativeV2CliError::ProcessCommand)
+        }
         command => execute_run_operation(command, context.backend, signal, output).await,
     }
 }

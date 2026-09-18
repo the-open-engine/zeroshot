@@ -26,6 +26,56 @@ pub(super) fn collect_executable_depths(
     }
 }
 
+/// Resolve presence facts once from the admitted root. Promotion applies these facts without
+/// reinterpreting payload schemas while replaying each group or loop iteration.
+pub(super) fn collect_optional_promotions(
+    node: &GraphNode,
+    optional_paths: &mut BTreeMap<NodeName, BTreeSet<FieldPath>>,
+) -> Result<(), ReducerError> {
+    let group = match node {
+        GraphNode::Seq(group) => Some((&group.state, &group.promoted_state_paths)),
+        GraphNode::Choice(group) => Some((&group.state, &group.promoted_state_paths)),
+        GraphNode::Par(group) => Some((&group.state, &group.promoted_state_paths)),
+        GraphNode::Loop(group) => Some((&group.state, &group.promoted_state_paths)),
+        GraphNode::Map(group) => Some((&group.state, &group.promoted_state_paths)),
+        GraphNode::Step(_)
+        | GraphNode::Verifier(_)
+        | GraphNode::Succeed(_)
+        | GraphNode::Fail(_) => None,
+    };
+    if let Some((schema, paths)) = group {
+        let mut optional = BTreeSet::new();
+        for path in paths {
+            if promotion_path_is_optional(schema, path)? {
+                optional.insert(path.clone());
+            }
+        }
+        optional_paths.insert(node.name().clone(), optional);
+    }
+    for child in openengine_cluster_server::graph_verifier::graph_node_children(node) {
+        collect_optional_promotions(child, optional_paths)?;
+    }
+    Ok(())
+}
+
+fn promotion_path_is_optional(
+    schema: &openengine_cluster_protocol::PayloadType,
+    path: &FieldPath,
+) -> Result<bool, ReducerError> {
+    use openengine_cluster_protocol::PayloadType;
+    let mut payload = schema;
+    let mut optional = false;
+    for part in path.segments() {
+        let PayloadType::Record { fields } = payload else {
+            return Err(ReducerError::MissingSelectedValue);
+        };
+        let field = fields.get(part).ok_or(ReducerError::MissingSelectedValue)?;
+        optional |= !field.required;
+        payload = &field.value_type;
+    }
+    Ok(optional)
+}
+
 pub(super) fn validate_history_for_mode(
     executions: &[DurableExecution],
     execution_mode: ExecutionMode,
@@ -315,6 +365,7 @@ pub(super) fn promote(request: PromotionRequest<'_>) -> Result<(), ReducerError>
         node,
         map_indices,
         paths,
+        optional_paths,
         local,
         parent,
         mode,
@@ -322,7 +373,15 @@ pub(super) fn promote(request: PromotionRequest<'_>) -> Result<(), ReducerError>
     } = request;
     let mut values = Vec::with_capacity(paths.len());
     for path in paths {
-        let value = select(&local.state, path)?.clone();
+        let Some(value) = promoted_value(
+            &local.state,
+            path,
+            &local.local_writes,
+            optional_paths.contains(path),
+        )?
+        else {
+            continue;
+        };
         set_path(&mut parent.state, path, value.clone())?;
         values.push(PromotedValue {
             path: path.clone(),
@@ -341,6 +400,22 @@ pub(super) fn promote(request: PromotionRequest<'_>) -> Result<(), ReducerError>
     }
     merge_runtime_facts(local, parent);
     Ok(())
+}
+
+pub(super) fn promoted_value(
+    state: &Value,
+    path: &FieldPath,
+    writes: &BTreeSet<FieldPath>,
+    optional: bool,
+) -> Result<Option<Value>, ReducerError> {
+    if optional && promoted_write_paths(writes, std::slice::from_ref(path)).is_empty() {
+        return Ok(None);
+    }
+    match select(state, path) {
+        Ok(value) => Ok(Some(value.clone())),
+        Err(ReducerError::MissingSelectedValue) if optional => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 pub(super) fn promoted_write_paths(
