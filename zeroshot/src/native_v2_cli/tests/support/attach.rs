@@ -12,6 +12,9 @@ pub(super) enum AttachBehavior {
     EndOfStream,
     SlowConsumer,
     ProtocolError,
+    TransportError {
+        attempt: usize,
+    },
 }
 
 pub(super) fn attach_event(

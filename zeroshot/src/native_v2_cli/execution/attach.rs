@@ -29,18 +29,21 @@ where
     let RoutedAttach { target, params } = route;
     let detach = signal.wait();
     tokio::pin!(detach);
+    let mut opened = false;
     loop {
         let mut subscription = tokio::select! {
             biased;
             () = &mut detach => return Ok(CliOutcome::Detached),
             result = backend.run_attach(target, params.clone()) => match result {
                 Ok(subscription) => subscription,
+                Err(error) if !opened => return Err(error),
                 Err(error) => {
                     retry_disconnected(error).await?;
                     continue;
                 }
             },
         };
+        opened = true;
         loop {
             let step = next_or_detach(subscription.next(), detach.as_mut()).await?;
             match step {
