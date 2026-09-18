@@ -91,9 +91,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
     steps:
       - name: Preserve source line endings on Windows
         if: runner.os == 'Windows'
@@ -123,6 +120,7 @@ jobs:
 
       - name: Test hosted process and filesystem boundaries as root
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           # Exercise mapped namespaces on this disposable runner, including Ubuntu AppArmor hosts.
           if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
