@@ -1,6 +1,6 @@
 use super::*;
 use super::super::status::confirmed_failure;
-use openengine_cluster_protocol::{RunStatus, RunStatusParams, RunStatusResult};
+use openengine_cluster_protocol::{RunStatus, RunStatusParams};
 
 async fn failed_runtime() -> (Fixture, NativeRunHistory, NativeV2Observability) {
     let fixture = Fixture::new().await;
@@ -299,6 +299,7 @@ async fn failure_observation_requires_exact_run_canonical_cursor_and_reserved_re
 #[cfg(unix)]
 mod local {
     use super::*;
+    use openengine_cluster_protocol::RunStatusResult;
     use crate::native_v2_portable_controller::{PortableControllerPaths, PortableControllerReady};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
