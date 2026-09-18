@@ -4,7 +4,7 @@ use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
 use crate::native_v2_runner::{
-    render_agent_prompt, DriverInvocation, NodeRole, NodeRunnerError, ResolvedEnvironment,
+    render_agent_prompt, DriverInvocation, NodeRunnerError, ResolvedEnvironment,
 };
 use crate::worker_catalog::ReasoningEffort;
 
@@ -21,7 +21,6 @@ const CLAUDE_CODE_OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 pub(super) struct ClaudeTurnArguments<'a> {
     pub(super) model: &'a str,
     pub(super) effort: Option<ReasoningEffort>,
-    pub(super) role: NodeRole,
     pub(super) resume_id: Option<&'a str>,
     pub(super) json_schema: String,
 }
@@ -29,7 +28,7 @@ pub(super) struct ClaudeTurnArguments<'a> {
 pub(super) fn claude_arguments(
     mut argv: Vec<String>,
     turn: ClaudeTurnArguments<'_>,
-) -> Result<Vec<String>, NodeRunnerError> {
+) -> Vec<String> {
     argv.extend([
         "--print".to_owned(),
         "--input-format".to_owned(),
@@ -46,14 +45,10 @@ pub(super) fn claude_arguments(
     if let Some(effort) = turn.effort {
         argv.extend(["--effort".to_owned(), effort_token(effort).to_owned()]);
     }
-    match turn.role {
-        NodeRole::Worker | NodeRole::Verifier => {}
-        NodeRole::GitDelivery => return Err(NodeRunnerError::Driver),
-    }
     if let Some(resume_id) = turn.resume_id {
         argv.extend(["--resume".to_owned(), resume_id.to_owned()]);
     }
-    Ok(argv)
+    argv
 }
 
 pub(super) fn extend_declared_environment(

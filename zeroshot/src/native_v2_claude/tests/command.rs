@@ -172,21 +172,18 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
 }
 
 #[test]
-fn verifiers_do_not_force_a_permission_policy() {
+fn arguments_leave_permission_policy_to_the_adapter() {
     use crate::native_v2_claude::command::{ClaudeTurnArguments, claude_arguments};
-    use crate::native_v2_runner::NodeRole;
 
     let arguments = claude_arguments(
         Vec::new(),
         ClaudeTurnArguments {
             model: "provider-owned-model",
             effort: None,
-            role: NodeRole::Verifier,
             resume_id: Some("same-session"),
             json_schema: "{}".to_owned(),
         },
-    )
-    .assert_value();
+    );
     assert!(
         !arguments
             .iter()
