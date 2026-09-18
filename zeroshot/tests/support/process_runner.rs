@@ -25,8 +25,7 @@ pub fn shell_quote(value: &str) -> String {
 }
 
 pub async fn wait_for_child_pid(path: &PathBuf) -> i32 {
-    let startup_seconds = if cfg!(windows) { 30 } else { 5 };
-    let deadline = Instant::now() + Duration::from_secs(startup_seconds);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(contents) = fs::read_to_string(path) {
             if let Ok(pid) = contents.trim().parse::<i32>() {

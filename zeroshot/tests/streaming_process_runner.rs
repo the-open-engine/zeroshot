@@ -353,47 +353,61 @@ async fn close_and_release_are_idempotent_for_one_shot_sessions() {
 }
 
 #[cfg(windows)]
+const WINDOWS_PROCESS_FIXTURE: &str = "ZEROSHOT_STREAMING_PROCESS_FIXTURE";
+
+#[cfg(windows)]
+async fn windows_process_fixture(pid_file: std::ffi::OsString) {
+    if pid_file == "descendant" {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        return;
+    }
+    let mut child = tokio::process::Command::new(std::env::current_exe().assert_value())
+        .args(["--exact", "windows_job_release_reaps_a_descendant"])
+        .env(WINDOWS_PROCESS_FIXTURE, "descendant")
+        .kill_on_drop(true)
+        .spawn()
+        .assert_value();
+    fs::write(
+        PathBuf::from(pid_file),
+        child.id().assert_value().to_string(),
+    )
+    .assert_value();
+    child.wait().await.assert_value();
+}
+
+#[cfg(windows)]
 #[tokio::test]
 async fn windows_job_release_reaps_a_descendant() {
-    let system_root = std::env::var("SystemRoot").assert_value_with("Windows has SystemRoot");
-    let powershell = PathBuf::from(&system_root)
-        .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe");
+    if let Some(pid_file) = std::env::var_os(WINDOWS_PROCESS_FIXTURE) {
+        windows_process_fixture(pid_file).await;
+        return;
+    }
+    let executable = std::env::current_exe().assert_value();
     let pid_file = unique_temp_path("zeroshot-stream-windows-descendant-pid");
-    let powershell_literal = powershell.to_string_lossy().replace('\'', "''");
-    let pid_literal = pid_file.to_string_lossy().replace('\'', "''");
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         $child = Start-Process -FilePath '{powershell_literal}' \
-         -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 60') \
-         -NoNewWindow -PassThru; \
-         Set-Content -NoNewline -LiteralPath '{pid_literal}' -Encoding ascii -Value $child.Id; \
-         Wait-Process -Id $child.Id"
-    );
     let mut launch = command(
-        powershell.to_string_lossy().as_ref(),
-        vec!["-NoProfile", "-NonInteractive", "-Command", &script],
+        executable.to_str().assert_value(),
+        vec!["--exact", "windows_job_release_reaps_a_descendant"],
     );
-    launch
-        .environment
-        .insert("SystemRoot".to_owned(), system_root);
-    // Bound cold PowerShell startup independently of the cancellation/cleanup deadlines.
-    launch.deadline = None;
+    launch.environment.insert(
+        "SystemRoot".to_owned(),
+        std::env::var("SystemRoot").assert_value(),
+    );
+    launch.environment.insert(
+        WINDOWS_PROCESS_FIXTURE.to_owned(),
+        pid_file.to_str().assert_value().to_owned(),
+    );
     let (cancel, cancellation) = cancellation_pair();
     let mut session = LocalProcessRunner::new()
         .open(launch, cancellation)
         .await
         .assert_value();
-    // This command takes no input; deliver EOF before waiting for its child.
     session.close_stdin().await.assert_value();
     let child_pid = tokio::select! {
         pid = wait_for_child_pid(&pid_file) => pid,
         output = session.wait() => {
             let output = output.assert_value();
             panic!(
-                "PowerShell exited before recording its child (exit {:?}): {}",
+                "fixture exited before recording its child (exit {:?}): {}",
                 output.exit_code,
                 String::from_utf8_lossy(&output.stderr_tail),
             );
@@ -405,6 +419,7 @@ async fn windows_job_release_reaps_a_descendant() {
         .await
         .assert_value()
         .assert_value();
+    assert!(completion.cancelled);
     assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
     wait_for_process_exit(child_pid).await;
     let _ = fs::remove_file(pid_file);
