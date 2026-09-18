@@ -202,7 +202,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   pipes behind one NDJSON protocol. Windows state uses protected current-user/SYSTEM ACLs, rejects
   reparse points, and pins volume/file identity. Provider and delivery descendants belong to
   kill-on-close Job Objects before their first instruction. Detached controllers inherit no caller
-  handles and leave a caller Job only when it permits breakaway. Windows config defaults to
+  handles and resume only after proving they escaped every caller Job; restrictive Job policies
+  reject controller startup. Windows config defaults to
   `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
 
 ## CLI and target contracts

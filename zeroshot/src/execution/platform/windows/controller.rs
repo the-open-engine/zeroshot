@@ -6,13 +6,17 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
-    TerminateProcess, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, PROCESS_INFORMATION,
+    ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 
-use super::{check, detached_creation_flags};
+use super::check;
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) struct ControllerChild(OwnedHandle);
 
@@ -73,7 +77,7 @@ pub(crate) fn spawn_controller(
             std::ptr::null(),
             std::ptr::null(),
             0,
-            detached_creation_flags()? | CREATE_UNICODE_ENVIRONMENT,
+            detached_creation_flags()? | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
             environment.as_ptr().cast(),
             directory
                 .as_ref()
@@ -82,12 +86,80 @@ pub(crate) fn spawn_controller(
             &mut process,
         )
     })?;
-    unsafe {
-        CloseHandle(process.hThread);
+    resume_controller(process)
+}
+
+fn resume_controller(process: PROCESS_INFORMATION) -> io::Result<ControllerChild> {
+    let child = ControllerChild(unsafe { OwnedHandle::from_raw_handle(process.hProcess) });
+    let thread = unsafe { OwnedHandle::from_raw_handle(process.hThread) };
+    if let Err(error) = resume_detached(&child, &thread) {
+        check(unsafe { TerminateProcess(child.0.as_raw_handle(), 1) })?;
+        if unsafe { WaitForSingleObject(child.0.as_raw_handle(), 5_000) } != WAIT_OBJECT_0 {
+            return Err(io::Error::other(
+                "failed controller launch cleanup could not be confirmed",
+            ));
+        }
+        return Err(error);
     }
-    Ok(ControllerChild(unsafe {
-        OwnedHandle::from_raw_handle(process.hProcess)
-    }))
+    Ok(child)
+}
+
+fn resume_detached(child: &ControllerChild, thread: &OwnedHandle) -> io::Result<()> {
+    // An ancestor Job may prohibit breakaway even when the immediate Job permits it.
+    // Check the suspended child before it can consume the bootstrap or start any work.
+    if in_job(child.0.as_raw_handle())? {
+        return Err(detachment_denied());
+    }
+    if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn in_job(process: HANDLE) -> io::Result<bool> {
+    let mut present = 0;
+    check(unsafe { IsProcessInJob(process, std::ptr::null_mut(), &mut present) })?;
+    Ok(present != 0)
+}
+
+fn detachment_denied() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "cannot detach a controller from this Windows Job; run Zeroshot from a terminal that permits process breakaway",
+    )
+}
+
+// Leave caller-owned Jobs only through their permitted breakaway policy.
+fn detached_creation_flags() -> io::Result<u32> {
+    use windows_sys::Win32::System::JobObjects::{
+        QueryInformationJobObject, JobObjectExtendedLimitInformation,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+        JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
+    };
+    let mut flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    if in_job(unsafe { GetCurrentProcess() })? {
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        check(unsafe {
+            QueryInformationJobObject(
+                std::ptr::null_mut(),
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_mut(&mut limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+                std::ptr::null_mut(),
+            )
+        })?;
+        if limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_BREAKAWAY_OK != 0 {
+            flags |= CREATE_BREAKAWAY_FROM_JOB;
+        } else if limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+            == 0
+        {
+            return Err(detachment_denied());
+        }
+    }
+    Ok(flags)
 }
 
 fn wide(value: &OsStr) -> io::Result<Vec<u16>> {

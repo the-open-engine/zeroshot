@@ -164,37 +164,6 @@ pub(crate) fn create_private_directory(path: &Path) -> io::Result<()> {
     check(unsafe { CreateDirectoryW(wide(path)?.as_ptr(), &attributes) })
 }
 
-/// A remote shell may own a kill-on-close Job. Leave it only when that Job permits breakaway;
-/// restrictive caller-owned Jobs retain their containment policy.
-pub(crate) fn detached_creation_flags() -> io::Result<u32> {
-    use windows_sys::Win32::System::JobObjects::{
-        IsProcessInJob, QueryInformationJobObject, JobObjectExtendedLimitInformation,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-    };
-    use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
-    };
-    let mut flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
-    let mut in_job = 0;
-    check(unsafe { IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut in_job) })?;
-    if in_job != 0 {
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        check(unsafe {
-            QueryInformationJobObject(
-                std::ptr::null_mut(),
-                JobObjectExtendedLimitInformation,
-                std::ptr::from_mut(&mut limits).cast(),
-                std::mem::size_of_val(&limits) as u32,
-                std::ptr::null_mut(),
-            )
-        })?;
-        if limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_BREAKAWAY_OK != 0 {
-            flags |= CREATE_BREAKAWAY_FROM_JOB;
-        }
-    }
-    Ok(flags)
-}
-
 pub(crate) fn open_directory(path: &Path) -> io::Result<File> {
     let file = open_identity(path)?;
     if !file.metadata()?.is_dir() {

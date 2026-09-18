@@ -365,21 +365,38 @@ async fn windows_job_release_reaps_a_descendant() {
     let powershell_literal = powershell.to_string_lossy().replace('\'', "''");
     let pid_literal = pid_file.to_string_lossy().replace('\'', "''");
     let script = format!(
-        "$child = Start-Process -FilePath '{powershell_literal}' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru; Set-Content -NoNewline -Path '{pid_literal}' -Value $child.Id; Wait-Process -Id $child.Id"
+        "$ErrorActionPreference = 'Stop'; \
+         $child = Start-Process -FilePath '{powershell_literal}' \
+         -ArgumentList @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 60') \
+         -NoNewWindow -PassThru; \
+         Set-Content -NoNewline -LiteralPath '{pid_literal}' -Encoding ascii -Value $child.Id; \
+         Wait-Process -Id $child.Id"
     );
     let mut launch = command(
         powershell.to_string_lossy().as_ref(),
-        vec!["-NoProfile", "-Command", &script],
+        vec!["-NoProfile", "-NonInteractive", "-Command", &script],
     );
     launch
         .environment
         .insert("SystemRoot".to_owned(), system_root);
+    // Bound cold PowerShell startup independently of the cancellation/cleanup deadlines.
+    launch.deadline = None;
     let (cancel, cancellation) = cancellation_pair();
     let mut session = LocalProcessRunner::new()
         .open(launch, cancellation)
         .await
         .assert_value();
-    let child_pid = wait_for_child_pid(&pid_file).await;
+    let child_pid = tokio::select! {
+        pid = wait_for_child_pid(&pid_file) => pid,
+        output = session.wait() => {
+            let output = output.assert_value();
+            panic!(
+                "PowerShell exited before recording its child (exit {:?}): {}",
+                output.exit_code,
+                String::from_utf8_lossy(&output.stderr_tail),
+            );
+        }
+    };
     assert!(process_exists(child_pid));
     cancel.send(true).assert_value();
     let completion = timeout(Duration::from_secs(5), session.wait())
