@@ -12,6 +12,7 @@ describe('npm binary shim', () => {
     assert.equal(packageManifest.name, '@the-open-engine-company/zeroshot');
     assert.deepEqual(packageManifest.bin, { zeroshot: 'bin/zeroshot.js' });
     assert.equal(packageManifest.scripts.postinstall, 'node install.js');
+    assert.equal(packageManifest.files.includes('skills/'), true);
   });
 
   it('downloads from canonical GitHub v-tags', () => {

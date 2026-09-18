@@ -2,8 +2,9 @@
 'use strict';
 
 const { install } = require('./lib/install');
+const { requireCompleteSkillInstall } = require('./lib/skills');
 
-install().catch((error) => {
+install({ onSkillResults: requireCompleteSkillInstall }).catch((error) => {
   process.stderr.write(`zeroshot install failed: ${error.message}\n`);
   process.exitCode = 1;
 });

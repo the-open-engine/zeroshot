@@ -1,16 +1,20 @@
 # Install Zeroshot
 
-Install the `zeroshot` command through its npm delivery package, which requires Node.js 18 or newer.
-The installer selects the release target declared for the current system and checks the downloaded
-archive against `SHA256SUMS` before writing the native executable.
+Install the `zeroshot` command and its agent skill through the npm delivery package, which requires
+Node.js 18 or newer. The installer selects the release target declared for the current system and
+checks the downloaded archive against `SHA256SUMS` before writing the native executable.
 
 ```console
 npm install --global @the-open-engine-company/zeroshot
-zeroshot version
 ```
 
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
+
+The package installs one managed skill for Codex and GitHub Copilot under `$HOME/.agents/skills`,
+and for Claude Code under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`. No agent selection or
+per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
+package, delete its two skill directories manually only if their `SKILL.md` files remain unmodified.
 
 On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
 Install Git for Windows and put Git and your chosen harness on `PATH`; npm-installed `.cmd`
@@ -21,6 +25,16 @@ these with absolute paths. The hosted target image requires Linux.
 For Codex, complete its [native Windows sandbox setup](https://developers.openai.com/codex/windows)
 before running graphs with reviewers. Zeroshot keeps local Codex reviewers read-only; it does not
 install their sandbox.
+
+## Connect Zeroshot Cloud
+
+The Cloud target is built in. Sign in once; organization selection happens in the browser:
+
+```console
+zeroshot target login cloud
+```
+
+Cloud runs use `--target cloud`. Omit `--target` for local execution.
 
 ## Open the workspace UI
 

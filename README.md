@@ -33,11 +33,11 @@ pass.
 
 ```bash
 npm install -g @the-open-engine-company/zeroshot
-zeroshot version
 ```
 
 The npm package installs a verified native binary for Linux x64/arm64, macOS x64/arm64, or Windows
-x64. Native archives and checksums are attached to each canonical `vX.Y.Z` GitHub Release.
+x64. It also installs one Zeroshot skill for Codex, GitHub Copilot, and Claude Code at user scope.
+Native archives and checksums are attached to each canonical `vX.Y.Z` GitHub Release.
 
 ## The graph is the orchestration
 

@@ -4,6 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const { URL } = require('url');
+const { installSkills } = require('./skills');
 const {
   archiveName,
   extractExecutable,
@@ -120,6 +121,13 @@ async function install(options = {}) {
   } finally {
     fs.rmSync(temporary, { force: true });
   }
+  const skillResults = installSkills({
+    packageRoot,
+    homeDirectory: options.homeDirectory,
+    environment: options.environment,
+    uid: options.uid,
+  });
+  if (options.onSkillResults) options.onSkillResults(skillResults);
   return destination;
 }
 

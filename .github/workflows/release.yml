@@ -679,19 +679,40 @@ jobs:
           npm install --ignore-scripts --prefix "$install_root" "${tarballs[0]}"
           package_root="$install_root/node_modules/@the-open-engine-company/zeroshot"
           node - "$package_root" "$PWD/release-assets" <<'NODE'
+          const assert = require('node:assert/strict');
           const fs = require('node:fs');
           const path = require('node:path');
           const [packageRoot, releaseDirectory] = process.argv.slice(2);
           const { install } = require(path.join(packageRoot, 'lib', 'install'));
-          install({
-            packageRoot,
-            platform: 'linux',
-            arch: 'x64',
-            fetchBuffer(url) {
-              const filename = path.basename(new URL(url).pathname);
-              return Promise.resolve(fs.readFileSync(path.join(releaseDirectory, filename)));
-            },
-          }).catch((error) => {
+          const { managedSource } = require(path.join(packageRoot, 'lib', 'skills'));
+          const installRoot = path.resolve(packageRoot, '..', '..', '..');
+          const homeDirectory = path.join(installRoot, 'home');
+          const options = {
+              packageRoot,
+              homeDirectory,
+              environment: {},
+              platform: 'linux',
+              arch: 'x64',
+              fetchBuffer(url) {
+                const filename = path.basename(new URL(url).pathname);
+                return Promise.resolve(fs.readFileSync(path.join(releaseDirectory, filename)));
+              },
+            };
+          (async () => {
+            await install(options);
+            const skillFiles = [
+              path.join(homeDirectory, '.agents', 'skills', 'zeroshot', 'SKILL.md'),
+              path.join(homeDirectory, '.claude', 'skills', 'zeroshot', 'SKILL.md'),
+            ];
+            const installed = skillFiles.map((filename) => fs.readFileSync(filename, 'utf8'));
+            assert.equal(installed[0], installed[1]);
+            assert.match(managedSource(installed[0]), /^---\nname: zeroshot\n/);
+            await install(options);
+            assert.deepEqual(
+              skillFiles.map((filename) => fs.readFileSync(filename, 'utf8')),
+              installed
+            );
+          })().catch((error) => {
             console.error(error);
             process.exitCode = 1;
           });

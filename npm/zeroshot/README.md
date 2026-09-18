@@ -1,6 +1,17 @@
 # `@the-open-engine-company/zeroshot`
 
-Thin installer for the canonical `zeroshot` executable. The package selects the release archive for the current Node platform and architecture, verifies it against that release's `SHA256SUMS`, and installs only the verified executable.
+Installer for the canonical `zeroshot` executable and agent skill. The package selects the release
+archive for the current Node platform and architecture, verifies it against that release's
+`SHA256SUMS`, and installs the executable.
+
+The same managed skill is installed for Codex and GitHub Copilot at
+`$HOME/.agents/skills/zeroshot/SKILL.md`, and for Claude Code at
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot/SKILL.md`. Reinstalling updates an unchanged
+managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so
+the conflict cannot pass unnoticed.
+
+npm 7 and newer do not run uninstall lifecycle scripts. After uninstalling the package, remove the
+two skill directories above manually if their `SKILL.md` files are still unmodified managed copies.
 
 Installation fails closed with `UNSUPPORTED_ZEROSHOT_HOST` when the host has no declared release target. Source compilation and cross-target substitution are not supported.
 

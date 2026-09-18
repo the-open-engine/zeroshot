@@ -19,6 +19,7 @@
   "files": [
     "bin/",
     "lib/",
+    "skills/",
     "install.js",
     "targets.json",
     "README.md"

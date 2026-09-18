@@ -11,7 +11,7 @@ try {
   const binary = path.join(__dirname, 'native', executable);
   if (!fs.existsSync(binary)) {
     throw new Error(
-      `NATIVE_BINARY_MISSING: ${binary}; reinstall @the-open-engine-company/zeroshot`
+      `NATIVE_BINARY_MISSING: ${binary}; reinstall @the-open-engine-company/zeroshot with lifecycle scripts enabled`
     );
   }
   const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });

@@ -26,6 +26,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   profile UI. The UI is served by Rust and never needs a production Node server.
 - Canonical releases are explicit `vX.Y.Z` tags with major version 8 or newer.
 - The npm package is `@the-open-engine-company/zeroshot`.
+- That package owns one canonical skill and installs managed copies for Codex, GitHub Copilot, and
+  Claude Code at their user scopes. Do not fork the skill by host.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -361,8 +363,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Fix root causes and keep changes scoped.
 - Use existing patterns; do not add parallel registries, provider lists, runtime model catalogs, or release
   authorities.
-- Keep optional developer and agent analysis tools external to the repository. Do not add package
-  dependencies, hooks, CI gates, skills, or checked-in state for personal analysis tooling.
+- Keep optional developer and agent analysis tools external to the repository. The npm-delivered
+  Zeroshot product skill is the sole product-owned exception; do not add package dependencies,
+  hooks, CI gates, other skills, or checked-in state for personal analysis tooling.
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
