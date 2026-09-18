@@ -112,6 +112,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Build and test embedded UI
+        shell: bash
         run: |
           npm --prefix ui ci --ignore-scripts
           npm --prefix ui run build
@@ -121,6 +122,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
+        shell: bash
         run: |
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy --package zeroshot --all-targets --features ui -- -D warnings
@@ -178,6 +180,7 @@ jobs:
         run: cargo doc --workspace --no-deps
 
       - name: Build and smoke canonical executable
+        shell: bash
         run: |
           cargo build --locked --release --package zeroshot --bin zeroshot --features ui
           target/release/zeroshot --version
