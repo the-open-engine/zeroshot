@@ -401,8 +401,10 @@ python -m mkdocs build --strict
 
 ## Release convention
 
-- CI has native, Python, and repository-tooling lanes plus stable aggregate `required`. The native
-  lane runs on Linux and Windows, including real local CLI subprocess tests. Windows uses
+- CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
+  aggregate `required`. `.github/ci-path-classifier.js` owns fail-closed path routing and cross-lane
+  producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
+  CLI subprocess tests. Windows uses
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
