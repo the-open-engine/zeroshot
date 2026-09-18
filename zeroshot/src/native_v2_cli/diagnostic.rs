@@ -270,6 +270,10 @@ fn remote_diagnostic(code: &str, message: &str, details: Option<Value>) -> Nativ
 
 fn protocol_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic> {
     match error {
+        NativeV2CliError::TargetTransport { name, origin, .. } => Some(
+            NativeV2CliDiagnostic::target(error.to_string())
+                .with_details(json!({"target": name, "origin": origin})),
+        ),
         NativeV2CliError::Protocol(_) | NativeV2CliError::OutputJson(_) => {
             Some(NativeV2CliDiagnostic::new(
                 DiagnosticKind::Protocol,

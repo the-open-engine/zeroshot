@@ -378,6 +378,16 @@ pub enum NativeV2CliError {
     SubmissionConflict { existing_run_id: String },
     #[error("Zeroshot observation transport disconnected")]
     Disconnected,
+    #[error(
+        "cannot communicate with target {name:?} at {origin}: {message}. \
+         Check the target address and that the server is running; \
+         for Docker targets, check Docker and the target container"
+    )]
+    TargetTransport {
+        name: String,
+        origin: String,
+        message: String,
+    },
     #[error("run finished unsuccessfully")]
     RunFailed,
     #[error("merge plan finished unsuccessfully")]
@@ -570,4 +580,10 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError>;
+}
+
+impl NativeV2CliError {
+    pub(crate) fn is_disconnected(&self) -> bool {
+        matches!(self, Self::Disconnected | Self::TargetTransport { .. })
+    }
 }

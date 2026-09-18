@@ -151,7 +151,7 @@ where
         self.authority
             .discover(&target)
             .await
-            .map_err(cli_authority_error)?;
+            .map_err(|error| error.into_cli(&target))?;
         self.registry.insert(target).map_err(cli_target_error)
     }
 
@@ -161,7 +161,7 @@ where
         self.authority
             .login(&target)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn connection_list(
@@ -174,7 +174,7 @@ where
         self.authority
             .connection_list(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn connection_set(
@@ -187,7 +187,7 @@ where
         self.authority
             .connection_set(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn connection_delete(
@@ -200,7 +200,7 @@ where
         self.authority
             .connection_delete(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn profile_list(
@@ -212,7 +212,7 @@ where
         self.authority
             .profile_list(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn profile_show(
@@ -224,7 +224,7 @@ where
         self.authority
             .profile_show(&target, selector)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn profile_set(
@@ -236,7 +236,7 @@ where
         self.authority
             .profile_set(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn profile_delete(
@@ -248,7 +248,7 @@ where
         self.authority
             .profile_delete(&target, selector)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn profile_default(
@@ -260,7 +260,7 @@ where
         self.authority
             .profile_default(&target, request)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn merge_plan_submit(
@@ -289,7 +289,7 @@ where
                 },
             )
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn merge_plan_status(
@@ -301,7 +301,7 @@ where
         self.authority
             .merge_plan_status(&target, &plan_id)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn merge_plan_force(
@@ -313,7 +313,7 @@ where
         self.authority
             .merge_plan_force(&target, &plan_id)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn submit(
@@ -350,7 +350,7 @@ where
                     },
                 )
                 .await
-                .map_err(cli_authority_error);
+                .map_err(|error| error.into_cli(&target));
         }
         self.authority
             .submit(
@@ -371,7 +371,7 @@ where
                 },
             )
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
     }
 
     async fn connect(
@@ -385,11 +385,11 @@ where
             .authority
             .oecp_session(&target, &TargetOecpSessionRequest { run_id })
             .await
-            .map_err(cli_authority_error)?;
+            .map_err(|error| error.into_cli(&target))?;
         self.dialer
             .dial(&target, session)
             .await
-            .map_err(cli_connector_error)
+            .map_err(|error| cli_connector_error(&target, error))
     }
 
     async fn hosted_run_list(
@@ -404,7 +404,7 @@ where
         self.authority
             .hosted_run_list(&target, params)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
             .map(Some)
     }
 
@@ -420,7 +420,7 @@ where
         self.authority
             .hosted_run_status(&target, params)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
             .map(Some)
     }
 
@@ -436,7 +436,7 @@ where
         self.authority
             .hosted_run_watch(&target, params)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
             .map(Some)
     }
 
@@ -452,7 +452,7 @@ where
         self.authority
             .hosted_run_logs(&target, params)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
             .map(Some)
     }
 
@@ -468,7 +468,7 @@ where
         self.authority
             .hosted_run_force(&target, params)
             .await
-            .map_err(cli_authority_error)
+            .map_err(|error| error.into_cli(&target))
             .map(Some)
     }
 }
@@ -487,13 +487,11 @@ fn cli_target_error(error: impl fmt::Display) -> NativeV2CliError {
     NativeV2CliError::Target(error.to_string())
 }
 
-fn cli_authority_error(error: TargetAuthorityError) -> NativeV2CliError {
-    error.into_cli()
-}
-
-fn cli_connector_error(error: TargetConnectorError) -> NativeV2CliError {
+fn cli_connector_error(target: &TargetRecord, error: TargetConnectorError) -> NativeV2CliError {
     match error {
-        TargetConnectorError::OecpConnection(_) => NativeV2CliError::Disconnected,
+        TargetConnectorError::OecpConnection(_) => {
+            TargetAuthorityError::disconnected("WebSocket connection failed").into_cli(target)
+        }
         error => cli_target_error(error),
     }
 }

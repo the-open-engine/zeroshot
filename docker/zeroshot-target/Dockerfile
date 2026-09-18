@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM rust:1.97.0-trixie AS rust-toolchain
 RUN rustup component add rustfmt clippy \
     && mkdir -p /opt/rustup \
@@ -18,9 +20,11 @@ FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c
 
 FROM node:24-trixie-slim AS tooling
 
-ARG COPILOT_VERSION=1.0.85
-ARG CODEX_VERSION=0.148.0
-ARG CLAUDE_CODE_VERSION=2.1.237
+ARG COPILOT_VERSION=1.0.86
+ARG CODEX_VERSION=0.155.0
+ARG CLAUDE_CODE_VERSION=2.1.276
+ARG TARGETARCH
+ARG GH_VERSION=2.101.0
 ARG NPM_VERSION=11.19.1
 ARG ZEROSHOT_VERSION=development
 ARG VCS_REF=unknown
@@ -30,12 +34,20 @@ LABEL org.opencontainers.image.source="https://github.com/the-open-engine/zerosh
       org.opencontainers.image.version="${ZEROSHOT_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-RUN apt-get update \
+# Verify the upstream package independently of Debian's GitHub CLI version.
+ADD --checksum=sha256:f8bbc37fc5568a6a162d1a67b1e9c1afa9139f7b5a46dcde4a57bdaa0db33b60 \
+    https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt /tmp/github-cli/checksums.txt
+ADD https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.deb /tmp/github-cli/
+
+RUN cd /tmp/github-cli \
+    && sha256sum --check --ignore-missing checksums.txt \
+    && apt-get update \
+    && apt-get upgrade --yes \
     && apt-get install --yes --no-install-recommends \
         bash \
         build-essential \
         ca-certificates \
-        gh \
+        /tmp/github-cli/gh_${GH_VERSION}_linux_${TARGETARCH}.deb \
         git \
         libbz2-1.0 \
         libffi-dev \
@@ -50,7 +62,7 @@ RUN apt-get update \
         ripgrep \
     && git_version="$(git --version)" \
     && dpkg --compare-versions "${git_version#git version }" ge 2.47 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/github-cli
 
 COPY --from=python-runtime /usr/local /usr/local
 COPY --from=rust-toolchain /opt/rustup /opt/rustup

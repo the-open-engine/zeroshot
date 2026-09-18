@@ -238,8 +238,8 @@ pub(super) async fn read_json_with_limit<T: DeserializeOwned>(
         )));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
-        TargetAuthorityError::disconnected(format!("{operation} response read failed"))
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        TargetAuthorityError::request_failed(&format!("{operation} response read"), &error)
     })? {
         if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(authority_error(format!(

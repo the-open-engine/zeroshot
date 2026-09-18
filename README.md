@@ -93,7 +93,7 @@ Keep execution and durable state on infrastructure you control. The target image
 engine plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
 
 ```bash
-docker run --rm --detach --name zeroshot-target \
+docker run --detach --restart unless-stopped --name zeroshot-target \
   -p 127.0.0.1:8080:8080 \
   -v zeroshot-data:/var/lib/zeroshot \
   ghcr.io/the-open-engine/zeroshot-target:latest

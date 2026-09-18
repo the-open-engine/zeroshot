@@ -18,7 +18,7 @@ Run Zeroshot from a Git worktree, and install the agent harness named by the run
 
 - install and sign in to Codex for `"harness": "codex"`;
 - install and sign in to Claude Code for `"harness": "claude"`;
-- install GitHub Copilot CLI 1.0.85 for `"harness": "copilot"` with `"provider": "github"`.
+- install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`.
 
 Provider credentials can come from the current environment or the private Zeroshot connection
 store. The command below prompts without echo and keeps the value out of runtime JSON:

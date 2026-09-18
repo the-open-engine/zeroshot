@@ -144,7 +144,7 @@ impl<'a> CopilotRpc<'a> {
             .await?;
         if connected["protocolVersion"].as_u64() != Some(3) {
             return Err(failure(
-                "Copilot RPC protocol version is incompatible; install CLI 1.0.85",
+                "Copilot RPC protocol version is incompatible; install CLI 1.0.86",
             ));
         }
         Ok(())

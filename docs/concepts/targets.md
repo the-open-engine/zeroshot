@@ -54,10 +54,10 @@ that variable isn't already declared. See [Runtimes and connections](runtimes-an
 ## Direct target
 
 A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.
-The released container includes Zeroshot plus pinned Codex and Claude harnesses.
+The released container includes Zeroshot plus pinned Codex, Claude, and GitHub Copilot harnesses.
 
 ```console
-docker run --rm --detach --name zeroshot-target \
+docker run --detach --restart unless-stopped --name zeroshot-target \
   -p 127.0.0.1:8080:8080 \
   -v zeroshot-data:/var/lib/zeroshot \
   ghcr.io/the-open-engine/zeroshot-target:latest
@@ -66,6 +66,11 @@ zeroshot target add local-target \
   --url http://127.0.0.1:8080 \
   --direct
 ```
+
+The target keeps running between runs. Docker restarts it after a reboot or unexpected exit with
+`--restart unless-stopped`; manually stopping it keeps it stopped until `docker start zeroshot-target`.
+Docker itself must be running. Target state persists in the named `zeroshot-data` volume, including
+when you recreate a container that was previously started with `--rm`.
 
 !!! danger "Direct means unauthenticated"
 

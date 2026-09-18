@@ -140,9 +140,11 @@ impl TargetHttpControlAuthority {
             TargetAuthorityError::disconnected(format!("{operation} request failed"))
         })?;
         let expected = request.url().clone();
-        let response = self.client.execute(request).await.map_err(|_| {
-            TargetAuthorityError::disconnected(format!("{operation} request failed"))
-        })?;
+        let response = self
+            .client
+            .execute(request)
+            .await
+            .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         if let Some(maximum_bytes) = maximum_bytes {
             read_success_json_with_limit(response, &expected, operation, maximum_bytes).await
         } else {
@@ -178,9 +180,7 @@ impl TargetHttpControlAuthority {
             .header(CACHE_CONTROL, "no-store")
             .send()
             .await
-            .map_err(|_| {
-                TargetAuthorityError::disconnected(format!("{operation} request failed"))
-            })?;
+            .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         require_response_route(&response, &url)?;
         if !response.status().is_success() {
             return Err(http_error(response, operation).await);

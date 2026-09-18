@@ -247,7 +247,9 @@ impl TargetHttpControlAuthority {
             ])
             .send()
             .await
-            .map_err(|_| TargetAuthorityError::disconnected("device token request failed"))?;
+            .map_err(|error| {
+                TargetAuthorityError::request_failed("device token request", &error)
+            })?;
         require_response_route(&response, &request.auth.token_endpoint)?;
         read_token_poll(response).await
     }
@@ -331,8 +333,8 @@ impl TargetHttpControlAuthority {
             .header(CACHE_CONTROL, "no-store")
             .send()
             .await
-            .map_err(|_| {
-                TargetAuthorityError::disconnected("target session verification failed")
+            .map_err(|error| {
+                TargetAuthorityError::request_failed("target session verification", &error)
             })?;
         let session: TargetSessionWire =
             read_success_json(response, &auth.session_endpoint, "target session").await?;
@@ -395,9 +397,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .send()
             .await
-            .map_err(|_| {
-                TargetAuthorityError::disconnected(format!("{operation} request failed"))
-            })?;
+            .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         read_success_json(response, url, operation).await
     }
 
@@ -413,9 +413,7 @@ impl TargetHttpControlAuthority {
             .form(form)
             .send()
             .await
-            .map_err(|_| {
-                TargetAuthorityError::disconnected(format!("{operation} request failed"))
-            })?;
+            .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         read_success_json(response, url, operation).await
     }
 }

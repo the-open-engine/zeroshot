@@ -329,7 +329,7 @@ fn token_response(token_index: &mut u8) -> String {
     .to_string()
 }
 
-async fn write_http_response(stream: &mut tokio::net::TcpStream, body: &str) {
+pub(super) async fn write_http_response(stream: &mut tokio::net::TcpStream, body: &str) {
     write_http_response_with_status(stream, "200 OK", body).await;
 }
 
@@ -347,7 +347,7 @@ async fn write_http_response_with_status(
     stream.shutdown().await.assert_value();
 }
 
-async fn read_http_request(stream: &mut tokio::net::TcpStream) -> CapturedHttpRequest {
+pub(super) async fn read_http_request(stream: &mut tokio::net::TcpStream) -> CapturedHttpRequest {
     let (mut bytes, header_end) = read_http_head(stream).await;
     let head = std::str::from_utf8(bytes.get(..header_end).assert_value()).assert_value();
     let (method, path) = request_line(head);

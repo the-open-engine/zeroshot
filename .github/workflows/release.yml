@@ -356,7 +356,7 @@ jobs:
 
       - name: Build linux/amd64 target image
         run: |
-          docker build --platform linux/amd64 \
+          docker build --pull --platform linux/amd64 \
             --build-arg "VCS_REF=$RELEASE_COMMIT" \
             --build-arg "ZEROSHOT_VERSION=$RELEASE_VERSION" \
             --file docker/zeroshot-target/Dockerfile \
@@ -384,6 +384,15 @@ jobs:
             --user 10001:10001 --env HOME=/work \
             --entrypoint copilot "$ZEROSHOT_IMAGE:$RELEASE_VERSION" \
             --no-auto-update --version
+
+      - name: Smoke GitHub delivery pagination
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --user 10001:10001 \
+            --mount "type=bind,src=${PWD}/docker/zeroshot-target/smoke-github.py,dst=/smoke.py,readonly" \
+            --entrypoint /usr/bin/env \
+            "$ZEROSHOT_IMAGE:$RELEASE_VERSION" -i PATH=/usr/local/bin:/usr/bin:/bin python3 /smoke.py
 
       - name: Compile with the isolated runtime toolchains
         run: |

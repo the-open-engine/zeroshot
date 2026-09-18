@@ -38,17 +38,22 @@ async fn queued_is_visible_in_unary_status_and_list() {
 
 #[tokio::test]
 async fn watch_reconnects_from_queued_cursor_into_admitted_history() {
-    let backend = FakeBackend::with_queued_lifecycle();
-    let (outcome, output) = execute_durable_command("watch", &backend).await;
-
-    assert_eq!(outcome, CliOutcome::Finished);
-    assert_cursor_calls(
-        &backend.calls(),
-        CursorCallKind::Watch,
-        &[None, Some("cloud:1")],
-    );
-    for cursor in ["cloud:1", "cloud:2", "cloud:3"] {
-        assert_cursor_once(&output, cursor);
+    for (backend, cursors) in [
+        (
+            FakeBackend::with_queued_lifecycle(),
+            vec![None, Some("cloud:1")],
+        ),
+        (
+            FakeBackend::with_target_transport_reopen_error(),
+            vec![None, Some("cloud:1"), Some("cloud:1")],
+        ),
+    ] {
+        let (outcome, output) = execute_durable_command("watch", &backend).await;
+        assert_eq!(outcome, CliOutcome::Finished);
+        assert_cursor_calls(&backend.calls(), CursorCallKind::Watch, &cursors);
+        for cursor in ["cloud:1", "cloud:2", "cloud:3"] {
+            assert_cursor_once(&output, cursor);
+        }
     }
 }
 

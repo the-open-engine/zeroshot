@@ -8,7 +8,7 @@ use super::super::{
     NativeV2CliError,
 };
 
-use super::{SubscriptionStep, next_or_detach, write_json};
+use super::{SubscriptionStep, next_or_detach, retry_disconnected, write_json};
 
 pub(super) struct RoutedAttach<'a> {
     pub(super) target: Option<&'a str>,
@@ -35,11 +35,10 @@ where
             () = &mut detach => return Ok(CliOutcome::Detached),
             result = backend.run_attach(target, params.clone()) => match result {
                 Ok(subscription) => subscription,
-                Err(NativeV2CliError::Disconnected) => {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                Err(error) => {
+                    retry_disconnected(error).await?;
                     continue;
                 }
-                Err(error) => return Err(error),
             },
         };
         loop {

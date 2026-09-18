@@ -141,6 +141,8 @@ fn unconfigured_policy(config: &Value, cwd: &Path) -> bool {
         "default_permissions",
         "profile",
         "auto_review",
+        "browser_use",
+        "computer_use",
     ] {
         if config.get(key).is_some_and(|value| !value.is_null()) {
             return false;
@@ -176,9 +178,14 @@ fn unconfigured_features(features: Option<&Value>) -> bool {
         .is_none_or(|features| {
             features.as_object().is_some_and(|features| {
                 features.get("web_search_cached") != Some(&Value::Bool(true))
-                    && ["network_proxy", "guardian_approval"]
-                        .iter()
-                        .all(|name| features.get(*name).is_none_or(Value::is_null))
+                    && [
+                        "network_proxy",
+                        "guardian_approval",
+                        "guardian_ext",
+                        "write_stdin_approval",
+                    ]
+                    .iter()
+                    .all(|name| features.get(*name).is_none_or(Value::is_null))
             })
         })
 }
@@ -235,6 +242,8 @@ mod tests {
             ("permissions", json!({})),
             ("default_permissions", json!("locked")),
             ("profile", json!("custom")),
+            ("browser_use", json!({"allow_history_access":false})),
+            ("computer_use", json!({"default_app_access":"deny"})),
         ] {
             let mut config = empty();
             config[key] = value;
@@ -248,7 +257,7 @@ mod tests {
 
     #[test]
     fn native_empty_configuration_and_authored_network_policy() {
-        let native: Vec<Value> = serde_json::from_str(include_str!("permissions-empty-0.148.json"))
+        let native: Vec<Value> = serde_json::from_str(include_str!("permissions-empty-0.155.json"))
             .expect("recorded native config responses");
         assert_eq!(
             permission_policy(&native, Path::new("/native-fixture/project")),
@@ -259,6 +268,10 @@ mod tests {
             json!({"network_proxy":false}),
             json!({"network_proxy":{"enabled":true,"domains":{"example.com":"allow"}}}),
             json!({"guardian_approval":true}),
+            json!({"guardian_ext":true}),
+            json!({"guardian_ext":false}),
+            json!({"write_stdin_approval":true}),
+            json!({"write_stdin_approval":false}),
             json!({"web_search_cached":true}),
         ] {
             let mut response = native.clone();

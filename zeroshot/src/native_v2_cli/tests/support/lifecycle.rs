@@ -1,6 +1,14 @@
 use super::*;
 
 impl FakeBackend {
+    pub(in super::super) fn with_target_transport_reopen_error() -> Self {
+        Self {
+            queued_lifecycle: true,
+            target_transport_reopen_watch: true,
+            ..Self::default()
+        }
+    }
+
     pub(in super::super) fn with_permanent_reopen_watch_error() -> Self {
         Self {
             permanent_reopen_watch: true,

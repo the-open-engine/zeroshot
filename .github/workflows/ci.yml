@@ -250,7 +250,7 @@ jobs:
 
       - name: Build canonical target image
         run: |
-          docker build --platform linux/amd64 \
+          docker build --pull --platform linux/amd64 \
             --file docker/zeroshot-target/Dockerfile \
             --tag zeroshot-target:ci .
 
@@ -263,6 +263,15 @@ jobs:
             --tmpfs /work:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=10001,gid=10001 \
             --user 10001:10001 --env HOME=/work \
             --entrypoint copilot zeroshot-target:ci --no-auto-update --version
+
+      - name: Smoke GitHub delivery pagination
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --user 10001:10001 \
+            --mount "type=bind,src=${PWD}/docker/zeroshot-target/smoke-github.py,dst=/smoke.py,readonly" \
+            --entrypoint /usr/bin/env \
+            zeroshot-target:ci -i PATH=/usr/local/bin:/usr/bin:/bin python3 /smoke.py
 
       - name: Compile with the isolated runtime toolchains
         run: |

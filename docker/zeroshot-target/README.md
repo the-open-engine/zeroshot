@@ -2,6 +2,9 @@
 
 `ghcr.io/the-open-engine/zeroshot-target` is the canonical self-hosted target server image. It
 contains the native `zeroshot` executable plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
+The image uses Debian Trixie with package updates applied at build time. GitHub CLI is pinned
+separately to an upstream release, verified by checksum, and tested for delivery API pagination
+before publication.
 
 Coding tools include Node.js 24 and npm, Python 3.12 with pip, venv and extension headers,
 Rust 1.97 with Cargo, rustfmt and Clippy, and C/C++ compilers, make, pkgconf, OpenSSL and
@@ -17,11 +20,20 @@ it specifies `CARGO_HOME`. Other compiler versions and project dependencies rema
 The image runs an unauthenticated direct target:
 
 ```bash
-docker run --rm --detach --name zeroshot-target \
+docker run --detach --restart unless-stopped --name zeroshot-target \
   -p 127.0.0.1:8080:8080 \
   -v zeroshot-data:/var/lib/zeroshot \
   ghcr.io/the-open-engine/zeroshot-target:latest
 ```
+
+The target is a long-running server: finishing a run leaves the container running.
+`--restart unless-stopped` restarts it after an unexpected exit or when Docker starts again,
+including after a reboot. Docker must itself be running. A manual `docker stop zeroshot-target`
+keeps it stopped until you run `docker start zeroshot-target`.
+
+The named `zeroshot-data` volume preserves target state when the container is replaced. If you
+previously used `--rm` and the container disappeared, repeat the command above with the same volume.
+Use `docker ps -a --filter name=zeroshot-target` to check whether the container exists and is running.
 
 The container listens on port `8080` internally. With the loopback-only host publish above, register
 it at `http://127.0.0.1:8080`:
@@ -39,7 +51,7 @@ not expose the port to the public internet.
 Build from the repository root:
 
 ```bash
-docker build -f docker/zeroshot-target/Dockerfile -t zeroshot-target:dev .
+docker build --pull -f docker/zeroshot-target/Dockerfile -t zeroshot-target:dev .
 ```
 
 Release builds set `ZEROSHOT_VERSION` and `VCS_REF` labels and are published only by

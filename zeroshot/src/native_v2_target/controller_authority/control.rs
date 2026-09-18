@@ -69,7 +69,7 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .json(request)
             .send()
             .await
-            .map_err(|_| TargetAuthorityError::disconnected("target run request failed"))?;
+            .map_err(|error| TargetAuthorityError::request_failed("target run request", &error))?;
         let receipt: TargetRunReceipt =
             read_success_json(response, &controller.run_url, "target run").await?;
         Ok(RunSubmitResult {
@@ -92,8 +92,8 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .json(request)
             .send()
             .await
-            .map_err(|_| {
-                TargetAuthorityError::disconnected("target OECP session request failed")
+            .map_err(|error| {
+                TargetAuthorityError::request_failed("target session request", &error)
             })?;
         let session: TargetOecpSession =
             read_success_json(response, &controller.session_url, "target OECP session").await?;

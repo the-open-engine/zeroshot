@@ -1,0 +1,168 @@
+[
+  {
+    "id": 1,
+    "result": {
+      "userAgent": "zeroshot_config/0.155.0 (Amazon Linux AMI 2023.0.0; x86_64) unknown (zeroshot_config; 0.0.0)",
+      "codexHome": "/native-fixture/home/.codex",
+      "platformFamily": "unix",
+      "platformOs": "linux"
+    }
+  },
+  {
+    "id": 2,
+    "result": {
+      "config": {
+        "model": null,
+        "review_model": null,
+        "model_context_window": null,
+        "model_auto_compact_token_limit": null,
+        "model_auto_compact_token_limit_scope": null,
+        "model_provider": null,
+        "approval_policy": null,
+        "approvals_reviewer": null,
+        "sandbox_mode": null,
+        "sandbox_workspace_write": null,
+        "forced_chatgpt_workspace_id": null,
+        "forced_login_method": null,
+        "web_search": null,
+        "tools": null,
+        "instructions": null,
+        "developer_instructions": null,
+        "compact_prompt": null,
+        "model_reasoning_effort": null,
+        "model_reasoning_summary": null,
+        "model_verbosity": null,
+        "service_tier": null,
+        "analytics": null,
+        "apps": null,
+        "browser_use": null,
+        "computer_use": null,
+        "desktop": null,
+        "responses_api_metadata": null,
+        "experimental_realtime_webrtc_call_base_url": null,
+        "feedback": null,
+        "experimental_thread_store_endpoint": null,
+        "hide_agent_reasoning": false,
+        "chatgpt_base_url": "https://chatgpt.com/backend-api/",
+        "check_for_update_on_startup": null,
+        "default_permissions": null,
+        "project_root_markers": [".git"],
+        "file_opener": "vscode",
+        "otel": null,
+        "mcp_oauth_callback_port": null,
+        "js_repl_node_module_dirs": null,
+        "profiles": {},
+        "show_raw_agent_reasoning": null,
+        "experimental_realtime_ws_base_url": null,
+        "thread_unload_delay_secs": null,
+        "experimental_realtime_ws_model": null,
+        "goals": null,
+        "features": {
+          "api_key_model_discovery": false,
+          "auth_elicitation": true,
+          "background_paginated_rollout_migration": false,
+          "codex_apps_mcp_2026_07_28": false,
+          "mcp_2026_07_28": false,
+          "memories": false,
+          "mentions_v2": true,
+          "remote_control": false,
+          "remote_plugin": true,
+          "tool_suggest": true,
+          "windows_sandbox_service": false
+        },
+        "disable_paste_burst": null,
+        "experimental_use_unified_exec_tool": null,
+        "windows": null,
+        "oss_provider": null,
+        "plan_mode_reasoning_effort": null,
+        "include_environment_context": true,
+        "suppress_unstable_features_warning": null,
+        "shell_environment_policy": {
+          "inherit": null,
+          "ignore_default_excludes": null,
+          "exclude": null,
+          "set": null,
+          "include_only": null,
+          "filters": null,
+          "experimental_use_profile": null
+        },
+        "history": {
+          "persistence": "save-all",
+          "max_bytes": null
+        },
+        "openai_base_url": null,
+        "project_doc_max_bytes": 32768,
+        "hooks": null,
+        "model_providers": {},
+        "memories": null,
+        "experimental_realtime_start_instructions": null,
+        "notify": null,
+        "allow_symlinked_codex_home": null,
+        "auto_review": null,
+        "personality": null,
+        "mcp_oauth_credentials_store": "auto",
+        "cli_auth_credentials_store": "file",
+        "tool_output_token_limit": null,
+        "include_permissions_instructions": true,
+        "experimental_realtime_ws_backend_prompt": null,
+        "audio": null,
+        "agents": null,
+        "model_catalog_json": null,
+        "notice": null,
+        "permissions": null,
+        "marketplaces": {},
+        "include_collaboration_mode_instructions": true,
+        "project_doc_fallback_filenames": [],
+        "mcp_optional_startup_grace_ms": null,
+        "model_instructions_file": null,
+        "ghost_snapshot": null,
+        "experimental_compact_prompt_file": null,
+        "orchestrator": null,
+        "include_apps_instructions": true,
+        "experimental_realtime_ws_startup_context": null,
+        "mcp_oauth_callback_url": null,
+        "tool_suggest": null,
+        "background_terminal_max_timeout": 300000,
+        "sqlite_home": null,
+        "allow_login_shell": true,
+        "skills": null,
+        "profile": null,
+        "tui": null,
+        "apps_mcp_product_sku": null,
+        "projects": null,
+        "mcp_servers": {},
+        "log_dir": null,
+        "plugins": {},
+        "realtime": null,
+        "js_repl_node_path": null,
+        "experimental_thread_store": null
+      },
+      "origins": {},
+      "layers": [
+        {
+          "name": {
+            "type": "user",
+            "file": "/native-fixture/home/.codex/config.toml",
+            "profile": null
+          },
+          "version": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "config": {}
+        },
+        {
+          "name": {
+            "type": "system",
+            "file": "/etc/codex/config.toml"
+          },
+          "version": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "config": {}
+        }
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "result": {
+      "requirements": null
+    }
+  }
+]

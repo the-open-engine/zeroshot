@@ -12,3 +12,5 @@ mod hosted_authority;
 mod hosted_lifecycle;
 #[path = "tests/integration.rs"]
 mod integration;
+#[path = "tests/transport.rs"]
+mod transport;

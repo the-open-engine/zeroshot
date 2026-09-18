@@ -71,7 +71,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Local verifiers retain read-only/plan policy; hosted verifiers use the same fallback in private copies.
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
-  configured, and unavailable inspection results.
+  configured, and unavailable inspection results. Codex browser/computer access controls and explicit
+  approval-review features count as authored policy.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
@@ -175,8 +176,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
   reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
 
-- Target images ship one Rust toolchain baseline plus Node.js, Python and shared native build
-  tools. They expose Rust through the fixed runtime PATH without a shared writable Cargo cache;
+- Target images apply current Debian Trixie package updates and install a checksum-verified upstream
+  GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.
+  They ship one Rust toolchain baseline plus Node.js, Python and shared native build tools. They expose
+  Rust through the fixed runtime PATH without a shared writable Cargo cache;
   explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
   tests compile native fixtures as an isolated user with a read-only root and fresh home.
 - Native-v2 admits concurrent writers in parallel branches and map items. Writers share the run's
@@ -218,6 +221,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned
   native-v2 protocol contracts. Do not add alternate endpoints as aliases.
 - Secret-bearing target inputs never enter run ledgers, target configuration, or observation records.
+- Target transport failures retain the target name, origin and safe connection category. Never expose
+  raw request URLs or credentials; transport failures remain eligible for observation reconnection.
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded

@@ -4,16 +4,17 @@ use super::direct::{
     spawn_message_only_rejecting_target_authority, spawn_problem_rejecting_target_authority,
 };
 use super::super::fixtures::{direct_target, exact_run_request, temp_root, test_http_authority};
-use super::super::super::{TargetControlAuthority, cli_authority_error};
+use super::super::super::TargetControlAuthority;
 
 async fn rejection_diagnostic(origin: String) -> serde_json::Value {
     let root = temp_root();
     let authority = test_http_authority(root.path("refresh-locks"));
+    let target = direct_target(origin);
     let error = authority
-        .submit(&direct_target(origin), &exact_run_request())
+        .submit(&target, &exact_run_request())
         .await
         .assert_error();
-    serde_json::to_value(cli_authority_error(error).diagnostic()).assert_value()
+    serde_json::to_value(error.into_cli(&target).diagnostic()).assert_value()
 }
 
 #[tokio::test]
