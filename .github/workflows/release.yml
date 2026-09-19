@@ -74,16 +74,26 @@ jobs:
             exit 1
           }
 
+      - name: Checkout release-note tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          path: release-tooling
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
       - name: Checkout exact Zeroshot release source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          path: release-source
           persist-credentials: false
           ref: ${{ inputs.release_commit }}
 
       - name: Verify exact main commit and independent tag
         id: release
         shell: bash
+        working-directory: release-source
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ACTION: ${{ inputs.action }}
@@ -147,6 +157,36 @@ jobs:
             echo "publish-latest=$publish_latest"
             echo "version=$RELEASE_VERSION"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
+      - name: Generate deterministic release notes
+        shell: bash
+        env:
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          node release-tooling/scripts/release-notes.js \
+            --repo release-source \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --output "$RUNNER_TEMP/release-notes.md"
+          {
+            echo "## Generated release notes"
+            echo
+            cat "$RUNNER_TEMP/release-notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deterministic release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zeroshot-release-notes-v${{ steps.release.outputs.version }}
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
 
   binaries:
     needs: [plan]
@@ -568,26 +608,41 @@ jobs:
           name: zeroshot-distribution-v${{ needs.plan.outputs.version }}
           path: release-assets
 
+      - name: Download deterministic release notes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-release-notes-v${{ needs.plan.outputs.version }}
+          path: release-notes
+
       - name: Create or verify independent GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          notes_file="release-notes/release-notes.md"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "$RELEASE_TAG already has a GitHub Release"
           elif [[ "$TAG_EXISTS" == "true" ]]; then
             gh release create "$RELEASE_TAG" \
               --verify-tag --latest="$PUBLISH_LATEST" \
               --title "Zeroshot v$RELEASE_VERSION" \
-              --notes "Standalone Zeroshot v$RELEASE_VERSION."
+              --notes-file "$notes_file"
           else
             gh release create "$RELEASE_TAG" \
               --target "$RELEASE_COMMIT" --latest="$PUBLISH_LATEST" \
               --title "Zeroshot v$RELEASE_VERSION" \
-              --notes "Standalone Zeroshot v$RELEASE_VERSION."
+              --notes-file "$notes_file"
           fi
-          gh release edit "$RELEASE_TAG" --latest="$PUBLISH_LATEST"
+          gh release edit "$RELEASE_TAG" \
+            --latest="$PUBLISH_LATEST" \
+            --notes-file "$notes_file"
+          published_notes="$(gh release view "$RELEASE_TAG" --json body --jq '.body')"
+          expected_notes="$(cat "$notes_file")"
+          [[ "$published_notes" == "$expected_notes" ]] || {
+            echo "::error::$RELEASE_TAG release notes differ from the generated artifact"
+            exit 1
+          }
           latest_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
           if [[ "$PUBLISH_LATEST" == "true" ]]; then
             [[ "$latest_tag" == "$RELEASE_TAG" ]] || {

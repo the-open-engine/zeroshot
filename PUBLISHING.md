@@ -45,8 +45,8 @@ Dispatch `Release Zeroshot` with:
 - `release_commit`: the exact 40-character commit SHA
 
 The workflow builds every native archive, verifies checksums and static Linux binaries, builds and
-smokes the target image, packs the npm package, and performs `npm publish --dry-run`. It does not
-create tags or publish registries.
+smokes the target image, packs the npm package, performs `npm publish --dry-run`, and shows the
+generated release notes in the workflow summary. It does not create tags or publish registries.
 
 ## Publish
 
@@ -58,7 +58,8 @@ not a blanket ignored failure. The workflow:
 2. builds the five declared native targets;
 3. creates and verifies `SHA256SUMS`;
 4. builds the canonical target image from the same source;
-5. creates or verifies the GitHub Release and uploads exact artifacts;
+5. creates or verifies the GitHub Release with notes generated from the immutable squash commits,
+   then uploads exact artifacts;
 6. publishes immutable image tags and `latest` when this is the newest release;
 7. packs, installs, smokes, and publishes `@the-open-engine-company/zeroshot`;
 8. invokes the Python SDK workflow for revision `1`, always creating or verifying its immutable
@@ -97,7 +98,9 @@ interactive publish; do not create a second package name or temporary compatibil
 
 Release jobs are designed to verify already-published immutable artifacts before completing missing
 steps. Recovery must use the same version, tag, and source commit. Never overwrite a different npm
-tarball, GitHub asset, Python wheel, image source label, or tag target.
+tarball, GitHub asset, Python wheel, image source label, or tag target. Recovery republishes the
+GitHub Release body from the same generated notes artifact, so manual edits do not become another
+release-note source.
 
 To recover documentation independently, dispatch **Publish versioned documentation** with
 `version: vX.Y.Z`, the release's exact `release_commit`, and `stable: true` only when it is the
