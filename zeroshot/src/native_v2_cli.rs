@@ -205,6 +205,7 @@ pub enum RunGraph {
     Template {
         template: BuiltinGraphTemplate,
         delivery: TemplateDelivery,
+        ignore_pr_feedback: bool,
     },
 }
 

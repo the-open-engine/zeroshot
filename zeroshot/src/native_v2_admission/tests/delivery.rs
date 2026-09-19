@@ -187,6 +187,7 @@ async fn merge_profile_keeps_github_credentials_on_delivery_nodes() {
                         .assert_value(),
                     )
                     .assert_value(),
+                    pull_request_feedback: Default::default(),
                 },
             ),
         ]),

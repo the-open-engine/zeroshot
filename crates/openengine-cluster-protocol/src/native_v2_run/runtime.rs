@@ -191,6 +191,21 @@ impl JsonSchema for DeclaredConnections {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestFeedback {
+    #[default]
+    Consider,
+    Ignore,
+}
+
+impl PullRequestFeedback {
+    #[must_use]
+    pub const fn is_consider(&self) -> bool {
+        matches!(self, Self::Consider)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum NodeRuntimeBinding {
@@ -210,6 +225,12 @@ pub enum NodeRuntimeBinding {
     GitDelivery {
         #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
         connections: DeclaredConnections,
+        #[serde(
+            default,
+            rename = "pullRequestFeedback",
+            skip_serializing_if = "PullRequestFeedback::is_consider"
+        )]
+        pull_request_feedback: PullRequestFeedback,
     },
 }
 
@@ -221,7 +242,42 @@ impl NodeRuntimeBinding {
     #[must_use]
     pub const fn declared_connections(&self) -> &DeclaredConnections {
         match self {
-            Self::Agent { connections, .. } | Self::GitDelivery { connections } => connections,
+            Self::Agent { connections, .. } | Self::GitDelivery { connections, .. } => connections,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pr_feedback_defaults_to_consider_and_runtime_can_select_ignore() {
+        let default: NodeRuntimeBinding =
+            serde_json::from_value(serde_json::json!({"kind":"git_delivery"})).unwrap();
+        assert!(matches!(
+            default,
+            NodeRuntimeBinding::GitDelivery {
+                pull_request_feedback: PullRequestFeedback::Consider,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(default).unwrap(),
+            serde_json::json!({"kind":"git_delivery"})
+        );
+
+        let ignored: NodeRuntimeBinding = serde_json::from_value(serde_json::json!({
+            "kind":"git_delivery",
+            "pullRequestFeedback":"ignore"
+        }))
+        .unwrap();
+        assert!(matches!(
+            ignored,
+            NodeRuntimeBinding::GitDelivery {
+                pull_request_feedback: PullRequestFeedback::Ignore,
+                ..
+            }
+        ));
     }
 }

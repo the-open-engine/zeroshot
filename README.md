@@ -26,6 +26,9 @@ Zeroshot turns a software goal into an explicit multi-agent graph. One agent imp
 agents review. Failures route back into bounded repair. Delivery happens only after the graph's checks
 pass.
 
+Delivery is explicit: keep work local, push the managed branch, prepare a mergeable PR, or ship it.
+PR and ship runs process visible GitHub feedback unless their delivery runtime binding opts out.
+
 > **Zeroshot v8 is a hard interface cutover.** The former Node.js runtime is retired; the native
 > `zeroshot` executable is the product.
 

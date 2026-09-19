@@ -7,8 +7,9 @@ use openengine_cluster_protocol::{
 
 use super::{DeliveryPolicy, NativeV2AdmissionError, MAX_AGENT_VERIFIER_ATTEMPTS};
 use crate::native_v2_contract::{
-    AdmittedRun, NodeRuntimeBinding, GIT_DELIVERY_MERGE_V2_WORKER_REF,
-    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    AdmittedRun, NodeRuntimeBinding, PullRequestFeedback, GIT_DELIVERY_MERGE_V2_WORKER_REF,
+    GIT_DELIVERY_MERGE_V3_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF,
+    GIT_DELIVERY_PR_WORKER_REF, GIT_DELIVERY_PUSH_WORKER_REF,
 };
 use crate::native_v2_delivery::{validate_delivery_contract, DeliveryMode};
 use crate::native_v2_runner::NodeResponseContract;
@@ -195,7 +196,7 @@ fn validate_binding_kind(
             })
         }
         (true, NodeRuntimeBinding::GitDelivery { .. }) => {
-            validate_delivery_declaration(declaration)
+            validate_delivery_declaration(declaration, binding)
         }
         _ => Ok(()),
     }
@@ -241,9 +242,12 @@ fn validate_delivery_policy(
 fn is_git_delivery_worker(worker: &WorkerRef) -> bool {
     matches!(
         worker.as_str(),
-        GIT_DELIVERY_PR_WORKER_REF
+        GIT_DELIVERY_PUSH_WORKER_REF
+            | GIT_DELIVERY_PR_WORKER_REF
+            | GIT_DELIVERY_PR_V2_WORKER_REF
             | GIT_DELIVERY_MERGE_WORKER_REF
             | GIT_DELIVERY_MERGE_V2_WORKER_REF
+            | GIT_DELIVERY_MERGE_V3_WORKER_REF
     )
 }
 
@@ -270,10 +274,24 @@ pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
 
 fn validate_delivery_declaration(
     declaration: &ExecutableDeclaration,
+    binding: &NodeRuntimeBinding,
 ) -> Result<(), NativeV2AdmissionError> {
     let Some(mode) = DeliveryMode::from_worker(&declaration.worker) else {
         return Ok(());
     };
+    if matches!(
+        binding,
+        NodeRuntimeBinding::GitDelivery {
+            pull_request_feedback: PullRequestFeedback::Ignore,
+            ..
+        }
+    ) && !mode.considers_feedback()
+    {
+        return Err(NativeV2AdmissionError::InvalidDeliveryContract {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
+        });
+    }
     let Some(verifier) = &declaration.contract.verifier else {
         return Err(NativeV2AdmissionError::InvalidDeliveryContract {
             node: declaration.name.clone(),

@@ -18,6 +18,7 @@ from zeroshot import (
     LocalTarget,
     MergePlanRequest,
     MergePlanRun,
+    Preset,
     RunFailedError,
     RunRequest,
     RunResult,
@@ -203,6 +204,26 @@ def test_presets_are_read_from_executable(fake_native: Path) -> None:
         "--delivery",
         "pull_request",
     ] in arguments
+
+
+def test_preset_can_disable_pull_request_feedback(fake_native: Path) -> None:
+    async def exercise() -> None:
+        async with Client(
+            preset=Preset(
+                "software-change",
+                delivery="pull_request",
+                pull_request_feedback="ignore",
+            ),
+            runtime=runtime(),
+            environment={"FAKE_ZEROSHOT_LOG": str(fake_native)},
+        ) as client:
+            await client.submit("repair checkout")
+
+    asyncio.run(exercise())
+    arguments = next(
+        item["args"] for item in read_invocations(fake_native) if item["args"][:1] == ["run"]
+    )
+    assert "--no-pr-feedback" in arguments
 
 
 def test_native_validation_error_is_structured_and_redacted(fake_native: Path) -> None:

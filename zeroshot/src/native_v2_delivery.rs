@@ -42,8 +42,9 @@ use openengine_cluster_protocol::{EnumLabel, FieldName, WorkerErrorCode, WorkerO
 use serde_json::{Map, Value, json};
 
 use crate::native_v2_contract::{
-    EnvironmentVariableName, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF,
-    GIT_DELIVERY_PR_WORKER_REF, NodeInvocation, NodeRuntimeBinding,
+    EnvironmentVariableName, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_V3_WORKER_REF,
+    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    GIT_DELIVERY_PUSH_WORKER_REF, NodeInvocation, NodeRuntimeBinding, PullRequestFeedback,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
@@ -56,20 +57,24 @@ use self::review_head::valid_head_update;
 
 pub const GITHUB_TOKEN_ENV: &str = "GH_TOKEN";
 pub const DELIVERY_SIGNAL_FIELD: &str = "delivery";
+pub const DELIVERY_PUSHED_LABEL: &str = "pushed";
 pub const DELIVERY_OPENED_LABEL: &str = "opened";
+pub const DELIVERY_READY_LABEL: &str = "ready";
 pub const DELIVERY_MERGED_LABEL: &str = "merged";
 pub const DELIVERY_CONFLICT_LABEL: &str = "conflict";
 pub const DELIVERY_CI_FAILED_LABEL: &str = "ci_failed";
 pub const DELIVERY_REPAIR_REQUIRED_LABEL: &str = "repair_required";
 
-const DELIVERY_PR_RESULT_VERSION: &str = "v1";
-const DELIVERY_MERGE_RESULT_VERSION: &str = "v2";
+const DELIVERY_V1_RESULT_VERSION: &str = "v1";
+const DELIVERY_V2_RESULT_VERSION: &str = "v2";
+const DELIVERY_V3_RESULT_VERSION: &str = "v3";
 const DELIVERY_VERSION_FIELD: &str = "version";
 const DELIVERY_MODE_FIELD: &str = "mode";
 const DELIVERY_OUTCOME_FIELD: &str = "outcome";
 const DELIVERY_REPOSITORY_FIELD: &str = "repository";
 const DELIVERY_TARGET_BRANCH_FIELD: &str = "targetBranch";
 const DELIVERY_HEAD_REVISION_FIELD: &str = "headRevision";
+const DELIVERY_HEAD_BRANCH_FIELD: &str = "headBranch";
 const DELIVERY_MERGE_REVISION_FIELD: &str = "mergeRevision";
 const DELIVERY_PULL_REQUEST_ID_FIELD: &str = "pullRequestId";
 
@@ -84,47 +89,82 @@ const MAX_CONFLICT_DIAGNOSTIC_BYTES: usize = 8 * 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeliveryMode {
+    Push,
     PullRequest,
+    PullRequestV2,
     /// The shipped merge@1 receipt contract, retained for stored and in-flight graphs.
     MergeV1,
     /// The merge@2 receipt contract with an authoritative merge revision.
     Merge,
+    /// The feedback-aware merge@3 receipt contract.
+    MergeV3,
 }
 
 impl DeliveryMode {
+    #[cfg(test)]
+    pub(crate) const fn worker_ref(self) -> &'static str {
+        match self {
+            Self::Push => GIT_DELIVERY_PUSH_WORKER_REF,
+            Self::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
+            Self::PullRequestV2 => GIT_DELIVERY_PR_V2_WORKER_REF,
+            Self::MergeV1 => GIT_DELIVERY_MERGE_WORKER_REF,
+            Self::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
+            Self::MergeV3 => GIT_DELIVERY_MERGE_V3_WORKER_REF,
+        }
+    }
+
     #[must_use]
     pub fn from_worker(worker: &WorkerRef) -> Option<Self> {
         match worker.as_str() {
+            GIT_DELIVERY_PUSH_WORKER_REF => Some(Self::Push),
             GIT_DELIVERY_PR_WORKER_REF => Some(Self::PullRequest),
+            GIT_DELIVERY_PR_V2_WORKER_REF => Some(Self::PullRequestV2),
             GIT_DELIVERY_MERGE_WORKER_REF => Some(Self::MergeV1),
             GIT_DELIVERY_MERGE_V2_WORKER_REF => Some(Self::Merge),
+            GIT_DELIVERY_MERGE_V3_WORKER_REF => Some(Self::MergeV3),
             _ => None,
         }
     }
 
     const fn label(self) -> &'static str {
         match self {
-            Self::PullRequest => "pr",
-            Self::MergeV1 | Self::Merge => "merge",
+            Self::Push => "push",
+            Self::PullRequest | Self::PullRequestV2 => "pr",
+            Self::MergeV1 | Self::Merge | Self::MergeV3 => "merge",
         }
     }
 
     const fn success_outcome(self) -> &'static str {
         match self {
+            Self::Push => DELIVERY_PUSHED_LABEL,
             Self::PullRequest => DELIVERY_OPENED_LABEL,
-            Self::MergeV1 | Self::Merge => DELIVERY_MERGED_LABEL,
+            Self::PullRequestV2 => DELIVERY_READY_LABEL,
+            Self::MergeV1 | Self::Merge | Self::MergeV3 => DELIVERY_MERGED_LABEL,
         }
     }
 
     const fn result_version(self) -> &'static str {
         match self {
-            Self::PullRequest | Self::MergeV1 => DELIVERY_PR_RESULT_VERSION,
-            Self::Merge => DELIVERY_MERGE_RESULT_VERSION,
+            Self::Push | Self::PullRequest | Self::MergeV1 => DELIVERY_V1_RESULT_VERSION,
+            Self::PullRequestV2 | Self::Merge => DELIVERY_V2_RESULT_VERSION,
+            Self::MergeV3 => DELIVERY_V3_RESULT_VERSION,
         }
     }
 
     const fn includes_merge_revision(self) -> bool {
-        matches!(self, Self::Merge)
+        matches!(self, Self::Merge | Self::MergeV3)
+    }
+
+    const fn creates_review(self) -> bool {
+        !matches!(self, Self::Push)
+    }
+
+    pub(crate) const fn considers_feedback(self) -> bool {
+        matches!(self, Self::PullRequestV2 | Self::MergeV3)
+    }
+
+    const fn is_merge(self) -> bool {
+        matches!(self, Self::MergeV1 | Self::Merge | Self::MergeV3)
     }
 }
 
@@ -309,6 +349,22 @@ pub struct GitHubReviewObservation {
     pub head_branch: String,
     pub head_revision: String,
     pub state: GitHubReviewState,
+    pub pull_request_ready: bool,
+    pub head_update_required: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubReviewFeedback {
+    pub items: Vec<GitHubReviewFeedbackItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubReviewFeedbackItem {
+    pub key: String,
+    pub version: String,
+    pub author: String,
+    pub location: Option<String>,
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -371,6 +427,15 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
         review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewObservation, GitHubAuthorityError>;
+
+    /// Reads every visible PR discussion surface behind one stable review/head identity fence.
+    async fn inspect_review_feedback(
+        &self,
+        _review: &GitHubReviewReceipt,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
+        Ok(GitHubReviewFeedback { items: Vec::new() })
+    }
 
     /// Requests provider-native integration after GitHub reports its merge policy ready.
     /// Acceptance is not proof; only a later merged observation confirms success.
@@ -445,17 +510,36 @@ fn delivery_outcome(
 }
 
 fn valid_delivery_result(result: &DeliveryResult<'_>) -> bool {
-    valid_mode_outcome(result.mode, result.outcome)
-        && match (result.mode, result.outcome, result.merge_revision) {
-            (
-                DeliveryMode::MergeV1 | DeliveryMode::Merge,
-                DELIVERY_MERGED_LABEL,
-                Some(revision),
-            ) => valid_revision(revision),
-            (DeliveryMode::MergeV1 | DeliveryMode::Merge, _, None)
-            | (DeliveryMode::PullRequest, _, None) => true,
-            _ => false,
+    if result.outcome == DELIVERY_REPAIR_REQUIRED_LABEL {
+        return result.merge_revision.is_none();
+    }
+    valid_delivery_identity(result)
+        && valid_mode_outcome(result.mode, result.outcome)
+        && valid_delivery_revision(result)
+}
+
+fn valid_delivery_identity(result: &DeliveryResult<'_>) -> bool {
+    valid_repository(&result.review.repository)
+        && valid_branch(&result.review.target_branch)
+        && valid_branch(&result.review.head_branch)
+        && valid_revision(&result.review.head_revision)
+        && if matches!(result.mode, DeliveryMode::Push) {
+            result.review.review_id.is_empty()
+        } else {
+            valid_review_id(&result.review.review_id)
         }
+}
+
+fn valid_delivery_revision(result: &DeliveryResult<'_>) -> bool {
+    match (
+        result.mode.is_merge(),
+        result.outcome,
+        result.merge_revision,
+    ) {
+        (true, DELIVERY_MERGED_LABEL, Some(revision)) => valid_revision(revision),
+        (_, _, None) => true,
+        _ => false,
+    }
 }
 
 fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
@@ -463,8 +547,13 @@ fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
         return true;
     }
     match mode {
+        DeliveryMode::Push => outcome == DELIVERY_PUSHED_LABEL,
         DeliveryMode::PullRequest => outcome == DELIVERY_OPENED_LABEL,
-        DeliveryMode::MergeV1 | DeliveryMode::Merge => matches!(
+        DeliveryMode::PullRequestV2 => matches!(
+            outcome,
+            DELIVERY_READY_LABEL | DELIVERY_CONFLICT_LABEL | DELIVERY_CI_FAILED_LABEL
+        ),
+        DeliveryMode::MergeV1 | DeliveryMode::Merge | DeliveryMode::MergeV3 => matches!(
             outcome,
             DELIVERY_MERGED_LABEL | DELIVERY_CONFLICT_LABEL | DELIVERY_CI_FAILED_LABEL
         ),
@@ -528,11 +617,18 @@ fn delivery_result(result: &DeliveryResult<'_>) -> Value {
             DELIVERY_HEAD_REVISION_FIELD.to_owned(),
             Value::String(result.review.head_revision.clone()),
         ),
-        (
+    ]);
+    if result.mode == DeliveryMode::Push {
+        fields.insert(
+            DELIVERY_HEAD_BRANCH_FIELD.to_owned(),
+            Value::String(result.review.head_branch.clone()),
+        );
+    } else {
+        fields.insert(
             DELIVERY_PULL_REQUEST_ID_FIELD.to_owned(),
             Value::String(result.review.review_id.clone()),
-        ),
-    ]);
+        );
+    }
     if result.mode.includes_merge_revision() {
         fields.insert(
             DELIVERY_MERGE_REVISION_FIELD.to_owned(),

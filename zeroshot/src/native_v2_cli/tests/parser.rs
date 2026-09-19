@@ -118,6 +118,67 @@ fn explicit_template_delivery_is_parsed_and_validated_by_rust() {
     ]))
     .assert_error();
     assert!(error.to_string().contains("future-mode"));
+
+    let push = parse_native_v2_args(args(&[
+        "run",
+        "--title",
+        "Repair checkout",
+        "--template",
+        "software-change",
+        "--push",
+        "--input",
+        "input.json",
+        "--runtime-config",
+        "runtime.json",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        run_command(push).selection,
+        crate::native_v2_cli::RunSelection::Inline {
+            graph: RunGraph::Template {
+                delivery: TemplateDelivery::Push,
+                ignore_pr_feedback: false,
+                ..
+            },
+            ..
+        }
+    ));
+
+    let ignore = parse_native_v2_args(args(&[
+        "run",
+        "--title",
+        "Repair checkout",
+        "--template",
+        "software-change",
+        "--pr",
+        "--no-pr-feedback",
+        "--input",
+        "input.json",
+        "--runtime-config",
+        "runtime.json",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        run_command(ignore).selection,
+        crate::native_v2_cli::RunSelection::Inline {
+            graph: RunGraph::Template {
+                delivery: TemplateDelivery::PullRequest,
+                ignore_pr_feedback: true,
+                ..
+            },
+            ..
+        }
+    ));
+
+    let error = parse_native_v2_args(args(&[
+        "template",
+        "show",
+        "software-change",
+        "--push",
+        "--no-pr-feedback",
+    ]))
+    .assert_error();
+    assert!(error.to_string().contains("requires --pr or --ship"));
 }
 
 #[test]
@@ -215,6 +276,7 @@ fn parser_exposes_the_two_builtin_templates_and_closed_delivery_choice() {
             graph: RunGraph::Template {
                 template: BuiltinGraphTemplate::SoftwareChange,
                 delivery: TemplateDelivery::PullRequest,
+                ignore_pr_feedback: false,
             },
             runtime: RunRuntime::Exact(PathBuf::from("runtime.json")),
         }

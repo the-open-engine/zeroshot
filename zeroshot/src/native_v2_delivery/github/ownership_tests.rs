@@ -467,6 +467,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
             contract::DeclaredEnvironment::new([token_name.clone()]).assert_value(),
         )
         .assert_value(),
+        pull_request_feedback: Default::default(),
     };
     let node = NodeName::new("deliver").assert_value();
     let admitted = admit(contract::RunSubmission {

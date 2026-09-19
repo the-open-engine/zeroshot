@@ -341,7 +341,7 @@ class Client:
 
         Args:
             name: Exact native preset name.
-            delivery: Native delivery selector, such as none, pull_request, or merge.
+            delivery: Native delivery selector, such as none, push, pull_request, or merge.
 
         Returns:
             The GraphSpec emitted by Zeroshot, copied without changes.
@@ -405,6 +405,13 @@ class Client:
             arguments.extend(["--graph", str(graph_path)])
             return
         arguments.extend(["--template", selected.name, "--delivery", selected.delivery])
+        if selected.pull_request_feedback == "ignore":
+            arguments.append("--no-pr-feedback")
+        elif selected.pull_request_feedback != "consider":
+            raise InvalidRequestError(
+                "pull_request_feedback must be consider or ignore",
+                code="template.feedback.invalid",
+            )
 
     @staticmethod
     def _append_runtime(arguments: list[str], selected: _Runtime, root: Path) -> None:

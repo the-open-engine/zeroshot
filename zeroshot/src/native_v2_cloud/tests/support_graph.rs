@@ -23,9 +23,7 @@ pub(super) fn runtime() -> RuntimePlan {
             ),
             (
                 NodeName::new("deliver").assert_value_with("node"),
-                NodeRuntimeBinding::GitDelivery {
-                    connections: DeclaredConnections::empty(),
-                },
+                delivery_binding(),
             ),
         ]),
     }
@@ -224,11 +222,16 @@ pub(super) fn complex_runtime() -> RuntimePlan {
             ),
             (
                 NodeName::new("deliver").assert_value_with("node"),
-                NodeRuntimeBinding::GitDelivery {
-                    connections: DeclaredConnections::empty(),
-                },
+                delivery_binding(),
             ),
         ]),
+    }
+}
+
+fn delivery_binding() -> NodeRuntimeBinding {
+    NodeRuntimeBinding::GitDelivery {
+        connections: DeclaredConnections::empty(),
+        pull_request_feedback: Default::default(),
     }
 }
 

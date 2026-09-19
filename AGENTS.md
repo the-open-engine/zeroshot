@@ -181,7 +181,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   when their tree has no staged difference. Other unfinished Git operations return raw status for
   repair before staging or reconciliation. Delivery does not inspect or filter user-installed tooling.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
-  merge queues/deferrals, and succeeds only after observing the exact merged result. Outside merge
+  merge queues/deferrals, and succeeds only after observing the exact merged result. Configured
+  branch-protection contexts remain pending until they appear on the exact PR head, preventing a
+  newly opened PR from looking ready before its required workflow registers. Missing or stale human
+  review may satisfy PR readiness only when aggregate branch policy positively identifies approval
+  as the sole remaining blocker; incomplete or co-blocked policy stays pending. That exception never
+  grants merge authority. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
@@ -204,6 +209,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   request descriptions and source-issue closing references stay inside the generated body markers
   so refreshing metadata cannot retain a stale issue reference. Reviews with an unowned closing
   reference in a legacy Zeroshot layout fail closed instead of rewriting ambiguous human text.
+- Current software-change templates author `push@1`, `pr@2`, and `merge@3` Git delivery workers.
+  Push publishes only the exact managed branch revision. PR delivery stops only after required CI,
+  freshness, and conflict checks pass; missing review approval is allowed and no merge is requested.
+  PR and merge workers read all visible issue comments, review summaries, and inline comments behind
+  one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
+  and verification loop once. `pullRequestFeedback: ignore` skips that read without weakening GitHub
+  policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
 
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.

@@ -12,6 +12,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(super) enum Script {
     NoCi,
+    Feedback,
     PushRejected,
     InspectFailed,
     MergeFailed,
@@ -51,6 +52,7 @@ pub(super) struct FakeGitHub {
     pub(super) head_updates: AtomicUsize,
     pub(super) head_sync_attempts: AtomicUsize,
     pub(super) inspections: AtomicUsize,
+    pub(super) feedback_reads: AtomicUsize,
     pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) conflict_materializations: AtomicUsize,
@@ -68,6 +70,7 @@ impl FakeGitHub {
             head_updates: AtomicUsize::new(0),
             head_sync_attempts: AtomicUsize::new(0),
             inspections: AtomicUsize::new(0),
+            feedback_reads: AtomicUsize::new(0),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
             conflict_materializations: AtomicUsize::new(0),
@@ -78,6 +81,7 @@ impl FakeGitHub {
     fn review_state(&self, inspection: usize) -> GitHubReviewState {
         match self.script {
             Script::NoCi
+            | Script::Feedback
             | Script::TargetIntegrationResponseLost
             | Script::LaterTargetIntegrationFails
             | Script::CredentialExpires
@@ -459,6 +463,25 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         Ok(review.observation(state))
     }
 
+    async fn inspect_review_feedback(
+        &self,
+        _review: &GitHubReviewReceipt,
+        _credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
+        self.feedback_reads.fetch_add(1, Ordering::SeqCst);
+        let items = matches!(self.script, Script::Feedback)
+            .then(|| GitHubReviewFeedbackItem {
+                key: "review_comment:41".to_owned(),
+                version: "v1".to_owned(),
+                author: "review-bot".to_owned(),
+                location: Some("path=src/lib.rs line=7".to_owned()),
+                body: "Handle the empty input before returning.".to_owned(),
+            })
+            .into_iter()
+            .collect();
+        Ok(GitHubReviewFeedback { items })
+    }
+
     async fn request_merge(
         &self,
         _review: &GitHubReviewReceipt,
@@ -772,6 +795,10 @@ case "$endpoint:$method" in
       '"id":"PR_node_17","number":17,"state":"OPEN","merged":false,"mergeCommit":null,' \
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
+      '"baseRef":{"name":"main","branchProtectionRule":{"requiresDeployments":false},' \
+      '"refUpdateRule":{"requiredApprovingReviewCount":0,"requiredStatusCheckContexts":[],' \
+      '"requiresCodeOwnerReviews":false,"requiresConversationResolution":false,' \
+      '"requiresLinearHistory":false,"requiresSignatures":false}},' \
       '"headRefName":"zeroshot/v2-test",' \
       '"headRefOid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","commits":{"nodes":[{' \
       '"commit":{"statusCheckRollup":null}}]}}}}}]'

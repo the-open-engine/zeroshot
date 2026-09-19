@@ -79,5 +79,13 @@ zeroshot template list
 zeroshot template show software-change
 ```
 
-`software-change` adds pull-request or merge delivery through `--pr` or `--ship`. That delivery is a
-graph node with its own runtime binding rather than an unrecorded agent side effect.
+`software-change` has four delivery choices. The default keeps the accepted change local. `--push`
+publishes the managed run branch without opening a pull request. `--pr` opens or updates a pull
+request, processes visible review feedback, waits for required CI and a conflict-free head, then
+stops without merging. `--ship` uses the same feedback loop before it follows the repository's merge
+policy and confirms the merged revision. Missing approval doesn't block `--pr`; it still blocks
+`--ship` when GitHub requires it.
+
+PR and merge delivery consider feedback by default. Use `--no-pr-feedback`, or set
+`pullRequestFeedback` to `ignore` on the delivery runtime binding, when the run should ignore PR
+discussion. CI, conflict, freshness, and merge-policy checks remain active.
