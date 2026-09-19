@@ -169,7 +169,7 @@ impl NativeV2DeliveryAdapter {
                 .as_ref()
                 .is_some_and(|updated| updated.head_revision == observed.head_revision)
         });
-        let adopting_existing = self.is_adopting_existing_delivery(&known);
+        let adopting_existing = self.is_adopting_existing_delivery(known);
         let request = GitHubHeadReconciliation {
             workspace: &self.config.workspace,
             published: &published,

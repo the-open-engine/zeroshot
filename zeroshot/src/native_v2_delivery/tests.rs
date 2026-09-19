@@ -512,6 +512,69 @@ async fn resumed_pull_request_adopts_the_predecessor_delivery_with_a_fresh_adapt
 }
 
 #[tokio::test]
+async fn resumed_current_delivery_modes_keep_the_predecessor_branch_with_a_fresh_adapter() {
+    for (mode, script, expected_outcome) in [
+        (DeliveryMode::Push, Script::NoCi, DELIVERY_PUSHED_LABEL),
+        (
+            DeliveryMode::PullRequestV2,
+            Script::CiFailed,
+            DELIVERY_CI_FAILED_LABEL,
+        ),
+        (
+            DeliveryMode::MergeV3,
+            Script::CiFailed,
+            DELIVERY_CI_FAILED_LABEL,
+        ),
+    ] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
+        let first = run_delivery_execution_with_identity(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 3,
+                mode,
+                run_id: "predecessor-run",
+                refresh: None,
+            },
+            authority.clone(),
+            "stable-delivery-run",
+        )
+        .await;
+        let resumed = run_delivery_execution_with_identity_and_adoption(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 3,
+                mode,
+                run_id: "successor-run",
+                refresh: None,
+            },
+            authority.clone(),
+            "stable-delivery-run",
+            true,
+        )
+        .await;
+
+        let first = assert_delivery_signal(&first.outcome, expected_outcome);
+        let resumed = assert_delivery_signal(&resumed.outcome, expected_outcome);
+        assert_eq!(first, resumed);
+        if mode == DeliveryMode::Push {
+            assert_eq!(
+                resumed["headBranch"],
+                delivery_branch("stable-delivery-run")
+            );
+        } else {
+            let reviews = authority.review_requests();
+            assert_eq!(reviews.len(), 2);
+            assert_eq!(reviews[0].head_branch, reviews[1].head_branch);
+            assert_eq!(
+                reviews[1].head_branch,
+                delivery_branch("stable-delivery-run")
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn rewritten_history_is_rejected_before_push() {
     let repo = TempRepo::delivery();
     git(&repo.workspace, &["checkout", "--orphan", "rewritten"]);
@@ -712,6 +775,7 @@ fn feedback_adapter(
         repo,
         authority.clone(),
         DeliveryPollPolicy::new(attempts, Duration::ZERO).assert_value(),
+        DeliveryLineage::original("delivery-feedback"),
     );
     (authority, adapter)
 }
