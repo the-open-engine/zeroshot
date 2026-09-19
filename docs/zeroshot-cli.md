@@ -21,6 +21,7 @@ Commands:
   template    Inspect built-in graph templates
   plan        Validate, submit, and observe hosted merge plans
   run         Submit a graph run locally or to a named target
+  update      Update this executable to the newest canonical release
   list        List runs as JSON
   status      Read a run's current status as JSON
   watch       Follow a run's durable event stream as NDJSON
@@ -823,6 +824,20 @@ RUNTIME CONFIGURATION
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
 ```
 
+### `zeroshot update`
+
+```text
+Update this executable to the newest canonical release.
+
+Downloads the declared archive for this platform from the latest GitHub Release, verifies its SHA256SUMS entry and executable version, then replaces this executable in place. The executable's directory must be writable; Zeroshot does not elevate privileges.
+
+Usage: zeroshot update
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ### `zeroshot list`
 
 ```text
@@ -972,6 +987,7 @@ Commands:
   template    Inspect built-in graph templates
   plan        Validate, submit, and observe hosted merge plans
   run         Submit a graph run locally or to a named target
+  update      Update this executable to the newest canonical release
   list        List runs as JSON
   status      Read a run's current status as JSON
   watch       Follow a run's durable event stream as NDJSON

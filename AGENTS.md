@@ -38,6 +38,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   publishing is known to be unavailable, then recover the same revision from the same source later.
 - Checked-in Cargo/npm versions are development placeholders. Tags, registry metadata, and GitHub
   Releases are authoritative. Never commit a staged release version to `main`.
+- `zeroshot update` resolves the newest canonical GitHub Release, selects the declared host archive,
+  verifies it through that release's `SHA256SUMS`, smoke-checks the staged executable, and replaces
+  the running executable in place without privilege escalation. Development-placeholder builds
+  refuse self-update.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
   exact version and source commit.
 
@@ -261,6 +265,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | Canonical crate and CLI       | `zeroshot/`                                                                                                                                                                                       |
 | CLI grammar/help              | `zeroshot/src/native_v2_cli/parser.rs`                                                                                                                                                            |
 | CLI composition               | `zeroshot/src/native_v2_cli.rs`, `zeroshot/src/main.rs`                                                                                                                                           |
+| CLI self-update               | `zeroshot/src/native_v2_cli/update.rs`                                                                                                                                                            |
 | Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                                                                                                        |
 | Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                                                                                                                 |
 | Hosted/cloud composition      | `zeroshot/src/native_v2_cloud.rs`, `zeroshot/src/native_v2_hosting.rs`                                                                                                                            |

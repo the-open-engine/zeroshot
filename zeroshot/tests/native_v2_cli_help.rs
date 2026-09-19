@@ -19,6 +19,7 @@ macro_rules! exhaustive_values {
 
 const HELP_PATHS: &[&[&str]] = &[
     &[],
+    &["update"],
     &["target"],
     &["target", "add"],
     &["target", "login"],
@@ -249,6 +250,15 @@ fn help_and_version_aliases_remain_available() {
     assert!(
         version.trim().starts_with("zeroshot "),
         "unexpected version output: {version:?}"
+    );
+}
+
+#[test]
+fn update_help_explains_the_verified_in_place_release_flow() {
+    let update = successful_stdout(&["update", "--help"]);
+    assert_prose(
+        &update,
+        &["newest canonical release", "usage: zeroshot update"],
     );
 }
 

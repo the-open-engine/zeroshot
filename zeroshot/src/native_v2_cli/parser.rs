@@ -83,6 +83,13 @@ enum CliCommand {
 
 #[derive(Debug, Subcommand)]
 enum UtilityCommand {
+    /// Update this executable to the newest canonical release.
+    ///
+    /// Downloads the declared archive for this platform from the latest GitHub Release, verifies
+    /// its SHA256SUMS entry and executable version, then replaces this executable in place. The
+    /// executable's directory must be writable; Zeroshot does not elevate privileges.
+    Update,
+
     /// List runs as JSON.
     List(TargetRouteArgs),
 

@@ -141,6 +141,7 @@ fn connection_route(
 impl UtilityCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::Update => Ok(NativeV2CliCommand::Update),
             Self::List(args) => Ok(NativeV2CliCommand::List {
                 target: validated_target(args.target)?,
             }),

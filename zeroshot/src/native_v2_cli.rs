@@ -67,6 +67,9 @@ use support::{absolute_user_path, nonempty_environment};
 pub(crate) use support::default_local_state_root;
 pub use support::VERSION;
 
+#[path = "native_v2_cli/update.rs"]
+mod update;
+
 pub use execution::{
     execute_native_v2_cli, try_execute_native_v2_preflight, try_execute_native_v2_static,
 };
@@ -228,6 +231,7 @@ pub struct RunLogsCommand {
 pub enum NativeV2CliCommand {
     Help(String),
     Version,
+    Update,
     TargetAdd(TargetAdd),
     TargetLogin {
         name: String,
@@ -341,6 +345,8 @@ pub enum NativeV2CliError {
     Usage(String),
     #[error("target serve is owned by the zeroshot process entrypoint")]
     ProcessCommand,
+    #[error("update failed: {0}")]
+    Update(String),
     #[error("could not read {kind} file {path}: {source}")]
     Read {
         kind: &'static str,

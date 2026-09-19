@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn parser_exposes_static_help_and_version_commands() {
+fn parser_exposes_static_help_version_and_update_commands() {
     assert_eq!(
         parse_native_v2_args(args(&["--version"])).assert_value(),
         NativeV2CliCommand::Version
@@ -9,6 +9,10 @@ fn parser_exposes_static_help_and_version_commands() {
     assert_eq!(
         parse_native_v2_args(args(&["version"])).assert_value(),
         NativeV2CliCommand::Version
+    );
+    assert_eq!(
+        parse_native_v2_args(args(&["update"])).assert_value(),
+        NativeV2CliCommand::Update
     );
     assert!(parse_native_v2_args(args(&["--version", "extra"])).is_err());
 }

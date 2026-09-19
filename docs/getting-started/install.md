@@ -8,6 +8,16 @@ checks the downloaded archive against `SHA256SUMS` before writing the native exe
 npm install --global @the-open-engine-company/zeroshot
 ```
 
+A canonical CLI release can update its executable in place. The command selects the newest GitHub
+release for the current platform, verifies its archive against that release's `SHA256SUMS`, and
+verifies the new executable before replacing the old one:
+
+```console
+zeroshot update
+```
+
+The update does not elevate privileges; the current executable must be writable by the caller.
+
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
 

@@ -19,6 +19,7 @@ repository = "https://github.com/the-open-engine/zeroshot"
 async-trait = "0.1.89"
 clap = { version = "4.5", features = ["derive"] }
 dbus = { version = "0.9.7", features = ["vendored"] }
+flate2 = "1.1.2"
 fs2 = "0.4.3"
 getrandom = "0.3.4"
 httparse = "1.10.1"
@@ -44,10 +45,13 @@ time = "0.3.41"
 futures-util = "0.3"
 jsonschema = { version = "0.29.1", default-features = false }
 keyring = { version = "3.6.3", default-features = false }
-reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls-native-roots", "stream"] }
 rpassword = "7"
 ring = "0.17.14"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
+self-replace = "1.5.0"
+tar = "0.4.44"
+tempfile = "3.20.0"
 windows-sys = "0.61.2"
 uuid = { version = "1.23.5", features = ["v7"] }
 

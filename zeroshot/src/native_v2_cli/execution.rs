@@ -46,6 +46,9 @@ where
     S: DetachSignal,
     W: Write,
 {
+    if let Some(outcome) = try_execute_native_v2_preflight(&command, output).await? {
+        return Ok(outcome);
+    }
     let environment = |name: &str| std::env::var_os(name);
     let context = CliExecutionContext::new(backend, &environment);
     execute_native_v2_cli_with_context(command, &context, signal, output).await
@@ -79,9 +82,9 @@ where
     }
     match command {
         NativeV2CliCommand::Run(run) => execute_run(run, context, signal, output).await,
-        NativeV2CliCommand::TargetServe(_) | NativeV2CliCommand::Ui { .. } => {
-            Err(NativeV2CliError::ProcessCommand)
-        }
+        NativeV2CliCommand::Update
+        | NativeV2CliCommand::TargetServe(_)
+        | NativeV2CliCommand::Ui { .. } => Err(NativeV2CliError::ProcessCommand),
         command => execute_run_operation(command, context.backend, signal, output).await,
     }
 }

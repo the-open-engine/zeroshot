@@ -25,6 +25,7 @@ include_dir = { version = "0.7", optional = true }
 schemars = { workspace = true, optional = true }
 async-trait.workspace = true
 clap.workspace = true
+flate2.workspace = true
 fs2.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
@@ -40,12 +41,15 @@ openengine-cluster-protocol.workspace = true
 openengine_cluster_client.workspace = true
 openengine-cluster-server.workspace = true
 rusqlite.workspace = true
+self-replace.workspace = true
 reqwest.workspace = true
 rpassword.workspace = true
 ring.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["parsing"] }
 tokio.workspace = true

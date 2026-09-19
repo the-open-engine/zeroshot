@@ -46,6 +46,9 @@ pub(crate) async fn try_execute_native_v2_preflight_with_environment<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
+    if matches!(command, NativeV2CliCommand::Update) {
+        return super::super::update::execute(output).await.map(Some);
+    }
     let NativeV2CliCommand::Run(run) = command else {
         return Ok(None);
     };

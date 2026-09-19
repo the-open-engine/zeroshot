@@ -117,6 +117,7 @@ fn request_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic>
             None,
             json!({}),
         ),
+        NativeV2CliError::Update(_) => request("update.failed", error.to_string(), None, json!({})),
         _ => return None,
     };
     Some(diagnostic)

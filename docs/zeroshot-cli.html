@@ -52,6 +52,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-plan-force-stop"><code>zeroshot plan force-stop</code></a></li>
 <li><a href="#zeroshot-plan-help"><code>zeroshot plan help</code></a></li>
 <li><a href="#zeroshot-run"><code>zeroshot run</code></a></li>
+<li><a href="#zeroshot-update"><code>zeroshot update</code></a></li>
 <li><a href="#zeroshot-list"><code>zeroshot list</code></a></li>
 <li><a href="#zeroshot-status"><code>zeroshot status</code></a></li>
 <li><a href="#zeroshot-watch"><code>zeroshot watch</code></a></li>
@@ -76,6 +77,7 @@ Commands:
   template    Inspect built-in graph templates
   plan        Validate, submit, and observe hosted merge plans
   run         Submit a graph run locally or to a named target
+  update      Update this executable to the newest canonical release
   list        List runs as JSON
   status      Read a run&#39;s current status as JSON
   watch       Follow a run&#39;s durable event stream as NDJSON
@@ -756,6 +758,16 @@ RUNTIME CONFIGURATION
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
     effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.</code></pre></section>
+<section id="zeroshot-update"><h3><code>zeroshot update</code></h3>
+<pre><code>Update this executable to the newest canonical release.
+
+Downloads the declared archive for this platform from the latest GitHub Release, verifies its SHA256SUMS entry and executable version, then replaces this executable in place. The executable&#39;s directory must be writable; Zeroshot does not elevate privileges.
+
+Usage: zeroshot update
+
+Options:
+  -h, --help
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-list"><h3><code>zeroshot list</code></h3>
 <pre><code>List runs as JSON
 
@@ -875,6 +887,7 @@ Commands:
   template    Inspect built-in graph templates
   plan        Validate, submit, and observe hosted merge plans
   run         Submit a graph run locally or to a named target
+  update      Update this executable to the newest canonical release
   list        List runs as JSON
   status      Read a run&#39;s current status as JSON
   watch       Follow a run&#39;s durable event stream as NDJSON
