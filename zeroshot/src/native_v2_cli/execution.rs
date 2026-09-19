@@ -32,7 +32,7 @@ mod submission;
 use attach::{RoutedAttach, follow_attach};
 pub(crate) use context::CliExecutionContext;
 pub use submission::{try_execute_native_v2_preflight, try_execute_native_v2_static};
-use submission::{select_connection_requirements, submit_run};
+use submission::{select_connection_requirements, submit_run, validate_github_token};
 use status::outcome_for_status;
 
 pub async fn execute_native_v2_cli<B, S, W>(
@@ -125,45 +125,10 @@ where
             return execute_force_stop(run, backend, output).await;
         }
         NativeV2CliCommand::Resume(run) => {
-            let successor_run_id = RunId::new(uuid::Uuid::now_v7().to_string());
-            let status = backend
-                .run_status(
-                    run.target.as_deref(),
-                    RunStatusParams {
-                        run_id: run.run_id.clone(),
-                    },
-                )
-                .await?;
-            let connections = select_connection_requirements(
-                status.workspace_recovery.connection_requirements,
-                context.environment,
-            )?;
-            let result = backend
-                .run_resume(
-                    run.target.as_deref(),
-                    RunResumeParams {
-                        run_id: run.run_id,
-                        successor_run_id,
-                        connections,
-                        connection_resolver: None,
-                        github_token: (context.environment)("GH_TOKEN")
-                            .and_then(|value| value.into_string().ok())
-                            .filter(|value| !value.is_empty()),
-                    },
-                )
-                .await?;
-            write_json(output, &result)?;
-            return Ok(CliOutcome::Completed);
+            return execute_resume(run, context, output).await;
         }
         NativeV2CliCommand::DiscardWorkspace(run) => {
-            let result = backend
-                .run_discard_workspace(
-                    run.target.as_deref(),
-                    RunDiscardWorkspaceParams { run_id: run.run_id },
-                )
-                .await?;
-            write_json(output, &result)?;
-            return Ok(CliOutcome::Completed);
+            return execute_discard_workspace(run, backend, output).await;
         }
         command => command,
     };
@@ -174,6 +139,73 @@ where
         return execute_run_unary(command, backend, output).await;
     }
     execute_run_subscription(command, backend, signal, output).await
+}
+
+async fn execute_resume<B, W>(
+    run: RunSelector,
+    context: &CliExecutionContext<'_, B>,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    W: Write,
+{
+    let status = context
+        .backend
+        .run_status(
+            run.target.as_deref(),
+            RunStatusParams {
+                run_id: run.run_id.clone(),
+            },
+        )
+        .await?;
+    let connections = select_connection_requirements(
+        status.workspace_recovery.connection_requirements,
+        context.environment,
+    )?;
+    let github_token = (context.environment)("GH_TOKEN")
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| NativeV2CliError::GitHubToken)
+        })
+        .transpose()?
+        .map(validate_github_token)
+        .transpose()?;
+    let result = context
+        .backend
+        .run_resume(
+            run.target.as_deref(),
+            RunResumeParams {
+                run_id: run.run_id,
+                successor_run_id: RunId::new(uuid::Uuid::now_v7().to_string()),
+                connections,
+                connection_resolver: None,
+                github_token,
+            },
+        )
+        .await?;
+    write_json(output, &result)?;
+    Ok(CliOutcome::Completed)
+}
+
+async fn execute_discard_workspace<B, W>(
+    run: RunSelector,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    W: Write,
+{
+    let result = backend
+        .run_discard_workspace(
+            run.target.as_deref(),
+            RunDiscardWorkspaceParams { run_id: run.run_id },
+        )
+        .await?;
+    write_json(output, &result)?;
+    Ok(CliOutcome::Completed)
 }
 
 async fn execute_run_unary<B, W>(

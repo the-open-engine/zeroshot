@@ -127,12 +127,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
   lineage before controller launch, uses a process-held file lock during admission, and reconciles
   an interrupted launch before permitting another successor. Direct-target retained-workspace
-  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup. Direct-target status
-  exposes the immutable admitted connection requirements so the CLI resolves fresh resume values
-  without consulting changed profiles. Recovery lineage also retains the root attempt's delivery
-  identity so every successor reuses the same delivery branch and pull request. Successor
-  composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned branch;
-  ordinary fresh adapters still reject unexplained existing run branches.
+  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup.
+  Direct-target status exposes the immutable admitted connection requirements so the CLI resolves
+  fresh resume values without consulting changed profiles. Recovery lineage also retains the root
+  attempt's delivery identity so every successor reuses the same delivery branch and pull request.
+  Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
+  branch; ordinary fresh adapters still reject unexplained existing run branches.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
@@ -217,6 +217,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   A delivery receipt certifies success only if every other writer settled before delivery started.
   Unconfirmed process cleanup is a fatal runtime failure, including after cancellation; it cannot
   be reduced to a retryable node crash or an authored parallel-join void.
+  Retained workspace handoff commits when the source workspace moves to its successor. A later
+  allocation failure preserves that successor for recovery; unconfirmed cleanup keeps its durable
+  run nonterminal until replacement-controller reconciliation confirms cleanup.
 - Hosted verifiers build in disposable writable copies of the current candidate. Copies include
   dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
   Source traversal pins descriptors without following symlinks so concurrent renames cannot escape

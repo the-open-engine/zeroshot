@@ -13,7 +13,7 @@ use openengine_cluster_protocol::{
     InitializeParams, InitializeResult, RunAttachEventNotification, RunAttachParams,
     RunAttachResult, RunForceParams, RunForceResult, RunId, RunListParams, RunListResult,
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunLogEventNotification, RunLogsParams,
-    RunLogsResult, RunResumeParams, RunResumeResult, RunStatusParams, RunStatusResult,
+    RunLogsResult, RunResumeParams, RunResumeResult, RunStatus, RunStatusParams, RunStatusResult,
     RunSubmitParams, RunSubmitResult, RunWatchEventNotification, RunWatchParams, RunWatchResult,
     ServerCapabilities, Sha256Digest, SubscriptionCloseReason, TerminalResult, WorkerErrorCode,
     WorkerOutcome, GONE, GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, NOT_FOUND,
@@ -54,7 +54,7 @@ mod contracts;
 pub use contracts::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
     CapsuleCleanupUnavailable, CapsuleDestroyed, CloudRunReceipt, ControllerClaimUnavailable,
-    ExclusiveControllerClaim, RetainedAllocationRequest,
+    ExclusiveControllerClaim, RetainedAllocationRequest, RetainedAllocationUnavailable,
 };
 pub use crate::native_v2_supervisor::RunEnvironment;
 
@@ -108,6 +108,14 @@ enum ForceTarget {
 
 struct RunSecretEnvelope {
     environment: Arc<RunEnvironment>,
+    github_token: Option<String>,
+}
+
+struct ResumeSecretRequest<'a> {
+    admitted: &'a AdmittedRun,
+    successor_run_id: &'a RunId,
+    connections: openengine_cluster_protocol::RunConnectionValues,
+    connection_resolver: Option<openengine_cluster_protocol::TargetConnectionResolver>,
     github_token: Option<String>,
 }
 
@@ -364,78 +372,35 @@ impl NativeV2CloudController {
             connection_resolver,
             github_token,
         } = params;
-        let source = self
-            .ledger
-            .get(&run_id)
-            .await?
-            .ok_or(RunLedgerError::RunNotFound)?;
-        if !matches!(
-            source.snapshot.terminal,
-            Some(TerminalResult::Failed { .. })
-        ) || !self.allocator.workspace_recovery(&run_id).await.recoverable
-        {
-            return Err(CapsuleAllocationUnavailable::Runtime.into());
-        }
-        let submission_key = openengine_cluster_protocol::IdempotencyKey::new(format!(
-            "resume-{}",
-            successor_run_id.as_str()
-        ))
-        .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
-        let submission_digest = Sha256Digest::new(format!(
-            "{:x}",
-            Sha256::digest(format!(
-                "{}\0{}",
-                run_id.as_str(),
-                successor_run_id.as_str()
-            ))
-        ))
-        .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
+        let source = self.recoverable_resume_source(&run_id).await?;
+        let (submission_key, submission_digest) =
+            retained_submission_identity(&run_id, &successor_run_id)?;
         let admitted = source.admitted.clone();
-        let environment = match connection_resolver {
-            Some(wire) => RunEnvironment::with_resolver(
-                &admitted.runtime,
-                connections,
-                crate::native_v2_hosting::build_connection_resolver(successor_run_id.clone(), wire)
-                    .map_err(|_| NativeV2CloudError::ResumeCredentials)?,
-            ),
-            None => RunEnvironment::exact(&admitted.runtime, connections),
-        }?;
-        let secrets = RunSecretEnvelope {
-            environment: Arc::new(environment),
+        let secrets = resume_secret_envelope(ResumeSecretRequest {
+            admitted: &admitted,
+            successor_run_id: &successor_run_id,
+            connections,
+            connection_resolver,
             github_token,
-        };
+        })?;
         let github_token = source_github_token(&secrets).await?;
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
-        let created = self
-            .ledger
-            .create_or_get(CreateRun {
+        let stored = self
+            .create_resume_successor(CreateRun {
                 run_id: successor_run_id.clone(),
                 submission_key,
                 submission_digest,
                 admitted: admitted.clone(),
             })
             .await?;
-        let stored = match created {
-            CreateRunOutcome::Created(stored) => stored,
-            CreateRunOutcome::Existing(_) => return Err(RunLedgerError::RunIdConflict.into()),
-        };
-        let capsule = match self
-            .allocator
-            .allocate_from_retained(RetainedAllocationRequest {
+        let capsule = self
+            .allocate_retained_capsule(RetainedAllocationRequest {
                 source_run_id: &run_id,
                 run_id: &successor_run_id,
                 admitted: &admitted,
                 github_token: github_token.as_deref(),
             })
-            .await
-        {
-            Ok(capsule) => capsule,
-            Err(error) => {
-                self.append_unavailable(&successor_run_id, error.failure_code())
-                    .await?;
-                return Err(error.into());
-            }
-        };
+            .await?;
         self.start_allocated(AllocatedRunStart {
             stored,
             environment: secrets.environment,
@@ -447,6 +412,55 @@ impl NativeV2CloudController {
             run_id: successor_run_id,
             resumed_from: run_id,
         })
+    }
+
+    async fn recoverable_resume_source(
+        &self,
+        run_id: &RunId,
+    ) -> Result<StoredRun, NativeV2CloudError> {
+        let source = self
+            .ledger
+            .get(run_id)
+            .await?
+            .ok_or(RunLedgerError::RunNotFound)?;
+        let failed = matches!(
+            source.snapshot.terminal,
+            Some(TerminalResult::Failed { .. })
+        );
+        if !failed || !self.allocator.workspace_recovery(run_id).await.recoverable {
+            return Err(CapsuleAllocationUnavailable::Runtime.into());
+        }
+        Ok(source)
+    }
+
+    async fn create_resume_successor(
+        &self,
+        request: CreateRun,
+    ) -> Result<StoredRun, NativeV2CloudError> {
+        let created = self.ledger.create_or_get(request).await?;
+        match created {
+            CreateRunOutcome::Created(stored) => Ok(stored),
+            CreateRunOutcome::Existing(_) => Err(RunLedgerError::RunIdConflict.into()),
+        }
+    }
+
+    async fn allocate_retained_capsule(
+        &self,
+        request: RetainedAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, NativeV2CloudError> {
+        let run_id = request.run_id;
+        let allocation = self.allocator.allocate_from_retained(request).await;
+        match allocation {
+            Ok(capsule) => Ok(capsule),
+            Err(RetainedAllocationUnavailable::Settled(error)) => {
+                self.append_unavailable(run_id, error.failure_code())
+                    .await?;
+                Err(error.into())
+            }
+            Err(RetainedAllocationUnavailable::CleanupUnconfirmed(_)) => {
+                Err(NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable).into())
+            }
+        }
     }
 
     pub async fn discard_workspace(
@@ -527,8 +541,17 @@ impl NativeV2CloudController {
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CloudError> {
         let mut result = self.observability.status(params).await?;
-        result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
-        if result.workspace_recovery.recoverable {
+        let failed = matches!(
+            result.status,
+            RunStatus::Finished {
+                terminal_result: TerminalResult::Failed { .. },
+                ..
+            }
+        );
+        if failed {
+            result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        }
+        if failed && result.workspace_recovery.recoverable {
             if let Some(stored) = self.ledger.get(&result.run_id).await? {
                 result.workspace_recovery.connection_requirements = stored
                     .admitted
@@ -647,22 +670,76 @@ impl NativeV2CloudController {
     }
 
     async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2CloudError> {
-        let status = self
+        let RunStatusResult {
+            run_id,
+            title,
+            source,
+            size,
+            at_cursor,
+            status,
+            workspace_recovery,
+        } = self
             .observability
             .status(RunStatusParams {
                 run_id: run_id.clone(),
             })
             .await?;
         Ok(RunForceResult {
-            run_id: status.run_id,
-            title: status.title,
-            source: status.source,
-            size: status.size,
-            at_cursor: status.at_cursor,
-            status: status.status,
-            workspace_recovery: status.workspace_recovery,
+            run_id,
+            title,
+            source,
+            size,
+            at_cursor,
+            status,
+            workspace_recovery,
         })
     }
+}
+
+fn retained_submission_identity(
+    source_run_id: &RunId,
+    successor_run_id: &RunId,
+) -> Result<(openengine_cluster_protocol::IdempotencyKey, Sha256Digest), NativeV2CloudError> {
+    let submission_key = openengine_cluster_protocol::IdempotencyKey::new(format!(
+        "resume-{}",
+        successor_run_id.as_str()
+    ))
+    .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
+    let submission_digest = Sha256Digest::new(format!(
+        "{:x}",
+        Sha256::digest(format!(
+            "{}\0{}",
+            source_run_id.as_str(),
+            successor_run_id.as_str()
+        ))
+    ))
+    .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
+    Ok((submission_key, submission_digest))
+}
+
+fn resume_secret_envelope(
+    request: ResumeSecretRequest<'_>,
+) -> Result<RunSecretEnvelope, NativeV2CloudError> {
+    let ResumeSecretRequest {
+        admitted,
+        successor_run_id,
+        connections,
+        connection_resolver,
+        github_token,
+    } = request;
+    let environment = match connection_resolver {
+        Some(wire) => RunEnvironment::with_resolver(
+            &admitted.runtime,
+            connections,
+            crate::native_v2_hosting::build_connection_resolver(successor_run_id.clone(), wire)
+                .map_err(|_| NativeV2CloudError::ResumeCredentials)?,
+        ),
+        None => RunEnvironment::exact(&admitted.runtime, connections),
+    }?;
+    Ok(RunSecretEnvelope {
+        environment: Arc::new(environment),
+        github_token,
+    })
 }
 
 mod backend;

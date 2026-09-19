@@ -156,6 +156,77 @@ async fn openrpc_exposes_only_the_implemented_protocol_methods() {
 }
 
 #[tokio::test]
+async fn openrpc_recovery_methods_match_the_authoritative_schema() {
+    let artifacts = generate_artifacts().await;
+    let openrpc = generated_json(&artifacts, "/openrpc.json");
+    let schema = generated_json(&artifacts, "/schema.json");
+    let definitions = schema.assert_key("$defs");
+
+    for (method_name, params_type, result_type) in [
+        ("run/resume", "RunResumeParams", "RunResumeResult"),
+        (
+            "run/discard_workspace",
+            "RunDiscardWorkspaceParams",
+            "RunDiscardWorkspaceResult",
+        ),
+    ] {
+        let method = openrpc
+            .assert_key("methods")
+            .as_array()
+            .assert_value()
+            .iter()
+            .find(|method| method.assert_key("name") == method_name)
+            .assert_value_with(&format!("OpenRPC is missing {method_name}"));
+        let parameter_definition = definitions.assert_key(params_type);
+        let properties = parameter_definition
+            .assert_key("properties")
+            .as_object()
+            .assert_value();
+        let required = parameter_definition
+            .assert_key("required")
+            .as_array()
+            .assert_value();
+        let parameters = method.assert_key("params").as_array().assert_value();
+        assert_eq!(
+            parameters.len(),
+            properties.len(),
+            "OpenRPC parameter count drifted from {params_type}"
+        );
+        for (name, property_schema) in properties {
+            let parameter = parameters
+                .iter()
+                .find(|parameter| parameter.assert_key("name") == name)
+                .assert_value_with(&format!("OpenRPC {method_name} is missing {name}"));
+            assert_eq!(
+                parameter.assert_key("required"),
+                required.contains(&serde_json::Value::String(name.clone())),
+                "OpenRPC required flag drifted for {method_name}.{name}"
+            );
+            assert_eq!(
+                parameter.assert_key("schema"),
+                property_schema,
+                "OpenRPC schema drifted for {method_name}.{name}"
+            );
+        }
+
+        let result_reference = method
+            .assert_key("result")
+            .assert_key("schema")
+            .assert_key("$ref")
+            .as_str()
+            .assert_value();
+        assert_eq!(
+            result_reference,
+            format!("schema.json#/$defs/{result_type}")
+        );
+        assert!(
+            definitions.get(result_type).is_some(),
+            "OpenRPC {method_name} result reference is absent from schema.json"
+        );
+    }
+}
+
+#[tokio::test]
 async fn openrpc_apply_controls_match_the_authoritative_apply_schema() {
     let artifacts = generate_artifacts().await;
     let openrpc = generated_json(&artifacts, "/openrpc.json");

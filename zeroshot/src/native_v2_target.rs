@@ -126,6 +126,11 @@ pub struct NativeV2TargetConnector<R, A, D> {
     dialer: D,
 }
 
+enum TargetSessionPurpose {
+    General,
+    WorkspaceRecovery,
+}
+
 impl<R, A, D> NativeV2TargetConnector<R, A, D> {
     #[must_use]
     pub const fn new(registry: R, authority: A, dialer: D) -> Self {
@@ -379,17 +384,17 @@ where
         name: &str,
         run_id: Option<openengine_cluster_protocol::RunId>,
     ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
-        validate_target_name(name).map_err(cli_target_error)?;
-        let target = self.registry.get(name).map_err(cli_target_error)?;
-        let session = self
-            .authority
-            .oecp_session(&target, &TargetOecpSessionRequest { run_id })
+        self.connect_session(name, run_id, TargetSessionPurpose::General)
             .await
-            .map_err(|error| error.into_cli(&target))?;
-        self.dialer
-            .dial(&target, session)
+    }
+
+    async fn connect_workspace_recovery(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::WorkspaceRecovery)
             .await
-            .map_err(|error| cli_connector_error(&target, error))
     }
 
     async fn hosted_run_list(
@@ -470,6 +475,37 @@ where
             .await
             .map_err(|error| error.into_cli(&target))
             .map(Some)
+    }
+}
+
+impl<R, A, D> NativeV2TargetConnector<R, A, D>
+where
+    R: TargetRegistry,
+    A: TargetControlAuthority,
+    D: TargetOecpDialer,
+{
+    async fn connect_session(
+        &self,
+        name: &str,
+        run_id: Option<openengine_cluster_protocol::RunId>,
+        purpose: TargetSessionPurpose,
+    ) -> Result<Arc<D::Transport>, NativeV2CliError> {
+        validate_target_name(name).map_err(cli_target_error)?;
+        let target = self.registry.get(name).map_err(cli_target_error)?;
+        let request = TargetOecpSessionRequest { run_id };
+        let session = match purpose {
+            TargetSessionPurpose::General => self.authority.oecp_session(&target, &request).await,
+            TargetSessionPurpose::WorkspaceRecovery => {
+                self.authority
+                    .workspace_recovery_session(&target, &request)
+                    .await
+            }
+        }
+        .map_err(|error| error.into_cli(&target))?;
+        self.dialer
+            .dial(&target, session)
+            .await
+            .map_err(|error| cli_connector_error(&target, error))
     }
 }
 

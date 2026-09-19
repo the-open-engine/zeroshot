@@ -14,22 +14,24 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
-  ui          Serve the local profile editor and live or recorded run history
-  target      Manage named targets or serve a direct target
-  connection  Inspect and manage named runtime connections
-  profile     Manage reusable graph/runtime profiles
-  template    Inspect built-in graph templates
-  plan        Validate, submit, and observe hosted merge plans
-  run         Submit a graph run locally or to a named target
-  update      Update this executable to the newest canonical release
-  list        List runs as JSON
-  status      Read a run's current status as JSON
-  watch       Follow a run's durable event stream as NDJSON
-  logs        Follow a run's log stream as NDJSON
-  attach      Attach to an execution's interactive event stream as NDJSON
-  force-stop  Force a run to stop and write the result as JSON
-  version     Print the Zeroshot version
-  help        Print this message or the help of the given subcommand(s)
+  ui                 Serve the local profile editor and live or recorded run history
+  target             Manage named targets or serve a direct target
+  connection         Inspect and manage named runtime connections
+  profile            Manage reusable graph/runtime profiles
+  template           Inspect built-in graph templates
+  plan               Validate, submit, and observe hosted merge plans
+  run                Submit a graph run locally or to a named target
+  update             Update this executable to the newest canonical release
+  list               List runs as JSON
+  status             Read a run's current status as JSON
+  watch              Follow a run's durable event stream as NDJSON
+  logs               Follow a run's log stream as NDJSON
+  attach             Attach to an execution's interactive event stream as NDJSON
+  force-stop         Force a run to stop and write the result as JSON
+  resume             Start a new attempt from a failed run's retained workspace
+  discard-workspace  Permanently delete an abandoned retained target workspace
+  version            Print the Zeroshot version
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
   -V, --version
@@ -960,6 +962,44 @@ Options:
           Print help
 ```
 
+### `zeroshot resume`
+
+```text
+Start a new attempt from a failed run's retained workspace
+
+Usage: zeroshot resume [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+  -h, --help
+          Print help
+```
+
+### `zeroshot discard-workspace`
+
+```text
+Permanently delete an abandoned retained target workspace
+
+Usage: zeroshot discard-workspace [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+Options:
+      --target <NAME>
+          Use this named target. If omitted, use the local controller
+
+  -h, --help
+          Print help
+```
+
 ### `zeroshot version`
 
 ```text
@@ -980,20 +1020,22 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot help [COMMAND]
 
 Commands:
-  ui          Serve the local profile editor and live or recorded run history
-  target      Manage named targets or serve a direct target
-  connection  Inspect and manage named runtime connections
-  profile     Manage reusable graph/runtime profiles
-  template    Inspect built-in graph templates
-  plan        Validate, submit, and observe hosted merge plans
-  run         Submit a graph run locally or to a named target
-  update      Update this executable to the newest canonical release
-  list        List runs as JSON
-  status      Read a run's current status as JSON
-  watch       Follow a run's durable event stream as NDJSON
-  logs        Follow a run's log stream as NDJSON
-  attach      Attach to an execution's interactive event stream as NDJSON
-  force-stop  Force a run to stop and write the result as JSON
-  version     Print the Zeroshot version
-  help        Print this message or the help of the given subcommand(s)
+  ui                 Serve the local profile editor and live or recorded run history
+  target             Manage named targets or serve a direct target
+  connection         Inspect and manage named runtime connections
+  profile            Manage reusable graph/runtime profiles
+  template           Inspect built-in graph templates
+  plan               Validate, submit, and observe hosted merge plans
+  run                Submit a graph run locally or to a named target
+  update             Update this executable to the newest canonical release
+  list               List runs as JSON
+  status             Read a run's current status as JSON
+  watch              Follow a run's durable event stream as NDJSON
+  logs               Follow a run's log stream as NDJSON
+  attach             Attach to an execution's interactive event stream as NDJSON
+  force-stop         Force a run to stop and write the result as JSON
+  resume             Start a new attempt from a failed run's retained workspace
+  discard-workspace  Permanently delete an abandoned retained target workspace
+  version            Print the Zeroshot version
+  help               Print this message or the help of the given subcommand(s)
 ```

@@ -225,13 +225,18 @@ impl LocalFixture {
             .clone()
     }
 
+    async fn available_status(&self, run_id: &str, mode: &str) -> Option<Value> {
+        let output = self.output(&["status", run_id], mode).await;
+        output
+            .status
+            .success()
+            .then(|| serde_json::from_slice(&output.stdout).assert_value_with("status JSON"))
+    }
+
     pub(super) async fn wait_running(&self, run_id: &str) -> Value {
         let deadline = Instant::now() + CLI_TIMEOUT;
         loop {
-            let output = self.output(&["status", run_id], "block").await;
-            if output.status.success() {
-                let status: Value =
-                    serde_json::from_slice(&output.stdout).assert_value_with("status JSON");
+            if let Some(status) = self.available_status(run_id, "block").await {
                 if status.assert_key("status").assert_key("phase") == "running"
                     && status
                         .assert_key("status")
@@ -250,16 +255,9 @@ impl LocalFixture {
     pub(super) async fn wait_terminal(&self, run_id: &str, mode: &str, reason: &str) -> Value {
         let deadline = Instant::now() + CLI_TIMEOUT;
         loop {
-            let output = self.output(&["status", run_id], mode).await;
-            if output.status.success() {
-                let status: Value =
-                    serde_json::from_slice(&output.stdout).assert_value_with("status JSON");
-                if status.assert_key("status").assert_key("phase") == "finished"
-                    && status
-                        .assert_key("status")
-                        .assert_key("terminalResult")
-                        .assert_key("reason")
-                        == reason
+            if let Some(status) = self.available_status(run_id, mode).await {
+                if terminal_result(&status)
+                    .is_some_and(|terminal| terminal.assert_key("reason") == reason)
                 {
                     return status;
                 }
@@ -267,6 +265,34 @@ impl LocalFixture {
             assert!(
                 Instant::now() < deadline,
                 "run did not finish with reason {reason}"
+            );
+            sleep(Duration::from_millis(30)).await;
+        }
+    }
+
+    pub(super) async fn wait_succeeded(&self, run_id: &str, mode: &str) -> Value {
+        let deadline = Instant::now() + CLI_TIMEOUT;
+        let mut last_status = None;
+        loop {
+            if let Some(status) = self.available_status(run_id, mode).await {
+                let terminal = terminal_result(&status);
+                if terminal == Some(&json!({"status":"succeeded", "output": null})) {
+                    return status;
+                }
+                if terminal.is_some() {
+                    let logs = self.output(&["logs", run_id], mode).await;
+                    panic!(
+                        "run failed while waiting for success: {status}; logs: {}",
+                        String::from_utf8_lossy(&logs.stdout)
+                    );
+                }
+                last_status = Some(status);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "run did not succeed; last status: {last_status:?}; turns: {}",
+                fs::read_to_string(self.repository.join("local-session.args"))
+                    .unwrap_or_else(|_| "<unavailable>".to_owned())
             );
             sleep(Duration::from_millis(30)).await;
         }
@@ -288,6 +314,11 @@ impl LocalFixture {
             .assert_value_with("controller PID");
         u32::try_from(pid).assert_value_with("controller PID fits u32")
     }
+}
+
+fn terminal_result(status: &Value) -> Option<&Value> {
+    (status.assert_key("status").assert_key("phase") == "finished")
+        .then(|| status.assert_key("status").assert_key("terminalResult"))
 }
 
 impl Drop for LocalFixture {
@@ -484,11 +515,20 @@ fn write_fake_codex(path: &Path) {
 test "${CODEX_API_KEY-}" = "local-declared-key" || exit 41
 test -z "${OPENAI_API_KEY+x}" || exit 42
 test -z "${UNDECLARED_SECRET+x}" || exit 43
+{
+  printf 'mode=%s\n' "${FAKE_CODEX_MODE-}"
+  for argument in "$@"; do printf 'arg=%s\n' "$argument"; done
+  printf '%s\n' '---'
+} >> "$PWD/local-session.args"
 printf '%s\n' "$$" > "$PWD/fake-codex.pid"
 printf 'preserved\n' > "$PWD/local-mutation.txt"
 printf 'declared-only\n' > "$PWD/environment-proof.txt"
 printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
 printf '%s\n' '{"type":"turn.started"}'
+if test "${FAKE_CODEX_MODE-}" = fail; then
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"injected failure"}}'
+  exit 1
+fi
 if test "${FAKE_CODEX_MODE-}" = block; then
   parent="$PPID"
   trap 'exit 0' TERM INT HUP
@@ -498,7 +538,7 @@ if test "${FAKE_CODEX_MODE-}" = block; then
   done
   exit 0
 fi
-printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"null"}}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":null}"}}'
 printf '%s\n' '{"type":"turn.completed"}'
 "#,
             "codex",

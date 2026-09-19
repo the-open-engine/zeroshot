@@ -1,3 +1,4 @@
+use openengine_cluster_protocol::WORKSPACE_RECOVERY_KIND;
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -49,6 +50,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) run_url: Url,
     pub(super) session_url: Url,
     pub(super) audience: String,
+    pub(super) workspace_recovery: bool,
 }
 
 pub(super) fn build_controller_descriptor(
@@ -56,6 +58,20 @@ pub(super) fn build_controller_descriptor(
     wire: TargetDiscoveryDocument,
     authentication: TargetAuthentication,
 ) -> Result<ControllerDescriptor, TargetAuthorityError> {
+    validate_controller_discovery(&wire, authentication)?;
+    let workspace_recovery = parse_workspace_recovery(&wire)?;
+    Ok(ControllerDescriptor {
+        run_url: same_origin_path(origin, &wire.run_path)?,
+        session_url: same_origin_path(origin, &wire.session_path)?,
+        audience: wire.audience,
+        workspace_recovery,
+    })
+}
+
+fn validate_controller_discovery(
+    wire: &TargetDiscoveryDocument,
+    authentication: TargetAuthentication,
+) -> Result<(), TargetAuthorityError> {
     if wire.kind != DISCOVERY_KIND
         || wire.authentication != authentication
         || wire.audience != CONTROLLER_AUDIENCE
@@ -65,10 +81,18 @@ pub(super) fn build_controller_descriptor(
             "native-v2 controller discovery is incompatible",
         ));
     }
-    Ok(ControllerDescriptor {
-        run_url: same_origin_path(origin, &wire.run_path)?,
-        session_url: same_origin_path(origin, &wire.session_path)?,
-        audience: wire.audience,
+    Ok(())
+}
+
+fn parse_workspace_recovery(wire: &TargetDiscoveryDocument) -> Result<bool, TargetAuthorityError> {
+    Ok(match wire.extensions.workspace_recovery.as_ref() {
+        Some(capability) if capability.kind == WORKSPACE_RECOVERY_KIND => true,
+        Some(_) => {
+            return Err(authority_error(
+                "workspace-recovery discovery is incompatible",
+            ));
+        }
+        None => false,
     })
 }
 
@@ -478,4 +502,44 @@ pub(super) fn valid_audience(value: &str) -> bool {
 
 pub(super) fn authority_error(message: impl Into<String>) -> TargetAuthorityError {
     TargetAuthorityError::new(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+
+    use super::*;
+
+    #[test]
+    fn controller_descriptor_reads_only_the_exact_workspace_recovery_capability() {
+        let origin = Url::parse("http://127.0.0.1:8080").assert_value();
+        let advertised = build_controller_descriptor(
+            &origin,
+            TargetDiscoveryDocument::direct(TargetAuthentication::None).with_workspace_recovery(),
+            TargetAuthentication::None,
+        )
+        .assert_value();
+        assert!(advertised.workspace_recovery);
+
+        let mut absent = TargetDiscoveryDocument::direct(TargetAuthentication::None);
+        absent.extensions.workspace_recovery = None;
+        let absent =
+            build_controller_descriptor(&origin, absent, TargetAuthentication::None).assert_value();
+        assert!(!absent.workspace_recovery);
+
+        let mut incompatible =
+            TargetDiscoveryDocument::direct(TargetAuthentication::None).with_workspace_recovery();
+        incompatible
+            .extensions
+            .workspace_recovery
+            .as_mut()
+            .assert_value()
+            .kind = "openengine.workspace-recovery/v2".to_owned();
+        let error = build_controller_descriptor(&origin, incompatible, TargetAuthentication::None)
+            .assert_error();
+        assert_eq!(
+            error.to_string(),
+            "workspace-recovery discovery is incompatible"
+        );
+    }
 }

@@ -208,7 +208,7 @@ async fn completed_reconciliation_followed_by_retry_still_requires_current_work_
     };
     let initial = run_with_adapter(request(), adapter.clone()).await.outcome;
     assert_delivery_signal(&initial, DELIVERY_CI_FAILED_LABEL);
-    let branch = delivery_branch("completed-reconciliation");
+    let branch = delivery_branch("delivery-run");
     let external = repo.root.child("external-reconciliation");
     git(
         repo.root.path(),
@@ -260,6 +260,7 @@ fn retained_delivery(
         repo,
         authority.clone(),
         DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
+        DeliveryLineage::original("delivery-run"),
     );
     (authority, adapter)
 }

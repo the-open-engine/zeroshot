@@ -642,10 +642,7 @@
           "type": "string"
         },
         "workspaceRecovery": {
-          "$ref": "#/$defs/WorkspaceRecovery",
-          "default": {
-            "recoverable": false
-          }
+          "$ref": "#/$defs/WorkspaceRecovery"
         }
       },
       "required": [
@@ -888,10 +885,7 @@
           "type": "string"
         },
         "workspaceRecovery": {
-          "$ref": "#/$defs/WorkspaceRecovery",
-          "default": {
-            "recoverable": false
-          }
+          "$ref": "#/$defs/WorkspaceRecovery"
         }
       },
       "required": [

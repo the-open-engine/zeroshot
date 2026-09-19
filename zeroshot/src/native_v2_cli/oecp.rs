@@ -410,7 +410,7 @@ where
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let transport = self
             .connector
-            .connect(require_named_target(target)?, Some(params.run_id.clone()))
+            .connect_workspace_recovery(require_named_target(target)?, params.run_id.clone())
             .await?;
         ClusterClient::new(transport.as_ref())
             .run_resume(params)
@@ -425,7 +425,7 @@ where
     ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
         let transport = self
             .connector
-            .connect(require_named_target(target)?, Some(params.run_id.clone()))
+            .connect_workspace_recovery(require_named_target(target)?, params.run_id.clone())
             .await?;
         ClusterClient::new(transport.as_ref())
             .run_discard_workspace(params)

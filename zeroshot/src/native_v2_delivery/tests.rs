@@ -583,15 +583,38 @@ async fn run_delivery_execution_with_identity_and_adoption(
     run_with_adapter(request, adapter).await
 }
 
+#[derive(Clone, Copy)]
+struct DeliveryLineage<'a> {
+    run_id: &'a str,
+    adopt_existing: bool,
+}
+
+impl<'a> DeliveryLineage<'a> {
+    const fn original(run_id: &'a str) -> Self {
+        Self {
+            run_id,
+            adopt_existing: false,
+        }
+    }
+
+    const fn resumed(run_id: &'a str) -> Self {
+        Self {
+            run_id,
+            adopt_existing: true,
+        }
+    }
+}
+
 fn retained_adapter(
     repo: &TempRepo,
     authority: Arc<dyn GitHubDeliveryAuthority>,
     poll: DeliveryPollPolicy,
+    lineage: DeliveryLineage<'_>,
 ) -> Arc<NativeV2DeliveryAdapter> {
     Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
-            delivery_run_id: RunId::new("delivery-run"),
-            adopt_existing_delivery: false,
+            delivery_run_id: RunId::new(lineage.run_id),
+            adopt_existing_delivery: lineage.adopt_existing,
             workspace: repo.workspace.clone(),
             git_program: "/usr/bin/git".into(),
             target: target(repo),

@@ -775,6 +775,43 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "connections",
+          "required": false,
+          "schema": {
+            "additionalProperties": false,
+            "patternProperties": {
+              "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+                "$ref": "#/$defs/StaticConnectionValues"
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
+          "name": "connectionResolver",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TargetConnectionResolver"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "name": "githubToken",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       ],
       "result": {

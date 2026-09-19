@@ -8,8 +8,8 @@ use openengine_cluster_protocol::{
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunForceResult,
     RunListParams, RunListResult, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
     RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchParams,
-    RunWatchResult, TargetOecpSessionRequest, TargetPrivateBootstrapRequest,
-    TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7, RUN_CONFLICT,
+    RunWatchResult, TargetOecpSessionRequest, TargetPrivateBootstrapRequest, INVALID_PHASE,
+    RUN_CONFLICT, SCHEMA_VIOLATION, TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7,
 };
 use openengine_cluster_server::admission::CancellationSignal;
 use openengine_cluster_server::identity::{
@@ -73,6 +73,10 @@ impl TargetServerAccess {
             Self::Private { .. } => TargetAuthentication::PrivateCapability,
             Self::Direct(_) => TargetAuthentication::None,
         }
+    }
+
+    const fn permits_workspace_recovery(&self) -> bool {
+        !matches!(self, Self::Hosted(_))
     }
 }
 
@@ -238,7 +242,10 @@ impl NativeV2TargetServer {
         .await
         .map_err(io::Error::other)?;
         let binding = ConnectionBinding::new(
-            Arc::new(TargetOecpBackend { controller }),
+            Arc::new(TargetOecpBackend {
+                controller,
+                workspace_recovery: self.workspace_recovery(),
+            }),
             StaticConnectionIdentityResolver::new(identity),
             SystemConnectionTime,
             CancellationSignal::default(),
@@ -248,10 +255,9 @@ impl NativeV2TargetServer {
 
     async fn handle_http(&self, request: HttpRequest) -> HttpResponse {
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", DISCOVERY_PATH) if request.body.is_empty() => HttpResponse::json(
-                200,
-                &TargetDiscoveryDocument::direct(self.access.authentication()),
-            ),
+            ("GET", DISCOVERY_PATH) if request.body.is_empty() => {
+                HttpResponse::json(200, &self.discovery_document())
+            }
             ("POST", TARGET_PRIVATE_BOOTSTRAP_PATH) => self.handle_private_bootstrap(request).await,
             ("GET", path) if is_operator_diagnostics_path(path) => {
                 self.handle_operator_diagnostics(request).await
@@ -376,6 +382,19 @@ impl NativeV2TargetServer {
         self.authenticate(head, BearerPurpose::Control).await
     }
 
+    fn workspace_recovery(&self) -> bool {
+        self.access.permits_workspace_recovery() && self.target.supports_workspace_recovery()
+    }
+
+    fn discovery_document(&self) -> TargetDiscoveryDocument {
+        let document = TargetDiscoveryDocument::direct(self.access.authentication());
+        if self.workspace_recovery() {
+            document.with_workspace_recovery()
+        } else {
+            document
+        }
+    }
+
     async fn authenticate_oecp(
         &self,
         head: &RequestHead,
@@ -446,10 +465,12 @@ enum BearerPurpose {
     Oecp,
 }
 
-/// Target OECP is an observation/control surface. HTTP submission is the only route that accepts
-/// a caller-assigned run identity, exact source, and bounded environment.
+/// Target OECP is primarily an observation/control surface. HTTP submission is the only route that
+/// accepts an initial caller-assigned run identity, exact source, and bounded environment. Recovery
+/// also accepts the fresh successor identity used to create a linked run.
 struct TargetOecpBackend {
     controller: Arc<NativeV2CloudController>,
+    workspace_recovery: bool,
 }
 
 #[async_trait]
@@ -535,6 +556,13 @@ impl ClusterBackend for TargetOecpBackend {
         context: &ConnectionContext,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, BackendError> {
+        if !self.workspace_recovery {
+            return Err(workspace_recovery_unavailable());
+        }
+        if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)
+        {
+            return Err(workspace_recovery_invalid_run_id());
+        }
         ClusterBackend::run_resume(self.controller.as_ref(), context, params).await
     }
 
@@ -543,8 +571,30 @@ impl ClusterBackend for TargetOecpBackend {
         context: &ConnectionContext,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, BackendError> {
+        if !self.workspace_recovery {
+            return Err(workspace_recovery_unavailable());
+        }
+        if !is_canonical_uuid_v7(&params.run_id) {
+            return Err(workspace_recovery_invalid_run_id());
+        }
         ClusterBackend::run_discard_workspace(self.controller.as_ref(), context, params).await
     }
+}
+
+fn workspace_recovery_unavailable() -> BackendError {
+    BackendError::application(
+        INVALID_PHASE,
+        "Backend does not support native-v2 workspace recovery",
+        None,
+    )
+}
+
+fn workspace_recovery_invalid_run_id() -> BackendError {
+    BackendError::invalid_params(
+        SCHEMA_VIOLATION,
+        "workspace recovery run IDs must be canonical UUIDv7 values",
+        None,
+    )
 }
 
 fn validate_oecp_endpoint(endpoint: &str) -> Result<(), TargetAuthorityError> {

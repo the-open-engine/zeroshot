@@ -24,7 +24,7 @@ use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeProcessEnvironment};
 use crate::native_v2_cloud::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
     CapsuleCleanupUnavailable, CapsuleDestroyed, ControllerClaimUnavailable,
-    ExclusiveControllerClaim, RetainedAllocationRequest,
+    ExclusiveControllerClaim, RetainedAllocationRequest, RetainedAllocationUnavailable,
 };
 use crate::native_v2_codex::NativeV2CodexConfig;
 use crate::native_v2_contract::{AdmittedRun, RuntimePlan};
@@ -83,12 +83,44 @@ struct CapsuleBuildRequest<'a> {
     transfer_retained_workspace: bool,
 }
 
-struct RetainedAllocationRollback<'a> {
-    source_root: &'a Path,
-    run_root: &'a Path,
-    source_path: &'a Path,
-    run_recovery_path: &'a Path,
-    source: &'a HostedRecoveryDocument,
+struct CapsuleBuildPaths {
+    run_root: PathBuf,
+    workspace: PathBuf,
+    runtime_home: PathBuf,
+}
+
+impl CapsuleBuildPaths {
+    fn new(storage_root: &Path, run_id: &RunId) -> Self {
+        let run_root = run_directory(storage_root, run_id);
+        Self {
+            workspace: run_root.join("workspace"),
+            runtime_home: run_root.join("runtime"),
+            run_root,
+        }
+    }
+}
+
+struct RetainedAllocationPaths {
+    source_root: PathBuf,
+    run_root: PathBuf,
+    source_recovery: PathBuf,
+    run_recovery: PathBuf,
+}
+
+impl RetainedAllocationPaths {
+    fn new(storage_root: &Path, source_run_id: &RunId, run_id: &RunId) -> Self {
+        Self {
+            source_root: run_directory(storage_root, source_run_id),
+            run_root: run_directory(storage_root, run_id),
+            source_recovery: recovery_path(storage_root, source_run_id),
+            run_recovery: recovery_path(storage_root, run_id),
+        }
+    }
+}
+
+struct RetainedAllocationClaim {
+    delivery_run_id: RunId,
+    original_source: HostedRecoveryDocument,
 }
 
 struct CleanupRunRequest<'a> {
@@ -166,124 +198,172 @@ impl ProductionCapsuleAllocator {
         &self,
         request: CapsuleBuildRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let CapsuleBuildRequest {
-            run_id,
-            delivery_run_id,
-            adopt_existing_delivery,
-            admitted,
-            github_token,
-            install_source,
-            transfer_retained_workspace,
-        } = request;
         let process_pool = self
             .process_pools
             .acquire()
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let active_process_pool = process_pool.process_pool();
-        let run_root = run_directory(&self.config.storage_root, run_id);
-        let workspace = run_root.join("workspace");
-        let runtime_home = run_root.join("runtime");
-        if transfer_retained_workspace {
-            let writer = active_process_pool
-                .identity(HostedProcessScope::Writer)
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            if transfer_workspace_ownership(&workspace, writer.uid(), writer.gid()).is_err() {
-                let _ = transfer_workspace_ownership(&workspace, 0, 0);
-                return Err(CapsuleAllocationUnavailable::Runtime);
-            }
+        let paths = CapsuleBuildPaths::new(&self.config.storage_root, request.run_id);
+        if request.transfer_retained_workspace {
+            transfer_retained_workspace_to_writer(&paths.workspace, active_process_pool)?;
         }
-        let allocation = async {
-            let filesystem =
-                (self.prepare_filesystem)(&workspace, &runtime_home, active_process_pool)?;
-            let target = if install_source {
-                let repository = admitted.source.repository.as_str();
-                let source = self.repository_source(repository);
-                install_repository(RepositoryInstall {
-                    git_program: &self.config.git_program,
-                    source: &source,
-                    resolved: &admitted.source,
-                    workspace: &filesystem.workspace,
-                    process_pool: active_process_pool,
-                    github_token,
-                })
-                .await
-                .map_err(|error| {
-                    error.record_diagnostic(run_id, &self.config.operator_diagnostics);
-                    CapsuleAllocationUnavailable::SourceCheckout
-                })?
-            } else {
-                DeliveryTarget::new(
-                    admitted.source.repository.as_str(),
-                    admitted.source.branch.as_str(),
-                    admitted.source.revision.as_str(),
-                )
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
-            };
-            let github_config = GhCliAuthorityConfig {
-                git_program: self.config.git_program.clone(),
-                gh_program: self.config.gh_program.clone(),
-                ..GhCliAuthorityConfig::hosted(runtime_home)
-            };
-            let candidate = build_native_v2_candidate(
-                admitted,
-                NativeV2CandidateConfig {
-                    harness: self.harness(admitted, &filesystem, active_process_pool)?,
-                    delivery: NativeV2DeliveryConfig::for_hosted_workspace(
-                        delivery_run_id.clone(),
-                        adopt_existing_delivery,
-                        filesystem.workspace.clone(),
-                        target,
-                    ),
-                    github: Arc::new(
-                        GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
-                            run_id.clone(),
-                            self.config.operator_diagnostics.clone(),
-                        ),
-                    ),
-                },
-            )
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(candidate)));
-            let runner = Arc::new(RemoteCapsuleNodeRunner::new(endpoint.clone()));
-            let (loss_sender, loss) = watch::channel(false);
-            let state = Arc::new(ProductionCapsuleState {
-                endpoint,
-                run_root,
-                recovery_path: recovery_path(&self.config.storage_root, run_id),
-                delivery_run_id: delivery_run_id.clone(),
-                process_pool: Mutex::new(Some(process_pool)),
-                _loss_sender: loss_sender.clone(),
-                cleanup_turn: Mutex::new(false),
-            });
-            let replaced = self
-                .active
-                .lock()
-                .await
-                .insert(run_id.clone(), state.clone());
-            if replaced.is_some() {
-                return Err(CapsuleAllocationUnavailable::Runtime);
-            }
-            monitor_workspace_identity(filesystem.workspace, workspace_identity, loss_sender);
-            let cleanup = Arc::new(ProductionCapsuleCleanup {
-                run_id: run_id.clone(),
-                state,
-                active: Arc::downgrade(&self.active),
-            });
-
-            Ok(AllocatedCapsule {
-                runner,
-                cleanup,
-                loss,
-            })
-        }
-        .await;
-        if allocation.is_err() && transfer_retained_workspace {
+        let retained_workspace = request.transfer_retained_workspace;
+        let workspace = paths.workspace.clone();
+        let allocation = self
+            .build_capsule_state(&request, paths, process_pool)
+            .await;
+        if allocation.is_err() && retained_workspace {
             transfer_workspace_ownership(&workspace, 0, 0)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         }
         allocation
+    }
+
+    async fn build_capsule_state(
+        &self,
+        request: &CapsuleBuildRequest<'_>,
+        paths: CapsuleBuildPaths,
+        process_pool: ActiveRunProcessPool,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let active_process_pool = process_pool.process_pool();
+        let filesystem =
+            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, active_process_pool)?;
+        let target = self
+            .capsule_delivery_target(request, &filesystem, active_process_pool)
+            .await?;
+        let github_config = GhCliAuthorityConfig {
+            git_program: self.config.git_program.clone(),
+            gh_program: self.config.gh_program.clone(),
+            ..GhCliAuthorityConfig::hosted(paths.runtime_home)
+        };
+        let candidate = build_native_v2_candidate(
+            request.admitted,
+            NativeV2CandidateConfig {
+                harness: self.harness(request.admitted, &filesystem, active_process_pool)?,
+                delivery: NativeV2DeliveryConfig::for_hosted_workspace(
+                    request.delivery_run_id.clone(),
+                    request.adopt_existing_delivery,
+                    filesystem.workspace.clone(),
+                    target,
+                ),
+                github: Arc::new(
+                    GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
+                        request.run_id.clone(),
+                        self.config.operator_diagnostics.clone(),
+                    ),
+                ),
+            },
+        )
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(candidate)));
+        let runner = Arc::new(RemoteCapsuleNodeRunner::new(endpoint.clone()));
+        let (loss_sender, loss) = watch::channel(false);
+        let state = Arc::new(ProductionCapsuleState {
+            endpoint,
+            run_root: paths.run_root,
+            recovery_path: recovery_path(&self.config.storage_root, request.run_id),
+            delivery_run_id: request.delivery_run_id.clone(),
+            process_pool: Mutex::new(Some(process_pool)),
+            _loss_sender: loss_sender.clone(),
+            cleanup_turn: Mutex::new(false),
+        });
+        if self
+            .active
+            .lock()
+            .await
+            .insert(request.run_id.clone(), state.clone())
+            .is_some()
+        {
+            return Err(CapsuleAllocationUnavailable::Runtime);
+        }
+        monitor_workspace_identity(filesystem.workspace, workspace_identity, loss_sender);
+        let cleanup = Arc::new(ProductionCapsuleCleanup {
+            run_id: request.run_id.clone(),
+            state,
+            active: Arc::downgrade(&self.active),
+        });
+        Ok(AllocatedCapsule {
+            runner,
+            cleanup,
+            loss,
+        })
+    }
+
+    async fn capsule_delivery_target(
+        &self,
+        request: &CapsuleBuildRequest<'_>,
+        filesystem: &CapsuleFilesystem,
+        process_pool: HostedProcessPool,
+    ) -> Result<DeliveryTarget, CapsuleAllocationUnavailable> {
+        if !request.install_source {
+            return DeliveryTarget::new(
+                request.admitted.source.repository.as_str(),
+                request.admitted.source.branch.as_str(),
+                request.admitted.source.revision.as_str(),
+            )
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime);
+        }
+        let repository = request.admitted.source.repository.as_str();
+        let source = self.repository_source(repository);
+        install_repository(RepositoryInstall {
+            git_program: &self.config.git_program,
+            source: &source,
+            resolved: &request.admitted.source,
+            workspace: &filesystem.workspace,
+            process_pool,
+            github_token: request.github_token,
+        })
+        .await
+        .map_err(|error| {
+            error.record_diagnostic(request.run_id, &self.config.operator_diagnostics);
+            CapsuleAllocationUnavailable::SourceCheckout
+        })
+    }
+
+    fn claim_retained_allocation(
+        &self,
+        source_run_id: &RunId,
+        run_id: &RunId,
+        paths: &RetainedAllocationPaths,
+    ) -> Result<RetainedAllocationClaim, RetainedAllocationUnavailable> {
+        let mut source =
+            read_recovery(&paths.source_recovery).ok_or(CapsuleAllocationUnavailable::Runtime)?;
+        if !source.recoverable || source.successor_run_id.is_some() || paths.run_root.exists() {
+            return Err(CapsuleAllocationUnavailable::Runtime.into());
+        }
+        let delivery_run_id =
+            retained_delivery_run_id(&self.config.storage_root, source_run_id, &source)
+                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+        let original_source = HostedRecoveryDocument {
+            recoverable: true,
+            run_id: Some(source_run_id.clone()),
+            delivery_run_id: Some(delivery_run_id.clone()),
+            resumed_from: source.resumed_from.clone(),
+            successor_run_id: None,
+        };
+        source.recoverable = false;
+        source.run_id = Some(source_run_id.clone());
+        source.delivery_run_id = Some(delivery_run_id.clone());
+        source.successor_run_id = Some(run_id.clone());
+        let successor = HostedRecoveryDocument {
+            recoverable: false,
+            run_id: Some(run_id.clone()),
+            delivery_run_id: Some(delivery_run_id.clone()),
+            resumed_from: Some(source_run_id.clone()),
+            successor_run_id: None,
+        };
+        if write_recovery(&paths.source_recovery, &source)
+            .and_then(|()| write_recovery(&paths.run_recovery, &successor))
+            .is_err()
+        {
+            return Err(retained_claim_failure(paths, &original_source));
+        }
+        Ok(RetainedAllocationClaim {
+            delivery_run_id,
+            original_source,
+        })
     }
 
     fn harness(
@@ -400,7 +480,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
     async fn allocate_from_retained(
         &self,
         request: RetainedAllocationRequest<'_>,
-    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+    ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
         let RetainedAllocationRequest {
             source_run_id,
             run_id,
@@ -408,55 +488,15 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             github_token,
         } = request;
         let _turn = self.allocation_turn.lock().await;
-        let source_root = run_directory(&self.config.storage_root, source_run_id);
-        let run_root = run_directory(&self.config.storage_root, run_id);
-        let source_path = recovery_path(&self.config.storage_root, source_run_id);
-        let run_recovery_path = recovery_path(&self.config.storage_root, run_id);
-        let mut source =
-            read_recovery(&source_path).ok_or(CapsuleAllocationUnavailable::Runtime)?;
-        if !source.recoverable || source.successor_run_id.is_some() || run_root.exists() {
-            return Err(CapsuleAllocationUnavailable::Runtime);
-        }
-        source.recoverable = false;
-        source.run_id = Some(source_run_id.clone());
-        let delivery_run_id =
-            retained_delivery_run_id(&self.config.storage_root, source_run_id, &source)
-                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
-        source.delivery_run_id = Some(delivery_run_id.clone());
-        source.successor_run_id = Some(run_id.clone());
-        let original_source = HostedRecoveryDocument {
-            recoverable: true,
-            run_id: Some(source_run_id.clone()),
-            delivery_run_id: Some(delivery_run_id.clone()),
-            resumed_from: source.resumed_from.clone(),
-            successor_run_id: None,
-        };
-        let claim_result = write_recovery(&source_path, &source).and_then(|()| {
-            write_recovery(
-                &run_recovery_path,
-                &HostedRecoveryDocument {
-                    recoverable: false,
-                    run_id: Some(run_id.clone()),
-                    delivery_run_id: Some(delivery_run_id.clone()),
-                    resumed_from: Some(source_run_id.clone()),
-                    successor_run_id: None,
-                },
-            )
-        });
-        if claim_result.is_err() {
-            let _ = write_recovery(&source_path, &original_source);
-            let _ = remove_recovery_file(&run_recovery_path);
-            return Err(CapsuleAllocationUnavailable::Runtime);
-        }
-        if std::fs::rename(&source_root, &run_root).is_err() {
-            let _ = write_recovery(&source_path, &original_source);
-            let _ = remove_recovery_file(&run_recovery_path);
-            return Err(CapsuleAllocationUnavailable::Runtime);
+        let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
+        let claim = self.claim_retained_allocation(source_run_id, run_id, &paths)?;
+        if std::fs::rename(&paths.source_root, &paths.run_root).is_err() {
+            return Err(retained_claim_failure(&paths, &claim.original_source));
         }
         let allocation = self
             .build_capsule(CapsuleBuildRequest {
                 run_id,
-                delivery_run_id: &delivery_run_id,
+                delivery_run_id: &claim.delivery_run_id,
                 adopt_existing_delivery: true,
                 admitted,
                 github_token,
@@ -464,18 +504,22 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 transfer_retained_workspace: true,
             })
             .await;
-        if allocation.is_err() {
-            let _ = restore_retained_allocation(RetainedAllocationRollback {
-                source_root: &source_root,
-                run_root: &run_root,
-                source_path: &source_path,
-                run_recovery_path: &run_recovery_path,
-                source: &original_source,
-            });
-            return allocation;
+        match allocation {
+            Ok(capsule) => {
+                self.allocated.lock().await.insert(run_id.clone());
+                Ok(capsule)
+            }
+            Err(error) => {
+                cleanup_run_directory(CleanupRunRequest {
+                    run_root: &paths.run_root,
+                    recovery_path: &paths.run_recovery,
+                    run_id,
+                    delivery_run_id: &claim.delivery_run_id,
+                    exit: RunRuntimeExit::RuntimeLost,
+                })?;
+                Err(RetainedAllocationUnavailable::Settled(error))
+            }
         }
-        self.allocated.lock().await.insert(run_id.clone());
-        allocation
     }
 
     async fn workspace_recovery(
@@ -593,72 +637,100 @@ async fn cleanup_state(
     Ok(())
 }
 
+enum FailedRunDirectoryState {
+    Absent,
+    Disposable,
+    Retained,
+}
+
 fn cleanup_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCleanupUnavailable> {
-    let CleanupRunRequest {
-        run_root,
-        recovery_path,
-        run_id,
-        delivery_run_id,
-        exit,
-    } = request;
-    if !matches!(exit, RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost) {
-        return remove_run_directory(run_root);
+    if !matches!(
+        request.exit,
+        RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
+    ) {
+        return remove_run_directory(request.run_root);
     }
+    match failed_run_directory_state(request.run_root)? {
+        FailedRunDirectoryState::Absent => Ok(()),
+        FailedRunDirectoryState::Disposable => remove_run_directory(request.run_root),
+        FailedRunDirectoryState::Retained => retain_failed_workspace(request),
+    }
+}
+
+fn failed_run_directory_state(
+    run_root: &Path,
+) -> Result<FailedRunDirectoryState, CapsuleCleanupUnavailable> {
     let metadata = match std::fs::symlink_metadata(run_root) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FailedRunDirectoryState::Absent);
+        }
         Err(_) => return Err(CapsuleCleanupUnavailable),
     };
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(CapsuleCleanupUnavailable);
     }
-    let workspace_metadata = std::fs::symlink_metadata(run_root.join("workspace"));
-    if !matches!(
-        workspace_metadata,
+    let workspace = std::fs::symlink_metadata(run_root.join("workspace"));
+    if matches!(
+        workspace,
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink()
     ) {
-        return remove_run_directory(run_root);
+        Ok(FailedRunDirectoryState::Retained)
+    } else {
+        Ok(FailedRunDirectoryState::Disposable)
     }
-    let runtime = run_root.join("runtime");
-    if runtime.exists() {
-        std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
-    }
-    transfer_workspace_ownership(&run_root.join("workspace"), 0, 0)
-        .map_err(|_| CapsuleCleanupUnavailable)?;
-    let mut document = read_recovery(recovery_path).unwrap_or_default();
-    document.recoverable = true;
-    document.run_id.get_or_insert_with(|| run_id.clone());
-    document
-        .delivery_run_id
-        .get_or_insert_with(|| delivery_run_id.clone());
-    write_recovery(recovery_path, &document)
 }
 
-fn restore_retained_allocation(
-    rollback: RetainedAllocationRollback<'_>,
+fn retain_failed_workspace(
+    request: CleanupRunRequest<'_>,
 ) -> Result<(), CapsuleCleanupUnavailable> {
-    let RetainedAllocationRollback {
-        source_root,
-        run_root,
-        source_path,
-        run_recovery_path,
-        source,
-    } = rollback;
-    let runtime = run_root.join("runtime");
+    let runtime = request.run_root.join("runtime");
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
     }
-    transfer_workspace_ownership(&run_root.join("workspace"), 0, 0)
+    transfer_workspace_ownership(&request.run_root.join("workspace"), 0, 0)
         .map_err(|_| CapsuleCleanupUnavailable)?;
-    if source_root.exists() {
-        remove_run_directory(source_root)?;
+    let mut document = read_recovery(request.recovery_path).unwrap_or_default();
+    document.recoverable = true;
+    document
+        .run_id
+        .get_or_insert_with(|| request.run_id.clone());
+    document
+        .delivery_run_id
+        .get_or_insert_with(|| request.delivery_run_id.clone());
+    write_recovery(request.recovery_path, &document)
+}
+
+fn transfer_retained_workspace_to_writer(
+    workspace: &Path,
+    process_pool: HostedProcessPool,
+) -> Result<(), CapsuleAllocationUnavailable> {
+    let writer = process_pool
+        .identity(HostedProcessScope::Writer)
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+    if transfer_workspace_ownership(workspace, writer.uid(), writer.gid()).is_err() {
+        let _ = transfer_workspace_ownership(workspace, 0, 0);
+        return Err(CapsuleAllocationUnavailable::Runtime);
     }
-    std::fs::rename(run_root, source_root).map_err(|_| CapsuleCleanupUnavailable)?;
-    write_recovery(source_path, source)?;
-    match std::fs::remove_file(run_recovery_path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(_) => Err(CapsuleCleanupUnavailable),
+    Ok(())
+}
+
+fn rollback_retained_claim(
+    paths: &RetainedAllocationPaths,
+    source: &HostedRecoveryDocument,
+) -> Result<(), CapsuleCleanupUnavailable> {
+    let source_result = write_recovery(&paths.source_recovery, source);
+    let successor_result = remove_recovery_file(&paths.run_recovery);
+    source_result.and(successor_result)
+}
+
+fn retained_claim_failure(
+    paths: &RetainedAllocationPaths,
+    source: &HostedRecoveryDocument,
+) -> RetainedAllocationUnavailable {
+    match rollback_retained_claim(paths, source) {
+        Ok(()) => RetainedAllocationUnavailable::Settled(CapsuleAllocationUnavailable::Runtime),
+        Err(error) => RetainedAllocationUnavailable::CleanupUnconfirmed(error),
     }
 }
 
@@ -731,41 +803,68 @@ fn reconcile_retained_allocations(root: &Path) -> Result<(), CapsuleCleanupUnava
     };
     for entry in entries {
         let path = entry.map_err(|_| CapsuleCleanupUnavailable)?.path();
-        let Some(mut source) = read_recovery(&path) else {
-            continue;
-        };
-        let (Some(source_run_id), Some(successor_run_id)) =
-            (source.run_id.clone(), source.successor_run_id.clone())
-        else {
-            continue;
-        };
-        let source_root = run_directory(root, &source_run_id);
-        let successor_root = run_directory(root, &successor_run_id);
-        let successor_path = recovery_path(root, &successor_run_id);
-        if source_root.exists() {
-            if successor_root.exists() {
-                return Err(CapsuleCleanupUnavailable);
-            }
-            source.recoverable = source_root.join("workspace").is_dir();
-            source.successor_run_id = None;
-            write_recovery(&path, &source)?;
-            remove_recovery_file(&successor_path)?;
-        } else if successor_root.exists() {
-            let mut successor = read_recovery(&successor_path).unwrap_or_default();
-            if successor
-                .resumed_from
-                .as_ref()
-                .is_some_and(|resumed_from| resumed_from != &source_run_id)
-            {
-                return Err(CapsuleCleanupUnavailable);
-            }
-            successor.run_id = Some(successor_run_id);
-            successor.delivery_run_id = source.delivery_run_id.clone();
-            successor.resumed_from = Some(source_run_id);
-            write_recovery(&successor_path, &successor)?;
-        }
+        reconcile_retained_document(root, &path)?;
     }
     Ok(())
+}
+
+fn reconcile_retained_document(
+    root: &Path,
+    source_path: &Path,
+) -> Result<(), CapsuleCleanupUnavailable> {
+    let Some(source) = read_recovery(source_path) else {
+        return Ok(());
+    };
+    let (Some(source_run_id), Some(successor_run_id)) =
+        (source.run_id.clone(), source.successor_run_id.clone())
+    else {
+        return Ok(());
+    };
+    let source_root = run_directory(root, &source_run_id);
+    let successor_root = run_directory(root, &successor_run_id);
+    let successor_path = recovery_path(root, &successor_run_id);
+    match (source_root.exists(), successor_root.exists()) {
+        (true, true) => Err(CapsuleCleanupUnavailable),
+        (true, false) => {
+            rollback_reconciled_claim(source_path, &successor_path, source, &source_root)
+        }
+        (false, true) => {
+            complete_reconciled_handoff(&successor_path, source, source_run_id, successor_run_id)
+        }
+        (false, false) => Ok(()),
+    }
+}
+
+fn rollback_reconciled_claim(
+    source_path: &Path,
+    successor_path: &Path,
+    mut source: HostedRecoveryDocument,
+    source_root: &Path,
+) -> Result<(), CapsuleCleanupUnavailable> {
+    source.recoverable = source_root.join("workspace").is_dir();
+    source.successor_run_id = None;
+    write_recovery(source_path, &source)?;
+    remove_recovery_file(successor_path)
+}
+
+fn complete_reconciled_handoff(
+    successor_path: &Path,
+    source: HostedRecoveryDocument,
+    source_run_id: RunId,
+    successor_run_id: RunId,
+) -> Result<(), CapsuleCleanupUnavailable> {
+    let mut successor = read_recovery(successor_path).unwrap_or_default();
+    if successor
+        .resumed_from
+        .as_ref()
+        .is_some_and(|resumed_from| resumed_from != &source_run_id)
+    {
+        return Err(CapsuleCleanupUnavailable);
+    }
+    successor.run_id = Some(successor_run_id);
+    successor.delivery_run_id = source.delivery_run_id;
+    successor.resumed_from = Some(source_run_id);
+    write_recovery(successor_path, &successor)
 }
 
 fn retained_delivery_run_id(
@@ -792,7 +891,7 @@ fn retained_delivery_run_id(
     None
 }
 
-fn production_filesystem(
+pub(super) fn production_filesystem(
     workspace: &Path,
     runtime_home: &Path,
     process_pool: HostedProcessPool,

@@ -128,6 +128,10 @@ impl ProductionTargetControllerFactory {
 
 #[async_trait]
 impl TargetControllerFactory for ProductionTargetControllerFactory {
+    fn supports_workspace_recovery(&self) -> bool {
+        true
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         self.create_controller()
             .await

@@ -23,11 +23,38 @@ use zeroshot_engine::native_v2_target_authority::{
     TargetOecpSession, TargetRunReceipt, TargetRunRequest,
 };
 
-use super::contract::{authority_error, read_success_json};
+use super::contract::{ControllerDescriptor, authority_error, read_success_json};
 use super::{HostedLogin, TargetHttpControlAuthority};
 use crate::native_v2_target::{
     TargetAccess, TargetAuthorityError, TargetControlAuthority, TargetOecpAccess, TargetRecord,
 };
+
+impl TargetHttpControlAuthority {
+    async fn issue_oecp_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+        controller_access: (ControllerDescriptor, Option<String>),
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let (controller, access) = controller_access;
+        let response = self
+            .with_access(
+                self.client.post(controller.session_url.clone()),
+                access.as_deref(),
+            )?
+            .header(ACCEPT, "application/json")
+            .json(request)
+            .send()
+            .await
+            .map_err(|error| {
+                TargetAuthorityError::request_failed("target session request", &error)
+            })?;
+        let session: TargetOecpSession =
+            read_success_json(response, &controller.session_url, "target OECP session").await?;
+        TargetOecpAccess::new(session.endpoint, session.bearer_token, &target.access)
+            .map_err(|_| authority_error("target OECP session response is malformed"))
+    }
+}
 
 #[async_trait]
 impl TargetControlAuthority for TargetHttpControlAuthority {
@@ -82,23 +109,19 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         target: &TargetRecord,
         request: &openengine_cluster_protocol::TargetOecpSessionRequest,
     ) -> Result<TargetOecpAccess, TargetAuthorityError> {
-        let (controller, access) = self.controller_access(target).await?;
-        let response = self
-            .with_access(
-                self.client.post(controller.session_url.clone()),
-                access.as_deref(),
-            )?
-            .header(ACCEPT, "application/json")
-            .json(request)
-            .send()
+        let controller_access = self.controller_access(target).await?;
+        self.issue_oecp_session(target, request, controller_access)
             .await
-            .map_err(|error| {
-                TargetAuthorityError::request_failed("target session request", &error)
-            })?;
-        let session: TargetOecpSession =
-            read_success_json(response, &controller.session_url, "target OECP session").await?;
-        TargetOecpAccess::new(session.endpoint, session.bearer_token, &target.access)
-            .map_err(|_| authority_error("target OECP session response is malformed"))
+    }
+
+    async fn workspace_recovery_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let controller_access = self.workspace_recovery_controller_access(target).await?;
+        self.issue_oecp_session(target, request, controller_access)
+            .await
     }
 
     async fn connection_list(

@@ -64,7 +64,7 @@ pub struct HostedRunStatusResult {
     pub size: RunSize,
     pub at_cursor: Cursor,
     pub status: HostedRunStatus,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "crate::WorkspaceRecovery::is_empty")]
     pub workspace_recovery: crate::WorkspaceRecovery,
 }
 

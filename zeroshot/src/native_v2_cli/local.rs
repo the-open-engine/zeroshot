@@ -485,37 +485,83 @@ impl LocalCliBackend {
     }
 
     async fn reconcile_local_resume_claim(&self, run_id: &RunId) -> Result<(), NativeV2CliError> {
-        let mut recovery = self.read_recovery_document(run_id)?;
-        let Some(successor_run_id) = recovery.successor_run_id.clone() else {
+        let Some((mut recovery, successor_run_id, successor_storage)) =
+            self.claimed_local_successor(run_id)?
+        else {
             return Ok(());
         };
-        let successor_storage = self.run_storage(&successor_run_id)?;
-        if !successor_storage.exists() {
-            recovery.successor_run_id = None;
-            return self.write_recovery_document(run_id, &recovery);
+        if self
+            .successor_claim_is_live_or_admitted(&successor_run_id, &successor_storage)
+            .await?
+        {
+            return Ok(());
         }
-        let paths = self.paths(&successor_run_id)?;
+        std::fs::remove_dir_all(&successor_storage).map_err(local_io)?;
+        recovery.successor_run_id = None;
+        self.write_recovery_document(run_id, &recovery)
+    }
+
+    async fn successor_claim_is_live_or_admitted(
+        &self,
+        successor_run_id: &RunId,
+        successor_storage: &Path,
+    ) -> Result<bool, NativeV2CliError> {
+        let paths = self.paths(successor_run_id)?;
         let ledger_path = successor_storage.join("runs.sqlite3");
         let deadline = Instant::now() + self.ready_timeout;
         loop {
-            if require_existing_ledger(&ledger_path)? || read_ready(&paths).is_ok() {
-                return Ok(());
-            }
             match ControllerLease::acquire(paths.lease()) {
-                Err(ControllerLeaseError::Held) => return Ok(()),
-                Ok(lease) if Instant::now() >= deadline => {
-                    std::fs::remove_dir_all(&successor_storage).map_err(local_io)?;
-                    drop(lease);
-                    recovery.successor_run_id = None;
-                    return self.write_recovery_document(run_id, &recovery);
-                }
+                Err(ControllerLeaseError::Held) => return Ok(true),
                 Ok(lease) => {
+                    if self
+                        .local_successor_was_admitted(&ledger_path, successor_run_id)
+                        .await?
+                    {
+                        return Ok(true);
+                    }
+                    if Instant::now() >= deadline {
+                        drop(lease);
+                        return Ok(false);
+                    }
                     drop(lease);
                     sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
                 }
                 Err(error) => return Err(local_error(error)),
             }
         }
+    }
+
+    fn claimed_local_successor(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<(LocalRecoveryDocument, RunId, PathBuf)>, NativeV2CliError> {
+        let mut recovery = self.read_recovery_document(run_id)?;
+        let Some(successor_run_id) = recovery.successor_run_id.clone() else {
+            return Ok(None);
+        };
+        let successor_storage = self.run_storage(&successor_run_id)?;
+        if successor_storage.exists() {
+            return Ok(Some((recovery, successor_run_id, successor_storage)));
+        }
+        recovery.successor_run_id = None;
+        self.write_recovery_document(run_id, &recovery)?;
+        Ok(None)
+    }
+
+    async fn local_successor_was_admitted(
+        &self,
+        ledger_path: &Path,
+        successor_run_id: &RunId,
+    ) -> Result<bool, NativeV2CliError> {
+        if !require_existing_ledger(ledger_path)? {
+            return Ok(false);
+        }
+        let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
+        Ok(ledger
+            .get(successor_run_id)
+            .await
+            .map_err(local_error)?
+            .is_some())
     }
 
     fn read_recovery_document(
@@ -607,14 +653,25 @@ impl LocalCliBackend {
         &self,
         params: RunForceParams,
     ) -> Result<RunForceResult, NativeV2CliError> {
+        let run_id = params.run_id.clone();
         let retry = params.clone();
         match self.force_once(params).await {
-            Ok(result) => Ok(result),
+            Ok(_) => {}
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
-                self.force_once(retry).await
+                self.force_once(retry).await?;
             }
-        }
+        };
+        let status = self.status_local(RunStatusParams { run_id }).await?;
+        Ok(RunForceResult {
+            run_id: status.run_id,
+            title: status.title,
+            source: status.source,
+            size: status.size,
+            at_cursor: status.at_cursor,
+            status: status.status,
+            workspace_recovery: status.workspace_recovery,
+        })
     }
 
     async fn force_once(&self, params: RunForceParams) -> Result<RunForceResult, NativeV2CliError> {
@@ -680,19 +737,87 @@ fn local_message(message: impl Into<String>) -> NativeV2CliError {
 mod recovery_claim_tests {
     use super::*;
     use openengine_cluster_testkit::assertions::AssertValue;
+    use serde_json::json;
+
+    use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
+    use crate::v2_run_ledger::CreateRun;
+
+    fn submission(key: &str) -> RunSubmission {
+        serde_json::from_value(json!({
+            "title": "Local recovery test",
+            "graph": full_graph(vec![success_node()]),
+            "initialInput": null,
+            "runtime": {
+                "harness": "codex",
+                "provider": "openai",
+                "size": "small",
+                "nodes": {}
+            },
+            "source": {
+                "repository": "open-engine/zeroshot",
+                "branch": "main",
+                "revision": "0123456789abcdef0123456789abcdef01234567"
+            },
+            "submissionKey": key
+        }))
+        .assert_value()
+    }
+
+    fn backend(root: &Path) -> LocalCliBackend {
+        LocalCliBackend::new(
+            root.to_owned(),
+            PathBuf::from("zeroshot"),
+            root.to_owned(),
+            PathBuf::from("git"),
+        )
+    }
+
+    struct ResumeClaimFixture {
+        _root: TestDirectory,
+        backend: LocalCliBackend,
+        run_id: RunId,
+        successor_run_id: RunId,
+        submission: RunSubmission,
+        successor_storage: PathBuf,
+    }
+
+    fn resume_claim_fixture(name: &str, submission_key: &str) -> ResumeClaimFixture {
+        let root = TestDirectory::new(name);
+        let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
+        let successor_run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000002");
+        std::fs::create_dir_all(root.child("runs").join(run_id.as_str())).assert_value();
+        let backend = backend(root.path()).with_ready_timeout(Duration::ZERO);
+        let submission = submission(submission_key);
+        backend
+            .write_recovery_document(
+                &run_id,
+                &LocalRecoveryDocument {
+                    submission: submission.clone(),
+                    workspace: root.child("workspace"),
+                    delivery_run_id: Some(run_id.clone()),
+                    resumed_from: None,
+                    successor_run_id: Some(successor_run_id.clone()),
+                },
+            )
+            .assert_value();
+        let successor_storage = backend.run_storage(&successor_run_id).assert_value();
+        std::fs::create_dir_all(&successor_storage).assert_value();
+        ResumeClaimFixture {
+            _root: root,
+            backend,
+            run_id,
+            successor_run_id,
+            submission,
+            successor_storage,
+        }
+    }
 
     #[test]
     fn interrupted_resume_releases_the_workspace_claim_for_retry() {
-        let root =
-            std::env::temp_dir().join(format!("zeroshot-local-recovery-{}", uuid::Uuid::now_v7()));
+        let root = TestDirectory::new("lr-claim");
         let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
-        std::fs::create_dir_all(root.join("runs").join(run_id.as_str())).assert_value();
-        let backend = LocalCliBackend::new(
-            root.clone(),
-            PathBuf::from("zeroshot"),
-            root.clone(),
-            PathBuf::from("git"),
-        );
+        std::fs::create_dir_all(root.child("runs").join(run_id.as_str())).assert_value();
+        let backend = backend(root.path());
 
         let interrupted_process_claim = backend.claim_recovery_workspace(&run_id).assert_value();
         assert!(
@@ -707,7 +832,64 @@ mod recovery_claim_tests {
                 .recovery_workspace_is_unclaimed(&run_id)
                 .assert_value()
         );
+    }
 
-        std::fs::remove_dir_all(root).assert_value();
+    #[tokio::test]
+    async fn interrupted_resume_with_empty_ledger_clears_the_successor_claim() {
+        let fixture = resume_claim_fixture("lr-empty", "interrupted-resume");
+        drop(SqliteRunLedger::open(fixture.successor_storage.join("runs.sqlite3")).assert_value());
+
+        fixture
+            .backend
+            .reconcile_local_resume_claim(&fixture.run_id)
+            .await
+            .assert_value();
+
+        assert!(!fixture.successor_storage.exists());
+        assert_eq!(
+            fixture
+                .backend
+                .read_recovery_document(&fixture.run_id)
+                .assert_value()
+                .successor_run_id,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_resume_with_a_durable_successor_keeps_the_claim() {
+        let fixture = resume_claim_fixture("lr-durable", "durable-successor");
+        let ledger =
+            SqliteRunLedger::open(fixture.successor_storage.join("runs.sqlite3")).assert_value();
+        let admitted = NativeV2Admission
+            .admit(fixture.submission.clone())
+            .await
+            .assert_value();
+        let digest = submission_digest(&fixture.submission).assert_value();
+        ledger
+            .create_or_get(CreateRun {
+                run_id: fixture.successor_run_id.clone(),
+                submission_key: fixture.submission.submission_key.clone(),
+                submission_digest: digest,
+                admitted,
+            })
+            .await
+            .assert_value();
+
+        fixture
+            .backend
+            .reconcile_local_resume_claim(&fixture.run_id)
+            .await
+            .assert_value();
+
+        assert!(fixture.successor_storage.exists());
+        assert_eq!(
+            fixture
+                .backend
+                .read_recovery_document(&fixture.run_id)
+                .assert_value()
+                .successor_run_id,
+            Some(fixture.successor_run_id)
+        );
     }
 }

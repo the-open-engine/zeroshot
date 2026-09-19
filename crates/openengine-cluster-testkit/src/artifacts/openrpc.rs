@@ -111,7 +111,7 @@ fn observation_method(name: &str) -> Option<Value> {
 }
 
 fn native_v2_method(name: &str) -> Option<Value> {
-    match name {
+    let method = match name {
         RUN_SUBMIT_METHOD => run_submit_method(),
         RUN_LIST_METHOD => run_list_method(),
         RUN_STATUS_METHOD => run_status_method(),
@@ -119,6 +119,13 @@ fn native_v2_method(name: &str) -> Option<Value> {
         RUN_LOGS_METHOD => run_logs_method(),
         RUN_ATTACH_METHOD => run_attach_method(),
         RUN_FORCE_METHOD => run_force_method(),
+        _ => return native_v2_recovery_method(name),
+    };
+    Some(method)
+}
+
+fn native_v2_recovery_method(name: &str) -> Option<Value> {
+    match name {
         RUN_RESUME_METHOD => run_resume_method(),
         RUN_DISCARD_WORKSPACE_METHOD => run_discard_workspace_method(),
         _ => return None,
@@ -409,7 +416,10 @@ fn run_resume_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
-            {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")}
+            {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")},
+            {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
+            {"name": "connectionResolver", "required": false, "schema": property_schema(&schema, "connectionResolver")},
+            {"name": "githubToken", "required": false, "schema": property_schema(&schema, "githubToken")}
         ],
         "result": {
             "name": "runResumeResult",

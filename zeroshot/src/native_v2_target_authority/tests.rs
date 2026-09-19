@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use openengine_cluster_client::ClusterClient;
-use openengine_cluster_client::websocket::WebSocketTransport;
+use openengine_cluster_client::{ClientError, ClusterClient};
+use openengine_cluster_client::websocket::{DialedWebSocketTransport, WebSocketTransport};
 use openengine_cluster_protocol::{
-    IdempotencyKey, ResolvedSource, RunId, RunListParams, RunResumeParams, RunSize, RunSubmission,
-    RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    TargetPrivateBootstrapRequest,
+    IdempotencyKey, ResolvedSource, RunDiscardWorkspaceParams, RunId, RunListParams,
+    RunResumeParams, RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId, INVALID_PARAMS,
+    SCHEMA_VIOLATION, SourceRepositoryId, SourceRevisionId, TargetPrivateBootstrapRequest,
+    WORKSPACE_RECOVERY_KIND,
 };
 use openengine_cluster_server::identity::{
     BindingAttributes, ConnectionIdentity, ConnectionIdentityConfig, PrincipalId, TenantId,
@@ -86,6 +87,10 @@ struct FakeFactory {
 
 #[async_trait]
 impl TargetControllerFactory for FakeFactory {
+    fn supports_workspace_recovery(&self) -> bool {
+        true
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         self.controllers.fetch_add(1, Ordering::SeqCst);
         test_controller().await
@@ -266,10 +271,10 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     );
     let task = tokio::spawn(server.serve(listener));
 
-    let discovery = http(address, TestHttpRequest::empty("GET", DISCOVERY_PATH, None)).await;
-    let document: TargetDiscoveryDocument = serde_json::from_slice(&discovery.body).assert_value();
+    let document = target_discovery(address).await;
     assert_eq!(document.authentication, TargetAuthentication::HostedOauth);
     assert_eq!(document.kind, DISCOVERY_KIND);
+    assert_workspace_recovery_capability(&document, false);
     assert_eq!(
         http(
             address,
@@ -313,6 +318,7 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     let session: TargetOecpSession = serde_json::from_slice(&session.body).assert_value();
     assert_eq!(session.endpoint, endpoint);
     connect_and_list(&session.endpoint, Some("oecp-token")).await;
+    assert_workspace_recovery(&session.endpoint, Some("oecp-token"), false).await;
 
     task.abort();
 }
@@ -384,12 +390,10 @@ async fn direct_target_remains_auth_free_without_private_bootstrap() {
 
 #[tokio::test]
 async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
-    let (_, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
-    let (websocket, _) = tokio_tungstenite::connect_async(&endpoint)
-        .await
-        .assert_value();
-    let client = ClusterClient::new(WebSocketTransport::new(websocket));
-    client.initialize().await.assert_value();
+    let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
+    let document = target_discovery(address).await;
+    assert_workspace_recovery_capability(&document, true);
+    let client = connect_client(&endpoint, None).await;
 
     let error = client
         .run_resume(RunResumeParams {
@@ -402,14 +406,80 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         .await
         .expect_err("missing run must be rejected by controller");
     assert!(!error.to_string().contains("does not support"));
+    let error = client
+        .run_discard_workspace(RunDiscardWorkspaceParams { run_id: run_id() })
+        .await
+        .expect_err("missing run must be rejected by controller");
+    assert!(!error.to_string().contains("does not support"));
 
+    for params in [
+        RunResumeParams {
+            run_id: RunId::new("not-a-run-id"),
+            successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+        },
+        RunResumeParams {
+            run_id: run_id(),
+            successor_run_id: RunId::new("not-a-run-id"),
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+        },
+    ] {
+        let error = client
+            .run_resume(params)
+            .await
+            .expect_err("noncanonical recovery run IDs must be rejected");
+        assert_recovery_run_id_rejected(error);
+    }
+    let error = client
+        .run_discard_workspace(RunDiscardWorkspaceParams {
+            run_id: RunId::new("not-a-run-id"),
+        })
+        .await
+        .expect_err("noncanonical discard run ID must be rejected");
+    assert_recovery_run_id_rejected(error);
+
+    task.abort();
+}
+
+fn assert_recovery_run_id_rejected(error: ClientError) {
+    let ClientError::Rpc(error) = error else {
+        panic!("expected JSON-RPC invalid params response, received {error:?}");
+    };
+    assert_eq!(error.code, INVALID_PARAMS);
+    assert_eq!(
+        error.data.as_ref().map(|data| data.code.as_str()),
+        Some(SCHEMA_VIOLATION)
+    );
+}
+
+#[tokio::test]
+async fn target_without_workspace_recovery_support_omits_and_rejects_the_capability() {
+    let (address, endpoint, task) = direct_test_server(Arc::new(RejectingFactory)).await;
+    let document = target_discovery(address).await;
+    assert_workspace_recovery_capability(&document, false);
+    assert_workspace_recovery(&endpoint, None, false).await;
     task.abort();
 }
 
 #[tokio::test]
 async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
     let (root, address, endpoint, task) = private_test_server().await;
+    let document = target_discovery(address).await;
+    assert_workspace_recovery_capability(&document, true);
     assert_private_routes_require_capability(address, &endpoint).await;
+    let token = bootstrap_private_target(address).await;
+    assert_private_session(address, &endpoint, &token).await;
+    assert_private_operator_diagnostics(address, &token).await;
+
+    task.abort();
+    let _ = std::fs::remove_dir(&root);
+}
+
+async fn bootstrap_private_target(address: std::net::SocketAddr) -> String {
     let token = "a".repeat(64);
     let bootstrap = private_bootstrap_payload(&token);
     assert_eq!(
@@ -430,14 +500,21 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
         .status,
         404
     );
+    token
+}
+
+async fn assert_private_session(address: std::net::SocketAddr, endpoint: &str, token: &str) {
     let session = http(
         address,
-        TestHttpRequest::body("POST", SESSION_PATH, Some(&token), b"{}"),
+        TestHttpRequest::body("POST", SESSION_PATH, Some(token), b"{}"),
     )
     .await;
     assert_eq!(session.status, 200);
-    connect_and_list(&endpoint, Some(&token)).await;
+    connect_and_list(endpoint, Some(token)).await;
+    assert_workspace_recovery(endpoint, Some(token), true).await;
+}
 
+async fn assert_private_operator_diagnostics(address: std::net::SocketAddr, token: &str) {
     assert_eq!(
         http(
             address,
@@ -454,7 +531,7 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
 
     http(
         address,
-        TestHttpRequest::empty("GET", OPERATOR_DIAGNOSTICS_PATH_PREFIX, Some(&token)),
+        TestHttpRequest::empty("GET", OPERATOR_DIAGNOSTICS_PATH_PREFIX, Some(token)),
     )
     .await
     .assert_problem(
@@ -467,7 +544,7 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
         TestHttpRequest::empty(
             "GET",
             &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}not-a-run"),
-            Some(&token),
+            Some(token),
         ),
     )
     .await
@@ -481,7 +558,7 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
         TestHttpRequest::empty(
             "GET",
             &format!("{OPERATOR_DIAGNOSTICS_PATH_PREFIX}{}", run_id().as_str()),
-            Some(&token),
+            Some(token),
         ),
     )
     .await;
@@ -501,9 +578,6 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
             .assert_value()
             .contains("other run")
     );
-
-    task.abort();
-    let _ = std::fs::remove_dir(&root);
 }
 
 async fn private_test_server() -> (
@@ -618,7 +692,26 @@ fn private_bootstrap_payload(token: &str) -> Vec<u8> {
     .assert_value()
 }
 
-async fn connect_and_list(endpoint: &str, bearer: Option<&str>) {
+async fn target_discovery(address: std::net::SocketAddr) -> TargetDiscoveryDocument {
+    let response = http(address, TestHttpRequest::empty("GET", DISCOVERY_PATH, None)).await;
+    serde_json::from_slice(&response.body).assert_value()
+}
+
+fn assert_workspace_recovery_capability(document: &TargetDiscoveryDocument, advertised: bool) {
+    assert_eq!(
+        document
+            .extensions
+            .workspace_recovery
+            .as_ref()
+            .map(|capability| capability.kind.as_str()),
+        advertised.then_some(WORKSPACE_RECOVERY_KIND)
+    );
+}
+
+async fn connect_client(
+    endpoint: &str,
+    bearer: Option<&str>,
+) -> ClusterClient<DialedWebSocketTransport> {
     let mut request = endpoint.into_client_request().assert_value();
     if let Some(bearer) = bearer {
         request.headers_mut().insert(
@@ -631,12 +724,40 @@ async fn connect_and_list(endpoint: &str, bearer: Option<&str>) {
         .assert_value();
     let client = ClusterClient::new(WebSocketTransport::new(websocket));
     client.initialize().await.assert_value();
+    client
+}
+
+async fn connect_and_list(endpoint: &str, bearer: Option<&str>) {
     assert!(
-        client
+        connect_client(endpoint, bearer)
+            .await
             .run_list(RunListParams {})
             .await
             .assert_value()
             .runs
             .is_empty()
     );
+}
+
+async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, advertised: bool) {
+    let client = connect_client(endpoint, bearer).await;
+    let errors = [
+        client
+            .run_resume(RunResumeParams {
+                run_id: run_id(),
+                successor_run_id: other_run_id(),
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            })
+            .await
+            .expect_err("missing run must be rejected"),
+        client
+            .run_discard_workspace(RunDiscardWorkspaceParams { run_id: run_id() })
+            .await
+            .expect_err("missing run must be rejected"),
+    ];
+    for error in errors {
+        assert_eq!(!error.to_string().contains("does not support"), advertised);
+    }
 }

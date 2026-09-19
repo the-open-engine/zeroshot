@@ -266,7 +266,7 @@ fn update_help_explains_the_verified_in_place_release_flow() {
 fn typos_report_a_suggestion_and_contextual_usage() {
     assert_contextual_error(
         &["rum"],
-        "a similar subcommand exists: 'run'",
+        "some similar subcommands exist: 'run', 'resume'",
         "usage: zeroshot [command]",
     );
     assert_contextual_error(

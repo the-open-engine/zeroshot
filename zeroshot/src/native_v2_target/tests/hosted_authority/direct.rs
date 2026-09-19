@@ -93,6 +93,11 @@ fn discovery() -> String {
         "sessionPath": "/native-v2/oecp-session",
         "oecpPath": "/native-v2/oecp",
         "audience": "controller",
+        "extensions": {
+            "workspace_recovery": {
+                "kind": "openengine.workspace-recovery/v1"
+            }
+        }
     })
     .to_string()
 }

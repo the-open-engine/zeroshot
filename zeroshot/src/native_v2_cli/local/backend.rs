@@ -1,6 +1,65 @@
 use super::*;
 use crate::native_v2_supervisor::RunEnvironment;
 
+impl LocalCliBackend {
+    async fn resume_local(
+        &self,
+        params: openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let _submission_lock = self.acquire_submission_lock().await?;
+        self.reconcile_local_resume_claim(&params.run_id).await?;
+        let status = self
+            .status_local(RunStatusParams {
+                run_id: params.run_id.clone(),
+            })
+            .await?;
+        if !status.workspace_recovery.recoverable {
+            return Err(local_message("run does not have a recoverable workspace"));
+        }
+        let recovery = self.read_recovery_document(&params.run_id)?;
+        if recovery.successor_run_id.is_some() {
+            return Err(local_message("retained workspace was already claimed"));
+        }
+        let _claim = self.claim_recovery_workspace(&params.run_id)?;
+        self.start_local_successor(params, recovery).await
+    }
+
+    async fn start_local_successor(
+        &self,
+        params: openengine_cluster_protocol::RunResumeParams,
+        mut recovery: LocalRecoveryDocument,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let connections = LocalConnectionStore::new(self.state_root.clone())
+            .resolve(&recovery.submission.runtime, &params.connections)?
+            .bootstrap_values();
+        let environment = RunEnvironment::exact(&recovery.submission.runtime, connections)
+            .map_err(local_error)?;
+        recovery.successor_run_id = Some(params.successor_run_id.clone());
+        self.write_recovery_document(&params.run_id, &recovery)?;
+        let prepared = PreparedLocalRun {
+            run_id: params.successor_run_id.clone(),
+            delivery_run_id: self.delivery_run_id(&params.run_id, &recovery)?,
+            submission: recovery.submission,
+            environment,
+            github_token: params.github_token,
+            workspace: recovery.workspace,
+        };
+        if let Err(error) = self
+            .start_prepared_controller_with_lineage(prepared, Some(params.run_id.clone()))
+            .await
+        {
+            self.reconcile_local_resume_claim(&params.run_id).await?;
+            return Err(error);
+        }
+        let successor = self.read_recovery_document(&params.successor_run_id)?;
+        debug_assert_eq!(successor.resumed_from.as_ref(), Some(&params.run_id));
+        Ok(openengine_cluster_protocol::RunResumeResult {
+            run_id: params.successor_run_id,
+            resumed_from: params.run_id,
+        })
+    }
+}
+
 #[async_trait]
 impl NativeV2CliBackend for LocalCliBackend {
     type Watch = ChannelSubscription<CliRunWatchEventNotification>;
@@ -164,53 +223,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         require_local(target)?;
-        let _submission_lock = self.acquire_submission_lock().await?;
-        self.reconcile_local_resume_claim(&params.run_id).await?;
-        let status = self
-            .status_local(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
-            .await?;
-        if !status.workspace_recovery.recoverable {
-            return Err(local_message("run does not have a recoverable workspace"));
-        }
-        let mut recovery = self.read_recovery_document(&params.run_id)?;
-        if recovery.successor_run_id.is_some() {
-            return Err(local_message("retained workspace was already claimed"));
-        }
-        let _claim = self.claim_recovery_workspace(&params.run_id)?;
-        async {
-            let connections = LocalConnectionStore::new(self.state_root.clone())
-                .resolve(&recovery.submission.runtime, &params.connections)?
-                .bootstrap_values();
-            let environment = RunEnvironment::exact(&recovery.submission.runtime, connections)
-                .map_err(local_error)?;
-            recovery.successor_run_id = Some(params.successor_run_id.clone());
-            self.write_recovery_document(&params.run_id, &recovery)?;
-            let prepared = PreparedLocalRun {
-                run_id: params.successor_run_id.clone(),
-                delivery_run_id: self.delivery_run_id(&params.run_id, &recovery)?,
-                submission: recovery.submission.clone(),
-                environment,
-                github_token: params.github_token,
-                workspace: recovery.workspace.clone(),
-            };
-            if let Err(error) = self
-                .start_prepared_controller_with_lineage(prepared, Some(params.run_id.clone()))
-                .await
-            {
-                recovery.successor_run_id = None;
-                self.write_recovery_document(&params.run_id, &recovery)?;
-                return Err(error);
-            }
-            let successor = self.read_recovery_document(&params.successor_run_id)?;
-            debug_assert_eq!(successor.resumed_from.as_ref(), Some(&params.run_id));
-            Ok(openengine_cluster_protocol::RunResumeResult {
-                run_id: params.successor_run_id,
-                resumed_from: params.run_id,
-            })
-        }
-        .await
+        self.resume_local(params).await
     }
 
     async fn run_discard_workspace(

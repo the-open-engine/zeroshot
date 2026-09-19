@@ -24,9 +24,6 @@
       ],
       "phase": "stopping"
     },
-    "title": "Repair checkout flow",
-    "workspaceRecovery": {
-      "recoverable": false
-    }
+    "title": "Repair checkout flow"
   }
 }

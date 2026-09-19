@@ -1,6 +1,16 @@
 use serde_json::{Value, json};
 
 pub(super) fn graph() -> Value {
+    let worker_errors = json!({
+        "kind":"in",
+        "value":{"name":"worker","source":"error","field":null},
+        "labels":["timeout","crash","malformed","refusal"]
+    });
+    let worker_failure = json!({
+        "kind":"fail",
+        "name":"worker_failed",
+        "reason":"worker_failed"
+    });
     json!({
         "profile":"openengine.graph.full/v1",
         "initialInput":{"kind":"null"},
@@ -22,7 +32,22 @@ pub(super) fn graph() -> Value {
                     "timeoutMs":30000,
                     "attempts":1
                 },
-                {"kind":"succeed", "name":"done", "output":{"kind":"null"}, "bindings":[]}
+                {
+                    "kind":"choice",
+                    "name":"worker_result",
+                    "state":{"kind":"null"},
+                    "branches":[{
+                        "when":worker_errors,
+                        "node":worker_failure
+                    }],
+                    "otherwise":{
+                        "kind":"succeed",
+                        "name":"done",
+                        "output":{"kind":"null"},
+                        "bindings":[]
+                    },
+                    "promotedStatePaths":[]
+                }
             ],
             "promotedStatePaths":[]
         }

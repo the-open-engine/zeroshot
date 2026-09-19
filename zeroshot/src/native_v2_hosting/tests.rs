@@ -22,7 +22,7 @@ use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError, RunRuntimeExit};
 use crate::native_v2_target_authority::TargetAuthorityErrorKind;
 
-use super::allocator::{ProductionCapsuleAllocator, monitor_workspace_identity};
+use super::allocator::{ProductionCapsuleAllocator, monitor_workspace_identity, production_filesystem};
 use super::repository::{RepositoryInstall, install_repository, path_source};
 
 mod checkout;

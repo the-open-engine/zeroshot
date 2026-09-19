@@ -135,10 +135,19 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(HostedAuthDescriptor, ControllerDescriptor), TargetAuthorityError> {
+        self.descriptors_inner(target, false).await
+    }
+
+    async fn descriptors_inner(
+        &self,
+        target: &TargetRecord,
+        require_workspace_recovery: bool,
+    ) -> Result<(HostedAuthDescriptor, ControllerDescriptor), TargetAuthorityError> {
         let (origin, wire) = self.discovery(target).await?;
         let auth = build_auth_descriptor(&origin, &wire)?;
         let controller =
             build_controller_descriptor(&origin, wire, target.access.authentication())?;
+        require_workspace_recovery_capability(&controller, require_workspace_recovery)?;
         let metadata: OAuthMetadataWire =
             self.get_json(&auth.metadata_url, "OAuth metadata").await?;
         validate_metadata_routes(&origin, &auth, &metadata)?;
@@ -365,15 +374,36 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
+        self.controller_access_inner(target, false).await
+    }
+
+    async fn workspace_recovery_controller_access(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
+        self.controller_access_inner(target, true).await
+    }
+
+    async fn controller_access_inner(
+        &self,
+        target: &TargetRecord,
+        require_workspace_recovery: bool,
+    ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
         match &target.access {
             TargetAccess::Hosted { .. } => {
-                let (auth, controller) = self.descriptors(target).await?;
+                let (auth, controller) = self
+                    .descriptors_inner(target, require_workspace_recovery)
+                    .await?;
                 let access = self
                     .access_token(target, &auth, &controller.audience)
                     .await?;
                 Ok((controller, Some(access)))
             }
-            TargetAccess::Direct => Ok((self.controller_descriptor(target).await?, None)),
+            TargetAccess::Direct => {
+                let controller = self.controller_descriptor(target).await?;
+                require_workspace_recovery_capability(&controller, require_workspace_recovery)?;
+                Ok((controller, None))
+            }
         }
     }
 
@@ -417,6 +447,19 @@ impl TargetHttpControlAuthority {
             .await
             .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         read_success_json(response, url, operation).await
+    }
+}
+
+fn require_workspace_recovery_capability(
+    controller: &ControllerDescriptor,
+    required: bool,
+) -> Result<(), TargetAuthorityError> {
+    if required && !controller.workspace_recovery {
+        Err(authority_error(
+            "target does not advertise workspace recovery",
+        ))
+    } else {
+        Ok(())
     }
 }
 

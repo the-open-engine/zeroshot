@@ -97,12 +97,14 @@ impl NativeV2DeliveryAdapter {
                 .as_ref()
                 .is_some_and(|updated| updated.head_revision == observed.head_revision)
         });
+        let adopting_existing = self.is_adopting_existing_delivery(&known);
         let request = GitHubHeadReconciliation {
             workspace: &self.config.workspace,
             published: &published,
             observed: &observed,
             commit_message,
             authorized_update,
+            adopting_existing,
         };
         let outcome = self.reconcile_before_delivery(request, preparation).await?;
         match outcome {
@@ -118,6 +120,12 @@ impl NativeV2DeliveryAdapter {
                 Ok(())
             }
         }
+    }
+
+    fn is_adopting_existing_delivery(&self, known: &DeliveryState) -> bool {
+        self.config.adopt_existing_delivery
+            && known.published.is_none()
+            && known.intended_push.is_none()
     }
 
     async fn require_reconciliation_anchor(

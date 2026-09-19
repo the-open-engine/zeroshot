@@ -13,12 +13,13 @@ pub(crate) async fn reconcile(
         credential,
     };
     fetch_head(context, request.published, request.observed).await?;
-    if !is_ancestor(
-        context,
-        &request.published.head_revision,
-        &request.observed.head_revision,
-    )
-    .await?
+    if !request.adopting_existing
+        && !is_ancestor(
+            context,
+            &request.published.head_revision,
+            &request.observed.head_revision,
+        )
+        .await?
     {
         return Ok(GitHubReconciliationOutcome::Refused(format!(
             "remote history was rewritten: published head {}; observed head {}; local work was preserved",
@@ -26,6 +27,30 @@ pub(crate) async fn reconcile(
         )));
     }
     reconcile_workspace(context, request).await
+}
+
+async fn reconcile_adopted_delivery(
+    context: HeadUpdateContext<'_>,
+    request: GitHubHeadReconciliation<'_>,
+    local_head: String,
+) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+    if !is_ancestor(context, &local_head, &request.observed.head_revision).await? {
+        return Ok(GitHubReconciliationOutcome::Refused(format!(
+            "existing remote head {} does not descend from retained local head {}; local work was preserved",
+            request.observed.head_revision, local_head,
+        )));
+    }
+    let mut anchor = request.observed.clone();
+    anchor.head_revision = local_head;
+    Box::pin(reconcile_workspace(
+        context,
+        GitHubHeadReconciliation {
+            published: &anchor,
+            adopting_existing: false,
+            ..request
+        },
+    ))
+    .await
 }
 
 fn require_identity(
@@ -46,6 +71,14 @@ fn require_identity(
     Ok(())
 }
 
+fn authorizes_fast_forward(
+    request: &GitHubHeadReconciliation<'_>,
+    head: &str,
+    dirty: bool,
+) -> bool {
+    request.authorized_update && !dirty && head == request.published.head_revision
+}
+
 async fn reconcile_workspace(
     context: HeadUpdateContext<'_>,
     request: GitHubHeadReconciliation<'_>,
@@ -57,6 +90,9 @@ async fn reconcile_workspace(
         .map_err(git_error)?;
     if is_ancestor(context, &request.observed.head_revision, &head).await? {
         return Ok(GitHubReconciliationOutcome::Unchanged);
+    }
+    if request.adopting_existing {
+        return reconcile_adopted_delivery(context, request, head).await;
     }
     if !is_ancestor(context, &request.published.head_revision, &head).await? {
         return Ok(GitHubReconciliationOutcome::Refused(format!(
@@ -74,7 +110,7 @@ async fn reconcile_workspace(
         .await
         .map_err(git_error)?;
     }
-    let authorized = request.authorized_update && !dirty && head == request.published.head_revision;
+    let authorized = authorizes_fast_forward(&request, &head, dirty);
     integrate(context, request, authorized).await
 }
 

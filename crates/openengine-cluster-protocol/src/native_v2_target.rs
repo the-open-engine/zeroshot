@@ -464,13 +464,19 @@ impl TargetDiscoveryDocument {
             .then(|| TARGET_PRIVATE_BOOTSTRAP_PATH.to_owned()),
             oauth: None,
             login_session: None,
-            extensions: TargetDiscoveryExtensions {
-                workspace_recovery: Some(TargetWorkspaceRecoveryDiscovery {
-                    kind: WORKSPACE_RECOVERY_KIND.to_owned(),
-                }),
-                ..TargetDiscoveryExtensions::default()
-            },
+            extensions: TargetDiscoveryExtensions::default(),
         }
+    }
+
+    /// Adds the recovery extension to direct and private-capability discovery.
+    #[must_use]
+    pub fn with_workspace_recovery(mut self) -> Self {
+        if !matches!(self.authentication, TargetAuthentication::HostedOauth) {
+            self.extensions.workspace_recovery = Some(TargetWorkspaceRecoveryDiscovery {
+                kind: WORKSPACE_RECOVERY_KIND.to_owned(),
+            });
+        }
+        self
     }
 }
 
@@ -497,6 +503,45 @@ mod tests {
     use openengine_cluster_testkit::assertions::AssertValue;
 
     use super::*;
+
+    #[test]
+    fn supported_non_hosted_target_discovery_advertises_workspace_recovery() {
+        let direct =
+            TargetDiscoveryDocument::direct(TargetAuthentication::None).with_workspace_recovery();
+        assert_eq!(
+            direct
+                .extensions
+                .workspace_recovery
+                .as_ref()
+                .map(|capability| capability.kind.as_str()),
+            Some(WORKSPACE_RECOVERY_KIND)
+        );
+        assert!(
+            TargetDiscoveryDocument::direct(TargetAuthentication::PrivateCapability)
+                .with_workspace_recovery()
+                .extensions
+                .workspace_recovery
+                .is_some()
+        );
+        for authentication in [
+            TargetAuthentication::None,
+            TargetAuthentication::PrivateCapability,
+        ] {
+            assert!(
+                TargetDiscoveryDocument::direct(authentication)
+                    .extensions
+                    .workspace_recovery
+                    .is_none()
+            );
+        }
+        assert!(
+            TargetDiscoveryDocument::direct(TargetAuthentication::HostedOauth)
+                .with_workspace_recovery()
+                .extensions
+                .workspace_recovery
+                .is_none()
+        );
+    }
 
     #[test]
     fn uuid_v7_validation_is_canonical_and_versioned() {

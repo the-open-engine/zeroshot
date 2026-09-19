@@ -4,9 +4,10 @@ use std::os::unix::process::CommandExt as _;
 
 use super::*;
 use crate::execution::process::HostedProcessPool;
-use crate::native_v2_capsule::{CapsuleFilesystem, CapsuleFilesystemSpec, prepare_capsule_filesystem};
+use crate::native_v2_capsule::CapsuleFilesystem;
 use crate::native_v2_cloud::{
     AllocatedCapsule, CapsuleAllocationUnavailable, RetainedAllocationRequest,
+    RetainedAllocationUnavailable,
 };
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
@@ -75,6 +76,38 @@ exec /usr/bin/git "$@"
         self.allocator
             .allocate(&self.run_id, &self.admitted, Some(CHECKOUT_TOKEN))
             .await
+    }
+
+    async fn retain_untracked_workspace(&self) -> PathBuf {
+        let capsule = self.allocate().await.assert_value();
+        let workspace = self.allocator.run_path(&self.run_id).join("workspace");
+        fs::write(workspace.join("untracked.txt"), "resume me\n").assert_value();
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
+        workspace
+    }
+
+    async fn allocate_retained(
+        &self,
+        successor: &RunId,
+    ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
+        self.allocator
+            .allocate_from_retained(RetainedAllocationRequest {
+                source_run_id: &self.run_id,
+                run_id: successor,
+                admitted: &self.admitted,
+                github_token: Some(CHECKOUT_TOKEN),
+            })
+            .await
+    }
+
+    async fn assert_claimed_by(&self, successor: &RunId) {
+        let source_recovery = self.allocator.workspace_recovery(&self.run_id).await;
+        assert!(!source_recovery.recoverable);
+        assert_eq!(source_recovery.successor_run_id.as_ref(), Some(successor));
     }
 }
 
@@ -315,61 +348,83 @@ async fn reconstructed_failed_runs_retain_workspace_without_active_capsules() {
 }
 
 #[tokio::test]
-async fn failed_retained_allocation_restores_source_ownership() {
+async fn failed_retained_allocation_commits_recovery_to_successor() {
     let mut fixture = CheckoutFixture::new("").await;
-    let capsule = fixture.allocate().await.assert_value();
-    let source_workspace = fixture
-        .allocator
-        .run_path(&fixture.run_id)
-        .join("workspace");
-    fs::write(source_workspace.join("untracked.txt"), "resume me\n").assert_value();
-    capsule
-        .cleanup
-        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
-        .await
-        .assert_value();
+    fixture.retain_untracked_workspace().await;
     fixture
         .allocator
         .set_test_filesystem(|_, _, _| Err(CapsuleAllocationUnavailable::Runtime));
 
     let successor = RunId::new("checkout-recovery-failed-successor");
-    assert!(
-        fixture
-            .allocator
-            .allocate_from_retained(RetainedAllocationRequest {
-                source_run_id: &fixture.run_id,
-                run_id: &successor,
-                admitted: &fixture.admitted,
-                github_token: Some(CHECKOUT_TOKEN),
-            })
-            .await
-            .is_err()
-    );
+    assert!(matches!(
+        fixture.allocate_retained(&successor).await,
+        Err(RetainedAllocationUnavailable::Settled(
+            CapsuleAllocationUnavailable::Runtime
+        ))
+    ));
 
-    let recovery = fixture.allocator.workspace_recovery(&fixture.run_id).await;
-    assert!(recovery.recoverable);
-    assert!(recovery.successor_run_id.is_none());
+    fixture.assert_claimed_by(&successor).await;
+    let successor_recovery = fixture.allocator.workspace_recovery(&successor).await;
+    assert!(successor_recovery.recoverable);
     assert_eq!(
-        fs::read_to_string(source_workspace.join("untracked.txt")).assert_value(),
+        successor_recovery.resumed_from.as_ref(),
+        Some(&fixture.run_id)
+    );
+    let successor_workspace = fixture.allocator.run_path(&successor).join("workspace");
+    assert_eq!(
+        fs::read_to_string(successor_workspace.join("untracked.txt")).assert_value(),
         "resume me\n"
     );
-    assert!(!fixture.allocator.run_path(&successor).exists());
+    assert!(
+        !fixture
+            .allocator
+            .run_path(&successor)
+            .join("runtime")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn unconfirmed_retained_cleanup_keeps_successor_for_reconciliation() {
+    let mut fixture = CheckoutFixture::new("").await;
+    fixture.retain_untracked_workspace().await;
+    fixture
+        .allocator
+        .set_test_filesystem(block_retained_cleanup);
+
+    let successor = RunId::new("checkout-recovery-unconfirmed-successor");
+    assert!(matches!(
+        fixture.allocate_retained(&successor).await,
+        Err(RetainedAllocationUnavailable::CleanupUnconfirmed(_))
+    ));
+
+    fixture.assert_claimed_by(&successor).await;
+    let successor_root = fixture.allocator.run_path(&successor);
+    assert_eq!(
+        fs::read_to_string(successor_root.join("workspace/untracked.txt")).assert_value(),
+        "resume me\n"
+    );
+    assert!(successor_root.join("runtime").is_file());
+
+    fs::remove_file(successor_root.join("runtime")).assert_value();
+    fixture.allocator.reconcile_test_recovery();
+    fixture
+        .allocator
+        .destroy_or_confirm_absent(&successor, RunRuntimeExit::RuntimeLost)
+        .await
+        .assert_value();
+    let successor_recovery = fixture.allocator.workspace_recovery(&successor).await;
+    assert!(successor_recovery.recoverable);
+    assert_eq!(
+        successor_recovery.resumed_from.as_ref(),
+        Some(&fixture.run_id)
+    );
 }
 
 #[tokio::test]
 async fn retained_capsule_moves_exclusively_to_successor_and_keeps_lineage() {
     let fixture = CheckoutFixture::new("").await;
-    let capsule = fixture.allocate().await.assert_value();
-    let source_workspace = fixture
-        .allocator
-        .run_path(&fixture.run_id)
-        .join("workspace");
-    fs::write(source_workspace.join("untracked.txt"), "resume me\n").assert_value();
-    capsule
-        .cleanup
-        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
-        .await
-        .assert_value();
+    fixture.retain_untracked_workspace().await;
 
     let successor = RunId::new("checkout-recovery-successor");
     let resumed = fixture
@@ -622,7 +677,7 @@ async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity(
         return;
     }
     let mut fixture = CheckoutFixture::new("").await;
-    fixture.allocator.set_test_filesystem(hosted_filesystem);
+    fixture.allocator.set_test_filesystem(production_filesystem);
     let capsule = fixture.allocate().await.assert_value();
     let source_workspace = fixture
         .allocator
@@ -715,15 +770,12 @@ async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity(
         .assert_value();
 }
 
-fn hosted_filesystem(
-    workspace: &Path,
+fn block_retained_cleanup(
+    _workspace: &Path,
     runtime_home: &Path,
-    process_pool: HostedProcessPool,
+    _process_pool: HostedProcessPool,
 ) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
-    prepare_capsule_filesystem(CapsuleFilesystemSpec {
-        workspace,
-        runtime_home,
-        process_pool,
-    })
-    .map_err(|_| CapsuleAllocationUnavailable::Runtime)
+    fs::write(runtime_home, "cleanup blocker")
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+    Err(CapsuleAllocationUnavailable::Runtime)
 }

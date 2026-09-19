@@ -229,10 +229,37 @@ impl SeparateHistory {
         observed
     }
 
+    fn rewrite_remote(&self) -> GitHubReviewReceipt {
+        git(&self.external, &["reset", "--hard", &self.repository.base]);
+        std::fs::write(self.external.join("rewritten.txt"), "rewritten\n").assert_value();
+        commit_all(&self.external, "human rewrite");
+        git(
+            &self.external,
+            &[
+                "push",
+                "--force",
+                "origin",
+                "HEAD:refs/heads/zeroshot/v2-run",
+            ],
+        );
+        let mut observed = self.published.clone();
+        observed.head_revision = git_output(&self.external, &["rev-parse", "HEAD"]);
+        observed
+    }
+
     async fn reconcile(
         &self,
         observed: &GitHubReviewReceipt,
         authorized: bool,
+    ) -> GitHubReconciliationOutcome {
+        self.reconcile_with_mode(observed, authorized, false).await
+    }
+
+    async fn reconcile_with_mode(
+        &self,
+        observed: &GitHubReviewReceipt,
+        authorized: bool,
+        adopting_existing: bool,
     ) -> GitHubReconciliationOutcome {
         super::reconcile(
             &self.authority,
@@ -242,6 +269,7 @@ impl SeparateHistory {
                 observed,
                 commit_message: "Preserve repair changes",
                 authorized_update: authorized,
+                adopting_existing,
             },
             GitHubCredential("test-token"),
         )
@@ -350,24 +378,15 @@ async fn real_reconciliation_materializes_conflict_without_discarding_repairs() 
 #[tokio::test]
 async fn real_reconciliation_refuses_rewritten_remote_without_changing_local_work() {
     let history = SeparateHistory::new();
-    git(
-        &history.external,
-        &["reset", "--hard", &history.repository.base],
-    );
-    std::fs::write(history.external.join("rewritten.txt"), "rewritten\n").assert_value();
-    commit_all(&history.external, "human rewrite");
-    git(
-        &history.external,
-        &[
-            "push",
-            "--force",
-            "origin",
-            "HEAD:refs/heads/zeroshot/v2-run",
-        ],
-    );
-    let mut observed = history.published.clone();
-    observed.head_revision = git_output(&history.external, &["rev-parse", "HEAD"]);
-    assert_refusal_preserves_repairs(&history, &observed).await;
+    let observed = history.rewrite_remote();
+    assert_refusal_preserves_repairs(&history, &observed, false).await;
+}
+
+#[tokio::test]
+async fn adopted_reconciliation_refuses_divergent_remote_without_changing_local_work() {
+    let history = SeparateHistory::new();
+    let observed = history.rewrite_remote();
+    assert_refusal_preserves_repairs(&history, &observed, true).await;
 }
 
 #[tokio::test]
@@ -391,12 +410,13 @@ async fn real_reconciliation_refuses_lost_local_anchor_even_when_remote_is_uncha
         &history.repository.workspace,
         &["reset", "--hard", &history.repository.base],
     );
-    assert_refusal_preserves_repairs(&history, &history.published).await;
+    assert_refusal_preserves_repairs(&history, &history.published, false).await;
 }
 
 async fn assert_refusal_preserves_repairs(
     history: &SeparateHistory,
     observed: &GitHubReviewReceipt,
+    adopting_existing: bool,
 ) {
     std::fs::write(
         history.repository.workspace.join("repair.txt"),
@@ -405,7 +425,9 @@ async fn assert_refusal_preserves_repairs(
     .assert_value();
     let before = git_output(&history.repository.workspace, &["rev-parse", "HEAD"]);
     assert!(matches!(
-        history.reconcile(observed, false).await,
+        history
+            .reconcile_with_mode(observed, false, adopting_existing)
+            .await,
         GitHubReconciliationOutcome::Refused(_)
     ));
     assert_eq!(

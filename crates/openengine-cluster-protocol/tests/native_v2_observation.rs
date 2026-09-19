@@ -51,7 +51,7 @@ fn running_status() -> RunStatus {
 
 #[test]
 fn status_exposes_every_parallel_execution_without_private_identity() {
-    let result = RunStatusResult {
+    let mut result = RunStatusResult {
         run_id: RunId::new("run-1"),
         title: title(),
         source: source(),
@@ -80,14 +80,18 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
                     { "execution": "opaque-verifier-a", "node": "verify-a" },
                     { "execution": "opaque-verifier-b", "node": "verify-b" }
                 ]
-            },
-            "workspaceRecovery": {"recoverable": false}
+            }
         })
     );
     let encoded = serde_json::to_string(&value).assert_value();
     for private_name in ["capsule", "session", "provider", "executionId"] {
         assert!(!encoded.contains(private_name));
     }
+    result.workspace_recovery.recoverable = true;
+    assert_eq!(
+        serde_json::to_value(&result).assert_value()["workspaceRecovery"],
+        json!({"recoverable": true})
+    );
     assert!(
         serde_json::from_value::<RunStatusResult>(json!({
             "runId": "run-1",
@@ -305,6 +309,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
         json_read::json_at(&value, "/status/phase"),
         &json!("stopping")
     );
+    assert!(value.get("workspaceRecovery").is_none());
 }
 
 #[test]

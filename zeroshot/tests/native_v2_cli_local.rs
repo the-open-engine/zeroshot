@@ -309,3 +309,88 @@ async fn concurrent_identical_submissions_create_one_local_run() {
     );
     fixture.json(&["force-stop", &run_id], "block").await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_local_run_resumes_in_the_same_dirty_workspace_with_fresh_connections() {
+    let fixture = LocalFixture::new();
+    let failed = fixture.run("Recoverable local run", "fail", false).await;
+    assert!(
+        !failed.status.success(),
+        "injected local failure succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&failed.stdout),
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    let failed_run_id = json_lines(&failed.stdout)
+        .as_slice()
+        .assert_at(0)
+        .assert_key("runId")
+        .as_str()
+        .assert_value_with("failed run receipt")
+        .to_owned();
+    wait_for_exit(fixture.ready_pid(&failed_run_id)).await;
+    fs::write(fixture.repository.join("resume-sentinel.txt"), "retained\n")
+        .assert_value_with("write retained workspace sentinel");
+
+    let failed_status = fixture.json(&["status", &failed_run_id], "finish").await;
+    assert_eq!(
+        failed_status
+            .assert_key("workspaceRecovery")
+            .assert_key("recoverable"),
+        true
+    );
+    let forced = fixture
+        .json(&["force-stop", &failed_run_id], "finish")
+        .await;
+    assert_eq!(
+        forced.assert_key("workspaceRecovery"),
+        failed_status.assert_key("workspaceRecovery")
+    );
+
+    let resumed = fixture.json(&["resume", &failed_run_id], "finish").await;
+    let successor_run_id = resumed
+        .assert_key("runId")
+        .as_str()
+        .assert_value_with("successor run identity")
+        .to_owned();
+    assert_local_run_id(&successor_run_id);
+    assert_ne!(successor_run_id, failed_run_id);
+    assert_eq!(resumed.assert_key("resumedFrom"), failed_run_id.as_str());
+
+    let successor = fixture.wait_succeeded(&successor_run_id, "finish").await;
+    assert_eq!(
+        successor
+            .assert_key("workspaceRecovery")
+            .assert_key("resumedFrom"),
+        failed_run_id.as_str()
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.repository.join("resume-sentinel.txt"))
+            .assert_value_with("retained workspace sentinel"),
+        "retained\n"
+    );
+    let turns = fs::read_to_string(fixture.repository.join("local-session.args"))
+        .assert_value_with("local session arguments");
+    let first_successor_turn = turns
+        .split("---\n")
+        .find(|turn| turn.lines().any(|line| line == "mode=finish"))
+        .assert_value_with("successor provider turn");
+    assert!(
+        !first_successor_turn
+            .lines()
+            .any(|line| line == "arg=resume"),
+        "successor reused a predecessor provider session"
+    );
+    let predecessor = fixture.json(&["status", &failed_run_id], "finish").await;
+    assert_eq!(
+        predecessor
+            .assert_key("workspaceRecovery")
+            .assert_key("successorRunId"),
+        successor_run_id.as_str()
+    );
+    assert_eq!(
+        predecessor
+            .assert_key("workspaceRecovery")
+            .assert_key("recoverable"),
+        false
+    );
+}

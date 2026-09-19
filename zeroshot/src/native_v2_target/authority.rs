@@ -35,6 +35,15 @@ pub trait TargetControlAuthority: Send + Sync {
         target: &TargetRecord,
         request: &TargetOecpSessionRequest,
     ) -> Result<TargetOecpAccess, TargetAuthorityError>;
+    async fn workspace_recovery_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace recovery",
+        ))
+    }
     async fn connection_list(
         &self,
         target: &TargetRecord,

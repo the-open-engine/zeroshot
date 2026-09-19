@@ -64,11 +64,7 @@ async fn valid_run_injects_only_declared_environment_and_retry_does_not_replace_
         &retry.submission.runtime,
         BTreeMap::from([(
             ConnectionKey::new("test").assert_value_with("connection key"),
-            StaticConnectionValues::new(BTreeMap::from([(
-                EnvironmentVariableName::new("NODE_TOKEN").assert_value_with("environment name"),
-                "replacement-secret".to_owned(),
-            )]))
-            .assert_value_with("connection values"),
+            test_connection_values("replacement-secret"),
         )]),
     )
     .assert_value_with("replacement environment");

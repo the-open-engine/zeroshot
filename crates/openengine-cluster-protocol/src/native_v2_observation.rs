@@ -173,18 +173,44 @@ pub struct RunStatusParams {
     pub run_id: RunId,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunStatusResult {
-    pub run_id: RunId,
-    pub title: RunTitle,
-    pub source: ResolvedSource,
-    pub size: RunSize,
-    pub at_cursor: Cursor,
-    pub status: RunStatus,
-    #[serde(default)]
-    pub workspace_recovery: WorkspaceRecovery,
+macro_rules! define_run_status_projection {
+    (
+        $(#[$attribute:meta])*
+        $name:ident
+        $(
+            {
+                run_id: #[$run_id_attribute:meta],
+                title: #[$title_attribute:meta],
+                source: #[$source_attribute:meta],
+                size: #[$size_attribute:meta],
+                at_cursor: #[$cursor_attribute:meta],
+                status: #[$status_attribute:meta],
+            }
+        )?
+    ) => {
+        $(#[$attribute])*
+        #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        pub struct $name {
+            $(#[$run_id_attribute])?
+            pub run_id: RunId,
+            $(#[$title_attribute])?
+            pub title: RunTitle,
+            $(#[$source_attribute])?
+            pub source: ResolvedSource,
+            $(#[$size_attribute])?
+            pub size: RunSize,
+            $(#[$cursor_attribute])?
+            pub at_cursor: Cursor,
+            $(#[$status_attribute])?
+            pub status: RunStatus,
+            #[serde(default, skip_serializing_if = "WorkspaceRecovery::is_empty")]
+            pub workspace_recovery: WorkspaceRecovery,
+        }
+    };
 }
+
+define_run_status_projection!(RunStatusResult);
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -196,6 +222,16 @@ pub struct WorkspaceRecovery {
     pub resumed_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub successor_run_id: Option<RunId>,
+}
+
+impl WorkspaceRecovery {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.recoverable
+            && self.connection_requirements.is_empty()
+            && self.resumed_from.is_none()
+            && self.successor_run_id.is_none()
+    }
 }
 
 /// Establishes a durable run watch.
@@ -308,22 +344,14 @@ pub struct RunForceParams {
     pub run_id: RunId,
 }
 
-/// The durable run status after recording the force request.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunForceResult {
-    /// Public identity of the run whose force request was recorded.
-    pub run_id: RunId,
-    /// Immutable title captured when the run was admitted.
-    pub title: RunTitle,
-    /// Immutable repository snapshot captured when the run was admitted.
-    pub source: ResolvedSource,
-    /// Immutable execution size selected for the run.
-    pub size: RunSize,
-    /// Durable cursor after the force request was recorded.
-    pub at_cursor: Cursor,
-    /// Public phase projected after the force request was recorded.
-    pub status: RunStatus,
-    #[serde(default)]
-    pub workspace_recovery: WorkspaceRecovery,
-}
+define_run_status_projection!(
+    /// The durable run status after recording the force request.
+    RunForceResult {
+        run_id: #[doc = "Public identity of the run whose force request was recorded."],
+        title: #[doc = "Immutable title captured when the run was admitted."],
+        source: #[doc = "Immutable repository snapshot captured when the run was admitted."],
+        size: #[doc = "Immutable execution size selected for the run."],
+        at_cursor: #[doc = "Durable cursor after the force request was recorded."],
+        status: #[doc = "Public phase projected after the force request was recorded."],
+    }
+);
