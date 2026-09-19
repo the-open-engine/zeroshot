@@ -179,6 +179,76 @@ async fn target_integration_completes_despite_inherited_merge_preferences() {
 }
 
 #[tokio::test]
+async fn configured_signing_failure_preserves_policy_and_work_for_repair() {
+    for committed_candidate in [false, true] {
+        let fixture = TargetFixture::new();
+        let workspace = &fixture.repository.workspace;
+        if committed_candidate {
+            commit_all(workspace, "candidate before signing policy");
+        }
+        let candidate = git_output(workspace, &["rev-parse", "HEAD"]);
+        let signer = fixture.repository.root.write_executable(
+            "unavailable-signer",
+            "#!/bin/sh\n/usr/bin/cat >/dev/null\n\
+             /usr/bin/printf 'fixture signer unavailable\\n' >&2\nexit 1\n",
+        );
+        for (key, value) in [
+            ("commit.gpgSign", "true"),
+            ("gpg.format", "openpgp"),
+            ("gpg.program", path_text(&signer)),
+        ] {
+            git(workspace, &["config", "--local", key, value]);
+        }
+
+        let error = fixture
+            .try_reconcile()
+            .await
+            .expect_err("authored signing policy must not be silently bypassed");
+
+        assert!(matches!(&error, GitHubAuthorityError::Command(_)));
+        let diagnostic = error.to_string();
+        assert!(
+            diagnostic.contains("fixture signer unavailable"),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("exitStatus: Some("), "{diagnostic}");
+        assert!(!diagnostic.contains("test-token"));
+        assert_eq!(git_output(workspace, &["rev-parse", "HEAD"]), candidate);
+        assert_eq!(
+            fs::read_to_string(workspace.join("result.txt")).assert_value(),
+            "feature work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join(".github/workflows/ci.yml")).assert_value(),
+            if committed_candidate {
+                "new workflow\n"
+            } else {
+                "old workflow\n"
+            }
+        );
+        for (key, value) in [
+            ("commit.gpgSign", "true"),
+            ("gpg.format", "openpgp"),
+            ("gpg.program", path_text(&signer)),
+        ] {
+            assert_eq!(git_output(workspace, &["config", "--local", key]), value);
+        }
+        assert_eq!(
+            workspace.join(".git/MERGE_HEAD").exists(),
+            committed_candidate
+        );
+        if committed_candidate {
+            assert_eq!(
+                git_output(workspace, &["rev-parse", "MERGE_HEAD"]),
+                fixture.target_revision
+            );
+            assert_eq!(git_output(workspace, &["ls-files", "--unmerged"]), "");
+        }
+        assert_transport_is_scoped(&fixture);
+    }
+}
+
+#[tokio::test]
 async fn successful_merge_exit_must_prove_both_ancestries_and_completion() {
     for failure in ["no_merge", "discard_candidate", "leave_merge_pending"] {
         let fixture = TargetFixture::new();

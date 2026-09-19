@@ -48,7 +48,10 @@ impl CleanupFixture {
         identity.prepare_command_domain().assert_value();
         let (loss, _) = watch::channel(false);
         let state = Arc::new(ProductionCapsuleState {
-            endpoint: Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(IdleRunner))),
+            endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
+                IdleRunner,
+            )))),
+            run_root_identity: OnceLock::from(WorkspaceIdentity::capture(&run_root).assert_value()),
             run_root,
             process_pool: Mutex::new(Some(lease)),
             portable_processes: false,

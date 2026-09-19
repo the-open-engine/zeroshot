@@ -105,4 +105,50 @@ async fn drive_cleanup_failure_automatically_retries_and_reports_runtime_failure
     );
 }
 
+#[tokio::test]
+async fn allocation_cleanup_refusal_remains_nonterminal_until_recovery_confirms_absence() {
+    let harness = harness(Behavior::Complete).await;
+    harness
+        .allocator
+        .fail_next_allocation(CapsuleAllocationUnavailable::SourceCheckout);
+    harness.cleanup.fail_next();
+    let submission = request(Value::Null);
+    assert!(matches!(
+        submit_test_request(&harness.controller, submission.clone()).await,
+        Err(NativeV2CloudError::Supervisor(
+            NativeV2SupervisorError::RuntimeCleanup(_)
+        ))
+    ));
+    let stored = harness
+        .ledger
+        .get_by_submission_key(&submission.submission.submission_key)
+        .await
+        .assert_value_with("ledger read")
+        .assert_value_with("failed allocation remains durable");
+    assert!(stored.snapshot.terminal.is_none());
+    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+    assert_eq!(harness.allocator.allocation_count(), 1);
+    assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+
+    let receipt = submit_test_request(&harness.controller, submission)
+        .await
+        .assert_value_with("retry confirms cleanup");
+    assert!(receipt.deduped);
+    assert_eq!(receipt.run_id, stored.snapshot.run_id);
+    assert_eq!(
+        terminal(&harness.controller, &receipt.run_id).await,
+        TerminalResult::Failed {
+            reason: EnumLabel::new("runtime_lost").assert_value_with("label")
+        }
+    );
+    assert_eq!(
+        harness.cleanup.exits(),
+        vec![RunRuntimeExit::RuntimeLost, RunRuntimeExit::RuntimeLost]
+    );
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false, false]);
+    assert_eq!(harness.allocator.allocation_count(), 1);
+    assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+}
+
 use openengine_cluster_testkit::assertions::{AssertValue};

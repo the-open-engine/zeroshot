@@ -161,6 +161,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   is fatal. A caught delivery panic settles as a node crash after confirmed cleanup, without exposing
   its payload. Allocation requires an idle writer domain before authenticated checkout and rechecks
   it before deleting the workspace or releasing its identity lease; failed cleanup retains both.
+  Allocation retains cleanup authority before checkout starts, including through startup errors and
+  cancellation. Controllers confirm destruction before recording an allocation failure as terminal.
   Local Git retains the caller identity.
 - Before first publication, delivery captures and fetches the exact current target revision and
   merges it while preserving candidate history and dirty work. Any changed candidate returns through

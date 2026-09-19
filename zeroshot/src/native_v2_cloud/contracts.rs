@@ -77,8 +77,10 @@ pub trait CapsuleAllocator: Send + Sync {
         run_id: &RunId,
     ) -> Result<Arc<dyn ExclusiveControllerClaim>, ControllerClaimUnavailable>;
 
-    /// An error guarantees that allocation left no surviving capsule. Once allocation succeeds,
-    /// cleanup authority is carried by [`AllocatedCapsule`].
+    /// Retains cleanup authority by run identity before starting runtime processes, including
+    /// when this future is cancelled or returns an error. The caller must confirm destruction
+    /// through [`Self::destroy_or_confirm_absent`] before recording a terminal allocation failure.
+    /// Once allocation succeeds, cleanup authority is also carried by [`AllocatedCapsule`].
     async fn allocate(
         &self,
         run_id: &RunId,

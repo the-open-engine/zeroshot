@@ -289,6 +289,12 @@ impl NativeV2CloudController {
         {
             Ok(capsule) => capsule,
             Err(error) => {
+                self.allocator
+                    .destroy_or_confirm_absent(&run_id, RunRuntimeExit::RuntimeLost)
+                    .await
+                    .map_err(|_| {
+                        NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable)
+                    })?;
                 self.append_unavailable(&run_id, error.failure_code())
                     .await?;
                 return Err(error.into());
