@@ -10,10 +10,10 @@ use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
     ConnectionMutationResult, ConnectionSetRequest, Cursor, MergePlan, MergePlanId,
     RunAttachEventNotification, RunAttachParams, RunForceParams, RunListParams,
-    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
-    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
-    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatus, RunStatusParams,
-    RunSubmitResult, RunWatchParams,
+    RunConnectionRequirements, RunLogEventNotification, RunLogsParams, RunProfile,
+    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
+    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
+    RunProfileSetRequest, RunStatus, RunStatusParams, RunSubmitResult, RunWatchParams,
 };
 use tokio::sync::mpsc;
 
@@ -403,14 +403,30 @@ where
             .map_err(protocol_error)
     }
 
+    async fn authorize_resume_connection_requirements(
+        &self,
+        target: Option<&str>,
+        run_id: &openengine_cluster_protocol::RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        self.connector.authorize_workspace_recovery_requirements(
+            require_named_target(target)?,
+            run_id,
+            requirements,
+        )
+    }
+
     async fn run_resume(
         &self,
         target: Option<&str>,
         params: openengine_cluster_protocol::RunResumeParams,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        self.connector
+            .prepare_workspace_recovery_resume(target, &params)?;
         let transport = self
             .connector
-            .connect_workspace_recovery(require_named_target(target)?, params.run_id.clone())
+            .connect_workspace_recovery(target, params.run_id.clone())
             .await?;
         ClusterClient::new(transport.as_ref())
             .run_resume(params)
@@ -423,14 +439,23 @@ where
         target: Option<&str>,
         params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
     ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        let run_id = params.run_id.clone();
         let transport = self
             .connector
-            .connect_workspace_recovery(require_named_target(target)?, params.run_id.clone())
+            .connect_workspace_recovery(target, run_id.clone())
             .await?;
-        ClusterClient::new(transport.as_ref())
+        let result = ClusterClient::new(transport.as_ref())
             .run_discard_workspace(params)
             .await
-            .map_err(protocol_error)
+            .map_err(protocol_error)?;
+        if result.run_id != run_id {
+            return Err(NativeV2CliError::Protocol(
+                "workspace discard returned a different run ID".to_owned(),
+            ));
+        }
+        self.connector.revoke_workspace_recovery(target, &run_id)?;
+        Ok(result)
     }
 }
 

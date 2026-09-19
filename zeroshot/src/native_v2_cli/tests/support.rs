@@ -146,6 +146,7 @@ pub(super) struct FakeBackend {
     queued_lifecycle: bool,
     terminal_plan_state: Option<MergePlanState>,
     resume_requirements: Option<RunConnectionRequirements>,
+    trusted_resume_requirements: Option<RunConnectionRequirements>,
 }
 
 #[derive(Clone, Copy)]
@@ -206,7 +207,19 @@ impl FakeBackend {
 
     pub(super) fn with_resume_requirements(requirements: RunConnectionRequirements) -> Self {
         Self {
-            resume_requirements: Some(requirements),
+            resume_requirements: Some(requirements.clone()),
+            trusted_resume_requirements: Some(requirements),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn with_untrusted_resume_requirements(
+        advertised: RunConnectionRequirements,
+        trusted: RunConnectionRequirements,
+    ) -> Self {
+        Self {
+            resume_requirements: Some(advertised),
+            trusted_resume_requirements: Some(trusted),
             ..Self::default()
         }
     }
@@ -624,6 +637,29 @@ impl NativeV2CliBackend for FakeBackend {
             "status":{"phase":"stopping","activeExecutions":[]}
         }))
         .map_err(NativeV2CliError::OutputJson)
+    }
+
+    async fn authorize_resume_connection_requirements(
+        &self,
+        target: Option<&str>,
+        _run_id: &RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        if target.is_none() {
+            return Ok(requirements);
+        }
+        let trusted = self.trusted_resume_requirements.as_ref().ok_or_else(|| {
+            NativeV2CliError::Target(
+                "local authorization for workspace recovery is unavailable".to_owned(),
+            )
+        })?;
+        if trusted != &requirements {
+            return Err(NativeV2CliError::Target(
+                "workspace-recovery connection requirements do not match the original run"
+                    .to_owned(),
+            ));
+        }
+        Ok(trusted.clone())
     }
 
     async fn run_resume(

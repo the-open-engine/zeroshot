@@ -159,10 +159,20 @@ where
             },
         )
         .await?;
-    let connections = select_connection_requirements(
-        status.workspace_recovery.connection_requirements,
-        context.environment,
-    )?;
+    if !status.workspace_recovery.recoverable {
+        return Err(NativeV2CliError::Target(
+            "run does not have a recoverable workspace".to_owned(),
+        ));
+    }
+    let requirements = context
+        .backend
+        .authorize_resume_connection_requirements(
+            run.target.as_deref(),
+            &run.run_id,
+            status.workspace_recovery.connection_requirements,
+        )
+        .await?;
+    let connections = select_connection_requirements(requirements, context.environment)?;
     let github_token = (context.environment)("GH_TOKEN")
         .map(|value| {
             value

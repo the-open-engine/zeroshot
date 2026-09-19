@@ -7,9 +7,10 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use openengine_cluster_protocol::{
-    RequestId, RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams,
-    ResolvedSource, RunStatusParams, RunSubmitResult, RunWatchParams, SourceBranchId,
-    SourceRepositoryId, SourceRevisionId, SubscriptionId, TargetOecpSessionRequest,
+    RequestId, RunConnectionRequirements, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, ResolvedSource, RunStatusParams, RunSubmitResult,
+    RunWatchParams, SourceBranchId, SourceRepositoryId, SourceRevisionId, SubscriptionId,
+    TargetOecpSessionRequest,
 };
 use serde_json::json;
 use zeroshot_engine::native_v2_cli::{PreparedRunRequest, TargetRunIntent};
@@ -36,6 +37,7 @@ pub(super) fn test_http_authority(refresh_lock_directory: PathBuf) -> TargetHttp
 #[derive(Clone, Default)]
 pub(super) struct MemoryRegistry {
     targets: Arc<Mutex<BTreeMap<String, TargetRecord>>>,
+    recovery_authorizations: Arc<Mutex<BTreeMap<(String, String), RunConnectionRequirements>>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,6 +52,7 @@ pub(super) enum AuthorityCall {
 pub(super) struct FakeAuthority {
     calls: Arc<Mutex<Vec<AuthorityCall>>>,
     endpoint: String,
+    receipt_run_id: Option<RunId>,
 }
 
 pub(super) struct StubTransport;
@@ -77,6 +80,50 @@ impl TargetRegistry for MemoryRegistry {
             .cloned()
             .ok_or_else(|| TargetConnectorError::NotFound(name.to_owned()))
     }
+
+    fn record_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        requirements: &RunConnectionRequirements,
+    ) -> Result<(), TargetConnectorError> {
+        let key = (target_id.to_owned(), run_id.as_str().to_owned());
+        let mut authorizations = self.recovery_authorizations.lock().assert_value();
+        if let Some(stored) = authorizations.get(&key) {
+            return if stored == requirements {
+                Ok(())
+            } else {
+                Err(TargetConnectorError::RecoveryAuthorizationMismatch)
+            };
+        }
+        authorizations.insert(key, requirements.clone());
+        Ok(())
+    }
+
+    fn recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<RunConnectionRequirements, TargetConnectorError> {
+        self.recovery_authorizations
+            .lock()
+            .assert_value()
+            .get(&(target_id.to_owned(), run_id.as_str().to_owned()))
+            .cloned()
+            .ok_or(TargetConnectorError::RecoveryAuthorizationUnavailable)
+    }
+
+    fn remove_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<(), TargetConnectorError> {
+        self.recovery_authorizations
+            .lock()
+            .assert_value()
+            .remove(&(target_id.to_owned(), run_id.as_str().to_owned()));
+        Ok(())
+    }
 }
 
 impl FakeAuthority {
@@ -84,6 +131,15 @@ impl FakeAuthority {
         Self {
             calls: Arc::new(Mutex::new(Vec::new())),
             endpoint: endpoint.into(),
+            receipt_run_id: None,
+        }
+    }
+
+    pub(super) fn with_receipt(endpoint: impl Into<String>, receipt_run_id: RunId) -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            endpoint: endpoint.into(),
+            receipt_run_id: Some(receipt_run_id),
         }
     }
 
@@ -120,7 +176,10 @@ impl TargetControlAuthority for FakeAuthority {
             Box::new(request.clone()),
         ));
         Ok(RunSubmitResult {
-            run_id: request.run_id.clone(),
+            run_id: self
+                .receipt_run_id
+                .clone()
+                .unwrap_or_else(|| request.run_id.clone()),
         })
     }
 

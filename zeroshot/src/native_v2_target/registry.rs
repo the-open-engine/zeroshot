@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use openengine_cluster_protocol::{RunConnectionRequirements, RunId, is_canonical_uuid_v7};
 use serde::{Deserialize, Serialize};
 
 use super::contract::{normalize_origin, prepare_target, validate_target_name};
@@ -13,10 +14,28 @@ use super::{TargetAccess, TargetConnectorError, TargetRecord};
 const REGISTRY_VERSION: u32 = 5;
 const LEGACY_REGISTRY_VERSION: u32 = 4;
 const MAX_REGISTRY_BYTES: u64 = 1024 * 1024;
+const RECOVERY_AUTHORIZATION_VERSION: u32 = 1;
+const MAX_RECOVERY_AUTHORIZATION_BYTES: u64 = 1024 * 1024;
 
 pub trait TargetRegistry: Send + Sync {
     fn insert(&self, target: TargetRecord) -> Result<(), TargetConnectorError>;
     fn get(&self, name: &str) -> Result<TargetRecord, TargetConnectorError>;
+    fn record_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        requirements: &RunConnectionRequirements,
+    ) -> Result<(), TargetConnectorError>;
+    fn recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<RunConnectionRequirements, TargetConnectorError>;
+    fn remove_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<(), TargetConnectorError>;
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +91,162 @@ impl TargetRegistry for FileTargetRegistry {
                 .ok_or_else(|| TargetConnectorError::NotFound(name.to_owned()))
         })
     }
+
+    fn record_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        requirements: &RunConnectionRequirements,
+    ) -> Result<(), TargetConnectorError> {
+        if !canonical_requirements(requirements) {
+            return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
+        }
+        let path = recovery_authorization_path(&self.path, target_id, run_id)?;
+        let _lock = self.lock_recovery_authorizations()?;
+        if let Some(stored) = read_recovery_authorization(&path)? {
+            return if stored.matches(target_id, run_id, requirements) {
+                Ok(())
+            } else {
+                Err(TargetConnectorError::RecoveryAuthorizationMismatch)
+            };
+        }
+        let authorization = RecoveryAuthorization {
+            version: RECOVERY_AUTHORIZATION_VERSION,
+            target_id: target_id.to_owned(),
+            run_id: run_id.clone(),
+            connection_requirements: requirements.clone(),
+        };
+        write_recovery_authorization(&path, &authorization)
+    }
+
+    fn recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<RunConnectionRequirements, TargetConnectorError> {
+        let path = recovery_authorization_path(&self.path, target_id, run_id)?;
+        let _lock = self.lock_recovery_authorizations()?;
+        let authorization = read_recovery_authorization(&path)?
+            .ok_or(TargetConnectorError::RecoveryAuthorizationUnavailable)?;
+        if !authorization.matches_identity(target_id, run_id) {
+            return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
+        }
+        Ok(authorization.connection_requirements)
+    }
+
+    fn remove_recovery_authorization(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<(), TargetConnectorError> {
+        let path = recovery_authorization_path(&self.path, target_id, run_id)?;
+        let _lock = self.lock_recovery_authorizations()?;
+        if let Err(error) = std::fs::remove_file(path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(TargetConnectorError::RegistryIo(error));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl FileTargetRegistry {
+    fn lock_recovery_authorizations(&self) -> Result<File, TargetConnectorError> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or(TargetConnectorError::RegistryPath("path has no parent"))?;
+        create_private_directory(parent)?;
+        let lock = open_lock(&self.path.with_extension("recovery.lock"))?;
+        lock_registry(&lock, true)?;
+        Ok(lock)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RecoveryAuthorization {
+    version: u32,
+    target_id: String,
+    run_id: RunId,
+    connection_requirements: RunConnectionRequirements,
+}
+
+impl RecoveryAuthorization {
+    fn matches_identity(&self, target_id: &str, run_id: &RunId) -> bool {
+        self.version == RECOVERY_AUTHORIZATION_VERSION
+            && self.target_id == target_id
+            && self.run_id == *run_id
+            && canonical_requirements(&self.connection_requirements)
+    }
+
+    fn matches(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        requirements: &RunConnectionRequirements,
+    ) -> bool {
+        self.matches_identity(target_id, run_id) && self.connection_requirements == *requirements
+    }
+}
+
+fn recovery_authorization_path(
+    registry_path: &Path,
+    target_id: &str,
+    run_id: &RunId,
+) -> Result<PathBuf, TargetConnectorError> {
+    if !valid_uuid(target_id) || !is_canonical_uuid_v7(run_id) {
+        return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
+    }
+    Ok(registry_path
+        .with_extension("recovery")
+        .join(target_id)
+        .join(format!("{}.json", run_id.as_str())))
+}
+
+fn canonical_requirements(requirements: &RunConnectionRequirements) -> bool {
+    requirements.values().all(|fields| {
+        !fields.is_empty()
+            && fields
+                .windows(2)
+                .all(|pair| pair[0].as_str() < pair[1].as_str())
+    })
+}
+
+fn read_recovery_authorization(
+    path: &Path,
+) -> Result<Option<RecoveryAuthorization>, TargetConnectorError> {
+    let Some(mut file) = open_registry(path)? else {
+        return Ok(None);
+    };
+    let metadata = file.metadata().map_err(TargetConnectorError::RegistryIo)?;
+    if metadata.len() > MAX_RECOVERY_AUTHORIZATION_BYTES {
+        return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
+    }
+    let capacity = usize::try_from(metadata.len())
+        .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)?;
+    let mut bytes = Vec::with_capacity(capacity);
+    file.read_to_end(&mut bytes)
+        .map_err(TargetConnectorError::RegistryIo)?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)
+}
+
+fn write_recovery_authorization(
+    path: &Path,
+    authorization: &RecoveryAuthorization,
+) -> Result<(), TargetConnectorError> {
+    let parent = path
+        .parent()
+        .ok_or(TargetConnectorError::RecoveryAuthorizationInvalid)?;
+    create_private_directory(parent)?;
+    let bytes = serde_json::to_vec(authorization)
+        .map_err(|_| TargetConnectorError::RecoveryAuthorizationInvalid)?;
+    if bytes.len() as u64 > MAX_RECOVERY_AUTHORIZATION_BYTES {
+        return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
+    }
+    write_private_file(path, &bytes)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -199,12 +374,12 @@ fn write_registry(path: &Path, state: &RegistryState) -> Result<(), TargetConnec
     if bytes.len() as u64 > MAX_REGISTRY_BYTES {
         return Err(TargetConnectorError::RegistryTooLarge);
     }
+    write_private_file(path, &bytes)
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), TargetConnectorError> {
     let mut suffix = [0_u8; 8];
-    getrandom::fill(&mut suffix).map_err(|_| {
-        TargetConnectorError::RegistryIo(std::io::Error::other(
-            "target registry randomness unavailable",
-        ))
-    })?;
+    getrandom::fill(&mut suffix).map_err(|_| TargetConnectorError::Randomness)?;
     let temporary = path.with_extension(format!("tmp-{}", encode_hex(&suffix)));
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
@@ -213,7 +388,7 @@ fn write_registry(path: &Path, state: &RegistryState) -> Result<(), TargetConnec
         let mut file = options
             .open(&temporary)
             .map_err(TargetConnectorError::RegistryIo)?;
-        file.write_all(&bytes)
+        file.write_all(bytes)
             .map_err(TargetConnectorError::RegistryIo)?;
         file.sync_all().map_err(TargetConnectorError::RegistryIo)?;
         std::fs::rename(&temporary, path).map_err(TargetConnectorError::RegistryIo)

@@ -14,12 +14,12 @@ use openengine_cluster_protocol::{
     ConnectionListResult, ConnectionMutationResult, ConnectionScope, ConnectionSetRequest, Cursor,
     EnvironmentVariableName, ExecutionRef, IdempotencyKey, MergePlan, MergePlanId,
     MergePlanRunRequest, MergePlanSource, RunAttachEventNotification, RunAttachParams,
-    RunConnectionValues, RunForceParams, RunId, RunListParams, RunLogEventNotification,
-    RunLogsParams, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
-    RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult, RunProfileMutationResult,
-    RunProfileName, RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunTitle,
-    RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    SubscriptionCloseReason,
+    RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileName, RunProfileSelector, RunProfileSetRequest,
+    RunStatusParams, RunTitle, RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, SubscriptionCloseReason,
 };
 use thiserror::Error;
 
@@ -593,6 +593,19 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError>;
+    async fn authorize_resume_connection_requirements(
+        &self,
+        target: Option<&str>,
+        _run_id: &RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        if target.is_some() {
+            return Err(NativeV2CliError::Target(
+                "local authorization for workspace recovery is unavailable".to_owned(),
+            ));
+        }
+        Ok(requirements)
+    }
     async fn run_resume(
         &self,
         _target: Option<&str>,

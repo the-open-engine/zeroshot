@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{RunDiscardWorkspaceParams, RunId, RunResumeParams};
+use openengine_cluster_protocol::{
+    ConnectionKey, EnvironmentVariableName, RunConnectionRequirements, RunDiscardWorkspaceParams,
+    RunId, RunResumeParams,
+};
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -77,6 +80,86 @@ fn file_registry_round_trips_direct_access_without_a_device_credential() {
         stored["targets"]["vm"]["access"],
         serde_json::json!({"mode": "direct"})
     );
+}
+
+#[test]
+fn file_registry_keeps_recovery_authorization_outside_target_records() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    let registry = FileTargetRegistry::new(path.clone());
+    registry
+        .insert(direct_target("http://127.0.0.1:8080"))
+        .assert_value();
+    let run_id = run_request().run_id;
+    let requirements = BTreeMap::from([(
+        ConnectionKey::new("openai").assert_value(),
+        vec![EnvironmentVariableName::new("OPENAI_API_KEY").assert_value()],
+    )]);
+
+    registry
+        .record_recovery_authorization(
+            "11111111-1111-4111-8111-111111111111",
+            &run_id,
+            &requirements,
+        )
+        .assert_value();
+    let different = BTreeMap::from([(
+        ConnectionKey::new("aws").assert_value(),
+        vec![EnvironmentVariableName::new("AWS_SECRET_ACCESS_KEY").assert_value()],
+    )]);
+    assert!(matches!(
+        registry.record_recovery_authorization(
+            "11111111-1111-4111-8111-111111111111",
+            &run_id,
+            &different,
+        ),
+        Err(TargetConnectorError::RecoveryAuthorizationMismatch)
+    ));
+    let authorization_path = path
+        .with_extension("recovery")
+        .join("11111111-1111-4111-8111-111111111111")
+        .join(format!("{}.json", run_id.as_str()));
+    drop(registry);
+    let restarted = FileTargetRegistry::new(path.clone());
+    assert_eq!(
+        restarted
+            .recovery_authorization("11111111-1111-4111-8111-111111111111", &run_id)
+            .assert_value(),
+        requirements
+    );
+    assert!(matches!(
+        restarted.recovery_authorization("33333333-3333-4333-8333-333333333333", &run_id),
+        Err(TargetConnectorError::RecoveryAuthorizationUnavailable)
+    ));
+    assert!(
+        !std::fs::read_to_string(path)
+            .assert_value()
+            .contains("OPENAI_API_KEY")
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&authorization_path)
+                .assert_value()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    std::fs::write(&authorization_path, b"{}").assert_value();
+    assert!(matches!(
+        restarted.recovery_authorization("11111111-1111-4111-8111-111111111111", &run_id),
+        Err(TargetConnectorError::RecoveryAuthorizationInvalid)
+    ));
+    restarted
+        .remove_recovery_authorization("11111111-1111-4111-8111-111111111111", &run_id)
+        .assert_value();
+    assert!(matches!(
+        restarted.recovery_authorization("11111111-1111-4111-8111-111111111111", &run_id),
+        Err(TargetConnectorError::RecoveryAuthorizationUnavailable)
+    ));
 }
 
 #[test]
@@ -192,6 +275,189 @@ async fn connector_preserves_add_login_and_target_scoped_connect() {
         dialer.sessions.lock().assert_value().as_slice(),
         &[(added.clone(), "wss://target.example/oecp".to_owned())]
     );
+}
+
+type RecoveryConnector = NativeV2TargetConnector<MemoryRegistry, FakeAuthority, FakeDialer>;
+
+struct DirectRecoveryFixture {
+    connector: RecoveryConnector,
+    registry: MemoryRegistry,
+    target: TargetRecord,
+    run_id: RunId,
+    key: ConnectionKey,
+    field: EnvironmentVariableName,
+    trusted: RunConnectionRequirements,
+}
+
+async fn direct_recovery_fixture() -> DirectRecoveryFixture {
+    let registry = MemoryRegistry::default();
+    let target = direct_target("http://127.0.0.1:8080");
+    registry.insert(target.clone()).assert_value();
+    let authoritative_run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c994");
+    let authority = FakeAuthority::with_receipt(
+        "ws://127.0.0.1:8080/native-v2/oecp",
+        authoritative_run_id.clone(),
+    );
+    let connector =
+        NativeV2TargetConnector::new(registry.clone(), authority, FakeDialer::default());
+    let mut request = run_request();
+    request.intent.runtime = serde_json::from_value(serde_json::json!({
+        "harness":"codex",
+        "provider":"openai",
+        "size":"medium",
+        "nodes":{
+            "worker":{
+                "kind":"agent",
+                "model":"gpt-5.6-sol",
+                "connections":{"openai":["OPENAI_API_KEY"]}
+            }
+        }
+    }))
+    .assert_value();
+    let requested_run_id = request.run_id.clone();
+    let receipt = connector.submit("vm", request).await.assert_value();
+    assert_eq!(receipt.run_id, authoritative_run_id);
+    let run_id = receipt.run_id;
+    let key = ConnectionKey::new("openai").assert_value();
+    let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
+    let trusted = BTreeMap::from([(key.clone(), vec![field.clone()])]);
+
+    assert_eq!(
+        registry
+            .recovery_authorization(&target.id, &requested_run_id)
+            .assert_value(),
+        trusted
+    );
+    DirectRecoveryFixture {
+        connector,
+        registry,
+        target,
+        run_id,
+        key,
+        field,
+        trusted,
+    }
+}
+
+#[tokio::test]
+async fn direct_connector_binds_resume_fields_to_the_original_runtime() {
+    let fixture = direct_recovery_fixture().await;
+    assert_eq!(
+        fixture
+            .connector
+            .authorize_workspace_recovery_requirements(
+                "vm",
+                &fixture.run_id,
+                fixture.trusted.clone(),
+            )
+            .assert_value(),
+        fixture.trusted
+    );
+    let selected = EnvironmentVariableName::new("AWS_SECRET_ACCESS_KEY").assert_value();
+    let untrusted = BTreeMap::from([(fixture.key.clone(), vec![selected])]);
+    assert!(
+        fixture
+            .connector
+            .authorize_workspace_recovery_requirements("vm", &fixture.run_id, untrusted)
+            .assert_error()
+            .to_string()
+            .contains("do not match the original run")
+    );
+}
+
+#[tokio::test]
+async fn direct_connector_constrains_resume_values_and_propagates_authorization() {
+    let fixture = direct_recovery_fixture().await;
+    let selected = EnvironmentVariableName::new("AWS_SECRET_ACCESS_KEY").assert_value();
+    let successor_run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
+    let untrusted_values = openengine_cluster_protocol::StaticConnectionValues::new(
+        BTreeMap::from([(selected, "secret".to_owned())]),
+    )
+    .assert_value();
+    let params = RunResumeParams {
+        run_id: fixture.run_id.clone(),
+        successor_run_id: successor_run_id.clone(),
+        connections: BTreeMap::from([(fixture.key.clone(), untrusted_values)]),
+        connection_resolver: None,
+        github_token: None,
+    };
+    assert!(
+        fixture
+            .connector
+            .prepare_workspace_recovery_resume("vm", &params)
+            .assert_error()
+            .to_string()
+            .contains("do not match the original run")
+    );
+    assert_recovery_unavailable(&fixture, &successor_run_id);
+
+    let resolver_successor = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993");
+    let resolver_params = RunResumeParams {
+        run_id: fixture.run_id.clone(),
+        successor_run_id: resolver_successor.clone(),
+        connections: BTreeMap::new(),
+        connection_resolver: Some(openengine_cluster_protocol::TargetConnectionResolver {
+            endpoint: "https://resolver.example".to_owned(),
+            bearer_token: "resolver-token".to_owned(),
+            keys: vec![fixture.key.clone()],
+            source_connection: None,
+        }),
+        github_token: None,
+    };
+    assert!(
+        fixture
+            .connector
+            .prepare_workspace_recovery_resume("vm", &resolver_params)
+            .assert_error()
+            .to_string()
+            .contains("do not match the original run")
+    );
+    assert_recovery_unavailable(&fixture, &resolver_successor);
+
+    let trusted_values = openengine_cluster_protocol::StaticConnectionValues::new(BTreeMap::from(
+        [(fixture.field.clone(), "fresh".to_owned())],
+    ))
+    .assert_value();
+    let params = RunResumeParams {
+        connections: BTreeMap::from([(fixture.key.clone(), trusted_values)]),
+        ..params
+    };
+    fixture
+        .connector
+        .prepare_workspace_recovery_resume("vm", &params)
+        .assert_value();
+    assert_eq!(
+        fixture
+            .registry
+            .recovery_authorization(&fixture.target.id, &successor_run_id)
+            .assert_value(),
+        fixture.trusted
+    );
+    assert_eq!(
+        fixture
+            .connector
+            .authorize_workspace_recovery_requirements(
+                "vm",
+                &successor_run_id,
+                fixture.trusted.clone(),
+            )
+            .assert_value(),
+        fixture.trusted
+    );
+    fixture
+        .connector
+        .revoke_workspace_recovery("vm", &successor_run_id)
+        .assert_value();
+    assert_recovery_unavailable(&fixture, &successor_run_id);
+}
+
+fn assert_recovery_unavailable(fixture: &DirectRecoveryFixture, run_id: &RunId) {
+    assert!(matches!(
+        fixture
+            .registry
+            .recovery_authorization(&fixture.target.id, run_id),
+        Err(TargetConnectorError::RecoveryAuthorizationUnavailable)
+    ));
 }
 
 #[tokio::test]
