@@ -18,7 +18,7 @@ const MAX_RESOLUTION_RESPONSE_BYTES: usize = 300 * 1024;
 const MAX_RESOLVER_TOKEN_BYTES: usize = 16 * 1024;
 const RESOLUTION_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub(super) fn build_connection_resolver(
+pub(crate) fn build_connection_resolver(
     run_id: RunId,
     wire: TargetConnectionResolver,
 ) -> Result<DynamicConnectionPlan, TargetAuthorityError> {

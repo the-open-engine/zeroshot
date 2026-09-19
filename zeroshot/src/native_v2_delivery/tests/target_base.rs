@@ -47,6 +47,7 @@ impl UpdatedTarget {
             &fixture.repo,
             authority.clone(),
             DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
+            DeliveryLineage::original("updated-target-before-push"),
         );
         (fixture, authority, adapter)
     }

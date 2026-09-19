@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use openengine_cluster_protocol::RunId;
 use openengine_cluster_protocol::{EnumLabel, FieldName, WorkerErrorCode, WorkerOutcome, WorkerRef};
 use serde_json::{Map, Value, json};
 
@@ -211,6 +212,8 @@ impl Default for DeliveryPollPolicy {
 
 #[derive(Clone, Debug)]
 pub struct NativeV2DeliveryConfig {
+    pub delivery_run_id: RunId,
+    pub adopt_existing_delivery: bool,
     /// Pinned workspace owner for hosted Git; local execution inherits the caller.
     pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     pub workspace: PathBuf,
@@ -219,14 +222,33 @@ pub struct NativeV2DeliveryConfig {
     pub poll: DeliveryPollPolicy,
 }
 
+#[derive(Clone, Debug)]
+pub struct DeliveryLineage {
+    delivery_run_id: RunId,
+    adopt_existing_delivery: bool,
+}
+
+impl DeliveryLineage {
+    #[must_use]
+    pub fn new(delivery_run_id: RunId, adopt_existing_delivery: bool) -> Self {
+        Self {
+            delivery_run_id,
+            adopt_existing_delivery,
+        }
+    }
+}
+
 impl NativeV2DeliveryConfig {
     #[must_use]
     pub fn for_hosted_workspace(
+        lineage: DeliveryLineage,
         workspace: PathBuf,
         target: DeliveryTarget,
         identity: crate::execution::process::HostedProcessIdentity,
     ) -> Self {
         Self {
+            delivery_run_id: lineage.delivery_run_id,
+            adopt_existing_delivery: lineage.adopt_existing_delivery,
             workspace,
             git_identity: Some(identity),
             git_program: PathBuf::from("/usr/bin/git"),

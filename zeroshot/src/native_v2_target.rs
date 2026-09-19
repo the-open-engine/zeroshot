@@ -20,8 +20,9 @@ use openengine_cluster_protocol::{
     ConnectionMutationResult, ConnectionSetRequest, MergePlan, MergePlanId, MergePlanSubmitRequest,
 };
 use openengine_cluster_protocol::{
-    RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams, RunStatusParams,
-    RunSubmission, RunSubmitResult, RunWatchParams,
+    RunConnectionRequirements, RunForceParams, RunListParams, RunLogEventNotification,
+    RunLogsParams, RunResumeParams, RunStatusParams, RunSubmission, RunSubmitResult,
+    RunWatchParams,
 };
 use openengine_cluster_protocol::{
     RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
@@ -108,6 +109,12 @@ pub enum TargetConnectorError {
     RegistryJson(#[source] serde_json::Error),
     #[error("target registry exceeds 1 MiB")]
     RegistryTooLarge,
+    #[error("local workspace-recovery authorization is unavailable")]
+    RecoveryAuthorizationUnavailable,
+    #[error("workspace-recovery connection requirements do not match the original run")]
+    RecoveryAuthorizationMismatch,
+    #[error("local workspace-recovery authorization is malformed")]
+    RecoveryAuthorizationInvalid,
     #[error("secure randomness is unavailable")]
     Randomness,
     #[error("target control authority failed: {0}")]
@@ -124,6 +131,11 @@ pub struct NativeV2TargetConnector<R, A, D> {
     registry: R,
     authority: A,
     dialer: D,
+}
+
+enum TargetSessionPurpose {
+    General,
+    WorkspaceRecovery,
 }
 
 impl<R, A, D> NativeV2TargetConnector<R, A, D> {
@@ -333,9 +345,10 @@ where
             })?
             .resolved
             .clone();
-        if let Some(profile) = request.profile {
-            return self
-                .authority
+        let recovery_requirements =
+            self.record_initial_recovery_authorization(&target, &request)?;
+        let receipt = if let Some(profile) = request.profile {
+            self.authority
                 .profile_run(
                     &target,
                     &RunProfileRunRequest {
@@ -350,28 +363,35 @@ where
                     },
                 )
                 .await
-                .map_err(|error| error.into_cli(&target));
-        }
-        self.authority
-            .submit(
-                &target,
-                &TargetRunRequest {
-                    run_id: request.run_id,
-                    submission: RunSubmission {
-                        title: request.intent.title,
-                        graph: request.intent.graph,
-                        initial_input: request.intent.initial_input,
-                        runtime: request.intent.runtime,
-                        source,
-                        submission_key: request.intent.submission_key,
+                .map_err(|error| error.into_cli(&target))?
+        } else {
+            self.authority
+                .submit(
+                    &target,
+                    &TargetRunRequest {
+                        run_id: request.run_id,
+                        submission: RunSubmission {
+                            title: request.intent.title,
+                            graph: request.intent.graph,
+                            initial_input: request.intent.initial_input,
+                            runtime: request.intent.runtime,
+                            source,
+                            submission_key: request.intent.submission_key,
+                        },
+                        connections: request.connections,
+                        connection_resolver: None,
+                        github_token: request.github_token,
                     },
-                    connections: request.connections,
-                    connection_resolver: None,
-                    github_token: request.github_token,
-                },
-            )
-            .await
-            .map_err(|error| error.into_cli(&target))
+                )
+                .await
+                .map_err(|error| error.into_cli(&target))?
+        };
+        self.record_receipt_recovery_authorization(
+            &target,
+            &receipt.run_id,
+            recovery_requirements.as_ref(),
+        )?;
+        Ok(receipt)
     }
 
     async fn connect(
@@ -379,17 +399,69 @@ where
         name: &str,
         run_id: Option<openengine_cluster_protocol::RunId>,
     ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
-        validate_target_name(name).map_err(cli_target_error)?;
-        let target = self.registry.get(name).map_err(cli_target_error)?;
-        let session = self
-            .authority
-            .oecp_session(&target, &TargetOecpSessionRequest { run_id })
+        self.connect_session(name, run_id, TargetSessionPurpose::General)
             .await
-            .map_err(|error| error.into_cli(&target))?;
-        self.dialer
-            .dial(&target, session)
+    }
+
+    async fn connect_workspace_recovery(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(name, Some(run_id), TargetSessionPurpose::WorkspaceRecovery)
             .await
-            .map_err(|error| cli_connector_error(&target, error))
+    }
+
+    fn authorize_workspace_recovery_requirements(
+        &self,
+        name: &str,
+        run_id: &openengine_cluster_protocol::RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        let target = self.direct_recovery_target(name)?;
+        let trusted = self
+            .registry
+            .recovery_authorization(&target.id, run_id)
+            .map_err(cli_target_error)?;
+        if trusted != requirements {
+            return Err(cli_target_error(
+                TargetConnectorError::RecoveryAuthorizationMismatch,
+            ));
+        }
+        Ok(trusted)
+    }
+
+    fn prepare_workspace_recovery_resume(
+        &self,
+        name: &str,
+        params: &RunResumeParams,
+    ) -> Result<(), NativeV2CliError> {
+        let target = self.direct_recovery_target(name)?;
+        let trusted = self
+            .registry
+            .recovery_authorization(&target.id, &params.run_id)
+            .map_err(cli_target_error)?;
+        if params.connection_resolver.is_some()
+            || !connection_values_match_requirements(&params.connections, &trusted)
+        {
+            return Err(cli_target_error(
+                TargetConnectorError::RecoveryAuthorizationMismatch,
+            ));
+        }
+        self.registry
+            .record_recovery_authorization(&target.id, &params.successor_run_id, &trusted)
+            .map_err(cli_target_error)
+    }
+
+    fn revoke_workspace_recovery(
+        &self,
+        name: &str,
+        run_id: &openengine_cluster_protocol::RunId,
+    ) -> Result<(), NativeV2CliError> {
+        let target = self.direct_recovery_target(name)?;
+        self.registry
+            .remove_recovery_authorization(&target.id, run_id)
+            .map_err(cli_target_error)
     }
 
     async fn hosted_run_list(
@@ -476,11 +548,102 @@ where
 impl<R, A, D> NativeV2TargetConnector<R, A, D>
 where
     R: TargetRegistry,
+    A: TargetControlAuthority,
+    D: TargetOecpDialer,
 {
+    async fn connect_session(
+        &self,
+        name: &str,
+        run_id: Option<openengine_cluster_protocol::RunId>,
+        purpose: TargetSessionPurpose,
+    ) -> Result<Arc<D::Transport>, NativeV2CliError> {
+        validate_target_name(name).map_err(cli_target_error)?;
+        let target = self.registry.get(name).map_err(cli_target_error)?;
+        let request = TargetOecpSessionRequest { run_id };
+        let session = match purpose {
+            TargetSessionPurpose::General => self.authority.oecp_session(&target, &request).await,
+            TargetSessionPurpose::WorkspaceRecovery => {
+                self.authority
+                    .workspace_recovery_session(&target, &request)
+                    .await
+            }
+        }
+        .map_err(|error| error.into_cli(&target))?;
+        self.dialer
+            .dial(&target, session)
+            .await
+            .map_err(|error| cli_connector_error(&target, error))
+    }
+}
+
+impl<R, A, D> NativeV2TargetConnector<R, A, D>
+where
+    R: TargetRegistry,
+{
+    fn record_initial_recovery_authorization(
+        &self,
+        target: &TargetRecord,
+        request: &PreparedRunRequest,
+    ) -> Result<Option<RunConnectionRequirements>, NativeV2CliError> {
+        if !matches!(target.access, TargetAccess::Direct) {
+            return Ok(None);
+        }
+        let requirements = runtime_connection_requirements(&request.intent.runtime);
+        self.registry
+            .record_recovery_authorization(&target.id, &request.run_id, &requirements)
+            .map_err(cli_target_error)?;
+        Ok(Some(requirements))
+    }
+
+    fn record_receipt_recovery_authorization(
+        &self,
+        target: &TargetRecord,
+        run_id: &openengine_cluster_protocol::RunId,
+        requirements: Option<&RunConnectionRequirements>,
+    ) -> Result<(), NativeV2CliError> {
+        let Some(requirements) = requirements else {
+            return Ok(());
+        };
+        self.registry
+            .record_recovery_authorization(&target.id, run_id, requirements)
+            .map_err(cli_target_error)
+    }
+
     fn target(&self, name: &str) -> Result<TargetRecord, NativeV2CliError> {
         validate_target_name(name).map_err(cli_target_error)?;
         self.registry.get(name).map_err(cli_target_error)
     }
+
+    fn direct_recovery_target(&self, name: &str) -> Result<TargetRecord, NativeV2CliError> {
+        let target = self.target(name)?;
+        if !matches!(target.access, TargetAccess::Direct) {
+            return Err(NativeV2CliError::Target(
+                "target does not advertise workspace recovery".to_owned(),
+            ));
+        }
+        Ok(target)
+    }
+}
+
+fn runtime_connection_requirements(
+    runtime: &openengine_cluster_protocol::RuntimePlan,
+) -> RunConnectionRequirements {
+    runtime
+        .connection_requirements()
+        .into_iter()
+        .map(|(key, fields)| (key, fields.into_iter().collect()))
+        .collect()
+}
+
+fn connection_values_match_requirements(
+    values: &openengine_cluster_protocol::RunConnectionValues,
+    requirements: &RunConnectionRequirements,
+) -> bool {
+    values.iter().all(|(key, values)| {
+        requirements
+            .get(key)
+            .is_some_and(|fields| values.as_map().keys().all(|name| fields.contains(name)))
+    })
 }
 
 fn cli_target_error(error: impl fmt::Display) -> NativeV2CliError {

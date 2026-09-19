@@ -88,6 +88,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   approval-review features count as authored policy.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
+- Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
   protocol, version, and profile values are bounded opaque strings; the protocol crate must not
   keep an external binding catalog. `openengine.worker.builtin/v1` is reserved for native
@@ -119,6 +120,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
   a later durable terminal snapshot remains authoritative over the in-memory fallback.
+- Failed local and direct-target runs retain an exclusively claimable workspace for a successor
+  attempt. Local recovery metadata lives beside each run ledger while the checkout remains
+  user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime
+  state after confirmed process cleanup, quarantine retained trees under supervisor ownership, and
+  recursively transfer them to the successor's newly leased writer identity before admission. They
+  advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
+  lineage before controller launch, uses a process-held file lock during admission, and reconciles
+  an interrupted launch before permitting another successor. Direct-target retained-workspace
+  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup.
+  Direct-target status exposes the immutable admitted connection requirements so the CLI resolves
+  fresh resume values without consulting changed profiles. Recovery lineage also retains the root
+  attempt's delivery identity so every successor reuses the same delivery branch and pull request.
+  Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
+  branch; ordinary fresh adapters still reject unexplained existing run branches.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
@@ -219,6 +234,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   A delivery receipt certifies success only if every other writer settled before delivery started.
   Unconfirmed process cleanup is a fatal runtime failure, including after cancellation; it cannot
   be reduced to a retryable node crash or an authored parallel-join void.
+  Retained workspace handoff commits when the source workspace moves to its successor. A later
+  allocation failure preserves that successor for recovery; unconfirmed cleanup keeps its durable
+  run nonterminal until replacement-controller reconciliation confirms cleanup.
 - Hosted verifiers build in disposable writable copies of the current candidate. Copies include
   dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
   Source traversal pins descriptors without following symlinks so concurrent renames cannot escape

@@ -10,8 +10,9 @@ use openengine_cluster_protocol::{
     GraphSpec, InitializeParams, InitializeResult, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, LogEventNotification, LogsClosedNotification, LogsParams, LogsResult,
     PlanParams, PlanResult, ResubmitParams, ResubmitResult, RetryParams, RetryResult, StopParams,
-    RunAttachEventNotification, RunAttachParams, RunAttachResult, RunForceParams, RunForceResult,
-    RunListParams, RunListResult, RunLogEventNotification, RunLogsParams, RunLogsResult,
+    RunAttachEventNotification, RunAttachParams, RunAttachResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
+    RunLogEventNotification, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
     RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchEventNotification,
     RunWatchParams, RunWatchResult, StopResult, StructuralBounds, SubscriptionCancelParams,
     SubscriptionClosedNotification, UpdateParams, UpdateResult, WatchParams, WatchResult,
@@ -105,6 +106,10 @@ pub struct ImplementedProtocolSchema {
     pub run_attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
     pub run_force_request: JsonRpcRequest<RunForceParams>,
     pub run_force_response: JsonRpcResponse<RunForceResult>,
+    pub run_resume_request: JsonRpcRequest<RunResumeParams>,
+    pub run_resume_response: JsonRpcResponse<RunResumeResult>,
+    pub run_discard_workspace_request: JsonRpcRequest<RunDiscardWorkspaceParams>,
+    pub run_discard_workspace_response: JsonRpcResponse<RunDiscardWorkspaceResult>,
 }
 
 pub async fn generate_artifacts() -> Vec<Artifact> {

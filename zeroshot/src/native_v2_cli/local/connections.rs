@@ -342,6 +342,16 @@ mod tests {
             resolved.bootstrap_values(),
             BTreeMap::from([(key("provider"), values(&[("OPENAI_API_KEY", "stored-key")]),)])
         );
+        let refreshed = store
+            .resolve(
+                &single_field_runtime,
+                &BTreeMap::from([(key("provider"), values(&[("OPENAI_API_KEY", "fresh-key")]))]),
+            )
+            .assert_value();
+        assert_eq!(
+            refreshed.bootstrap_values(),
+            BTreeMap::from([(key("provider"), values(&[("OPENAI_API_KEY", "fresh-key")]),)])
+        );
 
         let runtime = runtime(&["OPENAI_API_KEY", "OPENAI_ORG"]);
         let error = store

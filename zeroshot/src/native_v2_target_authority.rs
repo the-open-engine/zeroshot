@@ -92,6 +92,11 @@ impl TargetAuthorityError {
 /// environment, exact source checkout, and private capsule allocator for this target process.
 #[async_trait]
 pub trait TargetControllerFactory: Send + Sync {
+    /// Reports whether controllers from this factory can recover retained workspaces.
+    fn supports_workspace_recovery(&self) -> bool {
+        false
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError>;
 
     async fn submit(
@@ -157,6 +162,10 @@ impl NativeV2TargetAuthority {
         run_id: &openengine_cluster_protocol::RunId,
     ) -> TargetOperatorDiagnostics {
         self.operator_diagnostics.snapshot(run_id)
+    }
+
+    fn supports_workspace_recovery(&self) -> bool {
+        self.factory.supports_workspace_recovery()
     }
 
     /// Activates exactly one controller and returns the same authority for every target session.

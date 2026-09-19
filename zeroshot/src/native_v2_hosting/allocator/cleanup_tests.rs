@@ -47,18 +47,21 @@ impl CleanupFixture {
         let identity = writer(lease.process_pool());
         identity.prepare_command_domain().assert_value();
         let (loss, _) = watch::channel(false);
+        let run_id = RunId::new("delivery-lease-cleanup");
         let state = Arc::new(ProductionCapsuleState {
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,
             )))),
             run_root_identity: OnceLock::from(WorkspaceIdentity::capture(&run_root).assert_value()),
             run_root,
+            recovery_path: directory.child("recovery.json"),
+            delivery_run_id: run_id.clone(),
+            inherited_retained_workspace: false,
             process_pool: Mutex::new(Some(lease)),
             portable_processes: false,
             _loss_sender: loss,
             cleanup_turn: Mutex::new(false),
         });
-        let run_id = RunId::new("delivery-lease-cleanup");
         let active = Mutex::new(BTreeMap::from([(run_id.clone(), state.clone())]));
         Self {
             directory,
@@ -98,7 +101,13 @@ async fn root_failed_delivery_cleanup_retains_lease_until_processes_are_gone() {
     let pid = helper.id().assert_value();
     let failure = {
         let _denied = KillCapabilityGuard::suspend();
-        cleanup_state(&fixture.run_id, &fixture.state, &fixture.active).await
+        cleanup_state(
+            &fixture.run_id,
+            &fixture.state,
+            &fixture.active,
+            RunRuntimeExit::Completed,
+        )
+        .await
     };
     assert!(failure.is_err());
     assert_eq!(
@@ -120,9 +129,14 @@ async fn root_failed_delivery_cleanup_retains_lease_until_processes_are_gone() {
     assert!(std::path::Path::new(&format!("/proc/{pid}")).exists());
     drop(reused);
 
-    cleanup_state(&fixture.run_id, &fixture.state, &fixture.active)
-        .await
-        .assert_value();
+    cleanup_state(
+        &fixture.run_id,
+        &fixture.state,
+        &fixture.active,
+        RunRuntimeExit::Completed,
+    )
+    .await
+    .assert_value();
     let _ = tokio::time::timeout(Duration::from_secs(2), helper.wait())
         .await
         .assert_value();

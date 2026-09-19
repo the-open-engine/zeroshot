@@ -6,8 +6,9 @@
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    RunAttachEventNotification, RunAttachParams, RunAttachResult, RunForceParams, RunForceResult,
-    RunListParams, RunListResult, RunLogEventNotification, RunLogsParams, RunLogsResult,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunAttachEventNotification,
+    RunAttachParams, RunAttachResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
+    RunLogEventNotification, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
     RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchEventNotification,
     RunWatchParams, RunWatchResult, SubscriptionCloseReason,
 };
@@ -106,5 +107,21 @@ where
 
     pub async fn run_force(&self, params: RunForceParams) -> Result<RunForceResult, BackendError> {
         self.backend().run_force(self.context(), params).await
+    }
+
+    pub async fn run_resume(
+        &self,
+        params: RunResumeParams,
+    ) -> Result<RunResumeResult, BackendError> {
+        self.backend().run_resume(self.context(), params).await
+    }
+
+    pub async fn run_discard_workspace(
+        &self,
+        params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, BackendError> {
+        self.backend()
+            .run_discard_workspace(self.context(), params)
+            .await
     }
 }

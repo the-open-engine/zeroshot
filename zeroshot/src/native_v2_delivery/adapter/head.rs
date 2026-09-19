@@ -203,6 +203,7 @@ impl NativeV2DeliveryAdapter {
                 observed,
                 commit_message: "Preserve work before GitHub head reconciliation",
                 authorized_update: false,
+                adopting_existing: false,
             };
             let result = self
                 .authority

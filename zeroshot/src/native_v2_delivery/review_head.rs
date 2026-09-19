@@ -68,6 +68,7 @@ pub struct GitHubHeadReconciliation<'a> {
     pub observed: &'a GitHubReviewReceipt,
     pub commit_message: &'a str,
     pub authorized_update: bool,
+    pub adopting_existing: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

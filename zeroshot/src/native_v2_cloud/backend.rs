@@ -99,6 +99,24 @@ impl ClusterBackend for NativeV2CloudController {
     ) -> Result<RunForceResult, BackendError> {
         self.force(params).await.map_err(cloud_backend_error)
     }
+
+    async fn run_resume(
+        &self,
+        _context: &ConnectionContext,
+        params: RunResumeParams,
+    ) -> Result<RunResumeResult, BackendError> {
+        self.resume(params).await.map_err(cloud_backend_error)
+    }
+
+    async fn run_discard_workspace(
+        &self,
+        _context: &ConnectionContext,
+        params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, BackendError> {
+        self.discard_workspace(params)
+            .await
+            .map_err(cloud_backend_error)
+    }
 }
 
 struct WatchSource(RunWatchSubscription);

@@ -92,6 +92,25 @@ fn durable_observation_accepts_native_resume_and_execution_filters() {
 }
 
 #[test]
+fn parser_exposes_workspace_recovery_commands() {
+    let resume =
+        parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
+    assert!(matches!(
+        resume,
+        NativeV2CliCommand::Resume(RunSelector { target, run_id })
+            if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
+    ));
+
+    let discard = parse_native_v2_args(args(&["discard-workspace", "run-8", "--target", "docker"]))
+        .assert_value();
+    assert!(matches!(
+        discard,
+        NativeV2CliCommand::DiscardWorkspace(RunSelector { target, run_id })
+            if target.as_deref() == Some("docker") && run_id.as_str() == "run-8"
+    ));
+}
+
+#[test]
 fn explicit_template_delivery_is_parsed_and_validated_by_rust() {
     let shown = parse_native_v2_args(args(&[
         "template",

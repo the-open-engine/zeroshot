@@ -2,9 +2,10 @@ use crate::fixture::*;
 
 use openengine_cluster_protocol::{
     AgentAttachParams, ApplyParams, DeleteParams, ResubmitParams, RetryParams, RunAttachParams,
-    RunForceParams, RunLogsParams, RunStatusParams, RunSubmitParams, RunWatchParams, StopParams,
-    UpdateParams, RUN_ATTACH_METHOD, RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_LOGS_METHOD,
-    RUN_STATUS_METHOD, RUN_SUBMIT_METHOD, RUN_WATCH_METHOD,
+    RunDiscardWorkspaceParams, RunForceParams, RunLogsParams, RunResumeParams, RunStatusParams,
+    RunSubmitParams, RunWatchParams, StopParams, UpdateParams, RUN_ATTACH_METHOD,
+    RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_LOGS_METHOD,
+    RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD, RUN_WATCH_METHOD,
 };
 use openengine_cluster_server::method_registry::{MethodDescriptor, MethodKind, METHOD_REGISTRY};
 use schemars::schema_for;
@@ -110,7 +111,7 @@ fn observation_method(name: &str) -> Option<Value> {
 }
 
 fn native_v2_method(name: &str) -> Option<Value> {
-    match name {
+    let method = match name {
         RUN_SUBMIT_METHOD => run_submit_method(),
         RUN_LIST_METHOD => run_list_method(),
         RUN_STATUS_METHOD => run_status_method(),
@@ -118,6 +119,15 @@ fn native_v2_method(name: &str) -> Option<Value> {
         RUN_LOGS_METHOD => run_logs_method(),
         RUN_ATTACH_METHOD => run_attach_method(),
         RUN_FORCE_METHOD => run_force_method(),
+        _ => return native_v2_recovery_method(name),
+    };
+    Some(method)
+}
+
+fn native_v2_recovery_method(name: &str) -> Option<Value> {
+    match name {
+        RUN_RESUME_METHOD => run_resume_method(),
+        RUN_DISCARD_WORKSPACE_METHOD => run_discard_workspace_method(),
         _ => return None,
     }
     .into()
@@ -390,6 +400,32 @@ fn run_status_method() -> Value {
 
 fn run_force_method() -> Value {
     run_id_method::<RunForceParams>("runForceResult", "RunForceResult")
+}
+
+fn run_discard_workspace_method() -> Value {
+    run_id_method::<RunDiscardWorkspaceParams>(
+        "runDiscardWorkspaceResult",
+        "RunDiscardWorkspaceResult",
+    )
+}
+
+fn run_resume_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(RunResumeParams))
+        .assert_value_with("run resume parameter JSON Schema serialization must succeed");
+    json!({
+        "paramStructure": "by-name",
+        "params": [
+            {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
+            {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")},
+            {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
+            {"name": "connectionResolver", "required": false, "schema": property_schema(&schema, "connectionResolver")},
+            {"name": "githubToken", "required": false, "schema": property_schema(&schema, "githubToken")}
+        ],
+        "result": {
+            "name": "runResumeResult",
+            "schema": { "$ref": "schema.json#/$defs/RunResumeResult" }
+        }
+    })
 }
 
 fn run_id_method<P: schemars::JsonSchema>(result_name: &str, result_type: &str) -> Value {

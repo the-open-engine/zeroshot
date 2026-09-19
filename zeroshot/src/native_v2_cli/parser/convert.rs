@@ -142,15 +142,28 @@ impl UtilityCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
             Self::Update => Ok(NativeV2CliCommand::Update),
-            Self::List(args) => Ok(NativeV2CliCommand::List {
-                target: validated_target(args.target)?,
-            }),
+            Self::List(args) => {
+                validated_target(args.target).map(|target| NativeV2CliCommand::List { target })
+            }
             Self::Status(args) => args.into_selector().map(NativeV2CliCommand::Status),
             Self::Watch(args) => args.into_command(),
             Self::Logs(args) => args.into_command(),
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
+            recovery @ (Self::Resume(_) | Self::DiscardWorkspace(_)) => {
+                recovery.into_recovery_command()
+            }
             Self::Version => Ok(NativeV2CliCommand::Version),
+        }
+    }
+
+    fn into_recovery_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        match self {
+            Self::Resume(args) => args.into_selector().map(NativeV2CliCommand::Resume),
+            Self::DiscardWorkspace(args) => args
+                .into_selector()
+                .map(NativeV2CliCommand::DiscardWorkspace),
+            _ => unreachable!("recovery command was checked by the caller"),
         }
     }
 }

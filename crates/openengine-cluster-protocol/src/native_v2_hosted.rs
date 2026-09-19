@@ -64,6 +64,8 @@ pub struct HostedRunStatusResult {
     pub size: RunSize,
     pub at_cursor: Cursor,
     pub status: HostedRunStatus,
+    #[serde(default, skip_serializing_if = "crate::WorkspaceRecovery::is_empty")]
+    pub workspace_recovery: crate::WorkspaceRecovery,
 }
 
 impl From<RunStatusResult> for HostedRunStatusResult {
@@ -75,6 +77,7 @@ impl From<RunStatusResult> for HostedRunStatusResult {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status.into(),
+            workspace_recovery: result.workspace_recovery,
         }
     }
 }
@@ -88,6 +91,7 @@ impl From<RunForceResult> for HostedRunStatusResult {
             size: result.size,
             at_cursor: result.at_cursor,
             status: result.status.into(),
+            workspace_recovery: result.workspace_recovery,
         }
     }
 }

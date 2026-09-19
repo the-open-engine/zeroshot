@@ -2315,6 +2315,52 @@
       ],
       "type": "object"
     },
+    "JsonRpcRequest20": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest21": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunDiscardWorkspaceParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
     "JsonRpcRequest3": {
       "properties": {
         "id": {
@@ -2590,6 +2636,26 @@
       "anyOf": [
         {
           "$ref": "#/$defs/JsonRpcSuccess2"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse20": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess20"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcResponse21": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess21"
         },
         {
           "$ref": "#/$defs/JsonRpcErrorResponse"
@@ -2885,6 +2951,44 @@
         },
         "result": {
           "$ref": "#/$defs/PlanResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess20": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess21": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunDiscardWorkspaceResult"
         }
       },
       "required": [
@@ -3832,6 +3936,34 @@
       ],
       "type": "object"
     },
+    "RunDiscardWorkspaceParams": {
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunDiscardWorkspaceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "discarded": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "discarded"
+      ],
+      "type": "object"
+    },
     "RunForceParams": {
       "additionalProperties": false,
       "description": "Requests the MVP's only stop mode: force. Repeated requests are idempotent at the run ledger.",
@@ -3875,6 +4007,9 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspaceRecovery": {
+          "$ref": "#/$defs/WorkspaceRecovery"
         }
       },
       "required": [
@@ -4014,6 +4149,63 @@
       },
       "type": "object"
     },
+    "RunResumeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "connectionResolver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetConnectionResolver"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connections": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+              "$ref": "#/$defs/StaticConnectionValues"
+            }
+          },
+          "type": "object"
+        },
+        "githubToken": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "successorRunId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "successorRunId"
+      ],
+      "type": "object"
+    },
+    "RunResumeResult": {
+      "additionalProperties": false,
+      "properties": {
+        "resumedFrom": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "resumedFrom"
+      ],
+      "type": "object"
+    },
     "RunSize": {
       "enum": [
         "small",
@@ -4136,6 +4328,9 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspaceRecovery": {
+          "$ref": "#/$defs/WorkspaceRecovery"
         }
       },
       "required": [
@@ -4432,6 +4627,15 @@
       ],
       "type": "string"
     },
+    "StaticConnectionValues": {
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_]*$": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "StopMode": {
       "enum": [
         "drain",
@@ -4594,6 +4798,42 @@
       "required": [
         "subscriptionId",
         "reason"
+      ],
+      "type": "object"
+    },
+    "TargetConnectionResolver": {
+      "additionalProperties": false,
+      "description": "Run-scoped callback authority for dynamic connection keys.",
+      "properties": {
+        "bearerToken": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "keys": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sourceConnection": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "endpoint",
+        "bearerToken",
+        "keys"
       ],
       "type": "object"
     },
@@ -5146,6 +5386,45 @@
         }
       ]
     },
+    "WorkspaceRecovery": {
+      "additionalProperties": false,
+      "properties": {
+        "connectionRequirements": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "resumedFrom": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "successorRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "recoverable"
+      ],
+      "type": "object"
+    },
     "WriteBinding": {
       "additionalProperties": false,
       "properties": {
@@ -5254,6 +5533,12 @@
     "run_attach_response": {
       "$ref": "#/$defs/JsonRpcResponse18"
     },
+    "run_discard_workspace_request": {
+      "$ref": "#/$defs/JsonRpcRequest21"
+    },
+    "run_discard_workspace_response": {
+      "$ref": "#/$defs/JsonRpcResponse21"
+    },
     "run_force_request": {
       "$ref": "#/$defs/JsonRpcRequest19"
     },
@@ -5274,6 +5559,12 @@
     },
     "run_logs_response": {
       "$ref": "#/$defs/JsonRpcResponse17"
+    },
+    "run_resume_request": {
+      "$ref": "#/$defs/JsonRpcRequest20"
+    },
+    "run_resume_response": {
+      "$ref": "#/$defs/JsonRpcResponse20"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
@@ -5370,7 +5661,11 @@
     "run_attach_response",
     "run_attach_event_notification",
     "run_force_request",
-    "run_force_response"
+    "run_force_response",
+    "run_resume_request",
+    "run_resume_response",
+    "run_discard_workspace_request",
+    "run_discard_workspace_response"
   ],
   "title": "ImplementedProtocolSchema",
   "type": "object"

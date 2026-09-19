@@ -757,6 +757,98 @@
         "inboundNotifications": false,
         "serverPush": false
       }
+    },
+    {
+      "name": "run/resume",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "successorRunId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "connections",
+          "required": false,
+          "schema": {
+            "additionalProperties": false,
+            "patternProperties": {
+              "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
+                "$ref": "#/$defs/StaticConnectionValues"
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
+          "name": "connectionResolver",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TargetConnectionResolver"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "name": "githubToken",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "runResumeResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunResumeResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
+    },
+    {
+      "name": "run/discard_workspace",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "runId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "runDiscardWorkspaceResult",
+        "schema": {
+          "$ref": "schema.json#/$defs/RunDiscardWorkspaceResult"
+        }
+      },
+      "x-subscription": false,
+      "x-transport-requirements": {
+        "inboundNotifications": false,
+        "serverPush": false
+      }
     }
   ],
   "openrpc": "1.3.2",

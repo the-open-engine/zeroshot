@@ -5,10 +5,10 @@ use openengine_cluster_client::SubscriptionTransport;
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
     ConnectionMutationResult, ConnectionSetRequest, MergePlan, MergePlanId, RunForceParams,
-    RunListParams, RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
-    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
-    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatusParams,
-    RunSubmitResult, RunWatchParams,
+    RunConnectionRequirements, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
+    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
+    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
+    RunProfileSetRequest, RunResumeParams, RunStatusParams, RunSubmitResult, RunWatchParams,
 };
 
 use super::BoxedSubscription;
@@ -101,6 +101,43 @@ pub trait TargetConnector: Send + Sync {
         name: &str,
         run_id: Option<openengine_cluster_protocol::RunId>,
     ) -> Result<Arc<Self::Transport>, NativeV2CliError>;
+    async fn connect_workspace_recovery(
+        &self,
+        _name: &str,
+        _run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise workspace recovery".to_owned(),
+        ))
+    }
+    fn authorize_workspace_recovery_requirements(
+        &self,
+        _name: &str,
+        _run_id: &openengine_cluster_protocol::RunId,
+        _requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "local authorization for workspace recovery is unavailable".to_owned(),
+        ))
+    }
+    fn prepare_workspace_recovery_resume(
+        &self,
+        _name: &str,
+        _params: &RunResumeParams,
+    ) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "local authorization for workspace recovery is unavailable".to_owned(),
+        ))
+    }
+    fn revoke_workspace_recovery(
+        &self,
+        _name: &str,
+        _run_id: &openengine_cluster_protocol::RunId,
+    ) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "local authorization for workspace recovery is unavailable".to_owned(),
+        ))
+    }
     async fn hosted_run_list(
         &self,
         name: &str,

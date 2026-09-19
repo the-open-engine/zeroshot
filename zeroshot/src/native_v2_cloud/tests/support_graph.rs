@@ -49,6 +49,14 @@ pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitP
     }
 }
 
+pub(super) fn test_connection_values(value: &str) -> StaticConnectionValues {
+    StaticConnectionValues::new(BTreeMap::from([(
+        EnvironmentVariableName::new("NODE_TOKEN").assert_value_with("environment name"),
+        value.to_owned(),
+    )]))
+    .assert_value_with("connection values")
+}
+
 pub(super) fn source() -> ResolvedSource {
     ResolvedSource {
         repository: SourceRepositoryId::new("owner/repo").assert_value_with("repository"),

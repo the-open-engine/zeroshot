@@ -70,6 +70,7 @@ pub struct LiveOutputUnavailable;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RunRuntimeExit {
     Completed,
+    Failed,
     ForceStopped,
     RuntimeLost,
 }
@@ -295,7 +296,12 @@ impl NativeV2Supervisor {
         let terminal =
             enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
         self.runner.close_run(&self.run_id).await;
-        self.cleanup_runtime(RunRuntimeExit::Completed).await?;
+        let exit = if matches!(terminal, TerminalResult::Succeeded { .. }) {
+            RunRuntimeExit::Completed
+        } else {
+            RunRuntimeExit::Failed
+        };
+        self.cleanup_runtime(exit).await?;
         let terminal = self.append_terminal(terminal).await?;
         Ok(terminal)
     }

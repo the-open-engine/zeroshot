@@ -35,7 +35,7 @@ use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 use crate::native_v2_supervisor::RunEnvironment;
 
 use allocator::{ProductionCapsuleAllocator, ProductionCapsuleConfig};
-use connections::build_connection_resolver;
+pub(crate) use connections::build_connection_resolver;
 
 /// Composes the production target around exact sourceful run requests.
 pub async fn build_production_target_authority(
@@ -128,6 +128,10 @@ impl ProductionTargetControllerFactory {
 
 #[async_trait]
 impl TargetControllerFactory for ProductionTargetControllerFactory {
+    fn supports_workspace_recovery(&self) -> bool {
+        true
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         self.create_controller()
             .await

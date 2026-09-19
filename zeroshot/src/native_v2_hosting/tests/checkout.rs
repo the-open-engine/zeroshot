@@ -1,7 +1,14 @@
 use std::sync::Arc;
+use std::os::unix::fs::MetadataExt as _;
+use std::os::unix::process::CommandExt as _;
 
 use super::*;
-use crate::native_v2_cloud::{AllocatedCapsule, CapsuleAllocationUnavailable};
+use crate::execution::process::HostedProcessPool;
+use crate::native_v2_capsule::CapsuleFilesystem;
+use crate::native_v2_cloud::{
+    AllocatedCapsule, CapsuleAllocationUnavailable, RetainedAllocationRequest,
+    RetainedAllocationUnavailable,
+};
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
@@ -69,6 +76,38 @@ exec /usr/bin/git "$@"
         self.allocator
             .allocate(&self.run_id, &self.admitted, Some(CHECKOUT_TOKEN))
             .await
+    }
+
+    async fn retain_untracked_workspace(&self) -> PathBuf {
+        let capsule = self.allocate().await.assert_value();
+        let workspace = self.allocator.run_path(&self.run_id).join("workspace");
+        fs::write(workspace.join("untracked.txt"), "resume me\n").assert_value();
+        capsule
+            .cleanup
+            .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+            .await
+            .assert_value();
+        workspace
+    }
+
+    async fn allocate_retained(
+        &self,
+        successor: &RunId,
+    ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
+        self.allocator
+            .allocate_from_retained(RetainedAllocationRequest {
+                source_run_id: &self.run_id,
+                run_id: successor,
+                admitted: &self.admitted,
+                github_token: Some(CHECKOUT_TOKEN),
+            })
+            .await
+    }
+
+    async fn assert_claimed_by(&self, successor: &RunId) {
+        let source_recovery = self.allocator.workspace_recovery(&self.run_id).await;
+        assert!(!source_recovery.recoverable);
+        assert_eq!(source_recovery.successor_run_id.as_ref(), Some(successor));
     }
 }
 
@@ -196,4 +235,547 @@ esac"#,
             .contains(fixture.admitted.source.revision.as_str())
     );
     assert!(!fixture.allocator.run_path(&fixture.run_id).exists());
+}
+
+#[tokio::test]
+async fn failed_capsule_retains_workspace_until_discarded() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    let workspace = fixture
+        .allocator
+        .run_path(&fixture.run_id)
+        .join("workspace");
+    fs::write(workspace.join("untracked.txt"), "retained\n").assert_value();
+
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+
+    let recovery = fixture.allocator.workspace_recovery(&fixture.run_id).await;
+    assert!(recovery.recoverable);
+    assert_eq!(
+        fs::read_to_string(workspace.join("untracked.txt")).assert_value(),
+        "retained\n"
+    );
+    assert!(
+        !fixture
+            .allocator
+            .run_path(&fixture.run_id)
+            .join("runtime")
+            .exists()
+    );
+    assert!(
+        fixture
+            .allocator
+            .discard_workspace(&fixture.run_id)
+            .await
+            .assert_value()
+    );
+    assert!(!fixture.allocator.run_path(&fixture.run_id).exists());
+}
+
+#[tokio::test]
+async fn runtime_loss_retains_workspace_after_confirmed_cleanup() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    let workspace = fixture
+        .allocator
+        .run_path(&fixture.run_id)
+        .join("workspace");
+    fs::write(workspace.join("runtime-lost.txt"), "retained\n").assert_value();
+
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
+        .await
+        .assert_value();
+
+    assert!(
+        fixture
+            .allocator
+            .workspace_recovery(&fixture.run_id)
+            .await
+            .recoverable
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("runtime-lost.txt")).assert_value(),
+        "retained\n"
+    );
+}
+
+#[tokio::test]
+async fn reconstructed_failed_runs_retain_workspace_without_active_capsules() {
+    let fixture = CheckoutFixture::new("").await;
+    for (suffix, exit) in [
+        ("failed", RunRuntimeExit::Failed),
+        ("runtime-lost", RunRuntimeExit::RuntimeLost),
+    ] {
+        let run_id = RunId::new(format!("checkout-reconstructed-{suffix}"));
+        let run_root = fixture.allocator.run_path(&run_id);
+        let workspace = run_root.join("workspace");
+        let git_metadata = workspace.join(".git");
+        fs::create_dir_all(&git_metadata).assert_value();
+        fs::write(workspace.join("retained.txt"), "survived restart\n").assert_value();
+        fs::write(git_metadata.join("HEAD"), "ref: refs/heads/main\n").assert_value();
+        fs::create_dir_all(run_root.join("runtime")).assert_value();
+        fs::write(run_root.join("runtime/private"), "remove me\n").assert_value();
+
+        fixture
+            .allocator
+            .destroy_or_confirm_absent(&run_id, exit)
+            .await
+            .assert_value();
+
+        assert!(
+            fixture
+                .allocator
+                .workspace_recovery(&run_id)
+                .await
+                .recoverable
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("retained.txt")).assert_value(),
+            "survived restart\n"
+        );
+        assert_eq!(
+            fs::read_to_string(git_metadata.join("HEAD")).assert_value(),
+            "ref: refs/heads/main\n"
+        );
+        assert!(!run_root.join("runtime").exists());
+    }
+}
+
+#[tokio::test]
+async fn failed_retained_allocation_commits_recovery_to_successor() {
+    let mut fixture = CheckoutFixture::new("").await;
+    fixture.retain_untracked_workspace().await;
+    fixture
+        .allocator
+        .set_test_filesystem(|_, _, _| Err(CapsuleAllocationUnavailable::Runtime));
+
+    let successor = RunId::new("checkout-recovery-failed-successor");
+    assert!(matches!(
+        fixture.allocate_retained(&successor).await,
+        Err(RetainedAllocationUnavailable::Settled(
+            CapsuleAllocationUnavailable::Runtime
+        ))
+    ));
+
+    fixture.assert_claimed_by(&successor).await;
+    let successor_recovery = fixture.allocator.workspace_recovery(&successor).await;
+    assert!(successor_recovery.recoverable);
+    assert_eq!(
+        successor_recovery.resumed_from.as_ref(),
+        Some(&fixture.run_id)
+    );
+    let successor_workspace = fixture.allocator.run_path(&successor).join("workspace");
+    assert_eq!(
+        fs::read_to_string(successor_workspace.join("untracked.txt")).assert_value(),
+        "resume me\n"
+    );
+    assert!(
+        !fixture
+            .allocator
+            .run_path(&successor)
+            .join("runtime")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn unconfirmed_retained_cleanup_keeps_successor_for_reconciliation() {
+    let mut fixture = CheckoutFixture::new("").await;
+    fixture.retain_untracked_workspace().await;
+    fixture
+        .allocator
+        .set_test_filesystem(block_retained_cleanup);
+
+    let successor = RunId::new("checkout-recovery-unconfirmed-successor");
+    assert!(matches!(
+        fixture.allocate_retained(&successor).await,
+        Err(RetainedAllocationUnavailable::CleanupUnconfirmed(_))
+    ));
+
+    fixture.assert_claimed_by(&successor).await;
+    let successor_root = fixture.allocator.run_path(&successor);
+    assert_eq!(
+        fs::read_to_string(successor_root.join("workspace/untracked.txt")).assert_value(),
+        "resume me\n"
+    );
+    assert!(successor_root.join("runtime").is_file());
+
+    fs::remove_file(successor_root.join("runtime")).assert_value();
+    fixture.allocator.reconcile_test_recovery();
+    fixture
+        .allocator
+        .destroy_or_confirm_absent(&successor, RunRuntimeExit::RuntimeLost)
+        .await
+        .assert_value();
+    let successor_recovery = fixture.allocator.workspace_recovery(&successor).await;
+    assert!(successor_recovery.recoverable);
+    assert_eq!(
+        successor_recovery.resumed_from.as_ref(),
+        Some(&fixture.run_id)
+    );
+}
+
+#[tokio::test]
+async fn retained_capsule_moves_exclusively_to_successor_and_keeps_lineage() {
+    let fixture = CheckoutFixture::new("").await;
+    fixture.retain_untracked_workspace().await;
+
+    let successor = RunId::new("checkout-recovery-successor");
+    let resumed = fixture
+        .allocator
+        .allocate_from_retained(RetainedAllocationRequest {
+            source_run_id: &fixture.run_id,
+            run_id: &successor,
+            admitted: &fixture.admitted,
+            github_token: Some(CHECKOUT_TOKEN),
+        })
+        .await
+        .assert_value();
+    let successor_workspace = fixture.allocator.run_path(&successor).join("workspace");
+    assert_eq!(
+        fs::read_to_string(successor_workspace.join("untracked.txt")).assert_value(),
+        "resume me\n"
+    );
+    let source_recovery = fixture.allocator.workspace_recovery(&fixture.run_id).await;
+    assert!(!source_recovery.recoverable);
+    assert_eq!(source_recovery.successor_run_id.as_ref(), Some(&successor));
+    assert_eq!(
+        fixture
+            .allocator
+            .workspace_recovery(&successor)
+            .await
+            .resumed_from
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+    assert!(!fixture.allocator.run_path(&successor).exists());
+    assert_eq!(
+        fixture
+            .allocator
+            .workspace_recovery(&successor)
+            .await
+            .resumed_from
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+}
+
+#[tokio::test]
+async fn repeated_retained_successors_keep_the_root_delivery_identity() {
+    let fixture = CheckoutFixture::new("").await;
+    let original = fixture.allocate().await.assert_value();
+    original
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+
+    let first_successor = RunId::new("checkout-recovery-first-successor");
+    let first = fixture
+        .allocator
+        .allocate_from_retained(RetainedAllocationRequest {
+            source_run_id: &fixture.run_id,
+            run_id: &first_successor,
+            admitted: &fixture.admitted,
+            github_token: Some(CHECKOUT_TOKEN),
+        })
+        .await
+        .assert_value();
+    assert_eq!(
+        fixture
+            .allocator
+            .recovery_delivery_run_id(&first_successor)
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+    first
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    fixture
+        .allocator
+        .destroy_or_confirm_absent(&first_successor, RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    assert_eq!(
+        fixture
+            .allocator
+            .recovery_delivery_run_id(&first_successor)
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+
+    let second_successor = RunId::new("checkout-recovery-second-successor");
+    let second = fixture
+        .allocator
+        .allocate_from_retained(RetainedAllocationRequest {
+            source_run_id: &first_successor,
+            run_id: &second_successor,
+            admitted: &fixture.admitted,
+            github_token: Some(CHECKOUT_TOKEN),
+        })
+        .await
+        .assert_value();
+    assert_eq!(
+        fixture
+            .allocator
+            .recovery_delivery_run_id(&second_successor)
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+    second
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+}
+
+#[tokio::test]
+async fn retained_claim_reconciliation_rolls_back_before_workspace_move() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    let successor = RunId::new("checkout-recovery-interrupted-before-move");
+    fixture
+        .allocator
+        .write_test_recovery(&fixture.run_id, (false, None, Some(successor.clone())));
+
+    fixture.allocator.reconcile_test_recovery();
+
+    let source = fixture.allocator.workspace_recovery(&fixture.run_id).await;
+    assert!(source.recoverable);
+    assert!(source.successor_run_id.is_none());
+    assert!(
+        fixture
+            .allocator
+            .workspace_recovery(&successor)
+            .await
+            .resumed_from
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn retained_claim_reconciliation_removes_successor_metadata_before_workspace_move() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    let successor = RunId::new("checkout-recovery-interrupted-after-successor-metadata");
+    fixture
+        .allocator
+        .write_test_recovery(&fixture.run_id, (false, None, Some(successor.clone())));
+    fixture
+        .allocator
+        .write_test_recovery(&successor, (false, Some(fixture.run_id.clone()), None));
+
+    fixture.allocator.reconcile_test_recovery();
+
+    let source = fixture.allocator.workspace_recovery(&fixture.run_id).await;
+    assert!(source.recoverable);
+    assert!(source.successor_run_id.is_none());
+    assert!(
+        fixture
+            .allocator
+            .workspace_recovery(&successor)
+            .await
+            .resumed_from
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn retained_claim_reconciliation_completes_after_workspace_move() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    let successor = RunId::new("checkout-recovery-interrupted-after-move");
+    fixture
+        .allocator
+        .write_test_recovery(&fixture.run_id, (false, None, Some(successor.clone())));
+    fixture
+        .allocator
+        .write_test_recovery(&successor, (false, Some(fixture.run_id.clone()), None));
+    std::fs::rename(
+        fixture.allocator.run_path(&fixture.run_id),
+        fixture.allocator.run_path(&successor),
+    )
+    .assert_value();
+
+    fixture.allocator.reconcile_test_recovery();
+
+    let source = fixture.allocator.workspace_recovery(&fixture.run_id).await;
+    assert!(!source.recoverable);
+    assert_eq!(source.successor_run_id.as_ref(), Some(&successor));
+    assert_eq!(
+        fixture
+            .allocator
+            .workspace_recovery(&successor)
+            .await
+            .resumed_from
+            .as_ref(),
+        Some(&fixture.run_id)
+    );
+}
+
+#[tokio::test]
+async fn retained_claim_reconciliation_preserves_a_failed_successor() {
+    let fixture = CheckoutFixture::new("").await;
+    let capsule = fixture.allocate().await.assert_value();
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    let successor = RunId::new("checkout-recovery-failed-successor");
+    fixture
+        .allocator
+        .write_test_recovery(&fixture.run_id, (false, None, Some(successor.clone())));
+    fixture
+        .allocator
+        .write_test_recovery(&successor, (true, Some(fixture.run_id.clone()), None));
+    std::fs::rename(
+        fixture.allocator.run_path(&fixture.run_id),
+        fixture.allocator.run_path(&successor),
+    )
+    .assert_value();
+
+    fixture.allocator.reconcile_test_recovery();
+
+    let recovery = fixture.allocator.workspace_recovery(&successor).await;
+    assert!(recovery.recoverable);
+    assert_eq!(recovery.resumed_from.as_ref(), Some(&fixture.run_id));
+}
+
+#[tokio::test]
+async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity() {
+    if unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    let mut fixture = CheckoutFixture::new("").await;
+    fixture.allocator.set_test_filesystem(production_filesystem);
+    let capsule = fixture.allocate().await.assert_value();
+    let source_workspace = fixture
+        .allocator
+        .run_path(&fixture.run_id)
+        .join("workspace");
+    let source_metadata = fs::metadata(&source_workspace).assert_value();
+    let retained = source_workspace.join("retained.txt");
+    let create = std::process::Command::new("/bin/sh")
+        .args(["-c", "umask 022; printf retained > retained.txt"])
+        .current_dir(&source_workspace)
+        .uid(source_metadata.uid())
+        .gid(source_metadata.gid())
+        .output()
+        .assert_value();
+    assert!(create.status.success());
+    capsule
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Failed)
+        .await
+        .assert_value();
+    assert_eq!(fs::symlink_metadata(&retained).assert_value().uid(), 0);
+
+    let blocker_run_id = RunId::new("checkout-recovery-identity-blocker");
+    let blocker = fixture
+        .allocator
+        .allocate(&blocker_run_id, &fixture.admitted, Some(CHECKOUT_TOKEN))
+        .await
+        .assert_value();
+    let blocker_workspace = fixture
+        .allocator
+        .run_path(&blocker_run_id)
+        .join("workspace");
+    let blocker_metadata = fs::metadata(&blocker_workspace).assert_value();
+    assert_eq!(blocker_metadata.uid(), source_metadata.uid());
+
+    let successor = RunId::new("checkout-recovery-different-identity-successor");
+    let resumed = fixture
+        .allocator
+        .allocate_from_retained(RetainedAllocationRequest {
+            source_run_id: &fixture.run_id,
+            run_id: &successor,
+            admitted: &fixture.admitted,
+            github_token: Some(CHECKOUT_TOKEN),
+        })
+        .await
+        .assert_value();
+    let successor_workspace = fixture.allocator.run_path(&successor).join("workspace");
+    assert_ne!(source_workspace, successor_workspace);
+    assert!(!source_workspace.exists());
+    let successor_retained = successor_workspace.join("retained.txt");
+    let successor_metadata = fs::metadata(&successor_workspace).assert_value();
+    assert_ne!(successor_metadata.uid(), blocker_metadata.uid());
+    assert_eq!(
+        fs::symlink_metadata(&successor_retained)
+            .assert_value()
+            .uid(),
+        successor_metadata.uid()
+    );
+
+    let stale_writer = std::process::Command::new("/bin/sh")
+        .args(["-c", "printf stale >> retained.txt"])
+        .current_dir(&successor_workspace)
+        .uid(blocker_metadata.uid())
+        .gid(blocker_metadata.gid())
+        .output()
+        .assert_value();
+    assert!(!stale_writer.status.success());
+    let successor_writer = std::process::Command::new("/bin/sh")
+        .args(["-c", "printf resumed >> retained.txt"])
+        .current_dir(&successor_workspace)
+        .uid(successor_metadata.uid())
+        .gid(successor_metadata.gid())
+        .output()
+        .assert_value();
+    assert!(successor_writer.status.success());
+    assert_eq!(
+        fs::read_to_string(&successor_retained).assert_value(),
+        "retainedresumed"
+    );
+
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+    blocker
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+}
+
+fn block_retained_cleanup(
+    _workspace: &Path,
+    runtime_home: &Path,
+    _process_pool: HostedProcessPool,
+) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
+    fs::write(runtime_home, "cleanup blocker")
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+    Err(CapsuleAllocationUnavailable::Runtime)
 }

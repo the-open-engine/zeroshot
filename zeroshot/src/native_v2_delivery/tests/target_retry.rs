@@ -28,6 +28,7 @@ async fn assert_legacy_delivery_stops_on_target_drift(mode: DeliveryMode) {
         &repo,
         authority.clone(),
         DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
+        DeliveryLineage::original("legacy-target-drift"),
     );
     let admitted = admitted_legacy_delivery(&repo, mode).await;
     let runner =

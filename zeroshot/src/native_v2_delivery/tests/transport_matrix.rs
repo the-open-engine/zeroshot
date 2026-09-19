@@ -92,6 +92,26 @@ async fn push_successfully(repo: &TempRepo, server: &HttpGit, request: &GitHubPu
     );
 }
 
+fn publish_reviewed_candidate(repo: &TempRepo) -> GitHubReviewReceipt {
+    let candidate = commit_file(&repo.workspace, "result.txt", "reviewed\n");
+    let branch = delivery_branch(RUN);
+    git(
+        &repo.workspace,
+        &[
+            "push",
+            "origin",
+            &format!("{candidate}:refs/heads/{branch}"),
+        ],
+    );
+    GitHubReviewReceipt {
+        review_id: "17".to_owned(),
+        repository: "acme/project".to_owned(),
+        target_branch: "main".to_owned(),
+        head_branch: branch,
+        head_revision: candidate,
+    }
+}
+
 #[tokio::test]
 async fn http_push_uses_reviewed_sha_even_when_workspace_head_advances() {
     let repo = TempRepo::delivery();
@@ -378,6 +398,19 @@ fn adapter(repo: &TempRepo, authority: Arc<TransportAuthority>) -> Arc<NativeV2D
         repo,
         authority,
         DeliveryPollPolicy::new(5, Duration::from_millis(1)).assert_value(),
+        DeliveryLineage::original(RUN),
+    )
+}
+
+fn adopting_adapter(
+    repo: &TempRepo,
+    authority: Arc<TransportAuthority>,
+) -> Arc<NativeV2DeliveryAdapter> {
+    retained_adapter(
+        repo,
+        authority,
+        DeliveryPollPolicy::new(5, Duration::from_millis(1)).assert_value(),
+        DeliveryLineage::resumed(RUN),
     )
 }
 
@@ -502,27 +535,30 @@ async fn http_lost_update_receipt_fetches_remote_head_and_requires_existing_work
 }
 
 #[tokio::test]
+async fn fresh_resumed_adapter_reconciles_a_remote_descendant_before_delivery() {
+    let repo = TempRepo::delivery();
+    let published = publish_reviewed_candidate(&repo);
+    let server = HttpGit::start(&repo.remote);
+    let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+    let observed = authority.advance_remote(&repo.workspace, &published);
+
+    let execution = execute(&repo, adopting_adapter(&repo, authority.clone()), false).await;
+
+    assert_delivery_signal(&execution.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        observed.head_revision
+    );
+    assert_eq!(authority.pushes.load(Ordering::SeqCst), 0);
+    assert!(!authority.merged.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
 async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval() {
     let repo = TempRepo::delivery();
-    let candidate = commit_file(&repo.workspace, "result.txt", "reviewed\n");
-    let branch = delivery_branch(RUN);
-    git(
-        &repo.workspace,
-        &[
-            "push",
-            "origin",
-            &format!("{candidate}:refs/heads/{branch}"),
-        ],
-    );
+    let published = publish_reviewed_candidate(&repo);
     let server = HttpGit::start(&repo.remote);
     let authority = TransportAuthority::new(&repo, &server, Update::Known);
-    let published = GitHubReviewReceipt {
-        review_id: "17".to_owned(),
-        repository: "acme/project".to_owned(),
-        target_branch: "main".to_owned(),
-        head_branch: branch.clone(),
-        head_revision: candidate.clone(),
-    };
     let observed = authority.advance_remote(&repo.workspace, &published);
     let repair = commit_file(&repo.workspace, "repair.txt", "committed repair\n");
     fs::write(repo.workspace.join("dirty.txt"), "uncommitted repair\n").assert_value();
@@ -535,6 +571,7 @@ async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval
                 observed: &observed,
                 commit_message: "Preserve local repair",
                 authorized_update: true,
+                adopting_existing: false,
             },
             GitHubCredential("test-token"),
         )
@@ -563,7 +600,7 @@ async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval
         "uncommitted repair\n"
     );
     assert_eq!(
-        reference(&repo.remote, &branch),
+        reference(&repo.remote, &published.head_branch),
         Some(observed.head_revision)
     );
     assert_eq!(server.faults.receive_packs.load(Ordering::SeqCst), 0);

@@ -279,7 +279,7 @@ impl NativeV2DeliveryAdapter {
             .await?;
         let review_request = GitHubReviewRequest {
             target: self.config.target.clone(),
-            head_branch: delivery_branch(preparation.invocation.node.reference.run_id.as_str()),
+            head_branch: delivery_branch(self.config.delivery_run_id.as_str()),
             head_revision,
             title: input.title,
             description: input.description,

@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU32;
 
-use openengine_cluster_protocol::{DeclaredConnections, FieldName, WorkerRef};
+use openengine_cluster_protocol::{DeclaredConnections, FieldName, RunId, WorkerRef};
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
@@ -140,6 +140,7 @@ fn probe(directory: &TestDirectory, fault: Fault) -> Arc<FenceProbe> {
         .assert_value();
     let adapter = NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig::for_hosted_workspace(
+            DeliveryLineage::new(RunId::new("delivery-identity-fence"), false),
             directory.path().to_owned(),
             DeliveryTarget::new("acme/project", "main", "a".repeat(40)).assert_value(),
             identity,

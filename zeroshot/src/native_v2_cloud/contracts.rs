@@ -32,6 +32,19 @@ pub struct ControllerClaimUnavailable;
 #[error("capsule destruction could not be confirmed")]
 pub struct CapsuleCleanupUnavailable;
 
+/// Distinguishes a safely settled retained allocation failure from unconfirmed cleanup.
+///
+/// A settled failure leaves no live capsule and one durable recovery owner for the workspace.
+/// Cleanup failure keeps the successor nonterminal so replacement-controller reconciliation can
+/// confirm runtime cleanup before recording a terminal result.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum RetainedAllocationUnavailable {
+    #[error(transparent)]
+    Settled(#[from] CapsuleAllocationUnavailable),
+    #[error(transparent)]
+    CleanupUnconfirmed(#[from] CapsuleCleanupUnavailable),
+}
+
 /// Opaque acknowledgement from allocator authority that the disposable runtime no longer exists.
 ///
 /// For a live capsule this follows successful destruction. After an observed connection loss the
@@ -61,6 +74,13 @@ pub struct AllocatedCapsule {
     pub runner: Arc<dyn NodeRunner>,
     pub loss: watch::Receiver<bool>,
     pub cleanup: Arc<dyn CapsuleCleanup>,
+}
+
+pub struct RetainedAllocationRequest<'a> {
+    pub source_run_id: &'a RunId,
+    pub run_id: &'a RunId,
+    pub admitted: &'a AdmittedRun,
+    pub github_token: Option<&'a str>,
 }
 
 /// Allocator-owned proof that this is the only active controller for one run.
@@ -95,4 +115,22 @@ pub trait CapsuleAllocator: Send + Sync {
         run_id: &RunId,
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable>;
+
+    async fn allocate_from_retained(
+        &self,
+        _request: RetainedAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
+        Err(CapsuleAllocationUnavailable::Runtime.into())
+    }
+
+    async fn workspace_recovery(
+        &self,
+        _run_id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        Default::default()
+    }
+
+    async fn discard_workspace(&self, _run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {
+        Ok(false)
+    }
 }

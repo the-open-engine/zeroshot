@@ -22,6 +22,8 @@ pub const RUN_WATCH_METHOD: &str = "run/watch";
 pub const RUN_LOGS_METHOD: &str = "run/logs";
 pub const RUN_ATTACH_METHOD: &str = "run/attach";
 pub const RUN_FORCE_METHOD: &str = "run/force";
+pub const RUN_RESUME_METHOD: &str = "run/resume";
+pub const RUN_DISCARD_WORKSPACE_METHOD: &str = "run/discard_workspace";
 
 pub const MAX_DECLARED_ENVIRONMENT_NAMES: usize = 64;
 pub const MAX_DECLARED_CONNECTIONS: usize = 64;
@@ -429,7 +431,8 @@ pub use runtime::{DeclaredConnections, DeclaredEnvironment, NodeRuntimeBinding};
 
 mod wire;
 pub use wire::{
-    RunListParams, RunListResult, RunSubmission, RunSubmitParams, RunSubmitResult, RuntimePlan,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunListParams, RunListResult,
+    RunResumeParams, RunResumeResult, RunSubmission, RunSubmitParams, RunSubmitResult, RuntimePlan,
 };
 
 #[cfg(test)]

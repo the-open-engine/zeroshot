@@ -356,12 +356,14 @@ impl CapsuleAllocator for DeliveryAllocator {
 
     async fn allocate(
         &self,
-        _run_id: &RunId,
+        run_id: &RunId,
         admitted: &AdmittedRun,
         _github_token: Option<&str>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let delivery = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                delivery_run_id: run_id.clone(),
+                adopt_existing_delivery: false,
                 git_identity: None,
                 workspace: self.fixture.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),

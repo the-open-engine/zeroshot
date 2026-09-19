@@ -116,6 +116,7 @@ impl Fixture {
             graph["root"]["children"][0]["input"] = payload;
             graph["root"]["children"][0]["inputBindings"] =
                 json!([{"target":["blob"],"value":{"source":"state","path":["blob"]}}]);
+            graph["root"]["children"][1]["state"] = graph["root"]["state"].clone();
             self.write("graph.json", &graph);
             self.write("input.json", &json!({"blob":"x".repeat(256 * 1024)}));
         }

@@ -8,7 +8,7 @@ use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
     EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId, NodeName,
     NodeRuntimeBinding, ReasoningEffort, RunConnectionValues, RunSize, RunSubmitResult,
-    RuntimePlan, SessionScope, StaticConnectionValues,
+    RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
 };
 use serde::Deserialize;
 
@@ -249,6 +249,36 @@ where
 {
     let mut selected = BTreeMap::new();
     for (key, fields) in runtime.connection_requirements() {
+        let mut values = BTreeMap::new();
+        for name in fields {
+            let Some(value) = available(name.as_str()) else {
+                continue;
+            };
+            let value = value
+                .into_string()
+                .map_err(|_| NativeV2CliError::Environment(name.clone()))?;
+            values.insert(name, value);
+        }
+        if !values.is_empty() {
+            selected.insert(
+                key,
+                StaticConnectionValues::new(values)
+                    .map_err(|error| NativeV2CliError::Usage(error.to_string()))?,
+            );
+        }
+    }
+    Ok(selected)
+}
+
+pub(super) fn select_connection_requirements<F>(
+    requirements: RunConnectionRequirements,
+    available: F,
+) -> Result<RunConnectionValues, NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    let mut selected = BTreeMap::new();
+    for (key, fields) in requirements {
         let mut values = BTreeMap::new();
         for name in fields {
             let Some(value) = available(name.as_str()) else {

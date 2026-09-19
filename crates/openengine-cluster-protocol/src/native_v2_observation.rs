@@ -7,13 +7,14 @@
 //! learning product-local execution, capsule, harness, provider, or session identities.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentAttachEvent, Cursor, ExecutionRef, LogRecord, NodeName, RunId, SubscriptionId, RunSize,
-    RunTitle, ResolvedSource, TerminalResult, MAX_SAFE_GENERATION,
+    AgentAttachEvent, Cursor, ExecutionRef, LogRecord, NodeName, RunConnectionRequirements, RunId,
+    RunSize, RunTitle, SubscriptionId, ResolvedSource, TerminalResult, MAX_SAFE_GENERATION,
 };
 
 /// Non-negative token counter that remains exact in JavaScript clients.
@@ -172,15 +173,65 @@ pub struct RunStatusParams {
     pub run_id: RunId,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+macro_rules! define_run_status_projection {
+    (
+        $(#[$attribute:meta])*
+        $name:ident
+        $(
+            {
+                run_id: #[$run_id_attribute:meta],
+                title: #[$title_attribute:meta],
+                source: #[$source_attribute:meta],
+                size: #[$size_attribute:meta],
+                at_cursor: #[$cursor_attribute:meta],
+                status: #[$status_attribute:meta],
+            }
+        )?
+    ) => {
+        $(#[$attribute])*
+        #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        pub struct $name {
+            $(#[$run_id_attribute])?
+            pub run_id: RunId,
+            $(#[$title_attribute])?
+            pub title: RunTitle,
+            $(#[$source_attribute])?
+            pub source: ResolvedSource,
+            $(#[$size_attribute])?
+            pub size: RunSize,
+            $(#[$cursor_attribute])?
+            pub at_cursor: Cursor,
+            $(#[$status_attribute])?
+            pub status: RunStatus,
+            #[serde(default, skip_serializing_if = "WorkspaceRecovery::is_empty")]
+            pub workspace_recovery: WorkspaceRecovery,
+        }
+    };
+}
+
+define_run_status_projection!(RunStatusResult);
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunStatusResult {
-    pub run_id: RunId,
-    pub title: RunTitle,
-    pub source: ResolvedSource,
-    pub size: RunSize,
-    pub at_cursor: Cursor,
-    pub status: RunStatus,
+pub struct WorkspaceRecovery {
+    pub recoverable: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connection_requirements: RunConnectionRequirements,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed_from: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor_run_id: Option<RunId>,
+}
+
+impl WorkspaceRecovery {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.recoverable
+            && self.connection_requirements.is_empty()
+            && self.resumed_from.is_none()
+            && self.successor_run_id.is_none()
+    }
 }
 
 /// Establishes a durable run watch.
@@ -293,20 +344,14 @@ pub struct RunForceParams {
     pub run_id: RunId,
 }
 
-/// The durable run status after recording the force request.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunForceResult {
-    /// Public identity of the run whose force request was recorded.
-    pub run_id: RunId,
-    /// Immutable title captured when the run was admitted.
-    pub title: RunTitle,
-    /// Immutable repository snapshot captured when the run was admitted.
-    pub source: ResolvedSource,
-    /// Immutable execution size selected for the run.
-    pub size: RunSize,
-    /// Durable cursor after the force request was recorded.
-    pub at_cursor: Cursor,
-    /// Public phase projected after the force request was recorded.
-    pub status: RunStatus,
-}
+define_run_status_projection!(
+    /// The durable run status after recording the force request.
+    RunForceResult {
+        run_id: #[doc = "Public identity of the run whose force request was recorded."],
+        title: #[doc = "Immutable title captured when the run was admitted."],
+        source: #[doc = "Immutable repository snapshot captured when the run was admitted."],
+        size: #[doc = "Immutable execution size selected for the run."],
+        at_cursor: #[doc = "Durable cursor after the force request was recorded."],
+        status: #[doc = "Public phase projected after the force request was recorded."],
+    }
+);

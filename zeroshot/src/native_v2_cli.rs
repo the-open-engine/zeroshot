@@ -14,12 +14,12 @@ use openengine_cluster_protocol::{
     ConnectionListResult, ConnectionMutationResult, ConnectionScope, ConnectionSetRequest, Cursor,
     EnvironmentVariableName, ExecutionRef, IdempotencyKey, MergePlan, MergePlanId,
     MergePlanRunRequest, MergePlanSource, RunAttachEventNotification, RunAttachParams,
-    RunConnectionValues, RunForceParams, RunId, RunListParams, RunLogEventNotification,
-    RunLogsParams, RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult,
-    RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult, RunProfileMutationResult,
-    RunProfileName, RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunTitle,
-    RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    SubscriptionCloseReason,
+    RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileName, RunProfileSelector, RunProfileSetRequest,
+    RunStatusParams, RunTitle, RunWatchParams, ResolvedSource, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, SubscriptionCloseReason,
 };
 use thiserror::Error;
 
@@ -284,6 +284,8 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     ForceStop(RunSelector),
+    Resume(RunSelector),
+    DiscardWorkspace(RunSelector),
 }
 
 impl NativeV2CliCommand {
@@ -591,6 +593,37 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError>;
+    async fn authorize_resume_connection_requirements(
+        &self,
+        target: Option<&str>,
+        _run_id: &RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        if target.is_some() {
+            return Err(NativeV2CliError::Target(
+                "local authorization for workspace recovery is unavailable".to_owned(),
+            ));
+        }
+        Ok(requirements)
+    }
+    async fn run_resume(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support workspace recovery".to_owned(),
+        ))
+    }
+    async fn run_discard_workspace(
+        &self,
+        _target: Option<&str>,
+        _params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
+    ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support workspace recovery".to_owned(),
+        ))
+    }
 }
 
 impl NativeV2CliError {

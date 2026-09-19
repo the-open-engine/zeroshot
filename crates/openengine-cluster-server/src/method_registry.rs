@@ -72,6 +72,8 @@ pub static METHOD_REGISTRY: &[MethodDescriptor] = &[
         SubscriptionKind::RunAttach,
     ),
     unary(openengine_cluster_protocol::RUN_FORCE_METHOD),
+    unary(openengine_cluster_protocol::RUN_RESUME_METHOD),
+    unary(openengine_cluster_protocol::RUN_DISCARD_WORKSPACE_METHOD),
 ];
 
 const fn unary(name: &'static str) -> MethodDescriptor {

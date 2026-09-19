@@ -34,7 +34,9 @@ if (process.argv.includes('app-server')) {
     }
     const correction = mode === 'correction' && !process.argv.includes('resume');
     if (process.argv.includes('resume')) fs.writeFileSync('resumed.txt', 'same session');
-    emit({ type: 'item.completed', item: { type: 'agent_message', text: correction ? 'invalid-json' : 'null' } });
+    emit({ type: 'item.completed', item: {
+      type: 'agent_message', text: correction ? 'invalid-json' : JSON.stringify({ response: null })
+    } });
     process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } }));
   });
 }

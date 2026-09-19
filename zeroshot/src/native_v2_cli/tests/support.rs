@@ -2,10 +2,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
-    MergePlan, MergePlanState, RunAttachEventNotification, RunAttachParams, RunConnectionValues,
-    RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
-    RunProfileName, RunProfileScope, RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams,
-    RuntimePlan,
+    MergePlan, MergePlanState, RunAttachEventNotification, RunAttachParams,
+    RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileName, RunProfileScope,
+    RunResumeParams, RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams, RuntimePlan,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
@@ -68,6 +68,10 @@ pub(super) enum Call {
     Force {
         target: Option<String>,
         run_id: String,
+    },
+    Resume {
+        target: Option<String>,
+        params: RunResumeParams,
     },
 }
 
@@ -141,6 +145,8 @@ pub(super) struct FakeBackend {
     failed_watch: bool,
     queued_lifecycle: bool,
     terminal_plan_state: Option<MergePlanState>,
+    resume_requirements: Option<RunConnectionRequirements>,
+    trusted_resume_requirements: Option<RunConnectionRequirements>,
 }
 
 #[derive(Clone, Copy)]
@@ -195,6 +201,25 @@ impl FakeBackend {
     pub(super) fn with_terminal_plan_state(state: MergePlanState) -> Self {
         Self {
             terminal_plan_state: Some(state),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn with_resume_requirements(requirements: RunConnectionRequirements) -> Self {
+        Self {
+            resume_requirements: Some(requirements.clone()),
+            trusted_resume_requirements: Some(requirements),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn with_untrusted_resume_requirements(
+        advertised: RunConnectionRequirements,
+        trusted: RunConnectionRequirements,
+    ) -> Self {
+        Self {
+            resume_requirements: Some(advertised),
+            trusted_resume_requirements: Some(trusted),
             ..Self::default()
         }
     }
@@ -402,6 +427,25 @@ impl NativeV2CliBackend for FakeBackend {
             target: target.map(str::to_owned),
             run_id: params.run_id.as_str().to_owned(),
         });
+        if let Some(requirements) = &self.resume_requirements {
+            return serde_json::from_value(json!({
+                "runId":params.run_id,
+                "title":"Repair checkout",
+                "source":source(),
+                "size":"medium",
+                "atCursor":"v2:3",
+                "status":{
+                    "phase":"finished",
+                    "terminalResult":{"status":"failed","reason":"worker_failed"},
+                    "metadata":{}
+                },
+                "workspaceRecovery":{
+                    "recoverable":true,
+                    "connectionRequirements":requirements
+                }
+            }))
+            .map_err(NativeV2CliError::OutputJson);
+        }
         Ok(status(
             "run-public",
             if self.queued_lifecycle {
@@ -593,6 +637,44 @@ impl NativeV2CliBackend for FakeBackend {
             "status":{"phase":"stopping","activeExecutions":[]}
         }))
         .map_err(NativeV2CliError::OutputJson)
+    }
+
+    async fn authorize_resume_connection_requirements(
+        &self,
+        target: Option<&str>,
+        _run_id: &RunId,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionRequirements, NativeV2CliError> {
+        if target.is_none() {
+            return Ok(requirements);
+        }
+        let trusted = self.trusted_resume_requirements.as_ref().ok_or_else(|| {
+            NativeV2CliError::Target(
+                "local authorization for workspace recovery is unavailable".to_owned(),
+            )
+        })?;
+        if trusted != &requirements {
+            return Err(NativeV2CliError::Target(
+                "workspace-recovery connection requirements do not match the original run"
+                    .to_owned(),
+            ));
+        }
+        Ok(trusted.clone())
+    }
+
+    async fn run_resume(
+        &self,
+        target: Option<&str>,
+        params: RunResumeParams,
+    ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::Resume {
+            target: target.map(str::to_owned),
+            params: params.clone(),
+        });
+        Ok(openengine_cluster_protocol::RunResumeResult {
+            run_id: params.successor_run_id,
+            resumed_from: params.run_id,
+        })
     }
 }
 

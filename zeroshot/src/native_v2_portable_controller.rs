@@ -92,6 +92,8 @@ impl PortableControllerPaths {
 
 pub struct PortableControllerBootstrap {
     pub run_id: RunId,
+    pub delivery_run_id: RunId,
+    pub adopt_existing_delivery: bool,
     pub submission: RunSubmission,
     pub environment: RunEnvironment,
     pub github_token: Option<String>,
@@ -106,6 +108,7 @@ impl fmt::Debug for PortableControllerBootstrap {
         formatter
             .debug_struct("PortableControllerBootstrap")
             .field("run_id", &self.run_id)
+            .field("delivery_run_id", &self.delivery_run_id)
             .field("submission", &self.submission)
             .field("environment", &self.environment)
             .field(

@@ -187,7 +187,9 @@ pub(super) fn portable_filesystem(
 }
 
 pub(super) fn writable_directory(path: &Path) {
-    fs::create_dir(path).assert_value_with("create writable directory");
+    if !path.is_dir() {
+        fs::create_dir(path).assert_value_with("create writable directory");
+    }
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))
         .assert_value_with("writable permissions");
 }

@@ -356,10 +356,10 @@ async fn delivery_refreshes_an_expired_dynamic_github_credential() {
 }
 
 #[tokio::test]
-async fn exact_merge_retry_rediscovers_the_same_review_and_receipt() {
+async fn resumed_merge_rediscovers_the_predecessor_branch_and_review() {
     let repo = TempRepo::delivery();
     let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
-    let first = run_delivery_with_id(
+    let first = run_delivery_with_identity(
         DeliveryRunRequest {
             repo: &repo,
             attempts: 3,
@@ -368,17 +368,19 @@ async fn exact_merge_retry_rediscovers_the_same_review_and_receipt() {
             refresh: None,
         },
         authority.clone(),
+        "stable-delivery-run",
     )
     .await;
-    let second = run_delivery_with_id(
+    let second = run_delivery_with_identity(
         DeliveryRunRequest {
             repo: &repo,
             attempts: 3,
             mode: DeliveryMode::Merge,
-            run_id: "stable-delivery-run",
+            run_id: "successor-delivery-run",
             refresh: None,
         },
         authority.clone(),
+        "stable-delivery-run",
     )
     .await;
 
@@ -387,12 +389,53 @@ async fn exact_merge_retry_rediscovers_the_same_review_and_receipt() {
         assert_delivery_signal(&second, DELIVERY_MERGED_LABEL),
     );
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.review_requests().len(), 1);
     let reviews = authority.review_requests();
     assert_eq!(
         reviews.len(),
         1,
         "terminal retry must not update PR metadata"
     );
+}
+
+#[tokio::test]
+async fn resumed_pull_request_adopts_the_predecessor_delivery_with_a_fresh_adapter() {
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+    let first = run_delivery_execution_with_identity(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 3,
+            mode: DeliveryMode::PullRequest,
+            run_id: "predecessor-run",
+            refresh: None,
+        },
+        authority.clone(),
+        "stable-delivery-run",
+    )
+    .await;
+    let second = run_delivery_execution_with_identity_and_adoption(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 3,
+            mode: DeliveryMode::PullRequest,
+            run_id: "successor-run",
+            refresh: None,
+        },
+        authority.clone(),
+        "stable-delivery-run",
+        true,
+    )
+    .await;
+
+    assert_eq!(
+        assert_delivery_signal(&first.outcome, DELIVERY_OPENED_LABEL),
+        assert_delivery_signal(&second.outcome, DELIVERY_OPENED_LABEL),
+    );
+    let reviews = authority.review_requests();
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[0].head_branch, reviews[1].head_branch);
+    assert_eq!(reviews[0].head_revision, reviews[1].head_revision);
 }
 
 #[tokio::test]
@@ -478,6 +521,7 @@ async fn run_delivery(
     .await
 }
 
+#[derive(Clone)]
 struct DeliveryRunRequest<'a> {
     repo: &'a TempRepo,
     attempts: usize,
@@ -502,7 +546,38 @@ async fn run_delivery_execution(
     request: DeliveryRunRequest<'_>,
     authority: Arc<FakeGitHub>,
 ) -> DeliveryExecution {
+    let delivery_run_id = request.run_id.to_owned();
+    run_delivery_execution_with_identity(request, authority, &delivery_run_id).await
+}
+
+async fn run_delivery_with_identity(
+    request: DeliveryRunRequest<'_>,
+    authority: Arc<FakeGitHub>,
+    delivery_run_id: &str,
+) -> WorkerOutcome {
+    run_delivery_execution_with_identity(request, authority, delivery_run_id)
+        .await
+        .outcome
+}
+
+async fn run_delivery_execution_with_identity(
+    request: DeliveryRunRequest<'_>,
+    authority: Arc<FakeGitHub>,
+    delivery_run_id: &str,
+) -> DeliveryExecution {
+    run_delivery_execution_with_identity_and_adoption(request, authority, delivery_run_id, false)
+        .await
+}
+
+async fn run_delivery_execution_with_identity_and_adoption(
+    request: DeliveryRunRequest<'_>,
+    authority: Arc<FakeGitHub>,
+    delivery_run_id: &str,
+    adopt_existing_delivery: bool,
+) -> DeliveryExecution {
     let config = NativeV2DeliveryConfig {
+        delivery_run_id: RunId::new(delivery_run_id),
+        adopt_existing_delivery,
         git_identity: None,
         workspace: request.repo.workspace.clone(),
         git_program: PathBuf::from("/usr/bin/git"),
@@ -513,13 +588,38 @@ async fn run_delivery_execution(
     run_with_adapter(request, adapter).await
 }
 
+#[derive(Clone, Copy)]
+struct DeliveryLineage<'a> {
+    run_id: &'a str,
+    adopt_existing: bool,
+}
+
+impl<'a> DeliveryLineage<'a> {
+    const fn original(run_id: &'a str) -> Self {
+        Self {
+            run_id,
+            adopt_existing: false,
+        }
+    }
+
+    const fn resumed(run_id: &'a str) -> Self {
+        Self {
+            run_id,
+            adopt_existing: true,
+        }
+    }
+}
+
 fn retained_adapter(
     repo: &TempRepo,
     authority: Arc<dyn GitHubDeliveryAuthority>,
     poll: DeliveryPollPolicy,
+    lineage: DeliveryLineage<'_>,
 ) -> Arc<NativeV2DeliveryAdapter> {
     Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            delivery_run_id: RunId::new(lineage.run_id),
+            adopt_existing_delivery: lineage.adopt_existing,
             git_identity: None,
             workspace: repo.workspace.clone(),
             git_program: "/usr/bin/git".into(),
