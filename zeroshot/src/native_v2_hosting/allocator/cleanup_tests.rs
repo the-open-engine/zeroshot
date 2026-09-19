@@ -56,6 +56,7 @@ impl CleanupFixture {
             run_root,
             recovery_path: directory.child("recovery.json"),
             delivery_run_id: run_id.clone(),
+            inherited_retained_workspace: false,
             process_pool: Mutex::new(Some(lease)),
             portable_processes: false,
             _loss_sender: loss,

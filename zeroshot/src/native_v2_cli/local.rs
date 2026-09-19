@@ -22,15 +22,16 @@ use openengine_cluster_protocol::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
-use crate::execution::platform::ControllerChild as Child;
 use tokio::time::{Instant, sleep};
 
 use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
+use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError, PreparedRunRequest, TargetAdd,
     default_local_state_root,
 };
+use crate::execution::platform::{ControllerChild as Child, FileAccess, private_file};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
@@ -71,11 +72,19 @@ struct LocalRecoveryDocument {
     submission: RunSubmission,
     workspace: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    delivery_run_id: Option<RunId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     resumed_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     successor_run_id: Option<RunId>,
+}
+
+struct LocalRecoveryClaim(File);
+
+impl Drop for LocalRecoveryClaim {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.0);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -451,7 +460,10 @@ impl LocalCliBackend {
         Ok(self.run_storage(run_id)?.join(RECOVERY_CLAIM_FILE))
     }
 
-    fn claim_recovery_workspace(&self, run_id: &RunId) -> Result<File, NativeV2CliError> {
+    fn claim_recovery_workspace(
+        &self,
+        run_id: &RunId,
+    ) -> Result<LocalRecoveryClaim, NativeV2CliError> {
         let claim = OpenOptions::new()
             .read(true)
             .write(true)
@@ -460,13 +472,13 @@ impl LocalCliBackend {
             .open(self.recovery_claim_path(run_id)?)
             .map_err(local_io)?;
         claim.try_lock_exclusive().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::WouldBlock {
+            if error.kind() == fs2::lock_contended_error().kind() {
                 local_message("retained workspace is already being resumed")
             } else {
                 local_io(error)
             }
         })?;
-        Ok(claim)
+        Ok(LocalRecoveryClaim(claim))
     }
 
     fn recovery_workspace_is_unclaimed(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
@@ -579,11 +591,25 @@ impl LocalCliBackend {
         document: &LocalRecoveryDocument,
     ) -> Result<(), NativeV2CliError> {
         let path = self.recovery_path(run_id)?;
-        let temporary = path.with_extension("json.tmp");
+        let parent = path
+            .parent()
+            .ok_or_else(|| local_message("workspace recovery path is invalid"))?;
+        let temporary = parent.join(format!(".workspace-recovery-{}.tmp", uuid::Uuid::now_v7()));
         let bytes = serde_json::to_vec(document)
             .map_err(|_| local_message("workspace recovery metadata could not be encoded"))?;
-        std::fs::write(&temporary, bytes).map_err(local_io)?;
-        std::fs::rename(temporary, path).map_err(local_io)
+        let result = (|| {
+            let file = private_file(&temporary, FileAccess::CreateNew).map_err(local_io)?;
+            write_and_commit(
+                file,
+                &bytes,
+                CommitPaths {
+                    temporary: &temporary,
+                    destination: &path,
+                    parent,
+                },
+            )
+        })();
+        cleanup_temporary(result, &temporary)
     }
 
     fn delivery_run_id(
@@ -875,6 +901,7 @@ mod recovery_claim_tests {
             })
             .await
             .assert_value();
+        drop(ledger);
 
         fixture
             .backend

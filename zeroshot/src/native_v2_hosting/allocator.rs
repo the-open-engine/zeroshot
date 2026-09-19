@@ -128,6 +128,7 @@ struct CleanupRunRequest<'a> {
     recovery_path: &'a Path,
     run_id: &'a RunId,
     delivery_run_id: &'a RunId,
+    recovery_eligible: bool,
     exit: RunRuntimeExit,
 }
 
@@ -214,6 +215,7 @@ impl ProductionCapsuleAllocator {
             run_root_identity: OnceLock::new(),
             recovery_path: recovery_path(&self.config.storage_root, request.run_id),
             delivery_run_id: request.delivery_run_id.clone(),
+            inherited_retained_workspace: request.transfer_retained_workspace,
             process_pool: Mutex::new(Some(process_pool)),
             #[cfg(test)]
             portable_processes: self.portable_test_processes(),
@@ -559,6 +561,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     recovery_path: &recovery_path(&self.config.storage_root, run_id),
                     run_id,
                     delivery_run_id: run_id,
+                    recovery_eligible: true,
                     exit,
                 })?;
             }
@@ -610,6 +613,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                         recovery_path: &paths.run_recovery,
                         run_id,
                         delivery_run_id: &claim.delivery_run_id,
+                        recovery_eligible: true,
                         exit: RunRuntimeExit::RuntimeLost,
                     }),
                 };
@@ -676,6 +680,7 @@ struct ProductionCapsuleState {
     run_root_identity: OnceLock<WorkspaceIdentity>,
     recovery_path: PathBuf,
     delivery_run_id: RunId,
+    inherited_retained_workspace: bool,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
     process_pool: Mutex<Option<ActiveRunProcessPool>>,
     #[cfg(test)]
@@ -728,6 +733,7 @@ impl ProductionCapsuleState {
             recovery_path: &self.recovery_path,
             run_id,
             delivery_run_id: &self.delivery_run_id,
+            recovery_eligible: self.endpoint.get().is_some() || self.inherited_retained_workspace,
             exit,
         })
     }
@@ -829,10 +835,12 @@ fn confirmed_retained_workspace(
 }
 
 fn cleanup_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCleanupUnavailable> {
-    if !matches!(
-        request.exit,
-        RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
-    ) {
+    if !request.recovery_eligible
+        || !matches!(
+            request.exit,
+            RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
+        )
+    {
         return remove_run_directory(request.run_root);
     }
     match failed_run_directory_state(request.run_root)? {
