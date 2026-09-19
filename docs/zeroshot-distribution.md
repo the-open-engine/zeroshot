@@ -12,7 +12,7 @@
 | Native archives      | `zeroshot-vX.Y.Z-<target>.tar.gz`                                        |
 | Target manifest      | `distribution/zeroshot-targets.json`                                     |
 | npm package          | `@the-open-engine-company/zeroshot`                                      |
-| Agent skill          | `skills/zeroshot/SKILL.md` in the npm package                            |
+| Agent skill          | npm `skills/zeroshot/SKILL.md`; release asset `zeroshot-skill.md`        |
 | Target image         | `ghcr.io/the-open-engine/zeroshot-target`                                |
 | Python wheel release | `zeroshot-python-vX.Y.Z_1`                                               |
 | Python package       | `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled |
@@ -24,17 +24,19 @@ fallback, or compatibility artifact.
 The npm installer copies the same managed skill to `$HOME/.agents/skills/zeroshot` for Codex and
 GitHub Copilot, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot` for Claude Code. These
 fixed user scopes are installed unconditionally so agents added later need no Zeroshot reinstall.
-Package updates replace only an unchanged managed copy. An edited or conflicting skill is preserved
-and fails installation visibly. npm 7 and newer provide no uninstall lifecycle, so users remove
-unchanged managed copies from these documented paths when they uninstall the package.
+Package updates and `zeroshot update` replace only an unchanged managed copy. An edited or
+conflicting skill is preserved and fails installation visibly. npm 7 and newer provide no uninstall
+lifecycle, so users remove unchanged managed copies from these documented paths when they uninstall
+the package.
 
 ## Targets
 
 The target manifest declares Linux x64/arm64 musl, macOS x64/arm64, and Windows x64, and the npm
 target table must match it exactly. The installer stops on any other host.
 
-Every archive contains one executable, with one corresponding entry in `SHA256SUMS`. The workflow
-also rejects a Linux release binary that has a dynamic interpreter.
+Every archive contains one executable. `SHA256SUMS` covers each archive and the exact
+`zeroshot-skill.md` copied from the npm package's canonical skill. The workflow also rejects a Linux
+release binary that has a dynamic interpreter.
 
 ## Version staging
 

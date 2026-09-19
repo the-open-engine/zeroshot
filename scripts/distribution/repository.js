@@ -231,6 +231,8 @@ function checkReleaseFragments(workflow) {
     '[[ "$major" -ge 8 ]]',
     'node scripts/distribution.js stage-version --tag "$RELEASE_TAG"',
     'node scripts/distribution.js check-version --tag "$RELEASE_TAG"',
+    'release-assets/zeroshot-skill.md',
+    "--pattern 'zeroshot-skill.md'",
     'npm --prefix ui ci --ignore-scripts',
     'npm --prefix ui run build',
     'cargo build --release --locked -p zeroshot --bin zeroshot --features ui --target ${{ matrix.target }}',

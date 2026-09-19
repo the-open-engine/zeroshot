@@ -21,7 +21,7 @@ Commands:
   template           Inspect built-in graph templates
   plan               Validate, submit, and observe hosted merge plans
   run                Submit a graph run locally or to a named target
-  update             Update this executable to the newest canonical release
+  update             Update this executable and managed agent skill to the newest canonical release
   list               List runs as JSON
   status             Read a run's current status as JSON
   watch              Follow a run's durable event stream as NDJSON
@@ -847,9 +847,9 @@ RUNTIME CONFIGURATION
 ### `zeroshot update`
 
 ```text
-Update this executable to the newest canonical release.
+Update this executable and managed agent skill to the newest canonical release.
 
-Downloads the declared archive for this platform from the latest GitHub Release, verifies its SHA256SUMS entry and executable version, then replaces this executable in place. The executable's directory must be writable; Zeroshot does not elevate privileges.
+Downloads the declared archive and agent skill from the latest GitHub Release, verifies their SHA256SUMS entries and the executable version, then replaces this executable and any unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as conflicts. The executable's directory must be writable; Zeroshot does not elevate privileges.
 
 Usage: zeroshot update
 
@@ -1045,7 +1045,7 @@ Commands:
   template           Inspect built-in graph templates
   plan               Validate, submit, and observe hosted merge plans
   run                Submit a graph run locally or to a named target
-  update             Update this executable to the newest canonical release
+  update             Update this executable and managed agent skill to the newest canonical release
   list               List runs as JSON
   status             Read a run's current status as JSON
   watch              Follow a run's durable event stream as NDJSON

@@ -9,6 +9,7 @@ One successful release produces the same version across:
 
 - GitHub tag and Release: `vX.Y.Z`
 - native archives: `zeroshot-vX.Y.Z-<target>.tar.gz`
+- canonical agent skill: `zeroshot-skill.md`
 - checksum manifest: `SHA256SUMS`
 - npm package: `@the-open-engine-company/zeroshot@X.Y.Z`
 - target image: `ghcr.io/the-open-engine/zeroshot-target:X.Y.Z`

@@ -40,10 +40,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   publishing is known to be unavailable, then recover the same revision from the same source later.
 - Checked-in Cargo/npm versions are development placeholders. Tags, registry metadata, and GitHub
   Releases are authoritative. Never commit a staged release version to `main`.
-- `zeroshot update` resolves the newest canonical GitHub Release, selects the declared host archive,
-  verifies it through that release's `SHA256SUMS`, smoke-checks the staged executable, and replaces
-  the running executable in place without privilege escalation. Development-placeholder builds
-  refuse self-update.
+- `zeroshot update` resolves the newest canonical GitHub Release, verifies the declared host archive
+  and canonical `zeroshot-skill.md` asset through that release's `SHA256SUMS`, smoke-checks the
+  staged executable, and replaces the running executable in place without privilege escalation. It
+  installs or refreshes only unchanged managed skill copies and preserves conflicts.
+  Development-placeholder builds refuse self-update.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
   exact version and source commit.
 

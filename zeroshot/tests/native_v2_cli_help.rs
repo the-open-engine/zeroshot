@@ -258,7 +258,12 @@ fn update_help_explains_the_verified_in_place_release_flow() {
     let update = successful_stdout(&["update", "--help"]);
     assert_prose(
         &update,
-        &["newest canonical release", "usage: zeroshot update"],
+        &[
+            "newest canonical release",
+            "managed agent skill",
+            "user-edited skills are preserved",
+            "usage: zeroshot update",
+        ],
     );
 }
 

@@ -11,6 +11,9 @@ use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[path = "update/skill.rs"]
+mod skill;
+
 use super::{CliOutcome, NativeV2CliError};
 
 const LATEST_RELEASE_URL: &str =
@@ -19,7 +22,9 @@ const RELEASE_BASE_URL: &str = "https://github.com/the-open-engine/zeroshot/rele
 const MINIMUM_RELEASE_MAJOR: u64 = 8;
 const MAX_RELEASE_BYTES: usize = 1024 * 1024;
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
+const MAX_SKILL_BYTES: usize = 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
+const SKILL_ASSET: &str = "zeroshot-skill.md";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
@@ -54,17 +59,46 @@ struct UpdateResult {
     current_version: String,
     latest_version: String,
     updated: bool,
+    skill_updated: bool,
+}
+
+struct ReleaseUpdate {
+    binary: Option<Vec<u8>>,
+    skill: skill::PreparedSkill,
 }
 
 pub(super) async fn execute(output: &mut impl Write) -> Result<CliOutcome, NativeV2CliError> {
     let current = installed_version()?;
     let client = http_client()?;
     let latest = latest_version(&client).await?;
-    if latest > current {
-        download_and_install(&client, latest).await?;
-    }
-    write_result(output, current, latest, latest > current)?;
+    let (updated, skill_updated) = apply_release(&client, current, latest).await?;
+    write_result(
+        output,
+        UpdateResult {
+            current_version: current.to_string(),
+            latest_version: latest.to_string(),
+            updated,
+            skill_updated,
+        },
+    )?;
     Ok(CliOutcome::Completed)
+}
+
+async fn apply_release(
+    client: &reqwest::Client,
+    current: ReleaseVersion,
+    latest: ReleaseVersion,
+) -> Result<(bool, bool), NativeV2CliError> {
+    if latest < current {
+        return Ok((false, false));
+    }
+    let release = download_release(client, current, latest).await?;
+    let updated = release.binary.is_some();
+    if let Some(binary) = release.binary {
+        install(&binary, latest)?;
+    }
+    let skill_updated = release.skill.install()?;
+    Ok((updated, skill_updated))
 }
 
 fn installed_version() -> Result<ReleaseVersion, NativeV2CliError> {
@@ -109,12 +143,11 @@ async fn latest_version(client: &reqwest::Client) -> Result<ReleaseVersion, Nati
     Ok(latest)
 }
 
-async fn download_and_install(
+async fn download_release(
     client: &reqwest::Client,
+    current: ReleaseVersion,
     latest: ReleaseVersion,
-) -> Result<(), NativeV2CliError> {
-    let (target, executable) = release_target()?;
-    let filename = format!("zeroshot-v{latest}-{target}.tar.gz");
+) -> Result<ReleaseUpdate, NativeV2CliError> {
     let base_url = format!("{RELEASE_BASE_URL}/v{latest}");
     let manifest = download(
         client,
@@ -123,17 +156,43 @@ async fn download_and_install(
         "release checksum manifest",
     )
     .await?;
-    let expected_checksum = checksum_for(&manifest, &filename)?;
-    let archive = download(
+    let release = VerifiedRelease {
         client,
-        &format!("{base_url}/{filename}"),
-        MAX_ARCHIVE_BYTES,
-        "release archive",
-    )
-    .await?;
-    verify_checksum(&filename, &archive, &expected_checksum)?;
-    let binary = extract_executable(&archive, executable)?;
-    install(&binary, latest)
+        base_url: &base_url,
+        manifest: &manifest,
+    };
+    let skill_contents = release.download(SKILL_ASSET, MAX_SKILL_BYTES).await?;
+    let skill = skill::prepare(skill_contents)?;
+    let binary = if latest > current {
+        let (target, executable) = release_target()?;
+        let filename = format!("zeroshot-v{latest}-{target}.tar.gz");
+        let archive = release.download(&filename, MAX_ARCHIVE_BYTES).await?;
+        Some(extract_executable(&archive, executable)?)
+    } else {
+        None
+    };
+    Ok(ReleaseUpdate { binary, skill })
+}
+
+struct VerifiedRelease<'a> {
+    client: &'a reqwest::Client,
+    base_url: &'a str,
+    manifest: &'a [u8],
+}
+
+impl VerifiedRelease<'_> {
+    async fn download(&self, filename: &str, maximum: usize) -> Result<Vec<u8>, NativeV2CliError> {
+        let expected_checksum = checksum_for(self.manifest, filename)?;
+        let contents = download(
+            self.client,
+            &format!("{}/{filename}", self.base_url),
+            maximum,
+            filename,
+        )
+        .await?;
+        verify_checksum(filename, &contents, &expected_checksum)?;
+        Ok(contents)
+    }
 }
 
 fn release_version(value: &str, kind: &str) -> Result<ReleaseVersion, NativeV2CliError> {
@@ -367,20 +426,8 @@ fn validate_smoke_result(
     Ok(())
 }
 
-fn write_result(
-    output: &mut impl Write,
-    current: ReleaseVersion,
-    latest: ReleaseVersion,
-    updated: bool,
-) -> Result<(), NativeV2CliError> {
-    serde_json::to_writer(
-        &mut *output,
-        &UpdateResult {
-            current_version: current.to_string(),
-            latest_version: latest.to_string(),
-            updated,
-        },
-    )?;
+fn write_result(output: &mut impl Write, result: UpdateResult) -> Result<(), NativeV2CliError> {
+    serde_json::to_writer(&mut *output, &result)?;
     output.write_all(b"\n")?;
     output.flush()?;
     Ok(())
@@ -422,10 +469,14 @@ mod tests {
         let archive = test_archive(&[("zeroshot", binary)]);
         let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
         let checksum = format!("{:x}", Sha256::digest(&archive));
-        let manifest = format!("{checksum}  {filename}\n");
+        let skill = b"canonical skill";
+        let skill_checksum = format!("{:x}", Sha256::digest(skill));
+        let manifest = format!("{checksum}  {filename}\n{skill_checksum}  {SKILL_ASSET}\n");
 
         let expected = checksum_for(manifest.as_bytes(), filename).assert_value();
         verify_checksum(filename, &archive, &expected).assert_value();
+        let expected_skill = checksum_for(manifest.as_bytes(), SKILL_ASSET).assert_value();
+        verify_checksum(SKILL_ASSET, skill, &expected_skill).assert_value();
         assert_eq!(
             extract_executable(&archive, "zeroshot").assert_value(),
             binary
@@ -552,10 +603,19 @@ mod tests {
         assert!(validate_smoke_result(true, b"zeroshot 8.2.0\n", version).is_err());
 
         let mut output = Vec::new();
-        write_result(&mut output, ReleaseVersion([8, 2, 0]), version, true).assert_value();
+        write_result(
+            &mut output,
+            UpdateResult {
+                current_version: ReleaseVersion([8, 2, 0]).to_string(),
+                latest_version: version.to_string(),
+                updated: true,
+                skill_updated: true,
+            },
+        )
+        .assert_value();
         assert_eq!(
             output,
-            br#"{"currentVersion":"8.2.0","latestVersion":"8.2.1","updated":true}
+            br#"{"currentVersion":"8.2.0","latestVersion":"8.2.1","updated":true,"skillUpdated":true}
 "#
         );
     }

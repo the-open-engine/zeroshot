@@ -8,15 +8,18 @@ checks the downloaded archive against `SHA256SUMS` before writing the native exe
 npm install --global @the-open-engine-company/zeroshot
 ```
 
-A canonical CLI release can update its executable in place. The command selects the newest GitHub
-release for the current platform, verifies its archive against that release's `SHA256SUMS`, and
-verifies the new executable before replacing the old one:
+A canonical CLI release can update its executable and managed agent skill in place. The command
+selects the newest GitHub release for the current platform, verifies its archive and skill asset
+against that release's `SHA256SUMS`, and verifies the new executable before replacing the old one:
 
 ```console
 zeroshot update
 ```
 
 The update does not elevate privileges; the current executable must be writable by the caller.
+Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, and Claude
+Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
+after completing any safe updates.
 
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
@@ -102,8 +105,9 @@ names and explains the separation.
 
 ## Other installation paths
 
-Each [GitHub release](https://github.com/the-open-engine/zeroshot/releases) includes native archives
-and `SHA256SUMS`; archive names contain the release version and target triple.
+Each [GitHub release](https://github.com/the-open-engine/zeroshot/releases) includes native archives,
+the canonical `zeroshot-skill.md`, and `SHA256SUMS`; archive names contain the release version and
+target triple.
 
 The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
 wheel:

@@ -15,6 +15,7 @@ function writeReleaseAssets(directory, version = 'v8.0.0') {
       'fixture'
     );
   }
+  fs.writeFileSync(path.join(directory, 'zeroshot-skill.md'), 'fixture');
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), 'fixture');
   fs.writeFileSync(path.join(directory, distribution.releaseNotesName(version)), 'notes fixture');
 }
@@ -56,6 +57,15 @@ describe('canonical distribution', () => {
       }
       distribution.createManifest({ version: '8.0.0', directory });
       assert.equal(distribution.verifyDistribution({ version: 'v8.0.0', directory }), true);
+      assert.deepEqual(
+        fs.readFileSync(path.join(directory, 'zeroshot-skill.md')),
+        fs.readFileSync(path.join(__dirname, '../../npm/zeroshot/skills/zeroshot/SKILL.md'))
+      );
+      fs.writeFileSync(path.join(directory, 'zeroshot-skill.md'), 'tampered');
+      assert.throws(
+        () => distribution.verifyDistribution({ version: 'v8.0.0', directory }),
+        /CHECKSUM_MISMATCH/
+      );
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

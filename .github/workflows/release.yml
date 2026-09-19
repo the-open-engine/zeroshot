@@ -395,6 +395,7 @@ jobs:
           name: zeroshot-distribution-v${{ needs.plan.outputs.version }}
           path: |
             release-assets/*.tar.gz
+            release-assets/zeroshot-skill.md
             release-assets/SHA256SUMS
           if-no-files-found: error
 
@@ -736,6 +737,7 @@ jobs:
         run: |
           gh release download "$RELEASE_TAG" \
             --pattern 'SHA256SUMS' \
+            --pattern 'zeroshot-skill.md' \
             --pattern "zeroshot-v${RELEASE_VERSION}-*.tar.gz" \
             --dir release-assets
 

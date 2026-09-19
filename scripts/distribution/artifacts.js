@@ -16,9 +16,18 @@ const {
 
 const repositoryRoot = path.resolve(__dirname, '../..');
 const targetManifestPath = path.join(repositoryRoot, 'distribution', 'zeroshot-targets.json');
+const skillSourcePath = path.join(
+  repositoryRoot,
+  'npm',
+  'zeroshot',
+  'skills',
+  'zeroshot',
+  'SKILL.md'
+);
 const targets = Object.freeze(JSON.parse(fs.readFileSync(targetManifestPath, 'utf8')));
 const RELEASE_TAG_PREFIX = 'v';
 const MINIMUM_RELEASE_MAJOR = 8;
+const SKILL_ASSET_NAME = 'zeroshot-skill.md';
 
 function normalizeVersion(tag) {
   const version =
@@ -100,8 +109,9 @@ function packageTarget({ target, version, binaryPath, outputDirectory }) {
 }
 
 function createManifest({ version, directory }) {
-  const entries = targets.map(({ target }) => {
-    const filename = archiveName(version, target);
+  fs.copyFileSync(skillSourcePath, path.join(directory, SKILL_ASSET_NAME));
+  const names = [...targets.map(({ target }) => archiveName(version, target)), SKILL_ASSET_NAME];
+  const entries = names.map((filename) => {
     const contents = fs.readFileSync(path.join(directory, filename));
     return `${sha256(contents)}  ${filename}`;
   });
@@ -112,7 +122,7 @@ function createManifest({ version, directory }) {
 }
 
 function verifyDistribution({ version, directory }) {
-  const expected = targets.map(({ target }) => archiveName(version, target));
+  const expected = [...targets.map(({ target }) => archiveName(version, target)), SKILL_ASSET_NAME];
   const manifest = parseChecksumManifest(
     fs.readFileSync(path.join(directory, 'SHA256SUMS'), 'utf8')
   );
@@ -127,6 +137,11 @@ function verifyDistribution({ version, directory }) {
     verifyChecksum(filename, archive, manifest);
     extractExecutable(archive, declaration.executable);
   }
+  const skill = fs.readFileSync(path.join(directory, SKILL_ASSET_NAME));
+  verifyChecksum(SKILL_ASSET_NAME, skill, manifest);
+  if (!skill.equals(fs.readFileSync(skillSourcePath))) {
+    throw new Error('DISTRIBUTION_INCOMPLETE: release skill differs from the canonical npm skill');
+  }
   return true;
 }
 
@@ -137,6 +152,7 @@ function runGh(args) {
 function publishAssets({ tag, directory, invokeGh = runGh }) {
   const names = [
     ...targets.map(({ target }) => archiveName(tag, target)),
+    SKILL_ASSET_NAME,
     'SHA256SUMS',
     releaseNotesName(tag),
   ];
