@@ -14,6 +14,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - `main` is the only development and release trunk. Normal PRs target `main`.
 - Pull request titles are Conventional Commit headers because squash merge makes the title the
   released commit.
+- Pull request descriptions keep a nonempty `## Summary` with the user-facing change. Release notes
+  come from that summary in the immutable squash commit, not from mutable GitHub metadata.
 - Worker git operations are allowed only inside an isolated worktree/container or explicit PR/ship
   delivery flow.
 - Do not recreate the retired Node.js product, its commands, configuration, state, release workflow,
@@ -446,6 +448,10 @@ python -m mkdocs build --strict
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
+- It generates the GitHub Release body from the exact first-parent commits since the preceding
+  canonical tag. Every released commit must retain a Conventional Commit squash title ending in
+  `(#PR)` and a nonempty release summary. Generation uses the exact release source, and publication
+  persists the Markdown as an immutable release asset for byte-exact recovery.
 - It publishes native archives/checksums, `ghcr.io/the-open-engine/zeroshot-target`, and
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.
 - Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by

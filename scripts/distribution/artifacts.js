@@ -45,6 +45,10 @@ function archiveName(version, target) {
   return artifactArchiveName(normalizeVersion(version), target);
 }
 
+function releaseNotesName(version) {
+  return `zeroshot-release-notes-v${normalizeVersion(version)}.md`;
+}
+
 function targetForHost(platform, arch) {
   return findTargetForHost(targets, platform, arch);
 }
@@ -131,7 +135,11 @@ function runGh(args) {
 }
 
 function publishAssets({ tag, directory, invokeGh = runGh }) {
-  const names = [...targets.map(({ target }) => archiveName(tag, target)), 'SHA256SUMS'];
+  const names = [
+    ...targets.map(({ target }) => archiveName(tag, target)),
+    'SHA256SUMS',
+    releaseNotesName(tag),
+  ];
   const localAssets = new Map(
     names.map((name) => [name, fs.readFileSync(path.join(directory, name))])
   );
@@ -179,6 +187,7 @@ module.exports = {
   packageTarget,
   parseChecksumManifest,
   publishAssets,
+  releaseNotesName,
   releaseTag,
   repositoryRoot,
   sha256,

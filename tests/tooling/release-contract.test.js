@@ -43,7 +43,10 @@ describe('v8 hard cutover contract', () => {
     assert.match(release, /release_tag="v\$RELEASE_VERSION"/);
     assert.match(release, /ghcr\.io\/the-open-engine\/zeroshot-target/);
     assert.match(release, /existing_id.*candidate_id/);
-    assert.match(release, /gh release edit "\$RELEASE_TAG" --latest="\$PUBLISH_LATEST"/);
+    assert.match(
+      release,
+      /gh release edit "\$RELEASE_TAG" \\\n\s+--latest="\$PUBLISH_LATEST" \\\n\s+--notes-file "\$notes_file"/
+    );
     assert.match(release, /npm publish --provenance --access public \.\/shim-release\/\*\.tgz/);
     assert.doesNotMatch(release, /zeroshot-rust|release-rust|semantic-release/);
   });
@@ -57,6 +60,48 @@ describe('v8 hard cutover contract', () => {
     assert.match(pyproject, /^zeroshot = \[/m);
     assert.match(versionModule, /version\("the-open-engine-zeroshot"\)/);
     assert.match(pyproject, /"PyYAML==6\.0\.3"/);
+  });
+});
+
+describe('Release-note publication contract', () => {
+  it('generates one immutable notes artifact and republishes it exactly', () => {
+    const workflow = yaml.load(read('.github/workflows/release.yml'));
+    const planSteps = new Map(workflow.jobs.plan.steps.map((step) => [step.name, step]));
+    const publishSteps = new Map(workflow.jobs.publish.steps.map((step) => [step.name, step]));
+    const source = planSteps.get('Checkout exact Zeroshot release source');
+    const generate = planSteps.get('Generate or recover immutable release notes');
+    const upload = planSteps.get('Upload deterministic release notes');
+    const download = publishSteps.get('Download deterministic release notes');
+    const publish = publishSteps.get('Create or verify independent GitHub Release');
+
+    assert.deepEqual(source.with, {
+      'fetch-depth': 0,
+      path: 'release-source',
+      'persist-credentials': false,
+      ref: '${{ inputs.release_commit }}',
+    });
+    assert.equal(
+      planSteps.get('Verify exact main commit and independent tag')['working-directory'],
+      'release-source'
+    );
+    assert.match(generate.run, /node release-source\/scripts\/release-notes\.js/);
+    assert.match(generate.run, /--repo release-source/);
+    assert.match(generate.run, /--commit "\$RELEASE_COMMIT"/);
+    assert.match(generate.run, /gh release download "\$RELEASE_TAG"/);
+    assert.match(generate.run, /cmp -- "\$notes_file" "\$generated_file"/);
+    assert.equal(upload.with.name, 'zeroshot-release-notes-v${{ steps.release.outputs.version }}');
+    assert.equal(
+      upload.with.path,
+      '${{ runner.temp }}/zeroshot-release-notes-v${{ steps.release.outputs.version }}.md'
+    );
+    assert.equal(upload.with['if-no-files-found'], 'error');
+    assert.equal(download.with.name, 'zeroshot-release-notes-v${{ needs.plan.outputs.version }}');
+    assert.equal(download.with.path, 'release-assets');
+    assert.match(publish.run, /--notes-file "\$notes_file"/);
+    assert.match(publish.run, /jq --join-output '\.body'/);
+    assert.match(publish.run, /cmp -- "\$notes_file" "\$published_notes"/);
+    assert.doesNotMatch(publish.run, /--notes "/);
+    assert.doesNotMatch(publish.run, /expected_notes/);
   });
 });
 

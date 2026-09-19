@@ -183,6 +183,7 @@ module.exports = {
   packageTarget: artifacts.packageTarget,
   parseChecksumManifest: artifacts.parseChecksumManifest,
   publishAssets: artifacts.publishAssets,
+  releaseNotesName: artifacts.releaseNotesName,
   releaseTag: artifacts.releaseTag,
   sha256: artifacts.sha256,
   smokeExecutable,

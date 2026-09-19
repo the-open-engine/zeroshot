@@ -8,6 +8,17 @@ const { describe, it } = require('node:test');
 
 const distribution = require('../../scripts/distribution');
 
+function writeReleaseAssets(directory, version = 'v8.0.0') {
+  for (const target of distribution.targets) {
+    fs.writeFileSync(
+      path.join(directory, distribution.archiveName(version, target.target)),
+      'fixture'
+    );
+  }
+  fs.writeFileSync(path.join(directory, 'SHA256SUMS'), 'fixture');
+  fs.writeFileSync(path.join(directory, distribution.releaseNotesName(version)), 'notes fixture');
+}
+
 describe('canonical distribution', () => {
   it('uses canonical v8+ release tags', () => {
     assert.equal(distribution.normalizeVersion('8.0.0'), '8.0.0');
@@ -27,6 +38,7 @@ describe('canonical distribution', () => {
       distribution.archiveName('v8.0.0', 'x86_64-unknown-linux-musl'),
       'zeroshot-v8.0.0-x86_64-unknown-linux-musl.tar.gz'
     );
+    assert.equal(distribution.releaseNotesName('v8.0.0'), 'zeroshot-release-notes-v8.0.0.md');
   });
 
   it('creates and verifies the complete declared target set', () => {
@@ -70,17 +82,13 @@ describe('canonical distribution', () => {
       );
     }
   });
+});
 
+describe('release asset publication', () => {
   it('rejects unexpected assets on an existing GitHub Release', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-release-assets-'));
     try {
-      for (const target of distribution.targets) {
-        fs.writeFileSync(
-          path.join(directory, distribution.archiveName('v8.0.0', target.target)),
-          'fixture'
-        );
-      }
-      fs.writeFileSync(path.join(directory, 'SHA256SUMS'), 'fixture');
+      writeReleaseAssets(directory);
       assert.throws(
         () =>
           distribution.publishAssets({
@@ -89,6 +97,36 @@ describe('canonical distribution', () => {
             invokeGh: () => JSON.stringify({ assets: [{ name: 'zeroshot-rust-v7.tar.gz' }] }),
           }),
         /unexpected assets: zeroshot-rust-v7\.tar\.gz/
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a changed immutable release-note asset', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-release-assets-'));
+    const notesName = distribution.releaseNotesName('v8.0.0');
+    try {
+      writeReleaseAssets(directory);
+      fs.writeFileSync(path.join(directory, notesName), 'expected notes');
+      assert.throws(
+        () =>
+          distribution.publishAssets({
+            tag: 'v8.0.0',
+            directory,
+            invokeGh: (arguments_) => {
+              if (arguments_[1] === 'view') {
+                return JSON.stringify({ assets: [{ name: notesName }] });
+              }
+              if (arguments_[1] === 'download') {
+                const output = arguments_[arguments_.indexOf('--dir') + 1];
+                fs.writeFileSync(path.join(output, notesName), 'changed notes');
+                return '';
+              }
+              return '';
+            },
+          }),
+        new RegExp(`existing ${notesName.replaceAll('.', '\\.')} differs`)
       );
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
