@@ -280,6 +280,7 @@ impl Drop for Active<'_> {
 #[derive(Default)]
 pub(super) struct FakeDriver {
     pub(super) concurrency: Concurrency,
+    pub(super) slots: Mutex<Vec<(String, u64)>>,
 }
 
 pub(super) struct BurstDriver;
@@ -314,6 +315,10 @@ impl NodeDriver for FakeDriver {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         assert!(invocation.session.as_any().is::<FakeSession>());
+        self.slots.lock().assert_value().push((
+            invocation.node.reference.node.as_str().to_owned(),
+            invocation.provider_session_slot.get(),
+        ));
         let reader = invocation.role == NodeRole::Verifier;
         let counter = if reader {
             &self.concurrency.readers
@@ -361,14 +366,24 @@ impl NodeDriver for FakeDriver {
 }
 
 pub(super) fn runner() -> (NativeNodeRunner, Arc<FakeDriver>, Arc<FakeFactory>) {
+    configured_runner(false)
+}
+
+pub(super) fn owner_runner() -> (NativeNodeRunner, Arc<FakeDriver>, Arc<FakeFactory>) {
+    configured_runner(true)
+}
+
+fn configured_runner(owner_scoped: bool) -> (NativeNodeRunner, Arc<FakeDriver>, Arc<FakeFactory>) {
     let driver = Arc::new(FakeDriver::default());
     let factory = Arc::new(FakeFactory::default());
     let admitted = admitted();
-    (
-        NativeNodeRunner::new(&admitted, driver.clone(), factory.clone()).assert_value(),
-        driver,
-        factory,
-    )
+    let runner = if owner_scoped {
+        NativeNodeRunner::new_owner_scoped(&admitted, driver.clone(), factory.clone())
+    } else {
+        NativeNodeRunner::new(&admitted, driver.clone(), factory.clone())
+    }
+    .assert_value();
+    (runner, driver, factory)
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};

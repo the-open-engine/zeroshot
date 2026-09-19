@@ -350,21 +350,14 @@ impl LocalCliBackend {
     }
 
     fn workspace_lease(&self, workspace: &Path) -> Result<PathBuf, NativeV2CliError> {
-        let root = self.state_root.join("workspaces");
-        prepare_private_directory(&root)?;
-        let digest = Sha256::digest(workspace.as_os_str().as_encoded_bytes());
-        Ok(root.join(format!("{digest:x}.lock")))
+        local_workspace_lease_path(&self.state_root, workspace)
     }
 
     fn create_run_storage(
         &self,
         run_id: &openengine_cluster_protocol::RunId,
     ) -> Result<PathBuf, NativeV2CliError> {
-        let runs = self.state_root.join("runs");
-        prepare_private_directory(&runs)?;
-        let storage = self.run_storage(run_id)?;
-        crate::execution::platform::create_private_directory(&storage).map_err(local_io)?;
-        Ok(storage)
+        create_local_run_storage(&self.state_root, run_id)
     }
 
     fn spawn_controller(&self, bootstrap: &Path) -> Result<Child, NativeV2CliError> {
@@ -707,6 +700,28 @@ impl LocalCliBackend {
             .await
             .map_err(protocol_error)
     }
+}
+
+pub(crate) fn local_workspace_lease_path(
+    state_root: &Path,
+    workspace: &Path,
+) -> Result<PathBuf, NativeV2CliError> {
+    let root = state_root.join("workspaces");
+    prepare_private_directory(&root)?;
+    let digest = Sha256::digest(workspace.as_os_str().as_encoded_bytes());
+    Ok(root.join(format!("{digest:x}.lock")))
+}
+
+pub(crate) fn create_local_run_storage(
+    state_root: &Path,
+    run_id: &RunId,
+) -> Result<PathBuf, NativeV2CliError> {
+    validate_local_run_id(run_id)?;
+    let runs = state_root.join("runs");
+    prepare_private_directory(&runs)?;
+    let storage = runs.join(run_id.as_str());
+    crate::execution::platform::create_private_directory(&storage).map_err(local_io)?;
+    Ok(storage)
 }
 
 async fn wait_for_controller(

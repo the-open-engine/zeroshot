@@ -318,8 +318,13 @@ impl CapsuleAllocator for CandidateAllocator {
             },
             self.github.clone(),
         ));
-        let local = assemble_runner(admitted, self.agent.clone(), self.agent.clone(), delivery)
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let local = assemble_runner(
+            admitted,
+            CandidateAgents::new(self.agent.clone()),
+            delivery,
+            CandidatePlacement::Capsule,
+        )
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(local)));
         let remote = Arc::new(RemoteCapsuleNodeRunner::new(endpoint));
         Ok(AllocatedCapsule {

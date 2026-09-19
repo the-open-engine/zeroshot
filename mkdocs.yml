@@ -55,6 +55,7 @@ nav:
       - Targets: concepts/targets.md
   - Guides:
       - Observe and control runs: guides/observe-and-control.md
+      - Use a local graph as an ACP agent: guides/acp.md
       - Python SDK: guides/python-sdk.md
   - Reference:
       - CLI: zeroshot-cli.md

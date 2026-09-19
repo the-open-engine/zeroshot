@@ -10,6 +10,7 @@ pub enum NodeRole {
 pub(super) struct ResolvedNodePlan {
     pub(super) role: NodeRole,
     pub(super) response: NodeResponseContract,
+    pub(super) provider_session_slot: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -19,6 +20,7 @@ struct PlannedNode {
     binding: NodeRuntimeBinding,
     role: NodeRole,
     response: NodeResponseContract,
+    provider_session_slot: u64,
 }
 
 /// Immutable authority for execution role and runtime binding, derived from admitted input.
@@ -33,6 +35,10 @@ impl NodeRolePlan {
         collect_planned_nodes(&admitted.graph.root, admitted.runtime.nodes(), &mut nodes)?;
         if nodes.len() != admitted.runtime.nodes().len() {
             return Err(NodeRunnerError::InvalidRole);
+        }
+        for (index, planned) in nodes.values_mut().enumerate() {
+            planned.provider_session_slot =
+                u64::try_from(index + 1).map_err(|_| NodeRunnerError::InvalidRole)?;
         }
         Ok(Self {
             nodes: Arc::new(nodes),
@@ -56,6 +62,7 @@ impl NodeRolePlan {
         Ok(ResolvedNodePlan {
             role: planned.role,
             response: planned.response.clone(),
+            provider_session_slot: planned.provider_session_slot,
         })
     }
 }
@@ -77,6 +84,7 @@ fn collect_planned_nodes(
                     binding: binding.clone(),
                     role,
                     response,
+                    provider_session_slot: 0,
                 },
             )
             .is_some()

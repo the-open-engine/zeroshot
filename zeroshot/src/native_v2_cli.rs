@@ -75,6 +75,9 @@ pub use execution::{
 };
 pub use parser::{Cli, parse_native_v2_args};
 
+mod acp;
+pub use acp::{AcpServeError, serve_local_acp};
+
 #[cfg(test)]
 #[path = "native_v2_cli/tests.rs"]
 mod tests;
@@ -232,6 +235,9 @@ pub struct RunLogsCommand {
 pub enum NativeV2CliCommand {
     Help(String),
     Version,
+    Acp {
+        profile: RunProfileName,
+    },
     Update,
     TargetAdd(TargetAdd),
     TargetLogin {

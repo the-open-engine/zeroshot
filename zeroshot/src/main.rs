@@ -9,9 +9,9 @@ use thiserror::Error;
 use zeroshot_engine::native_v2_cli::local::{LOCAL_CONTROLLER_MODE, LocalCliBackend};
 use zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend;
 use zeroshot_engine::native_v2_cli::{
-    execute_native_v2_cli, parse_native_v2_args, try_execute_native_v2_preflight,
-    try_execute_native_v2_static, CtrlCDetachSignal, NativeV2CliCommand, NativeV2CliDiagnostic,
-    NativeV2CliError, ERROR_FORMAT_ENV, JSON_ERROR_FORMAT,
+    execute_native_v2_cli, parse_native_v2_args, try_execute_native_v2_preflight, serve_local_acp,
+    try_execute_native_v2_static, AcpServeError, CtrlCDetachSignal, NativeV2CliCommand,
+    NativeV2CliDiagnostic, NativeV2CliError, ERROR_FORMAT_ENV, JSON_ERROR_FORMAT,
 };
 use zeroshot_engine::native_v2_portable_controller::{PortableControllerError, run_controller_process};
 
@@ -22,6 +22,8 @@ use native_v2_target::{
 
 #[derive(Debug, Error)]
 enum ProcessError {
+    #[error(transparent)]
+    Acp(#[from] AcpServeError),
     #[error(transparent)]
     Target(#[from] TargetConnectorError),
     #[error(transparent)]
@@ -39,8 +41,15 @@ async fn run() -> Result<(), ProcessError> {
     if run_private_controller(&arguments).await? {
         return Ok(());
     }
-    let command = parse_native_v2_args(arguments)?;
+    dispatch(parse_native_v2_args(arguments)?).await
+}
+
+async fn dispatch(command: NativeV2CliCommand) -> Result<(), ProcessError> {
     match command {
+        NativeV2CliCommand::Acp { profile } => {
+            serve_local_acp(profile).await?;
+            Ok(())
+        }
         NativeV2CliCommand::Ui { listen } => {
             serve_ui(listen).await?;
             Ok(())

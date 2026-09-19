@@ -271,7 +271,7 @@ pub(crate) fn process_scope(
     let NodeRuntimeBinding::Agent { session_scope, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::Driver);
     };
-    let node_instance = invocation.node.reference.node_instance.get();
+    let node_instance = invocation.provider_session_slot.get();
     let execution = invocation.node.reference.execution.get();
     match (invocation.role, *session_scope) {
         (NodeRole::Worker, SessionScope::NodeInstance) => {

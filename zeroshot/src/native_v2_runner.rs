@@ -153,6 +153,8 @@ pub struct DriverInvocation {
     pub response: NodeResponseContract,
     pub environment: ResolvedEnvironment,
     pub session: Arc<dyn NodeSession>,
+    /// Stable private-home slot for the provider session that owns this invocation.
+    pub provider_session_slot: NodeInstanceId,
 }
 
 impl DriverInvocation {
@@ -260,6 +262,35 @@ impl NativeNodeRunner {
             activity: ActivityRegistry::default(),
         })
     }
+
+    /// Builds a runner whose node-instance sessions survive individual runs.
+    ///
+    /// The owner must serialize runs and call [`Self::close_session`] before releasing the
+    /// workspace or provider runtime.
+    pub(crate) fn new_owner_scoped(
+        admitted: &AdmittedRun,
+        driver: Arc<dyn NodeDriver>,
+        sessions: Arc<dyn SessionFactory>,
+    ) -> Result<Self, NodeRunnerError> {
+        Ok(Self {
+            driver,
+            sessions: SessionPool::new_owner_scoped(sessions),
+            roles: NodeRolePlan::from_admitted(admitted)?,
+            activity: ActivityRegistry::default(),
+        })
+    }
+
+    /// Permanently closes this runner and every provider session owned by it.
+    pub(crate) async fn close_session(&self) {
+        let targets = self.activity.begin_close_all().await;
+        for target in &targets {
+            if let Some(binding) = &target.binding {
+                self.sessions.close_bound(binding.clone(), true).await;
+            }
+        }
+        self.sessions.close_all().await;
+        wait_for_activity(targets).await;
+    }
 }
 
 #[async_trait]
@@ -286,6 +317,7 @@ impl NodeRunner for NativeNodeRunner {
                 request,
                 role: plan.role,
                 response: plan.response,
+                provider_session_slot: plan.provider_session_slot,
                 cancellation: cancel_receiver,
                 output: task_output,
                 durable_output: durable_output_sender,
@@ -307,15 +339,14 @@ impl NodeRunner for NativeNodeRunner {
     }
 
     async fn close_run(&self, run_id: &RunId) {
-        let completions = self.activity.begin_close(run_id).await;
-        self.sessions.close_run(run_id).await;
-        for mut completion in completions {
-            while !*completion.borrow_and_update() {
-                if completion.changed().await.is_err() {
-                    break;
-                }
+        let targets = self.activity.begin_close(run_id).await;
+        for target in &targets {
+            if let Some(binding) = &target.binding {
+                self.sessions.close_bound(binding.clone(), false).await;
             }
         }
+        self.sessions.close_run(run_id).await;
+        wait_for_activity(targets).await;
     }
 }
 
@@ -328,6 +359,7 @@ struct RunnerTask<'a> {
     request: NodeRunRequest,
     role: NodeRole,
     response: NodeResponseContract,
+    provider_session_slot: u64,
     cancellation: watch::Receiver<bool>,
     output: broadcast::Sender<LiveOutput>,
     durable_output: DurableEventSender,
@@ -341,8 +373,11 @@ async fn execute(
     let lease = match runtime
         .sessions
         .checkout(
-            &task.request.invocation,
-            &task.request.environment,
+            SessionCheckout {
+                invocation: &task.request.invocation,
+                environment: &task.request.environment,
+                owner_slot: task.provider_session_slot,
+            },
             &mut task.cancellation,
         )
         .await
@@ -350,12 +385,7 @@ async fn execute(
         Ok(lease) => lease,
         Err(error) => return Err(error),
     };
-    if task
-        .activity
-        .bind_session(lease.session.clone())
-        .await
-        .is_err()
-    {
+    if task.activity.bind_session(lease.binding()).await.is_err() {
         lease.finish(false).await;
         return Err(NodeRunnerError::Cancelled);
     }
@@ -366,6 +396,9 @@ async fn execute(
         response: response.clone(),
         environment: task.request.environment,
         session: lease.session.inner(),
+        provider_session_slot: runtime
+            .sessions
+            .provider_session_slot(&task.request.invocation, task.provider_session_slot)?,
     };
     let control = DriverControl {
         cancellation: task.cancellation.clone(),
@@ -388,6 +421,17 @@ async fn execute(
         Err(error) => {
             lease.finish(false).await;
             Err(error)
+        }
+    }
+}
+
+async fn wait_for_activity(targets: Vec<ActivityCloseTarget>) {
+    for target in targets {
+        let mut completion = target.done;
+        while !*completion.borrow_and_update() {
+            if completion.changed().await.is_err() {
+                break;
+            }
         }
     }
 }

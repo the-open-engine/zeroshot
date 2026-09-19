@@ -18,6 +18,17 @@ fn parser_exposes_static_help_version_and_update_commands() {
 }
 
 #[test]
+fn acp_accepts_only_an_explicit_local_profile() {
+    assert!(matches!(
+        parse_native_v2_args(args(&["acp", "--profile", "local:reviewer"])).assert_value(),
+        NativeV2CliCommand::Acp { profile } if profile.as_str() == "reviewer"
+    ));
+    for profile in ["reviewer", "user:reviewer", "org:reviewer", "local:"] {
+        assert!(parse_native_v2_args(args(&["acp", "--profile", profile])).is_err());
+    }
+}
+
+#[test]
 fn parser_exposes_the_closed_hosted_plan_surface() {
     let submit = parse_native_v2_args(args(&[
         "plan",

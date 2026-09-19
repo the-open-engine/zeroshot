@@ -20,7 +20,7 @@ use url::Url;
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2CandidateError, NativeV2HarnessConfig,
-    build_local_native_v2_candidate_with_github_token,
+    build_local_native_v2_candidate_with_github_token, build_local_owner_native_v2_candidate,
 };
 use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, ClaudeProcessEnvironment};
 use crate::native_v2_cli::PreparedRunRequest;
@@ -30,7 +30,7 @@ use crate::native_v2_copilot::CopilotConfig;
 use crate::native_v2_delivery::{
     DeliveryTarget, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
 };
-use crate::native_v2_runner::NodeRunner;
+use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 
 const DEFAULT_SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
@@ -110,7 +110,7 @@ pub fn prepare_local_run(
     })
 }
 
-fn local_resolved_source(
+pub(crate) fn local_resolved_source(
     current_directory: &Path,
     git_program: &Path,
 ) -> Result<(PathBuf, ResolvedSource), LocalCompositionError> {
@@ -213,6 +213,19 @@ fn github_remote_path(origin: &str) -> Option<String> {
 pub fn build_local_process_candidate(
     request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<dyn NodeRunner>, LocalCompositionError> {
+    build_local_candidate_config(request, false).map(|candidate| Arc::new(candidate) as _)
+}
+
+pub(crate) fn build_local_owner_process_candidate(
+    request: LocalProcessCandidateRequest<'_>,
+) -> Result<Arc<NativeNodeRunner>, LocalCompositionError> {
+    build_local_candidate_config(request, true).map(Arc::new)
+}
+
+fn build_local_candidate_config(
+    request: LocalProcessCandidateRequest<'_>,
+    owner_scoped: bool,
+) -> Result<NativeNodeRunner, LocalCompositionError> {
     let LocalProcessCandidateRequest {
         admitted,
         delivery_run_id,
@@ -270,24 +283,29 @@ pub fn build_local_process_candidate(
     let mut github_config = GhCliAuthorityConfig::hosted(runtime_home);
     github_config.git_program = PathBuf::from("git");
     github_config.gh_program = PathBuf::from("gh");
-    let candidate = build_local_native_v2_candidate_with_github_token(
-        admitted,
-        NativeV2CandidateConfig {
-            harness,
-            delivery: NativeV2DeliveryConfig {
-                delivery_run_id,
-                adopt_existing_delivery,
-                git_identity: None,
-                workspace: workspace.to_owned(),
-                git_program: PathBuf::from("git"),
-                target,
-                poll: Default::default(),
-            },
-            github: Arc::new(GhCliDeliveryAuthority::new(github_config)),
+    let config = NativeV2CandidateConfig {
+        harness,
+        delivery: NativeV2DeliveryConfig {
+            delivery_run_id,
+            adopt_existing_delivery,
+            git_identity: None,
+            workspace: workspace.to_owned(),
+            git_program: PathBuf::from("git"),
+            target,
+            poll: Default::default(),
         },
-        github_token.map(Arc::<str>::from),
-    )?;
-    Ok(Arc::new(candidate))
+        github: Arc::new(GhCliDeliveryAuthority::new(github_config)),
+    };
+    if owner_scoped {
+        build_local_owner_native_v2_candidate(admitted, config).map_err(Into::into)
+    } else {
+        build_local_native_v2_candidate_with_github_token(
+            admitted,
+            config,
+            github_token.map(Arc::<str>::from),
+        )
+        .map_err(Into::into)
+    }
 }
 
 fn current_user_home() -> Option<PathBuf> {

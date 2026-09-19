@@ -9,12 +9,18 @@ pub(super) struct ActivityRegistry {
 struct ActivityState {
     active: BTreeMap<ActiveKey, ActiveInvocation>,
     closed_runs: BTreeSet<RunId>,
+    closed: bool,
 }
 
 struct ActiveInvocation {
     cancel: watch::Sender<bool>,
-    session: Option<ManagedSession>,
+    binding: Option<SessionBinding>,
     done: watch::Sender<bool>,
+}
+
+pub(super) struct ActivityCloseTarget {
+    pub(super) binding: Option<SessionBinding>,
+    pub(super) done: watch::Receiver<bool>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -40,14 +46,14 @@ impl ActivityRegistry {
         };
         let (done, _) = watch::channel(false);
         let mut state = self.state.lock().await;
-        if state.closed_runs.contains(&key.run_id) {
+        if state.closed || state.closed_runs.contains(&key.run_id) {
             return Err(NodeRunnerError::RunClosed);
         }
         match state.active.entry(key.clone()) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(ActiveInvocation {
                     cancel,
-                    session: None,
+                    binding: None,
                     done,
                 });
             }
@@ -61,7 +67,7 @@ impl ActivityRegistry {
         })
     }
 
-    pub(super) async fn begin_close(&self, run_id: &RunId) -> Vec<watch::Receiver<bool>> {
+    pub(super) async fn begin_close(&self, run_id: &RunId) -> Vec<ActivityCloseTarget> {
         let targets = {
             let mut state = self.state.lock().await;
             state.closed_runs.insert(run_id.clone());
@@ -69,41 +75,54 @@ impl ActivityRegistry {
                 .active
                 .iter()
                 .filter(|(key, _)| key.run_id == *run_id)
-                .map(|(_, active)| {
-                    (
-                        active.cancel.clone(),
-                        active.session.clone(),
-                        active.done.subscribe(),
-                    )
-                })
+                .map(|(_, active)| close_target(active))
                 .collect::<Vec<_>>()
         };
-        for (cancel, _, _) in &targets {
-            let _ = cancel.send(true);
-        }
-        for (_, session, _) in &targets {
-            if let Some(session) = session {
-                session.close().await;
-            }
-        }
-        targets.into_iter().map(|(_, _, done)| done).collect()
+        cancel_targets(&targets);
+        targets.into_iter().map(|(_, target)| target).collect()
+    }
+
+    pub(super) async fn begin_close_all(&self) -> Vec<ActivityCloseTarget> {
+        let targets = {
+            let mut state = self.state.lock().await;
+            state.closed = true;
+            state.active.values().map(close_target).collect::<Vec<_>>()
+        };
+        cancel_targets(&targets);
+        targets.into_iter().map(|(_, target)| target).collect()
+    }
+}
+
+fn close_target(active: &ActiveInvocation) -> (watch::Sender<bool>, ActivityCloseTarget) {
+    (
+        active.cancel.clone(),
+        ActivityCloseTarget {
+            binding: active.binding.clone(),
+            done: active.done.subscribe(),
+        },
+    )
+}
+
+fn cancel_targets(targets: &[(watch::Sender<bool>, ActivityCloseTarget)]) {
+    for (cancel, _) in targets {
+        let _ = cancel.send(true);
     }
 }
 
 impl ActivityToken {
     pub(super) async fn bind_session(
         &self,
-        session: ManagedSession,
+        binding: SessionBinding,
     ) -> Result<(), NodeRunnerError> {
         let mut state = self.registry.state.lock().await;
-        if state.closed_runs.contains(&self.key.run_id) {
+        if state.closed || state.closed_runs.contains(&self.key.run_id) {
             return Err(NodeRunnerError::RunClosed);
         }
         let active = state
             .active
             .get_mut(&self.key)
             .ok_or(NodeRunnerError::Cancelled)?;
-        active.session = Some(session);
+        active.binding = Some(binding);
         Ok(())
     }
 
@@ -152,6 +171,20 @@ impl ManagedSession {
 pub(super) struct SessionPool {
     factory: Arc<dyn SessionFactory>,
     entries: Arc<Mutex<BTreeMap<SessionKey, SessionEntry>>>,
+    boundary: ReusableSessionBoundary,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReusableSessionBoundary {
+    Run,
+    Owner,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SessionCheckout<'a> {
+    pub(super) invocation: &'a NodeInvocation,
+    pub(super) environment: &'a ResolvedEnvironment,
+    pub(super) owner_slot: u64,
 }
 
 impl SessionPool {
@@ -159,19 +192,40 @@ impl SessionPool {
         Self {
             factory,
             entries: Arc::new(Mutex::new(BTreeMap::new())),
+            boundary: ReusableSessionBoundary::Run,
+        }
+    }
+
+    pub(super) fn new_owner_scoped(factory: Arc<dyn SessionFactory>) -> Self {
+        Self {
+            factory,
+            entries: Arc::new(Mutex::new(BTreeMap::new())),
+            boundary: ReusableSessionBoundary::Owner,
+        }
+    }
+
+    pub(super) fn provider_session_slot(
+        &self,
+        invocation: &NodeInvocation,
+        owner_slot: u64,
+    ) -> Result<NodeInstanceId, NodeRunnerError> {
+        match self.boundary {
+            ReusableSessionBoundary::Run => Ok(invocation.reference.node_instance),
+            ReusableSessionBoundary::Owner => {
+                NodeInstanceId::new(owner_slot).map_err(|_| NodeRunnerError::InvalidRole)
+            }
         }
     }
 
     pub(super) async fn checkout(
         &self,
-        invocation: &NodeInvocation,
-        environment: &ResolvedEnvironment,
+        request: SessionCheckout<'_>,
         cancellation: &mut watch::Receiver<bool>,
     ) -> Result<SessionLease, NodeRunnerError> {
-        let scope = session_scope(&invocation.binding)?;
+        let scope = session_scope(&request.invocation.binding)?;
         if scope == SessionScope::Execution {
             let session = self
-                .open_session(invocation, environment, cancellation)
+                .open_session(request.invocation, request.environment, cancellation)
                 .await?;
             return Ok(SessionLease {
                 session,
@@ -180,10 +234,33 @@ impl SessionPool {
             });
         }
 
-        let key = SessionKey {
-            run_id: invocation.reference.run_id.clone(),
-            node_instance: invocation.reference.node_instance,
-        };
+        let key = self.reusable_key(request.invocation, request.owner_slot)?;
+        self.checkout_reusable(key, request, cancellation).await
+    }
+
+    fn reusable_key(
+        &self,
+        invocation: &NodeInvocation,
+        owner_slot: u64,
+    ) -> Result<SessionKey, NodeRunnerError> {
+        Ok(match self.boundary {
+            ReusableSessionBoundary::Run => SessionKey::Run {
+                run_id: invocation.reference.run_id.clone(),
+                node_instance: invocation.reference.node_instance,
+            },
+            ReusableSessionBoundary::Owner => SessionKey::Owner {
+                node: invocation.reference.node.clone(),
+                provider_session_slot: self.provider_session_slot(invocation, owner_slot)?,
+            },
+        })
+    }
+
+    async fn checkout_reusable(
+        &self,
+        key: SessionKey,
+        request: SessionCheckout<'_>,
+        cancellation: &mut watch::Receiver<bool>,
+    ) -> Result<SessionLease, NodeRunnerError> {
         loop {
             match self.checkout_action(&key).await? {
                 CheckoutAction::Reuse(session) => {
@@ -194,7 +271,7 @@ impl SessionPool {
                 }
                 CheckoutAction::Open(ready) => {
                     let opened = self
-                        .open_session(invocation, environment, cancellation)
+                        .open_session(request.invocation, request.environment, cancellation)
                         .await;
                     return self.finish_open(key, ready, opened).await;
                 }
@@ -235,7 +312,7 @@ impl SessionPool {
         Ok(SessionLease {
             session,
             pool: self.clone(),
-            kind: SessionLeaseKind::NodeInstance(key),
+            kind: SessionLeaseKind::Reusable(key),
         })
     }
 
@@ -296,12 +373,18 @@ impl SessionPool {
                         Ok(SessionLease {
                             session,
                             pool: self.clone(),
-                            kind: SessionLeaseKind::NodeInstance(key),
+                            kind: SessionLeaseKind::Reusable(key),
                         })
                     }
                     Err(error) => {
                         if error == NodeRunnerError::Cancelled {
-                            entries.insert(key, SessionEntry::Lost);
+                            entries.insert(
+                                key,
+                                match self.boundary {
+                                    ReusableSessionBoundary::Run => SessionEntry::Lost,
+                                    ReusableSessionBoundary::Owner => SessionEntry::Replaceable,
+                                },
+                            );
                         } else {
                             entries.remove(&key);
                         }
@@ -328,10 +411,13 @@ impl SessionPool {
     }
 
     pub(super) async fn close_run(&self, run_id: &RunId) {
+        if self.boundary == ReusableSessionBoundary::Owner {
+            return;
+        }
         let mut entries = self.entries.lock().await;
         let keys = entries
             .keys()
-            .filter(|key| key.run_id == *run_id)
+            .filter(|key| matches!(key, SessionKey::Run { run_id: key_run_id, .. } if key_run_id == run_id))
             .cloned()
             .collect::<Vec<_>>();
         let entries_to_close = keys
@@ -343,12 +429,47 @@ impl SessionPool {
             })
             .collect::<Vec<_>>();
         drop(entries);
-        for entry in entries_to_close {
-            match entry {
-                EntryToClose::Session(session) => session.close().await,
-                EntryToClose::Opening(ready) => {
-                    let _ = ready.send(true);
+        close_entries(entries_to_close).await;
+    }
+
+    pub(super) async fn close_bound(&self, binding: SessionBinding, terminal: bool) {
+        match binding.kind {
+            SessionLeaseKind::Execution => binding.session.close().await,
+            SessionLeaseKind::Reusable(key) => {
+                let next = if terminal {
+                    SessionEntry::Lost
+                } else {
+                    SessionEntry::Replaceable
+                };
+                self.invalidate(key, binding.session, next).await;
+            }
+        }
+    }
+
+    pub(super) async fn close_all(&self) {
+        let mut entries = self.entries.lock().await;
+        let entries_to_close = entries
+            .values_mut()
+            .filter_map(|entry| {
+                let previous = std::mem::replace(entry, SessionEntry::Lost);
+                match previous {
+                    SessionEntry::Live(session) => Some(EntryToClose::Session(session)),
+                    SessionEntry::Opening(ready) => Some(EntryToClose::Opening(ready)),
+                    SessionEntry::Replaceable | SessionEntry::Lost => None,
                 }
+            })
+            .collect::<Vec<_>>();
+        drop(entries);
+        close_entries(entries_to_close).await;
+    }
+}
+
+async fn close_entries(entries: Vec<EntryToClose>) {
+    for entry in entries {
+        match entry {
+            EntryToClose::Session(session) => session.close().await,
+            EntryToClose::Opening(ready) => {
+                let _ = ready.send(true);
             }
         }
     }
@@ -385,9 +506,15 @@ enum EntryToClose {
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct SessionKey {
-    run_id: RunId,
-    node_instance: NodeInstanceId,
+enum SessionKey {
+    Run {
+        run_id: RunId,
+        node_instance: NodeInstanceId,
+    },
+    Owner {
+        node: NodeName,
+        provider_session_slot: NodeInstanceId,
+    },
 }
 
 enum SessionEntry {
@@ -406,11 +533,18 @@ pub(super) struct SessionLease {
 }
 
 impl SessionLease {
+    pub(super) fn binding(&self) -> SessionBinding {
+        SessionBinding {
+            session: self.session.clone(),
+            kind: self.kind.clone(),
+        }
+    }
+
     pub(super) async fn finish(self, clean: bool) {
         match self.kind {
             SessionLeaseKind::Execution => self.session.close().await,
-            SessionLeaseKind::NodeInstance(_) if clean => {}
-            SessionLeaseKind::NodeInstance(key) => {
+            SessionLeaseKind::Reusable(_) if clean => {}
+            SessionLeaseKind::Reusable(key) => {
                 self.pool
                     .invalidate(key, self.session, SessionEntry::Replaceable)
                     .await;
@@ -419,7 +553,14 @@ impl SessionLease {
     }
 }
 
+#[derive(Clone)]
 enum SessionLeaseKind {
     Execution,
-    NodeInstance(SessionKey),
+    Reusable(SessionKey),
+}
+
+#[derive(Clone)]
+pub(super) struct SessionBinding {
+    session: ManagedSession,
+    kind: SessionLeaseKind,
 }

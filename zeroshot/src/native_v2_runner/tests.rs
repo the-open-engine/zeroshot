@@ -14,7 +14,7 @@ mod backpressure;
 
 use super::*;
 use super::test_support::{
-    admitted, binding, request, runner, BurstDriver, FakeDriver, FakeFactory,
+    admitted, binding, owner_runner, request, runner, BurstDriver, FakeDriver, FakeFactory,
     SelectiveBlockingFactory,
 };
 use crate::native_v2_contract::{DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName};
@@ -124,20 +124,117 @@ async fn closing_a_run_permanently_loses_a_replaceable_session() {
     let pool = SessionPool::new(factory.clone());
     let (_cancel, mut cancellation) = watch::channel(false);
     let first = request(RUN_NAME, "looped", (1, 1));
-    pool.checkout(&first.invocation, &first.environment, &mut cancellation)
-        .await
-        .assert_value()
-        .finish(false)
-        .await;
+    pool.checkout(
+        SessionCheckout {
+            invocation: &first.invocation,
+            environment: &first.environment,
+            owner_slot: 1,
+        },
+        &mut cancellation,
+    )
+    .await
+    .assert_value()
+    .finish(false)
+    .await;
 
     pool.close_run(&RunId::new(RUN_NAME)).await;
     let retry = request(RUN_NAME, "looped", (1, 2));
     assert!(matches!(
-        pool.checkout(&retry.invocation, &retry.environment, &mut cancellation,)
-            .await,
+        pool.checkout(
+            SessionCheckout {
+                invocation: &retry.invocation,
+                environment: &retry.environment,
+                owner_slot: 1,
+            },
+            &mut cancellation,
+        )
+        .await,
         Err(NodeRunnerError::SessionLost)
     ));
     assert_eq!(factory.opened.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn owner_scoped_sessions_reuse_stable_node_slots_across_runs() {
+    let (runner, driver, factory) = owner_runner();
+
+    complete_owner_run(&runner, request("first", "looped", (7, 1))).await;
+    complete_owner_run(&runner, request("second", "looped", (91, 1))).await;
+
+    assert_eq!(factory.opened.load(Ordering::SeqCst), 1);
+    {
+        let slots = driver.slots.lock().assert_value();
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0], slots[1]);
+        assert_eq!(slots[0].0, "looped");
+    }
+
+    runner.close_session().await;
+    assert_eq!(closed_count(&factory, 0), 1);
+    assert!(matches!(
+        runner.start(request("third", "looped", (1, 1))).await,
+        Err(NodeRunnerError::RunClosed)
+    ));
+}
+
+#[tokio::test]
+async fn owner_scoped_nodes_with_matching_run_local_ids_do_not_alias() {
+    let (runner, driver, factory) = owner_runner();
+
+    for (run, node) in [("first", "looped"), ("second", "fast_reuse")] {
+        complete_owner_run(&runner, request(run, node, (1, 1))).await;
+    }
+
+    assert_eq!(factory.opened.load(Ordering::SeqCst), 2);
+    {
+        let slots = driver.slots.lock().assert_value();
+        assert_eq!(slots.len(), 2);
+        assert_ne!(slots[0], slots[1]);
+    }
+    runner.close_session().await;
+}
+
+#[tokio::test]
+async fn closing_owner_run_invalidates_only_its_active_reusable_session() {
+    let (runner, _, factory) = owner_runner();
+    let mut active = runner
+        .start(request("first", "looped", (1, 1)))
+        .await
+        .assert_value();
+    active
+        .take_initial_output()
+        .assert_value()
+        .recv()
+        .await
+        .assert_value();
+
+    runner.close_run(&RunId::new("first")).await;
+    assert_eq!(active.completion().await, Err(NodeRunnerError::Cancelled));
+    complete_owner_run(&runner, request("second", "looped", (1, 1))).await;
+    assert_eq!(factory.opened.load(Ordering::SeqCst), 2);
+    runner.close_session().await;
+}
+
+async fn complete_owner_run(runner: &NativeNodeRunner, request: NodeRunRequest) {
+    let run_id = request.invocation.reference.run_id.clone();
+    runner
+        .start(request)
+        .await
+        .assert_value()
+        .completion()
+        .await
+        .assert_value();
+    runner.close_run(&run_id).await;
+}
+
+fn closed_count(factory: &FakeFactory, index: usize) -> usize {
+    factory
+        .sessions
+        .lock()
+        .assert_value()
+        .assert_at(index)
+        .closed
+        .load(Ordering::SeqCst)
 }
 
 #[tokio::test]
@@ -152,16 +249,7 @@ async fn closing_a_run_closes_and_permanently_loses_its_reused_sessions() {
         .assert_value();
 
     runner.close_run(&RunId::new("run")).await;
-    assert_eq!(
-        factory
-            .sessions
-            .lock()
-            .assert_value()
-            .assert_at(0)
-            .closed
-            .load(Ordering::SeqCst),
-        1
-    );
+    assert_eq!(closed_count(&factory, 0), 1);
     assert!(matches!(
         runner.start(request("run", "looped", (1, 2))).await,
         Err(NodeRunnerError::RunClosed)

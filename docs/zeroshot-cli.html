@@ -22,6 +22,7 @@ section { margin-block: 2.5rem; }
 <p class="generated">Generated from the typed Clap command model and its Rust doc comments. Regenerate with <code>cargo run -p zeroshot --example generate_cli_docs -- --write</code>.</p>
 <nav aria-label="Command index"><h2>Commands</h2><ul>
 <li><a href="#zeroshot"><code>zeroshot</code></a></li>
+<li><a href="#zeroshot-acp"><code>zeroshot acp</code></a></li>
 <li><a href="#zeroshot-ui"><code>zeroshot ui</code></a></li>
 <li><a href="#zeroshot-target"><code>zeroshot target</code></a></li>
 <li><a href="#zeroshot-target-add"><code>zeroshot target add</code></a></li>
@@ -72,6 +73,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
   connection         Inspect and manage named runtime connections
@@ -94,6 +96,19 @@ Commands:
 Options:
   -V, --version
           Print the Zeroshot version
+
+  -h, --help
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-acp"><h3><code>zeroshot acp</code></h3>
+<pre><code>Serve one local Zeroshot profile as an experimental ACP agent over stdio.
+
+The MVP supports one session, text prompts, no MCP servers, and no session reload.
+
+Usage: zeroshot acp --profile &lt;local:NAME&gt;
+
+Options:
+      --profile &lt;local:NAME&gt;
+          Local profile exposed by this agent process, in local:NAME form
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
@@ -932,6 +947,7 @@ Options:
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
   connection         Inspect and manage named runtime connections

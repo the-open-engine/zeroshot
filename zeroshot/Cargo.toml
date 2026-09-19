@@ -18,6 +18,10 @@ path = "src/main.rs"
 ui = ["dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir", "dep:schemars"]
 
 [dependencies]
+agent-client-protocol = { version = "=0.10.4", features = [
+  "unstable_session_additional_directories",
+  "unstable_session_close",
+] }
 axum = { version = "0.8", optional = true }
 hyper = { version = "1", features = ["http1", "server"], optional = true }
 hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true }
@@ -53,6 +57,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["parsing"] }
 tokio.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
 tokio-tungstenite.workspace = true
 url.workspace = true
 uuid.workspace = true

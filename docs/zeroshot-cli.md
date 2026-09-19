@@ -14,6 +14,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
   connection         Inspect and manage named runtime connections
@@ -36,6 +37,23 @@ Commands:
 Options:
   -V, --version
           Print the Zeroshot version
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `zeroshot acp`
+
+```text
+Serve one local Zeroshot profile as an experimental ACP agent over stdio.
+
+The MVP supports one session, text prompts, no MCP servers, and no session reload.
+
+Usage: zeroshot acp --profile <local:NAME>
+
+Options:
+      --profile <local:NAME>
+          Local profile exposed by this agent process, in local:NAME form
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1038,6 +1056,7 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
   connection         Inspect and manage named runtime connections

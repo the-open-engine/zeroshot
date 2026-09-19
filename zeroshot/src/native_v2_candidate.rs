@@ -42,9 +42,28 @@ pub struct NativeV2CandidateConfig {
 }
 
 #[derive(Clone, Copy)]
-enum ProcessPlacement {
+enum CandidatePlacement {
     Capsule,
-    Local,
+    Local(SessionBoundary),
+}
+
+#[derive(Clone, Copy)]
+enum SessionBoundary {
+    Run,
+    Owner,
+}
+
+impl CandidatePlacement {
+    fn is_local(self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
+    fn session_boundary(self) -> SessionBoundary {
+        match self {
+            Self::Capsule | Self::Local(SessionBoundary::Run) => SessionBoundary::Run,
+            Self::Local(SessionBoundary::Owner) => SessionBoundary::Owner,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -64,7 +83,7 @@ pub fn build_native_v2_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, ProcessPlacement::Capsule, None)
+    build_candidate(admitted, config, CandidatePlacement::Capsule, None)
 }
 
 /// Hosted candidate with a trusted Git credential visible only to checkout and delivery.
@@ -73,7 +92,7 @@ pub fn build_native_v2_candidate_with_github_token(
     config: NativeV2CandidateConfig,
     github_token: Option<Arc<str>>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, ProcessPlacement::Capsule, github_token)
+    build_candidate(admitted, config, CandidatePlacement::Capsule, github_token)
 }
 
 /// Builds the same candidate with child processes running as the invoking local user.
@@ -81,7 +100,12 @@ pub fn build_local_native_v2_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, ProcessPlacement::Local, None)
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Local(SessionBoundary::Run),
+        None,
+    )
 }
 
 /// Local equivalent of [`build_native_v2_candidate_with_github_token`].
@@ -90,13 +114,31 @@ pub fn build_local_native_v2_candidate_with_github_token(
     config: NativeV2CandidateConfig,
     github_token: Option<Arc<str>>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, ProcessPlacement::Local, github_token)
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Local(SessionBoundary::Run),
+        github_token,
+    )
+}
+
+/// Local candidate whose reusable node sessions survive multiple supervisor runs.
+pub(crate) fn build_local_owner_native_v2_candidate(
+    admitted: &AdmittedRun,
+    config: NativeV2CandidateConfig,
+) -> Result<NativeNodeRunner, NativeV2CandidateError> {
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Local(SessionBoundary::Owner),
+        None,
+    )
 }
 
 fn build_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
-    placement: ProcessPlacement,
+    placement: CandidatePlacement,
     github_token: Option<Arc<str>>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     validate_config(admitted, &config)?;
@@ -106,28 +148,28 @@ fn build_candidate(
     );
     match config.harness {
         NativeV2HarnessConfig::Copilot(config) => {
-            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+            let agent = Arc::new(if placement.is_local() {
                 CopilotAdapter::new_local(config)
             } else {
                 CopilotAdapter::new(config)
             });
-            assemble_runner(admitted, agent.clone(), agent, delivery)
+            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
         }
         NativeV2HarnessConfig::Codex(config) => {
-            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+            let agent = Arc::new(if placement.is_local() {
                 NativeV2CodexAdapter::new_local(config)
             } else {
                 NativeV2CodexAdapter::new(config)
             });
-            assemble_runner(admitted, agent.clone(), agent, delivery)
+            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
         }
         NativeV2HarnessConfig::Claude(config) => {
-            let agent = Arc::new(if matches!(placement, ProcessPlacement::Local) {
+            let agent = Arc::new(if placement.is_local() {
                 ClaudeAdapter::new_local(config)?
             } else {
                 ClaudeAdapter::new(config)?
             });
-            assemble_runner(admitted, agent.clone(), agent, delivery)
+            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
         }
     }
 }
@@ -160,16 +202,36 @@ fn validate_config(
 
 fn assemble_runner(
     admitted: &AdmittedRun,
-    agent_driver: Arc<dyn NodeDriver>,
-    agent_sessions: Arc<dyn SessionFactory>,
+    agents: CandidateAgents,
     delivery: Arc<NativeV2DeliveryAdapter>,
+    placement: CandidatePlacement,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     let lane = Arc::new(CandidateNodeLane {
-        agent_driver,
-        agent_sessions,
+        agent_driver: agents.driver,
+        agent_sessions: agents.sessions,
         delivery,
     });
-    Ok(NativeNodeRunner::new(admitted, lane.clone(), lane)?)
+    Ok(match placement.session_boundary() {
+        SessionBoundary::Run => NativeNodeRunner::new(admitted, lane.clone(), lane)?,
+        SessionBoundary::Owner => NativeNodeRunner::new_owner_scoped(admitted, lane.clone(), lane)?,
+    })
+}
+
+struct CandidateAgents {
+    driver: Arc<dyn NodeDriver>,
+    sessions: Arc<dyn SessionFactory>,
+}
+
+impl CandidateAgents {
+    fn new<T>(agent: Arc<T>) -> Self
+    where
+        T: NodeDriver + SessionFactory + 'static,
+    {
+        Self {
+            driver: agent.clone(),
+            sessions: agent,
+        }
+    }
 }
 
 /// Routes only by the admitted closed binding: agent nodes use the graph-wide harness and the

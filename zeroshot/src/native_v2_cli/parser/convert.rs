@@ -8,7 +8,7 @@ use openengine_cluster_protocol::{
 };
 
 use super::{
-    AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, PlanCommand,
+    AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, PlanCommand,
     PlanSelectorArgs, PlanSubmitArgs, RunArgs, RunLogsArgs, RunSelectorArgs, RunWatchArgs,
     TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
 };
@@ -60,6 +60,7 @@ impl Cli {
 impl CliCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::Acp(args) => args.into_command(),
             Self::Ui { listen } => Ok(NativeV2CliCommand::Ui { listen }),
             Self::Target { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
@@ -69,6 +70,18 @@ impl CliCommand {
             Self::Run(args) => args.into_command(),
             Self::Utility(command) => command.into_command(),
         }
+    }
+}
+
+impl AcpArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let name = self
+            .profile
+            .strip_prefix("local:")
+            .ok_or_else(|| usage("ACP requires --profile local:NAME"))?;
+        Ok(NativeV2CliCommand::Acp {
+            profile: profile_name(name.to_owned())?,
+        })
     }
 }
 
