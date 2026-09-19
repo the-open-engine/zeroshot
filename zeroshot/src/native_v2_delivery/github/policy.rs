@@ -30,8 +30,16 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
       baseRefName
       baseRef {
         name
+        branchProtectionRule {
+          requiresDeployments
+        }
         refUpdateRule {
+          requiredApprovingReviewCount
           requiredStatusCheckContexts
+          requiresCodeOwnerReviews
+          requiresConversationResolution
+          requiresLinearHistory
+          requiresSignatures
         }
       }
       headRefName
@@ -117,13 +125,25 @@ struct PullRequestPolicyWire {
 #[serde(rename_all = "camelCase")]
 struct RefWire {
     name: String,
+    branch_protection_rule: Option<BranchProtectionRuleWire>,
     ref_update_rule: Option<RefUpdateRuleWire>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
+struct BranchProtectionRuleWire {
+    requires_deployments: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
 struct RefUpdateRuleWire {
+    required_approving_review_count: u64,
     required_status_check_contexts: Option<Vec<Option<String>>>,
+    requires_code_owner_reviews: bool,
+    requires_conversation_resolution: bool,
+    requires_linear_history: bool,
+    requires_signatures: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -553,6 +573,21 @@ fn pull_request_ready(pull_request: &PullRequestPolicyWire) -> bool {
         && matches!(
             pull_request.review_decision.as_deref(),
             Some("REVIEW_REQUIRED" | "CHANGES_REQUESTED")
+        )
+        && approval_is_only_policy_blocker(&pull_request.base_ref)
+}
+
+fn approval_is_only_policy_blocker(base_ref: &RefWire) -> bool {
+    let Some(rule) = base_ref.ref_update_rule.as_ref() else {
+        return false;
+    };
+    (rule.required_approving_review_count > 0 || rule.requires_code_owner_reviews)
+        && !rule.requires_conversation_resolution
+        && !rule.requires_linear_history
+        && !rule.requires_signatures
+        && matches!(
+            base_ref.branch_protection_rule.as_ref(),
+            Some(rule) if !rule.requires_deployments
         )
 }
 

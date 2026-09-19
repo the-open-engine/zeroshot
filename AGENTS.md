@@ -184,7 +184,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   merge queues/deferrals, and succeeds only after observing the exact merged result. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human
-  review may satisfy PR readiness, but that exception never grants merge authority. Outside merge
+  review may satisfy PR readiness only when aggregate branch policy positively identifies approval
+  as the sole remaining blocker; incomplete or co-blocked policy stays pending. That exception never
+  grants merge authority. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub

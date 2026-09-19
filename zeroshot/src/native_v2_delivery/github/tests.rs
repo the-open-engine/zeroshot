@@ -77,8 +77,16 @@ fn policy_page(
                     "baseRefName": "main",
                     "baseRef": {
                         "name": "main",
+                        "branchProtectionRule": {
+                            "requiresDeployments": false
+                        },
                         "refUpdateRule": {
-                            "requiredStatusCheckContexts": []
+                            "requiredApprovingReviewCount": 0,
+                            "requiredStatusCheckContexts": [],
+                            "requiresCodeOwnerReviews": false,
+                            "requiresConversationResolution": false,
+                            "requiresLinearHistory": false,
+                            "requiresSignatures": false
                         }
                     },
                     "headRefName": "zeroshot/v2-run",
@@ -140,6 +148,9 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(query.contains("statusCheckRollup"));
     assert!(query.contains("isMergeQueueEnabled"));
     assert!(query.contains("mergeCommitAllowed"));
+    assert!(query.contains("requiredApprovingReviewCount"));
+    assert!(query.contains("requiresConversationResolution"));
+    assert!(query.contains("requiresDeployments"));
 }
 
 #[test]
@@ -160,6 +171,8 @@ fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() 
 
     let mut no_ci = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
     no_ci["data"]["repository"]["pullRequest"]["reviewDecision"] = json!("REVIEW_REQUIRED");
+    no_ci["data"]["repository"]["pullRequest"]["baseRef"]["refUpdateRule"]["requiredApprovingReviewCount"] =
+        json!(1);
     let no_ci = classify(no_ci);
     assert_eq!(
         no_ci.state,
@@ -197,6 +210,11 @@ fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() 
         json!("REVIEW_REQUIRED");
     *approval_blocked_ready
         .pointer_mut(
+            "/data/repository/pullRequest/baseRef/refUpdateRule/requiredApprovingReviewCount",
+        )
+        .assert_value() = json!(1);
+    *approval_blocked_ready
+        .pointer_mut(
             "/data/repository/pullRequest/baseRef/refUpdateRule/requiredStatusCheckContexts",
         )
         .assert_value() = json!(["required-ci"]);
@@ -227,6 +245,47 @@ fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() 
         }
     );
     assert!(!ready.pull_request_ready);
+}
+
+#[test]
+fn approval_exception_requires_positive_review_only_policy_evidence() {
+    for pointer in [
+        "/data/repository/pullRequest/baseRef/refUpdateRule/requiresConversationResolution",
+        "/data/repository/pullRequest/baseRef/refUpdateRule/requiresLinearHistory",
+        "/data/repository/pullRequest/baseRef/refUpdateRule/requiresSignatures",
+        "/data/repository/pullRequest/baseRef/branchProtectionRule/requiresDeployments",
+    ] {
+        let mut page = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
+        page["data"]["repository"]["pullRequest"]["reviewDecision"] = json!("REVIEW_REQUIRED");
+        page["data"]["repository"]["pullRequest"]["baseRef"]["refUpdateRule"]["requiredApprovingReviewCount"] =
+            json!(1);
+        *page.pointer_mut(pointer).assert_value() = json!(true);
+        let snapshot = classify(page);
+        assert_eq!(
+            snapshot.state,
+            GitHubReviewState::Open {
+                checks: GitHubChecks::Pending
+            }
+        );
+        assert!(!snapshot.pull_request_ready);
+    }
+
+    let mut missing_rule = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
+    missing_rule["data"]["repository"]["pullRequest"]["reviewDecision"] = json!("REVIEW_REQUIRED");
+    missing_rule["data"]["repository"]["pullRequest"]["baseRef"]["refUpdateRule"] = Value::Null;
+    assert!(!classify(missing_rule).pull_request_ready);
+
+    let mut missing_branch_policy = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
+    missing_branch_policy["data"]["repository"]["pullRequest"]["reviewDecision"] =
+        json!("REVIEW_REQUIRED");
+    *missing_branch_policy
+        .pointer_mut(
+            "/data/repository/pullRequest/baseRef/refUpdateRule/requiredApprovingReviewCount",
+        )
+        .assert_value() = json!(1);
+    missing_branch_policy["data"]["repository"]["pullRequest"]["baseRef"]["branchProtectionRule"] =
+        Value::Null;
+    assert!(!classify(missing_branch_policy).pull_request_ready);
 }
 
 #[test]
