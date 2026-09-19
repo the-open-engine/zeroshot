@@ -125,6 +125,7 @@ async fn fetched_head_adoption_accepts_only_the_authorized_transition_and_its_re
     let mut updated = previous.clone();
     updated.head_revision = updated_head.clone();
     let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        git_identity: None,
         git_program: PathBuf::from("git"),
         gh_program: PathBuf::from("/usr/bin/false"),
         home_directory: repository.root.path().to_path_buf(),
@@ -203,6 +204,7 @@ impl SeparateHistory {
             ],
         );
         let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+            git_identity: None,
             git_program: "git".into(),
             gh_program: "/usr/bin/false".into(),
             home_directory: repository.root.path().to_owned(),

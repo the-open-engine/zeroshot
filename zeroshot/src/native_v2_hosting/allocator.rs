@@ -12,7 +12,7 @@ use openengine_cluster_protocol::RunId;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
-use crate::execution::process::HostedProcessPool;
+use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2HarnessConfig, build_native_v2_candidate,
 };
@@ -116,6 +116,7 @@ impl ProductionCapsuleAllocator {
             .acquire()
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let active_process_pool = process_pool.process_pool();
+        let git_identity = self.prepare_git_identity(active_process_pool)?;
         let run_root = run_directory(&self.config.storage_root, run_id);
         let workspace = run_root.join("workspace");
         let runtime_home = run_root.join("runtime");
@@ -136,6 +137,7 @@ impl ProductionCapsuleAllocator {
             CapsuleAllocationUnavailable::SourceCheckout
         })?;
         let github_config = GhCliAuthorityConfig {
+            git_identity: Some(git_identity),
             git_program: self.config.git_program.clone(),
             gh_program: self.config.gh_program.clone(),
             ..GhCliAuthorityConfig::hosted(runtime_home)
@@ -147,6 +149,7 @@ impl ProductionCapsuleAllocator {
                 delivery: NativeV2DeliveryConfig::for_hosted_workspace(
                     filesystem.workspace.clone(),
                     target,
+                    git_identity,
                 ),
                 github: Arc::new(
                     GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
@@ -166,6 +169,8 @@ impl ProductionCapsuleAllocator {
             endpoint,
             run_root,
             process_pool: Mutex::new(Some(process_pool)),
+            #[cfg(test)]
+            portable_processes: self.portable_test_processes(),
             _loss_sender: loss_sender.clone(),
             cleanup_turn: Mutex::new(false),
         });
@@ -188,6 +193,25 @@ impl ProductionCapsuleAllocator {
             loss,
             cleanup,
         })
+    }
+
+    fn prepare_git_identity(
+        &self,
+        process_pool: HostedProcessPool,
+    ) -> Result<HostedProcessIdentity, CapsuleAllocationUnavailable> {
+        let identity = process_pool
+            .identity(HostedProcessScope::Writer)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        #[cfg(test)]
+        if self.portable_test_processes() {
+            return Ok(identity);
+        }
+        // Never reuse a surviving identity after checkout failure or target restart.
+        // No checkout credential may reach this UID until its domain is proven empty.
+        identity
+            .prepare_command_domain()
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        Ok(identity)
     }
 
     fn harness(
@@ -237,6 +261,20 @@ impl ProductionCapsuleAllocator {
                     process_pool,
                 }))
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn portable_test_processes(&self) -> bool {
+        // Existing checkout tests replace containment with a caller-owned filesystem. Never
+        // inspect or kill the test runner's UID; production has no identity-isolation opt-out.
+        #[cfg(unix)]
+        {
+            self.source_override.is_some() && unsafe { libc::geteuid() } != 0
+        }
+        #[cfg(not(unix))]
+        {
+            false
         }
     }
 
@@ -307,6 +345,8 @@ struct ProductionCapsuleState {
     run_root: PathBuf,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
     process_pool: Mutex<Option<ActiveRunProcessPool>>,
+    #[cfg(test)]
+    portable_processes: bool,
     // Keeps the controller-side loss receiver live during intentional cleanup. A whole-host loss
     // is observed on restart through durable reconciliation, never by allocating a replacement.
     _loss_sender: watch::Sender<bool>,
@@ -359,9 +399,25 @@ async fn cleanup_state(
         return Ok(());
     }
     state.endpoint.disconnect().await;
+    let mut process_pool = state.process_pool.lock().await;
+    let identity = process_pool
+        .as_ref()
+        .ok_or(CapsuleCleanupUnavailable)?
+        .process_pool()
+        .identity(HostedProcessScope::Writer)
+        .map_err(|_| CapsuleCleanupUnavailable)?;
+    // A failed delivery may still own credential-bearing helpers. Keep its workspace and
+    // numeric identity lease until cleanup proves that a later run cannot inherit them.
+    #[cfg(test)]
+    let requires_cleanup = !state.portable_processes;
+    #[cfg(not(test))]
+    let requires_cleanup = true;
+    if requires_cleanup && !identity.cleanup().await.proves_tree_empty() {
+        return Err(CapsuleCleanupUnavailable);
+    }
     remove_run_directory(&state.run_root)?;
     active.lock().await.remove(run_id);
-    state.process_pool.lock().await.take();
+    process_pool.take();
     *cleaned = true;
     Ok(())
 }
@@ -421,3 +477,6 @@ impl ProductionCapsuleAllocator {
         run_directory(&self.config.storage_root, run_id)
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod cleanup_tests;

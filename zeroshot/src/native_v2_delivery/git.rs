@@ -28,11 +28,23 @@ impl From<GitCommandFailure> for GitError {
 #[derive(Clone)]
 pub(super) struct SystemGit {
     program: PathBuf,
+    identity: Option<crate::execution::process::HostedProcessIdentity>,
 }
 
 impl SystemGit {
     pub(super) fn new(program: PathBuf) -> Self {
-        Self { program }
+        Self {
+            program,
+            identity: None,
+        }
+    }
+
+    pub(super) fn with_identity(
+        mut self,
+        identity: Option<crate::execution::process::HostedProcessIdentity>,
+    ) -> Self {
+        self.identity = identity;
+        self
     }
 
     pub(super) async fn prepare_revision(
@@ -207,7 +219,8 @@ impl SystemGit {
     }
 
     fn command(&self, workspace: &Path, arguments: &[&str]) -> Command {
-        let mut command = command::local_git_command(&self.program, workspace);
+        let mut command =
+            command::local_git_command_with_identity(&self.program, workspace, self.identity);
         command.args(arguments);
         command
     }

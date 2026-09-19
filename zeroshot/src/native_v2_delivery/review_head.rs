@@ -77,3 +77,17 @@ pub enum GitHubReconciliationOutcome {
     NeedsWork(String),
     Refused(String),
 }
+
+/// Target integration retains the admitted source revision as provenance.
+#[derive(Clone, Copy)]
+pub struct GitHubTargetReconciliation<'a> {
+    pub workspace: &'a std::path::Path,
+    pub target: &'a super::DeliveryTarget,
+    pub commit_message: &'a str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitHubTargetIntegration {
+    pub target_revision: String,
+    pub outcome: GitHubReconciliationOutcome,
+}

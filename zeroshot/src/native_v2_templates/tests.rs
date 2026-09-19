@@ -403,7 +403,11 @@ async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() 
 }
 
 async fn assert_recoverable_delivery(recoverable: &str) {
-    let delivery_feedback = format!("trusted delivery reported {recoverable}");
+    let delivery_feedback = format!(
+        "sourceRevision: {}\nreviewBaseRevision: {}\ntrusted delivery reported {recoverable}",
+        "a".repeat(40),
+        "b".repeat(40),
+    );
     let (verified, initial_input) = verified_software_template(TemplateDelivery::Merge).await;
     let mut history = accepted_review_history(TemplateDelivery::Merge);
     let repair_input = json!({
@@ -435,7 +439,68 @@ async fn assert_recoverable_delivery(recoverable: &str) {
         settled_at: 5,
         input: repair_input,
     }));
+    assert_review_repair_preserves_delivery_feedback(
+        &verified,
+        &initial_input,
+        &mut history,
+        &delivery_feedback,
+    );
     assert_repaired_reviews_then_merge(&verified, &initial_input, &mut history, &delivery_feedback);
+}
+
+fn assert_review_repair_preserves_delivery_feedback(
+    verified: &VerifiedGraph,
+    initial_input: &Value,
+    history: &mut Vec<DurableExecution>,
+    delivery_feedback: &str,
+) {
+    let review_input = json!({"task":"repair checkout","deliveryFeedback":delivery_feedback});
+    let reviews = reduce(verified, initial_input, history);
+    assert_dispatch(&reviews, "acceptance", &review_input);
+    assert_dispatch(&reviews, "code", &review_input);
+    history.extend([
+        settled_review_execution_with_output(
+            SettledExecutionSpec {
+                execution: 6,
+                node_instance: 2,
+                node: "acceptance",
+                settled_at: 6,
+                input: review_input.clone(),
+            },
+            ACCEPTED_LABEL,
+            "requirements met after integration",
+            repaired_change_manifest(),
+        ),
+        settled_review_execution(
+            SettledExecutionSpec {
+                execution: 7,
+                node_instance: 3,
+                node: "code",
+                settled_at: 7,
+                input: review_input,
+            },
+            REJECTED_LABEL,
+            "repair an integration defect",
+        ),
+    ]);
+    let repair_input = json!({
+        "task":"repair checkout",
+        "acceptanceFeedback":"requirements met after integration",
+        "codeFeedback":"repair an integration defect",
+        "deliveryFeedback":delivery_feedback,
+    });
+    assert_dispatch(
+        &reduce(verified, initial_input, history),
+        "review_repair",
+        &repair_input,
+    );
+    history.push(settled_agent(SettledExecutionSpec {
+        execution: 8,
+        node_instance: 6,
+        node: "review_repair",
+        settled_at: 8,
+        input: repair_input,
+    }));
 }
 
 fn assert_repaired_reviews_then_merge(
@@ -454,10 +519,10 @@ fn assert_repaired_reviews_then_merge(
     assert_dispatch(&repaired, "code", &review_input);
     history.push(settled_review_execution_with_output(
         SettledExecutionSpec {
-            execution: 6,
+            execution: 9,
             node_instance: 2,
             node: "acceptance",
-            settled_at: 6,
+            settled_at: 9,
             input: review_input.clone(),
         },
         ACCEPTED_LABEL,
@@ -466,10 +531,10 @@ fn assert_repaired_reviews_then_merge(
     ));
     history.push(settled_review_execution(
         SettledExecutionSpec {
-            execution: 7,
+            execution: 10,
             node_instance: 3,
             node: "code",
-            settled_at: 7,
+            settled_at: 10,
             input: review_input,
         },
         ACCEPTED_LABEL,
@@ -482,10 +547,10 @@ fn assert_repaired_reviews_then_merge(
     );
     history.push(settled_delivery(
         SettledExecutionSpec {
-            execution: 8,
+            execution: 11,
             node_instance: 4,
             node: DELIVERY_NODE,
-            settled_at: 8,
+            settled_at: 11,
             input: repaired_delivery_input(),
         },
         DeliveryMode::Merge,

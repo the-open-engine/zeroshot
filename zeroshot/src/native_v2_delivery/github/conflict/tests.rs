@@ -56,6 +56,7 @@ impl ConflictFixture {
         let git_program = git_wrapper(&repository);
         let gh_program = gh_script(&repository, &target_revision);
         let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+            git_identity: None,
             git_program: git_program.clone(),
             gh_program: gh_program.clone(),
             home_directory: repository.root.path().to_owned(),

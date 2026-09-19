@@ -23,7 +23,7 @@ pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 pub use review_head::{
     GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
     GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
-    GitHubReconciliationOutcome,
+    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
 };
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
@@ -211,6 +211,8 @@ impl Default for DeliveryPollPolicy {
 
 #[derive(Clone, Debug)]
 pub struct NativeV2DeliveryConfig {
+    /// Pinned workspace owner for hosted Git; local execution inherits the caller.
+    pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     pub workspace: PathBuf,
     pub git_program: PathBuf,
     pub target: DeliveryTarget,
@@ -219,9 +221,14 @@ pub struct NativeV2DeliveryConfig {
 
 impl NativeV2DeliveryConfig {
     #[must_use]
-    pub fn for_hosted_workspace(workspace: PathBuf, target: DeliveryTarget) -> Self {
+    pub fn for_hosted_workspace(
+        workspace: PathBuf,
+        target: DeliveryTarget,
+        identity: crate::execution::process::HostedProcessIdentity,
+    ) -> Self {
         Self {
             workspace,
+            git_identity: Some(identity),
             git_program: PathBuf::from("/usr/bin/git"),
             target,
             poll: DeliveryPollPolicy::default(),
@@ -331,6 +338,13 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
         request: GitHubDeliveryRead<'_>,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError>;
+
+    /// Integrates an exact current target revision before the run branch is first published.
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError>;
 
     /// Fetches the observed head and preserves local work while reconciling its published ancestry.
     async fn reconcile_delivery_head(

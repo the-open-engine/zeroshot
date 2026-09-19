@@ -43,6 +43,7 @@ pub(super) struct DeliveryState {
     pub(super) published: Option<GitHubReviewReceipt>,
     pub(super) intended_push: Option<String>,
     pub(super) pending_head: Option<head::PendingHead>,
+    pub(super) review_base_revision: Option<String>,
 }
 
 impl NativeV2DeliveryAdapter {
@@ -86,7 +87,9 @@ impl NativeV2DeliveryAdapter {
                     )
                     .await;
             }
-            return Ok(());
+            return self
+                .reconcile_target_before_publication(preparation, commit_message)
+                .await;
         };
         let published = self
             .require_reconciliation_anchor(&known, &observed, preparation.control)
@@ -104,6 +107,7 @@ impl NativeV2DeliveryAdapter {
             commit_message,
             authorized_update,
         };
+        self.forget_review_base_if_head_changed(&published.head_revision, &observed.head_revision);
         let outcome = self.reconcile_before_delivery(request, preparation).await?;
         match outcome {
             GitHubReconciliationOutcome::Refused(diagnostic) => {
@@ -184,7 +188,7 @@ impl NativeV2DeliveryAdapter {
         }
     }
 
-    async fn reconciliation_result(
+    pub(super) async fn reconciliation_result(
         &self,
         outcome: GitHubReconciliationOutcome,
         before: &(String, bool),

@@ -48,7 +48,8 @@ pub(super) async fn review_completion(
     diagnostic: &str,
     merge_revision: Option<&str>,
 ) -> Result<ReviewStep, DeliveryStop> {
-    emit(drive.control, diagnostic).await?;
+    let diagnostic = drive.adapter.review_context(diagnostic);
+    emit(drive.control, &diagnostic).await?;
     validate_delivery_contract(drive.mode, drive.response).map_err(DeliveryStop::Runner)?;
     delivery_outcome(
         DeliveryResult {
@@ -57,7 +58,7 @@ pub(super) async fn review_completion(
             review: &drive.review,
             merge_revision,
         },
-        diagnostic,
+        &diagnostic,
     )
     .map(ReviewStep::Complete)
     .map_err(DeliveryStop::Runner)

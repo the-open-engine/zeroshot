@@ -56,6 +56,14 @@ impl GitHubDeliveryAuthority for OutageAuthority {
         Err(GitHubAuthorityError::Rejected)
     }
 
+    async fn reconcile_delivery_target(
+        &self,
+        _: GitHubTargetReconciliation<'_>,
+        _: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        Err(GitHubAuthorityError::Rejected)
+    }
+
     async fn reconcile_delivery_head(
         &self,
         _: GitHubHeadReconciliation<'_>,
@@ -190,6 +198,7 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
     };
     let adapter = NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
+            git_identity: None,
             workspace: std::env::temp_dir(),
             git_program: PathBuf::from("unused-git"),
             target: request.target.clone(),

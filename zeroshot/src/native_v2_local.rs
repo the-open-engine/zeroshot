@@ -259,6 +259,7 @@ pub fn build_local_process_candidate(
         NativeV2CandidateConfig {
             harness,
             delivery: NativeV2DeliveryConfig {
+                git_identity: None,
                 workspace: workspace.to_owned(),
                 git_program: PathBuf::from("git"),
                 target,

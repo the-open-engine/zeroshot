@@ -1,7 +1,7 @@
 use super::*;
 use zeroshot_engine::native_v2_delivery::{
     GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
-    GitHubReconciliationOutcome,
+    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
 };
 
 #[derive(Clone, Copy)]
@@ -163,6 +163,31 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
         Ok(GitHubDeliverySnapshot {
             review,
             head_revision,
+        })
+    }
+
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        require_test_credential(credential)?;
+        let target_revision = git_output(
+            &self.remote,
+            &[
+                "rev-parse",
+                &format!("refs/heads/{}", request.target.target_branch),
+            ],
+        );
+        // This fixture advances neither the target branch nor its admitted source.
+        assert_eq!(target_revision, request.target.base_revision);
+        git(
+            request.workspace,
+            &["merge-base", "--is-ancestor", &target_revision, "HEAD"],
+        );
+        Ok(GitHubTargetIntegration {
+            target_revision,
+            outcome: GitHubReconciliationOutcome::Unchanged,
         })
     }
 
@@ -337,6 +362,7 @@ impl CapsuleAllocator for DeliveryAllocator {
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let delivery = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
+                git_identity: None,
                 workspace: self.fixture.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: DeliveryTarget::new(

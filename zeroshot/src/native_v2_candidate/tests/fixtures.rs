@@ -191,6 +191,7 @@ pub(super) fn candidate_config(
     NativeV2CandidateConfig {
         harness,
         delivery: NativeV2DeliveryConfig {
+            git_identity: None,
             workspace: repository.workspace.clone(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", repository.base.clone())

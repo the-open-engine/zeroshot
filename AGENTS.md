@@ -153,6 +153,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the unchanged candidate directly; other integrated remote changes return `repair_required` so the
   authored graph decides what work follows. Agents receive local refs and conflicts without the
   delivery credential. Closed PRs, identity changes and lost published ancestry stop delivery.
+- Hosted delivery Git runs as the pinned workspace writer UID/GID, matching source checkout, so
+  fetched objects, commits, merges, and partial failures remain writable by subsequent repairs.
+  Admission excludes overlapping writers and requires their process cleanup before delivery;
+  concurrent hosted verifiers retain distinct identities. Delivery confirms UID-wide helper cleanup
+  before success, repair, error, cancellation, or panic can release that identity; unconfirmed cleanup
+  is fatal. A caught delivery panic settles as a node crash after confirmed cleanup, without exposing
+  its payload. Allocation requires an idle writer domain before authenticated checkout and rechecks
+  it before deleting the workspace or releasing its identity lease; failed cleanup retains both.
+  Local Git retains the caller identity.
+- Before first publication, delivery captures and fetches the exact current target revision and
+  merges it while preserving candidate history and dirty work. Any changed candidate returns through
+  the authored repair/review loop before push. Delivery feedback distinguishes immutable
+  `sourceRevision` provenance from the captured `reviewBaseRevision`; verifiers and repairs preserve
+  upstream changes. Unconfirmed baselines after external branch updates are explicitly unavailable.
 - Delivery retries recognized transport failures within the caller's polling and cancellation
   policy, refreshing dynamic credentials once after authentication failure. Temporary credential
   resolution retries with backoff; confirmed refusal and malformed responses stop. Initial

@@ -266,6 +266,34 @@ impl TestGitRepository {
 }
 
 #[cfg(unix)]
+pub(crate) fn local_delivery_authority(
+    workspace: &Path,
+    remote: &Path,
+) -> crate::native_v2_delivery::GhCliDeliveryAuthority {
+    use crate::native_v2_delivery::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
+
+    git(
+        workspace,
+        &[
+            "config",
+            "--local",
+            "zeroshotTest.httpOrigin",
+            path_text(remote),
+        ],
+    );
+    let program = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/native_v2_delivery/tests/transport_fixture.sh");
+    GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        git_identity: None,
+        git_program: program.clone(),
+        gh_program: program,
+        home_directory: remote.parent().assert_value().to_owned(),
+        api_deadline: std::time::Duration::from_secs(10),
+        push_deadline: std::time::Duration::from_secs(10),
+    })
+}
+
+#[cfg(unix)]
 pub(crate) fn assert_removed_directories(paths: &[&str], expected_count: usize) {
     let unique = paths.iter().collect::<std::collections::BTreeSet<_>>();
     assert_eq!(unique.len(), expected_count);
