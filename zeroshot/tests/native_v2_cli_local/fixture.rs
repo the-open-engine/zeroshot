@@ -523,6 +523,7 @@ test -z "${UNDECLARED_SECRET+x}" || exit 43
 printf '%s\n' "$$" > "$PWD/fake-codex.pid"
 printf 'preserved\n' > "$PWD/local-mutation.txt"
 printf 'declared-only\n' > "$PWD/environment-proof.txt"
+cat >/dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
 printf '%s\n' '{"type":"turn.started"}'
 if test "${FAKE_CODEX_MODE-}" = fail; then
