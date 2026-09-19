@@ -20,10 +20,9 @@ async fn large_utf8_ci_feedback_reaches_the_graph_and_live_output() {
     .await;
     assert_delivery_signal(&result.outcome, DELIVERY_CI_FAILED_LABEL);
     let diagnostic = outcome_diagnostic(&result.outcome);
-    assert_eq!(
-        diagnostic,
-        "failed check: build\n".to_owned() + &"λ🦀".repeat(20_000)
-    );
+    assert!(diagnostic.contains(&format!("sourceRevision: {}", repo.base)));
+    assert!(diagnostic.contains(&format!("reviewBaseRevision: {}", repo.base)));
+    assert!(diagnostic.ends_with(&("failed check: build\n".to_owned() + &"λ🦀".repeat(20_000))));
     assert!(
         result
             .output

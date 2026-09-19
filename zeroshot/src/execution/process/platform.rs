@@ -317,6 +317,22 @@ async fn await_process_group_exit(process_group_id: i32, deadline: Instant) -> C
         sleep(Duration::from_millis(10)).await;
     }
 }
+/// Confirms that an exclusively owned hosted identity has no surviving command descendants.
+pub(crate) async fn cleanup_process_domain(
+    containment: ProcessContainment,
+) -> ProcessCleanupEvidence {
+    #[cfg(target_os = "linux")]
+    if let Some(membership) = containment.membership() {
+        return await_worker_exit(membership, Instant::now() + PROCESS_TREE_CLEANUP_TIMEOUT)
+            .await
+            .cleanup;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = containment;
+    // A process-group-only or unsupported boundary cannot prove an entire hosted identity empty.
+    ProcessCleanupEvidence::TimedOut
+}
+
 #[cfg(target_os = "linux")]
 async fn await_worker_exit(membership: WorkerMembership, deadline: Instant) -> CleanupOutcome {
     loop {

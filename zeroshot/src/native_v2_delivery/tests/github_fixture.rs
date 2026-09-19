@@ -17,6 +17,9 @@ pub(super) enum Script {
     MergeFailed,
     CiFailed,
     ReconcileCompletesThenUnavailable,
+    TargetIntegrationResponseLost,
+    LaterTargetIntegrationFails,
+    ConflictMaterializationFailsAfterMutation,
     LargeCiDiagnostic,
     Conflict,
     ConflictAtMerge,
@@ -51,6 +54,7 @@ pub(super) struct FakeGitHub {
     pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) conflict_materializations: AtomicUsize,
+    pub(super) target_reconciliations: AtomicUsize,
 }
 
 impl FakeGitHub {
@@ -67,12 +71,15 @@ impl FakeGitHub {
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
             conflict_materializations: AtomicUsize::new(0),
+            target_reconciliations: AtomicUsize::new(0),
         }
     }
 
     fn review_state(&self, inspection: usize) -> GitHubReviewState {
         match self.script {
             Script::NoCi
+            | Script::TargetIntegrationResponseLost
+            | Script::LaterTargetIntegrationFails
             | Script::CredentialExpires
             | Script::ReviewSyncRace
             | Script::InspectFailed
@@ -96,7 +103,9 @@ impl FakeGitHub {
             Script::LargeCiDiagnostic => open_review(GitHubChecks::Failed {
                 diagnostic: "failed check: build\n".to_owned() + &"λ🦀".repeat(20_000),
             }),
-            Script::Conflict => GitHubReviewState::Conflict,
+            Script::Conflict | Script::ConflictMaterializationFailsAfterMutation => {
+                GitHubReviewState::Conflict
+            }
             Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
             Script::StrictBehind
@@ -275,6 +284,42 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             review,
             head_revision,
         })
+    }
+
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        let attempt = self.target_reconciliations.fetch_add(1, Ordering::SeqCst);
+        let authority = crate::native_v2_candidate::test_support::local_delivery_authority(
+            request.workspace,
+            &self.remote,
+        );
+        let result = authority
+            .reconcile_delivery_target(request, credential)
+            .await?;
+        if matches!(self.script, Script::TargetIntegrationResponseLost) && attempt == 0 {
+            assert!(matches!(
+                result.outcome,
+                GitHubReconciliationOutcome::NeedsWork(_)
+            ));
+            return Err(GitHubAuthorityError::api(
+                Some(503),
+                "target integration completed but confirmation was unavailable",
+            ));
+        }
+        if matches!(self.script, Script::LaterTargetIntegrationFails) && attempt == 1 {
+            assert!(matches!(
+                result.outcome,
+                GitHubReconciliationOutcome::NeedsWork(_)
+            ));
+            return Err(GitHubAuthorityError::api(
+                None,
+                "target integration completed but its response was malformed",
+            ));
+        }
+        Ok(result)
     }
 
     async fn reconcile_delivery_head(
@@ -600,6 +645,15 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .assert_value();
         if merge.code() != Some(1) {
             return Err(GitHubAuthorityError::Rejected);
+        }
+        if matches!(
+            self.script,
+            Script::ConflictMaterializationFailsAfterMutation
+        ) {
+            return Err(GitHubAuthorityError::api(
+                None,
+                "conflict inspection failed after integrating a newer target",
+            ));
         }
         let paths = std::process::Command::new("/usr/bin/git")
             .arg("-C")

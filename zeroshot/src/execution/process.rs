@@ -174,6 +174,28 @@ impl HostedProcessIdentity {
         self.gid
     }
 
+    /// Checks an exclusively owned command identity before any child starts and enables orphan reaping.
+    pub(crate) fn prepare_command_domain(self) -> Result<(), ProcessRunnerError> {
+        platform::register_process_tree_for(self.runner.containment)
+            .map(drop)
+            .map_err(|error| {
+                ProcessRunnerError::Launch(io_error_detail(
+                    "hosted command domain preparation failed",
+                    &error,
+                ))
+            })
+    }
+
+    /// Applies the existing hosted identity, capability and descriptor boundary to a trusted command.
+    pub(crate) fn configure_command(self, command: &mut tokio::process::Command) {
+        platform::configure_process(command, self.runner.containment);
+    }
+
+    /// Kills and reaps this exclusively owned identity, including helpers outside its process group.
+    pub(crate) async fn cleanup(self) -> ProcessCleanupEvidence {
+        platform::cleanup_process_domain(self.runner.containment).await
+    }
+
     /// Creates or reclaims the provider-private leaf under a supervisor-owned runtime root.
     ///
     /// The root must already exist and be traversable by the configured provider identity. It must
@@ -508,3 +530,6 @@ pub use platform::ProcessCleanupEvidence;
 #[cfg(test)]
 #[path = "process/tests.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) mod test_support;

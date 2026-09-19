@@ -314,6 +314,23 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
     command
 }
 
+/// Hosted Git writes as the allocated workspace owner, including on failed or cancelled operations.
+/// Admission excludes concurrent writers and their cleanup completes before delivery starts.
+pub(crate) fn local_git_command_with_identity(
+    program: &Path,
+    workspace: &Path,
+    identity: Option<crate::execution::process::HostedProcessIdentity>,
+) -> Command {
+    let mut command = local_git_command(program, workspace);
+    if let Some(identity) = identity {
+        // The launcher may be in a root-only directory. The existing containment clears
+        // supplementary groups/capabilities and prevents helpers from regaining privilege.
+        command.current_dir("/");
+        identity.configure_command(&mut command);
+    }
+    command
+}
+
 fn spawn_contained(
     command: &mut Command,
 ) -> std::io::Result<(tokio::process::Child, ProcessGroup)> {

@@ -193,6 +193,7 @@ pub(super) fn candidate_config(
         delivery: NativeV2DeliveryConfig {
             delivery_run_id: RunId::new("candidate-fixture"),
             adopt_existing_delivery: false,
+            git_identity: None,
             workspace: repository.workspace.clone(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", repository.base.clone())

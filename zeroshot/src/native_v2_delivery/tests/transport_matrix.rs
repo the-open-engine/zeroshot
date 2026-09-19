@@ -63,6 +63,7 @@ fn contains_object(workspace: &Path, revision: &str) -> bool {
 fn authority(repo: &TempRepo, server: &HttpGit) -> GhCliDeliveryAuthority {
     let program = server.git_program(repo);
     GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        git_identity: None,
         git_program: program.clone(),
         gh_program: program,
         home_directory: repo.root.path().to_owned(),
@@ -184,6 +185,8 @@ struct TransportAuthority {
     update: Update,
     updated: AtomicBool,
     expire_during_update: AtomicBool,
+    expire_before_push: AtomicBool,
+    reject_expired_push: AtomicBool,
     merged: AtomicBool,
     updates: AtomicUsize,
     synchronizations: AtomicUsize,
@@ -200,6 +203,8 @@ impl TransportAuthority {
             update,
             updated: AtomicBool::new(false),
             expire_during_update: AtomicBool::new(false),
+            expire_before_push: AtomicBool::new(false),
+            reject_expired_push: AtomicBool::new(false),
             merged: AtomicBool::new(false),
             updates: AtomicUsize::new(0),
             synchronizations: AtomicUsize::new(0),
@@ -261,6 +266,16 @@ impl GitHubDeliveryAuthority for TransportAuthority {
         })
     }
 
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        self.concrete
+            .reconcile_delivery_target(request, credential)
+            .await
+    }
+
     async fn reconcile_delivery_head(
         &self,
         request: GitHubHeadReconciliation<'_>,
@@ -277,6 +292,13 @@ impl GitHubDeliveryAuthority for TransportAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<(), GitHubAuthorityError> {
         self.pushes.fetch_add(1, Ordering::SeqCst);
+        if self.expire_before_push.swap(false, Ordering::SeqCst) {
+            self.faults.require_refreshed.store(true, Ordering::SeqCst);
+            self.faults.reject_all_credentials.store(
+                self.reject_expired_push.load(Ordering::SeqCst),
+                Ordering::SeqCst,
+            );
+        }
         self.concrete.push_branch(request, credential).await
     }
 
@@ -423,14 +445,10 @@ async fn http_expired_push_credential_refreshes_or_stops_without_graph_repair() 
     ] {
         let repo = TempRepo::delivery();
         let server = HttpGit::start(&repo.remote);
-        server
-            .faults
-            .require_refreshed
-            .store(true, Ordering::SeqCst);
         let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
-        server
-            .faults
-            .reject_all_credentials
+        authority.expire_before_push.store(true, Ordering::SeqCst);
+        authority
+            .reject_expired_push
             .store(permanently_denied, Ordering::SeqCst);
 
         let delivery = adapter(&repo, authority.clone());

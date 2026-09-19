@@ -277,6 +277,7 @@ pub fn build_local_process_candidate(
             delivery: NativeV2DeliveryConfig {
                 delivery_run_id,
                 adopt_existing_delivery,
+                git_identity: None,
                 workspace: workspace.to_owned(),
                 git_program: PathBuf::from("git"),
                 target,

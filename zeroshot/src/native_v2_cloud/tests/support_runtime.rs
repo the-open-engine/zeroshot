@@ -3,6 +3,7 @@ use super::*;
 struct AllocatorCore {
     claims: FakeClaimAuthority,
     allocations: AtomicUsize,
+    allocation_failure: StdMutex<Option<CapsuleAllocationUnavailable>>,
     driver: Arc<dyn NodeDriver>,
     sessions: Arc<FakeSessionFactory>,
     cleanup: Arc<FakeCleanup>,
@@ -14,6 +15,7 @@ impl AllocatorCore {
         Self {
             claims: FakeClaimAuthority::default(),
             allocations: AtomicUsize::new(0),
+            allocation_failure: StdMutex::new(None),
             driver,
             sessions: Arc::new(FakeSessionFactory::default()),
             cleanup,
@@ -121,6 +123,14 @@ impl TestAllocator<ImmediateAllocation> {
         }
     }
 
+    pub(super) fn fail_next_allocation(&self, error: CapsuleAllocationUnavailable) {
+        *self
+            .core
+            .allocation_failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(error);
+    }
+
     pub(super) fn lose_capsule(&self) {
         self.core.lose_capsule();
     }
@@ -173,6 +183,15 @@ where
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         self.core.allocations.fetch_add(1, Ordering::SeqCst);
         self.gate.enter().await?;
+        if let Some(error) = self
+            .core
+            .allocation_failure
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            return Err(error);
+        }
         self.core.allocate(admitted)
     }
 

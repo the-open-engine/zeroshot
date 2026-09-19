@@ -1,5 +1,4 @@
 use super::*;
-use crate::native_v2_delivery::git::{GitError, SystemGit};
 
 pub(crate) async fn reconcile(
     authority: &GhCliDeliveryAuthority,
@@ -83,7 +82,7 @@ async fn reconcile_workspace(
     context: HeadUpdateContext<'_>,
     request: GitHubHeadReconciliation<'_>,
 ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
-    let git = SystemGit::new(context.authority.config.git_program.clone());
+    let git = context.authority.workspace_git();
     let (head, dirty) = git
         .workspace_state(context.workspace)
         .await
@@ -186,11 +185,4 @@ async fn is_ancestor(
     }
     output.require_success()?;
     Ok(true)
-}
-
-fn git_error(error: GitError) -> GitHubAuthorityError {
-    match error {
-        GitError::Command(failure) => GitHubAuthorityError::Command(failure),
-        error => GitHubAuthorityError::api(None, error.to_string()),
-    }
 }

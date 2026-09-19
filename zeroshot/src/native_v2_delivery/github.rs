@@ -18,7 +18,8 @@ use super::{
     GitHubConflictOutcome, GitHubConflictRequest, GitHubCredential, GitHubDeliveryAuthority,
     GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
     GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest,
-    GitHubReviewState, valid_head_update, valid_revision,
+    GitHubReviewState, GitHubTargetIntegration, GitHubTargetReconciliation, valid_head_update,
+    valid_revision,
 };
 
 mod api;
@@ -26,12 +27,18 @@ mod conflict;
 mod metadata;
 mod observation;
 mod push;
+mod target;
+
+#[cfg(all(test, target_os = "linux"))]
+mod ownership_tests;
 
 const DEFAULT_API_DEADLINE: Duration = Duration::from_secs(2 * 60);
 const DEFAULT_PUSH_DEADLINE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug)]
 pub struct GhCliAuthorityConfig {
+    /// Pinned workspace owner for Git subprocesses; GitHub API commands retain the controller identity.
+    pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
     pub home_directory: PathBuf,
@@ -43,6 +50,7 @@ impl GhCliAuthorityConfig {
     #[must_use]
     pub fn hosted(home_directory: PathBuf) -> Self {
         Self {
+            git_identity: None,
             git_program: PathBuf::from("/usr/bin/git"),
             gh_program: PathBuf::from("/usr/bin/gh"),
             home_directory,
@@ -80,6 +88,11 @@ impl GhCliDeliveryAuthority {
     ) -> Self {
         self.operator_diagnostics = Some(OperatorDiagnosticReporter { run_id, store });
         self
+    }
+
+    fn workspace_git(&self) -> super::git::SystemGit {
+        super::git::SystemGit::new(self.config.git_program.clone())
+            .with_identity(self.config.git_identity)
     }
 
     async fn find_review(
@@ -268,6 +281,14 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
         observation::observe(self, request, credential).await
+    }
+
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        target::reconcile(self, request, credential).await
     }
 
     async fn reconcile_delivery_head(
@@ -516,7 +537,11 @@ fn git_command(
 }
 
 fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path) -> Command {
-    let mut command = super::command::local_git_command(&config.git_program, workspace);
+    let mut command = super::command::local_git_command_with_identity(
+        &config.git_program,
+        workspace,
+        config.git_identity,
+    );
     command.env("HOME", &config.home_directory);
     command
 }
@@ -538,6 +563,28 @@ fn authenticated_git_command(
         .env("GIT_CONFIG_KEY_1", "http.https://github.com/.extraheader")
         .env("GIT_CONFIG_VALUE_1", authorization);
     command
+}
+
+async fn configure_delivery_identity(
+    config: &GhCliAuthorityConfig,
+    workspace: &std::path::Path,
+) -> Result<(), GitHubAuthorityError> {
+    for (key, value) in [
+        ("user.name", "Zeroshot"),
+        ("user.email", "delivery@zeroshot.invalid"),
+    ] {
+        let mut command = local_git_command(config, workspace);
+        command.args(["config", "--local", "--replace-all", key, value]);
+        bounded_status(command, config.api_deadline).await?;
+    }
+    Ok(())
+}
+
+fn git_error(error: super::git::GitError) -> GitHubAuthorityError {
+    match error {
+        super::git::GitError::Command(failure) => GitHubAuthorityError::Command(failure),
+        error => GitHubAuthorityError::api(None, error.to_string()),
+    }
 }
 
 async fn bounded_status(

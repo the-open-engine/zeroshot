@@ -81,7 +81,7 @@ impl NodeDriver for DeliveryLoopLane {
     }
 }
 
-async fn create_delivery_run(
+pub(super) async fn create_delivery_run(
     admitted: crate::native_v2_contract::AdmittedRun,
 ) -> (RunId, Arc<FakeRunLedger>, Arc<RunEnvironment>) {
     let run_id = RunId::new("delivery-supervisor-run");
@@ -126,6 +126,7 @@ async fn drive_repair_loop(
         NativeV2DeliveryConfig {
             delivery_run_id: RunId::new("delivery-routing"),
             adopt_existing_delivery: false,
+            git_identity: None,
             workspace: repo.workspace.clone(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", repo.base.clone()).assert_value(),

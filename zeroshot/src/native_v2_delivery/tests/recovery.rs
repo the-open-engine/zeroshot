@@ -16,7 +16,7 @@ async fn locked_index_provides_raw_git_feedback_and_can_recover() {
         assert!(diagnostic.contains("index.lock"));
         assert!(diagnostic.contains("exitStatus: Some(128)"));
         assert!(diagnostic.contains("File exists"));
-        assert!(diagnostic.contains("baseRevision:"));
+        assert!(diagnostic.contains("sourceRevision:"));
         assert_receipt_match(output, mode, &repo, false);
 
         // The repair worker removes this stale lock; delivery itself never manages user files.

@@ -3,7 +3,7 @@ mod identity_leases;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use openengine_cluster_protocol::RunId;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
-use crate::execution::process::{HostedProcessPool, HostedProcessScope};
+use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2HarnessConfig, build_native_v2_candidate,
 };
@@ -28,7 +28,9 @@ use crate::native_v2_cloud::{
 };
 use crate::native_v2_codex::NativeV2CodexConfig;
 use crate::native_v2_contract::{AdmittedRun, RuntimePlan};
-use crate::native_v2_delivery::{GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig};
+use crate::native_v2_delivery::{
+    DeliveryLineage, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
+};
 use crate::native_v2_delivery::DeliveryTarget;
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
@@ -84,7 +86,6 @@ struct CapsuleBuildRequest<'a> {
 }
 
 struct CapsuleBuildPaths {
-    run_root: PathBuf,
     workspace: PathBuf,
     runtime_home: PathBuf,
 }
@@ -95,7 +96,6 @@ impl CapsuleBuildPaths {
         Self {
             workspace: run_root.join("workspace"),
             runtime_home: run_root.join("runtime"),
-            run_root,
         }
     }
 }
@@ -174,9 +174,6 @@ impl ProductionCapsuleAllocator {
         admitted: &AdmittedRun,
         github_token: Option<&str>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let run_root = run_directory(&self.config.storage_root, run_id);
-        std::fs::create_dir(&run_root).map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        set_traversable_directory(&run_root).map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let allocation = self
             .build_capsule(CapsuleBuildRequest {
                 run_id,
@@ -189,7 +186,13 @@ impl ProductionCapsuleAllocator {
             })
             .await;
         if allocation.is_err() {
-            let _ = remove_run_directory(&run_root);
+            // Failed cleanup deliberately retains the active state and lease. The controller
+            // confirms destruction through allocator authority before recording a terminal error.
+            let state = self.active.lock().await.get(run_id).cloned();
+            if let Some(state) = state {
+                let _ =
+                    cleanup_state(run_id, &state, &self.active, RunRuntimeExit::Completed).await;
+            }
         }
         allocation
     }
@@ -203,35 +206,58 @@ impl ProductionCapsuleAllocator {
             .acquire()
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let active_process_pool = process_pool.process_pool();
-        let paths = CapsuleBuildPaths::new(&self.config.storage_root, request.run_id);
-        if request.transfer_retained_workspace {
-            transfer_retained_workspace_to_writer(&paths.workspace, active_process_pool)?;
+        let git_identity = self.prepare_git_identity(active_process_pool)?;
+        let (loss_sender, _) = watch::channel(false);
+        let state = Arc::new(ProductionCapsuleState {
+            endpoint: OnceLock::new(),
+            run_root: run_directory(&self.config.storage_root, request.run_id),
+            run_root_identity: OnceLock::new(),
+            recovery_path: recovery_path(&self.config.storage_root, request.run_id),
+            delivery_run_id: request.delivery_run_id.clone(),
+            process_pool: Mutex::new(Some(process_pool)),
+            #[cfg(test)]
+            portable_processes: self.portable_test_processes(),
+            _loss_sender: loss_sender,
+            cleanup_turn: Mutex::new(false),
+        });
+        // Retain cleanup authority and the identity lease before checkout or retained-workspace
+        // ownership transfer can start.
+        let mut active = self.active.lock().await;
+        if active.contains_key(request.run_id) {
+            return Err(CapsuleAllocationUnavailable::Runtime);
         }
-        let retained_workspace = request.transfer_retained_workspace;
-        let workspace = paths.workspace.clone();
-        let allocation = self
-            .build_capsule_state(&request, paths, process_pool)
-            .await;
-        if allocation.is_err() && retained_workspace {
-            transfer_workspace_ownership(&workspace, 0, 0)
-                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        }
-        allocation
+        active.insert(request.run_id.clone(), state.clone());
+        drop(active);
+        self.build_capsule_state(
+            PendingCapsule {
+                run_id: request.run_id,
+                state,
+                process_pool: active_process_pool,
+                git_identity,
+            },
+            &request,
+        )
+        .await
     }
 
     async fn build_capsule_state(
         &self,
+        pending: PendingCapsule<'_>,
         request: &CapsuleBuildRequest<'_>,
-        paths: CapsuleBuildPaths,
-        process_pool: ActiveRunProcessPool,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let active_process_pool = process_pool.process_pool();
-        let filesystem =
-            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, active_process_pool)?;
+        let paths = CapsuleBuildPaths::new(&self.config.storage_root, pending.run_id);
+        let filesystem = self.prepare_capsule_workspace(&pending, request, &paths)?;
+        let PendingCapsule {
+            run_id,
+            state,
+            process_pool: active_process_pool,
+            git_identity,
+        } = pending;
         let target = self
             .capsule_delivery_target(request, &filesystem, active_process_pool)
             .await?;
         let github_config = GhCliAuthorityConfig {
+            git_identity: Some(git_identity),
             git_program: self.config.git_program.clone(),
             gh_program: self.config.gh_program.clone(),
             ..GhCliAuthorityConfig::hosted(paths.runtime_home)
@@ -241,10 +267,13 @@ impl ProductionCapsuleAllocator {
             NativeV2CandidateConfig {
                 harness: self.harness(request.admitted, &filesystem, active_process_pool)?,
                 delivery: NativeV2DeliveryConfig::for_hosted_workspace(
-                    request.delivery_run_id.clone(),
-                    request.adopt_existing_delivery,
+                    DeliveryLineage::new(
+                        request.delivery_run_id.clone(),
+                        request.adopt_existing_delivery,
+                    ),
                     filesystem.workspace.clone(),
                     target,
+                    git_identity,
                 ),
                 github: Arc::new(
                     GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
@@ -259,28 +288,18 @@ impl ProductionCapsuleAllocator {
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(candidate)));
         let runner = Arc::new(RemoteCapsuleNodeRunner::new(endpoint.clone()));
-        let (loss_sender, loss) = watch::channel(false);
-        let state = Arc::new(ProductionCapsuleState {
-            endpoint,
-            run_root: paths.run_root,
-            recovery_path: recovery_path(&self.config.storage_root, request.run_id),
-            delivery_run_id: request.delivery_run_id.clone(),
-            process_pool: Mutex::new(Some(process_pool)),
-            _loss_sender: loss_sender.clone(),
-            cleanup_turn: Mutex::new(false),
-        });
-        if self
-            .active
-            .lock()
-            .await
-            .insert(request.run_id.clone(), state.clone())
-            .is_some()
-        {
-            return Err(CapsuleAllocationUnavailable::Runtime);
-        }
-        monitor_workspace_identity(filesystem.workspace, workspace_identity, loss_sender);
+        state
+            .endpoint
+            .set(endpoint)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let loss = state._loss_sender.subscribe();
+        monitor_workspace_identity(
+            filesystem.workspace,
+            workspace_identity,
+            state._loss_sender.clone(),
+        );
         let cleanup = Arc::new(ProductionCapsuleCleanup {
-            run_id: request.run_id.clone(),
+            run_id: run_id.clone(),
             state,
             active: Arc::downgrade(&self.active),
         });
@@ -289,6 +308,23 @@ impl ProductionCapsuleAllocator {
             cleanup,
             loss,
         })
+    }
+
+    fn prepare_capsule_workspace(
+        &self,
+        pending: &PendingCapsule<'_>,
+        request: &CapsuleBuildRequest<'_>,
+        paths: &CapsuleBuildPaths,
+    ) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
+        if request.install_source {
+            pending.state.create_run_directory()?;
+        } else {
+            pending.state.capture_run_directory()?;
+        }
+        if request.transfer_retained_workspace {
+            transfer_retained_workspace_to_writer(&paths.workspace, pending.process_pool)?;
+        }
+        (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)
     }
 
     async fn capsule_delivery_target(
@@ -366,6 +402,25 @@ impl ProductionCapsuleAllocator {
         })
     }
 
+    fn prepare_git_identity(
+        &self,
+        process_pool: HostedProcessPool,
+    ) -> Result<HostedProcessIdentity, CapsuleAllocationUnavailable> {
+        let identity = process_pool
+            .identity(HostedProcessScope::Writer)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        #[cfg(test)]
+        if self.portable_test_processes() {
+            return Ok(identity);
+        }
+        // Never reuse a surviving identity after checkout failure or target restart.
+        // No checkout credential may reach this UID until its domain is proven empty.
+        identity
+            .prepare_command_domain()
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        Ok(identity)
+    }
+
     fn harness(
         &self,
         admitted: &AdmittedRun,
@@ -416,6 +471,20 @@ impl ProductionCapsuleAllocator {
         }
     }
 
+    #[cfg(test)]
+    fn portable_test_processes(&self) -> bool {
+        // Existing checkout tests replace containment with a caller-owned filesystem. Never
+        // inspect or kill the test runner's UID; production has no identity-isolation opt-out.
+        #[cfg(unix)]
+        {
+            self.source_override.is_some() && unsafe { libc::geteuid() } != 0
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     fn repository_source(&self, repository: &str) -> std::ffi::OsString {
         #[cfg(test)]
         if let Some(path) = &self.source_override {
@@ -463,16 +532,36 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let _turn = self.allocation_turn.lock().await;
-        if let Some(state) = self.active.lock().await.get(run_id).cloned() {
+        let state = self.active.lock().await.get(run_id).cloned();
+        if let Some(state) = state {
             cleanup_state(run_id, &state, &self.active, exit).await?;
         } else {
-            cleanup_run_directory(CleanupRunRequest {
-                run_root: &run_directory(&self.config.storage_root, run_id),
-                recovery_path: &recovery_path(&self.config.storage_root, run_id),
-                run_id,
-                delivery_run_id: run_id,
-                exit,
-            })?;
+            let path = run_directory(&self.config.storage_root, run_id);
+            // A failed attempt that never registered ownership cannot delete a directory that
+            // predates it. Reconstructed runs still use the allocator's restart cleanup path.
+            if self.allocated.lock().await.contains(run_id) {
+                let absent = matches!(
+                    std::fs::symlink_metadata(&path),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                );
+                if !absent
+                    && !confirmed_retained_workspace(
+                        &path,
+                        &recovery_path(&self.config.storage_root, run_id),
+                        run_id,
+                    )?
+                {
+                    return Err(CapsuleCleanupUnavailable);
+                }
+            } else {
+                cleanup_run_directory(CleanupRunRequest {
+                    run_root: &path,
+                    recovery_path: &recovery_path(&self.config.storage_root, run_id),
+                    run_id,
+                    delivery_run_id: run_id,
+                    exit,
+                })?;
+            }
         }
         Ok(CapsuleDestroyed::confirmed())
     }
@@ -510,14 +599,24 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 Ok(capsule)
             }
             Err(error) => {
-                cleanup_run_directory(CleanupRunRequest {
-                    run_root: &paths.run_root,
-                    recovery_path: &paths.run_recovery,
-                    run_id,
-                    delivery_run_id: &claim.delivery_run_id,
-                    exit: RunRuntimeExit::RuntimeLost,
-                })?;
-                Err(RetainedAllocationUnavailable::Settled(error))
+                let state = self.active.lock().await.get(run_id).cloned();
+                let cleanup = match state {
+                    Some(state) => {
+                        cleanup_state(run_id, &state, &self.active, RunRuntimeExit::RuntimeLost)
+                            .await
+                    }
+                    None => cleanup_run_directory(CleanupRunRequest {
+                        run_root: &paths.run_root,
+                        recovery_path: &paths.run_recovery,
+                        run_id,
+                        delivery_run_id: &claim.delivery_run_id,
+                        exit: RunRuntimeExit::RuntimeLost,
+                    }),
+                };
+                match cleanup {
+                    Ok(()) => Err(RetainedAllocationUnavailable::Settled(error)),
+                    Err(cleanup) => Err(RetainedAllocationUnavailable::CleanupUnconfirmed(cleanup)),
+                }
             }
         }
     }
@@ -564,17 +663,74 @@ struct ProductionControllerClaim {
 
 impl ExclusiveControllerClaim for ProductionControllerClaim {}
 
+struct PendingCapsule<'a> {
+    run_id: &'a RunId,
+    state: Arc<ProductionCapsuleState>,
+    process_pool: HostedProcessPool,
+    git_identity: HostedProcessIdentity,
+}
+
 struct ProductionCapsuleState {
-    endpoint: Arc<NativeCapsuleNodeEndpoint>,
+    endpoint: OnceLock<Arc<NativeCapsuleNodeEndpoint>>,
     run_root: PathBuf,
+    run_root_identity: OnceLock<WorkspaceIdentity>,
     recovery_path: PathBuf,
     delivery_run_id: RunId,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
     process_pool: Mutex<Option<ActiveRunProcessPool>>,
+    #[cfg(test)]
+    portable_processes: bool,
     // Keeps the controller-side loss receiver live during intentional cleanup. A whole-host loss
     // is observed on restart through durable reconciliation, never by allocating a replacement.
     _loss_sender: watch::Sender<bool>,
     cleanup_turn: Mutex<bool>,
+}
+
+impl ProductionCapsuleState {
+    fn create_run_directory(&self) -> Result<(), CapsuleAllocationUnavailable> {
+        std::fs::create_dir(&self.run_root).map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        self.capture_run_directory()?;
+        set_traversable_directory(&self.run_root)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        Ok(())
+    }
+
+    fn capture_run_directory(&self) -> Result<(), CapsuleAllocationUnavailable> {
+        self.run_root_identity
+            .set(
+                WorkspaceIdentity::capture(&self.run_root)
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+            )
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        Ok(())
+    }
+
+    fn cleanup_owned_directory(
+        &self,
+        run_id: &RunId,
+        exit: RunRuntimeExit,
+    ) -> Result<(), CapsuleCleanupUnavailable> {
+        // A failed create or a replaced directory is not this allocation's disposable workspace.
+        // Keep authority until that path is absent rather than deleting unrelated retained work.
+        if self
+            .run_root
+            .try_exists()
+            .map_err(|_| CapsuleCleanupUnavailable)?
+            && !self
+                .run_root_identity
+                .get()
+                .is_some_and(|identity| identity.is_current(&self.run_root))
+        {
+            return Err(CapsuleCleanupUnavailable);
+        }
+        cleanup_run_directory(CleanupRunRequest {
+            run_root: &self.run_root,
+            recovery_path: &self.recovery_path,
+            run_id,
+            delivery_run_id: &self.delivery_run_id,
+            exit,
+        })
+    }
 }
 
 pub(super) fn monitor_workspace_identity(
@@ -623,16 +779,28 @@ async fn cleanup_state(
     if *cleaned {
         return Ok(());
     }
-    state.endpoint.disconnect().await;
-    cleanup_run_directory(CleanupRunRequest {
-        run_root: &state.run_root,
-        recovery_path: &state.recovery_path,
-        run_id,
-        delivery_run_id: &state.delivery_run_id,
-        exit,
-    })?;
+    if let Some(endpoint) = state.endpoint.get() {
+        endpoint.disconnect().await;
+    }
+    let mut process_pool = state.process_pool.lock().await;
+    let identity = process_pool
+        .as_ref()
+        .ok_or(CapsuleCleanupUnavailable)?
+        .process_pool()
+        .identity(HostedProcessScope::Writer)
+        .map_err(|_| CapsuleCleanupUnavailable)?;
+    // A failed delivery may still own credential-bearing helpers. Keep its workspace and
+    // numeric identity lease until cleanup proves that a later run cannot inherit them.
+    #[cfg(test)]
+    let requires_cleanup = !state.portable_processes;
+    #[cfg(not(test))]
+    let requires_cleanup = true;
+    if requires_cleanup && !identity.cleanup().await.proves_tree_empty() {
+        return Err(CapsuleCleanupUnavailable);
+    }
+    state.cleanup_owned_directory(run_id, exit)?;
     active.lock().await.remove(run_id);
-    state.process_pool.lock().await.take();
+    process_pool.take();
     *cleaned = true;
     Ok(())
 }
@@ -641,6 +809,23 @@ enum FailedRunDirectoryState {
     Absent,
     Disposable,
     Retained,
+}
+
+fn confirmed_retained_workspace(
+    run_root: &Path,
+    recovery_path: &Path,
+    run_id: &RunId,
+) -> Result<bool, CapsuleCleanupUnavailable> {
+    let Some(document) = read_recovery(recovery_path) else {
+        return Ok(false);
+    };
+    if !document.recoverable || document.run_id.as_ref() != Some(run_id) {
+        return Ok(false);
+    }
+    Ok(matches!(
+        failed_run_directory_state(run_root)?,
+        FailedRunDirectoryState::Retained
+    ))
 }
 
 fn cleanup_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCleanupUnavailable> {
@@ -978,3 +1163,9 @@ impl ProductionCapsuleAllocator {
             .expect("test recovery metadata should reconcile");
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod cleanup_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+mod allocation_tests;

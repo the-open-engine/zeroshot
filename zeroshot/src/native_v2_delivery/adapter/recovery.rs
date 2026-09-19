@@ -60,17 +60,16 @@ impl NativeV2DeliveryAdapter {
                 head_revision: String::new(),
             });
         let diagnostic = format!(
-            "repository: {}\ntargetBranch: {}\nbaseRevision: {}\nrunBranch: {}\nheadRevision: {}\n\
+            "repository: {}\ntargetBranch: {}\nrunBranch: {}\nheadRevision: {}\n\
              pullRequestId: {}\n{}",
             review.repository,
             review.target_branch,
-            self.config.target.base_revision,
             review.head_branch,
             review.head_revision,
             review.review_id,
             failure.diagnostic,
         );
-        let diagnostic = self.redact_feedback(invocation, diagnostic);
+        let diagnostic = self.redact_feedback(invocation, self.review_context(&diagnostic));
         delivery_outcome(
             DeliveryResult {
                 mode,
@@ -79,6 +78,26 @@ impl NativeV2DeliveryAdapter {
                 merge_revision: None,
             },
             &diagnostic,
+        )
+    }
+
+    pub(super) fn review_context(&self, diagnostic: &str) -> String {
+        let state = self.delivery_state();
+        let baseline = match state.review_base_revision.as_deref() {
+            Some(revision) => format!(
+                "reviewBaseRevision: {revision}\nReview the candidate against this captured target \
+                 revision. Preserve integrated upstream changes."
+            ),
+            None => {
+                "reviewBaseRevision: unavailable\nThe current integrated target revision has not \
+                     been confirmed; do not infer it from sourceRevision."
+                    .to_owned()
+            }
+        };
+        format!(
+            "sourceRevision: {}\n{baseline}\nsourceRevision is the original admitted source, \
+             retained for provenance; do not restore files merely to match it.\n{diagnostic}",
+            self.config.target.base_revision,
         )
     }
 

@@ -43,6 +43,10 @@ mod head_update;
 mod review_sync;
 #[path = "tests/routing.rs"]
 mod routing;
+#[path = "tests/target_base.rs"]
+mod target_base;
+#[path = "tests/target_retry.rs"]
+mod target_retry;
 
 use github_fixture::{
     FakeGitHub, GH_MISMATCH_SCRIPT, GH_SCRIPT, GIT_SCRIPT, Script, argument_lines,
@@ -445,7 +449,7 @@ async fn rewritten_history_is_rejected_before_push() {
     let outcome = run_delivery(&repo, authority.clone(), 2, DeliveryMode::Merge).await;
 
     assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
-    assert!(outcome_diagnostic(&outcome).contains("merge-base"));
+    assert!(outcome_diagnostic(&outcome).contains("rev-parse"));
     assert!(!authority.pushed.load(Ordering::SeqCst));
     assert!(authority.review_requests().is_empty());
 }
@@ -574,6 +578,7 @@ async fn run_delivery_execution_with_identity_and_adoption(
     let config = NativeV2DeliveryConfig {
         delivery_run_id: RunId::new(delivery_run_id),
         adopt_existing_delivery,
+        git_identity: None,
         workspace: request.repo.workspace.clone(),
         git_program: PathBuf::from("/usr/bin/git"),
         target: target(request.repo),
@@ -615,6 +620,7 @@ fn retained_adapter(
         NativeV2DeliveryConfig {
             delivery_run_id: RunId::new(lineage.run_id),
             adopt_existing_delivery: lineage.adopt_existing,
+            git_identity: None,
             workspace: repo.workspace.clone(),
             git_program: "/usr/bin/git".into(),
             target: target(repo),

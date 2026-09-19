@@ -23,7 +23,7 @@ pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 pub use review_head::{
     GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
     GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
-    GitHubReconciliationOutcome,
+    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
 };
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
@@ -214,24 +214,43 @@ impl Default for DeliveryPollPolicy {
 pub struct NativeV2DeliveryConfig {
     pub delivery_run_id: RunId,
     pub adopt_existing_delivery: bool,
+    /// Pinned workspace owner for hosted Git; local execution inherits the caller.
+    pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     pub workspace: PathBuf,
     pub git_program: PathBuf,
     pub target: DeliveryTarget,
     pub poll: DeliveryPollPolicy,
 }
 
-impl NativeV2DeliveryConfig {
+#[derive(Clone, Debug)]
+pub struct DeliveryLineage {
+    delivery_run_id: RunId,
+    adopt_existing_delivery: bool,
+}
+
+impl DeliveryLineage {
     #[must_use]
-    pub fn for_hosted_workspace(
-        delivery_run_id: RunId,
-        adopt_existing_delivery: bool,
-        workspace: PathBuf,
-        target: DeliveryTarget,
-    ) -> Self {
+    pub fn new(delivery_run_id: RunId, adopt_existing_delivery: bool) -> Self {
         Self {
             delivery_run_id,
             adopt_existing_delivery,
+        }
+    }
+}
+
+impl NativeV2DeliveryConfig {
+    #[must_use]
+    pub fn for_hosted_workspace(
+        lineage: DeliveryLineage,
+        workspace: PathBuf,
+        target: DeliveryTarget,
+        identity: crate::execution::process::HostedProcessIdentity,
+    ) -> Self {
+        Self {
+            delivery_run_id: lineage.delivery_run_id,
+            adopt_existing_delivery: lineage.adopt_existing_delivery,
             workspace,
+            git_identity: Some(identity),
             git_program: PathBuf::from("/usr/bin/git"),
             target,
             poll: DeliveryPollPolicy::default(),
@@ -341,6 +360,13 @@ pub trait GitHubDeliveryAuthority: Send + Sync {
         request: GitHubDeliveryRead<'_>,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError>;
+
+    /// Integrates an exact current target revision before the run branch is first published.
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError>;
 
     /// Fetches the observed head and preserves local work while reconciling its published ancestry.
     async fn reconcile_delivery_head(

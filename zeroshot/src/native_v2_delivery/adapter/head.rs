@@ -55,6 +55,7 @@ impl NativeV2DeliveryAdapter {
         if !valid_head_update(&drive.review, &updated) {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
+        self.record_review_base(None);
         let previous = std::mem::replace(&mut drive.review, updated);
         // Record before an awaited log/output operation can fail or cancellation can intervene.
         self.state
@@ -247,6 +248,10 @@ impl NativeV2DeliveryAdapter {
             }
         }
         let observed = preflight::receipt_from_observation(&review);
+        self.forget_review_base_if_head_changed(
+            &observed.head_revision,
+            &drive.review.head_revision,
+        );
         let outcome = self.reconcile_updated_head(drive, &observed).await?;
         let outcome = recovered_outcome(
             outcome,

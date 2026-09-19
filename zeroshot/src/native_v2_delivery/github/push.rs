@@ -200,6 +200,7 @@ exit 17
                 &format!("#!/bin/sh\nprintf '%s' '{}'\n", body),
             );
             let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+                git_identity: None,
                 git_program: "/usr/bin/false".into(),
                 gh_program: program,
                 home_directory: repository.root.path().to_owned(),
@@ -234,6 +235,7 @@ exit 17
         store: Arc<OperatorDiagnosticStore>,
     ) -> GhCliDeliveryAuthority {
         GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+            git_identity: None,
             git_program,
             gh_program: "/usr/bin/false".into(),
             home_directory: repository.root.path().to_owned(),

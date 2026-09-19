@@ -43,10 +43,10 @@ use crate::native_v2_contract::{
 };
 use crate::native_v2_delivery::{
     GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
-    GitHubReconciliationOutcome, DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError,
-    GitHubChecks, GitHubCredential, GitHubMergeRequestOutcome, GitHubPushRequest,
-    GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState,
-    GITHUB_TOKEN_ENV,
+    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
+    DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,
+    GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt,
+    GitHubReviewRequest, GitHubReviewState, GITHUB_TOKEN_ENV,
 };
 use crate::native_v2_runner::NodeRole;
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
@@ -73,6 +73,19 @@ impl ScriptedGitHub {
 
 #[async_trait]
 impl GitHubDeliveryAuthority for ScriptedGitHub {
+    async fn reconcile_delivery_target(
+        &self,
+        request: GitHubTargetReconciliation<'_>,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        crate::native_v2_candidate::test_support::local_delivery_authority(
+            request.workspace,
+            &self.remote,
+        )
+        .reconcile_delivery_target(request, credential)
+        .await
+    }
+
     async fn observe_delivery(
         &self,
         request: GitHubDeliveryRead<'_>,
@@ -296,6 +309,7 @@ impl CapsuleAllocator for CandidateAllocator {
             NativeV2DeliveryConfig {
                 delivery_run_id: RunId::new("candidate-test"),
                 adopt_existing_delivery: false,
+                git_identity: None,
                 workspace: self.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: self.target.clone(),

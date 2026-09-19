@@ -234,7 +234,7 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
         attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
         signals,
         diagnostic: diagnostic_type()?,
-        instructions: Some(instructions(spec.authored_instructions)?),
+        instructions: Some(delivery_feedback_instructions(spec.authored_instructions)?),
     }))
 }
 
@@ -264,7 +264,7 @@ fn review_repair() -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Step(StepNode {
         name: node_name("review_repair")?,
         worker: worker_ref("builtin.agent.review-repair@1")?,
-        instructions: Some(instructions(
+        instructions: Some(delivery_feedback_instructions(
             "Address both verifier diagnostics in the shared workspace without weakening the \
              requested behavior. Account for any delivery feedback and run the relevant checks \
              before returning. Delivery runs `git add --all`; put downloaded tools and other files \
@@ -343,7 +343,7 @@ fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError
     Ok(GraphNode::Step(StepNode {
         name: node_name("delivery_repair")?,
         worker: worker_ref("builtin.agent.delivery-repair@1")?,
-        instructions: Some(instructions(
+        instructions: Some(delivery_feedback_instructions(
             "Diagnose the reported Git, delivery, CI failure, or merge conflict using the original \
              diagnostics. Repair the shared workspace when needed and run relevant checks, \
              preserving the requested behavior and verifier-approved change. Delivery will retry \
@@ -544,6 +544,16 @@ fn worker_ref(value: &str) -> Result<WorkerRef, BuiltinTemplateError> {
 
 fn instructions(value: &str) -> Result<NodeInstructions, BuiltinTemplateError> {
     static_value(NodeInstructions::new(value))
+}
+
+fn delivery_feedback_instructions(value: &str) -> Result<NodeInstructions, BuiltinTemplateError> {
+    instructions(&format!(
+        "{value} Delivery feedback's sourceRevision is immutable checkout provenance. \
+         When reviewBaseRevision is provided, assess the change against that captured target \
+         revision and preserve integrated upstream changes. Never restore original-source files \
+         solely because they differ. If the review base is unavailable, do not infer that a \
+         rollback is needed."
+    ))
 }
 
 fn positive(value: u64) -> Result<PositiveInteger, BuiltinTemplateError> {

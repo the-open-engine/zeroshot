@@ -7,6 +7,7 @@ fn github_authority(
     gh_program: PathBuf,
 ) -> GhCliDeliveryAuthority {
     GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        git_identity: None,
         git_program,
         gh_program,
         home_directory: home.to_owned(),

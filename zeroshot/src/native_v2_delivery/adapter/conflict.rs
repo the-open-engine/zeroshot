@@ -11,10 +11,15 @@ impl NativeV2DeliveryAdapter {
             workspace: self.config.workspace.clone(),
             review: drive.review.clone(),
         };
+        let previous_base = self.delivery_state().review_base_revision;
+        // Materialization can mutate the workspace before its result becomes observable.
+        self.record_review_base(None);
         let outcome = self
             .materialize_conflict(&request, &mut drive.credentials, drive.control)
             .await?;
         let GitHubConflictOutcome::Materialized(materialization) = outcome else {
+            // ObservationChanged confirms the original clean review head was restored.
+            self.record_review_base(previous_base);
             emit(
                 drive.control,
                 "delivery: conflict observation changed; rechecking GitHub",
@@ -24,6 +29,7 @@ impl NativeV2DeliveryAdapter {
         };
         let diagnostic = conflict_diagnostic(authority_diagnostic, &materialization)
             .ok_or_else(|| DeliveryStop::Outcome(WorkerOutcome::malformed()))?;
+        self.record_review_base(Some(materialization.target_revision));
         review_completion(drive, DELIVERY_CONFLICT_LABEL, &diagnostic, None).await
     }
 

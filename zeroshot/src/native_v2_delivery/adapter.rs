@@ -1,3 +1,5 @@
+use futures_util::FutureExt;
+
 use super::*;
 
 mod conflict;
@@ -7,6 +9,10 @@ mod preflight;
 mod recovery;
 mod review;
 mod sync;
+mod target;
+
+#[cfg(all(test, target_os = "linux"))]
+mod ownership_tests;
 use input::delivery_input;
 use review::{crash_outcome, review_completion, ReviewProgress, ReviewStep};
 
@@ -25,7 +31,7 @@ impl NativeV2DeliveryAdapter {
         config: NativeV2DeliveryConfig,
         authority: Arc<dyn GitHubDeliveryAuthority>,
     ) -> Self {
-        let git = SystemGit::new(config.git_program.clone());
+        let git = SystemGit::new(config.git_program.clone()).with_identity(config.git_identity);
         Self {
             config: Arc::new(config),
             authority,
@@ -87,6 +93,36 @@ impl NodeDriver for NativeV2DeliveryAdapter {
     async fn run(
         &self,
         invocation: DriverInvocation,
+        control: DriverControl,
+    ) -> Result<WorkerOutcome, NodeRunnerError> {
+        if let Some(identity) = self.config.git_identity {
+            identity
+                .prepare_command_domain()
+                .map_err(|_| NodeRunnerError::CleanupUnconfirmed)?;
+        }
+        let result = std::panic::AssertUnwindSafe(self.run_delivery(invocation, control))
+            .catch_unwind()
+            .await;
+        // A cancelled or panicking Git future drops its process-group guard first. Reap any
+        // detached helpers before the graph can hand this workspace UID to another writer.
+        if let Some(identity) = self.config.git_identity {
+            if !identity.cleanup().await.proves_tree_empty() {
+                return Err(NodeRunnerError::CleanupUnconfirmed);
+            }
+        }
+        match result {
+            Ok(result) => result,
+            Err(_) => Err(NodeRunnerError::DriverDetail(
+                "Git delivery panicked".to_owned(),
+            )),
+        }
+    }
+}
+
+impl NativeV2DeliveryAdapter {
+    async fn run_delivery(
+        &self,
+        invocation: DriverInvocation,
         mut control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let (session, mut credentials, mode) = match self.authorize(&invocation) {
@@ -103,7 +139,7 @@ impl NodeDriver for NativeV2DeliveryAdapter {
                     invocation: &invocation, session, credentials: &mut credentials, control: &control,
                 }).await?;
                 self.drive_review(ReviewDrive {
-                    mode, response: &invocation.response, review, credentials, control: &mut control,
+                    adapter: self, mode, response: &invocation.response, review, credentials, control: &mut control,
                 }).await
             } => result,
         };
@@ -147,6 +183,7 @@ impl From<NodeRunnerError> for DeliveryStop {
 }
 
 struct ReviewDrive<'a> {
+    adapter: &'a NativeV2DeliveryAdapter,
     mode: DeliveryMode,
     response: &'a NodeResponseContract,
     review: GitHubReviewReceipt,
