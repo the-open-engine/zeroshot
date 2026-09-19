@@ -294,7 +294,7 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
             Some(&json!(true))
         );
     }
-    assert!(shown.to_string().contains("builtin.git-delivery.pr@1"));
+    assert!(shown.to_string().contains("builtin.git-delivery.pr@2"));
     assert!(backend.calls().is_empty());
 }
 

@@ -18,12 +18,13 @@ use super::{
     GitHubConflictOutcome, GitHubConflictRequest, GitHubCredential, GitHubDeliveryAuthority,
     GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
     GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt, GitHubReviewRequest,
-    GitHubReviewState, GitHubTargetIntegration, GitHubTargetReconciliation, valid_head_update,
-    valid_revision,
+    GitHubReviewFeedback, GitHubReviewFeedbackItem, GitHubReviewState, GitHubTargetIntegration,
+    GitHubTargetReconciliation, valid_head_update, valid_revision,
 };
 
 mod api;
 mod conflict;
+mod feedback;
 mod metadata;
 mod observation;
 mod push;
@@ -333,7 +334,20 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
         let snapshot = self.policy_snapshot_with_logs(review, credential).await?;
-        Ok(review.observation(snapshot.state))
+        let head_update_required = snapshot.head_update.is_some();
+        Ok(review.observation_with_readiness(
+            snapshot.state,
+            snapshot.pull_request_ready,
+            head_update_required,
+        ))
+    }
+
+    async fn inspect_review_feedback(
+        &self,
+        review: &GitHubReviewReceipt,
+        credential: GitHubCredential<'_>,
+    ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
+        feedback::inspect(self, review, credential).await
     }
 
     async fn request_merge(

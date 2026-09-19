@@ -5,7 +5,9 @@ use openengine_cluster_server::graph_verifier::graph_node_children;
 use serde_json::{json, Value};
 
 use crate::native_v2_contract::{
-    GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_V3_WORKER_REF,
+    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    GIT_DELIVERY_PUSH_WORKER_REF,
 };
 
 use super::{ApiError, BuiltinGraphTemplate, TemplateDelivery};
@@ -16,6 +18,7 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         let deliveries = if *template == BuiltinGraphTemplate::SoftwareChange {
             &[
                 TemplateDelivery::None,
+                TemplateDelivery::Push,
                 TemplateDelivery::PullRequest,
                 TemplateDelivery::Merge,
             ][..]
@@ -57,16 +60,23 @@ pub(super) fn workers() -> Result<Vec<Value>, ApiError> {
     })];
     for (id, label, delivery, refs) in [
         (
+            "git_delivery_push",
+            "Git delivery · push",
+            TemplateDelivery::Push,
+            vec![GIT_DELIVERY_PUSH_WORKER_REF],
+        ),
+        (
             "git_delivery_pr",
             "Git delivery · pull request",
             TemplateDelivery::PullRequest,
-            vec![GIT_DELIVERY_PR_WORKER_REF],
+            vec![GIT_DELIVERY_PR_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF],
         ),
         (
             "git_delivery_merge",
             "Git delivery · merge",
             TemplateDelivery::Merge,
             vec![
+                GIT_DELIVERY_MERGE_V3_WORKER_REF,
                 GIT_DELIVERY_MERGE_V2_WORKER_REF,
                 GIT_DELIVERY_MERGE_WORKER_REF,
             ],
@@ -112,6 +122,7 @@ fn template_label(template: BuiltinGraphTemplate, delivery: TemplateDelivery) ->
     match (template, delivery) {
         (BuiltinGraphTemplate::SingleWorker, _) => "Single worker",
         (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::None) => "Software change",
+        (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::Push) => "Software change · push",
         (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::PullRequest) => {
             "Software change · pull request"
         }
@@ -136,9 +147,13 @@ mod tests {
     use openengine_cluster_testkit::assertions::AssertValue;
 
     #[test]
-    fn delivery_choices_use_native_contracts_and_preserve_legacy_merge_identity() {
+    fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
         let choices = workers().assert_value();
-        for (index, mode) in [(1, DeliveryMode::PullRequest), (2, DeliveryMode::Merge)] {
+        for (index, mode) in [
+            (1, DeliveryMode::Push),
+            (2, DeliveryMode::PullRequestV2),
+            (3, DeliveryMode::MergeV3),
+        ] {
             let choice = &choices[index];
             assert_eq!(choice["node"]["kind"], "verifier");
             assert!(choice["node"]["instructions"].is_null());
@@ -164,11 +179,11 @@ mod tests {
             );
         }
         assert_eq!(
-            choices[2]["node"]["worker"],
-            GIT_DELIVERY_MERGE_V2_WORKER_REF
+            choices[3]["node"]["worker"],
+            GIT_DELIVERY_MERGE_V3_WORKER_REF
         );
         assert!(
-            choices[2]["workerRefs"]
+            choices[3]["workerRefs"]
                 .as_array()
                 .assert_value()
                 .contains(&json!(GIT_DELIVERY_MERGE_WORKER_REF))
@@ -184,12 +199,13 @@ mod tests {
     #[tokio::test]
     async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
         let templates = templates().assert_value();
-        assert_eq!(templates.len(), 4);
+        assert_eq!(templates.len(), 5);
         for template in templates {
             let kind = BuiltinGraphTemplate::parse(template["name"].as_str().assert_value())
                 .assert_value();
             let delivery = match template["delivery"].as_str().assert_value() {
                 "pull_request" => TemplateDelivery::PullRequest,
+                "push" => TemplateDelivery::Push,
                 "merge" => TemplateDelivery::Merge,
                 _ => TemplateDelivery::None,
             };

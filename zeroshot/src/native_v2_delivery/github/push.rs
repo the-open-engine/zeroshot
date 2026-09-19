@@ -28,7 +28,7 @@ pub(super) async fn push_branch(
         .await
         .and_then(GitCommandFailure::require_success)
     {
-        Ok(_) => Ok(()),
+        Ok(_) => authority.confirm_pushed_head(request, credential).await,
         Err(failure) => {
             authority.record_push_failure(&failure);
             // A transport failure may follow an accepted push. Observe the exact remote ref before repair.
@@ -163,20 +163,29 @@ exit 17
         let repository = TestGitRepository::delivery();
         let store = Arc::new(OperatorDiagnosticStore::default());
         let run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
-        let authority = diagnostic_authority(
-            &repository,
-            "/usr/bin/true".into(),
-            run_id.clone(),
-            store.clone(),
+        let request = push_request(&repository);
+        let body = serde_json::json!({
+            "ref": format!("refs/heads/{}", request.head_branch),
+            "object": { "type": "commit", "sha": request.head_revision }
+        });
+        let gh_program = executable(
+            repository.root.path(),
+            "confirmed-head",
+            &format!("#!/bin/sh\nprintf '%s' '{}'\n", body),
         );
+        let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+            git_identity: None,
+            git_program: "/usr/bin/true".into(),
+            gh_program,
+            home_directory: repository.root.path().to_owned(),
+            api_deadline: Duration::from_secs(10),
+            push_deadline: Duration::from_secs(10),
+        })
+        .with_operator_diagnostics(run_id.clone(), store.clone());
 
-        push_branch(
-            &authority,
-            &push_request(&repository),
-            GitHubCredential("raw-github-token"),
-        )
-        .await
-        .assert_value();
+        push_branch(&authority, &request, GitHubCredential("raw-github-token"))
+            .await
+            .assert_value();
 
         assert!(store.snapshot(&run_id).diagnostics.is_empty());
     }

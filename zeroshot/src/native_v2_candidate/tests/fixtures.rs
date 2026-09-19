@@ -29,6 +29,7 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
             .assert_value_with("delivery environment"),
         )
         .assert_value_with("delivery connection"),
+        pull_request_feedback: Default::default(),
     };
     let nodes = BTreeMap::from([
         (

@@ -63,6 +63,7 @@ async fn admitted_with_delivery() -> AdmittedRun {
                 NodeName::new("deliver").assert_value(),
                 NodeRuntimeBinding::GitDelivery {
                     connections: DeclaredConnections::empty(),
+                    pull_request_feedback: Default::default(),
                 },
             ),
             (NodeName::new("verify").assert_value(), agent_binding()),

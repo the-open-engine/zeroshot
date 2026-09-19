@@ -370,6 +370,9 @@ Options:
       --delivery <MODE>
           Materialize this template-owned delivery mode
 
+      --push
+          Commit and push the managed run branch without opening a pull request
+
       --pr
           Materialize pull-request delivery for the software-change template
 
@@ -377,6 +380,9 @@ Options:
           Materialize merge delivery for the software-change template.
 
           Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+
+      --no-pr-feedback
+          Do not route visible pull-request feedback through the autonomous repair loop
 
       --target <NAME>
           Use this named hosted target. If omitted, use local profiles
@@ -530,6 +536,9 @@ Options:
       --delivery <MODE>
           Materialize this template-owned delivery mode
 
+      --push
+          Commit and push the managed run branch without opening a pull request
+
       --pr
           Materialize pull-request delivery for the software-change template
 
@@ -537,6 +546,9 @@ Options:
           Materialize merge delivery for the software-change template.
 
           Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+
+      --no-pr-feedback
+          Do not route visible pull-request feedback through the autonomous repair loop
 
   -h, --help
           Print help (see a summary with '-h')
@@ -589,7 +601,7 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one `builtin.git-delivery.merge@2` node;
+Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
 pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 binding may declare it. `needs` gates readiness but does not pass output between runs.
 Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
@@ -776,6 +788,9 @@ Options:
       --delivery <MODE>
           Materialize this template-owned delivery mode
 
+      --push
+          Commit and push the managed run branch without opening a pull request
+
       --pr
           Materialize pull-request delivery for the software-change template
 
@@ -783,6 +798,9 @@ Options:
           Materialize merge delivery for the software-change template.
 
           Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+
+      --no-pr-feedback
+          Do not route visible pull-request feedback through the autonomous repair loop
 
   -h, --help
           Print help (see a summary with '-h')
@@ -818,7 +836,7 @@ RUNTIME CONFIGURATION
     (execution or node_instance), and connections. Each connection key maps to the exact
     environment variable names required by that node; never put values in this file.
 
-    Use `zeroshot template show TEMPLATE` to inspect node names. With --pr or --ship, omit the
+    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
     template-owned delivery binding.
 
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,

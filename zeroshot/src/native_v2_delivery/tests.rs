@@ -23,9 +23,8 @@ use crate::native_v2_candidate::test_support::{
 };
 use crate::native_v2_contract::{
     self, CodexProvider, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
-    NodeRuntimeBinding, RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId,
-    SourceRepositoryId, SourceRevisionId, ResolvedSource, GIT_DELIVERY_MERGE_V2_WORKER_REF,
-    GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF,
+    NodeRuntimeBinding, PullRequestFeedback, RunSize, RunSubmission, RunTitle, RuntimePlan,
+    SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NativeNodeRunner, NodeDriver, NodeRunRequest, NodeRunner,
@@ -75,6 +74,65 @@ async fn legacy_merge_worker_retains_the_v1_receipt_contract() {
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 1);
 }
 
+#[tokio::test]
+async fn push_worker_publishes_only_the_exact_managed_branch() {
+    let authority = successful_delivery(DeliveryMode::Push, DELIVERY_PUSHED_LABEL, 1).await;
+    assert!(authority.pushed.load(Ordering::SeqCst));
+    assert!(authority.review_requests().is_empty());
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn current_pr_worker_waits_for_technical_readiness_without_merging() {
+    let authority = successful_delivery(DeliveryMode::PullRequestV2, DELIVERY_READY_LABEL, 1).await;
+    assert_eq!(authority.review_requests().len(), 1);
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn current_pr_worker_checkpoints_feedback_before_readiness() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = feedback_adapter(&repo, 2);
+    let request = || DeliveryRunRequest {
+        repo: &repo,
+        attempts: 2,
+        mode: DeliveryMode::PullRequestV2,
+        run_id: "feedback-checkpoint",
+        refresh: None,
+    };
+
+    let first = run_with_adapter(request(), adapter.clone()).await.outcome;
+    assert_delivery_signal(&first, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(outcome_diagnostic(&first).contains("Handle the empty input"));
+
+    let second = run_with_adapter(request(), adapter).await.outcome;
+    assert_delivery_signal(&second, DELIVERY_READY_LABEL);
+    assert!(authority.feedback_reads.load(Ordering::SeqCst) >= 2);
+}
+
+#[tokio::test]
+async fn runtime_policy_can_ignore_pr_feedback_without_weakening_readiness() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = feedback_adapter(&repo, 1);
+    let outcome = run_with_adapter_feedback(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 1,
+            mode: DeliveryMode::PullRequestV2,
+            run_id: "ignore-feedback",
+            refresh: None,
+        },
+        adapter,
+        PullRequestFeedback::Ignore,
+    )
+    .await
+    .outcome;
+
+    assert_delivery_signal(&outcome, DELIVERY_READY_LABEL);
+    assert_eq!(authority.feedback_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
 async fn successful_delivery(
     mode: DeliveryMode,
     expected_label: &str,
@@ -86,6 +144,10 @@ async fn successful_delivery(
     let output = assert_delivery_signal(&outcome, expected_label);
     assert_receipt_match(output, mode, &repo, true);
     match mode {
+        DeliveryMode::Push => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v1")));
+            assert!(output.pointer("/pullRequestId").is_none());
+        }
         DeliveryMode::PullRequest => {
             assert_eq!(output.pointer("/version"), Some(&json!("v1")));
             assert!(output.pointer("/mergeRevision").is_none());
@@ -96,6 +158,17 @@ async fn successful_delivery(
         }
         DeliveryMode::Merge => {
             assert_eq!(output.pointer("/version"), Some(&json!("v2")));
+            assert_eq!(
+                output.pointer("/mergeRevision"),
+                Some(&json!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+            );
+        }
+        DeliveryMode::PullRequestV2 => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v2")));
+            assert!(output.pointer("/mergeRevision").is_none());
+        }
+        DeliveryMode::MergeV3 => {
+            assert_eq!(output.pointer("/version"), Some(&json!("v3")));
             assert_eq!(
                 output.pointer("/mergeRevision"),
                 Some(&json!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
@@ -630,11 +703,32 @@ fn retained_adapter(
     ))
 }
 
+fn feedback_adapter(
+    repo: &TempRepo,
+    attempts: usize,
+) -> (Arc<FakeGitHub>, Arc<NativeV2DeliveryAdapter>) {
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::Feedback));
+    let adapter = retained_adapter(
+        repo,
+        authority.clone(),
+        DeliveryPollPolicy::new(attempts, Duration::ZERO).assert_value(),
+    );
+    (authority, adapter)
+}
+
 async fn run_with_adapter(
     request: DeliveryRunRequest<'_>,
     adapter: Arc<NativeV2DeliveryAdapter>,
 ) -> DeliveryExecution {
-    let admitted = admitted(request.repo, request.mode).await;
+    run_with_adapter_feedback(request, adapter, PullRequestFeedback::Consider).await
+}
+
+async fn run_with_adapter_feedback(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+    pull_request_feedback: PullRequestFeedback,
+) -> DeliveryExecution {
+    let admitted = admitted_with_feedback(request.repo, request.mode, pull_request_feedback).await;
     let runner = NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value();
     let binding = admitted
         .runtime
@@ -662,7 +756,7 @@ async fn run_with_adapter(
                     node_instance: native_v2_contract::NodeInstanceId::new(1).assert_value(),
                     execution: native_v2_contract::ExecutionId::new(1).assert_value(),
                 },
-                worker: WorkerRef::new(worker_ref(request.mode)).assert_value(),
+                worker: WorkerRef::new(request.mode.worker_ref()).assert_value(),
                 instructions: None,
                 input: Value::Null,
                 binding,
@@ -683,6 +777,14 @@ async fn run_with_adapter(
 }
 
 async fn admitted(repo: &TempRepo, mode: DeliveryMode) -> crate::native_v2_contract::AdmittedRun {
+    admitted_with_feedback(repo, mode, PullRequestFeedback::Consider).await
+}
+
+async fn admitted_with_feedback(
+    repo: &TempRepo,
+    mode: DeliveryMode,
+    pull_request_feedback: PullRequestFeedback,
+) -> crate::native_v2_contract::AdmittedRun {
     let graph = full_graph(vec![delivery_node(mode), success_node()]);
     let binding = NodeRuntimeBinding::GitDelivery {
         connections: DeclaredConnections::single(
@@ -693,6 +795,7 @@ async fn admitted(repo: &TempRepo, mode: DeliveryMode) -> crate::native_v2_contr
             .assert_value(),
         )
         .assert_value(),
+        pull_request_feedback,
     };
     NativeV2Admission
         .admit(RunSubmission {
@@ -720,18 +823,10 @@ fn target(repo: &TempRepo) -> DeliveryTarget {
     DeliveryTarget::new("acme/project", "main", repo.base.clone()).assert_value()
 }
 
-fn worker_ref(mode: DeliveryMode) -> &'static str {
-    match mode {
-        DeliveryMode::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
-        DeliveryMode::MergeV1 => GIT_DELIVERY_MERGE_WORKER_REF,
-        DeliveryMode::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
-    }
-}
-
 fn delivery_node(mode: DeliveryMode) -> Value {
     let labels = delivery_signal_labels(mode).assert_value();
     json!({
-        "kind":"verifier","name":"deliver","worker":worker_ref(mode),
+        "kind":"verifier","name":"deliver","worker":mode.worker_ref(),
         "input":{"kind":"null"},"output":delivery_result_schema(mode).assert_value(),
         "inputBindings":[],"writeBindings":[],"timeoutMs":1000,"attempts":1,
         "signals":{"delivery":labels},"diagnostic":delivery_diagnostic_schema().assert_value()

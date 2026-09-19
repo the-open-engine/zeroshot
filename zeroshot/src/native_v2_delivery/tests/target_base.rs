@@ -1,5 +1,6 @@
 use super::*;
 use crate::native_v2_candidate::test_support::{commit_all, path_text};
+use std::process::Command;
 
 const WORKFLOW: &str = ".github/workflows/ci.yml";
 const UPDATED_WORKFLOW: &str = "name: updated upstream CI\n";
@@ -116,6 +117,46 @@ impl UpdatedTarget {
             "the original source must remain distinct from the updated review base"
         );
     }
+}
+
+#[tokio::test]
+async fn push_publishes_the_admitted_candidate_without_integrating_target_drift() {
+    let (fixture, authority, adapter) = UpdatedTarget::harness(Script::NoCi);
+
+    let published = run_with_adapter(fixture.request(DeliveryMode::Push), adapter).await;
+
+    let receipt = assert_delivery_signal(&published.outcome, DELIVERY_PUSHED_LABEL);
+    assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 0);
+    assert!(authority.review_requests().is_empty());
+    let head = receipt["headRevision"]
+        .as_str()
+        .expect("push head revision");
+    assert_eq!(fixture.head(), head);
+    assert_eq!(
+        git_output(
+            &fixture.repo.remote,
+            &[
+                "rev-parse",
+                &format!(
+                    "refs/heads/{}",
+                    delivery_branch("updated-target-before-push")
+                )
+            ]
+        ),
+        head
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.repo.workspace.join(WORKFLOW)).assert_value(),
+        "name: original CI\n"
+    );
+    assert!(
+        !Command::new("git")
+            .args(["merge-base", "--is-ancestor", &fixture.revision, head])
+            .current_dir(&fixture.repo.workspace)
+            .status()
+            .assert_value()
+            .success()
+    );
 }
 
 #[tokio::test]

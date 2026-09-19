@@ -3349,6 +3349,9 @@
             "kind": {
               "const": "git_delivery",
               "type": "string"
+            },
+            "pullRequestFeedback": {
+              "$ref": "#/$defs/PullRequestFeedback"
             }
           },
           "required": [
@@ -3663,6 +3666,13 @@
     "PolicyDefault": {
       "enum": [
         "deny"
+      ],
+      "type": "string"
+    },
+    "PullRequestFeedback": {
+      "enum": [
+        "consider",
+        "ignore"
       ],
       "type": "string"
     },

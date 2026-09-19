@@ -130,6 +130,8 @@ fn review_observation(
 ) -> GitHubReviewObservation {
     GitHubReviewObservation {
         state,
+        pull_request_ready: false,
+        head_update_required: false,
         head_revision: review.head_revision.clone(),
         head_branch: review.head_branch.clone(),
         target_branch: review.target_branch.clone(),

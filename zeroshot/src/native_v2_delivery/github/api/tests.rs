@@ -312,6 +312,7 @@ exec /bin/cat "$HOME/payload"
         failed_job_ids: vec![91],
         merge_method: None,
         head_update: None,
+        pull_request_ready: false,
     };
     include_check_logs(&mut snapshot, &[(91, check_log_tail(&output))]);
     let GitHubReviewState::Open {

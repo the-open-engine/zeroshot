@@ -134,7 +134,7 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one `builtin.git-delivery.merge@2` node;
+Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
 pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 binding may declare it. `needs` gates readiness but does not pass output between runs.
 Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
@@ -327,14 +327,17 @@ enum TemplateName {
 }
 
 #[derive(Debug, Args)]
-#[group(id = "delivery_mode", multiple = false)]
 struct DeliveryArgs {
     /// Materialize this template-owned delivery mode.
-    #[arg(long, value_name = "MODE")]
+    #[arg(long, value_name = "MODE", conflicts_with_all = ["push", "pr", "ship"])]
     delivery: Option<String>,
 
+    /// Commit and push the managed run branch without opening a pull request.
+    #[arg(long, conflicts_with_all = ["pr", "ship"])]
+    push: bool,
+
     /// Materialize pull-request delivery for the software-change template.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "ship")]
     pr: bool,
 
     /// Materialize merge delivery for the software-change template.
@@ -342,11 +345,21 @@ struct DeliveryArgs {
     /// Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
     #[arg(long)]
     ship: bool,
+
+    /// Do not route visible pull-request feedback through the autonomous repair loop.
+    #[arg(long)]
+    no_pr_feedback: bool,
 }
 
 impl DeliveryArgs {
-    fn selection(&self) -> (Option<&str>, bool, bool) {
-        (self.delivery.as_deref(), self.pr, self.ship)
+    fn selection(&self) -> (Option<&str>, bool, bool, bool, bool) {
+        (
+            self.delivery.as_deref(),
+            self.push,
+            self.pr,
+            self.ship,
+            self.no_pr_feedback,
+        )
     }
 }
 
@@ -392,7 +405,7 @@ struct TemplateShowArgs {
     (execution or node_instance), and connections. Each connection key maps to the exact
     environment variable names required by that node; never put values in this file.
 
-    Use `zeroshot template show TEMPLATE` to inspect node names. With --pr or --ship, omit the
+    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
     template-owned delivery binding.
 
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,

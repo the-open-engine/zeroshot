@@ -427,7 +427,7 @@ pub enum SessionScope {
 }
 
 mod runtime;
-pub use runtime::{DeclaredConnections, DeclaredEnvironment, NodeRuntimeBinding};
+pub use runtime::{DeclaredConnections, DeclaredEnvironment, NodeRuntimeBinding, PullRequestFeedback};
 
 mod wire;
 pub use wire::{

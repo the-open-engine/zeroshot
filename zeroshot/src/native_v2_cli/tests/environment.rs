@@ -101,6 +101,7 @@ async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
         "--template",
         "software-change",
         "--ship",
+        "--no-pr-feedback",
         "--input",
         files.input.to_str().assert_value(),
         "--runtime-config",
@@ -147,6 +148,10 @@ async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
     assert_eq!(
         runtime.pointer("/nodes/deliver/connections/github/0"),
         Some(&json!("GH_TOKEN"))
+    );
+    assert_eq!(
+        runtime.pointer("/nodes/deliver/pullRequestFeedback"),
+        Some(&json!("ignore"))
     );
     assert_eq!(
         submitted

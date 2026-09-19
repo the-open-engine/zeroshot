@@ -172,6 +172,7 @@ fn token_environment(token: &str) -> ResolvedEnvironment {
             DeclaredEnvironment::new([name.clone()]).assert_value(),
         )
         .assert_value(),
+        pull_request_feedback: Default::default(),
     };
     ResolvedEnvironment::exact(&binding, BTreeMap::from([(name, token.to_owned())])).assert_value()
 }

@@ -10,7 +10,9 @@ use openengine_cluster_protocol::{
 };
 
 use crate::native_v2_admission::MAX_AGENT_VERIFIER_ATTEMPTS;
-use crate::native_v2_contract::{GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_PR_WORKER_REF};
+use crate::native_v2_contract::{
+    GIT_DELIVERY_MERGE_V3_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF, GIT_DELIVERY_PUSH_WORKER_REF,
+};
 use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
 };
@@ -290,17 +292,22 @@ fn accepted_change(
 ) -> Result<GraphNode, BuiltinTemplateError> {
     match delivery {
         TemplateDelivery::None => succeed_null("done"),
+        TemplateDelivery::Push => push_delivery(state),
         TemplateDelivery::PullRequest => pull_request_delivery(state),
         TemplateDelivery::Merge => merge_delivery(state),
     }
 }
 
+fn push_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    delivery_with_repair(state, DeliveryMode::Push, "push_delivery")
+}
+
 fn pull_request_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    delivery_with_repair(state, DeliveryMode::PullRequest, "pull_request_delivery")
+    delivery_with_repair(state, DeliveryMode::PullRequestV2, "pull_request_delivery")
 }
 
 fn merge_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    delivery_with_repair(state, DeliveryMode::Merge, "merge_delivery")
+    delivery_with_repair(state, DeliveryMode::MergeV3, "merge_delivery")
 }
 
 fn delivery_with_repair(
@@ -309,8 +316,12 @@ fn delivery_with_repair(
     name: &str,
 ) -> Result<GraphNode, BuiltinTemplateError> {
     let labels = match mode {
+        DeliveryMode::Push => vec![DELIVERY_REPAIR_REQUIRED_LABEL],
         DeliveryMode::PullRequest => vec![DELIVERY_REPAIR_REQUIRED_LABEL],
-        DeliveryMode::MergeV1 | DeliveryMode::Merge => vec![
+        DeliveryMode::PullRequestV2
+        | DeliveryMode::MergeV1
+        | DeliveryMode::Merge
+        | DeliveryMode::MergeV3 => vec![
             DELIVERY_CI_FAILED_LABEL,
             DELIVERY_CONFLICT_LABEL,
             DELIVERY_REPAIR_REQUIRED_LABEL,
@@ -509,16 +520,20 @@ fn verdict_labels() -> Result<NonEmptyEnumSet, BuiltinTemplateError> {
 fn delivery_mode(delivery: TemplateDelivery) -> Option<DeliveryMode> {
     match delivery {
         TemplateDelivery::None => None,
-        TemplateDelivery::PullRequest => Some(DeliveryMode::PullRequest),
-        TemplateDelivery::Merge => Some(DeliveryMode::Merge),
+        TemplateDelivery::Push => Some(DeliveryMode::Push),
+        TemplateDelivery::PullRequest => Some(DeliveryMode::PullRequestV2),
+        TemplateDelivery::Merge => Some(DeliveryMode::MergeV3),
     }
 }
 
 fn delivery_worker(mode: DeliveryMode) -> &'static str {
     match mode {
-        DeliveryMode::PullRequest => GIT_DELIVERY_PR_WORKER_REF,
-        DeliveryMode::Merge => GIT_DELIVERY_MERGE_V2_WORKER_REF,
-        DeliveryMode::MergeV1 => unreachable!("built-in templates never author merge@1"),
+        DeliveryMode::Push => GIT_DELIVERY_PUSH_WORKER_REF,
+        DeliveryMode::PullRequestV2 => GIT_DELIVERY_PR_V2_WORKER_REF,
+        DeliveryMode::MergeV3 => GIT_DELIVERY_MERGE_V3_WORKER_REF,
+        DeliveryMode::PullRequest | DeliveryMode::MergeV1 | DeliveryMode::Merge => {
+            unreachable!("built-in templates author only current delivery workers")
+        }
     }
 }
 
