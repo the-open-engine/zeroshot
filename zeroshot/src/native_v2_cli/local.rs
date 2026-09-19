@@ -811,8 +811,8 @@ mod recovery_claim_tests {
         let root = TestDirectory::new(name);
         let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
         let successor_run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000002");
-        std::fs::create_dir_all(root.child("runs").join(run_id.as_str())).assert_value();
         let backend = backend(root.path()).with_ready_timeout(Duration::ZERO);
+        backend.create_run_storage(&run_id).assert_value();
         let submission = submission(submission_key);
         backend
             .write_recovery_document(
@@ -826,8 +826,7 @@ mod recovery_claim_tests {
                 },
             )
             .assert_value();
-        let successor_storage = backend.run_storage(&successor_run_id).assert_value();
-        std::fs::create_dir_all(&successor_storage).assert_value();
+        let successor_storage = backend.create_run_storage(&successor_run_id).assert_value();
         ResumeClaimFixture {
             _root: root,
             backend,
