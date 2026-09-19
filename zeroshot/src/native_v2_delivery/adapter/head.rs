@@ -174,6 +174,7 @@ impl NativeV2DeliveryAdapter {
                 target: &self.config.target,
                 head_branch: &drive.review.head_branch,
                 known_review: Some(&drive.review),
+                include_review: true,
             };
             match self
                 .authority

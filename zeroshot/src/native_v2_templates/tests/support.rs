@@ -256,34 +256,50 @@ pub(super) fn settled_delivery_with_diagnostic(
 }
 
 pub(super) fn delivery_receipt(mode: DeliveryMode, outcome: &str) -> serde_json::Value {
-    let (version, mode, merge_revision) = match mode {
-        DeliveryMode::PullRequest => ("v1", "pr", None),
-        DeliveryMode::MergeV1 => ("v1", "merge", None),
-        DeliveryMode::Merge => (
-            "v2",
-            "merge",
-            Some(
-                if outcome == crate::native_v2_delivery::DELIVERY_MERGED_LABEL {
-                    "c".repeat(40)
-                } else {
-                    String::new()
-                },
-            ),
-        ),
-    };
+    let (version, mode_name) = delivery_metadata(mode);
+    let merge_revision = delivery_merge_revision(mode, outcome);
     let mut receipt = json!({
         "version":version,
-        "mode":mode,
+        "mode":mode_name,
         "outcome":outcome,
         "repository":"acme/project",
         "targetBranch":"main",
         "headRevision":"b".repeat(40),
-        "pullRequestId":"17"
     });
+    if mode_name == "push" {
+        receipt["headBranch"] = json!("zeroshot/v2-test");
+    } else {
+        receipt["pullRequestId"] = json!("17");
+    }
     if let Some(merge_revision) = merge_revision {
         receipt["mergeRevision"] = json!(merge_revision);
     }
     receipt
+}
+
+fn delivery_metadata(mode: DeliveryMode) -> (&'static str, &'static str) {
+    match mode {
+        DeliveryMode::Push => ("v1", "push"),
+        DeliveryMode::PullRequest => ("v1", "pr"),
+        DeliveryMode::PullRequestV2 => ("v2", "pr"),
+        DeliveryMode::MergeV1 => ("v1", "merge"),
+        DeliveryMode::Merge => ("v2", "merge"),
+        DeliveryMode::MergeV3 => ("v3", "merge"),
+    }
+}
+
+fn delivery_merge_revision(mode: DeliveryMode, outcome: &str) -> Option<String> {
+    matches!(
+        mode,
+        DeliveryMode::MergeV1 | DeliveryMode::Merge | DeliveryMode::MergeV3
+    )
+    .then(|| {
+        if outcome == crate::native_v2_delivery::DELIVERY_MERGED_LABEL {
+            "c".repeat(40)
+        } else {
+            String::new()
+        }
+    })
 }
 
 pub(super) struct SettledExecutionSpec<'a> {

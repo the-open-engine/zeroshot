@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::native_v2_contract::{
-    AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF, NodeRuntimeBinding, RunSubmission,
-    RunSubmissionIntent, RuntimePlan,
+    AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_V3_WORKER_REF,
+    NodeRuntimeBinding, RunSubmission, RunSubmissionIntent, RuntimePlan,
 };
 use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
@@ -138,7 +138,12 @@ impl NativeV2Admission {
             .await?;
         let has_merge = executable_declarations(&graph.root)
             .iter()
-            .any(|declaration| declaration.worker.as_str() == GIT_DELIVERY_MERGE_V2_WORKER_REF);
+            .any(|declaration| {
+                matches!(
+                    declaration.worker.as_str(),
+                    GIT_DELIVERY_MERGE_V2_WORKER_REF | GIT_DELIVERY_MERGE_V3_WORKER_REF
+                )
+            });
         if !has_merge {
             return Err(NativeV2AdmissionError::MergeDeliveryRequired);
         }

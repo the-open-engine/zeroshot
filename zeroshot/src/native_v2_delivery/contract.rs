@@ -8,11 +8,12 @@ use crate::native_v2_runner::{NodeResponseContract, NodeRunnerError};
 
 use super::{
     DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL, DELIVERY_HEAD_REVISION_FIELD,
-    DELIVERY_MERGED_LABEL, DELIVERY_MERGE_REVISION_FIELD, DELIVERY_MODE_FIELD,
-    DELIVERY_OPENED_LABEL, DELIVERY_OUTCOME_FIELD, DELIVERY_PULL_REQUEST_ID_FIELD,
-    DELIVERY_REPOSITORY_FIELD, DELIVERY_SIGNAL_FIELD, DELIVERY_TARGET_BRANCH_FIELD,
-    DELIVERY_VERSION_FIELD, DELIVERY_REPAIR_REQUIRED_LABEL, DeliveryMode, DeliveryTarget,
-    valid_review_id, valid_revision,
+    DELIVERY_HEAD_BRANCH_FIELD, DELIVERY_MERGED_LABEL, DELIVERY_MERGE_REVISION_FIELD,
+    DELIVERY_MODE_FIELD, DELIVERY_OPENED_LABEL, DELIVERY_OUTCOME_FIELD,
+    DELIVERY_PULL_REQUEST_ID_FIELD, DELIVERY_PUSHED_LABEL, DELIVERY_READY_LABEL,
+    DELIVERY_REPAIR_REQUIRED_LABEL, DELIVERY_REPOSITORY_FIELD, DELIVERY_SIGNAL_FIELD,
+    DELIVERY_TARGET_BRANCH_FIELD, DELIVERY_VERSION_FIELD, DeliveryMode, DeliveryTarget,
+    valid_branch, valid_review_id, valid_revision,
 };
 
 pub fn validate_delivery_contract(
@@ -86,12 +87,31 @@ fn receipt_matches_target(
         && result.target_branch == target.target_branch
         && valid_revision(&result.head_revision)
         && result.head_revision != target.base_revision
-        && valid_review_id(&result.pull_request_id)
-        && match mode {
-            DeliveryMode::PullRequest => result.merge_revision.is_none(),
-            DeliveryMode::MergeV1 => result.merge_revision.is_none(),
-            DeliveryMode::Merge => result.merge_revision.as_deref().is_some_and(valid_revision),
+        && receipt_mode_matches(result, mode)
+}
+
+fn receipt_mode_matches(result: &DeliveryResultWire, mode: DeliveryMode) -> bool {
+    match mode {
+        DeliveryMode::Push => {
+            result.head_branch.as_deref().is_some_and(valid_branch)
+                && result.pull_request_id.is_none()
+                && result.merge_revision.is_none()
         }
+        DeliveryMode::PullRequest | DeliveryMode::PullRequestV2 | DeliveryMode::MergeV1 => {
+            valid_pull_request_receipt(result) && result.merge_revision.is_none()
+        }
+        DeliveryMode::Merge | DeliveryMode::MergeV3 => {
+            valid_pull_request_receipt(result)
+                && result.merge_revision.as_deref().is_some_and(valid_revision)
+        }
+    }
+}
+
+fn valid_pull_request_receipt(result: &DeliveryResultWire) -> bool {
+    result
+        .pull_request_id
+        .as_deref()
+        .is_some_and(valid_review_id)
 }
 
 #[derive(Deserialize)]
@@ -103,7 +123,8 @@ struct DeliveryResultWire {
     repository: String,
     target_branch: String,
     head_revision: String,
-    pull_request_id: String,
+    head_branch: Option<String>,
+    pull_request_id: Option<String>,
     merge_revision: Option<String>,
 }
 
@@ -132,8 +153,18 @@ fn delivery_identity_fields(
         contract_field(DELIVERY_REPOSITORY_FIELD, PayloadType::String)?,
         contract_field(DELIVERY_TARGET_BRANCH_FIELD, PayloadType::String)?,
         contract_field(DELIVERY_HEAD_REVISION_FIELD, PayloadType::String)?,
-        contract_field(DELIVERY_PULL_REQUEST_ID_FIELD, PayloadType::String)?,
     ];
+    if mode == DeliveryMode::Push {
+        fields.push(contract_field(
+            DELIVERY_HEAD_BRANCH_FIELD,
+            PayloadType::String,
+        )?);
+    } else {
+        fields.push(contract_field(
+            DELIVERY_PULL_REQUEST_ID_FIELD,
+            PayloadType::String,
+        )?);
+    }
     if mode.includes_merge_revision() {
         fields.push(contract_field(
             DELIVERY_MERGE_REVISION_FIELD,
@@ -166,8 +197,14 @@ pub(crate) fn delivery_signal_labels(
 
 fn signal_labels(mode: DeliveryMode, repair: bool) -> Result<NonEmptyEnumSet, ContractValueError> {
     let mut labels = match mode {
+        DeliveryMode::Push => vec![DELIVERY_PUSHED_LABEL],
         DeliveryMode::PullRequest => vec![DELIVERY_OPENED_LABEL],
-        DeliveryMode::MergeV1 | DeliveryMode::Merge => vec![
+        DeliveryMode::PullRequestV2 => vec![
+            DELIVERY_READY_LABEL,
+            DELIVERY_CONFLICT_LABEL,
+            DELIVERY_CI_FAILED_LABEL,
+        ],
+        DeliveryMode::MergeV1 | DeliveryMode::Merge | DeliveryMode::MergeV3 => vec![
             DELIVERY_MERGED_LABEL,
             DELIVERY_CONFLICT_LABEL,
             DELIVERY_CI_FAILED_LABEL,

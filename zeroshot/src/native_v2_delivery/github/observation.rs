@@ -18,12 +18,15 @@ pub(super) async fn observe(
     request: GitHubDeliveryRead<'_>,
     credential: GitHubCredential<'_>,
 ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
-    let identity = match request
-        .known_review
-        .filter(|review| !review.review_id.is_empty())
-    {
-        Some(review) => Some(review.clone()),
-        None => find_identity(authority, request, credential).await?,
+    let identity = match (
+        request.include_review,
+        request
+            .known_review
+            .filter(|review| !review.review_id.is_empty()),
+    ) {
+        (false, _) => None,
+        (true, Some(review)) => Some(review.clone()),
+        (true, None) => find_identity(authority, request, credential).await?,
     };
     let review = match identity {
         Some(identity) => Some(observe_review(authority, request, &identity, credential).await?),

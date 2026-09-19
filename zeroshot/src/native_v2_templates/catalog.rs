@@ -54,9 +54,21 @@ impl BuiltinGraphTemplate {
         }
     }
 
+    #[cfg(any(test, feature = "ui"))]
     pub(crate) fn delivery_runtime_binding(
         self,
         delivery: TemplateDelivery,
+    ) -> Result<Option<(NodeName, NodeRuntimeBinding)>, BuiltinTemplateError> {
+        self.delivery_runtime_binding_with_feedback(
+            delivery,
+            crate::native_v2_contract::PullRequestFeedback::Consider,
+        )
+    }
+
+    pub(crate) fn delivery_runtime_binding_with_feedback(
+        self,
+        delivery: TemplateDelivery,
+        pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
     ) -> Result<Option<(NodeName, NodeRuntimeBinding)>, BuiltinTemplateError> {
         self.validate_delivery(delivery)?;
         if delivery == TemplateDelivery::None {
@@ -68,7 +80,10 @@ impl BuiltinGraphTemplate {
         let connections = static_value(DeclaredConnections::new([(connection_key, environment)]))?;
         Ok(Some((
             node_name(DELIVERY_NODE)?,
-            NodeRuntimeBinding::GitDelivery { connections },
+            NodeRuntimeBinding::GitDelivery {
+                connections,
+                pull_request_feedback,
+            },
         )))
     }
 
@@ -88,6 +103,7 @@ impl BuiltinGraphTemplate {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TemplateDelivery {
     None,
+    Push,
     PullRequest,
     Merge,
 }
@@ -97,6 +113,7 @@ impl TemplateDelivery {
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::None => "none",
+            Self::Push => "push",
             Self::PullRequest => "pull_request",
             Self::Merge => "merge",
         }

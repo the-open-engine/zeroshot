@@ -108,6 +108,7 @@ impl NodeDriver for FenceProbe {
         invocation.node.worker = WorkerRef::new(GIT_DELIVERY_PR_WORKER_REF).assert_value();
         invocation.node.binding = NodeRuntimeBinding::GitDelivery {
             connections: DeclaredConnections::empty(),
+            pull_request_feedback: Default::default(),
         };
         // A malformed input provides an ordinary outcome that failed cleanup must override.
         invocation.node.input = serde_json::json!(17);

@@ -295,6 +295,7 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
             .assert_value(),
         )
         .assert_value(),
+        pull_request_feedback: Default::default(),
     };
     let repair = NodeRuntimeBinding::Agent {
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value(),

@@ -273,7 +273,7 @@ struct RunSelectionArgs<'a> {
     template: Option<TemplateName>,
     exact: Option<PathBuf>,
     uniform: Option<PathBuf>,
-    delivery: (Option<&'a str>, bool, bool),
+    delivery: (Option<&'a str>, bool, bool, bool, bool),
 }
 
 fn run_selection(args: RunSelectionArgs<'_>) -> Result<RunSelection, NativeV2CliError> {
@@ -320,7 +320,11 @@ fn selection_shape(args: &RunSelectionArgs<'_>) -> (bool, bool, bool) {
     (
         args.graph.is_some() | args.template.is_some(),
         args.exact.is_some() | args.uniform.is_some(),
-        args.delivery.0.is_some() | args.delivery.1 | args.delivery.2,
+        args.delivery.0.is_some()
+            | args.delivery.1
+            | args.delivery.2
+            | args.delivery.3
+            | args.delivery.4,
     )
 }
 
@@ -390,23 +394,35 @@ fn run_route(
 fn run_graph(
     graph: Option<PathBuf>,
     template: Option<TemplateName>,
-    delivery: (Option<&str>, bool, bool),
+    delivery: (Option<&str>, bool, bool, bool, bool),
 ) -> Result<RunGraph, NativeV2CliError> {
-    let (delivery, pr, ship) = delivery;
+    let (delivery, push, pr, ship, no_pr_feedback) = delivery;
     match (graph, template) {
-        (Some(path), None) if delivery.is_none() && !pr && !ship => Ok(RunGraph::File(path)),
+        (Some(path), None)
+            if delivery_options_empty((delivery, push, pr, ship, no_pr_feedback)) =>
+        {
+            Ok(RunGraph::File(path))
+        }
         (Some(_), None) => Err(usage(
-            "--pr and --ship require --template software-change; author delivery in custom graphs",
+            "delivery flags require --template software-change; author delivery in custom graphs",
         )),
         (None, Some(template)) => {
             let template = template.into_template()?;
+            let delivery = template_delivery(template, (delivery, push, pr, ship, no_pr_feedback))?;
             Ok(RunGraph::Template {
                 template,
-                delivery: template_delivery(template, (delivery, pr, ship))?,
+                delivery,
+                ignore_pr_feedback: no_pr_feedback,
             })
         }
         _ => Err(usage("exactly one of --graph or --template is required")),
     }
+}
+
+fn delivery_options_empty(
+    (delivery, push, pr, ship, no_pr_feedback): (Option<&str>, bool, bool, bool, bool),
+) -> bool {
+    delivery.is_none() && !(push || pr || ship || no_pr_feedback)
 }
 
 fn submission_key(
@@ -469,23 +485,77 @@ impl AttachArgs {
 
 fn template_delivery(
     template: BuiltinGraphTemplate,
-    (selected, pr, ship): (Option<&str>, bool, bool),
+    (selected, push, pr, ship, no_pr_feedback): (Option<&str>, bool, bool, bool, bool),
 ) -> Result<TemplateDelivery, NativeV2CliError> {
-    let delivery = match (selected, pr, ship) {
-        (Some("none"), false, false) | (None, false, false) => TemplateDelivery::None,
-        (Some("pull_request"), false, false) | (None, true, false) => TemplateDelivery::PullRequest,
-        (Some("merge"), false, false) | (None, false, true) => TemplateDelivery::Merge,
-        (Some(mode), false, false) => {
-            return Err(usage(format!("unknown template delivery mode {mode:?}")));
-        }
-        _ => return Err(usage("--delivery, --pr, and --ship are mutually exclusive")),
-    };
+    let delivery = selected_delivery(selected, push, pr, ship)?;
+    validate_template_delivery(template, delivery, no_pr_feedback)?;
+    Ok(delivery)
+}
+
+fn selected_delivery(
+    selected: Option<&str>,
+    push: bool,
+    pr: bool,
+    ship: bool,
+) -> Result<TemplateDelivery, NativeV2CliError> {
+    if selected.is_some() && (push || pr || ship) {
+        return Err(exclusive_delivery_error());
+    }
+    match selected {
+        Some(mode) => named_delivery(mode),
+        None => flagged_delivery(push, pr, ship),
+    }
+}
+
+fn validate_template_delivery(
+    template: BuiltinGraphTemplate,
+    delivery: TemplateDelivery,
+    no_pr_feedback: bool,
+) -> Result<(), NativeV2CliError> {
+    if no_pr_feedback && !delivery_supports_feedback(delivery) {
+        return Err(usage("--no-pr-feedback requires --pr or --ship"));
+    }
     if template == BuiltinGraphTemplate::SingleWorker && delivery != TemplateDelivery::None {
         return Err(usage(
-            "--pr and --ship are valid only with --template software-change",
+            "delivery flags are valid only with --template software-change",
         ));
     }
-    Ok(delivery)
+    Ok(())
+}
+
+fn named_delivery(mode: &str) -> Result<TemplateDelivery, NativeV2CliError> {
+    match mode {
+        "none" => Ok(TemplateDelivery::None),
+        "push" => Ok(TemplateDelivery::Push),
+        "pull_request" => Ok(TemplateDelivery::PullRequest),
+        "merge" => Ok(TemplateDelivery::Merge),
+        _ => Err(usage(format!("unknown template delivery mode {mode:?}"))),
+    }
+}
+
+fn flagged_delivery(
+    push: bool,
+    pr: bool,
+    ship: bool,
+) -> Result<TemplateDelivery, NativeV2CliError> {
+    match (push, pr, ship) {
+        (false, false, false) => Ok(TemplateDelivery::None),
+        (true, false, false) => Ok(TemplateDelivery::Push),
+        (false, true, false) => Ok(TemplateDelivery::PullRequest),
+        (false, false, true) => Ok(TemplateDelivery::Merge),
+        _ => Err(exclusive_delivery_error()),
+    }
+}
+
+fn delivery_supports_feedback(delivery: TemplateDelivery) -> bool {
+    matches!(
+        delivery,
+        TemplateDelivery::PullRequest | TemplateDelivery::Merge
+    )
+}
+
+fn exclusive_delivery_error() -> NativeV2CliError {
+    usage("--delivery, --push, --pr, and --ship are mutually exclusive")
 }
 
 fn required_target(target: String) -> Result<String, NativeV2CliError> {

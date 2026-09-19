@@ -75,6 +75,12 @@ fn policy_page(
                     "isInMergeQueue": false,
                     "isMergeQueueEnabled": false,
                     "baseRefName": "main",
+                    "baseRef": {
+                        "name": "main",
+                        "refUpdateRule": {
+                            "requiredStatusCheckContexts": []
+                        }
+                    },
                     "headRefName": "zeroshot/v2-run",
                     "headRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                     "commits": {
@@ -138,13 +144,30 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
 
 #[test]
 fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() {
-    let absent = classify(policy_page("MERGEABLE", "BLOCKED", None, (false, None)));
+    let mut approval_blocked = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
+    approval_blocked["data"]["repository"]["pullRequest"]["reviewDecision"] =
+        json!("REVIEW_REQUIRED");
+    approval_blocked["data"]["repository"]["pullRequest"]["baseRef"]["refUpdateRule"]["requiredStatusCheckContexts"] =
+        json!(["required-ci"]);
+    let absent = classify(approval_blocked);
     assert_eq!(
         absent.state,
         GitHubReviewState::Open {
             checks: GitHubChecks::Pending
         }
     );
+    assert!(!absent.pull_request_ready);
+
+    let mut no_ci = policy_page("MERGEABLE", "BLOCKED", None, (false, None));
+    no_ci["data"]["repository"]["pullRequest"]["reviewDecision"] = json!("REVIEW_REQUIRED");
+    let no_ci = classify(no_ci);
+    assert_eq!(
+        no_ci.state,
+        GitHubReviewState::Open {
+            checks: GitHubChecks::NotRequired
+        }
+    );
+    assert!(no_ci.pull_request_ready);
 
     let queued = classify(policy_page(
         "MERGEABLE",
@@ -158,6 +181,33 @@ fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() 
             checks: GitHubChecks::Pending
         }
     );
+
+    let mut approval_blocked_ready = policy_page(
+        "MERGEABLE",
+        "BLOCKED",
+        Some(vec![check_run(
+            "required-ci",
+            "COMPLETED",
+            Some("SUCCESS"),
+            true,
+        )]),
+        (false, Some("ready")),
+    );
+    approval_blocked_ready["data"]["repository"]["pullRequest"]["reviewDecision"] =
+        json!("REVIEW_REQUIRED");
+    *approval_blocked_ready
+        .pointer_mut(
+            "/data/repository/pullRequest/baseRef/refUpdateRule/requiredStatusCheckContexts",
+        )
+        .assert_value() = json!(["required-ci"]);
+    let approval_blocked_ready = classify(approval_blocked_ready);
+    assert_eq!(
+        approval_blocked_ready.state,
+        GitHubReviewState::Open {
+            checks: GitHubChecks::Passed
+        }
+    );
+    assert!(approval_blocked_ready.pull_request_ready);
 
     let ready = classify(policy_page(
         "MERGEABLE",
@@ -176,6 +226,7 @@ fn delayed_required_workflow_registration_stays_pending_until_github_is_ready() 
             checks: GitHubChecks::Passed
         }
     );
+    assert!(!ready.pull_request_ready);
 }
 
 #[test]

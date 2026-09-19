@@ -9,6 +9,15 @@ pub struct GitHubHeadSynchronization<'a> {
 
 impl GitHubReviewReceipt {
     pub(crate) fn observation(&self, state: GitHubReviewState) -> GitHubReviewObservation {
+        self.observation_with_readiness(state, false, false)
+    }
+
+    pub(crate) fn observation_with_readiness(
+        &self,
+        state: GitHubReviewState,
+        pull_request_ready: bool,
+        head_update_required: bool,
+    ) -> GitHubReviewObservation {
         GitHubReviewObservation {
             review_id: self.review_id.clone(),
             repository: self.repository.clone(),
@@ -16,6 +25,8 @@ impl GitHubReviewReceipt {
             head_branch: self.head_branch.clone(),
             head_revision: self.head_revision.clone(),
             state,
+            pull_request_ready,
+            head_update_required,
         }
     }
 }
@@ -53,6 +64,7 @@ pub struct GitHubDeliveryRead<'a> {
     pub target: &'a super::DeliveryTarget,
     pub head_branch: &'a str,
     pub known_review: Option<&'a GitHubReviewReceipt>,
+    pub include_review: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

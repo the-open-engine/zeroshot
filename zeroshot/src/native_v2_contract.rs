@@ -15,20 +15,27 @@ use openengine_cluster_protocol::{
 };
 pub use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, ConnectionKey, DeclaredConnections,
-    DeclaredEnvironment, EnvironmentVariableName, ModelId, NodeRuntimeBinding, ReasoningEffort,
-    ResolvedSource, RunSize, RunSubmission, RunTitle, RuntimePlan, SessionScope, SourceBranchId,
-    SourceRepositoryId, SourceRevisionId, MAX_DECLARED_CONNECTIONS, MAX_DECLARED_ENVIRONMENT_NAMES,
+    DeclaredEnvironment, EnvironmentVariableName, ModelId, NodeRuntimeBinding, PullRequestFeedback,
+    ReasoningEffort, ResolvedSource, RunSize, RunSubmission, RunTitle, RuntimePlan, SessionScope,
+    SourceBranchId, SourceRepositoryId, SourceRevisionId, MAX_DECLARED_CONNECTIONS,
+    MAX_DECLARED_ENVIRONMENT_NAMES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-/// Graph-visible PR delivery worker backed by the shared Git delivery implementation.
+/// Graph-visible push-only delivery worker.
+pub const GIT_DELIVERY_PUSH_WORKER_REF: &str = "builtin.git-delivery.push@1";
+/// Legacy open-only PR delivery worker.
 pub const GIT_DELIVERY_PR_WORKER_REF: &str = "builtin.git-delivery.pr@1";
+/// PR delivery that waits for technical readiness and considers feedback.
+pub const GIT_DELIVERY_PR_V2_WORKER_REF: &str = "builtin.git-delivery.pr@2";
 /// Graph-visible merge delivery worker backed by the shared Git delivery implementation.
 pub const GIT_DELIVERY_MERGE_WORKER_REF: &str = "builtin.git-delivery.merge@1";
 /// Merge delivery with an authoritative merge revision in its v2 receipt.
 pub const GIT_DELIVERY_MERGE_V2_WORKER_REF: &str = "builtin.git-delivery.merge@2";
+/// Feedback-aware merge delivery with an authoritative v3 receipt.
+pub const GIT_DELIVERY_MERGE_V3_WORKER_REF: &str = "builtin.git-delivery.merge@3";
 /// Conventional connection key used by built-in GitHub checkout and delivery behavior.
 pub const GITHUB_CONNECTION_KEY: &str = "github";
 

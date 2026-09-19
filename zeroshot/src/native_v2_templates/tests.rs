@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_contract::RunSubmissionIntent;
-use crate::native_v2_delivery::{DELIVERY_MERGED_LABEL, DELIVERY_OPENED_LABEL};
+use crate::native_v2_delivery::{DELIVERY_MERGED_LABEL, DELIVERY_PUSHED_LABEL, DELIVERY_READY_LABEL};
 use crate::full_v1_reducer::{
     Decision, DurableExecution, FullV1Reducer, Reduction, ReductionInput, TerminalProjection,
 };
@@ -92,6 +92,18 @@ async fn every_supported_materialization_is_admissible() {
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
+            TemplateDelivery::Push,
+            vec![
+                "acceptance",
+                "code",
+                "deliver",
+                "delivery_repair",
+                "review_repair",
+                "worker",
+            ],
+        ),
+        (
+            BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::PullRequest,
             vec![
                 "acceptance",
@@ -133,6 +145,7 @@ async fn every_supported_materialization_is_admissible() {
 fn software_change_has_one_global_ten_cycle_budget() {
     for delivery in [
         TemplateDelivery::None,
+        TemplateDelivery::Push,
         TemplateDelivery::PullRequest,
         TemplateDelivery::Merge,
     ] {
@@ -353,7 +366,11 @@ async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
 
 #[tokio::test]
 async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
-    for delivery in [TemplateDelivery::None, TemplateDelivery::PullRequest] {
+    for delivery in [
+        TemplateDelivery::None,
+        TemplateDelivery::Push,
+        TemplateDelivery::PullRequest,
+    ] {
         let (verified, initial_input) = verified_software_template(delivery).await;
         let reviews = accepted_review_history(delivery);
         let worker_history = [settled_worker()];
@@ -371,7 +388,12 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
             continue;
         }
         assert_dispatched_together(&reviewed, &[DELIVERY_NODE]);
-        let receipt = delivery_receipt(DeliveryMode::PullRequest, DELIVERY_OPENED_LABEL);
+        let (mode, outcome) = match delivery {
+            TemplateDelivery::Push => (DeliveryMode::Push, DELIVERY_PUSHED_LABEL),
+            TemplateDelivery::PullRequest => (DeliveryMode::PullRequestV2, DELIVERY_READY_LABEL),
+            _ => unreachable!(),
+        };
+        let receipt = delivery_receipt(mode, outcome);
         let mut delivered = reviews;
         delivered.push(settled_delivery(
             SettledExecutionSpec {
@@ -381,8 +403,8 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
                 settled_at: 4,
                 input: delivery_input(),
             },
-            DeliveryMode::PullRequest,
-            DELIVERY_OPENED_LABEL,
+            mode,
+            outcome,
         ));
         assert_eq!(
             reduce(&verified, &initial_input, &delivered).terminal,
@@ -423,7 +445,7 @@ async fn assert_recoverable_delivery(recoverable: &str) {
             settled_at: 4,
             input: delivery_input(),
         },
-        DeliveryMode::Merge,
+        DeliveryMode::MergeV3,
         recoverable,
         &delivery_feedback,
     ));
@@ -553,10 +575,10 @@ fn assert_repaired_reviews_then_merge(
             settled_at: 11,
             input: repaired_delivery_input(),
         },
-        DeliveryMode::Merge,
+        DeliveryMode::MergeV3,
         DELIVERY_MERGED_LABEL,
     ));
-    let receipt = delivery_receipt(DeliveryMode::Merge, DELIVERY_MERGED_LABEL);
+    let receipt = delivery_receipt(DeliveryMode::MergeV3, DELIVERY_MERGED_LABEL);
     assert_eq!(
         reduce(verified, initial_input, history).terminal,
         Some(TerminalProjection::Succeeded { output: receipt })
@@ -713,7 +735,7 @@ async fn pull_request_delivery_routes_a_pre_review_git_failure_to_repair() {
             settled_at: 4,
             input: delivery_input(),
         },
-        DeliveryMode::PullRequest,
+        DeliveryMode::PullRequestV2,
         DELIVERY_REPAIR_REQUIRED_LABEL,
         "git push: unfamiliar failure",
     ));

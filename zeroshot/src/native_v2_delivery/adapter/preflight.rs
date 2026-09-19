@@ -12,6 +12,13 @@ pub(super) struct OperationContext<'a, 'environment> {
     pub(super) retry: &'a mut OperationRetry,
 }
 
+struct ObservedPreflight<'a, 'invocation, 'environment> {
+    known: &'a DeliveryState,
+    observed: GitHubReviewReceipt,
+    preparation: &'a mut DeliveryPreparation<'invocation, 'environment>,
+    commit_message: &'a str,
+}
+
 impl<'environment> DeliveryPreparation<'_, 'environment> {
     pub(super) fn operation_context<'a>(
         &'a mut self,
@@ -44,6 +51,7 @@ pub(super) struct DeliveryState {
     pub(super) intended_push: Option<String>,
     pub(super) pending_head: Option<head::PendingHead>,
     pub(super) review_base_revision: Option<String>,
+    pub(super) feedback_versions: BTreeMap<String, String>,
 }
 
 impl NativeV2DeliveryAdapter {
@@ -64,6 +72,30 @@ impl NativeV2DeliveryAdapter {
         state.pending_head = None;
     }
 
+    pub(super) fn checkpoint_feedback(
+        &self,
+        feedback: GitHubReviewFeedback,
+    ) -> Vec<GitHubReviewFeedbackItem> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut unseen = Vec::new();
+        for item in feedback.items {
+            let changed = state
+                .feedback_versions
+                .get(&item.key)
+                .is_none_or(|version| version != &item.version);
+            state
+                .feedback_versions
+                .insert(item.key.clone(), item.version.clone());
+            if changed {
+                unseen.push(item);
+            }
+        }
+        unseen
+    }
+
     pub(super) async fn preflight(
         &self,
         preparation: &mut DeliveryPreparation<'_, '_>,
@@ -71,28 +103,65 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<(), DeliveryStop> {
         let branch = delivery_branch(preparation.invocation.node.reference.run_id.as_str());
         let known = self.delivery_state();
+        let mode = DeliveryMode::from_worker(&preparation.invocation.node.worker)
+            .ok_or(NodeRunnerError::InvalidRole)?;
         let request = GitHubDeliveryRead {
             target: &self.config.target,
             head_branch: &branch,
             known_review: known.published.as_ref(),
+            include_review: mode.creates_review(),
         };
         let snapshot = self.observe_before_delivery(request, preparation).await?;
         self.check_terminal_review(&snapshot, preparation).await?;
         let Some(observed) = observed_receipt(snapshot, &self.config.target, &branch) else {
-            if known.published.is_some() {
-                return self
-                    .refuse_delivery(
-                        preparation.control,
-                        "the published run branch was deleted; work was preserved",
-                    )
-                    .await;
-            }
             return self
-                .reconcile_target_before_publication(preparation, commit_message)
+                .unpublished_preflight(&known, preparation, commit_message)
                 .await;
         };
+        self.reconcile_observed(ObservedPreflight {
+            known: &known,
+            observed,
+            preparation,
+            commit_message,
+        })
+        .await
+    }
+
+    async fn unpublished_preflight(
+        &self,
+        known: &DeliveryState,
+        preparation: &mut DeliveryPreparation<'_, '_>,
+        commit_message: &str,
+    ) -> Result<(), DeliveryStop> {
+        if known.published.is_some() {
+            return self
+                .refuse_delivery(
+                    preparation.control,
+                    "the published run branch was deleted; work was preserved",
+                )
+                .await;
+        }
+        if DeliveryMode::from_worker(&preparation.invocation.node.worker)
+            == Some(DeliveryMode::Push)
+        {
+            return Ok(());
+        }
+        self.reconcile_target_before_publication(preparation, commit_message)
+            .await
+    }
+
+    async fn reconcile_observed(
+        &self,
+        context: ObservedPreflight<'_, '_, '_>,
+    ) -> Result<(), DeliveryStop> {
+        let ObservedPreflight {
+            known,
+            observed,
+            preparation,
+            commit_message,
+        } = context;
         let published = self
-            .require_reconciliation_anchor(&known, &observed, preparation.control)
+            .require_reconciliation_anchor(known, &observed, preparation.control)
             .await?;
         let authorized_update = known.pending_head.as_ref().is_some_and(|pending| {
             pending
@@ -249,7 +318,7 @@ impl NativeV2DeliveryAdapter {
             .map_err(|error| recovery::repair(error.to_string()))?;
         let mode = DeliveryMode::from_worker(&preparation.invocation.node.worker)
             .ok_or(NodeRunnerError::InvalidRole)?;
-        if dirty || head != review.head_revision || mode == DeliveryMode::PullRequest {
+        if dirty || head != review.head_revision || !mode.is_merge() {
             return self.refuse_delivery(preparation.control,
                 "the run PR is already merged, but current local work is not confirmed delivered; work was preserved")
                 .await;

@@ -5,7 +5,7 @@ use tokio::time::timeout;
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
 
-const MAX_API_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_API_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_API_ERROR_BYTES: usize = 64 * 1024;
 const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
 const MAX_CHECK_LOG_TAIL_BYTES: usize = 64 * 1024;

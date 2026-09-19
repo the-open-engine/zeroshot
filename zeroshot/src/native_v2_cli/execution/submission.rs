@@ -273,9 +273,9 @@ where
 fn materialize_graph(selection: &RunGraph) -> Result<GraphSpec, NativeV2CliError> {
     match selection {
         RunGraph::File(path) => read_json("graph", path),
-        RunGraph::Template { template, delivery } => {
-            template.materialize(*delivery).map_err(template_error)
-        }
+        RunGraph::Template {
+            template, delivery, ..
+        } => template.materialize(*delivery).map_err(template_error),
     }
 }
 
@@ -284,24 +284,48 @@ fn materialize_runtime(
     graph: &GraphSpec,
     source: &RunRuntime,
 ) -> Result<RuntimePlan, NativeV2CliError> {
+    let feedback = template_feedback(selection);
     let path = match source {
         RunRuntime::Exact(path) => path,
         RunRuntime::Uniform(path) => {
             let uniform = read_json::<UniformRuntimePlan>("uniform runtime config", path)?;
-            return uniform.materialize(graph);
+            return uniform.materialize(graph, feedback);
         }
     };
-    let mut runtime = read_json::<RuntimePlan>("runtime config", path)?;
-    let RunGraph::Template { template, delivery } = selection else {
+    let runtime = read_json::<RuntimePlan>("runtime config", path)?;
+    apply_template_runtime(selection, runtime, feedback)
+}
+
+fn template_feedback(selection: &RunGraph) -> crate::native_v2_contract::PullRequestFeedback {
+    match selection {
+        RunGraph::Template {
+            ignore_pr_feedback: true,
+            ..
+        } => crate::native_v2_contract::PullRequestFeedback::Ignore,
+        _ => crate::native_v2_contract::PullRequestFeedback::Consider,
+    }
+}
+
+fn apply_template_runtime(
+    selection: &RunGraph,
+    mut runtime: RuntimePlan,
+    feedback: crate::native_v2_contract::PullRequestFeedback,
+) -> Result<RuntimePlan, NativeV2CliError> {
+    let RunGraph::Template {
+        template,
+        delivery,
+        ignore_pr_feedback,
+    } = selection
+    else {
         return Ok(runtime);
     };
     let Some((name, binding)) = template
-        .delivery_runtime_binding(*delivery)
+        .delivery_runtime_binding_with_feedback(*delivery, feedback)
         .map_err(template_error)?
     else {
         return Ok(runtime);
     };
-    insert_template_binding(&mut runtime, name, binding)?;
+    insert_template_binding(&mut runtime, name, binding, *ignore_pr_feedback)?;
     Ok(runtime)
 }
 
@@ -347,7 +371,11 @@ const fn medium_size() -> RunSize {
 }
 
 impl UniformRuntimePlan {
-    fn materialize(self, graph: &GraphSpec) -> Result<RuntimePlan, NativeV2CliError> {
+    fn materialize(
+        self,
+        graph: &GraphSpec,
+        pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
+    ) -> Result<RuntimePlan, NativeV2CliError> {
         let harness = self.harness;
         let connections = self
             .connections
@@ -355,7 +383,10 @@ impl UniformRuntimePlan {
             .map_or_else(|| default_connections(self.provider), Ok)?;
         let mut nodes = BTreeMap::new();
         for (name, delivery) in executable_runtime_roles(&graph.root) {
-            nodes.insert(name, self.binding(delivery, &connections)?);
+            nodes.insert(
+                name,
+                self.binding(delivery, &connections, pull_request_feedback)?,
+            );
         }
         self.into_runtime_plan(harness, nodes)
     }
@@ -364,9 +395,10 @@ impl UniformRuntimePlan {
         &self,
         delivery: bool,
         connections: &DeclaredConnections,
+        pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
     ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
         if delivery {
-            return git_delivery_binding();
+            return git_delivery_binding(pull_request_feedback);
         }
         Ok(NodeRuntimeBinding::Agent {
             model: self.model.clone(),
@@ -444,12 +476,17 @@ fn default_connections(provider: UniformProvider) -> Result<DeclaredConnections,
     connection(key, names)
 }
 
-fn git_delivery_binding() -> Result<NodeRuntimeBinding, NativeV2CliError> {
+fn git_delivery_binding(
+    pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
+) -> Result<NodeRuntimeBinding, NativeV2CliError> {
     let connections = connection(
         crate::native_v2_contract::GITHUB_CONNECTION_KEY,
         &[GITHUB_TOKEN_ENV],
     )?;
-    Ok(NodeRuntimeBinding::GitDelivery { connections })
+    Ok(NodeRuntimeBinding::GitDelivery {
+        connections,
+        pull_request_feedback,
+    })
 }
 
 fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2CliError> {
@@ -468,17 +505,28 @@ fn insert_template_binding(
     runtime: &mut RuntimePlan,
     name: openengine_cluster_protocol::NodeName,
     binding: NodeRuntimeBinding,
+    override_feedback: bool,
 ) -> Result<(), NativeV2CliError> {
     let nodes = match runtime {
         RuntimePlan::Copilot { nodes, .. }
         | RuntimePlan::Codex { nodes, .. }
         | RuntimePlan::Claude { nodes, .. } => nodes,
     };
-    if nodes.contains_key(&name) {
-        return Err(NativeV2CliError::Usage(format!(
-            "runtime config must not bind template-owned node {:?}",
-            name.as_str()
-        )));
+    if let Some(existing) = nodes.get_mut(&name) {
+        let NodeRuntimeBinding::GitDelivery {
+            pull_request_feedback,
+            ..
+        } = existing
+        else {
+            return Err(NativeV2CliError::Usage(format!(
+                "runtime config must bind template-owned node {:?} as git_delivery",
+                name.as_str()
+            )));
+        };
+        if override_feedback {
+            *pull_request_feedback = crate::native_v2_contract::PullRequestFeedback::Ignore;
+        }
+        return Ok(());
     }
     nodes.insert(name, binding);
     Ok(())

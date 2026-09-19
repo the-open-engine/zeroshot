@@ -23,10 +23,17 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
       mergeCommit { oid }
       mergeable
       mergeStateStatus
+      reviewDecision
       isDraft
       isInMergeQueue
       isMergeQueueEnabled
       baseRefName
+      baseRef {
+        name
+        refUpdateRule {
+          requiredStatusCheckContexts
+        }
+      }
       headRefName
       headRefOid
       commits(last: 1) {
@@ -71,6 +78,7 @@ pub(super) struct PolicySnapshot {
     pub(super) failed_job_ids: Vec<u64>,
     pub(super) merge_method: Option<MergeMethod>,
     pub(super) head_update: Option<HeadUpdate>,
+    pub(super) pull_request_ready: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,13 +102,28 @@ struct PullRequestPolicyWire {
     merge_commit: Option<RevisionWire>,
     mergeable: String,
     merge_state_status: String,
+    review_decision: Option<String>,
     is_draft: bool,
     is_in_merge_queue: bool,
     is_merge_queue_enabled: bool,
     base_ref_name: String,
+    base_ref: RefWire,
     head_ref_name: String,
     head_ref_oid: String,
     commits: CommitConnectionWire,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RefWire {
+    name: String,
+    ref_update_rule: Option<RefUpdateRuleWire>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RefUpdateRuleWire {
+    required_status_check_contexts: Option<Vec<Option<String>>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -320,6 +343,7 @@ fn require_identity<'a>(
     let valid = repository.name_with_owner == review.repository
         && pull_request.number.to_string() == review.review_id
         && pull_request.base_ref_name == review.target_branch
+        && pull_request.base_ref.name == review.target_branch
         && pull_request.head_ref_name == review.head_branch
         && pull_request.head_ref_oid == review.head_revision;
     valid
@@ -328,16 +352,33 @@ fn require_identity<'a>(
 }
 
 fn same_policy(left: &PullRequestPolicyWire, right: &PullRequestPolicyWire) -> bool {
-    left.id == right.id
-        && left.number == right.number
-        && left.state == right.state
-        && left.merged == right.merged
-        && left.merge_commit == right.merge_commit
-        && left.mergeable == right.mergeable
-        && left.merge_state_status == right.merge_state_status
-        && left.is_draft == right.is_draft
-        && left.is_in_merge_queue == right.is_in_merge_queue
-        && left.is_merge_queue_enabled == right.is_merge_queue_enabled
+    (
+        &left.id,
+        left.number,
+        &left.state,
+        left.merged,
+        &left.merge_commit,
+        &left.mergeable,
+        &left.merge_state_status,
+        &left.review_decision,
+        left.is_draft,
+        left.is_in_merge_queue,
+        left.is_merge_queue_enabled,
+        &left.base_ref,
+    ) == (
+        &right.id,
+        right.number,
+        &right.state,
+        right.merged,
+        &right.merge_commit,
+        &right.mergeable,
+        &right.merge_state_status,
+        &right.review_decision,
+        right.is_draft,
+        right.is_in_merge_queue,
+        right.is_merge_queue_enabled,
+        &right.base_ref,
+    )
 }
 
 fn same_repository_policy(left: &RepositoryPolicyWire, right: &RepositoryPolicyWire) -> bool {
@@ -368,7 +409,10 @@ fn classify_snapshot(
     if let Some(snapshot) = terminal_snapshot(pull_request)? {
         return Ok(snapshot);
     }
-    let evidence = classify_required_checks(contexts);
+    let mut evidence = classify_required_checks(contexts);
+    if required_context_is_missing(pull_request, contexts) {
+        evidence.checks = RequiredChecks::Pending;
+    }
     if !evidence.failures.is_empty() {
         return Ok(PolicySnapshot {
             state: GitHubReviewState::Open {
@@ -379,19 +423,47 @@ fn classify_snapshot(
             failed_job_ids: evidence.failed_job_ids,
             merge_method: merge_method(repository, pull_request),
             head_update: head_update(pull_request),
+            pull_request_ready: false,
         });
     }
-    let checks = match (merge_gate_ready(pull_request), evidence.checks) {
+    let policy_ready = merge_gate_ready(pull_request) || pull_request_ready(pull_request);
+    let checks = match (policy_ready, evidence.checks) {
         (true, RequiredChecks::Absent) => GitHubChecks::NotRequired,
         (true, RequiredChecks::Passed) => GitHubChecks::Passed,
         _ => GitHubChecks::Pending,
     };
+    let pull_request_ready =
+        !matches!(evidence.checks, RequiredChecks::Pending) && pull_request_ready(pull_request);
     Ok(PolicySnapshot {
         state: GitHubReviewState::Open { checks },
         failed_job_ids: Vec::new(),
         merge_method: merge_method(repository, pull_request),
         head_update: head_update(pull_request),
+        pull_request_ready,
     })
+}
+
+fn required_context_is_missing(
+    pull_request: &PullRequestPolicyWire,
+    contexts: &[CheckContextWire],
+) -> bool {
+    let Some(required) = pull_request
+        .base_ref
+        .ref_update_rule
+        .as_ref()
+        .and_then(|rule| rule.required_status_check_contexts.as_ref())
+    else {
+        return false;
+    };
+    let observed = contexts
+        .iter()
+        .map(CheckContextWire::name)
+        .collect::<BTreeSet<_>>();
+    required
+        .iter()
+        .flatten()
+        .filter(|name| !name.is_empty())
+        .any(|name| !observed.contains(name.as_str()))
 }
 
 fn head_update(pull_request: &PullRequestPolicyWire) -> Option<HeadUpdate> {
@@ -420,6 +492,17 @@ fn merge_method(
     }
 }
 
+fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {
+    let state_ready = matches!(
+        pull_request.merge_state_status.as_str(),
+        "BEHIND" | "CLEAN" | "HAS_HOOKS" | "UNSTABLE"
+    );
+    !pull_request.is_draft
+        && !pull_request.is_in_merge_queue
+        && (pull_request.is_merge_queue_enabled
+            || pull_request.mergeable == "MERGEABLE" && state_ready)
+}
+
 fn terminal_snapshot(
     pull_request: &PullRequestPolicyWire,
 ) -> Result<Option<PolicySnapshot>, GitHubAuthorityError> {
@@ -438,6 +521,7 @@ fn terminal_snapshot(
         failed_job_ids: Vec::new(),
         merge_method: None,
         head_update: None,
+        pull_request_ready: false,
     }))
 }
 
@@ -456,19 +540,20 @@ fn merged_snapshot(
             failed_job_ids: Vec::new(),
             merge_method: None,
             head_update: None,
+            pull_request_ready: false,
         })
         .ok_or(GitHubAuthorityError::Rejected)
 }
 
-fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {
-    let state_ready = matches!(
-        pull_request.merge_state_status.as_str(),
-        "BEHIND" | "CLEAN" | "HAS_HOOKS" | "UNSTABLE"
-    );
+fn pull_request_ready(pull_request: &PullRequestPolicyWire) -> bool {
     !pull_request.is_draft
         && !pull_request.is_in_merge_queue
-        && (pull_request.is_merge_queue_enabled
-            || pull_request.mergeable == "MERGEABLE" && state_ready)
+        && pull_request.mergeable == "MERGEABLE"
+        && pull_request.merge_state_status == "BLOCKED"
+        && matches!(
+            pull_request.review_decision.as_deref(),
+            Some("REVIEW_REQUIRED" | "CHANGES_REQUESTED")
+        )
 }
 
 fn waiting_snapshot() -> PolicySnapshot {
@@ -479,6 +564,7 @@ fn waiting_snapshot() -> PolicySnapshot {
         failed_job_ids: Vec::new(),
         merge_method: None,
         head_update: None,
+        pull_request_ready: false,
     }
 }
 

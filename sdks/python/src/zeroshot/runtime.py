@@ -61,11 +61,14 @@ class Preset:
 
     Args:
         name: Exact name returned by Client.list_presets().
-        delivery: Native delivery selector: none, pull_request, or merge.
+        delivery: Native delivery selector: none, push, pull_request, or merge.
+        pull_request_feedback: Whether pull-request feedback is considered or ignored for
+            pull_request and merge delivery.
     """
 
     name: str
     delivery: str = field(default="none", kw_only=True)
+    pull_request_feedback: str = field(default="consider", kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)

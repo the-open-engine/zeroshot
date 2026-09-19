@@ -519,8 +519,8 @@ mod tests {
             .json()
             .await
             .assert_value();
-        assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 4);
-        assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 3);
+        assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 5);
+        assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 4);
         assert!(bootstrap["runtimeSchema"]["$defs"].is_object());
     }
 }

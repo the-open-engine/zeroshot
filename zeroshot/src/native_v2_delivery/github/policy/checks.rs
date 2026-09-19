@@ -19,6 +19,15 @@ enum RequiredCheckOutcome {
     },
 }
 
+impl CheckContextWire {
+    pub(super) fn name(&self) -> &str {
+        match self {
+            Self::CheckRun { name, .. } => name,
+            Self::StatusContext { context, .. } => context,
+        }
+    }
+}
+
 struct CheckRunEvidence<'a> {
     conclusion: Option<&'a str>,
     details_url: Option<&'a str>,
