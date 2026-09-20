@@ -176,11 +176,39 @@ impl Fixture {
         Self::with_graph(graph, json!({"request":"Write a migration report"})).await
     }
 
+    async fn new_with_controller_lease()
+    -> (Self, crate::native_v2_portable_controller::ControllerLease) {
+        let graph: CompiledGraphIr = serde_json::from_str(include_str!(
+            "../../../../protocol/openengine-cluster/v1/fixtures/graph/canonical/base.json"
+        ))
+        .assert_value();
+        let (fixture, lease) =
+            Self::build(graph, json!({"request":"Write a migration report"}), true).await;
+        (fixture, lease.assert_value())
+    }
+
     async fn with_graph(graph: CompiledGraphIr, initial_input: Value) -> Self {
+        Self::build(graph, initial_input, false).await.0
+    }
+
+    async fn build(
+        graph: CompiledGraphIr,
+        initial_input: Value,
+        hold_controller_lease: bool,
+    ) -> (
+        Self,
+        Option<crate::native_v2_portable_controller::ControllerLease>,
+    ) {
         let root = std::env::temp_dir().join(format!("zeroshot-history-{}", uuid::Uuid::now_v7()));
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         let directory = root.join("runs").join(id.as_str());
         std::fs::create_dir_all(&directory).assert_value();
+        let paths =
+            crate::native_v2_portable_controller::PortableControllerPaths::new(directory.clone());
+        let controller_lease = hold_controller_lease.then(|| {
+            crate::native_v2_portable_controller::ControllerLease::acquire(paths.lease())
+                .assert_value()
+        });
         let ledger = SqliteRunLedger::open(directory.join("runs.sqlite3")).assert_value();
         ledger
             .create_or_get(CreateRun {
@@ -206,12 +234,15 @@ impl Fixture {
             })
             .await
             .assert_value();
-        Self {
-            service: NativeRunHistory::new(root.clone()),
-            root,
-            id,
-            ledger,
-        }
+        (
+            Self {
+                service: NativeRunHistory::new(root.clone()),
+                root,
+                id,
+                ledger,
+            },
+            controller_lease,
+        )
     }
     fn reference(&self, execution: u64) -> ExecutionRef {
         ExecutionRef {

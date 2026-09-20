@@ -267,36 +267,23 @@ async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history
 
 #[tokio::test]
 async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_socket() {
-    let fixture = Fixture::new().await;
+    let (fixture, lease) = Fixture::new_with_controller_lease().await;
     fixture.start(1).await;
     let snapshot = stored_snapshot(&fixture).await;
     let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
         fixture.root.join("runs").join(fixture.id.as_str()),
     );
-    let lease = crate::native_v2_portable_controller::ControllerLease::acquire(paths.lease())
-        .assert_value();
-    #[cfg(windows)]
-    {
-        use crate::execution::platform::{self, FileAccess};
-        use fs2::FileExt;
-
-        let probe = platform::private_file(&paths.lease(), FileAccess::ReadWriteExisting)
-            .unwrap_or_else(|error| panic!("lease probe open failed: {error:?}"));
-        match probe.try_lock_exclusive() {
-            Ok(()) => {
-                FileExt::unlock(&probe).assert_value();
-                eprintln!("held lease probe unexpectedly acquired the lock");
-            }
-            Err(error) => eprintln!(
-                "held lease probe returned kind {:?} and OS code {:?}",
-                error.kind(),
-                error.raw_os_error()
-            ),
-        }
-    }
+    assert!(
+        crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
+            .expect("probe held controller lease")
+    );
     let status = RuntimeStatusReader::Local(fixture.root.clone());
     assert!(status.failure(&snapshot).await.assert_value().is_none());
     drop(lease);
+    assert!(
+        !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
+            .expect("probe released controller lease")
+    );
     assert!(status.failure(&snapshot).await.is_err());
 }
 
