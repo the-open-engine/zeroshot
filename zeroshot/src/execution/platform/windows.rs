@@ -66,7 +66,7 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     if !file.metadata()?.is_file() {
         return Err(io::Error::other("private path is not a file"));
     }
-    if matches!(access, FileAccess::ReadWrite | FileAccess::CreateNew) {
+    if access.repairs_security() {
         security::protect(file.as_raw_handle())?;
     }
     validate_private_file(&file)?;

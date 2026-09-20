@@ -84,6 +84,33 @@ fn private_state_and_workspace_reject_fifos_without_waiting_for_a_writer() {
     assert!(private_file(&path, FileAccess::Read).is_err());
 }
 
+#[cfg(all(unix, feature = "ui"))]
+#[test]
+fn existing_read_write_probe_neither_repairs_nor_creates_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = TemporaryDirectory::for_test("private-probe");
+    let insecure = root.path("insecure");
+    fs::write(&insecure, []).unwrap();
+    fs::set_permissions(&insecure, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let error = private_file(&insecure, FileAccess::ReadWriteExisting).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(
+        fs::metadata(&insecure).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+
+    let missing = root.path("missing");
+    assert_eq!(
+        private_file(&missing, FileAccess::ReadWriteExisting)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert!(!missing.exists());
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_preserves_local_profile_folders_and_isolates_private_homes() {

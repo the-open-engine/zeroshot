@@ -30,6 +30,12 @@ pub(crate) enum FileAccess {
     CreateNew,
 }
 
+impl FileAccess {
+    fn repairs_security(self) -> bool {
+        matches!(self, Self::ReadWrite | Self::CreateNew)
+    }
+}
+
 pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> {
     native::private_file(path, access)
 }
