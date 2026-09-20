@@ -202,14 +202,16 @@ impl Fixture {
         let root = std::env::temp_dir().join(format!("zeroshot-history-{}", uuid::Uuid::now_v7()));
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         let directory = root.join("runs").join(id.as_str());
-        std::fs::create_dir_all(&directory).assert_value();
+        std::fs::create_dir_all(&directory)
+            .assert_value_with("create profile UI fixture directory");
         let paths =
             crate::native_v2_portable_controller::PortableControllerPaths::new(directory.clone());
         let controller_lease = hold_controller_lease.then(|| {
             crate::native_v2_portable_controller::ControllerLease::acquire(paths.lease())
-                .assert_value()
+                .assert_value_with("acquire embedded controller lease fixture")
         });
-        let ledger = SqliteRunLedger::open(directory.join("runs.sqlite3")).assert_value();
+        let ledger = SqliteRunLedger::open(directory.join("runs.sqlite3"))
+            .assert_value_with("open profile UI fixture ledger");
         ledger
             .create_or_get(CreateRun {
                 run_id: id.clone(),
@@ -233,7 +235,7 @@ impl Fixture {
                 },
             })
             .await
-            .assert_value();
+            .assert_value_with("create profile UI fixture run");
         (
             Self {
                 service: NativeRunHistory::new(root.clone()),
@@ -270,7 +272,7 @@ impl Fixture {
                 ],
             )
             .await
-            .assert_value();
+            .assert_value_with("append profile UI fixture start");
     }
 }
 

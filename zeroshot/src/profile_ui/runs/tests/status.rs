@@ -21,8 +21,8 @@ async fn stored_snapshot(fixture: &Fixture) -> RunSnapshot {
         .ledger
         .get(&fixture.id)
         .await
-        .assert_value()
-        .assert_value()
+        .assert_value_with("read profile UI fixture ledger")
+        .assert_value_with("find profile UI fixture run")
         .snapshot
 }
 
@@ -278,7 +278,13 @@ async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_sock
             .expect("probe held controller lease")
     );
     let status = RuntimeStatusReader::Local(fixture.root.clone());
-    assert!(status.failure(&snapshot).await.assert_value().is_none());
+    assert!(
+        status
+            .failure(&snapshot)
+            .await
+            .assert_value_with("held embedded controller lease is live")
+            .is_none()
+    );
     drop(lease);
     assert!(
         !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
