@@ -5,13 +5,7 @@ use openengine_cluster_protocol::{RunStatus, RunStatusParams};
 async fn failed_runtime() -> (Fixture, NativeRunHistory, NativeV2Observability) {
     let fixture = Fixture::new().await;
     fixture.start(1).await;
-    let snapshot = fixture
-        .ledger
-        .get(&fixture.id)
-        .await
-        .assert_value()
-        .assert_value()
-        .snapshot;
+    let snapshot = stored_snapshot(&fixture).await;
     let observations = fixture.observations();
     observations.track_runtime(&snapshot).assert_value();
     observations.runtime_failed(&fixture.id);
@@ -20,6 +14,16 @@ async fn failed_runtime() -> (Fixture, NativeRunHistory, NativeV2Observability) 
         observations.clone(),
     );
     (fixture, source, observations)
+}
+
+async fn stored_snapshot(fixture: &Fixture) -> RunSnapshot {
+    fixture
+        .ledger
+        .get(&fixture.id)
+        .await
+        .assert_value()
+        .assert_value()
+        .snapshot
 }
 
 #[tokio::test]
@@ -259,6 +263,22 @@ async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history
     ] {
         assert!(!directory.join(name).exists());
     }
+}
+
+#[tokio::test]
+async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_socket() {
+    let fixture = Fixture::new().await;
+    fixture.start(1).await;
+    let snapshot = stored_snapshot(&fixture).await;
+    let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
+        fixture.root.join("runs").join(fixture.id.as_str()),
+    );
+    let lease = crate::native_v2_portable_controller::ControllerLease::acquire(paths.lease())
+        .assert_value();
+    let status = RuntimeStatusReader::Local(fixture.root.clone());
+    assert!(status.failure(&snapshot).await.assert_value().is_none());
+    drop(lease);
+    assert!(status.failure(&snapshot).await.is_err());
 }
 
 #[tokio::test]

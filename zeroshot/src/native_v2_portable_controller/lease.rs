@@ -67,6 +67,24 @@ impl ControllerLease {
             .and_then(|file| platform::file_identity(&file))
             .is_ok_and(|identity| identity == self.identity)
     }
+
+    /// Checks whether an existing private lease is owned without creating or changing it.
+    #[cfg(feature = "ui")]
+    pub(crate) fn is_held(path: &Path) -> Result<bool, ControllerLeaseError> {
+        reject_non_file(path)?;
+        let file = platform::private_file(path, FileAccess::Read)
+            .map_err(|_| ControllerLeaseError::InvalidPath)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => {
+                FileExt::unlock(&file).map_err(|_| ControllerLeaseError::InvalidPath)?;
+                Ok(false)
+            }
+            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                Ok(true)
+            }
+            Err(_) => Err(ControllerLeaseError::InvalidPath),
+        }
+    }
 }
 
 impl std::fmt::Debug for ControllerLease {

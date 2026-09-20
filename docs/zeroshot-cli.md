@@ -47,7 +47,7 @@ Options:
 ```text
 Serve one local Zeroshot profile as an experimental ACP agent over stdio.
 
-The MVP supports one session, text prompts, no MCP servers, and no session reload.
+The MVP supports one active session and text prompts. The profile must accept one task string and return one response string from every success node. It supports local Codex or Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
 
 Usage: zeroshot acp --profile <local:NAME>
 

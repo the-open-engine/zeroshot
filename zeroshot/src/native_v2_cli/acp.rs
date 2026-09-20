@@ -253,7 +253,6 @@ struct AcpCore {
     profile: RunProfile,
     state_root: PathBuf,
     session: Mutex<Option<Arc<AcpSession>>>,
-    published_session: SyncMutex<Option<Arc<AcpSession>>>,
 }
 
 impl AcpCore {
@@ -262,7 +261,6 @@ impl AcpCore {
             profile,
             state_root,
             session: Mutex::new(None),
-            published_session: SyncMutex::new(None),
         }
     }
 
@@ -284,10 +282,6 @@ impl AcpCore {
         let session =
             AcpSession::create(self.profile.clone(), self.state_root.clone(), request.cwd).await?;
         let session_id = session.id.clone();
-        *self
-            .published_session
-            .lock()
-            .expect("published ACP session lock") = Some(session.clone());
         *slot = Some(session);
         Ok(session_id)
     }
@@ -297,11 +291,11 @@ impl AcpCore {
         session_id: &acp::SessionId,
         task: String,
     ) -> Result<TurnResult, AcpServeError> {
-        self.require_session(session_id)?.run_turn(task).await
+        self.require_session(session_id).await?.run_turn(task).await
     }
 
     async fn cancel(&self, session_id: &acp::SessionId) -> Result<(), AcpServeError> {
-        self.require_session(session_id)?.cancel().await;
+        self.require_session(session_id).await?.cancel().await;
         Ok(())
     }
 
@@ -312,10 +306,6 @@ impl AcpCore {
             .filter(|session| &session.id == session_id)
             .cloned()
             .ok_or(AcpServeError::Request("session was not found"))?;
-        self.published_session
-            .lock()
-            .expect("published ACP session lock")
-            .take();
         session.close().await;
         *slot = None;
         Ok(())
@@ -324,22 +314,18 @@ impl AcpCore {
     async fn close_all(&self) {
         let mut slot = self.session.lock().await;
         if let Some(session) = slot.as_ref().cloned() {
-            self.published_session
-                .lock()
-                .expect("published ACP session lock")
-                .take();
             session.close().await;
             *slot = None;
         }
     }
 
-    fn require_session(
+    async fn require_session(
         &self,
         session_id: &acp::SessionId,
     ) -> Result<Arc<AcpSession>, AcpServeError> {
-        self.published_session
+        self.session
             .lock()
-            .expect("published ACP session lock")
+            .await
             .as_ref()
             .filter(|session| &session.id == session_id)
             .cloned()
@@ -350,7 +336,6 @@ impl AcpCore {
 struct AcpSession {
     id: acp::SessionId,
     profile: RunProfile,
-    source: openengine_cluster_protocol::ResolvedSource,
     environment: Arc<RunEnvironment>,
     workspace: PathBuf,
     runner: Arc<NativeNodeRunner>,
@@ -515,7 +500,6 @@ impl AcpSession {
         let session = Arc::new(Self {
             id: acp::SessionId::new(uuid::Uuid::now_v7().to_string()),
             profile,
-            source: prepared.source,
             environment,
             workspace: prepared.workspace,
             runner,
@@ -580,7 +564,11 @@ impl AcpSession {
 
     async fn prepare_turn(&self, task: String) -> Result<PreparedTurn, AcpServeError> {
         let run_id = new_run_id();
-        let submission = submission(&self.profile, &self.source, &task, run_id.as_str())?;
+        let (workspace, source) = local_resolved_source(&self.workspace, Path::new("git"))?;
+        if workspace != self.workspace {
+            return Err(AcpServeError::Portable(PortableControllerError::Workspace));
+        }
+        let submission = submission(&self.profile, &source, &task, run_id.as_str())?;
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();
         let admitted = NativeV2Admission.admit(submission).await?;

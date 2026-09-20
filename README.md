@@ -94,6 +94,15 @@ Run `zeroshot ui` to edit profiles and inspect live or completed runs in your br
 Open `http://127.0.0.1:4173/ui/`. It shares the CLI's saved profiles and history;
 Ctrl-C stops the UI server while runs continue. See [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
 
+Experimental: expose a saved local profile as an ACP agent. Each prompt runs the graph as a
+durable local run while the ACP session keeps the workspace and node sessions alive:
+
+```bash
+zeroshot acp --profile local:NAME
+```
+
+See [Use a local graph as an ACP agent](docs/guides/acp.md) for the narrow preview contract.
+
 ### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
@@ -129,6 +138,7 @@ submitting runs.
 
 - [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
 - [Get started](docs/getting-started/first-run.md)
+- [ACP agent preview](docs/guides/acp.md)
 - [CLI reference](docs/zeroshot-cli.md)
 - [Standalone HTML CLI reference](docs/zeroshot-cli.html)
 - [Distribution contract](docs/zeroshot-distribution.md)

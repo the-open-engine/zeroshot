@@ -137,8 +137,8 @@ standard error. The process accepts one active ACP session, doesn't implement se
 rejects MCP servers or extra workspace directories.
 
 The client sends one nonempty ACP text block per prompt. Zeroshot maps it to `{"task":"..."}` and
-streams the successful `response` as an agent message. The prompt response includes private
-metadata with the durable run ID and full terminal value:
+streams the successful `response` as an agent message. The prompt response includes
+Zeroshot-specific metadata with the durable run ID and raw graph output:
 
 ```json
 {
@@ -149,12 +149,18 @@ metadata with the durable run ID and full terminal value:
 }
 ```
 
+`rawOutput` is Zeroshot's JSON form of the graph's terminal result, before ACP turns it into an
+agent message. Success is `{"response":"..."}`; an authored fail node is `{"failed":"REASON"}`.
+
 Use that run ID with the ordinary read commands:
 
 ```console
 zeroshot status RUN_ID
 zeroshot logs RUN_ID
 ```
+
+Each prompt also appears in `zeroshot ui` as a normal local run, including its graph and retained
+history.
 
 ## Session and run lifetime
 

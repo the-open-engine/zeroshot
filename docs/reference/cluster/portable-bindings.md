@@ -15,6 +15,8 @@ execution configuration.
 
 Zeroshot does not currently ship a portable worker binding. An ACP binding is under development;
 there is no supported version, profile identifier, compatibility claim, or production runtime yet.
+The experimental local [`zeroshot acp`](../../guides/acp.md) endpoint instead exposes a complete
+graph to an ACP client; it is not a portable worker binding.
 
 Native graph nodes use the reserved `openengine.worker.builtin/v1` binding. That binding describes
 in-process Zeroshot workers and is not a portable protocol adapter.

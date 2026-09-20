@@ -52,6 +52,24 @@ zeroshot connection list --target cloud --scope org
 Do not assume a profile creates a pull request. `--pr` requests pull-request delivery and `--ship`
 requests merge delivery when materializing a compatible template; use either only when intended.
 
+## Expose a profile over ACP
+
+Start `zeroshot acp` only when the user explicitly asks to expose a Zeroshot graph as an ACP agent.
+The experimental endpoint is local-only and owns stdio until its client disconnects:
+
+```console
+zeroshot acp --profile local:NAME
+```
+
+Check the profile first. It must accept exactly one required string named `task`; every success node
+must return exactly one required string named `response`. The runtime must use Codex or Claude, and
+every executable node must have an agent binding with `sessionScope: node_instance`. Maps, delivery,
+runtime connections, MCP servers, and session reload are unsupported.
+
+Each ACP prompt is a separate durable local run. The outer ACP session keeps the Git workspace and
+node provider sessions alive across prompts. Inspect the returned run ID with `zeroshot status` or
+`zeroshot logs`; `zeroshot ui` includes the run in local history.
+
 ## Validate and submit
 
 Put profile input in a JSON file matching the profile's declared schema. Use a stable, non-secret

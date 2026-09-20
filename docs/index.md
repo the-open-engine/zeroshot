@@ -75,7 +75,7 @@ review loop, use `single-worker`; custom graphs follow the same protocol contrac
 [How execution works](concepts/execution.md) describes the graph and reduction model. Read
 [Runtimes and connections](concepts/runtimes-and-connections.md) before choosing models or supplying
 credentials; [Observe and control runs](guides/observe-and-control.md) covers durable status and log
-streams.
+streams. [Use a local graph as an ACP agent](guides/acp.md) covers the experimental stdio endpoint.
 
 The reference section is built from product-owned definitions:
 

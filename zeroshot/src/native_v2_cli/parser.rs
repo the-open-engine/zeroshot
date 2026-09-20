@@ -27,7 +27,9 @@ pub struct Cli {
 enum CliCommand {
     /// Serve one local Zeroshot profile as an experimental ACP agent over stdio.
     ///
-    /// The MVP supports one session, text prompts, no MCP servers, and no session reload.
+    /// The MVP supports one active session and text prompts. The profile must accept one task
+    /// string and return one response string from every success node. It supports local Codex or
+    /// Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
     Acp(AcpArgs),
 
     /// Serve the local profile editor and live or recorded run history.

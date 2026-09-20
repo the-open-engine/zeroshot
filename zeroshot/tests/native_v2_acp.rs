@@ -11,6 +11,8 @@ use agent_client_protocol::{self as acp, Agent as _};
 use async_trait::async_trait;
 use fs2::FileExt as _;
 use serde_json::{json, Value};
+#[cfg(feature = "ui")]
+use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
 #[derive(Default)]
@@ -153,6 +155,81 @@ async fn active_turn_interruption_is_terminal_and_bounded() {
     }
 }
 
+#[cfg(feature = "ui")]
+#[tokio::test(flavor = "current_thread")]
+async fn active_acp_turn_streams_through_the_workspace_ui() {
+    let fixture = AcpFixture::new();
+    fixture.install_profile();
+    let mut acp_server = fixture.spawn_stalled_server();
+    let outgoing = acp_server.stdin.take().unwrap();
+    let incoming = acp_server.stdout.take().unwrap();
+    let mut ui_server = fixture.spawn_ui();
+    let origin = read_ui_origin(&mut ui_server).await;
+    let workspace = fixture.workspace.clone();
+    let state = fixture.state.clone();
+    let started = fixture._root.path().join("provider-started");
+    let release = fixture._root.path().join("provider-release");
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let client = Arc::new(RecordingClient::default());
+            let (connection, io, session_id) =
+                open_session(outgoing, incoming, workspace, client).await;
+            let request = acp::PromptRequest::new(session_id.clone(), vec!["show this run".into()]);
+            let mut prompt = Box::pin(connection.prompt(request));
+            tokio::select! {
+                () = wait_for_file(&started) => {}
+                result = &mut prompt => panic!("prompt finished before UI inspection: {result:?}"),
+            }
+            let run_id = only_file(&state.join("runs"))
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let (client, events, mut body) = open_live_ui_run(&origin, &run_id).await;
+
+            std::fs::write(release, []).unwrap();
+            let response = tokio::time::timeout(Duration::from_secs(5), &mut prompt)
+                .await
+                .expect("ACP prompt did not finish")
+                .unwrap();
+            assert_eq!(response.stop_reason, acp::StopReason::EndTurn);
+            body.push_str(
+                &tokio::time::timeout(Duration::from_secs(5), events.text())
+                    .await
+                    .expect("UI live history did not close after the terminal event")
+                    .unwrap(),
+            );
+            assert!(body.contains("\"kind\":\"terminal\""));
+            assert!(!body.contains("event: history_error\n"));
+
+            let finished: Value = client
+                .get(format!("{origin}/ui/api/runs/{run_id}"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(finished["phase"], "finished");
+            assert_eq!(finished["terminal"]["status"], "succeeded");
+            connection
+                .close_session(acp::CloseSessionRequest::new(session_id))
+                .await
+                .unwrap();
+            drop(prompt);
+            drop(connection);
+            disconnect_client(io).await;
+        })
+        .await;
+    assert_server_exits(&mut acp_server).await;
+    ui_server.start_kill().unwrap();
+    ui_server.wait().await.unwrap();
+}
+
 struct AcpFixture {
     _root: tempfile::TempDir,
     workspace: PathBuf,
@@ -245,6 +322,20 @@ impl AcpFixture {
         self.spawn_server()
     }
 
+    #[cfg(feature = "ui")]
+    fn spawn_ui(&self) -> tokio::process::Child {
+        let mut command = tokio::process::Command::new(&self.executable);
+        command
+            .args(["ui", "--listen", "127.0.0.1:0"])
+            .current_dir(&self.workspace)
+            .envs(self.environment())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command.spawn().unwrap()
+    }
+
     async fn run_session(&self) -> (Vec<String>, Vec<String>) {
         let mut child = self.spawn_server();
         let outgoing = child.stdin.take().unwrap();
@@ -253,15 +344,24 @@ impl AcpFixture {
         let session_workspace = self.workspace.clone();
         let result = tokio::task::LocalSet::new()
             .run_until(async move {
-                let (connection, io, session_id) =
-                    open_session(outgoing, incoming, session_workspace, client.clone()).await;
+                let (connection, io, session_id) = open_session(
+                    outgoing,
+                    incoming,
+                    session_workspace.clone(),
+                    client.clone(),
+                )
+                .await;
                 connection
                     .cancel(acp::CancelNotification::new(session_id.clone()))
                     .await
                     .unwrap();
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 let mut run_ids = Vec::new();
-                for (task, expected) in [("first task", "first"), ("second task", "second")] {
+                for (index, (task, expected)) in
+                    [("first task", "first"), ("second task", "second")]
+                        .into_iter()
+                        .enumerate()
+                {
                     let response = connection
                         .prompt(acp::PromptRequest::new(
                             session_id.clone(),
@@ -274,6 +374,16 @@ impl AcpFixture {
                     let zeroshot = meta.get("zeroshot").unwrap();
                     run_ids.push(zeroshot["runId"].as_str().unwrap().to_owned());
                     assert_eq!(zeroshot["rawOutput"]["response"], expected);
+                    if index == 0 {
+                        std::fs::write(session_workspace.join("turn.txt"), "second revision\n")
+                            .unwrap();
+                        run(&session_workspace, "git", &["add", "turn.txt"]);
+                        run(
+                            &session_workspace,
+                            "git",
+                            &["commit", "-m", "test: advance source"],
+                        );
+                    }
                 }
                 drop(connection);
                 disconnect_client(io).await;
@@ -286,6 +396,7 @@ impl AcpFixture {
     }
 
     fn assert_durable_runs(&self, run_ids: &[String]) {
+        let mut revisions = Vec::new();
         for (run_id, expected) in run_ids.iter().zip(["first", "second"]) {
             let output = Command::new(&self.executable)
                 .args(["status", run_id])
@@ -303,6 +414,7 @@ impl AcpFixture {
                 status["status"]["terminalResult"]["output"]["response"],
                 expected
             );
+            revisions.push(status["source"]["revision"].as_str().unwrap().to_owned());
             assert!(
                 self.state
                     .join("runs")
@@ -311,6 +423,7 @@ impl AcpFixture {
                     .is_file()
             );
         }
+        assert_ne!(revisions[0], revisions[1]);
     }
 }
 
@@ -343,6 +456,78 @@ async fn open_session(
         .await
         .unwrap();
     (connection, io, session.session_id)
+}
+
+#[cfg(feature = "ui")]
+async fn read_ui_origin(child: &mut tokio::process::Child) -> String {
+    let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(line) = lines.next_line().await.unwrap() {
+            if let Some(url) = line.strip_prefix("Zeroshot UI: ") {
+                return url.trim_end_matches("/ui/").to_owned();
+            }
+        }
+        panic!("UI exited before publishing its address");
+    })
+    .await
+    .expect("UI did not publish its address")
+}
+
+#[cfg(feature = "ui")]
+async fn open_live_ui_run(
+    origin: &str,
+    run_id: &str,
+) -> (reqwest::Client, reqwest::Response, String) {
+    let client = reqwest::Client::new();
+    let listed: Value = client
+        .get(format!("{origin}/ui/api/runs"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(listed["runs"][0]["runId"], run_id);
+    assert_eq!(listed["runs"][0]["phase"], "running");
+    let detail: Value = client
+        .get(format!("{origin}/ui/api/runs/{run_id}"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["title"], "ACP turn");
+    assert_eq!(detail["graph"]["root"]["name"], "root");
+
+    let mut events = client
+        .get(format!("{origin}/ui/api/runs/{run_id}/events?after=v2%3A0"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let body = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut body = String::new();
+        while !body.contains("event: history\n") && !body.contains("event: history_error\n") {
+            let chunk = events
+                .chunk()
+                .await
+                .unwrap()
+                .expect("UI closed the live history stream");
+            body.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+        body
+    })
+    .await
+    .expect("UI did not send the initial live history page");
+    assert!(body.contains("event: history\n"));
+    assert!(!body.contains("event: history_error\n"));
+    (client, events, body)
 }
 
 async fn wait_for_file(path: &Path) {

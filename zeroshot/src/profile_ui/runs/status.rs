@@ -44,12 +44,29 @@ impl RuntimeStatusReader {
         }
         let status = tokio::time::timeout(STATUS_TIMEOUT, self.status(&snapshot.run_id))
             .await
-            .map_err(|_| ())?
-            .ok_or(())?;
+            .map_err(|_| ())?;
+        let Some(status) = status else {
+            return if self.local_owner_is_live(&snapshot.run_id) {
+                Ok(None)
+            } else {
+                Err(())
+            };
+        };
         if !valid_status(snapshot, &status) {
             return Err(());
         }
         Ok(confirmed_failure(snapshot, status))
+    }
+
+    fn local_owner_is_live(&self, id: &RunId) -> bool {
+        let Self::Local(root) = self else {
+            return false;
+        };
+        let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
+            root.join("runs").join(id.as_str()),
+        );
+        crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
+            .unwrap_or(false)
     }
 
     async fn status(&self, id: &RunId) -> Option<RunStatusResult> {
