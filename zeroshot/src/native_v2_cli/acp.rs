@@ -419,13 +419,34 @@ struct PreparedSession {
 struct PreparedTurn {
     run_id: RunId,
     ledger: Arc<SqliteRunLedger>,
-    controller_lease: Arc<ControllerLease>,
+    leases: Arc<TurnLeases>,
+}
+
+struct TurnLeases {
+    // Fields drop in declaration order. Release the ACP identity before controller ownership.
+    acp_turn: ControllerLease,
+    controller: ControllerLease,
+}
+
+impl TurnLeases {
+    fn acquire(paths: &PortableControllerPaths) -> Result<Self, ControllerLeaseError> {
+        let controller = ControllerLease::acquire(paths.lease())?;
+        let acp_turn = ControllerLease::acquire(paths.acp_turn_lease())?;
+        Ok(Self {
+            acp_turn,
+            controller,
+        })
+    }
+
+    fn is_intact(&self) -> bool {
+        self.controller.is_intact() && self.acp_turn.is_intact()
+    }
 }
 
 struct ActiveTurn {
     cancelled: AtomicBool,
     lost: AtomicBool,
-    controller_lease: SyncMutex<Option<Arc<ControllerLease>>>,
+    leases: SyncMutex<Option<Arc<TurnLeases>>>,
     supervisor: Mutex<Option<Arc<NativeV2Supervisor>>>,
 }
 
@@ -434,24 +455,21 @@ impl ActiveTurn {
         Self {
             cancelled: AtomicBool::new(false),
             lost: AtomicBool::new(false),
-            controller_lease: SyncMutex::new(None),
+            leases: SyncMutex::new(None),
             supervisor: Mutex::new(None),
         }
     }
 
-    fn set_controller_lease(&self, lease: Arc<ControllerLease>) {
-        *self
-            .controller_lease
-            .lock()
-            .expect("active turn lease lock") = Some(lease);
+    fn set_leases(&self, leases: Arc<TurnLeases>) {
+        *self.leases.lock().expect("active turn lease lock") = Some(leases);
     }
 
-    fn controller_lease_is_intact(&self) -> bool {
-        self.controller_lease
+    fn leases_are_intact(&self) -> bool {
+        self.leases
             .lock()
             .expect("active turn lease lock")
             .as_ref()
-            .is_none_or(|lease| lease.is_intact())
+            .is_none_or(|leases| leases.is_intact())
     }
 
     async fn cancel(&self) {
@@ -540,7 +558,7 @@ impl AcpSession {
         active: Arc<ActiveTurn>,
     ) -> Result<TurnResult, AcpServeError> {
         let prepared = self.prepare_turn(task).await?;
-        active.set_controller_lease(prepared.controller_lease.clone());
+        active.set_leases(prepared.leases.clone());
         let runner: Arc<dyn crate::native_v2_runner::NodeRunner> = self.runner.clone();
         let supervisor = Arc::new(NativeV2Supervisor::new(
             prepared.run_id.clone(),
@@ -549,13 +567,14 @@ impl AcpSession {
             self.environment.clone(),
         ));
         *active.supervisor.lock().await = Some(supervisor.clone());
-        if !self.workspace_is_intact() || !active.controller_lease_is_intact() {
+        if !self.workspace_is_intact() || !active.leases_are_intact() {
             self.lose_workspace().await;
         }
         if active.lost.load(Ordering::Acquire) {
             supervisor.runtime_lost().await;
         } else if active.cancelled.load(Ordering::Acquire) {
-            supervisor.force_stop().await?;
+            // Drive observes in-memory stop intent and owns persistence failure recovery.
+            let _ = supervisor.force_stop().await;
         }
         let terminal = drive_supervisor(&supervisor).await?;
         let cancelled = active.cancelled.load(Ordering::Acquire);
@@ -574,7 +593,7 @@ impl AcpSession {
         let admitted = NativeV2Admission.admit(submission).await?;
         let storage = create_local_run_storage(&self.state_root, &run_id)?;
         let paths = PortableControllerPaths::new(storage);
-        let controller_lease = Arc::new(ControllerLease::acquire(paths.lease())?);
+        let leases = Arc::new(TurnLeases::acquire(&paths)?);
         let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
         ledger
             .create_or_get(CreateRun {
@@ -587,7 +606,7 @@ impl AcpSession {
         Ok(PreparedTurn {
             run_id,
             ledger,
-            controller_lease,
+            leases,
         })
     }
 
@@ -652,9 +671,7 @@ fn monitor_session(session: Weak<AcpSession>) {
             };
             let active = session.monitored_turn();
             let intact = session.workspace_is_intact()
-                && active
-                    .as_ref()
-                    .is_none_or(|turn| turn.controller_lease_is_intact());
+                && active.as_ref().is_none_or(|turn| turn.leases_are_intact());
             if !intact {
                 session.lose_workspace().await;
                 return;

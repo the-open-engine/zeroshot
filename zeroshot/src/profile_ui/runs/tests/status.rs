@@ -256,6 +256,7 @@ async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history
     );
     let directory = fixture.root.join("runs").join(fixture.id.as_str());
     for name in [
+        "acp-turn.lock",
         "controller.lock",
         "controller.sock",
         "controller.ready.json",
@@ -266,8 +267,8 @@ async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history
 }
 
 #[tokio::test]
-async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_socket() {
-    let (fixture, lease) = Fixture::new_with_controller_lease().await;
+async fn only_exact_acp_leases_keep_an_embedded_owner_live_without_a_socket() {
+    let (fixture, controller_lease, acp_turn_lease) = Fixture::new_with_embedded_leases().await;
     fixture.start(1).await;
     let snapshot = stored_snapshot(&fixture).await;
     let paths = crate::native_v2_portable_controller::PortableControllerPaths::new(
@@ -277,6 +278,10 @@ async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_sock
         crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
             .expect("probe held controller lease")
     );
+    assert!(
+        crate::native_v2_portable_controller::ControllerLease::is_held(&paths.acp_turn_lease())
+            .expect("probe held ACP turn lease")
+    );
     let status = RuntimeStatusReader::Local(fixture.root.clone());
     assert!(
         status
@@ -285,12 +290,36 @@ async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_sock
             .assert_value_with("held embedded controller lease is live")
             .is_none()
     );
-    drop(lease);
+    drop(acp_turn_lease);
+    assert!(
+        !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.acp_turn_lease())
+            .expect("probe released ACP turn lease")
+    );
+    assert!(
+        crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
+            .expect("probe retained controller lease")
+    );
+    let ready = crate::execution::platform::private_file(
+        &paths.ready(),
+        crate::execution::platform::FileAccess::ReadWrite,
+    )
+    .assert_value_with("create unusable controller readiness");
+    serde_json::to_writer(
+        ready,
+        &crate::native_v2_portable_controller::PortableControllerReady {
+            kind: "zeroshot.portable-controller-ready/v1".into(),
+            run_id: fixture.id.clone(),
+            socket: paths.socket(),
+            pid: std::process::id(),
+        },
+    )
+    .assert_value_with("write unusable controller readiness");
+    assert!(status.failure(&snapshot).await.is_err());
+    drop(controller_lease);
     assert!(
         !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
             .expect("probe released controller lease")
     );
-    assert!(status.failure(&snapshot).await.is_err());
 }
 
 #[tokio::test]

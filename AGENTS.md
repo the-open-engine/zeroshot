@@ -273,9 +273,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ledger, supervisor lifecycle, run ID, and freshly resolved Git source provenance. Owner-scoped
   node sessions use stable slots derived from sorted graph node names, survive clean turn settlement,
   and close before the ACP session releases its runtime directory or workspace lease. Workspace
-  identity and both lease layers are monitored; loss terminalizes active work as `runtime_lost` and
-  poisons the session. The local UI treats an exact held turn lease as live when the in-process ACP
-  owner has no controller socket. Ordinary runs retain run-scoped session keys.
+  identity, workspace lease, controller lease, and an ACP-specific turn lease are monitored;
+  loss terminalizes active work as `runtime_lost` and poisons the session. The local UI requires both
+  per-run leases before treating an in-process ACP owner without a controller socket as live.
+  Ordinary runs retain run-scoped session keys.
 
 ## CLI and target contracts
 

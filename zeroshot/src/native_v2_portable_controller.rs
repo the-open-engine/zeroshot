@@ -85,6 +85,11 @@ impl PortableControllerPaths {
     }
 
     #[must_use]
+    pub(crate) fn acp_turn_lease(&self) -> PathBuf {
+        self.storage.join("acp-turn.lock")
+    }
+
+    #[must_use]
     pub fn runtime(&self) -> PathBuf {
         self.storage.join("runtime")
     }

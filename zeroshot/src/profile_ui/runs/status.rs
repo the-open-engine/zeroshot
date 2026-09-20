@@ -67,6 +67,10 @@ impl RuntimeStatusReader {
         );
         crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
             .unwrap_or(false)
+            && crate::native_v2_portable_controller::ControllerLease::is_held(
+                &paths.acp_turn_lease(),
+            )
+            .unwrap_or(false)
     }
 
     async fn status(&self, id: &RunId) -> Option<RunStatusResult> {

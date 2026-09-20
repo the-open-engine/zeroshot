@@ -166,6 +166,10 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
         storage.join("controller.ready.json")
     );
     assert_eq!(controller.paths().lease(), storage.join("controller.lock"));
+    assert_eq!(
+        controller.paths().acp_turn_lease(),
+        storage.join("acp-turn.lock")
+    );
     assert_eq!(controller.paths().ledger(), storage.join("runs.sqlite3"));
 
     let server = controller
