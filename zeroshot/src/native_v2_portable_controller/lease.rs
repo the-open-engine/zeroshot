@@ -79,9 +79,7 @@ impl ControllerLease {
                 FileExt::unlock(&file).map_err(|_| ControllerLeaseError::InvalidPath)?;
                 Ok(false)
             }
-            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-                Ok(true)
-            }
+            Err(error) if error.kind() == fs2::lock_contended_error().kind() => Ok(true),
             Err(_) => Err(ControllerLeaseError::InvalidPath),
         }
     }
