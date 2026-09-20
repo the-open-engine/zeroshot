@@ -25,6 +25,7 @@ pub(crate) use native::{
 pub(crate) enum FileAccess {
     Read,
     ReadWrite,
+    #[cfg(feature = "ui")]
     ReadWriteExisting,
     CreateNew,
 }

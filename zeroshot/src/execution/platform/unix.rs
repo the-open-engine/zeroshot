@@ -42,10 +42,7 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     let mut options = OpenOptions::new();
     options
         .read(true)
-        .write(matches!(
-            access,
-            FileAccess::ReadWrite | FileAccess::ReadWriteExisting | FileAccess::CreateNew
-        ))
+        .write(!matches!(access, FileAccess::Read))
         .create(matches!(access, FileAccess::ReadWrite))
         .create_new(matches!(access, FileAccess::CreateNew))
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)

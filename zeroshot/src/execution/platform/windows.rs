@@ -153,6 +153,7 @@ fn file_access(access: FileAccess) -> (u32, u32) {
     match access {
         FileAccess::Read => (GENERIC_READ, OPEN_EXISTING),
         FileAccess::ReadWrite => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, OPEN_ALWAYS),
+        #[cfg(feature = "ui")]
         FileAccess::ReadWriteExisting => (GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING),
         FileAccess::CreateNew => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, CREATE_NEW),
     }
