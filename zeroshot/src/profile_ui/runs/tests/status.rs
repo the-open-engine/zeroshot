@@ -275,6 +275,25 @@ async fn held_local_controller_lease_keeps_an_embedded_owner_live_without_a_sock
     );
     let lease = crate::native_v2_portable_controller::ControllerLease::acquire(paths.lease())
         .assert_value();
+    #[cfg(windows)]
+    {
+        use crate::execution::platform::{self, FileAccess};
+        use fs2::FileExt;
+
+        let probe = platform::private_file(&paths.lease(), FileAccess::ReadWriteExisting)
+            .unwrap_or_else(|error| panic!("lease probe open failed: {error:?}"));
+        match probe.try_lock_exclusive() {
+            Ok(()) => {
+                FileExt::unlock(&probe).assert_value();
+                eprintln!("held lease probe unexpectedly acquired the lock");
+            }
+            Err(error) => eprintln!(
+                "held lease probe returned kind {:?} and OS code {:?}",
+                error.kind(),
+                error.raw_os_error()
+            ),
+        }
+    }
     let status = RuntimeStatusReader::Local(fixture.root.clone());
     assert!(status.failure(&snapshot).await.assert_value().is_none());
     drop(lease);
