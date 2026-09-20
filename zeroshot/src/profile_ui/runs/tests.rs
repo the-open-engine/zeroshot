@@ -201,9 +201,12 @@ impl Fixture {
     ) {
         let root = std::env::temp_dir().join(format!("zeroshot-history-{}", uuid::Uuid::now_v7()));
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
-        let directory = root.join("runs").join(id.as_str());
-        std::fs::create_dir_all(&directory)
-            .assert_value_with("create profile UI fixture directory");
+        let runs = root.join("runs");
+        crate::execution::platform::private_directory(&runs)
+            .assert_value_with("prepare profile UI fixture runs directory");
+        let directory = runs.join(id.as_str());
+        crate::execution::platform::create_private_directory(&directory)
+            .assert_value_with("create profile UI fixture run directory");
         let paths =
             crate::native_v2_portable_controller::PortableControllerPaths::new(directory.clone());
         let controller_lease = hold_controller_lease.then(|| {
