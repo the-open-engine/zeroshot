@@ -42,17 +42,14 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     let mut options = OpenOptions::new();
     options
         .read(true)
+        .write(matches!(
+            access,
+            FileAccess::ReadWrite | FileAccess::ReadWriteExisting | FileAccess::CreateNew
+        ))
+        .create(matches!(access, FileAccess::ReadWrite))
+        .create_new(matches!(access, FileAccess::CreateNew))
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .mode(0o600);
-    match access {
-        FileAccess::Read => {}
-        FileAccess::ReadWrite => {
-            options.write(true).create(true);
-        }
-        FileAccess::CreateNew => {
-            options.write(true).create_new(true);
-        }
-    }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::other("private path is not a file"));

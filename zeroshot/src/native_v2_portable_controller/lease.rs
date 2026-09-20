@@ -72,7 +72,7 @@ impl ControllerLease {
     #[cfg(feature = "ui")]
     pub(crate) fn is_held(path: &Path) -> Result<bool, ControllerLeaseError> {
         reject_non_file(path)?;
-        let file = platform::private_file(path, FileAccess::Read)
+        let file = platform::private_file(path, FileAccess::ReadWriteExisting)
             .map_err(|_| ControllerLeaseError::InvalidPath)?;
         match file.try_lock_exclusive() {
             Ok(()) => {

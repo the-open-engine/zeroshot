@@ -66,7 +66,7 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     if !file.metadata()?.is_file() {
         return Err(io::Error::other("private path is not a file"));
     }
-    if !matches!(access, FileAccess::Read) {
+    if matches!(access, FileAccess::ReadWrite | FileAccess::CreateNew) {
         security::protect(file.as_raw_handle())?;
     }
     validate_private_file(&file)?;
@@ -153,6 +153,7 @@ fn file_access(access: FileAccess) -> (u32, u32) {
     match access {
         FileAccess::Read => (GENERIC_READ, OPEN_EXISTING),
         FileAccess::ReadWrite => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, OPEN_ALWAYS),
+        FileAccess::ReadWriteExisting => (GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING),
         FileAccess::CreateNew => (GENERIC_READ | GENERIC_WRITE | WRITE_DAC, CREATE_NEW),
     }
 }
