@@ -93,8 +93,7 @@ fn lock_is_contended(error: &io::Error) -> bool {
     #[cfg(windows)]
     {
         // LockFileEx can report an overlapping exclusive lock as asynchronous contention.
-        return error.raw_os_error()
-            == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32);
+        error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_IO_PENDING as i32)
     }
     #[cfg(not(windows))]
     false
