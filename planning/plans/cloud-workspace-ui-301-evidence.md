@@ -2,7 +2,7 @@
 
 The implementation and release order are defined in
 [the approved plan](cloud-workspace-ui-301.md). This record separates executed
-checks from remaining local/provider/release/deployment work.
+checks from remaining release and deployment work.
 
 ## Phase 1: Zeroshot
 
@@ -54,9 +54,35 @@ The first real Sonnet 4.6 provider run,
 After the target was removed, the archived viewer reloaded with identical admitted
 graph, runtime, input, source and event/control prefix, and rendered provider output.
 
-Strict cursor reconnect and expired/partial history checks remain pending on the
-final candidate. Canonical release, released-source repin, dev deployment and
-deployed browser tests also remain pending.
+Final local acceptance passed on product source `a69f95e5`, including the merged
+main changes below. The final real Sonnet 4.6 run,
+`01a0c5c9-cf38-7953-8c83-6fd7ecf5be3b`, succeeded with five contiguous native events
+and four controls. Its typed worker output rendered `CAMPAIGN301_LOCAL_OK` and the
+provider-generated README summary. The browser captured two follow requests,
+resuming with `Last-Event-ID: v2:2`, while the selected replay position stayed at
+zero. After target removal, a fresh archived viewer retained the exact definition,
+all terminal events and controls, and the earlier live prefix; start/latest replay
+and rendered output still worked.
+
+The first terminal-output assertion selected a hidden Input tab containing the
+same marker. Restricting the test locator to visible text completed the terminal
+assertions on the same run; the separate fresh-archive check passed. An earlier
+successful run declared null worker output and produced no transcript, so it was
+not used as evidence of rendered provider output. Neither test correction changed
+product code or archive data.
+
+Expired-history browser coverage returned HTTP 410 and displayed the expiry
+message. Incomplete-history coverage displayed the incomplete banner, retained
+all five events and four controls, supported replay, and returned HTTP 503 for the
+unavailable tail. The original archive and chunk rows were restored exactly; the
+restored replay matched the baseline and no longer displayed the banner. Final
+Cloud validation also passed all 107 real-auth HTTPS browser tests and fresh
+production frontend/target builds. Local browser evidence is retained under
+`campaign301-browser/evidence/local-typed-*`, `campaign301-browser/editor/`, and
+`campaign301-browser/failures/01a0c5c9-cf38-7953-8c83-6fd7ecf5be3b/` in the host cache.
+
+Local validation is complete. Canonical release, released-source repin, dev
+deployment and deployed browser tests remain pending.
 
 ## Main integration
 
