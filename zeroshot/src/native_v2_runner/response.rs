@@ -448,13 +448,16 @@ pub fn render_agent_prompt(
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
+    let workspace_setup_guidance = "Runtime-owned workspace setup guidance:\n\
+         Follow repository setup and install manifest/lockfile dependencies in the checkout, not from an ad hoc \
+         unpinned list. Wait for setup to finish and check exit status. Leave ignored dependencies there. Put \
+         standalone tools under an executable user path such as `$HOME/.local`, not `/tmp` (possibly `noexec`).\n";
     let verifier_guidance = match response {
         NodeResponseContract::Verifier { .. } => {
             "Runtime-owned verifier guidance:\n\
-             Independently verify the work. Do not modify source, tests, configuration, or other \
-             material under review, and do not implement repairs. You may run checks and create \
-             their temporary files and generated artifacts. Report findings with evidence and \
-             describe failed or unavailable checks accurately.\n"
+             Verify. Do not modify source, tests, configuration, or reviewed material; do not implement repairs. \
+             Run checks and create artifacts. Report failures accurately. A missing declared dependency is not an \
+             unavailable check: run repository setup here and retry; reject unless a real external blocker remains.\n"
         }
         NodeResponseContract::Worker { .. } => "",
     };
@@ -464,6 +467,7 @@ pub fn render_agent_prompt(
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
+         {workspace_setup_guidance}\
          {verifier_guidance}\
          Input JSON:\n{input}\n\
          Runtime-owned response contract:\n{response}\n\

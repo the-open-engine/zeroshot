@@ -16,7 +16,7 @@ fn worker_contract() -> NodeResponseContract {
 }
 
 #[test]
-fn verifier_guidance_is_runtime_owned_and_independent_of_authored_instructions() {
+fn workspace_and_verifier_guidance_are_runtime_owned() {
     let instructions = NodeInstructions::new("Assess a custom project's behavior.").assert_value();
     let input = json!({"task":"custom review"});
     let verifier = NodeResponseContract::Verifier {
@@ -26,11 +26,17 @@ fn verifier_guidance_is_runtime_owned_and_independent_of_authored_instructions()
     };
     let prompt = render_agent_prompt(&instructions, &input, &verifier).assert_value();
     assert!(prompt.contains(instructions.as_str()));
+    assert!(prompt.contains("Runtime-owned workspace setup guidance:"));
+    assert!(prompt.contains("manifest/lockfile dependencies in the checkout"));
+    assert!(prompt.contains("Wait for setup to finish and check exit status"));
+    assert!(prompt.contains("`$HOME/.local`, not `/tmp`"));
     assert!(prompt.contains("Do not modify source, tests, configuration"));
-    assert!(prompt.contains("temporary files and generated artifacts"));
+    assert!(prompt.contains("create artifacts"));
+    assert!(prompt.contains("A missing declared dependency is not an unavailable check"));
     assert!(prompt.contains(&input.to_string()));
     assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
     let worker = render_agent_prompt(&instructions, &input, &worker_contract()).assert_value();
+    assert!(worker.contains("Runtime-owned workspace setup guidance:"));
     assert!(!worker.contains("Runtime-owned verifier guidance:"));
 }
 

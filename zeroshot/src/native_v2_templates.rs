@@ -75,8 +75,7 @@ fn software_change_graph(delivery: TemplateDelivery) -> Result<GraphSpec, Builti
         "builtin.agent.software-worker@1",
         "Implement the requested software change fully in the shared workspace. Follow the \
          repository's guidance, keep the change focused, and run relevant checks. Delivery runs \
-         `git add --all`; put downloaded tools and other files you do not want committed outside \
-         the repository checkout.",
+         `git add --all`; do not leave unrelated unignored files in the repository checkout.",
     )?;
     let worker_route = initial_worker_route(state.clone(), delivery)?;
     graph(
@@ -269,8 +268,8 @@ fn review_repair() -> Result<GraphNode, BuiltinTemplateError> {
         instructions: Some(delivery_feedback_instructions(
             "Address both verifier diagnostics in the shared workspace without weakening the \
              requested behavior. Account for any delivery feedback and run the relevant checks \
-             before returning. Delivery runs `git add --all`; put downloaded tools and other files \
-             you do not want committed outside the repository checkout.",
+             before returning. Delivery runs `git add --all`; do not leave unrelated unignored \
+             files in the repository checkout.",
         )?),
         input: review_repair_input_type()?,
         output: PayloadType::Null,
@@ -358,8 +357,8 @@ fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError
             "Diagnose the reported Git, delivery, CI failure, or merge conflict using the original \
              diagnostics. Repair the shared workspace when needed and run relevant checks, \
              preserving the requested behavior and verifier-approved change. Delivery will retry \
-             with the updated workspace. Delivery runs `git add --all`; put downloaded tools and \
-             other files you do not want committed outside the repository checkout.",
+             with the updated workspace. Delivery runs `git add --all`; do not leave unrelated \
+             unignored files in the repository checkout.",
         )?),
         input: delivery_repair_input_type(mode)?,
         output: PayloadType::Null,
